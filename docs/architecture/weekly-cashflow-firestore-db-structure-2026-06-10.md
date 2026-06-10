@@ -9,6 +9,7 @@
 - `사업비 입력(주간)` 화면은 행 입력, 저장, 통장내역 이동, 캐시플로 이동만 담당한다.
 - `프로젝트 캐시플로(주간)` 화면만 Projection/Actual 조회, 비교, 엑셀 다운로드를 담당한다.
 - Java는 주간 사업비 저장, 행/셀 검증, Actual 계산, 캐시플로 read model, 외부감사용 export snapshot, idempotency만 담당한다.
+- 프로젝트 생성 시 `통장내역 기준본`은 항상 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 생성한다. 거래가 없다는 상태는 `null`이 아니라 `rows: []`로 표현한다.
 
 ## 화면 용어 대조표
 
@@ -16,6 +17,7 @@
 | --- | --- | --- |
 | 사업비 입력(주간) | 주간 사업비 시트, 행/셀 command | `projects/{projectId}/expense_sheets/{sheetKey}` |
 | 거래/행 | 사업비 입력 한 줄 | `expense_sheets/{sheetKey}.rows[]` |
+| 통장내역 기준본 | 업로드 전에도 존재하는 표준 통장내역 시트 | `projects/{projectId}/bank_statements/default` |
 | 통장내역 | 엑셀 업로드 후 반영 후보 | `projects/{projectId}/expense_intake/{sourceLineKey}` |
 | 기존 통장내역 가져오기 | 통장내역 기준본에서 사업비 행으로 반영 | `expense_intake` + `expense_sheets.rows[]` |
 | 캐시플로 보기 | 캐시플로 화면 이동 | `/portal/cashflow` |

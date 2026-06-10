@@ -17,10 +17,17 @@ describe('portal-store fetch architecture', () => {
       '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIds, livePortalMode]);',
     );
     expect(portalStoreSource).toContain(
-      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);',
+      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode]);',
     );
     expect(portalStoreSource).toContain(
       '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);',
     );
+  });
+
+  it('keeps bank statement default state as a real sheet instead of null when the default document is missing', () => {
+    expect(portalStoreSource).toContain('createDefaultBankStatementSheet()');
+    expect(portalStoreSource).toContain('buildDefaultBankStatementPersistenceDoc');
+    expect(portalStoreSource).not.toContain('if (!snap.exists()) {\n          setBankStatementRows(null);');
+    expect(portalStoreSource).not.toContain('if (rawRows.length === 0) {\n          setBankStatementRows(null);');
   });
 });

@@ -62,6 +62,31 @@ const PROJECT_TYPE_SLACK_LABELS = {
   Z1: 'Z-1 기타사업',
 };
 
+const DEFAULT_BANK_STATEMENT_COLUMNS = [
+  '통장번호',
+  '거래일시',
+  '적요',
+  '의뢰인/수취인',
+  '내통장표시내용',
+  '출금금액',
+  '입금금액',
+  '잔액',
+  '취급점',
+  '구분',
+];
+
+function buildDefaultBankStatementDoc({ tenantId, projectId, now, actorId }) {
+  return {
+    tenantId,
+    projectId,
+    columns: [...DEFAULT_BANK_STATEMENT_COLUMNS],
+    rows: [],
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+}
+
 export function formatProjectTypeSlackLabel(value) {
   const normalized = normalizeProjectType(readOptionalText(value));
   return PROJECT_TYPE_SLACK_LABELS[normalized] || normalized;
@@ -845,6 +870,18 @@ export function mountProjectRoutes(app, {
       expectedVersion,
       outboxEvent,
     });
+
+    if (result.created) {
+      await db.doc(`orgs/${tenantId}/projects/${projectPayload.id}/bank_statements/default`).set(
+        buildDefaultBankStatementDoc({
+          tenantId,
+          projectId: projectPayload.id,
+          now: timestamp,
+          actorId,
+        }),
+        { merge: true },
+      );
+    }
 
     if (Array.isArray(projectPayload.teamMembersDetailed)) {
       await syncProjectParticipationEntries({

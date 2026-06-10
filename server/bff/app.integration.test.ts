@@ -512,6 +512,29 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       name: 'Zero Contract Project',
       contractAmount: 0,
     });
+
+    const defaultBankStatement = await db
+      .doc(`orgs/${tenantId}/projects/p-zero-contract-001/bank_statements/default`)
+      .get();
+    expect(defaultBankStatement.exists).toBe(true);
+    expect(defaultBankStatement.data()).toMatchObject({
+      tenantId,
+      projectId: 'p-zero-contract-001',
+      rows: [],
+      updatedBy: actorId,
+    });
+    expect(defaultBankStatement.data()?.columns).toEqual([
+      '통장번호',
+      '거래일시',
+      '적요',
+      '의뢰인/수취인',
+      '내통장표시내용',
+      '출금금액',
+      '입금금액',
+      '잔액',
+      '취급점',
+      '구분',
+    ]);
   });
 
   it('normalizes project revenue fields through project upsert', async () => {

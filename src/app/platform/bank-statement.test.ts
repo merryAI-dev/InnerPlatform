@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBankImportIntakeItemsFromBankSheet,
+  createDefaultBankStatementSheet,
   detectBankStatementProfile,
   getBankStatementProfileLabel,
   mergeBankRowsIntoExpenseSheet,
   mapBankStatementsToImportRows,
   normalizeBankStatementMatrix,
+  BANK_STATEMENT_COLUMNS,
 } from './bank-statement';
 import { SETTLEMENT_COLUMNS, createEmptyImportRow } from './settlement-csv';
 
 describe('bank statement helpers', () => {
+  it('creates a default bank statement sheet with standard columns and no fake transactions', () => {
+    const sheet = createDefaultBankStatementSheet();
+
+    expect(sheet.columns).toEqual([...BANK_STATEMENT_COLUMNS]);
+    expect(sheet.rows).toEqual([]);
+  });
+
   it('detects known bank profiles from headers and file name', () => {
     expect(detectBankStatementProfile(['거래일시', '적요', '신한은행 메모'], 'statement.xlsx')).toBe('shinhan');
     expect(detectBankStatementProfile(['거래일자', '국민 계좌', '출금금액'], 'bank.csv')).toBe('kb');

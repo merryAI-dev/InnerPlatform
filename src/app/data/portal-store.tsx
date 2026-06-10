@@ -61,6 +61,7 @@ import type { ImportRow } from '../platform/settlement-csv';
 import {
   BANK_STATEMENT_COLUMNS,
   buildBankImportIntakeItemsFromBankSheet,
+  createDefaultBankStatementSheet,
   mapBankStatementsToImportRows,
   mergeBankRowsIntoExpenseSheet,
   type BankStatementRow,
@@ -554,6 +555,26 @@ function withTenantScope<T extends object>(orgId: string, payload: T): T & { ten
     ...payload,
     tenantId: orgId,
   };
+}
+
+function buildDefaultBankStatementPersistenceDoc({
+  orgId,
+  projectId,
+  now,
+  updatedBy,
+}: {
+  orgId: string;
+  projectId: string;
+  now: string;
+  updatedBy: string;
+}) {
+  return withTenantScope(orgId, {
+    projectId,
+    ...createDefaultBankStatementSheet(),
+    createdAt: now,
+    updatedAt: now,
+    updatedBy,
+  });
 }
 
 function stripUndefinedDeep<T>(value: T): T {
@@ -1334,6 +1355,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       db,
       `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_tree_v2/default`,
     );
+    const seedDefaultBankStatementSheet = () => setDoc(
+      bankStatementRef,
+      buildDefaultBankStatementPersistenceDoc({
+        orgId,
+        projectId: currentProjectId,
+        now: new Date().toISOString(),
+        updatedBy: portalUser?.name || authUser?.name || '',
+      }),
+      { merge: true },
+    ).catch((err) => {
+      console.warn('[PortalStore] default bank statement seed failed:', err);
+    });
     const handleTransactionResult = (docs: Array<{ data(): unknown }>) => {
       ifActive(() => {
         const list = docs
@@ -1531,19 +1564,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const handleBankStatementResult = (snap: { exists(): boolean; data(): unknown }) => {
       ifActive(() => {
         if (!snap.exists()) {
-          setBankStatementRows(null);
+          setBankStatementRows(createDefaultBankStatementSheet());
+          void seedDefaultBankStatementSheet();
           return;
         }
         const data = snap.data() as { rows?: BankStatementRow[]; columns?: string[] };
         const rawRows = Array.isArray(data?.rows) ? data.rows : [];
-        if (rawRows.length === 0) {
-          setBankStatementRows(null);
-          return;
-        }
         const fallbackColumnCount = Math.max(...rawRows.map((row) => (Array.isArray(row?.cells) ? row.cells.length : 0)), 0);
         const fallbackColumns = fallbackColumnCount > 0
           ? Array.from({ length: fallbackColumnCount }, (_, index) => BANK_STATEMENT_COLUMNS[index] || `컬럼${index + 1}`)
-          : [];
+          : createDefaultBankStatementSheet().columns;
         const columns = Array.isArray(data?.columns) && data.columns.length > 0
           ? data.columns.map((column, index) => normalizeSpace(String(column || `컬럼${index + 1}`)))
           : fallbackColumns;
@@ -1672,7 +1702,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.forEach((unsub) => unsub());
       projectScopeUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, portalUser?.name, livePortalMode]);
 
   useEffect(() => {
     weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
@@ -2463,6 +2493,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       });
     } else {
       await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)), withTenantScope(orgId, project), { merge: true });
+      await setDoc(
+        doc(db, `${getOrgDocumentPath(orgId, 'projects', projectId)}/bank_statements/default`),
+        buildDefaultBankStatementPersistenceDoc({
+          orgId,
+          projectId,
+          now,
+          updatedBy: ownerName,
+        }),
+        { merge: true },
+      );
     }
     const nextPortalProjectIds = normalizeProjectIds([
       ...(Array.isArray(portalUser?.projectIds) ? portalUser.projectIds : []),

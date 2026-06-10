@@ -185,6 +185,13 @@ export interface BankStatementSheet {
   rows: BankStatementRow[];
 }
 
+export function createDefaultBankStatementSheet(): BankStatementSheet {
+  return {
+    columns: [...BANK_STATEMENT_COLUMNS],
+    rows: [],
+  };
+}
+
 function cleanHeader(value: string): string {
   return normalizeKey(value);
 }

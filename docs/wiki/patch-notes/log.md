@@ -163,6 +163,10 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 상단 폴더 아이콘을 MYSC 로고로 교체하고 workspace 문구를 제거했으며, 첫 화면의 사업 정보와 주간 상태를 한 장의 세로형 헤더 슬랩으로 다시 묶었다.
 
+## [2026-06-10] patch-note | shared-portal-architecture | default bank statement seed
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 신규 프로젝트 생성 시 `통장내역 기준본`을 `bank_statements/default`에 표준 컬럼과 빈 행 목록으로 항상 생성하고, 기존 프로젝트에서 문서가 없을 때도 화면은 `null` 대신 빈 기준본을 사용하도록 정책을 고정했다.
+
 ## [2026-04-14] patch-note | portal-dashboard-minimal-pass | 중복 CTA 제거와 단일 세로 흐름
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 홈 첫 화면에서 중복 이동 버튼과 작업 카드 묶음을 제거하고, 상태 slab와 자금 요약만 남는 더 미니멀한 세로 흐름으로 압축했다.
