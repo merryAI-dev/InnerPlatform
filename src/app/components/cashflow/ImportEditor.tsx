@@ -167,6 +167,7 @@ export function ImportEditor({
   basis,
   onToggleFullscreen,
   onDeriveRows,
+  readOnly = false,
 }: {
   rows: ImportRow[];
   onChange: (rows: ImportRow[]) => void;
@@ -207,6 +208,7 @@ export function ImportEditor({
     context: SettlementDerivationContext,
     options: SettlementDerivationOptions,
   ) => Promise<ImportRow[]>;
+  readOnly?: boolean;
 }) {
   const isInlineLayout = inline && !fullscreen;
   const deriveRequestSeq = useRef(0);
@@ -842,11 +844,13 @@ export function ImportEditor({
   }, [getSelectionAnchor, selectionBounds]);
 
   const commitRows = useCallback((nextRows: ImportRow[], focusTarget?: { rowIdx: number; colIdx: number } | null) => {
+    if (readOnly) return;
     if (focusTarget) pendingFocusCell.current = focusTarget;
     applyDerivedRows(normalizeRowNumbers(nextRows), { mode: 'full' });
-  }, [normalizeRowNumbers, applyDerivedRows]);
+  }, [normalizeRowNumbers, applyDerivedRows, readOnly]);
 
   const addRow = useCallback(() => {
+    if (readOnly) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
@@ -857,9 +861,10 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
 
   const insertPreparedRow = useCallback((preparedRow: ImportRow, focusColIdx?: number) => {
+    if (readOnly) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const nextRows = [
@@ -868,9 +873,10 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: focusColIdx ?? getPreferredEditableCol() });
-  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol]);
+  }, [rows, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
 
   const addQuickInsertRow = useCallback((kind: SettlementQuickInsertKind) => {
+    if (readOnly) return;
     if (kind === 'ADJUSTMENT' && !resolvedPolicy.allowAdjustmentRows) {
       toast.message('현재 사업 정책에서는 잔액 조정 행을 사용할 수 없습니다.');
       return;
@@ -882,9 +888,10 @@ export function ImportEditor({
         ? (expenseIdx >= 0 ? expenseIdx : bankAmountIdx)
         : (balanceIdx >= 0 ? balanceIdx : bankAmountIdx);
     insertPreparedRow(preparedRow, focusColIdx >= 0 ? focusColIdx : undefined);
-  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows]);
+  }, [insertPreparedRow, depositIdx, expenseIdx, balanceIdx, bankAmountIdx, resolvedPolicy.allowAdjustmentRows, readOnly]);
 
   const addRows = useCallback((count: number) => {
+    if (readOnly) return;
     if (count <= 0) return;
     const nextRows = [...rows];
     for (let i = 0; i < count; i++) {
@@ -892,7 +899,7 @@ export function ImportEditor({
       nextRows.push(newRow);
     }
     commitRows(nextRows);
-  }, [rows, commitRows]);
+  }, [rows, commitRows, readOnly]);
 
   useEffect(() => {
     if (!pendingQuickInsert) return;
@@ -901,6 +908,7 @@ export function ImportEditor({
   }, [pendingQuickInsert, addQuickInsertRow, onPendingQuickInsertHandled]);
 
   const addTemplateRow = useCallback((template: QuickExpenseTemplate) => {
+    if (readOnly) return;
     const anchor = getSelectionAnchor();
     const insertIndex = anchor ? Math.min(rows.length, anchor.rowIdx + 1) : rows.length;
     const newRow = createEmptyImportRow();
@@ -914,9 +922,10 @@ export function ImportEditor({
       ...rows.slice(insertIndex),
     ];
     commitRows(nextRows, { rowIdx: insertIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol]);
+  }, [rows, methodIdx, cashflowIdx, counterpartyIdx, memoIdx, getSelectionAnchor, commitRows, getPreferredEditableCol, readOnly]);
 
   const insertRowAt = useCallback((index: number) => {
+    if (readOnly) return;
     const boundedIndex = Math.max(0, Math.min(rows.length, index));
     const newRow = createEmptyImportRow();
     const nextRows = [
@@ -925,7 +934,7 @@ export function ImportEditor({
       ...rows.slice(boundedIndex),
     ];
     commitRows(nextRows, { rowIdx: boundedIndex, colIdx: getPreferredEditableCol() });
-  }, [rows, commitRows, getPreferredEditableCol]);
+  }, [rows, commitRows, getPreferredEditableCol, readOnly]);
 
   const formatNumberCell = useCallback((value: string) => {
     if (!value) return '';
@@ -943,6 +952,7 @@ export function ImportEditor({
   }, [cloneRows, rows]);
 
   const clearSelectedCells = useCallback((options?: { silent?: boolean }) => {
+    if (readOnly) return false;
     const bounds = getActiveSelectionBounds();
     if (!bounds) return false;
     const nextRows = clearSelectionCells(rows, bounds, {
@@ -968,9 +978,11 @@ export function ImportEditor({
     protectedClearColumnIndexes,
     pushUndoSnapshot,
     rows,
+    readOnly,
   ]);
 
   const removeSelectedRows = useCallback(() => {
+    if (readOnly) return false;
     if (!resolvedPolicy.allowRowDelete) {
       toast.message('현재 사업 정책에서는 행 삭제가 잠겨 있습니다.');
       return false;
@@ -989,9 +1001,10 @@ export function ImportEditor({
         : null,
     );
     return true;
-  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, resolvedPolicy.allowRowDelete, rows]);
+  }, [commitRows, getActiveSelectionBounds, getPreferredEditableCol, pushUndoSnapshot, resolvedPolicy.allowRowDelete, rows, readOnly]);
 
   const clearAllRows = useCallback(() => {
+    if (readOnly) return false;
     if (rows.length === 0) {
       toast.message('초기화할 행이 없습니다.');
       return false;
@@ -1001,10 +1014,11 @@ export function ImportEditor({
     commitRows([], null);
     toast.success('현재 탭을 초기화했습니다.');
     return true;
-  }, [commitRows, pushUndoSnapshot, rows]);
+  }, [commitRows, pushUndoSnapshot, rows, readOnly]);
 
   const applyPaste = useCallback(
     (startRow: number, startCol: number, text: string, html?: string) => {
+      if (readOnly) return;
       const grid = (html && isSpreadsheetHtml(html))
         ? html2grid(html)
         : parseTsvRows(text);
@@ -1351,6 +1365,7 @@ export function ImportEditor({
   ]);
 
   useEffect(() => {
+    if (readOnly) return undefined;
     const onPaste = (e: ClipboardEvent) => {
       // Modal/form inputs handle their own paste — don't intercept
       const active = document.activeElement;
@@ -1373,7 +1388,7 @@ export function ImportEditor({
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [selection, applyPaste]);
+  }, [selection, applyPaste, readOnly]);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -1474,12 +1489,14 @@ export function ImportEditor({
 
   useEffect(() => {
     if (!inline) return;
+    if (readOnly) return;
     if (rows.length >= 20) return;
     addRows(20 - rows.length);
-  }, [rows.length, inline, addRows]);
+  }, [rows.length, inline, addRows, readOnly]);
 
   const removeRow = useCallback(
     (rowIdx: number) => {
+      if (readOnly) return;
       if (!resolvedPolicy.allowRowDelete) {
         toast.message('현재 사업 정책에서는 행 삭제가 잠겨 있습니다.');
         return;
@@ -1491,10 +1508,11 @@ export function ImportEditor({
       const nextFocusRow = Math.min(Math.max(0, rowIdx - 1), Math.max(0, nextRows.length - 1));
       commitRows(nextRows, nextRows.length > 0 ? { rowIdx: nextFocusRow, colIdx: getPreferredEditableCol() } : null);
     },
-    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol, resolvedPolicy.allowRowDelete],
+    [rows, pushUndoSnapshot, commitRows, getPreferredEditableCol, resolvedPolicy.allowRowDelete, readOnly],
   );
 
   const applyEvidenceMapping = useCallback((rowIdx?: number) => {
+    if (readOnly) return;
     if (budgetCodeIdx < 0 || subCodeIdx < 0 || evidenceIdx < 0) return;
     if (!evidenceRequiredMap || Object.keys(evidenceRequiredMap).length === 0) return;
     const next = rowIdx == null
@@ -1523,7 +1541,7 @@ export function ImportEditor({
         return updated;
       });
     onChange(next);
-  }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap]);
+  }, [rows, onChange, projectId, defaultLedgerId, budgetCodeIdx, subCodeIdx, evidenceIdx, evidenceRequiredMap, readOnly]);
 
   const openMappingEditor = useCallback(() => {
     setMappingDraft({ ...(evidenceRequiredMap || {}) });
@@ -1611,7 +1629,7 @@ export function ImportEditor({
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             <div>행 왼쪽 배지에서 출처를 확인할 수 있습니다.</div>
-            <div>입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.</div>
+            <div>{readOnly ? '이 화면은 원장 조회 전용입니다. 생성과 수정은 위자드에서만 처리합니다.' : '입력한 값은 저장 시 캐시플로 actual에 바로 반영됩니다.'}</div>
             {onToggleFullscreen && (
               <Button
                 variant="outline"
@@ -1632,29 +1650,33 @@ export function ImportEditor({
                 <Badge variant="outline" className="text-[10px]">
                   선택 영역 {selectionSummary.rowCount}행 x {selectionSummary.colCount}열
                 </Badge>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                  onClick={() => {
-                    void clearSelectedCells();
-                  }}
-                >
-                  <X className="h-3.5 w-3.5" />
-                  선택 셀 비우기
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                  onClick={() => {
-                    void removeSelectedRows();
-                  }}
-                  disabled={selectedRowIdx < 0 || rows.length === 0 || !resolvedPolicy.allowRowDelete}
-                >
-                  <X className="h-3.5 w-3.5" />
-                  선택 행 삭제
-                </Button>
+                {!readOnly && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                      onClick={() => {
+                        void clearSelectedCells();
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      선택 셀 비우기
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                      onClick={() => {
+                        void removeSelectedRows();
+                      }}
+                      disabled={selectedRowIdx < 0 || rows.length === 0 || !resolvedPolicy.allowRowDelete}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      선택 행 삭제
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1666,120 +1688,129 @@ export function ImportEditor({
               </>
             ) : (
               <span className="text-[11px] text-muted-foreground">
-                셀이나 행을 선택하면 대량 작업 액션이 여기에 나타납니다.
+                {readOnly ? '원장은 조회 전용입니다. 수정은 선택 행 수정 위자드에서 진행합니다.' : '셀이나 행을 선택하면 대량 작업 액션이 여기에 나타납니다.'}
               </span>
             )}
           </div>
           <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={openMappingEditor}
-          >
-            증빙 매핑 설정
-          </Button>
-          {workflowMode === 'DIRECT_ENTRY' && (
+          {!readOnly && (
             <>
               <Button
-                variant="default"
+                variant="outline"
                 size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
-                onClick={() => addQuickInsertRow('DEPOSIT')}
+                className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+                onClick={openMappingEditor}
               >
-                <Plus className="h-3.5 w-3.5" />
-                입금 추가
+                증빙 매핑 설정
               </Button>
+              {workflowMode === 'DIRECT_ENTRY' && (
+                <>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
+                    onClick={() => addQuickInsertRow('DEPOSIT')}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    입금 추가
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                    onClick={() => addQuickInsertRow('EXPENSE')}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    지출 추가
+                  </Button>
+                  {resolvedPolicy.allowAdjustmentRows && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                      onClick={() => addQuickInsertRow('ADJUSTMENT')}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      잔액 조정
+                    </Button>
+                  )}
+                </>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    정기지출 템플릿
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="text-[11px]">
+                  {QUICK_EXPENSE_TEMPLATES.map((template) => (
+                    <DropdownMenuItem
+                      key={template.id}
+                      onClick={() => addTemplateRow(template)}
+                    >
+                      {template.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                onClick={() => addQuickInsertRow('EXPENSE')}
+                onClick={addRow}
               >
                 <Plus className="h-3.5 w-3.5" />
-                지출 추가
+                행 추가
               </Button>
-              {resolvedPolicy.allowAdjustmentRows && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-                  onClick={() => addQuickInsertRow('ADJUSTMENT')}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  잔액 조정
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+                onClick={() => setClearAllConfirmOpen(true)}
+                disabled={rows.length === 0}
+              >
+                현재 탭 전체 비우기
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
+                onClick={onCancel}
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                되돌리기
+              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
+                      onClick={onSave}
+                      disabled={validCount === 0 || saving || derivingRows}
+                    >
+                      {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[320px] text-[11px] leading-5">
+                  <p className="font-semibold">저장</p>
+                  <p>지금 보이는 주간 사업비 입력표를 서버 기준본으로 보관합니다. 저장 후에는 캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.</p>
+                </TooltipContent>
+              </Tooltip>
             </>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                정기지출 템플릿
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="text-[11px]">
-              {QUICK_EXPENSE_TEMPLATES.map((template) => (
-                <DropdownMenuItem
-                  key={template.id}
-                  onClick={() => addTemplateRow(template)}
-                >
-                  {template.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={addRow}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            행 추가
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={() => setClearAllConfirmOpen(true)}
-            disabled={rows.length === 0}
-          >
-            현재 탭 전체 비우기
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] cursor-pointer shadow-sm hover:bg-muted/40"
-            onClick={onCancel}
-          >
-            <RotateCcw className="h-3.5 w-3.5 mr-1" />
-            되돌리기
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <Button
-                  size="sm"
-                  className="h-7 text-[11px] gap-1 cursor-pointer shadow-sm"
-                  onClick={onSave}
-                  disabled={validCount === 0 || saving || derivingRows}
-                >
-                  {saving || derivingRows ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {saving ? '저장 중...' : derivingRows ? 'Rust 계산 중...' : `${validCount}건 저장`}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[320px] text-[11px] leading-5">
-              <p className="font-semibold">저장</p>
-              <p>지금 보이는 주간 사업비 입력표를 서버 기준본으로 보관합니다. 저장 후에는 캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.</p>
-            </TooltipContent>
-          </Tooltip>
+          {readOnly && (
+            <Badge variant="outline" className="h-7 px-2 text-[11px]">
+              View-only ledger
+            </Badge>
+          )}
         </div>
         </div>
       </div>
@@ -1915,6 +1946,7 @@ export function ImportEditor({
                 rowIdx={rowIdx}
                 budgetSuggestion={budgetSuggestion}
                 counterpartyHint={counterpartyHint}
+                readOnly={readOnly}
                 onCellChange={(colIdx, value) => updateCell(rowIdx, colIdx, value)}
                 onRowChange={(updater) => updateRow(rowIdx, updater)}
                 onRemove={() => removeRow(rowIdx)}

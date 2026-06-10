@@ -14,6 +14,12 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('sheetRows={expenseSheetRows}');
   });
 
+  it('treats weekly expense as a view-only ledger and routes edits through the wizard policy', () => {
+    expect(weeklyExpenseSource).toContain('ledgerViewOnly');
+    expect(weeklyExpenseSource).toContain('사업비 입력은 원장 조회 화면입니다');
+    expect(weeklyExpenseSource).toContain('금액/분류/지급정보 생성과 수정은 위자드에서만 처리합니다');
+  });
+
   it('does not wire weekly expense to cashflow actual sync from the frontend', () => {
     expect(weeklyExpenseSource).not.toContain('syncProjectCashflowActualsViaBff');
     expect(weeklyExpenseSource).not.toContain('onSyncCashflowActuals');

@@ -163,6 +163,7 @@ export interface SettlementLedgerProps {
   discardChangesRequestToken?: number;
   autoSaveIdleMs?: number;
   autoSaveSyncCashflow?: boolean;
+  ledgerViewOnly?: boolean;
 }
 
 // ── Main Component ──
@@ -213,6 +214,7 @@ export function SettlementLedgerPage({
   discardChangesRequestToken = 0,
   autoSaveIdleMs = 60_000,
   autoSaveSyncCashflow = true,
+  ledgerViewOnly = false,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
   const isDirectEntryMode = workflowMode === 'DIRECT_ENTRY';
@@ -921,7 +923,7 @@ export function SettlementLedgerPage({
     () => resolveWeeklyAccountingProductStatusDomHooks(weeklyAccountingStatus),
     [weeklyAccountingStatus],
   );
-  const saveStatusButton = showSaveStatusButton && onSaveSheetRows ? (
+  const saveStatusButton = showSaveStatusButton && onSaveSheetRows && !ledgerViewOnly ? (
     <Popover>
       <PopoverTrigger asChild>
         <Button
@@ -1084,7 +1086,7 @@ export function SettlementLedgerPage({
               {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
               {downloadPreparing ? '엑셀 준비 중' : (isDirectEntryMode ? '엑셀 템플릿 다운로드' : '엑셀 다운로드')}
             </Button>
-            {isDirectEntryMode && (
+            {isDirectEntryMode && !ledgerViewOnly && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1096,7 +1098,7 @@ export function SettlementLedgerPage({
                 {directEntryUploading ? '작성본 반영 중' : '작성본 업로드'}
               </Button>
             )}
-            {isDirectEntryMode && (
+            {isDirectEntryMode && !ledgerViewOnly && (
               <input
                 ref={directEntryUploadInputRef}
                 type="file"
@@ -1117,6 +1119,7 @@ export function SettlementLedgerPage({
           <ImportEditor
             rows={importRows}
             onChange={(rows) => {
+              if (ledgerViewOnly) return;
               setImportRows(rows);
               setImportDirty(true);
               setSheetSaveState('dirty');
@@ -1150,6 +1153,7 @@ export function SettlementLedgerPage({
             onPendingQuickInsertHandled={onPendingQuickInsertHandled}
             onToggleFullscreen={() => setEditorFullscreen((prev) => !prev)}
             onDeriveRows={onDeriveRows}
+            readOnly={ledgerViewOnly}
           />
         )}
         {revertConfirmDialog}
@@ -1208,7 +1212,7 @@ export function SettlementLedgerPage({
               {downloadPreparing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
               {downloadPreparing ? '엑셀 준비 중' : (isDirectEntryMode ? '엑셀 템플릿 다운로드' : '엑셀 다운로드')}
             </Button>
-            {isDirectEntryMode && (
+            {isDirectEntryMode && !ledgerViewOnly && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1234,7 +1238,7 @@ export function SettlementLedgerPage({
               className="h-8 rounded-md border px-2 text-[11px] bg-background"
               title="다운로드 종료일"
             />
-            {isDirectEntryMode && (
+            {isDirectEntryMode && !ledgerViewOnly && (
               <input
                 ref={directEntryUploadInputRef}
                 type="file"
@@ -1318,6 +1322,7 @@ export function SettlementLedgerPage({
         <ImportEditor
           rows={importRows}
           onChange={(rows) => {
+            if (ledgerViewOnly) return;
             setImportRows(rows);
             setImportDirty(true);
             setSheetSaveState('dirty');
@@ -1349,6 +1354,7 @@ export function SettlementLedgerPage({
           pendingQuickInsert={pendingQuickInsert}
           onPendingQuickInsertHandled={onPendingQuickInsertHandled}
           onDeriveRows={onDeriveRows}
+          readOnly={ledgerViewOnly}
         />
       )}
       {revertConfirmDialog}

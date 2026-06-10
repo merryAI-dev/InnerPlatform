@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | portal-weekly-expense, portal-bank-statement | ledger view-only and VAT draft split
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 사업비 입력(주간)을 view-only ledger로 고정하고 셀 직접 편집/행 추가/삭제/작성본 업로드/저장 mutation 액션을 위자드 경로로 분리했다. 통장내역 선택 행 반영 위자드는 입출금 총액을 부가세 포함 공식 기준으로 `공급가액 + 매입부가세` 초안 분해해 채우며, 최종 반영은 Java command API 검증으로 유지한다.
+
 ## [2026-06-10] patch-note | portal-bank-statement | production temp wizard hardening
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 통장내역 선택 행 반영 위자드를 상용 입력 버퍼로 보강했다. dirty 통장 원본은 위자드 진입 전 기준본으로 자동 저장하고, 30일 임시저장/작성본 불러오기/거래처 이전 조합 제안/선택 행 일괄적용/되돌리기/오류 요약을 추가했으며, 필수증빙자료는 예산 편집의 `비목 > 세목 > 세세목` 계층을 우선 상속한다.

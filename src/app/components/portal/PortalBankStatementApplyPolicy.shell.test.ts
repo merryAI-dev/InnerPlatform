@@ -106,6 +106,15 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('resolveEvidenceSuggestion');
   });
 
+  it('pre-fills tax-included withdrawal and deposit drafts only inside the wizard buffer', () => {
+    expect(bankStatementPageSource).toContain('splitVatIncludedDraftAmount');
+    expect(bankStatementPageSource).toContain('Math.round(total / 11)');
+    expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(split.supplyAmount)');
+    expect(bankStatementPageSource).toContain('vatIn: formatNumberDraft(split.vatAmount)');
+    expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(split.supplyAmount)');
+    expect(bankStatementPageSource).toContain('vatRefund: formatNumberDraft(split.vatAmount)');
+  });
+
   it('keeps user assistance inside temp state with explicit apply and undo controls', () => {
     expect(bankStatementPageSource).toContain('sameCounterpartySuggestions');
     expect(bankStatementPageSource).toContain('handleApplySuggestion');

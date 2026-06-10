@@ -688,12 +688,8 @@ export function PortalWeeklyExpensePage() {
                 </Badge>
               )}
             </div>
-            <p className="max-w-4xl text-[12px] text-muted-foreground">
-              {isDirectEntryMode
-                ? '주간 사업비 시트에서 직접 입력하고 저장합니다.'
-                : bankStatementCount > 0
-                  ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
-                  : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
+             <p className="max-w-4xl text-[12px] text-muted-foreground">
+              사업비 입력은 원장 조회 화면입니다. 금액/분류/지급정보 생성과 수정은 위자드에서만 처리합니다.
             </p>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-slate-50/80 px-3 py-2.5">
               <Badge variant="secondary" className="text-[10px]">
@@ -707,12 +703,10 @@ export function PortalWeeklyExpensePage() {
                   {bankStatementCount > 0 ? `통장내역 ${bankStatementCount}건 연결` : '통장내역 기준본 미준비'}
                 </Badge>
               )}
-              <span className="text-[11px] text-muted-foreground">
-                {isDirectEntryMode
-                  ? '원본 입력은 이 화면입니다.'
-                  : bankStatementCount > 0
-                    ? '원본 기준과 같은 흐름으로 저장을 이어갑니다.'
-                    : '원본 기준본을 준비하면 이 화면에서 바로 이어서 저장할 수 있습니다.'}
+               <span className="text-[11px] text-muted-foreground">
+                {bankStatementCount > 0
+                  ? '통장 원본 기준과 연결된 원장 상태를 조회합니다.'
+                  : '통장내역 기준본을 준비한 뒤 위자드에서 생성/수정합니다.'}
               </span>
             </div>
           </div>
@@ -799,7 +793,7 @@ export function PortalWeeklyExpensePage() {
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
             <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {expenseRowCount}건의 거래를 현재 탭에서 입력하고 저장합니다. 저장 결과 비교는 캐시플로 화면에서 확인합니다.
+              {expenseRowCount}건의 거래를 현재 탭에서 조회합니다. 생성/수정은 위자드를 거쳐 서버 검증 후 반영합니다.
             </div>
           </div>
         </div>
@@ -871,6 +865,7 @@ export function PortalWeeklyExpensePage() {
           onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
           weeklySubmissionStatuses={weeklySubmissionStatuses}
           discardChangesRequestToken={0}
+          ledgerViewOnly
         />
       </Suspense>
       {/* 참여율 이상 탐지 경고 모달 */}

@@ -213,6 +213,7 @@ function ImportEditorRow({
   budgetSuggestion,
   counterpartyHint,
   onBudgetSuggestionAccepted,
+  readOnly = false,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -256,6 +257,7 @@ function ImportEditorRow({
   budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null;
   counterpartyHint?: CounterpartySuggestion | null;
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
+  readOnly?: boolean;
 }) {
   const hasError = Boolean(row.error);
   const hasReviewHint = hasImportRowReviewRequirement(row);
@@ -420,7 +422,7 @@ function ImportEditorRow({
     } transition-colors`}>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
-        const isReadOnly = col.csvHeader === 'No.';
+        const isReadOnly = readOnly || col.csvHeader === 'No.';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
         const isSubSubCode = colIdx === subSubCodeIdx;
@@ -460,7 +462,7 @@ function ImportEditorRow({
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
             <div className={`group relative ${showCellBadge ? 'pt-4' : ''}`}>
-              {isFirstColumn && (
+              {isFirstColumn && !readOnly && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button

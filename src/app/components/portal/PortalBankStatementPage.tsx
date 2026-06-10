@@ -89,6 +89,15 @@ function formatNumberDraft(value: number | null | undefined): string {
     : '';
 }
 
+function splitVatIncludedDraftAmount(value: number): { supplyAmount: number; vatAmount: number } {
+  const total = Math.abs(value);
+  const vatAmount = Math.round(total / 11);
+  return {
+    supplyAmount: total - vatAmount,
+    vatAmount,
+  };
+}
+
 function parseDraftAmount(value: string): number | null {
   const cleaned = String(value || '').replace(/,/g, '').trim();
   if (!cleaned) return null;
@@ -161,9 +170,10 @@ function getBankRowCounterparty(columns: string[], row: BankStatementRow): strin
 
 function buildInitialWizardDraft(signedAmount: number | null | undefined): WizardDraft {
   if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
+  const split = splitVatIncludedDraftAmount(signedAmount);
   return signedAmount < 0
-    ? { expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
-    : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
+    ? { expenseAmount: formatNumberDraft(split.supplyAmount), vatIn: formatNumberDraft(split.vatAmount) }
+    : { depositAmount: formatNumberDraft(split.supplyAmount), vatRefund: formatNumberDraft(split.vatAmount) };
 }
 
 function buildSameCounterpartySuggestions(expenseSheets: { rows?: ImportRow[] }[]): Map<string, WizardSuggestion> {
