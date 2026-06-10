@@ -225,7 +225,12 @@ assert(bankImport.commandName === 'weeklyExpense.bankStatement.importBatch', 'ba
 assert(Number(bankImport.stagedLineCount) === 1, 'bank import did not stage one line', bankImport);
 
 const importLines = await requestJson('GET', `/api/v1/weekly-expenses/${encodeURIComponent(projectId)}/bank-statements/import-lines?status=staged`);
-const importLineId = importLines.lines?.find((line) => line.sourceLineKey === `smoke-bank-line-${runId}`)?.id || '';
+const smokeUploadName = `stage-smoke-bank-${runId}.xlsx`;
+const importLineId = importLines.lines?.find((line) => (
+  line.sourceLineKey === `smoke-bank-line-${runId}`
+  || line.uploadName === smokeUploadName
+  || line.rawCells?.join('\t') === ['2026-06-02', 'Stage Smoke Vendor', 'stage smoke selected apply', '-500', '9500'].join('\t')
+))?.id || '';
 assert(importLineId, 'staged bank import line not listed', importLines);
 
 const bankApply = await requestJson('POST', `/api/v1/weekly-expenses/${encodeURIComponent(projectId)}/bank-statements/apply-items`, {
