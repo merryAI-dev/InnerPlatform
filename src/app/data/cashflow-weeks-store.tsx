@@ -72,7 +72,7 @@ interface CashflowWeekActions {
     varianceFlag: VarianceFlag | undefined;
     varianceHistory: VarianceFlagEvent[];
   }) => Promise<void>;
-  ensureProjectCashflowSnapshot: (projectId: string, options?: { force?: boolean }) => Promise<void>;
+  ensureProjectCashflowSnapshot: (projectId: string) => Promise<void>;
   ensureProjectCashflowSnapshots: (projectIds: string[]) => Promise<void>;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
   getReadModelForProjectMonth: (projectId: string, yearMonth: string) => CashflowMonthReadModel | undefined;
@@ -404,15 +404,12 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     };
   }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, routeMode, yearMonth]);
 
-  const ensureProjectCashflowSnapshot = useCallback(async (
-    projectIdInput: string,
-    options?: { force?: boolean },
-  ): Promise<void> => {
+  const ensureProjectCashflowSnapshot = useCallback(async (projectIdInput: string): Promise<void> => {
     const actor = user;
     const projectId = String(projectIdInput || '').trim();
     if (!actor || !projectId) return;
     if (!isPlatformApiEnabled() || actor.source === 'dev_harness') return;
-    if (!options?.force && loadedProjectSnapshotsRef.current.has(projectId)) return;
+    if (loadedProjectSnapshotsRef.current.has(projectId)) return;
 
     setIsLoading(true);
     try {

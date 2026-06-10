@@ -23,7 +23,6 @@ import {
   type Transaction,
   type TransactionState,
 } from '../../data/types';
-import type { ImportRow } from '../../platform/settlement-csv';
 import { toast } from 'sonner';
 import { useFirebase } from '../../lib/firebase-context';
 import {
@@ -53,11 +52,6 @@ const GoogleSheetMigrationWizard = lazy(
 const SettlementLedgerPage = lazy(
   () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
-
-function formatWon(value: number): string {
-  const amount = Number(value);
-  return Number.isFinite(amount) ? `${Math.trunc(amount).toLocaleString('ko-KR')}원` : '-';
-}
 
 export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
@@ -96,13 +90,7 @@ export function PortalWeeklyExpensePage() {
     markSheetSourceApplied,
     weeklySubmissionStatuses,
   } = usePortalStore();
-  const {
-    yearMonth: cashflowYearMonth,
-    isLoading: cashflowLoading,
-    submitWeekAsPm,
-    ensureProjectCashflowSnapshot,
-    getReadModelForProjectMonth,
-  } = useCashflowWeeks();
+  const { submitWeekAsPm } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const weeklyDirectApiMode = isPlatformApiEnabled();
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
@@ -127,19 +115,6 @@ export function PortalWeeklyExpensePage() {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
-  const cashflowReadModel = useMemo(
-    () => getReadModelForProjectMonth(projectId, cashflowYearMonth),
-    [cashflowYearMonth, getReadModelForProjectMonth, projectId],
-  );
-  const cashflowSummary = useMemo(() => {
-    const projectionOut = Number(cashflowReadModel?.projection.monthTotals.totalOut || 0);
-    const actualOut = Number(cashflowReadModel?.actual.monthTotals.totalOut || 0);
-    return {
-      projectionOut,
-      actualOut,
-      varianceOut: actualOut - projectionOut,
-    };
-  }, [cashflowReadModel]);
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
@@ -283,23 +258,6 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
     });
   }, [updateTransaction]);
-
-  useEffect(() => {
-    if (!projectId) return;
-    void ensureProjectCashflowSnapshot(projectId);
-  }, [ensureProjectCashflowSnapshot, projectId]);
-
-  const handleSaveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
-    const persistedRows = await saveExpenseSheetRows(rows);
-    if (projectId) {
-      try {
-        await ensureProjectCashflowSnapshot(projectId, { force: true });
-      } catch (error) {
-        console.warn('[PortalWeeklyExpense] cashflow summary refresh failed:', error);
-      }
-    }
-    return persistedRows;
-  }, [ensureProjectCashflowSnapshot, projectId, saveExpenseSheetRows]);
 
   const handleSubmitWeek = useCallback(async ({ yearMonth, weekNo, txIds }: {
     yearMonth: string;
@@ -520,30 +478,6 @@ export function PortalWeeklyExpensePage() {
               {expenseRowCount}건의 거래를 현재 탭에서 관리합니다. 저장된 행은 Actual 반영 기준으로 사용됩니다.
             </div>
           </div>
-          <div className="rounded-xl border bg-slate-50/80 px-4 py-3" data-testid="weekly-expense-cashflow-summary">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Cashflow {cashflowYearMonth}</div>
-              {cashflowLoading && !cashflowReadModel ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-              ) : null}
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              <div>
-                <div className="text-[10px] text-muted-foreground">Projection</div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-900">{formatWon(cashflowSummary.projectionOut)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-muted-foreground">Actual</div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-900">{formatWon(cashflowSummary.actualOut)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-muted-foreground">차이</div>
-                <div className={`mt-0.5 text-sm font-semibold ${cashflowSummary.varianceOut > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                  {formatWon(cashflowSummary.varianceOut)}
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
       </div>
@@ -597,7 +531,7 @@ export function PortalWeeklyExpensePage() {
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
           sheetRows={expenseSheetRows}
-          onSaveSheetRows={handleSaveExpenseSheetRows}
+          onSaveSheetRows={saveExpenseSheetRows}
           onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}

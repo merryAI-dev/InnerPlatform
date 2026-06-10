@@ -251,10 +251,14 @@
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 로그인 직후 member profile sync를 Java API/Admin SDK 경로로 옮기고, stage/live 포털 흐름의 `members/{uid}` 직접 write와 role claim 없는 privileged role fallback을 차단했다.
 
-## [2026-06-09] patch-note | portal-weekly-expense | 수동 저장과 Cashflow 요약
+## [2026-06-09] patch-note | portal-weekly-expense | 수동 저장
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
-- summary: 사업비 입력(주간)의 자동 저장 루프를 끄고 명시 저장 후 Java cashflow read model을 강제 갱신해 Projection, Actual, 차이 요약을 같은 화면에서 확인하도록 했다.
+- summary: 사업비 입력(주간)의 자동 저장 루프를 끄고 명시 저장만 사용하도록 했다.
 
 ## [2026-06-09] patch-note | portal-weekly-expense | 캐시플로 화면 이동 액션
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 사업비 입력(주간) 화면 상단에 포털 캐시플로 화면으로 바로 이동하는 액션을 추가해 Projection/Actual 비교 화면으로 이어지는 운영 경로를 열었다.
+
+## [2026-06-10] patch-note | portal-weekly-expense | Cashflow 요약 분리
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 주간 사업비 입력 화면의 inline cashflow read model 요약과 강제 갱신을 제거하고, Projection/Actual 확인은 포털 캐시플로 화면 이동으로 분리해 입력 화면의 재렌더와 레이아웃 변동을 줄였다.
