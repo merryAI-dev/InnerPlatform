@@ -471,6 +471,29 @@ export function ImportEditor({
       colCount: selectionBounds.c2 - selectionBounds.c1 + 1,
     };
   }, [selectionBounds]);
+  const selectedAmountSummary = useMemo(() => {
+    if (!selectionBounds) return null;
+    const amountColumns = new Set(
+      [balanceIdx, bankAmountIdx].filter((idx) => idx >= 0),
+    );
+    if (amountColumns.size === 0) return null;
+
+    let sum = 0;
+    let count = 0;
+    for (let rowIdx = selectionBounds.r1; rowIdx <= selectionBounds.r2; rowIdx += 1) {
+      const row = rows[rowIdx];
+      if (!row) continue;
+      for (let colIdx = selectionBounds.c1; colIdx <= selectionBounds.c2; colIdx += 1) {
+        if (!amountColumns.has(colIdx)) continue;
+        const parsed = parseNumber(String(row.cells?.[colIdx] || ''));
+        if (parsed == null || !Number.isFinite(parsed)) continue;
+        sum += parsed;
+        count += 1;
+      }
+    }
+    if (count === 0) return null;
+    return { sum, count };
+  }, [balanceIdx, bankAmountIdx, rows, selectionBounds]);
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
@@ -2122,6 +2145,15 @@ export function ImportEditor({
               </Button>
             </div>
           </div>
+        </div>
+      ) : null}
+      {selectedAmountSummary ? (
+        <div
+          data-testid="settlement-selection-amount-sum"
+          className="pointer-events-none fixed bottom-3 left-3 z-[190] rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-900 shadow-lg"
+          title={`${selectedAmountSummary.count.toLocaleString('ko-KR')}개 금액 셀 합계`}
+        >
+          금액 합계: {selectedAmountSummary.sum.toLocaleString('ko-KR')}원
         </div>
       ) : null}
       <input

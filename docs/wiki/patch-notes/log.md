@@ -243,6 +243,10 @@
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [portal-bank-statement](./pages/portal-bank-statement.md), [portal-cashflow](./pages/portal-cashflow.md)
 - summary: 사업비 입력(주간)은 작성자 컬럼 위치를 행 선택 체크박스로 대체하고, 선택 행 정정은 빨간색 임시 위자드에서 모든 값을 수정한 뒤 기존 확정 행을 mutate하지 않고 새 원장 행으로 append한다. 통장내역 반영과 정정 저장은 전체 원장 기준 actual read model을 같은 주차 단위로 즉시 동기화한다.
 
+## [2026-06-10] patch-note | portal-weekly-selection-sum | 원장 선택 금액 합계 표시
+- pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
+- summary: 사업비 입력 원장에서 `통장잔액` 또는 `통장에 찍힌 입/출금액` 셀을 드래그 선택하면 좌측 하단에 스프레드시트처럼 `금액 합계`를 표시한다.
+
 ## [2026-04-14] patch-note | portal-shell-project-search | 담당 사업 검색 전환 지원
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 헤더의 중복 `사업비 입력` 버튼을 제거하고, 상단 command search가 담당 사업 전체를 검색해 선택 시 해당 사업으로 전환 후 이동하도록 확장했다.
