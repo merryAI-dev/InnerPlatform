@@ -96,7 +96,9 @@ import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
+  saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
+  type WeeklyExpenseDraftRowPatch,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
@@ -235,6 +237,27 @@ export function areExpenseSheetRowsEqual(
   right: ImportRow[] | null | undefined,
 ): boolean {
   return serializeExpenseSheetRowsForComparison(left) === serializeExpenseSheetRowsForComparison(right);
+}
+
+function buildWeeklyExpenseDraftRows(rows: ImportRow[]): WeeklyExpenseDraftRowPatch[] {
+  return rows.map((row, rowIndex) => ({
+    rowIndex,
+    ...(row.tempId ? { tempId: row.tempId } : {}),
+    ...(row.sourceTxId ? { sourceTxId: row.sourceTxId } : {}),
+    ...(row.entryKind ? { entryKind: row.entryKind } : {}),
+    cells: SETTLEMENT_COLUMNS.map((_, columnIndex) => ({
+      columnIndex,
+      rawValue: String(row.cells?.[columnIndex] ?? ''),
+      ...(row.userEditedCells?.has(columnIndex) ? { userEdited: true } : {}),
+    })),
+  }));
+}
+
+function buildWeeklyExpenseIdempotencyKey(projectId: string, sheetId: string): string {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `weekly-expense-save:${projectId}:${sheetId}:${suffix}`;
 }
 
 function serializeExpenseSheetTabForComparison(tab: ExpenseSheetTab): string {
@@ -1972,7 +1995,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         ? { userEditedCells: new Set(row.userEditedCells) }
         : {}),
     }));
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    if (isDevHarnessUser) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
       setExpenseSheets((prev) => upsertExpenseSheetTabRows({
         sheets: prev,
@@ -2006,22 +2029,22 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       });
       return sanitizedRows as ImportRow[];
     }
-    const payload = buildExpenseSheetPersistenceDoc({
-      orgId,
+    if (!currentProjectId || !authUser) {
+      const message = '사업비 저장 권한 확인이 필요합니다. 다시 로그인한 뒤 저장해 주세요.';
+      toast.error(message);
+      throw new Error(message);
+    }
+    await saveWeeklyExpenseDraftViaBff({
+      tenantId: orgId,
+      actor: authUser,
       projectId: currentProjectId,
-      activeSheetId,
-      activeSheetName,
-      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-      rows: sanitizedRows as ImportRow[],
-      createdAt: activeSheet?.createdAt,
-      now,
-      updatedBy: portalUser?.name || authUser?.name || '',
+      sheetKey: activeSheetId,
+      idempotencyKey: buildWeeklyExpenseIdempotencyKey(currentProjectId, activeSheetId),
+      payload: {
+        sheetName: activeSheetName,
+        rows: buildWeeklyExpenseDraftRows(sanitizedRows as ImportRow[]),
+      },
     });
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${activeSheetId}`),
-      payload,
-      { merge: true },
-    );
     const nextSheets = upsertExpenseSheetTabRows({
       sheets: expenseSheetsRef.current,
       sheetId: activeSheetId,
