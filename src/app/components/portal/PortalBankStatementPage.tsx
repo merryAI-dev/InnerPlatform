@@ -70,7 +70,13 @@ const WIZARD_WITHDRAWAL_FIELDS = WIZARD_FIELDS.filter((field) => (
   field.key === 'expenseAmount' || field.key === 'vatIn'
 ));
 const WIZARD_AMOUNT_FIELD_KEYS = ['depositAmount', 'vatRefund', 'expenseAmount', 'vatIn'] as const;
-const WIZARD_FIELD_KEYS = WIZARD_FIELDS.map((field) => field.key);
+const WIZARD_BULK_CLASSIFICATION_FIELD_KEYS = [
+  'budgetCategory',
+  'budgetSubCategory',
+  'budgetSubSubCategory',
+  'cashflowLine',
+  'evidenceRequired',
+] as const;
 const WIZARD_CASHFLOW_OPTIONS = CASHFLOW_LINE_OPTIONS.filter((option) => option.value !== 'INPUT_VAT_OUT');
 const WIZARD_DRAFT_RETENTION_DAYS = 30;
 
@@ -111,15 +117,6 @@ function formatNumberDraft(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.abs(value).toLocaleString('ko-KR')
     : '';
-}
-
-function splitVatIncludedDraftAmount(value: number): { supplyAmount: number; vatAmount: number } {
-  const total = Math.abs(value);
-  const vatAmount = Math.round(total / 11);
-  return {
-    supplyAmount: total - vatAmount,
-    vatAmount,
-  };
 }
 
 function parseDraftAmount(value: string): number | null {
@@ -197,14 +194,6 @@ function buildInitialWizardDraft(signedAmount: number | null | undefined): Wizar
   return signedAmount < 0
     ? { expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
     : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
-}
-
-function buildVatIncludedDraftSuggestion(signedAmount: number | null | undefined): WizardDraft {
-  if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
-  const split = splitVatIncludedDraftAmount(signedAmount);
-  return signedAmount < 0
-    ? { expenseAmount: formatNumberDraft(split.supplyAmount), vatIn: formatNumberDraft(split.vatAmount) }
-    : { depositAmount: formatNumberDraft(split.supplyAmount), vatRefund: formatNumberDraft(split.vatAmount) };
 }
 
 function buildWizardWeekLabel(transactionDate: string | null | undefined): string {
@@ -297,6 +286,7 @@ export function PortalBankStatementPage() {
   const [wizardHistory, setWizardHistory] = useState<Record<string, WizardDraft>[]>([]);
   const [wizardSelectedRowKeys, setWizardSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [wizardSavingDraft, setWizardSavingDraft] = useState(false);
+  const [wizardSidebarCollapsed, setWizardSidebarCollapsed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wizardDraftsRef = useRef<Record<string, WizardDraft>>({});
 
@@ -717,32 +707,19 @@ export function PortalBankStatementPage() {
     });
   }, [pushWizardHistorySnapshot]);
 
-  const handleApplyVatSuggestion = useCallback((rowKey: string, signedAmount: number) => {
-    const suggestion = buildVatIncludedDraftSuggestion(signedAmount);
-    if (!Object.keys(suggestion).length) return;
-    pushWizardHistorySnapshot();
-    setWizardDrafts((current) => ({
-      ...current,
-      [rowKey]: {
-        ...(current[rowKey] || {}),
-        ...suggestion,
-      },
-    }));
-  }, [pushWizardHistorySnapshot]);
-
   const handleBulkApplyWizardDraft = useCallback(() => {
     const selectedKeys = Array.from(wizardSelectedRowKeys);
     if (selectedKeys.length < 2) {
-      toast.message('같은 값을 적용할 행을 2개 이상 선택해 주세요.');
+      toast.message('분류를 복사할 행을 2개 이상 선택해 주세요.');
       return;
     }
-    const sourceKey = selectedKeys.find((key) => WIZARD_FIELD_KEYS.some((fieldKey) => String(wizardDrafts[key]?.[fieldKey] || '').trim()));
+    const sourceKey = selectedKeys.find((key) => WIZARD_BULK_CLASSIFICATION_FIELD_KEYS.some((fieldKey) => String(wizardDrafts[key]?.[fieldKey] || '').trim()));
     if (!sourceKey) {
-      toast.message('먼저 기준이 될 행에 값을 입력해 주세요.');
+      toast.message('먼저 기준 행에 비목/세목/cashflow/증빙 값을 입력해 주세요.');
       return;
     }
     const sourceDraft = wizardDrafts[sourceKey] || {};
-    const patchDraft = WIZARD_FIELD_KEYS.reduce<WizardDraft>((acc, fieldKey) => {
+    const patchDraft = WIZARD_BULK_CLASSIFICATION_FIELD_KEYS.reduce<WizardDraft>((acc, fieldKey) => {
       const value = String(sourceDraft[fieldKey] || '').trim();
       if (value) acc[fieldKey] = value;
       return acc;
@@ -766,6 +743,7 @@ export function PortalBankStatementPage() {
     setWizardDraftVersions([]);
     setWizardHistory([]);
     setWizardSelectedRowKeys(new Set());
+    setWizardSidebarCollapsed(false);
   }, []);
 
   const handleSubmitWizard = useCallback(async () => {
@@ -796,8 +774,8 @@ export function PortalBankStatementPage() {
   const renderWizardField = useCallback((rowKey: string, field: typeof WIZARD_FIELDS[number], draft: WizardDraft) => {
     const amountField = (WIZARD_AMOUNT_FIELD_KEYS as readonly string[]).includes(field.key);
     const baseClass = [
-      'h-8 w-full border border-slate-300 bg-white px-2 text-[11px] outline-none focus:border-blue-500',
-      amountField ? 'min-w-[104px] text-right tabular-nums' : 'min-w-[132px]',
+      'h-7 w-full border border-slate-300 bg-white px-1.5 text-[11px] outline-none focus:border-blue-500',
+      amountField ? 'min-w-[84px] text-right tabular-nums' : 'min-w-[104px]',
     ].join(' ');
     if (field.key === 'cashflowLine') {
       return (
@@ -1202,15 +1180,15 @@ export function PortalBankStatementPage() {
       )}
 
       {wizardRows.length > 0 ? (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 px-3 py-3">
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/45 px-1.5 py-1.5">
           <div
             data-testid="bank-statement-completion-wizard"
-            className="flex max-h-[94vh] w-[min(1680px,98vw)] flex-col overflow-hidden border border-slate-300 bg-white shadow-2xl"
+            className="flex max-h-[98vh] w-[min(1800px,99vw)] flex-col overflow-hidden border border-slate-300 bg-white shadow-2xl"
           >
-            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+            <div className="flex items-center justify-between gap-4 border-b px-3 py-2">
               <div>
-                <h2 className="text-[17px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
-                <p className="mt-1 text-[12px] leading-5 text-slate-500">
+                <h2 className="text-[15px] font-extrabold text-slate-950">비어있는 사업비 항목 작성</h2>
+                <p className="mt-0.5 text-[11px] leading-4 text-slate-500">
                   통장내역에서 선택한 거래를 원장에 쓰기 전, 비목/세목/세세목, cashflow항목, 금액, 증빙을 임시 작성합니다. 해당 주차는 거래일 기준으로 자동 계산됩니다.
                 </p>
               </div>
@@ -1219,11 +1197,29 @@ export function PortalBankStatementPage() {
               </Button>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
-              <aside className="overflow-auto border-r bg-slate-50 p-3">
-                <div className="rounded border border-blue-200 bg-white p-3 shadow-sm">
+            <div className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${wizardSidebarCollapsed ? 'lg:grid-cols-[44px_minmax(0,1fr)]' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
+              <aside className={`${wizardSidebarCollapsed ? 'overflow-hidden p-1' : 'overflow-auto p-2'} border-r bg-slate-50`}>
+                <div className="mb-2 flex justify-end">
+                  <button
+                    type="button"
+                    className="h-7 border border-slate-300 bg-white px-2 text-[11px] font-bold text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                    onClick={() => setWizardSidebarCollapsed((current) => !current)}
+                    aria-label={wizardSidebarCollapsed ? '요약 서랍 열기' : '요약 서랍 닫기'}
+                  >
+                    {wizardSidebarCollapsed ? '>>' : '<<'}
+                  </button>
+                </div>
+
+                {wizardSidebarCollapsed ? (
+                  <div className="flex flex-col items-center gap-2 pt-1 text-[10px] font-bold text-slate-500">
+                    <span className="writing-mode-vertical">요약</span>
+                    <span>{wizardIssueSummary.amount + wizardIssueSummary.budget + wizardIssueSummary.evidence}</span>
+                  </div>
+                ) : (
+                  <>
+                <div className="rounded border border-blue-200 bg-white p-2 shadow-sm">
                   <div className="text-[13px] font-bold text-slate-900">미반영</div>
-                  <div className="mt-4 space-y-2 text-[12px]">
+                  <div className="mt-3 space-y-1.5 text-[11px]">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-600">선택 거래</span>
                       <span className="font-bold">{selectedRows.length.toLocaleString('ko-KR')}건</span>
@@ -1239,11 +1235,11 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 rounded border bg-white">
-                  <div className="border-b bg-slate-100 px-3 py-2 text-[12px] font-bold text-slate-900">
+                <div className="mt-2 rounded border bg-white">
+                  <div className="border-b bg-slate-100 px-2 py-1.5 text-[12px] font-bold text-slate-900">
                     오류 요약
                   </div>
-                  <div className="space-y-2 px-3 py-3 text-[12px] leading-5 text-slate-700">
+                  <div className="space-y-1.5 px-2 py-2 text-[11px] leading-4 text-slate-700">
                     <div className="flex items-center justify-between">
                       <span>금액 오류</span>
                       <span className="font-bold">{wizardIssueSummary.amount.toLocaleString('ko-KR')}건</span>
@@ -1259,16 +1255,15 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 rounded border bg-white">
-                  <div className="flex items-center justify-between gap-2 border-b bg-slate-100 px-3 py-2">
+                <div className="mt-2 rounded border bg-white">
+                  <div className="flex items-center justify-between gap-2 border-b bg-slate-100 px-2 py-1.5">
                     <div className="text-[12px] font-bold text-slate-900">임시 작성본</div>
                     <Button variant="outline" size="sm" onClick={() => void handleSaveWizardDraft()} disabled={wizardSavingDraft}>
                       {wizardSavingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       임시저장
                     </Button>
                   </div>
-                  <div className="space-y-2 px-3 py-3 text-[11px] leading-5 text-slate-600">
-                    <p>원본 통장내역은 수정하지 않습니다.</p>
+                  <div className="space-y-1.5 px-2 py-2 text-[11px] leading-4 text-slate-600">
                     <p>임시저장은 30일 동안 보관됩니다. 30일 이후에는 새 작성본으로 다시 저장해 주세요.</p>
                     {wizardDraftVersions.length > 0 ? (
                       <div className="space-y-1 border-t pt-3">
@@ -1289,7 +1284,7 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex justify-end">
+                <div className="mt-2 flex justify-end">
                   <div
                     data-testid="bank-statement-wizard-policy-help"
                     className="group relative inline-flex"
@@ -1313,10 +1308,12 @@ export function PortalBankStatementPage() {
                     </div>
                   </div>
                 </div>
+                  </>
+                )}
               </aside>
 
-              <section className="min-w-0 overflow-auto p-3">
-                <div className="min-w-[1360px]">
+              <section className="min-w-0 overflow-auto p-2">
+                <div className="min-w-[1120px]">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="text-[12px] text-slate-500">Ctrl+Z / Command+Z는 이 위자드 입력만 되돌립니다.</div>
                     <div className="flex items-center gap-2">
@@ -1324,14 +1321,14 @@ export function PortalBankStatementPage() {
                         되돌리기
                       </Button>
                       <Button variant="outline" size="sm" onClick={handleBulkApplyWizardDraft} disabled={wizardSelectedRowKeys.size < 2}>
-                        선택 행 일괄적용
+                        선택 행 분류만 복사
                       </Button>
                     </div>
                   </div>
                   <table className="w-full border-collapse text-[11px]">
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-slate-100 text-left">
-                        <th rowSpan={2} className="w-9 border px-2 py-1.5">
+                        <th rowSpan={2} className="w-8 border px-1.5 py-1">
                           <Checkbox
                             checked={wizardRows.length > 0 && wizardSelectedRowKeys.size === wizardRows.length}
                             onCheckedChange={(checked) => {
@@ -1342,29 +1339,29 @@ export function PortalBankStatementPage() {
                             aria-label="위자드 전체 행 선택"
                           />
                         </th>
-                        <th rowSpan={2} className="w-10 border px-2 py-1.5">행</th>
-                        <th rowSpan={2} className="w-[210px] border px-2 py-1.5">통장내역 원본</th>
-                        <th rowSpan={2} className="w-[86px] border px-2 py-1.5">해당 주차</th>
+                        <th rowSpan={2} className="w-9 border px-1.5 py-1">행</th>
+                        <th rowSpan={2} className="w-[150px] border px-1.5 py-1">통장내역 원본</th>
+                        <th rowSpan={2} className="w-[68px] border px-1.5 py-1">해당 주차</th>
                         {WIZARD_PRIMARY_FIELDS.map((field) => (
-                          <th key={field.key} rowSpan={2} className="border px-2 py-1.5">
+                          <th key={field.key} rowSpan={2} className="border px-1.5 py-1">
                             {field.label}
                           </th>
                         ))}
-                        <th colSpan={WIZARD_DEPOSIT_FIELDS.length} className="border bg-emerald-50 px-2 py-1.5 text-center">
+                        <th colSpan={WIZARD_DEPOSIT_FIELDS.length} className="border bg-emerald-50 px-1.5 py-1 text-center">
                           입금
                         </th>
-                        <th colSpan={WIZARD_WITHDRAWAL_FIELDS.length} className="border bg-orange-50 px-2 py-1.5 text-center">
+                        <th colSpan={WIZARD_WITHDRAWAL_FIELDS.length} className="border bg-orange-50 px-1.5 py-1 text-center">
                           출금
                         </th>
                       </tr>
                       <tr className="bg-slate-100 text-left">
                         {WIZARD_DEPOSIT_FIELDS.map((field) => (
-                          <th key={field.key} className="w-[110px] border bg-emerald-50 px-2 py-1.5">
+                          <th key={field.key} className="w-[88px] border bg-emerald-50 px-1.5 py-1">
                             {field.label}
                           </th>
                         ))}
                         {WIZARD_WITHDRAWAL_FIELDS.map((field) => (
-                          <th key={field.key} className="w-[110px] border bg-orange-50 px-2 py-1.5">
+                          <th key={field.key} className="w-[88px] border bg-orange-50 px-1.5 py-1">
                             {field.label}
                           </th>
                         ))}
@@ -1381,24 +1378,20 @@ export function PortalBankStatementPage() {
                         const counterparty = getBankRowCounterparty(columns, row);
                         const suggestion = sameCounterpartySuggestions.get(normalizeKey(counterparty));
                         const importMeta = wizardImportMetaByRowKey.get(rowKey);
-                        const signedAmount = importMeta?.signedAmount;
-                        const vatSuggestion = typeof signedAmount === 'number'
-                          ? splitVatIncludedDraftAmount(signedAmount)
-                          : null;
                         return (
                           <tr key={rowKey} className="align-top">
-                            <td className="border bg-slate-50 px-2 py-1.5 text-center">
+                            <td className="border bg-slate-50 px-1.5 py-1 text-center">
                               <Checkbox
                                 checked={wizardSelectedRowKeys.has(rowKey)}
                                 onCheckedChange={(checked) => toggleWizardRowSelection(rowKey, Boolean(checked))}
                                 aria-label={`${rowIdx + 1}행 위자드 선택`}
                               />
                             </td>
-                            <td className="border bg-slate-50 px-2 py-1.5 text-center text-[11px] text-slate-500">
+                            <td className="border bg-slate-50 px-1.5 py-1 text-center text-[11px] text-slate-500">
                               {rowIdx + 1}
                             </td>
-                            <td className="border px-2 py-1.5">
-                              <div className="max-w-[200px] space-y-1 text-[11px] text-slate-700">
+                            <td className="border px-1.5 py-1">
+                              <div className="max-w-[145px] space-y-0.5 text-[10px] text-slate-700">
                                 {(previewCells.length > 0 ? previewCells : ['원본 셀 없음']).map((cell, idx) => (
                                   <div key={`${rowKey}-raw-${idx}`} className="truncate">
                                     {cell}
@@ -1407,27 +1400,17 @@ export function PortalBankStatementPage() {
                                 {suggestion ? (
                                   <button
                                     type="button"
-                                    className="mt-2 border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                                    className="mt-1 border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-100"
                                     onClick={() => handleApplySuggestion(rowKey, suggestion)}
                                   >
                                     이전 거래처 조합 적용
                                   </button>
                                 ) : null}
-                                {vatSuggestion ? (
-                                  <button
-                                    type="button"
-                                    className="mt-1 block border border-amber-200 bg-amber-50 px-2 py-1 text-left text-[10px] font-semibold text-amber-800 hover:bg-amber-100"
-                                    onClick={() => handleApplyVatSuggestion(rowKey, signedAmount!)}
-                                    title="부가세 포함 거래일 때만 사람이 확인 후 적용합니다."
-                                  >
-                                    부가세 추정 적용 · 공급 {vatSuggestion.supplyAmount.toLocaleString('ko-KR')} / 세액 {vatSuggestion.vatAmount.toLocaleString('ko-KR')}
-                                  </button>
-                                ) : null}
                               </div>
                             </td>
-                            <td className="border bg-slate-100 px-2 py-1.5 text-center">
+                            <td className="border bg-slate-100 px-1.5 py-1 text-center">
                               <span
-                                className="inline-flex h-8 w-full min-w-[72px] items-center justify-center border border-slate-300 bg-slate-50 px-2 text-[11px] font-semibold text-slate-600"
+                                className="inline-flex h-7 w-full min-w-[58px] items-center justify-center border border-slate-300 bg-slate-50 px-1.5 text-[10px] font-semibold text-slate-600"
                                 aria-label="해당 주차 수정불가 계산값"
                                 title={importMeta?.transactionDate ? `${importMeta.transactionDate} 기준 수정불가 계산값` : '거래일 기준 수정불가 계산값'}
                               >

@@ -106,16 +106,14 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('resolveEvidenceSuggestion');
   });
 
-  it('keeps full bank amount by default and exposes VAT split only as an explicit wizard action', () => {
-    expect(bankStatementPageSource).toContain('splitVatIncludedDraftAmount');
-    expect(bankStatementPageSource).toContain('Math.round(total / 11)');
-    expect(bankStatementPageSource).toContain('buildVatIncludedDraftSuggestion');
-    expect(bankStatementPageSource).toContain('handleApplyVatSuggestion');
-    expect(bankStatementPageSource).toContain('부가세 추정 적용');
+  it('keeps full bank amount by default without rendering VAT suggestion actions', () => {
     expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(signedAmount)');
     expect(bankStatementPageSource).toContain("vatIn: ''");
     expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(signedAmount)');
     expect(bankStatementPageSource).toContain("vatRefund: ''");
+    expect(bankStatementPageSource).not.toContain('부가세 추정 적용');
+    expect(bankStatementPageSource).not.toContain('handleApplyVatSuggestion');
+    expect(bankStatementPageSource).not.toContain('buildVatIncludedDraftSuggestion');
   });
 
   it('treats cashflow line as a strict company policy key in the wizard', () => {
@@ -167,8 +165,11 @@ describe('portal bank statement apply policy', () => {
   });
 
   it('uses a dense full-screen wizard layout with grouped deposit and withdrawal amount fields', () => {
-    expect(bankStatementPageSource).toContain('w-[min(1680px,98vw)]');
-    expect(bankStatementPageSource).toContain('max-h-[94vh]');
+    expect(bankStatementPageSource).toContain('w-[min(1800px,99vw)]');
+    expect(bankStatementPageSource).toContain('max-h-[98vh]');
+    expect(bankStatementPageSource).toContain('wizardSidebarCollapsed');
+    expect(bankStatementPageSource).toContain('<<');
+    expect(bankStatementPageSource).toContain('>>');
     expect(bankStatementPageSource).toContain('WIZARD_PRIMARY_FIELDS');
     expect(bankStatementPageSource).toContain('WIZARD_DEPOSIT_FIELDS');
     expect(bankStatementPageSource).toContain('WIZARD_WITHDRAWAL_FIELDS');
@@ -178,13 +179,28 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('출금');
   });
 
-  it('keeps user assistance inside temp state with explicit apply and undo controls', () => {
+  it('keeps user assistance inside temp state with classification-only bulk copy and undo controls', () => {
     expect(bankStatementPageSource).toContain('sameCounterpartySuggestions');
     expect(bankStatementPageSource).toContain('handleApplySuggestion');
     expect(bankStatementPageSource).toContain('handleBulkApplyWizardDraft');
+    expect(bankStatementPageSource).toContain('WIZARD_BULK_CLASSIFICATION_FIELD_KEYS');
+    expect(bankStatementPageSource).toContain('선택 행 분류만 복사');
     expect(bankStatementPageSource).toContain('handleWizardUndo');
     expect(bankStatementPageSource).toContain('wizardHistory');
     expect(bankStatementPageSource).toContain('오류 요약');
+
+    const bulkApplyBlock = sourceBetween(
+      bankStatementPageSource,
+      'const handleBulkApplyWizardDraft = useCallback',
+      'const closeWizard = useCallback',
+    );
+    expect(bulkApplyBlock).toContain('WIZARD_BULK_CLASSIFICATION_FIELD_KEYS');
+    expect(bulkApplyBlock).not.toContain('depositAmount');
+    expect(bulkApplyBlock).not.toContain('vatRefund');
+    expect(bulkApplyBlock).not.toContain('expenseAmount');
+    expect(bulkApplyBlock).not.toContain('vatIn');
+    expect(bulkApplyBlock).not.toContain('memo');
+    expect(bulkApplyBlock).not.toContain('settlementNote');
   });
 
   it('computes already applied bank lines across every expense sheet tab', () => {
