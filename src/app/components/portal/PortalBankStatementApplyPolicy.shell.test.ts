@@ -68,8 +68,9 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).toContain('선택 행 반영');
     expect(bankStatementPageSource).toContain('selectedRows');
     expect(bankStatementPageSource).toContain("switchStatusTab('applied')");
-    expect(bankStatementPageSource).toContain("refreshBankStatementRows(status)");
+    expect(bankStatementPageSource).toContain("refreshBankStatementRows(status === 'all' ? undefined : status)");
     expect(bankStatementPageSource).toContain('visibleBankRows');
+    expect(bankStatementPageSource).toContain("activeStatusTab === 'all'");
     expect(bankStatementPageSource).toContain("activeStatusTab === 'applied'");
     expect(bankStatementPageSource).toContain('appliedBankLineIds.has(rowKey)');
     expect(bankStatementPageSource).toContain("activeStatusTab !== 'staged'");
@@ -272,6 +273,17 @@ describe('portal bank statement apply policy', () => {
     expect(bankStatementPageSource).not.toContain('반영할 거래를 선택합니다');
     expect(bankStatementPageSource).not.toContain('getBankStatementProfileLabel');
     expect(bankStatementPageSource).not.toContain('lastSavedAt');
+  });
+
+  it('keeps cumulative bank statement uploads visible with a repeat upload entry', () => {
+    expect(bankStatementPageSource).toContain('appendBankStatementRows');
+    expect(bankStatementPageSource).toContain('누적 통장내역');
+    expect(bankStatementPageSource).toContain('추가 업로드');
+    expect(bankStatementPageSource).toContain("switchStatusTab('all')");
+    expect(bankStatementPageSource).toContain('누적 거래');
+    expect(bankStatementPageSource).toContain('미반영 거래');
+    expect(bankStatementPageSource).toContain('반영완료 거래');
+    expect(bankStatementPageSource).toContain('통장내역 ${mergedPreview.appendedRows.length.toLocaleString');
   });
 
   it('computes already applied bank lines across every expense sheet tab', () => {

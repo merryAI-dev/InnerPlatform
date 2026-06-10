@@ -8,6 +8,7 @@ import { Checkbox } from '../ui/checkbox';
 import { usePortalStore, type BankStatementApplyCellPatch } from '../../data/portal-store';
 import {
   buildBankStatementServerImportLines,
+  appendBankStatementRows,
   isHtmlMaskedAsXls,
   normalizeBankStatementMatrix,
   parseHtmlBankExport,
@@ -33,6 +34,7 @@ function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
 }
 
 type WizardDraft = Record<string, string>;
+type BankStatementStatusTab = 'all' | 'staged' | 'applied';
 
 const WIZARD_FIELDS = [
   { key: 'budgetCategory', label: '비목', column: '비목' },
@@ -279,7 +281,7 @@ export function PortalBankStatementPage() {
   const [dragActive, setDragActive] = useState(false);
   const [uploadPreparing, setUploadPreparing] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
-  const [activeStatusTab, setActiveStatusTab] = useState<'staged' | 'applied'>('staged');
+  const [activeStatusTab, setActiveStatusTab] = useState<BankStatementStatusTab>('staged');
   const [wizardRows, setWizardRows] = useState<BankStatementRow[]>([]);
   const [wizardDrafts, setWizardDrafts] = useState<Record<string, WizardDraft>>({});
   const [wizardDraftVersions, setWizardDraftVersions] = useState<WizardDraftVersion[]>([]);
@@ -311,12 +313,19 @@ export function PortalBankStatementPage() {
     () => rows
       .map((row, index) => ({ row, index, rowKey: row.tempId || `row-${index}` }))
       .filter(({ rowKey }) => (
-        activeStatusTab === 'applied'
+        activeStatusTab === 'all'
+          ? true
+          : activeStatusTab === 'applied'
           ? appliedBankLineIds.has(rowKey)
           : !appliedBankLineIds.has(rowKey)
       )),
     [activeStatusTab, appliedBankLineIds, rows],
   );
+  const appliedBankRowCount = useMemo(
+    () => rows.reduce((count, row, index) => count + (appliedBankLineIds.has(bankRowKey(row, index)) ? 1 : 0), 0),
+    [appliedBankLineIds, rows],
+  );
+  const stagedBankRowCount = Math.max(rows.length - appliedBankRowCount, 0);
   const selectedVisibleCount = useMemo(
     () => visibleBankRows.filter(({ rowKey }) => selectedRowIds.has(rowKey)).length,
     [selectedRowIds, visibleBankRows],
@@ -475,17 +484,32 @@ export function PortalBankStatementPage() {
         toast.error('업로드 데이터에서 컬럼/행을 찾지 못했습니다. 파일 형식을 확인해 주세요.');
         return;
       }
-      setColumns(result.columns);
-      setRows(result.rows);
-      setSelectedRowIds(new Set(result.rows.map((row, index) => row.tempId || `row-${index}`)));
+      const mergedPreview = appendBankStatementRows({ columns, rows }, result);
+      setColumns(mergedPreview.sheet.columns);
+      setRows(mergedPreview.sheet.rows);
+      setSelectedRowIds(new Set(mergedPreview.appendedRows.map((row, index) => row.tempId || `uploaded-${index}`)));
+      setActiveStatusTab('staged');
       setDirty(true);
+      if (saveBankStatementRows) {
+        setSaving(true);
+        try {
+          await saveBankStatementRows(result);
+          setDirty(false);
+          toast.success(`통장내역 ${mergedPreview.appendedRows.length.toLocaleString('ko-KR')}건을 누적 저장했습니다.`);
+        } catch (err) {
+          console.error('[BankStatement] upload save failed:', err);
+          toast.error('통장내역 저장에 실패했습니다.');
+        } finally {
+          setSaving(false);
+        }
+      }
     } catch (err) {
       console.error('[BankStatement] upload parse failed:', err);
       toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
     } finally {
       setUploadPreparing(false);
     }
-  }, [parseExcelToMatrix]);
+  }, [columns, parseExcelToMatrix, rows, saveBankStatementRows]);
 
   const openFilePicker = useCallback(() => {
     warmXlsx();
@@ -533,7 +557,7 @@ export function PortalBankStatementPage() {
     setSelectedRowIds(checked ? new Set(visibleBankRows.map(({ rowKey }) => rowKey)) : new Set());
   }, [visibleBankRows]);
 
-  const switchStatusTab = useCallback(async (status: 'staged' | 'applied') => {
+  const switchStatusTab = useCallback(async (status: BankStatementStatusTab) => {
     if (status === activeStatusTab) return;
     if (dirty) {
       toast.message('저장 전 초안을 먼저 기준본으로 저장한 뒤 탭을 전환해 주세요.');
@@ -542,7 +566,7 @@ export function PortalBankStatementPage() {
     setActiveStatusTab(status);
     setSelectedRowIds(new Set());
     try {
-      await refreshBankStatementRows(status);
+      await refreshBankStatementRows(status === 'all' ? undefined : status);
     } catch (err) {
       console.error('[BankStatement] status tab load failed:', err);
       toast.error('통장내역 상태를 불러오지 못했습니다.');
@@ -1019,6 +1043,12 @@ export function PortalBankStatementPage() {
           </div>
           <p className="text-[12px] text-muted-foreground">{projectName} · 카드/통장 내역 업로드</p>
         </div>
+        {hasUploadedSheet ? (
+          <Button size="sm" onClick={openFilePicker} disabled={uploadPreparing || saving}>
+            {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
+            {uploadPreparing ? '엑셀 준비 중' : '추가 업로드'}
+          </Button>
+        ) : null}
       </div>
       <input
         ref={fileInputRef}
@@ -1086,13 +1116,20 @@ export function PortalBankStatementPage() {
           <div className="border-b px-5 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-[18px] font-bold text-slate-950">통장내역 선택</h2>
+                <h2 className="text-[18px] font-bold text-slate-950">누적 통장내역</h2>
               </div>
             </div>
           </div>
 
           <div className="border-b px-5 pt-3">
             <div className="flex items-center gap-6 text-[13px] font-semibold">
+              <button
+                type="button"
+                className={`px-1 pb-2 ${activeStatusTab === 'all' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-500'}`}
+                onClick={() => void switchStatusTab('all')}
+              >
+                전체
+              </button>
               <button
                 type="button"
                 className={`px-1 pb-2 ${activeStatusTab === 'staged' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-500'}`}
@@ -1113,13 +1150,21 @@ export function PortalBankStatementPage() {
           <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
             <aside className="border-r bg-slate-50/70 p-5">
               <div className="rounded border border-blue-200 bg-white p-4 shadow-sm">
-                <div className="text-[14px] font-bold text-slate-900">전체</div>
-                <div className="mt-7 space-y-3 text-[13px]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600">{activeStatusTab === 'staged' ? '미반영 거래' : '반영완료 거래'}</span>
-                    <span className="font-bold">{visibleBankRows.length.toLocaleString('ko-KR')}건</span>
-                  </div>
-                  <div className="flex items-center justify-between border-t pt-3">
+                  <div className="text-[14px] font-bold text-slate-900">전체</div>
+                  <div className="mt-7 space-y-3 text-[13px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600">누적 거래</span>
+                      <span className="font-bold">{rows.length.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600">미반영 거래</span>
+                      <span className="font-bold">{stagedBankRowCount.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600">반영완료 거래</span>
+                      <span className="font-bold">{appliedBankRowCount.toLocaleString('ko-KR')}건</span>
+                    </div>
+                    <div className="flex items-center justify-between border-t pt-3">
                     <span className="text-slate-600">금액 컬럼</span>
                     <span className="font-bold">{hasTransactionAmountColumns ? '감지됨' : '확인 필요'}</span>
                   </div>

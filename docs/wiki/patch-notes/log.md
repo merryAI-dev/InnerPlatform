@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | portal-bank-statement | cumulative upload surface
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 통장내역 화면에 `전체/미반영/반영완료` 탭과 누적 거래 요약을 추가했다. 업로드된 상태에서도 `추가 업로드` 버튼을 노출하고, 새 파일은 기존 append/dedupe 기준으로 즉시 누적 저장해 프로젝트별 다회 업로드 흐름을 지원한다.
+
 ## [2026-06-10] patch-note | portal-weekly-expense | workspace access hook restore
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 주간 사업비 화면의 증빙 업로드 경로에서 Google Workspace access helper를 Auth store에서 명시적으로 받아오도록 복구했다. 이로써 stage bundle에서 `ensureGoogleWorkspaceAccess is not defined`로 화면 전체가 ErrorBoundary에 떨어지는 회귀를 막는다.
