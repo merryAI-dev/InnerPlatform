@@ -33,6 +33,7 @@ scripts/etl/output/
 .worktrees/
 .env*.local
 .gstack/
+.understand-anything/
 .claude/worktrees/
 .claude/memory/
 .pm-status/

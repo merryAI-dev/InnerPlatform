@@ -3,7 +3,7 @@
 - route: `/portal/budget`
 - primary users: PM, 예산 구조 관리 담당자
 - status: active
-- last updated: 2026-04-22
+- last updated: 2026-06-10
 
 ## Purpose
 
@@ -30,6 +30,7 @@
 
 ## Recent Changes
 
+- [2026-06-10] stage Java weekly 변경이 예산 편집 UI/권한/저장 경로로 번지지 않도록 budget live drift guard와 provider 저장 경계 테스트를 추가했다.
 - [2026-04-22] 구조 편집에서 세세목 삭제 시 남은 입력칸이 있을 때는 편집 영역을 유지하고, 마지막 빈 세세목만 기본 상태로 접히도록 정리했다.
 - [2026-04-21] 세세목 구조를 `budget_tree_v2`로 분리하고, 세목 부모 예산 편집과 합계 불일치 경고를 추가했다.
 - [2026-04-14] 상단 budget guide 카드를 제거하고 액션 영역을 단순화했다.

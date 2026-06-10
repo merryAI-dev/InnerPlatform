@@ -1,6 +1,12 @@
 .git
 .github
 .vercel
+.understand-anything
+.worktrees
+.gitnexus
+.gstack
+.claude
+.superpowers
 .env*
 !.env.example
 !.env.*.example
@@ -16,5 +22,6 @@ tmp
 *.log
 
 docs
+rust
 rust/**/target
 server/jvm-weekly-api/target

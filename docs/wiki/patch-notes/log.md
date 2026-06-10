@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-10] patch-note | portal-budget, shared-portal-architecture | budget live drift guard
+- pages: [portal-budget](./pages/portal-budget.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: stage Java weekly 변경이 예산 편집 UI/권한/저장 경로로 확산되지 않도록 `PortalBudget` live drift guard와 `portal-store` 예산 저장 경계 테스트를 추가했다. 예산 codebook rename 전파는 live와 같은 예산 Firestore 경로를 유지하고, weekly Java draft save 경로로 새지 않도록 고정했다.
+
 ## [2026-06-09] patch-note | shared-portal-architecture | weekly Java authority hardening
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 주간 사업비 Java API stage/live 경로에서 Vercel/BFF rewrite fallback을 런타임에서 차단하고, Firestore rules catchall이 서버 전용 컬렉션 쓰기 차단을 우회하지 못하도록 보강했다. Java weekly/cashflow 호출은 scoped Firebase Bearer 인증을 사용하고, idempotency replay는 project/command 단위로 제한하며, projection/actual cashflow line은 백엔드 canonical ID로 저장되도록 정리했다.

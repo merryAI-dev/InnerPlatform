@@ -2388,6 +2388,10 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (renameMap.size === 0) return;
 
     const budgetPlanRef = doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/budget_summary/default`);
+    const expenseSheetRef = doc(
+      db,
+      `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${activeExpenseSheetId || 'default'}`,
+    );
     const evidenceMapRef = doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', currentProjectId));
     const updatedBy = portalUser?.name || authUser?.name || '';
 
@@ -2437,7 +2441,16 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           return { ...row, cells };
         });
         if (touched) {
-          await saveExpenseSheetRows(nextRows);
+          await setDoc(
+            expenseSheetRef,
+            withTenantScope(orgId, {
+              projectId: currentProjectId,
+              rows: nextRows.map(serializeExpenseSheetRowForPersistence),
+              updatedAt: now,
+              updatedBy,
+            }),
+            { merge: true },
+          );
           setExpenseSheetRows(nextRows);
         }
       }
@@ -2476,7 +2489,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setEvidenceRequiredMap(nextMap);
       }
     }
-  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser, saveExpenseSheetRows]);
+  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, activeExpenseSheetId, isDevHarnessUser]);
 
   const saveBudgetTreeV2 = useCallback(async (codes: BudgetTreeCode[]) => {
     const now = new Date().toISOString();

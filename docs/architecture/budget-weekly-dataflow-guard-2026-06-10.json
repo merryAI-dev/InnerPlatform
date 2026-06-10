@@ -1,0 +1,143 @@
+{
+  "name": "budget-weekly-dataflow-guard",
+  "date": "2026-06-10",
+  "purpose": "Keep stage Java weekly changes from drifting into the live budget editing UI, permission, and save path.",
+  "sourceGraph": {
+    "tool": "understand-anything deterministic local pipeline",
+    "nodes": 1016,
+    "edges": 1949,
+    "localOutput": ".understand-anything/knowledge-graph.json"
+  },
+  "policy": [
+    "Budget UI and edit path must remain live-identical unless a budget-scoped change is explicitly approved.",
+    "Java weekly/stage changes are limited to weekly expense input, cashflow read model, and auth/session routes.",
+    "Weekly expense input must not hydrate, aggregate, or force-refresh cashflow read models.",
+    "Projection/Actual comparison UI belongs in /portal/cashflow only."
+  ],
+  "nodes": [
+    {
+      "id": "ui.portalBudget",
+      "path": "src/app/components/portal/PortalBudget.tsx",
+      "role": "Budget editing UI"
+    },
+    {
+      "id": "store.portalBudgetProvider",
+      "path": "src/app/data/portal-store.tsx",
+      "role": "Budget codebook, budget plan, budget tree persistence boundary"
+    },
+    {
+      "id": "store.saveBudgetCodeBook",
+      "path": "src/app/data/portal-store.tsx",
+      "role": "Budget codebook save and rename propagation"
+    },
+    {
+      "id": "store.saveExpenseSheetRows",
+      "path": "src/app/data/portal-store.tsx",
+      "role": "Weekly expense sheet save entrypoint"
+    },
+    {
+      "id": "api.weeklyJava",
+      "path": "src/app/lib/platform-bff-client.ts",
+      "role": "Java weekly API client channel"
+    },
+    {
+      "id": "ui.weeklyExpense",
+      "path": "src/app/components/portal/PortalWeeklyExpensePage.tsx",
+      "role": "Weekly expense input, save, and navigation only"
+    },
+    {
+      "id": "ui.cashflow",
+      "path": "src/app/components/cashflow/CashflowProjectSheet.tsx",
+      "role": "Projection/Actual read model and comparison UI"
+    },
+    {
+      "id": "firestore.budgetCodeBook",
+      "path": "projects/{projectId}/budget_code_book/default",
+      "role": "Budget codebook document"
+    },
+    {
+      "id": "firestore.budgetSummary",
+      "path": "projects/{projectId}/budget_summary/default",
+      "role": "Budget plan document"
+    },
+    {
+      "id": "firestore.expenseSheet",
+      "path": "projects/{projectId}/expense_sheets/{activeExpenseSheetId}",
+      "role": "Live-compatible budget rename propagation target"
+    },
+    {
+      "id": "firestore.budgetEvidenceMap",
+      "path": "budgetEvidenceMaps/{projectId}",
+      "role": "Evidence-required budget mapping"
+    }
+  ],
+  "allowedEdges": [
+    {
+      "from": "ui.portalBudget",
+      "to": "store.portalBudgetProvider",
+      "reason": "Budget UI calls budget-scoped store actions."
+    },
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "firestore.budgetCodeBook",
+      "reason": "Budget codebook is saved through the live budget document path."
+    },
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "firestore.budgetSummary",
+      "reason": "Budget rename propagates to budget plan rows through the live path."
+    },
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "firestore.expenseSheet",
+      "reason": "Budget rename propagation stays live-compatible and does not call the weekly Java draft save."
+    },
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "firestore.budgetEvidenceMap",
+      "reason": "Evidence-required mapping follows budget rename changes."
+    },
+    {
+      "from": "ui.weeklyExpense",
+      "to": "store.saveExpenseSheetRows",
+      "reason": "Weekly expense input owns row input/save/navigation only."
+    },
+    {
+      "from": "store.saveExpenseSheetRows",
+      "to": "api.weeklyJava",
+      "reason": "Weekly draft save can use Java authority in platform API mode."
+    },
+    {
+      "from": "ui.cashflow",
+      "to": "api.weeklyJava",
+      "reason": "Cashflow reads Projection/Actual through the read model channel."
+    }
+  ],
+  "forbiddenEdges": [
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "store.saveExpenseSheetRows",
+      "enforcedBy": "src/app/components/portal/PortalBudget.live-drift.test.ts",
+      "reason": "Budget editing must not route through weekly Java draft save."
+    },
+    {
+      "from": "store.saveBudgetCodeBook",
+      "to": "api.weeklyJava",
+      "enforcedBy": "src/app/components/portal/PortalBudget.live-drift.test.ts",
+      "reason": "Java weekly changes are out of budget edit scope."
+    },
+    {
+      "from": "ui.weeklyExpense",
+      "to": "ui.cashflow",
+      "enforcedBy": "src/app/components/portal/PortalWeeklyExpensePage.flow-layout.test.ts",
+      "reason": "Weekly expense screen can navigate to cashflow but must not render Projection/Actual comparison UI."
+    }
+  ],
+  "verification": [
+    "npm test",
+    "npm run policy:verify",
+    "node scripts/verify_weekly_bff_free_policy.mjs",
+    "npm run build",
+    "mvn test in server/jvm-weekly-api"
+  ]
+}
