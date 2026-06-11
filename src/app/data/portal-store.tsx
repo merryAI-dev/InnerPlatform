@@ -1668,7 +1668,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               sheetVersion: sheet.sheetVersion,
             }),
           })));
-          setWeeklyExpenseRecentAuditEvents(result.recentAuditEvents || []);
+          ifActive(() => setWeeklyExpenseRecentAuditEvents(result.recentAuditEvents || []));
         })
         .catch(handleExpenseSheetError);
     };
