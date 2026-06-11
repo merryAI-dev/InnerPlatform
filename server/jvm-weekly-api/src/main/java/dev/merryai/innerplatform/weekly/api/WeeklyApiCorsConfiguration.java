@@ -11,6 +11,17 @@ public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
         "https://inner-platform-stage-merryai-devs-projects.vercel.app",
         "https://inner-platform.vercel.app"
     };
+    static final String[] ALLOWED_HEADERS = new String[]{
+        "authorization",
+        "content-type",
+        "idempotency-key",
+        "x-request-id",
+        "x-tenant-id",
+        "x-actor-id",
+        "x-actor-role",
+        "x-actor-email",
+        "x-actor-name"
+    };
 
     private final String[] allowedOrigins;
 
@@ -23,16 +34,7 @@ public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
         registry.addMapping("/api/v1/**")
             .allowedOrigins(allowedOrigins)
             .allowedMethods("GET", "POST", "OPTIONS")
-            .allowedHeaders(
-                "authorization",
-                "content-type",
-                "idempotency-key",
-                "x-request-id",
-                "x-tenant-id",
-                "x-actor-id",
-                "x-actor-role",
-                "x-actor-email"
-            )
+            .allowedHeaders(ALLOWED_HEADERS)
             .exposedHeaders("x-request-id")
             .allowCredentials(true)
             .maxAge(600);

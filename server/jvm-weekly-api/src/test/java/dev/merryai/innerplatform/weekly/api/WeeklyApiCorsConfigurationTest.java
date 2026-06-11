@@ -19,4 +19,10 @@ class WeeklyApiCorsConfigurationTest {
         assertThat(WeeklyApiCorsConfiguration.parseOrigins(" https://stage.example , https://live.example "))
             .containsExactly("https://stage.example", "https://live.example");
     }
+
+    @Test
+    void allowedHeadersIncludeActorNameForBrowserDirectAuditLogging() {
+        assertThat(WeeklyApiCorsConfiguration.ALLOWED_HEADERS)
+            .contains("x-actor-id", "x-actor-email", "x-actor-name");
+    }
 }
