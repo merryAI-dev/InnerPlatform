@@ -153,7 +153,7 @@ describe('portal bank statement apply policy', () => {
   });
 
   it('keeps full bank amount by default and only applies VAT split through an explicit temp action', () => {
-    expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(signedAmount)');
+    expect(bankStatementPageSource).toContain('expenseAmount: formatNumberDraft(Math.abs(signedAmount))');
     expect(bankStatementPageSource).toContain("vatIn: ''");
     expect(bankStatementPageSource).toContain('depositAmount: formatNumberDraft(signedAmount)');
     expect(bankStatementPageSource).toContain("vatRefund: ''");

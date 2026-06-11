@@ -3,7 +3,7 @@
 - route: `/`
 - primary users: 관리자, 운영 PM
 - status: active
-- last updated: 2026-05-21
+- last updated: 2026-06-11
 
 ## Purpose
 
@@ -28,6 +28,7 @@
 
 ## Recent Changes
 
+- [2026-06-11] 캐시플로 관련 대시보드 소비 화면이 Java cashflow read model snapshot을 먼저 hydrate하도록 맞췄다. stage 기준선에서는 frontend가 Actual을 계산하거나 쓰지 않고, Java가 만든 read model을 조회하는 흐름을 따른다.
 - [2026-05-21] `/` 첫 화면을 기능 검색 전용 페이지로 바꾸고 기존 대시보드는 `/dashboard`로 보존했다. 검색 결과는 `관리자`와 `PM` 그룹으로 나눠 색상 pill과 카드 배경으로 구분하고, 계약서/CIC/사업비/권한 같은 현업 키워드를 노출된 업무 화면에 매핑했다.
 - [2026-05-21] 기능 검색 화면의 검색 slab, 관리자/PM shortcut panel, 검색 결과 리스트를 translucent surface와 blur 기반 glassmorphism 톤으로 조정했다.
 - [2026-05-21] `/` 기능 검색 화면에서는 AppLayout의 sidebar/header/status chrome을 생략해 최초 진입 시 전체 화면으로 보이게 했다. 실제 업무 화면으로 이동하면 기존 Admin/Portal shell이 다시 적용된다.

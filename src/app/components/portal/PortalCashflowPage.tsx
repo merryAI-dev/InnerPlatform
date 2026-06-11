@@ -33,7 +33,7 @@ export function PortalCashflowPage() {
     markSheetSourceApplied,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { upsertWeekAmounts } = useCashflowWeeks();
+  const { hydrateProjectCashflowSnapshot, upsertWeekAmounts } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
 
@@ -114,15 +114,18 @@ export function PortalCashflowPage() {
             saveBankStatementRows={saveBankStatementRows}
             saveEvidenceRequiredMap={saveEvidenceRequiredMap}
             markSheetSourceApplied={markSheetSourceApplied}
+            onRefreshCashflowSnapshot={hydrateProjectCashflowSnapshot}
             upsertWeekAmounts={async (input) => {
+              if (input.mode === 'actual') {
+                throw new Error('Actual은 사업비 원장 저장 후 Java read model에서만 조회합니다.');
+              }
               await upsertWeekAmounts(input);
               await upsertWeeklySubmissionStatus({
                 projectId: input.projectId,
                 yearMonth: input.yearMonth,
                 weekNo: input.weekNo,
-                ...(input.mode === 'projection'
-                  ? { projectionEdited: true, projectionUpdated: true }
-                  : { expenseEdited: true, expenseUpdated: true }),
+                projectionEdited: true,
+                projectionUpdated: true,
               });
             }}
           />

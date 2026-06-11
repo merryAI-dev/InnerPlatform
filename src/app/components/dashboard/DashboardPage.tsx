@@ -20,7 +20,7 @@ import { usePayroll } from '../../data/payroll-store';
 import { buildDashboardCashflowRollups } from './dashboard-rollups';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useCashflowWeeks, useHydrateCashflowSnapshots } from '../../data/cashflow-weeks-store';
 import { isPayrollLiquidityRiskStatus, resolvePayrollLiquidityQueue } from '../../platform/payroll-liquidity';
 import { resolveAdminMonitoringIssues } from '../../platform/admin-monitoring';
 import { resolvePayrollReviewQueue } from '../../platform/payroll-review';
@@ -75,6 +75,7 @@ export function DashboardPage() {
   const { announcements } = useHrAnnouncements();
   const { runs } = usePayroll();
   const { weeks: cashflowWeeks } = useCashflowWeeks();
+  useHydrateCashflowSnapshots(projects.map((project) => project.id));
   const navigate = useNavigate();
   const [labEnabled] = useShellLabEnabled();
 

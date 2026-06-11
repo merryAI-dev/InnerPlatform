@@ -646,18 +646,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 }
                 continue;
             }
-            for (Map.Entry<String, Object> lineEntry : nestedMap(data.get("actual")).entrySet()) {
-                WeeklyExpenseActualEntity line = new WeeklyExpenseActualEntity(
-                    tenantId,
-                    projectId,
-                    "cashflow_weeks",
-                    yearMonth,
-                    weekNo,
-                    lineEntry.getKey()
-                );
-                line.setAmount(decimal(lineEntry.getValue()));
-                lines.add(line);
-            }
         }
         if (!auditOrder) return lines;
         return lines.stream()

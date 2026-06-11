@@ -44,7 +44,6 @@ import {
   type ImportRow,
   type SettlementHeaderAnalysis,
 } from '../../platform/settlement-csv';
-import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
 import {
   describeGoogleSheetMigrationTarget,
   parseBankStatementMatrix,
@@ -59,8 +58,6 @@ import {
 } from '../../platform/google-sheet-migration';
 import { parseLocalWorkbookFile, type LocalWorkbookSheet } from '../../platform/local-workbook';
 import { reportError } from '../../platform/observability';
-import { buildSettlementActualSyncPayloadLocally } from '../../platform/settlement-calculation-kernel';
-import type { SettlementActualSyncWeekPayload } from '../../platform/settlement-sheet-sync';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -120,6 +117,7 @@ interface GoogleSheetMigrationWizardProps {
   saveBankStatementRows: (sheet: BankStatementImportSheet) => Promise<void>;
   saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
   markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceSnapshot['sourceType']; applyTarget: string }) => Promise<void>;
+  onRefreshCashflowSnapshot?: (projectId: string) => Promise<void>;
   upsertWeekAmounts: (input: {
     projectId: string;
     yearMonth: string;
@@ -127,11 +125,6 @@ interface GoogleSheetMigrationWizardProps {
     mode: 'projection' | 'actual';
     amounts: Record<string, number>;
   }) => Promise<void>;
-  previewActualSyncPayload?: (
-    rows: ImportRow[],
-    yearWeeks: ReturnType<typeof getYearMondayWeeks>,
-    persistedRows?: ImportRow[] | null,
-  ) => Promise<SettlementActualSyncWeekPayload[]>;
 }
 
 function getGoogleSheetWizardStepLabel(step: GoogleSheetWizardStep): string {
@@ -319,8 +312,8 @@ export function GoogleSheetMigrationWizard({
   saveBankStatementRows,
   saveEvidenceRequiredMap,
   markSheetSourceApplied,
+  onRefreshCashflowSnapshot,
   upsertWeekAmounts,
-  previewActualSyncPayload,
 }: GoogleSheetMigrationWizardProps) {
   const [step, setStep] = useState<GoogleSheetWizardStep>('source');
   const [link, setLink] = useState('');
@@ -779,56 +772,9 @@ export function GoogleSheetMigrationWizard({
           const expenseRows = reviewState.expenseRows || [];
           if (expenseRows.length === 0) throw new Error('가져올 데이터 행이 없습니다.');
           const mergePlan = planGoogleSheetImportMerge(expenseSheetRows, expenseRows);
-          const persistedRows = await saveExpenseSheetRows(mergePlan.mergedRows);
-          const actualPreviewRows = Array.isArray(persistedRows) ? persistedRows : mergePlan.mergedRows;
-          const actualPayload = previewActualSyncPayload
-            ? await previewActualSyncPayload(
-              actualPreviewRows,
-              getYearMondayWeeks(new Date().getFullYear()),
-              expenseSheetRows,
-            )
-            : buildSettlementActualSyncPayloadLocally(
-              actualPreviewRows,
-              getYearMondayWeeks(new Date().getFullYear()),
-              expenseSheetRows,
-            );
-          let actualSyncFailed = false;
-          if (actualPayload.length > 0) {
-            const results = await Promise.allSettled(
-              actualPayload.map((sheet) => upsertWeekAmounts({
-                projectId,
-                yearMonth: sheet.yearMonth,
-                weekNo: sheet.weekNo,
-                mode: 'actual',
-                amounts: sheet.amounts as Record<string, number>,
-              })),
-            );
-            actualSyncFailed = results.some((result) => result.status === 'rejected');
-            results.forEach((result) => {
-              if (result.status === 'rejected') {
-                reportError(result.reason, {
-                  message: '[GoogleSheetMigrationWizard] expense sheet actual sync failed:',
-                  options: {
-                    level: 'error',
-                    tags: {
-                      surface: 'google_sheet_migration',
-                      action: 'expense_sheet_actual_sync',
-                    },
-                    extra: {
-                      projectId,
-                      selectedSheetName: preview.selectedSheetName,
-                    },
-                  },
-                });
-              }
-            });
-          }
-          if (actualSyncFailed) {
-            toast.message(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했지만 캐시플로 actual 동기화는 일부 실패했습니다.`);
-          } else {
-            const cashflowSuffix = actualPayload.length > 0 ? ` · actual ${actualPayload.length}주차 동기화` : '';
-            toast.success(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했습니다${cashflowSuffix}.`);
-          }
+          await saveExpenseSheetRows(mergePlan.mergedRows);
+          await onRefreshCashflowSnapshot?.(projectId);
+          toast.success(`Google Sheets ${mergePlan.summary.importedCount}건을 ${activeSheetName}에 반영했습니다.`);
           break;
         }
         case 'budget_plan': {

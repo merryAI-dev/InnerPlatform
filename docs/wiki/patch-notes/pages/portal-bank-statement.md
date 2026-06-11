@@ -3,7 +3,7 @@
 - route: `/portal/bank-statements`
 - primary users: PM, 운영 입력 담당자
 - status: active
-- last updated: 2026-06-10
+- last updated: 2026-06-11
 
 ## Purpose
 
@@ -37,6 +37,7 @@
 
 ## Recent Changes
 
+- [2026-06-11] Stage 기준선에서 통장내역 선택 반영과 cashflow Actual 흐름을 Java read model 정책에 맞췄다. 출금 거래는 위자드 초안에서 음수로 표시하지 않고 사업비 사용액 원액으로 보여주며, spreadsheet 실험은 별도 lab alias와 브랜치 guard로 stage 기준선을 덮지 못하게 분리했다.
 - [2026-06-10] 통장내역 화면에 `전체/미반영/반영완료` 탭과 누적 거래 요약을 추가했다. 업로드된 상태에서도 `추가 업로드` 버튼을 계속 노출하고, 새 파일은 현재 탭이 아니라 저장된 전체 기준본 기준 append/dedupe로 즉시 누적 저장해 한 프로젝트에 여러 파일을 순차 반영할 수 있게 했다.
 - [2026-06-10] 선택 행 반영 시 주간 사업비 원장은 기존 행을 재구성하지 않고 새 확정 행만 append한다. 출금 행은 `지출구분`을 기본 `계좌이체`로 채워 위자드와 원장 간 지급구분 누락을 줄인다.
 - [2026-06-10] 선택 행 반영 transaction에서 저장된 전체 원장 행으로 cashflow actual read model을 다시 계산해, 반영 직후 `/portal/cashflow`의 Actual이 기존 정적 값을 오래 물고 있지 않도록 했다.

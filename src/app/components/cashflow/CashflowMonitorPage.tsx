@@ -13,7 +13,7 @@ import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useAppStore } from '../../data/store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useCashflowWeeks, useHydrateCashflowSnapshots } from '../../data/cashflow-weeks-store';
 
 type MonitorLinkCardProps = {
   title: string;
@@ -89,6 +89,7 @@ function MonitorLinkCard({ title, description, href, badge, icon: Icon, toneClas
 export function CashflowMonitorPage() {
   const { projects } = useAppStore();
   const { weeks, yearMonth, isLoading } = useCashflowWeeks();
+  useHydrateCashflowSnapshots(projects.map((project) => project.id));
 
   const currentMonthWeeks = useMemo(
     () => weeks.filter((week) => week.yearMonth === yearMonth),

@@ -103,7 +103,7 @@ class FirestoreCashflowWeekActualMergeTest {
     }
 
     @Test
-    void keepsLegacyActualOnlyWhenCurrentSheetHasNoDeltas() {
+    void ignoresLegacyActualWhenCurrentSheetHasNoDeltas() {
         Map<String, Object> existing = Map.of(
             "actual", Map.of(
                 "DIRECT_COST_OUT", 2000,
@@ -125,9 +125,8 @@ class FirestoreCashflowWeekActualMergeTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> bySheet = (Map<String, Object>) patch.get("weeklyExpenseActualBySheet");
 
-        assertThat(bySheet).containsOnlyKeys(FirestoreCashflowWeekActualMerge.LEGACY_ACTUAL_SHEET_KEY);
-        assertThat(actual).containsEntry("DIRECT_COST_OUT", 2000L);
-        assertThat(actual).containsEntry("SALES_IN", 9000L);
-        assertThat(patch.get("actualTotals")).isEqualTo(Map.of("totalIn", 9000L, "totalOut", 2000L, "net", 7000L));
+        assertThat(bySheet).isEmpty();
+        assertThat(actual).isEmpty();
+        assertThat(patch.get("actualTotals")).isEqualTo(Map.of("totalIn", 0L, "totalOut", 0L, "net", 0L));
     }
 }

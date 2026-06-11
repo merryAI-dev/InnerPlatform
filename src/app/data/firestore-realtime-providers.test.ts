@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const providerFiles = [
   'board-store.tsx',
-  'cashflow-weeks-store.tsx',
   'hr-announcements-store.tsx',
   'payroll-store.tsx',
   'portal-store.tsx',
@@ -22,10 +21,13 @@ describe('route-aware firestore realtime providers', () => {
     });
   }
 
-  it('keeps cashflow weeks realtime for project-scoped users so actual values do not go stale', () => {
+  it('keeps cashflow actuals on the Java read model path instead of Firestore realtime', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'cashflow-weeks-store.tsx'), 'utf8');
 
-    expect(source).toContain('onSnapshot(q,');
-    expect(source).not.toContain('getDocs(q)');
+    expect(source).toContain('fetchCashflowSnapshotViaPlatformApi');
+    expect(source).toContain('hydrateProjectCashflowSnapshot');
+    expect(source).not.toContain('useFirestoreAccessPolicy');
+    expect(source).toContain("Cashflow actual은 프론트에서 저장할 수 없습니다");
+    expect(source).toContain("input.mode === 'actual'");
   });
 });

@@ -77,12 +77,17 @@ fi
 
 echo "[deploy-jvm-weekly-api] project=${PROJECT_ID} region=${REGION} service=${SERVICE_NAME} image=${IMAGE_URI}"
 
-env -u JVM_WEEKLY_STORAGE_BACKEND -u JVM_WEEKLY_PROJECT_ACCESS_BACKEND \
+env -u JVM_WEEKLY_STORAGE_BACKEND \
+  -u JVM_WEEKLY_PROJECT_ACCESS_BACKEND \
+  -u JVM_WEEKLY_AUTH_MODE \
+  -u JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN \
   mvn -f server/jvm-weekly-api/pom.xml test
-docker build -f server/jvm-weekly-api/Dockerfile -t "$IMAGE_URI" .
+mvn -f server/jvm-weekly-api/pom.xml -DskipTests package
+docker build --platform linux/amd64 -f server/jvm-weekly-api/Dockerfile.runtime -t "$IMAGE_URI" .
 docker push "$IMAGE_URI"
 
 gcloud run deploy "$SERVICE_NAME" \
+  --project "$PROJECT_ID" \
   --image "$IMAGE_URI" \
   --region "$REGION" \
   --platform managed \
@@ -92,13 +97,13 @@ gcloud run deploy "$SERVICE_NAME" \
   --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false|JVM_WEEKLY_STORAGE_BACKEND=${JVM_WEEKLY_STORAGE_BACKEND}|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=${JVM_WEEKLY_PROJECT_ACCESS_BACKEND}|JVM_WEEKLY_AUTH_MODE=${JVM_WEEKLY_AUTH_MODE}|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=${JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN}|JVM_WEEKLY_DATABASE_URL=${JVM_WEEKLY_DATABASE_URL}|JVM_WEEKLY_DATABASE_USER=${JVM_WEEKLY_DATABASE_USER}|JVM_WEEKLY_FIREBASE_PROJECT_ID=${JVM_WEEKLY_FIRESTORE_PROJECT_ID}|JVM_WEEKLY_FIRESTORE_PROJECT_ID=${JVM_WEEKLY_FIRESTORE_PROJECT_ID}|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID}|JVM_WEEKLY_ALLOWED_ORIGINS=${JVM_WEEKLY_ALLOWED_ORIGINS}" \
   --set-secrets "JVM_WEEKLY_DATABASE_PASSWORD=${JVM_WEEKLY_DATABASE_PASSWORD_SECRET}:latest,JVM_WEEKLY_INTERNAL_API_TOKEN=${JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest"
 
-SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format='value(status.url)')"
+SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')"
 if [[ -z "$JVM_WEEKLY_SMOKE_URL" ]]; then
   JVM_WEEKLY_SMOKE_URL="$SERVICE_URL"
 fi
-SMOKE_FIREBASE_WEB_API_KEY="${FIREBASE_WEB_API_KEY:-$(gcloud secrets versions access latest --secret="$FIREBASE_WEB_API_KEY_SECRET")}"
-SMOKE_EMAIL="${JVM_WEEKLY_SMOKE_EMAIL:-$(gcloud secrets versions access latest --secret="$JVM_WEEKLY_SMOKE_EMAIL_SECRET")}"
-SMOKE_PASSWORD="${JVM_WEEKLY_SMOKE_PASSWORD:-$(gcloud secrets versions access latest --secret="$JVM_WEEKLY_SMOKE_PASSWORD_SECRET")}"
+SMOKE_FIREBASE_WEB_API_KEY="${FIREBASE_WEB_API_KEY:-$(gcloud secrets versions access latest --project "$PROJECT_ID" --secret="$FIREBASE_WEB_API_KEY_SECRET")}"
+SMOKE_EMAIL="${JVM_WEEKLY_SMOKE_EMAIL:-$(gcloud secrets versions access latest --project "$PROJECT_ID" --secret="$JVM_WEEKLY_SMOKE_EMAIL_SECRET")}"
+SMOKE_PASSWORD="${JVM_WEEKLY_SMOKE_PASSWORD:-$(gcloud secrets versions access latest --project "$PROJECT_ID" --secret="$JVM_WEEKLY_SMOKE_PASSWORD_SECRET")}"
 SMOKE_AUTH_ENV="$(
   FIREBASE_WEB_API_KEY="$SMOKE_FIREBASE_WEB_API_KEY" \
   JVM_WEEKLY_SMOKE_EMAIL="$SMOKE_EMAIL" \

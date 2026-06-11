@@ -536,48 +536,70 @@ export interface OverrideTransactionEvidenceDriveCategoriesPayload {
   }>;
 }
 
-export interface CashflowWeekAmountsPayload {
-  yearMonth: string;
-  weekNo: number;
-  mode: 'projection' | 'actual';
-  amounts: Record<string, number>;
+export interface CashflowSnapshotResult {
+  projectId: string;
+  projection: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
+  actual: Array<{
+    sheetKey: string;
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
+  readModel?: {
+    months?: Array<{
+      yearMonth: string;
+      projection?: {
+        rowTotals?: Record<string, number>;
+        weeks?: Array<{
+          weekNo: number;
+          amounts?: Record<string, number>;
+          totalIn?: number;
+          totalOut?: number;
+          net?: number;
+          weekIn?: number;
+          weekOut?: number;
+        }>;
+        monthTotals?: { totalIn?: number; totalOut?: number; net?: number };
+      };
+      actual?: {
+        rowTotals?: Record<string, number>;
+        weeks?: Array<{
+          weekNo: number;
+          amounts?: Record<string, number>;
+          totalIn?: number;
+          totalOut?: number;
+          net?: number;
+          weekIn?: number;
+          weekOut?: number;
+        }>;
+        monthTotals?: { totalIn?: number; totalOut?: number; net?: number };
+      };
+    }>;
+  };
 }
 
-export interface CashflowWeekAmountsResult {
+export interface CashflowProjectionUpsertResult {
   ok: boolean;
+  commandName: string;
+  projectId: string;
+  updatedLines: number;
+  auditId: string;
+}
+
+export interface WeeklyExpenseWeekCommandResult {
+  ok: boolean;
+  commandName: string;
   projectId: string;
   yearMonth: string;
   weekNo: number;
-  weekStart: string;
-  weekEnd: string;
-  mode: 'projection' | 'actual';
-  updatedAt: string;
-}
-
-export interface ProjectCashflowActualSyncResult {
-  ok: boolean;
-  skipped?: boolean;
-  reason?: string;
-  projectId: string;
-  sourceRows: number;
-  sheetCount: number;
-  upsertedWeeks: number;
-  clearedWeeks: number;
-  weeks: Array<{
-    yearMonth: string;
-    weekNo: number;
-    weekStart?: string;
-    weekEnd?: string;
-    amounts?: Record<string, number>;
-  }>;
-  cleared: Array<{
-    yearMonth: string;
-    weekNo: number;
-    weekStart?: string;
-    weekEnd?: string;
-    amounts?: Record<string, number>;
-  }>;
-  updatedAt: string;
+  state: string;
+  auditId: string;
 }
 
 export interface WeeklyExpenseDraftCellPatch {
@@ -1504,20 +1526,18 @@ export async function overrideTransactionEvidenceDriveCategoriesViaBff(params: {
   return response.data;
 }
 
-export async function upsertCashflowWeekAmountsViaBff(params: {
+export async function fetchCashflowSnapshotViaPlatformApi(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
-  payload: CashflowWeekAmountsPayload;
   client?: PlatformApiClientLike;
-}): Promise<CashflowWeekAmountsResult> {
+}): Promise<CashflowSnapshotResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<CashflowWeekAmountsResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-weeks/upsert`,
+  const response = await apiClient.get<CashflowSnapshotResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
       retries: 0,
       timeoutMs: 12000,
     },
@@ -1525,21 +1545,88 @@ export async function upsertCashflowWeekAmountsViaBff(params: {
   return response.data;
 }
 
-export async function syncProjectCashflowActualsViaBff(params: {
+export async function upsertCashflowProjectionViaPlatformApi(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  idempotencyKey: string;
+  lines: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
   client?: PlatformApiClientLike;
-}): Promise<ProjectCashflowActualSyncResult> {
+}): Promise<CashflowProjectionUpsertResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<ProjectCashflowActualSyncResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-actuals/sync`,
+  const response = await apiClient.post<CashflowProjectionUpsertResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/projection`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: {},
+      body: {
+        idempotencyKey: params.idempotencyKey,
+        lines: params.lines,
+      },
+      idempotencyKey: params.idempotencyKey,
       retries: 0,
-      timeoutMs: 20000,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function submitWeeklyExpenseWeekViaPlatformApi(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  idempotencyKey: string;
+  yearMonth: string;
+  weekNo: number;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseWeekCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseWeekCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/submit`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        idempotencyKey: params.idempotencyKey,
+        yearMonth: params.yearMonth,
+        weekNo: params.weekNo,
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 15000,
+    },
+  );
+  return response.data;
+}
+
+export async function closeWeeklyExpenseWeekViaPlatformApi(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  idempotencyKey: string;
+  yearMonth: string;
+  weekNo: number;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseWeekCommandResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseWeekCommandResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/close`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        idempotencyKey: params.idempotencyKey,
+        yearMonth: params.yearMonth,
+        weekNo: params.weekNo,
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 15000,
     },
   );
   return response.data;

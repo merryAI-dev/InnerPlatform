@@ -18,8 +18,9 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('syncProjectActualsFromExpenseSheets');
     expect(cashflowProjectSheetSource).not.toContain('actualSyncing');
     expect(cashflowProjectSheetSource).not.toContain('monthSavingMode');
-    expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
-    expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
+    expect(cashflowWeeksStoreSource).not.toContain('syncProjectCashflowActualsViaBff');
+    expect(cashflowWeeksStoreSource).not.toContain('upsertCashflowWeekAmountsViaBff');
+    expect(cashflowWeeksStoreSource).toContain('fetchCashflowSnapshotViaPlatformApi');
   });
 
   it('saves visible weekly values instead of draft-only input changes', () => {
@@ -35,6 +36,7 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('Projection → Actual');
     expect(cashflowProjectSheetSource).not.toContain('Actual → Projection');
     expect(cashflowProjectSheetSource).toContain('await upsertWeekAmounts({');
+    expect(cashflowProjectSheetSource).toContain("if (input.mode === 'actual') return;");
   });
 
   it('formats persisted input values for display without changing numeric save parsing', () => {
@@ -63,10 +65,17 @@ describe('CashflowProjectSheet actual sync flow', () => {
   });
 
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
-    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
-    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");
+    expect(cashflowWeeksStoreSource).toContain('hydrateProjectCashflowSnapshot');
+    expect(cashflowWeeksStoreSource).toContain('fetchCashflowSnapshotViaPlatformApi');
     expect(cashflowWeeksStoreSource).not.toContain("where('projectId'");
     expect(cashflowWeeksStoreSource).not.toContain('allowPrivilegedReadAll');
     expect(cashflowWeeksStoreSource).not.toContain('projectIds.length === 0');
+  });
+
+  it('keeps actual read-only and hydrates it from the Java read model', () => {
+    expect(cashflowProjectSheetSource).toContain('hydrateProjectCashflowSnapshot({ projectId })');
+    expect(cashflowProjectSheetSource).toContain("tableMode === 'actual' || !canEdit");
+    expect(cashflowProjectSheetSource).not.toContain("mode: 'actual',\\n        amounts");
+    expect(cashflowProjectSheetSource).not.toContain('실적값을 확인하고 필요 시 보정합니다.');
   });
 });

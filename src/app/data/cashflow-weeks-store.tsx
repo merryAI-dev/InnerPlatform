@@ -21,7 +21,6 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { filterCashflowWeeksThroughSelectedYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import {
@@ -33,10 +32,11 @@ import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
+  closeWeeklyExpenseWeekViaPlatformApi,
+  fetchCashflowSnapshotViaPlatformApi,
   isPlatformApiEnabled,
-  syncProjectCashflowActualsViaBff,
-  upsertCashflowWeekAmountsViaBff,
-  type ProjectCashflowActualSyncResult,
+  submitWeeklyExpenseWeekViaPlatformApi,
+  upsertCashflowProjectionViaPlatformApi,
 } from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
@@ -68,7 +68,7 @@ interface CashflowWeekActions {
   }) => Promise<void>;
   submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
   closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
-  syncProjectActualsFromExpenseSheets: (input: { projectId: string }) => Promise<ProjectCashflowActualSyncResult>;
+  hydrateProjectCashflowSnapshot: (input: { projectId: string }) => Promise<void>;
   updateVarianceFlag: (input: {
     sheetId: string;
     varianceFlag: VarianceFlag | undefined;
@@ -83,9 +83,20 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
 }
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
 
+function idempotencyKey(prefix: string, parts: Array<string | number>): string {
+  return `${prefix}-${parts.map((part) => String(part).replace(/[^a-zA-Z0-9_-]/g, '_')).join('-')}-${Date.now()}`;
+}
+
+function numericAmounts(input: Record<string, unknown> | undefined): Partial<Record<CashflowSheetLineId, number>> {
+  const output: Partial<Record<CashflowSheetLineId, number>> = {};
+  for (const [lineId, amount] of Object.entries(input || {})) {
+    output[lineId as CashflowSheetLineId] = Math.trunc(Number(amount) || 0);
+  }
+  return output;
+}
+
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { routeMode } = useFirestoreAccessPolicy(user?.role);
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
@@ -119,6 +130,12 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     }
 
     if (!firestoreEnabled || !db) {
+      setWeeks([]);
+      setIsLoading(false);
+      return;
+    }
+
+    if (isPlatformApiEnabled() && user.source !== 'dev_harness') {
       setWeeks([]);
       setIsLoading(false);
       return;
@@ -161,7 +178,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       unsubsRef.current.forEach((u) => u());
       unsubsRef.current = [];
     };
-  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, routeMode, yearMonth]);
+  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
@@ -182,9 +199,13 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
     if (!def) return;
 
+    if (input.mode === 'actual') {
+      throw new Error('Cashflow actual은 프론트에서 저장할 수 없습니다. 사업비 원장 저장 후 Java read model을 조회해야 합니다.');
+    }
+
     if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
       const normalizedAmounts = input.amounts || {};
-      await upsertCashflowWeekAmountsViaBff({
+      await upsertCashflowProjectionViaPlatformApi({
         tenantId: orgId,
         actor: {
           uid: actor.uid,
@@ -194,14 +215,13 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           googleAccessToken: (actor as any).googleAccessToken,
         },
         projectId,
-        payload: {
+        idempotencyKey: idempotencyKey('cashflow-projection', [projectId, ym, weekNo]),
+        lines: Object.entries(normalizedAmounts).map(([lineId, amount]) => ({
           yearMonth: ym,
           weekNo,
-          mode: input.mode,
-          amounts: Object.fromEntries(
-            Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
-          ),
-        },
+          cashflowLine: lineId,
+          amount: Number(amount) || 0,
+        })),
       });
       const now = new Date().toISOString();
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({
@@ -326,17 +346,17 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     });
   }, [upsertWeekAmounts]);
 
-  const syncProjectActualsFromExpenseSheets = useCallback(async (input: {
+  const hydrateProjectCashflowSnapshot = useCallback(async (input: {
     projectId: string;
-  }): Promise<ProjectCashflowActualSyncResult> => {
+  }): Promise<void> => {
     const actor = user;
     const projectId = input.projectId.trim();
-    if (!actor || !projectId) throw new Error('Actual 동기화 권한 정보가 없습니다.');
+    if (!actor || !projectId) return;
     if (!isPlatformApiEnabled() || actor.source === 'dev_harness') {
-      throw new Error('Actual 동기화 API가 연결되어 있지 않습니다.');
+      return;
     }
 
-    const result = await syncProjectCashflowActualsViaBff({
+    const snapshot = await fetchCashflowSnapshotViaPlatformApi({
       tenantId: orgId,
       actor: {
         uid: actor.uid,
@@ -348,35 +368,56 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       projectId,
     });
 
-    if (!result.skipped) {
-      setWeeks((prev) => [...result.weeks, ...result.cleared].reduce((nextWeeks, week) => {
-        const fallback = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
-        return applyWeekAmountsToLocalWeeks({
-          weeks: nextWeeks,
-          orgId,
-          actorUid: actor.uid,
-          actorName: actor.name,
+    const now = new Date().toISOString();
+    const nextDocs: CashflowWeekSheet[] = [];
+    const monthModels = snapshot.readModel?.months || [];
+    for (const month of monthModels) {
+      const defs = getMonthMondayWeeks(month.yearMonth);
+      const projectionWeeks = new Map((month.projection?.weeks || []).map((week) => [week.weekNo, week]));
+      const actualWeeks = new Map((month.actual?.weeks || []).map((week) => [week.weekNo, week]));
+      const weekNos = new Set<number>([
+        ...projectionWeeks.keys(),
+        ...actualWeeks.keys(),
+      ]);
+      for (const weekNo of weekNos) {
+        const def = defs.find((week) => week.weekNo === weekNo);
+        const projection = numericAmounts(projectionWeeks.get(weekNo)?.amounts);
+        const actual = numericAmounts(actualWeeks.get(weekNo)?.amounts);
+        nextDocs.push({
+          id: resolveWeekDocId(projectId, month.yearMonth, weekNo),
+          tenantId: orgId,
           projectId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          weekStart: week.weekStart || fallback?.weekStart || '',
-          weekEnd: week.weekEnd || fallback?.weekEnd || '',
-          mode: 'actual',
-          amounts: (week.amounts || {}) as Partial<Record<CashflowSheetLineId, number>>,
-          now: result.updatedAt,
+          yearMonth: month.yearMonth,
+          weekNo,
+          weekStart: def?.weekStart || '',
+          weekEnd: def?.weekEnd || '',
+          projection,
+          actual,
+          projectionTotals: {
+            totalIn: Number(projectionWeeks.get(weekNo)?.totalIn || 0),
+            totalOut: Number(projectionWeeks.get(weekNo)?.totalOut || 0),
+            net: Number(projectionWeeks.get(weekNo)?.net || 0),
+          },
+          actualTotals: {
+            totalIn: Number(actualWeeks.get(weekNo)?.totalIn || 0),
+            totalOut: Number(actualWeeks.get(weekNo)?.totalOut || 0),
+            net: Number(actualWeeks.get(weekNo)?.net || 0),
+          },
+          projectionUpdated: Object.values(projection).some((amount) => Number(amount) !== 0),
+          pmSubmitted: Object.values(actual).some((amount) => Number(amount) !== 0),
+          adminClosed: false,
+          createdAt: now,
+          updatedAt: now,
+          updatedByUid: 'java-weekly-api',
+          updatedByName: 'Java Weekly API',
         });
-      }, prev));
+      }
     }
 
-    console.groupCollapsed(`[CashflowActualSync] project=${projectId}`);
-    console.log('response', result);
-    console.table(result.weeks.map((week) => ({
-      week: `${week.yearMonth}:w${week.weekNo}`,
-      nonZero: Object.fromEntries(Object.entries(week.amounts || {}).filter(([, amount]) => Number(amount) !== 0)),
-    })));
-    console.groupEnd();
-
-    return result;
+    setWeeks((prev) => [
+      ...prev.filter((week) => week.projectId !== projectId),
+      ...nextDocs,
+    ]);
   }, [orgId, user]);
 
   const submitWeekAsPm = useCallback(async (input: {
@@ -384,13 +425,43 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
+      await submitWeeklyExpenseWeekViaPlatformApi({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+        idempotencyKey: idempotencyKey('weekly-submit', [projectId, ym, weekNo]),
+        yearMonth: ym,
+        weekNo,
+      });
+      setWeeks((prev) => prev.map((week) => (
+        week.projectId === projectId && week.yearMonth === ym && week.weekNo === weekNo
+          ? {
+            ...week,
+            pmSubmitted: true,
+            pmSubmittedAt: new Date().toISOString(),
+            pmSubmittedByUid: actor.uid,
+            pmSubmittedByName: actor.name,
+          }
+          : week
+      )));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
@@ -445,13 +516,43 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth: string;
     weekNo: number;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+
+    if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
+      await closeWeeklyExpenseWeekViaPlatformApi({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+        idempotencyKey: idempotencyKey('weekly-close', [projectId, ym, weekNo]),
+        yearMonth: ym,
+        weekNo,
+      });
+      setWeeks((prev) => prev.map((week) => (
+        week.projectId === projectId && week.yearMonth === ym && week.weekNo === weekNo
+          ? {
+            ...week,
+            adminClosed: true,
+            adminClosedAt: new Date().toISOString(),
+            adminClosedByUid: actor.uid,
+            adminClosedByName: actor.name,
+          }
+          : week
+      )));
+      return;
+    }
+
+    if (!db) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
@@ -534,7 +635,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
-    syncProjectActualsFromExpenseSheets,
+    hydrateProjectCashflowSnapshot,
     updateVarianceFlag,
     getWeeksForProject,
   }), [
@@ -548,7 +649,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     upsertLineAmount,
     submitWeekAsPm,
     closeWeekAsAdmin,
-    syncProjectActualsFromExpenseSheets,
+    hydrateProjectCashflowSnapshot,
     updateVarianceFlag,
     getWeeksForProject,
   ]);
@@ -564,4 +665,33 @@ export function useCashflowWeeks() {
   const ctx = useContext(CashflowWeekContext);
   if (!ctx) throw new Error('useCashflowWeeks must be used within CashflowWeekProvider');
   return ctx;
+}
+
+export function useHydrateCashflowSnapshots(projectIds: string[], options: { enabled?: boolean } = {}) {
+  const { hydrateProjectCashflowSnapshot } = useCashflowWeeks();
+  const enabled = options.enabled ?? true;
+  const projectKey = useMemo(() => (
+    Array.from(new Set(projectIds.map((id) => id.trim()).filter(Boolean))).sort().join('|')
+  ), [projectIds]);
+
+  useEffect(() => {
+    if (!enabled || !projectKey) return;
+    let cancelled = false;
+    const ids = projectKey.split('|');
+
+    void (async () => {
+      for (const projectId of ids) {
+        if (cancelled) return;
+        try {
+          await hydrateProjectCashflowSnapshot({ projectId });
+        } catch (error) {
+          console.error('[Cashflow] Java snapshot hydration failed:', { projectId, error });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, hydrateProjectCashflowSnapshot, projectKey]);
 }

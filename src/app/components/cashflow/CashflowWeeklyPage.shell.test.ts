@@ -47,4 +47,9 @@ describe('CashflowWeeklyPage status semantics', () => {
     expect(cashflowWeeklyPageSource).toContain('프로젝션 바로가기');
     expect(cashflowWeeklyPageSource).toContain('프로젝션 열기');
   });
+
+  it('hydrates Java cashflow snapshots for the 전사 weekly status table', () => {
+    expect(cashflowWeeklyPageSource).toContain('useHydrateCashflowSnapshots');
+    expect(cashflowWeeklyPageSource).toContain('projects.map((project) => project.id)');
+  });
 });

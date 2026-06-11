@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-11] patch-note | admin-dashboard, portal-bank-statement | Java cashflow read model stage baseline
+- pages: [admin-dashboard](./pages/admin-dashboard.md), [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: Stage 기준선을 Java cashflow read model 우선 흐름으로 고정했다. 대시보드/캐시플로 소비 화면은 Java snapshot hydration을 통해 Actual을 읽고, 통장내역 선택 반영의 출금 원액은 음수 표기 없이 사업비 사용액으로 표시한다. Vercel stage와 spreadsheet lab alias는 각각 브랜치 guard 스크립트로 분리했다.
+
 ## [2026-06-10] patch-note | portal-bank-statement | cumulative upload surface
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 통장내역 화면에 `전체/미반영/반영완료` 탭과 누적 거래 요약을 추가했다. 업로드된 상태에서도 `추가 업로드` 버튼을 노출하고, 새 파일은 현재 탭이 아니라 저장된 전체 기준본 기준 append/dedupe로 즉시 누적 저장해 프로젝트별 다회 업로드 흐름을 지원한다.

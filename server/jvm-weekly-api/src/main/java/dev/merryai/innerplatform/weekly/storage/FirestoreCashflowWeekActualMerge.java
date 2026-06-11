@@ -10,8 +10,6 @@ import java.util.Map;
 import java.util.TreeMap;
 
 final class FirestoreCashflowWeekActualMerge {
-    static final String LEGACY_ACTUAL_SHEET_KEY = "__legacy_cashflow_weeks__";
-
     private FirestoreCashflowWeekActualMerge() {
     }
 
@@ -31,11 +29,6 @@ final class FirestoreCashflowWeekActualMerge {
         }
         if (!currentSheet.isEmpty()) {
             bySheet.put(sheetKey, numberMap(currentSheet));
-        } else if (bySheet.isEmpty()) {
-            Map<String, Object> legacyActual = nestedMap(existingDoc.get("actual"));
-            if (!legacyActual.isEmpty()) {
-                bySheet.put(LEGACY_ACTUAL_SHEET_KEY, legacyActual);
-            }
         }
 
         Map<String, BigDecimal> actual = sumActualBySheet(bySheet);

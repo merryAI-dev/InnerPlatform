@@ -39,4 +39,9 @@ describe('DashboardPage shell contract', () => {
     expect(dashboardPageSource).not.toContain('typeBreakdown');
     expect(dashboardPageSource).not.toContain('cashflowTrend');
   });
+
+  it('hydrates Java cashflow snapshots before cashflow rollups are derived', () => {
+    expect(dashboardPageSource).toContain('useHydrateCashflowSnapshots');
+    expect(dashboardPageSource).toContain('projects.map((project) => project.id)');
+  });
 });

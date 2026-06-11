@@ -10,6 +10,7 @@ const submissionsSource = readPortalSource('PortalSubmissionsPage.tsx');
 const bankStatementSource = readPortalSource('PortalBankStatementPage.tsx');
 const weeklyExpenseSource = readPortalSource('PortalWeeklyExpensePage.tsx');
 const cashflowSource = readPortalSource('PortalCashflowPage.tsx');
+const googleSheetMigrationWizardSource = readPortalSource('GoogleSheetMigrationWizard.tsx');
 const projectEditSource = readPortalSource('PortalProjectEdit.tsx');
 const projectRegisterSource = readPortalSource('PortalProjectRegister.tsx');
 const projectEditorWizardSource = readFileSync(resolve(import.meta.dirname, '../projects/ProjectEditorWizard.tsx'), 'utf8');
@@ -63,6 +64,13 @@ describe('portal minimal sweep', () => {
   it('turns cashflow migration guidance into a compact action instead of a top explainer card', () => {
     expect(cashflowSource).not.toContain('기존 캐시플로 형식 그대로 migration 할 수 있습니다.');
     expect(cashflowSource).not.toContain('권장 형식: 첫 1~2열에 항목명');
+  });
+
+  it('refreshes the Java cashflow read model after expense-sheet imports', () => {
+    expect(cashflowSource).toContain('hydrateProjectCashflowSnapshot');
+    expect(cashflowSource).toContain('onRefreshCashflowSnapshot={hydrateProjectCashflowSnapshot}');
+    expect(googleSheetMigrationWizardSource).toContain('onRefreshCashflowSnapshot?.(projectId)');
+    expect(googleSheetMigrationWizardSource).not.toContain("mode: 'actual'");
   });
 
   it('drops the redundant current-project subtitle from project edit', () => {

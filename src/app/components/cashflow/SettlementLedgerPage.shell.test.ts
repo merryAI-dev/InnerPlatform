@@ -14,10 +14,11 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
     expect(settlementLedgerSource).toContain('작성본 업로드');
   });
 
-  it('reuses workbook parsing helpers and cashflow sync when applying uploaded direct-entry sheets', () => {
+  it('reuses workbook parsing helpers without frontend cashflow actual sync when applying uploaded direct-entry sheets', () => {
     expect(settlementLedgerSource).toContain('parseLocalWorkbookFile');
     expect(settlementLedgerSource).toContain('normalizeSettlementWorkbookToImportRows');
-    expect(settlementLedgerSource).toContain('syncImportRowsToCashflow');
+    expect(settlementLedgerSource).not.toContain('syncImportRowsToCashflow');
+    expect(settlementLedgerSource).not.toContain("mode: 'actual'");
   });
 
   it('only reports dirty navigation state for real unsaved drafts, not while a save request is in flight', () => {
@@ -26,21 +27,22 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
   });
 
   it('emits a separate saving-state signal while the sheet save request is in flight', () => {
-    expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving' || cashflowSyncing)");
+    expect(settlementLedgerSource).toContain("onSavingStateChange?.(sheetSaveState === 'saving')");
+    expect(settlementLedgerSource).not.toContain('cashflowSyncing');
   });
 
-  it('does not keep a human-review queue between expense saves and cashflow actual sync', () => {
-    expect(settlementLedgerSource).toContain('const syncableWeeks = payload;');
+  it('does not keep a human-review queue or frontend sync between expense saves and cashflow actual', () => {
+    expect(settlementLedgerSource).not.toContain('const syncableWeeks = payload;');
     expect(settlementLedgerSource).not.toContain('const syncableWeeks = payload.filter((week) => !blockedWeeks.includes(week));');
     expect(settlementLedgerSource).not.toContain("expenseSyncState: 'review_required'");
     expect(settlementLedgerSource).toContain("expenseSyncState: 'synced'");
   });
 
-  it('uses persisted weekly sync status to resume pending cashflow updates after returning to the page', () => {
+  it('does not resume pending cashflow updates from the frontend after returning to the page', () => {
     expect(settlementLedgerSource).toContain('weeklySubmissionStatuses?: WeeklySubmissionStatus[]');
     expect(settlementLedgerSource).toContain('resolveCashflowSyncStateFromStatuses');
-    expect(settlementLedgerSource).toContain("cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed'");
-    expect(settlementLedgerSource).toContain("void syncImportRowsToCashflow(importRows, { silent: true });");
+    expect(settlementLedgerSource).not.toContain("cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed'");
+    expect(settlementLedgerSource).not.toContain('void syncImportRowsToCashflow');
   });
 
   it('appends selected ledger corrections instead of mutating confirmed rows in place', () => {
@@ -48,7 +50,7 @@ describe('SettlementLedgerPage direct-entry workbook flow', () => {
     expect(settlementLedgerSource).toContain('...cloneImportRows(baseRows)');
     expect(settlementLedgerSource).toContain('...rowsToAppend.map');
     expect(settlementLedgerSource).toContain('persistImportRowsSnapshot(nextRows');
-    expect(settlementLedgerSource).toContain('syncImportRowsToCashflow(persistedRows');
+    expect(settlementLedgerSource).not.toContain('syncImportRowsToCashflow(persistedRows');
     expect(settlementLedgerSource).toContain('showRowSelection={ledgerViewOnly}');
     expect(settlementLedgerSource).toContain('onRequestAppendRows={appendCorrectionRows}');
   });

@@ -8,7 +8,7 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useCashflowWeeks, useHydrateCashflowSnapshots } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import type { CashflowWeekSheet, CashflowWeekTotals, VarianceFlag, VarianceFlagEvent } from '../../data/types';
 
@@ -28,6 +28,7 @@ export function CashflowWeeklyPage() {
   const { projects } = useAppStore();
   const { user } = useAuth();
   const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
+  useHydrateCashflowSnapshots(projects.map((project) => project.id));
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
 

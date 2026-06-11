@@ -22,7 +22,7 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { useAppStore } from '../../data/store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useCashflowWeeks, useHydrateCashflowSnapshots } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getOrgCollectionPath } from '../../lib/firebase';
@@ -93,6 +93,7 @@ export function CashflowExportPage() {
   const { weeks, yearMonth } = useCashflowWeeks();
   const { user } = useAuth();
   const { db, orgId } = useFirebase();
+  useHydrateCashflowSnapshots(projects.map((project) => project.id));
   const [scope, setScope] = useState<'all' | 'single'>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');

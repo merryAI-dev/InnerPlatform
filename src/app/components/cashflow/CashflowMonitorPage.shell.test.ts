@@ -25,4 +25,9 @@ describe('CashflowMonitorPage shell contract', () => {
     expect(cashflowMonitorSource).not.toContain('상태 우선, 추출은 다음 단계');
     expect(cashflowMonitorSource).not.toContain('엑셀 내보내기 열기');
   });
+
+  it('hydrates Java cashflow snapshots because Firestore realtime is not the stage actual source', () => {
+    expect(cashflowMonitorSource).toContain('useHydrateCashflowSnapshots');
+    expect(cashflowMonitorSource).toContain('projects.map((project) => project.id)');
+  });
 });

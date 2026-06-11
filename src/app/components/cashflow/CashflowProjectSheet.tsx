@@ -101,8 +101,8 @@ export function CashflowProjectSheet({
     goPrevMonth,
     goNextMonth,
     upsertWeekAmounts,
-    submitWeekAsPm,
     closeWeekAsAdmin,
+    hydrateProjectCashflowSnapshot,
   } = useCashflowWeeks();
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
@@ -127,6 +127,13 @@ export function CashflowProjectSheet({
     return map;
   }, [projectWeeks]);
 
+  useEffect(() => {
+    void hydrateProjectCashflowSnapshot({ projectId }).catch((error) => {
+      console.error('[Cashflow] Java snapshot hydration failed:', error);
+      toast.error('캐시플로 기준값을 불러오지 못했습니다.');
+    });
+  }, [hydrateProjectCashflowSnapshot, projectId]);
+
   const openingTotalsByMode = useMemo(() => {
     return computeOpeningCashflowTotals({
       weeks,
@@ -136,7 +143,7 @@ export function CashflowProjectSheet({
   }, [normalizedYearMonth, projectId, weeks]);
 
 
-  // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
+  // Actual is read from the Java cashflow snapshot hydrated into the cashflow week store.
 
   const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>(initialViewMode);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -144,8 +151,6 @@ export function CashflowProjectSheet({
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
 
-  const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
-  const [submitBusy, setSubmitBusy] = useState(false);
   const [projectionCompleteWeek, setProjectionCompleteWeek] = useState<number | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeDialog, setCloseDialog] = useState<{
@@ -187,7 +192,6 @@ export function CashflowProjectSheet({
     // Clear drafts when switching month to avoid writing into wrong docs.
     setDrafts({});
     setWeekSaveState({});
-    setSubmitConfirm(null);
   }, [yearMonth, projectId]);
 
   const weekMeta = useMemo(() => {
@@ -243,7 +247,6 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    // Actual/Projection → Firestore 캐시플로 시트 값 사용
     const doc = byWeekNo.get(params.weekNo);
     const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
     const key = resolveCellKey(params);
@@ -360,7 +363,7 @@ export function CashflowProjectSheet({
     mode: 'projection' | 'actual';
     silent?: boolean;
   }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
+    if (input.mode === 'actual') return;
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
     const doc = byWeekNo.get(input.weekNo);
 
@@ -445,7 +448,7 @@ export function CashflowProjectSheet({
     weekNo: number;
     mode: 'projection' | 'actual';
   }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
+    if (input.mode === 'actual') return;
 
     const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
     const doc = byWeekNo.get(input.weekNo);
@@ -541,20 +544,6 @@ export function CashflowProjectSheet({
       .then(() => goNextMonth())
       .catch(() => {});
   }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
-
-  const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
-    setSubmitBusy(true);
-    try {
-      await persistWeekValues({ weekNo: input.weekNo, mode: 'actual' });
-      await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
-      toast.success('작성완료 처리했습니다.');
-    } catch (e) {
-      toast.error('작성완료 처리에 실패했습니다.');
-    } finally {
-      setSubmitBusy(false);
-      setSubmitConfirm(null);
-    }
-  }, [persistWeekValues, projectId, submitWeekAsPm]);
 
   const handleCompleteProjectionWeek = useCallback((weekNo: number) => {
     if (!canEdit) return;
@@ -660,19 +649,6 @@ export function CashflowProjectSheet({
     }
   }, [db, orgId, projectId, yearMonth]);
 
-  function countEmptyCellsForWeek(input: { weekNo: number; mode: 'projection' | 'actual' }): number {
-    const doc = byWeekNo.get(input.weekNo);
-    let empty = 0;
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
-      const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-      const filled = persisted.hasValue || (typeof raw === 'string' && raw.trim() !== '');
-      if (!filled) empty += 1;
-    }
-    return empty;
-  }
-
   function renderSheetTable(tableMode: 'projection' | 'actual') {
     const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
     return (
@@ -731,16 +707,6 @@ export function CashflowProjectSheet({
                               작성완료
                             </Button>
                           )}
-                          {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && isPm && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => setSubmitConfirm({ weekNo: w.weekNo, yearMonth })}
-                            >
-                              <CheckCircle2 className="w-3 h-3" /> 작성완료
-                            </Button>
-                          )}
                           {tableMode === 'projection' && !weekMeta[w.weekNo]?.adminClosed && canClose && (
                             <Button
                               size="sm"
@@ -774,7 +740,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual' || !canEdit) {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -835,7 +801,7 @@ export function CashflowProjectSheet({
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual' || !canEdit) {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -943,7 +909,7 @@ export function CashflowProjectSheet({
       />
 
       <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
-        비교 모드에서는 Firestore에 저장된 Projection과 Actual을 동시에 대조합니다. 직접 입력한 값은 각 영역의 저장/작성완료 버튼을 눌렀을 때 서버 기준값으로 반영됩니다.
+        비교 모드에서는 Java 기준 Projection과 Actual을 동시에 대조합니다. Projection은 이 화면에서 저장하고, Actual은 사업비 원장 저장 결과를 읽습니다.
       </div>
 
       <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>
@@ -994,7 +960,7 @@ export function CashflowProjectSheet({
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-[12px] font-semibold">Actual</div>
-                  <div className="text-[10px] text-muted-foreground">실적값을 확인하고 필요 시 보정합니다.</div>
+                  <div className="text-[10px] text-muted-foreground">사업비 원장에서 계산된 실적값을 확인합니다.</div>
                 </div>
               </div>
               {renderSheetTable('actual')}
@@ -1002,57 +968,6 @@ export function CashflowProjectSheet({
           </div>
         </TabsContent>
       </Tabs>
-
-      <AlertDialog
-        open={!!submitConfirm}
-        onOpenChange={(open) => {
-          if (!open) setSubmitConfirm(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>이번 주차를 작성완료 처리할까요?</AlertDialogTitle>
-            <AlertDialogDescription>
-              작성완료 후에는 관리자 결산 전까지 수정은 가능하지만, 승인/결산 흐름이 시작됩니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {submitConfirm && (
-            <div className="text-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">주차</span>
-                <span style={{ fontWeight: 700 }}>
-                  {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.label || `w${submitConfirm.weekNo}`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">기간</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.weekStart} ~ {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.weekEnd}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">비어있는 항목</span>
-                <span style={{ fontWeight: 700 }}>
-                  {countEmptyCellsForWeek({ weekNo: submitConfirm.weekNo, mode: 'actual' })} / {CASHFLOW_ALL_LINES.length}
-                </span>
-              </div>
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={submitBusy}>취소</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!submitConfirm || submitBusy}
-              onClick={(e) => {
-                e.preventDefault();
-                if (!submitConfirm) return;
-                void handleSubmitWeek(submitConfirm);
-              }}
-            >
-              {submitBusy ? '처리 중…' : '작성완료'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog
         open={blocker.state === 'blocked'}

@@ -203,7 +203,7 @@ function getBankRowCounterparty(columns: string[], row: BankStatementRow): strin
 function buildInitialWizardDraft(signedAmount: number | null | undefined): WizardDraft {
   if (typeof signedAmount !== 'number' || !Number.isFinite(signedAmount)) return {};
   return signedAmount < 0
-    ? { paymentMethod: METHOD_LABELS.TRANSFER, expenseAmount: formatNumberDraft(signedAmount), vatIn: '' }
+    ? { paymentMethod: METHOD_LABELS.TRANSFER, expenseAmount: formatNumberDraft(Math.abs(signedAmount)), vatIn: '' }
     : { depositAmount: formatNumberDraft(signedAmount), vatRefund: '' };
 }
 
