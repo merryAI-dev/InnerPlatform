@@ -78,6 +78,14 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('expenseDashboardTotal');
   });
 
+  it('shows recent Java audit metadata as a collapsed applied-history surface only', () => {
+    expect(weeklyExpenseSource).toContain('weeklyExpenseRecentAuditEvents');
+    expect(weeklyExpenseSource).toContain('반영 완료');
+    expect(weeklyExpenseSource).toContain('title={`${formatWeeklyAuditCommand(event.commandName)}');
+    expect(weeklyExpenseSource).not.toContain('저장완료');
+    expect(weeklyExpenseSource).not.toContain('AuditSidePanel');
+  });
+
   it('guards the setup panel so the page can render when no setup action is needed', () => {
     expect(weeklyExpenseSource).toMatch(/\{weeklySetupPanel \? \(\s*<Card data-testid="weekly-expense-setup-panel" className=\{weeklySetupPanel\.toneClass\}>/);
   });

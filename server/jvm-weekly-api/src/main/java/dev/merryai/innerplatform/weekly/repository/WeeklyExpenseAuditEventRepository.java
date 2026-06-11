@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface WeeklyExpenseAuditEventRepository extends JpaRepository<WeeklyExpenseAuditEventEntity, String> {
     List<WeeklyExpenseAuditEventEntity> findByTenantIdAndProjectIdOrderByCreatedAtAsc(String tenantId, String projectId);
+    List<WeeklyExpenseAuditEventEntity> findTop5ByTenantIdAndProjectIdOrderByCreatedAtDesc(String tenantId, String projectId);
 }

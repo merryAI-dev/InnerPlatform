@@ -304,22 +304,40 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         QuerySnapshot snap = query(auditEvents(tenantId).whereEqualTo("projectId", projectId));
         List<WeeklyExpenseAuditEventEntity> events = new ArrayList<>();
         for (DocumentSnapshot doc : snap.getDocuments()) {
-            Map<String, Object> data = data(doc);
-            WeeklyExpenseAuditEventEntity event = new WeeklyExpenseAuditEventEntity(
-                tenantId,
-                projectId,
-                text(data.get("sheetKey"), ""),
-                text(data.get("commandName"), ""),
-                text(data.get("actorId"), ""),
-                text(data.get("actorRole"), ""),
-                text(data.get("idempotencyKey"), ""),
-                text(data.get("metadataJson"), "{}")
-            );
-            event.restorePersistenceState(doc.getId(), instant(data.get("createdAt")));
-            events.add(event);
+            events.add(auditEventFromDocument(tenantId, projectId, doc));
         }
         events.sort(Comparator.comparing(WeeklyExpenseAuditEventEntity::getCreatedAt));
         return events;
+    }
+
+    @Override
+    public List<WeeklyExpenseAuditEventEntity> findRecentAuditEvents(String tenantId, String projectId, int limit) {
+        if (limit <= 0) return List.of();
+        QuerySnapshot snap = query(auditEvents(tenantId)
+            .whereEqualTo("projectId", projectId)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(limit));
+        List<WeeklyExpenseAuditEventEntity> events = new ArrayList<>();
+        for (DocumentSnapshot doc : snap.getDocuments()) {
+            events.add(auditEventFromDocument(tenantId, projectId, doc));
+        }
+        return events;
+    }
+
+    private WeeklyExpenseAuditEventEntity auditEventFromDocument(String tenantId, String projectId, DocumentSnapshot doc) {
+        Map<String, Object> data = data(doc);
+        WeeklyExpenseAuditEventEntity event = new WeeklyExpenseAuditEventEntity(
+            tenantId,
+            projectId,
+            text(data.get("sheetKey"), ""),
+            text(data.get("commandName"), ""),
+            text(data.get("actorId"), ""),
+            text(data.get("actorRole"), ""),
+            text(data.get("idempotencyKey"), ""),
+            text(data.get("metadataJson"), "{}")
+        );
+        event.restorePersistenceState(doc.getId(), instant(data.get("createdAt")));
+        return event;
     }
 
     @Override

@@ -9,7 +9,8 @@ public record WeeklyExpenseSheetResponse(
     String sheetKey,
     String sheetName,
     long sheetVersion,
-    List<Row> rows
+    List<Row> rows,
+    List<WeeklyExpenseAuditEventResponse> recentAuditEvents
 ) {
     public record Row(
         String id,

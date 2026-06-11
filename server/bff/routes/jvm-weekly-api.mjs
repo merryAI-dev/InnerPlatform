@@ -24,6 +24,26 @@ function resolveJavaWeeklyApiIdTokenAudience(options = {}, env = process.env) {
     || readOptionalText(env.WEEKLY_API_ID_TOKEN_AUDIENCE);
 }
 
+function resolveJavaWeeklyAuthMode(options = {}, env = process.env) {
+  return readOptionalText(options.jvmWeeklyAuthMode)
+    || readOptionalText(env.JVM_WEEKLY_AUTH_MODE)
+    || readOptionalText(env.WEEKLY_AUTH_MODE)
+    || 'strict';
+}
+
+function resolveJavaWeeklyWorkspaceEmailDomain(options = {}, env = process.env) {
+  const raw = readOptionalText(options.jvmWeeklyWorkspaceEmailDomain)
+    || readOptionalText(env.JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN)
+    || readOptionalText(env.WEEKLY_WORKSPACE_EMAIL_DOMAIN)
+    || 'mysc.co.kr';
+  return raw.replace(/^@+/, '').toLowerCase();
+}
+
+function isWorkspaceAuthMode(authMode) {
+  const normalized = readOptionalText(authMode).toLowerCase();
+  return normalized === 'internal_saas_workspace' || normalized === 'workspace';
+}
+
 async function fetchGoogleIdentityToken(fetchImpl, audience) {
   if (!audience) return '';
   const tokenUrl = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(audience)}&format=full`;
@@ -38,19 +58,23 @@ async function fetchGoogleIdentityToken(fetchImpl, audience) {
   return token.trim();
 }
 
-async function buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience }) {
+async function buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience, authMode, workspaceEmailDomain }) {
   if (!serviceToken) {
     throw createHttpError(503, 'JVM weekly API service token is not configured.', 'jvm_weekly_api_token_unconfigured');
   }
+  const actorRole = isWorkspaceAuthMode(authMode) && isWorkspaceUser(context, workspaceEmailDomain) ? 'workspace_user' : context.actorRole || '';
   const headers = {
     'content-type': 'application/json',
     'x-inner-platform-service-token': serviceToken,
     'x-tenant-id': context.tenantId,
     'x-actor-id': context.actorId,
-    'x-actor-role': context.actorRole || '',
+    'x-actor-role': actorRole,
   };
   if (context.actorEmail) {
     headers['x-actor-email'] = context.actorEmail;
+  }
+  if (context.actorName) {
+    headers['x-actor-name'] = encodeURIComponent(context.actorName);
   }
   const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience);
   if (identityToken) {
@@ -70,6 +94,8 @@ async function proxyJavaWeeklyJson({
   baseUrl,
   serviceToken,
   idTokenAudience,
+  authMode,
+  workspaceEmailDomain,
   context,
   method,
   path,
@@ -80,7 +106,7 @@ async function proxyJavaWeeklyJson({
   }
   const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
     method,
-    headers: await buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience }),
+    headers: await buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience, authMode, workspaceEmailDomain }),
     body: method === 'GET' ? undefined : JSON.stringify(body || {}),
   });
 
@@ -111,16 +137,31 @@ function createJavaMutatingProxyRoute(routeHandler) {
   });
 }
 
+function isWorkspaceUser(context, workspaceEmailDomain) {
+  const email = readOptionalText(context?.actorEmail).toLowerCase();
+  const domain = readOptionalText(workspaceEmailDomain).replace(/^@+/, '').toLowerCase();
+  return Boolean(domain) && email.endsWith(`@${domain}`);
+}
+
+function assertWeeklyWorkspaceOrRoleAllowed(req, allowedRoles, action, authMode, workspaceEmailDomain) {
+  if (isWorkspaceAuthMode(authMode) && isWorkspaceUser(req.context, workspaceEmailDomain)) return;
+  assertActorRoleAllowed(req, allowedRoles, action);
+}
+
 export function mountJvmWeeklyApiRoutes(app, {
   env = process.env,
   fetchImpl = globalThis.fetch,
   jvmWeeklyApiBaseUrl,
   jvmWeeklyApiServiceToken,
   jvmWeeklyApiIdTokenAudience,
+  jvmWeeklyAuthMode,
+  jvmWeeklyWorkspaceEmailDomain,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
   const idTokenAudience = resolveJavaWeeklyApiIdTokenAudience({ jvmWeeklyApiIdTokenAudience }, env);
+  const authMode = resolveJavaWeeklyAuthMode({ jvmWeeklyAuthMode }, env);
+  const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
 
   async function proxyMutation(req, path, body) {
     return proxyJavaWeeklyJson({
@@ -128,6 +169,8 @@ export function mountJvmWeeklyApiRoutes(app, {
       baseUrl,
       serviceToken,
       idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
       context: req.context,
       method: 'POST',
       path,
@@ -136,13 +179,15 @@ export function mountJvmWeeklyApiRoutes(app, {
   }
 
   app.get('/api/v1/weekly-expenses/:projectId/sheets', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheets');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheets', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyJavaWeeklyJson({
       fetchImpl,
       baseUrl,
       serviceToken,
       idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/sheets`,
@@ -151,7 +196,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.get('/api/v1/weekly-expenses/:projectId/sheets/:sheetKey', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheet');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheet', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const sheetKey = encodeURIComponent(readOptionalText(req.params.sheetKey));
     const result = await proxyJavaWeeklyJson({
@@ -159,6 +204,8 @@ export function mountJvmWeeklyApiRoutes(app, {
       baseUrl,
       serviceToken,
       idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}`,
@@ -167,7 +214,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/weekly-expenses/:projectId/sheets/:sheetKey/save-draft', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'save weekly expense draft');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.writeCore, 'save weekly expense draft', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const sheetKey = encodeURIComponent(readOptionalText(req.params.sheetKey));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}/save-draft`, commandBody(req));
@@ -175,14 +222,14 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/weekly-expenses/:projectId/bank-statements/import-batch', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'import weekly expense bank statement batch');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.writeCore, 'import weekly expense bank statement batch', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/bank-statements/import-batch`, commandBody(req));
     return { status: 200, body: result };
   }));
 
   app.get('/api/v1/weekly-expenses/:projectId/bank-statements/import-lines', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense bank statement import lines');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense bank statement import lines', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const status = readOptionalText(req.query.status);
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
@@ -191,6 +238,8 @@ export function mountJvmWeeklyApiRoutes(app, {
       baseUrl,
       serviceToken,
       idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/bank-statements/import-lines${query}`,
@@ -199,7 +248,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/weekly-expenses/:projectId/bank-statements/apply-items', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'apply weekly expense bank statement items');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.writeCore, 'apply weekly expense bank statement items', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/bank-statements/apply-items`, commandBody(req));
     return { status: 200, body: result };
@@ -207,7 +256,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   for (const command of ['cell-patch', 'copy', 'paste', 'cut', 'row-insert', 'row-delete']) {
     app.post(`/api/v1/weekly-expenses/:projectId/sheets/:sheetKey/commands/${command}`, createJavaMutatingProxyRoute(async (req) => {
-      assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, `run weekly expense ${command}`);
+      assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.writeCore, `run weekly expense ${command}`, authMode, workspaceEmailDomain);
       const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
       const sheetKey = encodeURIComponent(readOptionalText(req.params.sheetKey));
       const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}/commands/${command}`, commandBody(req));
@@ -216,41 +265,43 @@ export function mountJvmWeeklyApiRoutes(app, {
   }
 
   app.post('/api/v1/weekly-expenses/:projectId/submit', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'submit weekly expense week');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.writeCore, 'submit weekly expense week', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/submit`, commandBody(req));
     return { status: 200, body: result };
   }));
 
   app.post('/api/v1/weekly-expenses/:projectId/close', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ['admin', 'finance'], 'close weekly expense week');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'close weekly expense week', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/close`, commandBody(req));
     return { status: 200, body: result };
   }));
 
   app.post('/api/v1/weekly-expenses/:projectId/audit-export', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ['admin', 'finance'], 'create weekly expense audit export');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'create weekly expense audit export', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/weekly-expenses/${projectId}/audit-export`, commandBody(req));
     return { status: 200, body: result };
   }));
 
   app.post('/api/v1/cashflow/:projectId/projection', createJavaMutatingProxyRoute(async (req) => {
-    assertActorRoleAllowed(req, ['admin', 'finance'], 'write Java weekly projection');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'write Java weekly projection', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(req, `/api/v1/cashflow/${projectId}/projection`, commandBody(req));
     return { status: 200, body: result };
   }));
 
   app.get('/api/v1/cashflow/:projectId', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, ROUTE_ROLES.readCore, 'read Java weekly cashflow snapshot');
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read Java weekly cashflow snapshot', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyJavaWeeklyJson({
       fetchImpl,
       baseUrl,
       serviceToken,
       idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
       context: req.context,
       method: 'GET',
       path: `/api/v1/cashflow/${projectId}`,

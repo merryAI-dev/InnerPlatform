@@ -314,6 +314,137 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
+  it('preserves real Java roles for mysc users when JVM auth mode is strict', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, commandName: 'weeklyExpense.auditExport.create' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-mysc-1',
+      actorRole: 'finance',
+      actorEmail: 'finance@mysc.co.kr',
+      actorName: '재무 사용자',
+    });
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/audit-export')
+      .set('idempotency-key', 'idem-strict-mysc-export-1')
+      .send({ format: 'CSV' })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({
+      'x-actor-id': 'finance-mysc-1',
+      'x-actor-role': 'finance',
+      'x-actor-email': 'finance@mysc.co.kr',
+      'x-actor-name': encodeURIComponent('재무 사용자'),
+    });
+  });
+
+  it('does not relax finance-only Java weekly routes for workspace users in strict mode', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'viewer-mysc-1',
+      actorRole: 'viewer',
+      actorEmail: 'viewer@mysc.co.kr',
+    });
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/audit-export')
+      .set('idempotency-key', 'idem-strict-viewer-export-1')
+      .send({ format: 'CSV' })
+      .expect(403);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('lets mysc workspace users run scoped Java weekly commands when JVM auth mode is workspace', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, commandName: 'weeklyExpense.auditExport.create' }),
+      };
+    });
+    const { app } = createApp(
+      fetchImpl,
+      createIdempotencyService(),
+      {
+        actorId: 'workspace-1',
+        actorRole: 'viewer',
+        actorEmail: 'workspace@mysc.co.kr',
+        actorName: '민욱 사용자',
+      },
+      { jvmWeeklyAuthMode: 'internal_saas_workspace' },
+    );
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/audit-export')
+      .set('idempotency-key', 'idem-workspace-export-1')
+      .send({ format: 'CSV' })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('http://jvm-weekly.local/api/v1/weekly-expenses/project-a/audit-export');
+    expect(calls[0].init.headers).toMatchObject({
+      'x-tenant-id': 'tenant-a',
+      'x-inner-platform-service-token': 'test-service-token',
+      'x-actor-id': 'workspace-1',
+      'x-actor-role': 'workspace_user',
+      'x-actor-email': 'workspace@mysc.co.kr',
+      'x-actor-name': encodeURIComponent('민욱 사용자'),
+    });
+  });
+
+  it('uses the configured workspace email domain when relaxing Java weekly roles', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, commandName: 'weeklyExpense.auditExport.create' }),
+      };
+    });
+    const { app } = createApp(
+      fetchImpl,
+      createIdempotencyService(),
+      {
+        actorId: 'workspace-2',
+        actorRole: 'viewer',
+        actorEmail: 'workspace@example.org',
+      },
+      {
+        jvmWeeklyAuthMode: 'internal_saas_workspace',
+        jvmWeeklyWorkspaceEmailDomain: 'example.org',
+      },
+    );
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/audit-export')
+      .set('idempotency-key', 'idem-workspace-export-custom-domain-1')
+      .send({ format: 'CSV' })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({
+      'x-actor-id': 'workspace-2',
+      'x-actor-role': 'workspace_user',
+      'x-actor-email': 'workspace@example.org',
+    });
+  });
+
   it('proxies weekly close as an admin-only Java command', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {

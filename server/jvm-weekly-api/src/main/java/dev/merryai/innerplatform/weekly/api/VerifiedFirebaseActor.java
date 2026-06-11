@@ -4,13 +4,19 @@ public record VerifiedFirebaseActor(
     String tenantId,
     String actorId,
     String actorEmail,
-    String actorRole
+    String actorRole,
+    String actorName
 ) {
+    public VerifiedFirebaseActor(String tenantId, String actorId, String actorEmail, String actorRole) {
+        this(tenantId, actorId, actorEmail, actorRole, "");
+    }
+
     public VerifiedFirebaseActor {
         tenantId = tenantId == null ? "" : tenantId.trim();
         actorId = requireText(actorId, "actorId");
         actorEmail = actorEmail == null ? "" : actorEmail.trim().toLowerCase();
         actorRole = actorRole == null ? "" : actorRole.trim().toLowerCase();
+        actorName = actorName == null ? "" : actorName.trim();
     }
 
     private static String requireText(String value, String name) {

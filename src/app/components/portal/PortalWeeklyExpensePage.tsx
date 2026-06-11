@@ -34,6 +34,7 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  type WeeklyExpenseAuditEventResult,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
 import {
@@ -64,6 +65,44 @@ const SettlementLedgerPage = lazy(
   () => import('../cashflow/SettlementLedgerPage').then((module) => ({ default: module.SettlementLedgerPage })),
 );
 
+function formatWeeklyAuditCommand(commandName?: string | null): string {
+  switch (commandName) {
+    case 'weeklyExpense.bankStatement.importBatch':
+      return '통장내역 업로드';
+    case 'weeklyExpense.bankStatement.applyItems':
+      return '사업비 반영';
+    case 'weeklyExpense.saveDraft':
+      return '사업비 초안 반영';
+    case 'weeklyExpense.projection.upsert':
+      return 'Projection 반영';
+    case 'weeklyExpense.submitWeek':
+      return '주차 제출';
+    case 'weeklyExpense.closeWeek':
+      return '주차 마감';
+    case 'weeklyExpense.auditExport.create':
+      return '감사 Export';
+    default:
+      return '반영';
+  }
+}
+
+function formatWeeklyAuditAt(value?: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ko-KR', {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatWeeklyAuditActor(event: WeeklyExpenseAuditEventResult): string {
+  return event.actorName || event.actorEmail || event.actorId || '';
+}
+
 export function PortalWeeklyExpensePage() {
   const navigate = useNavigate();
   const weeklyExpenseSavePolicy = resolveWeeklyExpenseSavePolicy();
@@ -86,6 +125,7 @@ export function PortalWeeklyExpensePage() {
     setActiveExpenseSheet,
     expenseSheetRows,
     bankStatementRows,
+    weeklyExpenseRecentAuditEvents,
     saveExpenseSheetRows,
     comments,
     addComment,
@@ -117,6 +157,7 @@ export function PortalWeeklyExpensePage() {
     return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
+  const recentAuditEvents = useMemo(() => (weeklyExpenseRecentAuditEvents || []).slice(0, 5), [weeklyExpenseRecentAuditEvents]);
 
   const defaultLedgerId = useMemo(() => {
     const ledger = ledgers.find((l) => l.projectId === projectId);
@@ -789,16 +830,36 @@ export function PortalWeeklyExpensePage() {
             </Card>
           ) : null}
 
-          <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
-            <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {expenseRowCount}건의 거래를 현재 탭에서 조회합니다. 생성/수정은 위자드를 거쳐 서버 검증 후 반영합니다.
+              <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
+                <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                  {expenseRowCount}건의 거래를 현재 탭에서 조회합니다. 생성/수정은 위자드를 거쳐 서버 검증 후 반영합니다.
+                </div>
+              </div>
+              <details className="rounded-xl border bg-white px-4 py-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                  <span>반영 완료</span>
+                  <Badge variant="outline" className="text-[10px]">{recentAuditEvents.length}건</Badge>
+                </summary>
+                <div className="mt-2 space-y-1.5">
+                  {recentAuditEvents.length > 0 ? recentAuditEvents.map((event) => (
+                    <div
+                      key={event.id || `${event.commandName}-${event.createdAt}`}
+                      className="flex items-center justify-between gap-3 rounded-md border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px]"
+                      title={`${formatWeeklyAuditCommand(event.commandName)} · ${formatWeeklyAuditActor(event)} · ${event.idempotencyKey || ''}`}
+                    >
+                      <span className="min-w-0 truncate font-medium text-slate-700">{formatWeeklyAuditCommand(event.commandName)}</span>
+                      <span className="shrink-0 text-slate-500">{formatWeeklyAuditAt(event.createdAt)}</span>
+                    </div>
+                  )) : (
+                    <div className="text-[11px] text-muted-foreground">최근 반영 이력이 없습니다.</div>
+                  )}
+                </div>
+              </details>
             </div>
-          </div>
-        </div>
 
-      </div>
+          </div>
 
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">

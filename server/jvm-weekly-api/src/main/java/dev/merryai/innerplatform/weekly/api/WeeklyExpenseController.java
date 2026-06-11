@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 
 import java.math.BigDecimal;
@@ -429,7 +431,9 @@ public class WeeklyExpenseController {
     }
 
     private TrustedActorContext actorContext(String tenantId, String actorId, String actorRole, String actorEmail) {
-        return new TrustedActorContext(tenantId, actorId, actorEmail, actorRole);
+        ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        String actorName = attrs == null ? "" : attrs.getRequest().getHeader("x-actor-name");
+        return new TrustedActorContext(tenantId, actorId, actorEmail, actorRole, actorName);
     }
 
     private record CashflowAmountLine(

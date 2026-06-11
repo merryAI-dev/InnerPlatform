@@ -1,6 +1,7 @@
 package dev.merryai.innerplatform.weekly.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CellCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CellPatchCommandRequest;
@@ -128,21 +129,25 @@ public class WeeklyExpenseCommandService {
         authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
         Optional<WeeklyExpenseSheetEntity> found = persistence.findSheetForUpdate(actor.tenantId(), projectId, sheetKey);
         if (found.isEmpty()) {
-            return new WeeklyExpenseSheetResponse(true, projectId, "", sheetKey, sheetKey, 0, List.of());
+            return new WeeklyExpenseSheetResponse(true, projectId, "", sheetKey, sheetKey, 0, List.of(), recentAuditEvents(actor.tenantId(), projectId));
         }
-        return toSheetResponse(projectId, found.get());
+        return toSheetResponse(projectId, found.get(), recentAuditEvents(actor.tenantId(), projectId));
     }
 
     @Transactional(readOnly = true)
     public WeeklyExpenseSheetsResponse listSheets(TrustedActorContext actor, String projectId) {
         authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
         List<WeeklyExpenseSheetResponse> sheets = persistence.findSheets(actor.tenantId(), projectId).stream()
-            .map(sheet -> toSheetResponse(projectId, sheet))
+            .map(sheet -> toSheetResponse(projectId, sheet, List.of()))
             .toList();
-        return new WeeklyExpenseSheetsResponse(true, projectId, sheets);
+        return new WeeklyExpenseSheetsResponse(true, projectId, sheets, recentAuditEvents(actor.tenantId(), projectId));
     }
 
-    private WeeklyExpenseSheetResponse toSheetResponse(String projectId, WeeklyExpenseSheetEntity sheet) {
+    private WeeklyExpenseSheetResponse toSheetResponse(
+        String projectId,
+        WeeklyExpenseSheetEntity sheet,
+        List<dev.merryai.innerplatform.weekly.api.WeeklyExpenseAuditEventResponse> recentAuditEvents
+    ) {
         return new WeeklyExpenseSheetResponse(
             true,
             projectId,
@@ -171,8 +176,54 @@ public class WeeklyExpenseCommandService {
                         ))
                         .toList()
                 ))
-                .toList()
+                .toList(),
+            recentAuditEvents
         );
+    }
+
+    private List<dev.merryai.innerplatform.weekly.api.WeeklyExpenseAuditEventResponse> recentAuditEvents(
+        String tenantId,
+        String projectId
+    ) {
+        return persistence.findRecentAuditEvents(tenantId, projectId, 5).stream()
+            .map(this::toAuditEventResponse)
+            .toList();
+    }
+
+    private dev.merryai.innerplatform.weekly.api.WeeklyExpenseAuditEventResponse toAuditEventResponse(
+        WeeklyExpenseAuditEventEntity event
+    ) {
+        JsonNode metadata = readMetadataNode(event.getMetadataJson());
+        return new dev.merryai.innerplatform.weekly.api.WeeklyExpenseAuditEventResponse(
+            text(event.getId()),
+            text(event.getCommandName()),
+            text(event.getSheetKey()),
+            text(event.getActorId()),
+            metadataText(metadata, "actorEmail"),
+            metadataText(metadata, "actorName", "actorDisplayName"),
+            text(event.getActorRole()),
+            text(event.getIdempotencyKey()),
+            event.getCreatedAt()
+        );
+    }
+
+    private JsonNode readMetadataNode(String metadataJson) {
+        try {
+            return objectMapper.readTree(metadataJson == null || metadataJson.isBlank() ? "{}" : metadataJson);
+        } catch (JsonProcessingException error) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private String metadataText(JsonNode node, String... keys) {
+        if (node == null) return "";
+        for (String key : keys) {
+            JsonNode value = node.get(key);
+            if (value != null && value.isTextual() && !value.asText().isBlank()) {
+                return value.asText().trim();
+            }
+        }
+        return "";
     }
 
     @Transactional
@@ -362,6 +413,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("batchId", savedBatch.getId());
         metadata.put("stagedLineCount", savedBatch.getLines().size());
         metadata.put("duplicateLineCount", duplicateLines.size());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -497,6 +549,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("touchedRows", touchedRows);
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -655,6 +708,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -720,6 +774,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -801,6 +856,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("projectionLineCount", artifact.getProjectionLineCount());
         metadata.put("actualLineCount", artifact.getActualLineCount());
         metadata.put("auditEventCount", artifact.getAuditEventCount());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -1149,6 +1205,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("touchedRows", touchedRows);
         metadata.put("touchedCellCount", clipboard.cells().size());
         metadata.put("depth", clipboard.depth());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
@@ -1211,6 +1268,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("touchedCellCount", touchedCellCount);
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
@@ -1272,6 +1330,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("affectedRowCount", affectedRowCount);
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
+        putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             tenantId,
@@ -1746,15 +1805,21 @@ public class WeeklyExpenseCommandService {
         metadata.put("cellCount", countCells(sheet));
         metadata.put("validationIssueCount", issues.size());
         metadata.put("actualDeltaCount", actualDelta.size());
-        metadata.put("actorEmail", actor.email());
+        putActorMetadata(metadata, actor);
         return writeJson(metadata);
     }
 
     private String projectionMetadataJson(TrustedActorContext actor, int lineCount) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("lineCount", lineCount);
-        metadata.put("actorEmail", actor.email());
+        putActorMetadata(metadata, actor);
         return writeJson(metadata);
+    }
+
+    private void putActorMetadata(Map<String, Object> metadata, TrustedActorContext actor) {
+        metadata.put("actorEmail", actor.email());
+        metadata.put("actorName", actor.name());
+        metadata.put("actorRole", normalizeRole(actor.role()));
     }
 
     private String normalizeExportFormat(String format) {
@@ -1772,7 +1837,7 @@ public class WeeklyExpenseCommandService {
         List<WeeklyExpenseAuditEventEntity> auditEvents
     ) {
         StringBuilder out = new StringBuilder();
-        out.append(csvLine("section", "projectId", "yearMonth", "weekNo", "sheetKey", "cashflowLine", "amount", "commandName", "actorId", "actorRole", "idempotencyKey", "createdAt"));
+        out.append(csvLine("section", "projectId", "yearMonth", "weekNo", "sheetKey", "cashflowLine", "amount", "commandName", "actorId", "actorRole", "idempotencyKey", "createdAt", "actorEmail", "actorName"));
         for (WeeklyExpenseProjectionEntity line : projection) {
             out.append(csvLine(
                 "PROJECTION",
@@ -1782,6 +1847,8 @@ public class WeeklyExpenseCommandService {
                 "",
                 line.getCashflowLine(),
                 line.getAmount().toPlainString(),
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -1802,10 +1869,13 @@ public class WeeklyExpenseCommandService {
                 "",
                 "",
                 "",
+                "",
+                "",
                 ""
             ));
         }
         for (WeeklyExpenseAuditEventEntity event : auditEvents) {
+            JsonNode metadata = readMetadataNode(event.getMetadataJson());
             out.append(csvLine(
                 "AUDIT_SUMMARY",
                 projectId,
@@ -1818,7 +1888,9 @@ public class WeeklyExpenseCommandService {
                 event.getActorId(),
                 event.getActorRole(),
                 event.getIdempotencyKey(),
-                event.getCreatedAt().toString()
+                event.getCreatedAt().toString(),
+                metadataText(metadata, "actorEmail"),
+                metadataText(metadata, "actorName", "actorDisplayName")
             ));
         }
         return out.toString();

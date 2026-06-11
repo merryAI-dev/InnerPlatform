@@ -32,6 +32,17 @@ describe('request-context helpers', () => {
     expect(headers.get('idempotency-key')).toMatch(/^idem_POST_u001_/);
   });
 
+  it('adds actor display name for Java audit metadata without changing auth authority', () => {
+    const headers = buildStandardHeaders({
+      tenantId: 'mysc',
+      actor: { id: 'u001', name: '변민욱', email: 'pm@mysc.co.kr', role: 'pm' },
+      method: 'GET',
+    });
+
+    expect(headers.get('x-actor-name')).toBe(encodeURIComponent('변민욱'));
+    expect(headers.get('x-actor-email')).toBe('pm@mysc.co.kr');
+  });
+
   it('does not force idempotency for read requests', () => {
     const headers = buildStandardHeaders({
       tenantId: 'mysc',

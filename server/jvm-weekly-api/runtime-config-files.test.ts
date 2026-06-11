@@ -67,8 +67,15 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('PROJECT_ACCESS_BACKEND="firestore"');
     expect(cloudBuild).toContain('PROJECT_ACCESS_BACKEND="disabled"');
     expect(cloudBuild).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND=$${PROJECT_ACCESS_BACKEND}');
+    expect(cloudBuild).toContain('AUTH_MODE="${_JVM_WEEKLY_AUTH_MODE}"');
+    expect(cloudBuild).toContain('AUTH_MODE="strict"');
+    expect(cloudBuild).toContain('AUTH_MODE="internal_saas_workspace"');
+    expect(cloudBuild).toContain('JVM_WEEKLY_AUTH_MODE=$${AUTH_MODE}');
+    expect(cloudBuild).toContain('JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=$${WORKSPACE_EMAIL_DOMAIN}');
     expect(cloudBuild).toContain("_JVM_WEEKLY_STORAGE_BACKEND: firestore");
     expect(cloudBuild).toContain("_JVM_WEEKLY_PROJECT_ACCESS_BACKEND: ''");
+    expect(cloudBuild).toContain("_JVM_WEEKLY_AUTH_MODE: ''");
+    expect(cloudBuild).toContain('_JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN: mysc.co.kr');
     expect(cloudBuild).toContain('JVM_WEEKLY_FIREBASE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}');
     expect(cloudBuild).toContain('JVM_WEEKLY_FIRESTORE_PROJECT_ID=$${FIRESTORE_PROJECT_ID}');
     expect(cloudBuild).toContain('JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=$${AUTH_PROJECT_ID}');
@@ -77,6 +84,10 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest');
     expect(deployScript).toContain('JVM_WEEKLY_DATABASE_URL is required for stage deploy');
     expect(deployScript).toContain('JVM_WEEKLY_STORAGE_BACKEND="${JVM_WEEKLY_STORAGE_BACKEND:-firestore}"');
+    expect(deployScript).toContain('DEFAULT_AUTH_MODE="strict"');
+    expect(deployScript).toContain('DEFAULT_AUTH_MODE="internal_saas_workspace"');
+    expect(deployScript).toContain('JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE:-$DEFAULT_AUTH_MODE}"');
+    expect(deployScript).toContain('JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN="${JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN:-mysc.co.kr}"');
     expect(deployScript).toContain('DEFAULT_PROJECT_ACCESS_BACKEND="firestore"');
     expect(deployScript).toContain('DEFAULT_PROJECT_ACCESS_BACKEND="disabled"');
     expect(deployScript).toContain('JVM_WEEKLY_PROJECT_ACCESS_BACKEND="${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:-$DEFAULT_PROJECT_ACCESS_BACKEND}"');
@@ -96,6 +107,8 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).toContain('JVM_WEEKLY_ALLOWED_ORIGINS="${JVM_WEEKLY_ALLOWED_ORIGINS:-https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app}"');
     expect(deployScript).toContain('--set-env-vars "^|^WEEKLY_API_PORT=8080');
     expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=false');
+    expect(deployScript).toContain('JVM_WEEKLY_AUTH_MODE=${JVM_WEEKLY_AUTH_MODE}');
+    expect(deployScript).toContain('JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=${JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN}');
     expect(deployScript).toContain('node scripts/smoke_jvm_weekly_api.mjs');
     expect(deployScript).toContain('gcloud secrets versions access latest');
     expect(deployScript).not.toContain('gcloud auth print-identity-token');
@@ -117,5 +130,23 @@ describe('JVM weekly API runtime config files', () => {
     expect(smokeScript).toContain('/api/v1/cashflow/');
     expect(smokeScript).toContain('/audit-export');
     expect(smokeScript).toContain('weeklyExpense.auditExport.create');
+  });
+
+  it('deploys the Firestore index used by Java weekly recent audit reads', () => {
+    const indexes = JSON.parse(readRepoFile('firebase/firestore.indexes.json')) as {
+      indexes: Array<{
+        collectionGroup?: string;
+        fields?: Array<{ fieldPath?: string; order?: string }>;
+      }>;
+    };
+
+    expect(indexes.indexes).toContainEqual({
+      collectionGroup: 'weekly_api_audit_events',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'projectId', order: 'ASCENDING' },
+        { fieldPath: 'createdAt', order: 'DESCENDING' },
+      ],
+    });
   });
 });

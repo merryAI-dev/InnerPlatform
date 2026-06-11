@@ -57,6 +57,8 @@ public interface WeeklyExpensePersistence {
 
     List<WeeklyExpenseAuditEventEntity> findAuditEventsForAudit(String tenantId, String projectId);
 
+    List<WeeklyExpenseAuditEventEntity> findRecentAuditEvents(String tenantId, String projectId, int limit);
+
     WeeklyExpenseAuditExportEntity saveAuditExport(WeeklyExpenseAuditExportEntity auditExport);
 
     WeeklyExpenseBankImportBatchEntity saveBankImportBatch(WeeklyExpenseBankImportBatchEntity batch);

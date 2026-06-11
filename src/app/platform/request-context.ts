@@ -2,6 +2,7 @@ import { assertTenantId } from './tenant';
 
 export interface RequestActor {
   id: string;
+  name?: string;
   email?: string;
   role?: string;
   idToken?: string;
@@ -68,6 +69,10 @@ export function buildStandardHeaders(input: BuildStandardHeadersInput): Headers 
 
   if (input.actor.email && !headers.get('x-actor-email')) {
     headers.set('x-actor-email', input.actor.email.trim().toLowerCase());
+  }
+
+  if (input.actor.name && !headers.get('x-actor-name')) {
+    headers.set('x-actor-name', encodeURIComponent(input.actor.name.trim()));
   }
 
   const actorRole = normalizeActorRole(input.actor.role);

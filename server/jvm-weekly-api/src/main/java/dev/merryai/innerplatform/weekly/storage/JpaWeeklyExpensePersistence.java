@@ -160,6 +160,15 @@ public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
     }
 
     @Override
+    public List<WeeklyExpenseAuditEventEntity> findRecentAuditEvents(String tenantId, String projectId, int limit) {
+        if (limit <= 0) return List.of();
+        return auditEventRepository.findTop5ByTenantIdAndProjectIdOrderByCreatedAtDesc(tenantId, projectId)
+            .stream()
+            .limit(limit)
+            .toList();
+    }
+
+    @Override
     public WeeklyExpenseAuditExportEntity saveAuditExport(WeeklyExpenseAuditExportEntity auditExport) {
         return auditExportRepository.save(auditExport);
     }

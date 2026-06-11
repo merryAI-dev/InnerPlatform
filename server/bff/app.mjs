@@ -547,6 +547,7 @@ export async function resolveApiRequestContext(req, {
 
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
+  const actorName = identity.actorName;
 
   if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
     const memberIdentity = await resolveMemberIdentity({
@@ -562,6 +563,7 @@ export async function resolveApiRequestContext(req, {
     actorId: identity.actorId,
     actorRole,
     actorEmail,
+    actorName,
     authSource: identity.source,
     requestId,
     idempotencyKey: idempotencyKey.trim() || undefined,

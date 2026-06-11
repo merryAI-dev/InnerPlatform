@@ -102,6 +102,7 @@ import {
   listWeeklyExpenseSheetsViaBff,
   readWeeklyExpenseSheetViaBff,
   saveWeeklyExpenseDraftViaBff,
+  type WeeklyExpenseAuditEventResult,
   type UpsertProjectPayload,
   type WeeklyExpenseDraftRowPatch,
   upsertProjectViaBff,
@@ -534,6 +535,7 @@ interface PortalState {
   sheetSources: ProjectSheetSourceSnapshot[];
   expenseIntakeItems: BankImportIntakeItem[];
   expenseSheets: ExpenseSheetTab[];
+  weeklyExpenseRecentAuditEvents: WeeklyExpenseAuditEventResult[];
   activeExpenseSheetId: string;
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementSheet | null;
@@ -768,6 +770,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [sheetSources, setSheetSources] = useState<ProjectSheetSourceSnapshot[]>([]);
   const [expenseIntakeItems, setExpenseIntakeItems] = useState<BankImportIntakeItem[]>([]);
   const [expenseSheets, setExpenseSheets] = useState<ExpenseSheetTab[]>([]);
+  const [weeklyExpenseRecentAuditEvents, setWeeklyExpenseRecentAuditEvents] = useState<WeeklyExpenseAuditEventResult[]>([]);
   const [activeExpenseSheetId, setActiveExpenseSheetIdState] = useState('default');
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementSheet | null>(null);
@@ -1665,6 +1668,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
               sheetVersion: sheet.sheetVersion,
             }),
           })));
+          setWeeklyExpenseRecentAuditEvents(result.recentAuditEvents || []);
         })
         .catch(handleExpenseSheetError);
     };
@@ -2858,6 +2862,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       sheetKey: targetSheetId,
     });
     const latestRows = weeklyExpenseServerRowsToImportRows(latestSheet.rows);
+    setWeeklyExpenseRecentAuditEvents(latestSheet.recentAuditEvents || []);
     const nextSheets = upsertExpenseSheetTabRows({
       sheets: expenseSheetsRef.current,
       sheetId: targetSheetId,
@@ -3652,6 +3657,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     sheetSources,
     expenseIntakeItems,
     expenseSheets,
+    weeklyExpenseRecentAuditEvents,
     activeExpenseSheetId,
     expenseSheetRows,
     bankStatementRows,

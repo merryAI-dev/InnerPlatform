@@ -12,6 +12,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URLDecoder;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
@@ -29,11 +30,15 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
     private final String internalApiToken;
     private final FirebaseBearerTokenVerifier firebaseBearerTokenVerifier;
     private final Set<String> allowedOrigins;
+    private final String authMode;
+    private final String workspaceEmailDomain;
 
     public InternalServiceTokenFilter(
         @Value("${weekly.internal-api-token-enabled:false}") boolean internalApiTokenEnabled,
         @Value("${weekly.internal-api-token}") String internalApiToken,
         @Value("${weekly.allowed-origins:}") String allowedOrigins,
+        @Value("${weekly.auth-mode:strict}") String authMode,
+        @Value("${weekly.workspace-email-domain:mysc.co.kr}") String workspaceEmailDomain,
         FirebaseBearerTokenVerifier firebaseBearerTokenVerifier
     ) {
         if (internalApiTokenEnabled && (internalApiToken == null || internalApiToken.isBlank())) {
@@ -42,6 +47,8 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         this.internalApiTokenEnabled = internalApiTokenEnabled;
         this.internalApiToken = internalApiToken;
         this.allowedOrigins = Set.of(WeeklyApiCorsConfiguration.parseOrigins(allowedOrigins));
+        this.authMode = authMode == null ? "strict" : authMode.trim().toLowerCase(Locale.ROOT);
+        this.workspaceEmailDomain = normalizeWorkspaceDomain(workspaceEmailDomain);
         this.firebaseBearerTokenVerifier = firebaseBearerTokenVerifier;
     }
 
@@ -135,6 +142,21 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
             requireHeaderMatch(request, "x-tenant-id", tenantId, "tenant_mismatch", "Header tenant does not match token tenant.");
         }
 
+        String actorEmail = tokenActor.actorEmail();
+        String actorName = tokenActor.actorName();
+        if (actorName.isBlank()) {
+            actorName = normalizeName(request.getHeader("x-actor-name"));
+        }
+
+        if (isWorkspaceAuthMode()) {
+            requireWorkspaceEmail(actorEmail);
+            return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, "workspace_user", actorName);
+        }
+
+        if (actorEmail.isBlank()) {
+            actorEmail = normalizeEmail(request.getHeader("x-actor-email"));
+        }
+
         String actorRole = tokenActor.actorRole();
         if (actorRole.isBlank()) {
             actorRole = normalizeRole(requireRequestHeader(request, "x-actor-role", "actor_role_required", "Request actor role context is required."));
@@ -147,12 +169,7 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
             }
         }
 
-        String actorEmail = tokenActor.actorEmail();
-        if (actorEmail.isBlank()) {
-            actorEmail = normalizeEmail(request.getHeader("x-actor-email"));
-        }
-
-        return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, actorRole);
+        return new VerifiedFirebaseActor(tenantId, tokenActor.actorId(), actorEmail, actorRole, actorName);
     }
 
     private String requireRequestHeader(HttpServletRequest request, String headerName, String code, String message) {
@@ -171,6 +188,20 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         return normalized;
     }
 
+    private boolean isWorkspaceAuthMode() {
+        return "internal_saas_workspace".equals(authMode) || "workspace".equals(authMode);
+    }
+
+    private void requireWorkspaceEmail(String actorEmail) {
+        if (!actorEmail.endsWith("@" + workspaceEmailDomain)) {
+            throw new WeeklyApiAuthException(
+                HttpServletResponse.SC_FORBIDDEN,
+                "workspace_email_domain_required",
+                "Google Workspace account must belong to @" + workspaceEmailDomain + "."
+            );
+        }
+    }
+
     private boolean isPrivilegedRole(String value) {
         String normalized = normalizeRole(value);
         return "admin".equals(normalized)
@@ -185,6 +216,22 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
+    private String normalizeName(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.isBlank()) return "";
+        try {
+            return URLDecoder.decode(trimmed, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException error) {
+            return trimmed;
+        }
+    }
+
+    private String normalizeWorkspaceDomain(String value) {
+        String normalized = value == null ? "mysc.co.kr" : value.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("@")) normalized = normalized.substring(1);
+        return normalized.isBlank() ? "mysc.co.kr" : normalized;
+    }
+
     private HttpServletRequest withTrustedActorHeaders(HttpServletRequest request, VerifiedFirebaseActor actor) {
         Map<String, String> trustedHeaders = new LinkedHashMap<>();
         trustedHeaders.put("x-tenant-id", actor.tenantId());
@@ -192,6 +239,9 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
         trustedHeaders.put("x-actor-role", actor.actorRole());
         if (!actor.actorEmail().isBlank()) {
             trustedHeaders.put("x-actor-email", actor.actorEmail());
+        }
+        if (!actor.actorName().isBlank()) {
+            trustedHeaders.put("x-actor-name", actor.actorName());
         }
         return new TrustedActorHeaderRequest(request, trustedHeaders);
     }

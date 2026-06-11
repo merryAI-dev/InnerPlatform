@@ -51,7 +51,9 @@ public class FirebaseBearerTokenVerifier {
         String tenantId = readTextClaim(claims, "tenantId", "tenant_id", "orgId", "org_id");
         String actorRole = readRoleClaim(claims);
         String actorEmail = normalizeEmail(firebaseToken.getEmail());
-        return new VerifiedFirebaseActor(tenantId, firebaseToken.getUid(), actorEmail, actorRole);
+        String actorName = readTextClaim(claims, "name", "displayName", "display_name");
+        if (actorName.isBlank()) actorName = firebaseToken.getName();
+        return new VerifiedFirebaseActor(tenantId, firebaseToken.getUid(), actorEmail, actorRole, actorName);
     }
 
     private FirebaseAuth auth() {
@@ -91,7 +93,8 @@ public class FirebaseBearerTokenVerifier {
             readTextClaim(claims, "tenantId", "tenant_id", "orgId", "org_id"),
             readTextClaim(claims, "uid", "sub"),
             normalizeEmail(readTextClaim(claims, "email")),
-            readRoleClaim(claims)
+            readRoleClaim(claims),
+            readTextClaim(claims, "name", "displayName", "display_name")
         );
     }
 

@@ -17,6 +17,7 @@ export interface PlatformApiRuntimeConfig {
 
 export interface ActorLike {
   uid: string;
+  name?: string;
   email?: string;
   role?: string;
   idToken?: string;
@@ -702,6 +703,18 @@ export interface ApplyBankStatementItemsResult {
   auditId: string;
 }
 
+export interface WeeklyExpenseAuditEventResult {
+  id: string;
+  commandName: string;
+  sheetKey?: string | null;
+  actorId: string;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  actorRole: string;
+  idempotencyKey: string;
+  createdAt: string;
+}
+
 export interface WeeklyExpenseSheetResult {
   ok: boolean;
   projectId: string;
@@ -725,12 +738,14 @@ export interface WeeklyExpenseSheetResult {
       userEdited?: boolean;
     }>;
   }>;
+  recentAuditEvents?: WeeklyExpenseAuditEventResult[];
 }
 
 export interface WeeklyExpenseSheetsResult {
   ok: boolean;
   projectId: string;
   sheets: WeeklyExpenseSheetResult[];
+  recentAuditEvents?: WeeklyExpenseAuditEventResult[];
 }
 
 export interface PlatformApiClientLike {
@@ -801,6 +816,7 @@ export function readPlatformApiRuntimeConfig(
 export function toRequestActor(actor: ActorLike): RequestActor {
   const mapped: RequestActor = {
     id: actor.uid,
+    name: actor.name,
     email: actor.email,
     role: actor.role,
   };

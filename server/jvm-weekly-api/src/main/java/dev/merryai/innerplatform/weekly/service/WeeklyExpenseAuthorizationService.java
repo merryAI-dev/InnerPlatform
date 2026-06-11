@@ -2,6 +2,7 @@ package dev.merryai.innerplatform.weekly.service;
 
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -17,6 +18,25 @@ public class WeeklyExpenseAuthorizationService {
         "tenant_admin",
         "support",
         "security"
+    );
+    private static final Set<String> WORKSPACE_COMMANDS = Set.of(
+        WeeklyExpenseCommandService.SAVE_DRAFT_COMMAND,
+        WeeklyExpenseCommandService.SHEET_READ_COMMAND,
+        WeeklyExpenseCommandService.BANK_IMPORT_BATCH_COMMAND,
+        WeeklyExpenseCommandService.BANK_IMPORT_LIST_LINES_COMMAND,
+        WeeklyExpenseCommandService.BANK_IMPORT_APPLY_ITEMS_COMMAND,
+        WeeklyExpenseCommandService.UPSERT_PROJECTION_COMMAND,
+        WeeklyExpenseCommandService.SUBMIT_WEEK_COMMAND,
+        WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND,
+        WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND,
+        WeeklyExpenseCommandService.CELL_PATCH_COMMAND,
+        WeeklyExpenseCommandService.CELLS_COPY_COMMAND,
+        WeeklyExpenseCommandService.CELLS_PASTE_COMMAND,
+        WeeklyExpenseCommandService.CELLS_CUT_COMMAND,
+        WeeklyExpenseCommandService.ROW_INSERT_COMMAND,
+        WeeklyExpenseCommandService.ROW_DELETE_COMMAND,
+        WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND,
+        WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND
     );
     private static final Map<String, Set<String>> COMMAND_ROLES = Map.ofEntries(
         Map.entry(WeeklyExpenseCommandService.SAVE_DRAFT_COMMAND, Set.of("admin", "finance", "pm")),
@@ -39,15 +59,23 @@ public class WeeklyExpenseAuthorizationService {
     );
 
     private final WeeklyProjectAccessRepository projectAccessRepository;
+    private final String authMode;
 
-    public WeeklyExpenseAuthorizationService(WeeklyProjectAccessRepository projectAccessRepository) {
+    public WeeklyExpenseAuthorizationService(
+        WeeklyProjectAccessRepository projectAccessRepository,
+        @Value("${weekly.auth-mode:strict}") String authMode
+    ) {
         this.projectAccessRepository = projectAccessRepository;
+        this.authMode = authMode == null ? "strict" : authMode.trim().toLowerCase(Locale.ROOT);
     }
 
     public void requireAllowed(String commandName, TrustedActorContext actor) {
         String role = actor == null || actor.role() == null
             ? ""
             : actor.role().trim().toLowerCase(Locale.ROOT);
+        if (isWorkspaceMode() && "workspace_user".equals(role) && WORKSPACE_COMMANDS.contains(commandName)) {
+            return;
+        }
         Set<String> allowed = COMMAND_ROLES.getOrDefault(commandName, Set.of());
         if (!allowed.contains(role)) {
             throw new WeeklyExpenseForbiddenException("Actor role is not allowed to run " + commandName + ".");
@@ -59,6 +87,9 @@ public class WeeklyExpenseAuthorizationService {
         String role = actor == null || actor.role() == null
             ? ""
             : actor.role().trim().toLowerCase(Locale.ROOT);
+        if (isWorkspaceMode() && "workspace_user".equals(role) && WORKSPACE_COMMANDS.contains(commandName)) {
+            return;
+        }
         if (TENANT_WIDE_PROJECT_ROLES.contains(role)) {
             return;
         }
@@ -66,5 +97,9 @@ public class WeeklyExpenseAuthorizationService {
             return;
         }
         throw new WeeklyExpenseForbiddenException("Actor is not assigned to this project.");
+    }
+
+    private boolean isWorkspaceMode() {
+        return "internal_saas_workspace".equals(authMode) || "workspace".equals(authMode);
     }
 }

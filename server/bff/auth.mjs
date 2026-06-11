@@ -21,6 +21,16 @@ function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function normalizeActorName(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 function normalizeDomain(value) {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
   const withoutAt = raw.startsWith('@') ? raw.slice(1) : raw;
@@ -120,6 +130,7 @@ function resolveIdentityFromHeaders({ readHeaderValue }) {
   const actorId = normalizeActorId(readHeader(readHeaderValue, 'x-actor-id'));
   const actorRole = normalizeRole(readHeader(readHeaderValue, 'x-actor-role')) || undefined;
   const actorEmail = normalizeEmail(readHeader(readHeaderValue, 'x-actor-email')) || undefined;
+  const actorName = normalizeActorName(readHeader(readHeaderValue, 'x-actor-name')) || undefined;
 
   return {
     source: 'headers',
@@ -127,6 +138,7 @@ function resolveIdentityFromHeaders({ readHeaderValue }) {
     actorId,
     actorRole,
     actorEmail,
+    actorName,
   };
 }
 
@@ -178,6 +190,7 @@ export async function resolveRequestIdentity(params) {
   }
 
   const claimEmail = normalizeEmail(claims?.email || '');
+  const claimActorName = normalizeActorName(claims?.name || claims?.displayName || claims?.display_name || '');
   const allowedDomains = parseAllowedEmailDomains(process.env.BFF_ALLOWED_EMAIL_DOMAINS);
   if (!claimEmail) {
     throw createAuthError(403, 'Token does not include a valid email', 'missing_email');
@@ -194,6 +207,7 @@ export async function resolveRequestIdentity(params) {
     actorId: claimActorId,
     actorRole: claimRole || undefined,
     actorEmail: claimEmail || undefined,
+    actorName: claimActorName || undefined,
     tokenClaims: claims,
   };
 }
