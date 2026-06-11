@@ -22,4 +22,6 @@ Only run:
 scripts/deploy_stage_vercel.sh
 ```
 
+The script refuses to deploy when the working tree is dirty or local `HEAD` does not match `origin/weekly-java-deployed-live-baseline`.
+
 Do not manually alias spreadsheet experiment previews to the stage URL.

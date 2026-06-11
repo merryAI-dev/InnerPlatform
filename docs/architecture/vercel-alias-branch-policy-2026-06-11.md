@@ -31,6 +31,19 @@ scripts/deploy_sheets_lab_vercel.sh
 
 The scripts check the current Git branch before assigning an alias. This prevents a preview deployment from accidentally replacing the fixed stage QA URL.
 
+Before Vercel deploy starts, the scripts also require:
+
+- clean working tree, including untracked files
+- local `HEAD` equals `origin/<allowed-branch>`
+- fixed alias post-check through `vercel inspect`
+
+Use `DRY_RUN=1` to verify these guards without deploying:
+
+```bash
+DRY_RUN=1 scripts/deploy_stage_vercel.sh
+DRY_RUN=1 scripts/deploy_sheets_lab_vercel.sh
+```
+
 ## Required PR Checks For Spreadsheet Work
 
 - No frontend actual calculation.

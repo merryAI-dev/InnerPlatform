@@ -42,3 +42,5 @@ Only run:
 ```bash
 scripts/deploy_sheets_lab_vercel.sh
 ```
+
+The script refuses to deploy when the working tree is dirty or local `HEAD` does not match `origin/experiment/sheets-cashflow-projection-readonly`.
