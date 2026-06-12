@@ -735,17 +735,6 @@ public class WeeklyExpenseCommandService {
             sheetLabProjectionEntities.add(projectionEntity);
         }
 
-        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
-        for (WeeklyExpenseProjectionEntity projectionEntity : sheetLabProjectionEntities) {
-            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
-            projection.add(new CashflowSnapshotResponse.ProjectionLine(
-                saved.getYearMonth(),
-                saved.getWeekNo(),
-                saved.getCashflowLine(),
-                saved.getAmount()
-            ));
-        }
-
         List<SaveDraftResponse.ActualDelta> actualDeltas = actualPatches.values().stream()
             .map(line -> new SaveDraftResponse.ActualDelta(
                 line.yearMonth,
@@ -769,6 +758,17 @@ public class WeeklyExpenseCommandService {
                 line.getAmount()
             ))
             .toList();
+
+        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        for (WeeklyExpenseProjectionEntity projectionEntity : sheetLabProjectionEntities) {
+            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
+            projection.add(new CashflowSnapshotResponse.ProjectionLine(
+                saved.getYearMonth(),
+                saved.getWeekNo(),
+                saved.getCashflowLine(),
+                saved.getAmount()
+            ));
+        }
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
