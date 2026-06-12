@@ -239,6 +239,79 @@ describe('cashflow sheet lab route', () => {
     ]));
   });
 
+  it('parses Google Sheets formatted currency values before applying to Java', async () => {
+    const matrix = buildMatrix();
+    matrix[3][3] = '₩5,000,000';
+    matrix[3][4] = '5,000,000원';
+    matrix[4][3] = '−500,000';
+    matrix[20][3] = '(1,250,000)';
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      applyCashflowSheetLab: vi.fn(async () => ({
+        ok: true,
+        commandName: 'weeklyExpense.cashflowSheetLab.apply',
+        projectId: 'project-a',
+        sourceSheetKey: 'cashflow-sheet-lab',
+        savedProjectionLineCount: 24,
+        savedActualLineCount: 24,
+        auditId: 'audit-1',
+      })),
+    };
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix,
+      })),
+    };
+
+    await request(createApp({ db, javaWeeklyClient, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-currency-001' })
+      .expect(200);
+
+    const call = javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0];
+    expect(call.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mode: 'projection',
+        weekNo: 1,
+        cashflowLine: 'MYSC_PREPAY_IN',
+        amount: 5000000,
+      }),
+      expect.objectContaining({
+        mode: 'projection',
+        weekNo: 2,
+        cashflowLine: 'MYSC_PREPAY_IN',
+        amount: 5000000,
+      }),
+      expect.objectContaining({
+        mode: 'projection',
+        weekNo: 1,
+        cashflowLine: 'SALES_IN',
+        amount: -500000,
+      }),
+      expect.objectContaining({
+        mode: 'actual',
+        weekNo: 1,
+        cashflowLine: 'MYSC_PREPAY_IN',
+        amount: -1250000,
+      }),
+    ]));
+  });
+
   it('uses the saved sheet config when preview is requested without a sheet link', async () => {
     const db = createDb({
       data: {

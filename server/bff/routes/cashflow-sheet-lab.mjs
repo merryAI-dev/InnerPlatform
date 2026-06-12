@@ -274,10 +274,21 @@ function readSheetCell(matrix, mapping) {
 }
 
 function parseCashflowSheetAmount(value) {
-  const normalized = String(value || '').replace(/,/g, '').replace(/\s+/g, '').trim();
-  if (!normalized || normalized === '-') return 0;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const text = String(value || '').normalize('NFKC').trim();
+  if (!text || /^[-–—―]+$/.test(text)) return 0;
+  const normalizedMinus = text.replace(/[−﹣－]/g, '-');
+  const parenthesizedNegative = /^\(.*\)$/.test(normalizedMinus);
+  let cleaned = normalizedMinus
+    .replace(/[,\s\u00a0원₩￦]/g, '')
+    .replace(/[()]/g, '')
+    .replace(/[^0-9.+-]/g, '');
+  if (!cleaned) return 0;
+  if (cleaned.endsWith('-') && cleaned.length > 1) {
+    cleaned = `-${cleaned.slice(0, -1)}`;
+  }
+  const parsed = Number.parseFloat(cleaned);
+  if (!Number.isFinite(parsed)) return 0;
+  return parenthesizedNegative && parsed > 0 ? -parsed : parsed;
 }
 
 function buildPreviewValues(template, cashflowSnapshot, matrix = []) {
