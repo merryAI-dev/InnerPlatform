@@ -33,6 +33,12 @@ export function resolveJavaWeeklyWorkspaceEmailDomain(options = {}, env = proces
   return raw.replace(/^@+/, '').toLowerCase();
 }
 
+export function resolveJavaWeeklyFirestoreProjectId(options = {}, env = process.env) {
+  return readOptionalText(options.jvmWeeklyFirestoreProjectId)
+    || readOptionalText(env.JVM_WEEKLY_FIRESTORE_PROJECT_ID)
+    || readOptionalText(env.WEEKLY_FIRESTORE_PROJECT_ID);
+}
+
 export function isWorkspaceAuthMode(authMode) {
   const normalized = readOptionalText(authMode).toLowerCase();
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
@@ -116,12 +122,14 @@ export function createJavaWeeklyClient({
   jvmWeeklyApiIdTokenAudience,
   jvmWeeklyAuthMode,
   jvmWeeklyWorkspaceEmailDomain,
+  jvmWeeklyFirestoreProjectId,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
   const idTokenAudience = resolveJavaWeeklyApiIdTokenAudience({ jvmWeeklyApiIdTokenAudience }, env);
   const authMode = resolveJavaWeeklyAuthMode({ jvmWeeklyAuthMode }, env);
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
+  const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
 
   async function requestJson({ context, method = 'GET', path, body }) {
     if (!baseUrl) {
@@ -180,5 +188,6 @@ export function createJavaWeeklyClient({
     applyCashflowSheetLab,
     authMode,
     workspaceEmailDomain,
+    firestoreProjectId,
   };
 }

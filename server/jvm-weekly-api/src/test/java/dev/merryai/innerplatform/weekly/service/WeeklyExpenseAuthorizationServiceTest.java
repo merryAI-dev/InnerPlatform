@@ -12,6 +12,7 @@ class WeeklyExpenseAuthorizationServiceTest {
     void pmCanMutateOnlyAssignedProject() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> "project-allowed".equals(projectId),
+            (tenantId, projectId) -> true,
             "strict"
         );
         TrustedActorContext pm = new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm");
@@ -35,6 +36,7 @@ class WeeklyExpenseAuthorizationServiceTest {
     void tenantWideRolesStillRespectCommandRoleGate() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> false,
+            (tenantId, projectId) -> true,
             "strict"
         );
         TrustedActorContext finance = new TrustedActorContext("tenant-a", "finance-1", "finance@example.com", "finance");
@@ -57,6 +59,7 @@ class WeeklyExpenseAuthorizationServiceTest {
     void workspaceUserCanRunWeeklyCashflowAndAuditCommandsWithoutProjectAssignment() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> false,
+            (tenantId, projectId) -> true,
             "internal_saas_workspace"
         );
         TrustedActorContext workspaceUser = new TrustedActorContext(
@@ -82,5 +85,28 @@ class WeeklyExpenseAuthorizationServiceTest {
             workspaceUser,
             "project-any"
         )).doesNotThrowAnyException();
+    }
+
+    @Test
+    void workspaceUserCannotWriteMissingProjectEvenWhenWorkspaceModeAllowsCommand() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> true,
+            (tenantId, projectId) -> false,
+            "internal_saas_workspace"
+        );
+        TrustedActorContext workspaceUser = new TrustedActorContext(
+            "tenant-a",
+            "firebase-user-1",
+            "user@mysc.co.kr",
+            "workspace_user"
+        );
+
+        assertThatThrownBy(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            workspaceUser,
+            "project-orphan"
+        ))
+            .isInstanceOf(WeeklyExpenseForbiddenException.class)
+            .hasMessageContaining("does not exist");
     }
 }

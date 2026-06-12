@@ -30,8 +30,29 @@ function nextYearMonth(yearMonth) {
   return `${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}`;
 }
 
-export function mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now }) {
+function isExplicitlyEnabled(value) {
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+function assertLegacyCashflowWritesEnabled(enabled) {
+  if (!isExplicitlyEnabled(enabled)) {
+    throw createHttpError(
+      410,
+      'Legacy BFF cashflow writes are disabled. Use the Java cashflow read model flow instead.',
+      'legacy_bff_cashflow_write_disabled',
+    );
+  }
+}
+
+export function mountCashflowExportRoutes(app, {
+  db,
+  rbacPolicy,
+  idempotencyService,
+  now,
+  legacyCashflowWritesEnabled = process.env.LEGACY_BFF_CASHFLOW_WRITES_ENABLED,
+}) {
   app.post('/api/v1/projects/:projectId/cashflow-weeks/upsert', createMutatingRoute(idempotencyService, async (req) => {
+    assertLegacyCashflowWritesEnabled(legacyCashflowWritesEnabled);
     const { tenantId, actorId, actorEmail } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write cashflow week amounts');
     const projectId = readOptionalText(req.params.projectId);
@@ -57,6 +78,7 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyServ
   }));
 
   app.post('/api/v1/projects/:projectId/cashflow-actuals/sync', createMutatingRoute(idempotencyService, async (req) => {
+    assertLegacyCashflowWritesEnabled(legacyCashflowWritesEnabled);
     const { tenantId, actorId, actorEmail } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'sync cashflow actuals');
     parseWithSchema(cashflowActualSyncSchema, req.body || {}, 'Invalid cashflow actual sync request');

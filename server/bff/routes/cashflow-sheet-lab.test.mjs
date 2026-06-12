@@ -78,6 +78,16 @@ function createApp({
     };
     next();
   });
+  const resolvedJavaWeeklyClient = javaWeeklyClient
+    ? { firestoreProjectId: 'bff-firestore-a', ...javaWeeklyClient }
+    : {
+        workspaceEmailDomain: 'mysc.co.kr',
+        firestoreProjectId: 'bff-firestore-a',
+        getCashflowSnapshot: vi.fn(async () => ({
+          projectId: 'project-a',
+          weeks: [{ yearMonth: '2026-01', weekNo: 1, projection: { SALES_IN: 123 }, actual: { SALES_IN: 456 } }],
+        })),
+      };
   mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService: googleSheetsService || {
@@ -89,13 +99,14 @@ function createApp({
         matrix: buildMatrix(),
       })),
     },
-    javaWeeklyClient: javaWeeklyClient || {
-      workspaceEmailDomain: 'mysc.co.kr',
-      getCashflowSnapshot: vi.fn(async () => ({
-        projectId: 'project-a',
-        weeks: [{ yearMonth: '2026-01', weekNo: 1, projection: { SALES_IN: 123 }, actual: { SALES_IN: 456 } }],
-      })),
-    },
+    javaWeeklyClient: resolvedJavaWeeklyClient,
+    bffProjectId: 'bff-firestore-a',
+  });
+  app.use((error, _req, res, _next) => {
+    res.status(error.statusCode || 500).json({
+      code: error.code || 'error',
+      message: error.message,
+    });
   });
   return app;
 }
@@ -237,6 +248,33 @@ describe('cashflow sheet lab route', () => {
         amount: 999,
       }),
     ]));
+  });
+
+  it('blocks apply when BFF and Java point at different Firestore projects', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      firestoreProjectId: 'different-firestore',
+      applyCashflowSheetLab: vi.fn(),
+    };
+
+    const response = await request(createApp({ db, javaWeeklyClient }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-mismatch-001' })
+      .expect(409);
+
+    expect(response.body.code).toBe('cashflow_sheet_apply_environment_mismatch');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
   it('parses Google Sheets formatted currency values before applying to Java', async () => {

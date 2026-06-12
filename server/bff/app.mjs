@@ -680,6 +680,7 @@ export function createBffApp(options = {}) {
     jvmWeeklyApiIdTokenAudience: options.jvmWeeklyApiIdTokenAudience,
     jvmWeeklyAuthMode: options.jvmWeeklyAuthMode,
     jvmWeeklyWorkspaceEmailDomain: options.jvmWeeklyWorkspaceEmailDomain,
+    jvmWeeklyFirestoreProjectId: options.jvmWeeklyFirestoreProjectId,
   });
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
@@ -1389,8 +1390,19 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
-  mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now });
-  mountCashflowSheetLabRoutes(app, { db, googleSheetsService, javaWeeklyClient });
+  mountCashflowExportRoutes(app, {
+    db,
+    rbacPolicy,
+    idempotencyService,
+    now,
+    legacyCashflowWritesEnabled: options.legacyCashflowWritesEnabled,
+  });
+  mountCashflowSheetLabRoutes(app, {
+    db,
+    googleSheetsService,
+    javaWeeklyClient,
+    bffProjectId: projectId,
+  });
   mountJvmWeeklyApiRoutes(app, {
     idempotencyService,
     env,

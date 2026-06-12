@@ -114,6 +114,9 @@ export interface CashflowSheetLabPreviewResult {
     sheetPreviewCache: 'hit' | 'miss' | 'in_flight_join';
     sheetNamePolicy: 'cashflow_usage_linked_only';
     sheetConfigSource?: 'request' | 'saved_config';
+    bffFirestoreProjectId?: string | null;
+    javaFirestoreProjectId?: string | null;
+    applyEnvironmentAligned?: boolean;
   };
   activeWeekRange?: {
     startWeek?: string;

@@ -57,6 +57,18 @@ function buildJavaReadContext(context, workspaceEmailDomain = 'mysc.co.kr') {
   };
 }
 
+function assertApplyEnvironmentAligned({ bffProjectId, javaFirestoreProjectId }) {
+  const bff = readOptionalText(bffProjectId);
+  const javaProject = readOptionalText(javaFirestoreProjectId);
+  if (!bff || !javaProject || bff !== javaProject) {
+    throw createHttpError(
+      409,
+      'Cashflow sheet apply is blocked because BFF Firestore and Java Firestore are not aligned.',
+      'cashflow_sheet_apply_environment_mismatch',
+    );
+  }
+}
+
 function normalizeSheetFamilyName(value) {
   return readOptionalText(value).toLowerCase().replace(/\s+/g, '');
 }
@@ -377,6 +389,7 @@ export function mountCashflowSheetLabRoutes(app, {
   db,
   googleSheetsService,
   javaWeeklyClient,
+  bffProjectId = '',
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
 } = {}) {
@@ -483,6 +496,13 @@ export function mountCashflowSheetLabRoutes(app, {
           sheetPreviewCache: preview.cacheStatus,
           sheetNamePolicy: 'cashflow_usage_linked_only',
           sheetConfigSource: source.source,
+          bffFirestoreProjectId: readOptionalText(bffProjectId) || null,
+          javaFirestoreProjectId: readOptionalText(javaWeeklyClient?.firestoreProjectId) || null,
+          applyEnvironmentAligned: Boolean(
+            readOptionalText(bffProjectId)
+            && readOptionalText(javaWeeklyClient?.firestoreProjectId)
+            && readOptionalText(bffProjectId) === readOptionalText(javaWeeklyClient?.firestoreProjectId),
+          ),
         },
         activeWeekRange: {
           startWeek: weekRange.startWeek,
@@ -503,6 +523,10 @@ export function mountCashflowSheetLabRoutes(app, {
     if (!javaWeeklyClient?.applyCashflowSheetLab) {
       throw createHttpError(503, 'Java cashflow sheet apply API is not configured.', 'jvm_weekly_api_unconfigured');
     }
+    assertApplyEnvironmentAligned({
+      bffProjectId,
+      javaFirestoreProjectId: javaWeeklyClient.firestoreProjectId,
+    });
 
     const { tenantId } = req.context;
     const { projectId } = req.params;

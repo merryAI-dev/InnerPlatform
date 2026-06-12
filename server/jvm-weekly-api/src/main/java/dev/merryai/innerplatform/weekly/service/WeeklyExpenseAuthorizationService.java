@@ -61,13 +61,16 @@ public class WeeklyExpenseAuthorizationService {
     );
 
     private final WeeklyProjectAccessRepository projectAccessRepository;
+    private final WeeklyProjectExistenceRepository projectExistenceRepository;
     private final String authMode;
 
     public WeeklyExpenseAuthorizationService(
         WeeklyProjectAccessRepository projectAccessRepository,
+        WeeklyProjectExistenceRepository projectExistenceRepository,
         @Value("${weekly.auth-mode:strict}") String authMode
     ) {
         this.projectAccessRepository = projectAccessRepository;
+        this.projectExistenceRepository = projectExistenceRepository;
         this.authMode = authMode == null ? "strict" : authMode.trim().toLowerCase(Locale.ROOT);
     }
 
@@ -86,6 +89,9 @@ public class WeeklyExpenseAuthorizationService {
 
     public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
         requireAllowed(commandName, actor);
+        if (!projectExistenceRepository.exists(actor == null ? "" : actor.tenantId(), projectId)) {
+            throw new WeeklyExpenseForbiddenException("Project does not exist in this workspace.");
+        }
         String role = actor == null || actor.role() == null
             ? ""
             : actor.role().trim().toLowerCase(Locale.ROOT);
