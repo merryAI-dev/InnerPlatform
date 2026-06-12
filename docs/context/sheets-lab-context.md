@@ -65,7 +65,8 @@ Phase 0 - Boundary lock:
 Phase 1 - Sheet structure mapping:
 
 - Link input, spreadsheet ID extraction, and BFF read-only Google Sheet access.
-- Detect Actual/Projection sections, weekly labels such as `26-1-1`, cashflow line rows, derived rows, and ignored rows.
+- Detect the two cashflow sections. The upper section is Projection and the lower section is Actual.
+- Within each section, detect weekly labels such as `26-1-1`, cashflow line rows, derived rows, and ignored rows.
 - Return layout mapping candidates with row/column/A1 coordinates. Do not treat Sheet numbers as cashflow values.
 
 Phase 2 - Template contract hardening:

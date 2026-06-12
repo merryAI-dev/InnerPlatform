@@ -61,6 +61,8 @@ The source file is a Google Sheets CSV export with quoted multi-line cells. Pars
 
 These coordinates are sample evidence, not implementation constants. The mapper must scan each detected week row for `YY-M-W` labels and derive the first weekly column, last weekly column, and week count dynamically. A supported Sheet is not required to end at BK or contain exactly 60 week columns.
 
+The section order is a template invariant, not a heuristic: the upper cashflow section is Projection and the lower cashflow section is Actual. The mapper should use this order to assign `mode`, then validate row labels and week labels inside each section.
+
 The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are not authoritative cashflow values and must not be parsed as ledger Actual or Projection.
 
 ### Section Structure
@@ -105,7 +107,7 @@ The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are
 | Actual | 46 | 출금 합계 | derived | total |
 | Actual | 47 | 잔액 | derived | balance |
 
-Phase 1 should turn this structure into mapping candidates, not a summary. The join key is the weekly label row (`26-1-1`, `26-1-2`, etc.), not the merged month header. Phase 2 should harden this section into the first golden template contract.
+Phase 1 should turn this structure into mapping candidates, not a summary. The section mode comes from fixed template order: upper section is Projection, lower section is Actual. The join key inside each section is the weekly label row (`26-1-1`, `26-1-2`, etc.), not the merged month header. Phase 2 should harden this section into the first golden template contract.
 
 ## Architecture
 
@@ -170,13 +172,13 @@ Scope:
 - Place the first lab page in the PM portal cashflow area.
 - Allow `workspace_user`, `pm`, `finance`, and `admin`.
 - Parse the selected tab into normalized rows while preserving original row/column coordinates.
-- Detect Projection and Actual sections by section labels and row position.
+- Detect the two cashflow sections and assign mode by fixed order: upper section is `projection`, lower section is `actual`.
 - Detect weekly columns by `YY-M-W` labels such as `26-1-1`; do not depend on merged month headers.
 - Map row labels to existing `cashflow-policy.json` line ids.
 - Separate derived rows such as deposit total, withdrawal total, and balance from cashflow line rows.
 - Ignore guidance/notes and other rows outside the detected Actual/Projection sections.
 - Return mapping candidates with `mode`, `lineId`, `yearMonth`, `weekNo`, `rowIndex`, `columnIndex`, `a1`, and `source: "sheet_layout"`.
-- Display selected spreadsheet title, sheet tabs, section candidates, week columns, derived rows, ignored rows, mapping candidates, and access errors.
+- Display selected spreadsheet title, sheet tabs, detected sections, week columns, derived rows, ignored rows, mapping candidates, and access errors.
 
 Out of scope:
 
@@ -193,7 +195,7 @@ Completion criteria:
 - Missing service account configuration returns `google_sheets_not_configured`.
 - Sheet not shared with the MYSC system account returns a visible access error.
 - Valid sheet returns title, tabs, selected tab, and matrix.
-- Valid sheet returns Projection and Actual section candidates.
+- Valid sheet returns exactly ordered Projection and Actual sections.
 - Valid sheet returns weekly columns by scanning the detected week row for `YY-M-W` labels, without hardcoding the final column.
 - The provided CSV-equivalent fixture returns 60 weekly columns and 720 mapping cells per mode, but this fixture count is not a global template limit.
 - Valid sheet returns the detected cashflow line rows and mapping cell count for each mode.
@@ -228,7 +230,7 @@ Scope:
   - required row labels include cashflow line labels from the existing policy.
   - required week columns are detected from `YY-M-W` labels; D through BK is only the first observed sample shape, not a dependency.
   - required columns can be matched to year-month/week labels.
-  - Actual and Projection sections must be distinguishable.
+  - Actual and Projection sections follow fixed order: upper section is Projection, lower section is Actual.
   - derived rows are recognized as totals/balance, not cashflow line ids.
 - Build deterministic validator.
 - Show unsupported reasons in the UI.
