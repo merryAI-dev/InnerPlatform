@@ -94,6 +94,22 @@ function buildTemplateMatrix({ weekCount = 60, firstWeekColumn = 3, projectionOv
   ];
 }
 
+function buildNonCashflowWeeklyBlock({ weekCount = 60, firstWeekColumn = 3 } = {}) {
+  const width = firstWeekColumn + weekCount + 2;
+  const empty = () => Array.from({ length: width }, () => '');
+  const header = empty();
+  header[0] = '사업비 입금예상 (MYSC계좌기준)';
+  const weekRow = empty();
+  makeWeekLabels(weekCount).forEach((label, index) => {
+    weekRow[firstWeekColumn + index] = label;
+  });
+  const dateRow = empty();
+  dateRow[0] = '입금일';
+  const amountRow = empty();
+  amountRow[0] = '입금액';
+  return [header, weekRow, dateRow, amountRow, []];
+}
+
 describe('cashflow sheet template mapping', () => {
   it('parses YY-M-W week labels into authoritative join keys', () => {
     expect(parseCashflowWeekLabel('26-1-1')).toEqual({
@@ -133,6 +149,30 @@ describe('cashflow sheet template mapping', () => {
       source: 'sheet_layout',
     });
     expect(result.mappingCandidates.some((mapping) => mapping.mode === 'actual')).toBe(true);
+  });
+
+  it('ignores a non-cashflow weekly block above the Projection header', () => {
+    const result = analyzeCashflowSheetTemplate([
+      ['최종 업데이트'],
+      ...buildNonCashflowWeeklyBlock({ weekCount: 60 }),
+      ...buildTemplateMatrix({ weekCount: 60 }),
+    ]);
+
+    expect(result.supported).toBe(true);
+    expect(result.reasons).toEqual([]);
+    expect(result.sections.map((section) => section.mode)).toEqual(['projection', 'actual']);
+    expect(result.sections[0]).toMatchObject({
+      mode: 'projection',
+      lineRows: expect.arrayContaining([
+        expect.objectContaining({
+          label: 'MYSC 선입금(잔금 등 입금 필요 시)',
+          canonicalLabel: 'MYSC 선입금(잔금 등 입금 필요 시)',
+          lineId: 'MYSC_PREPAY_IN',
+        }),
+      ]),
+    });
+    expect(result.sections[0].lineRows).toHaveLength(12);
+    expect(result.sections[1].lineRows).toHaveLength(12);
   });
 
   it('scans weekly columns dynamically when the last column is not BK', () => {

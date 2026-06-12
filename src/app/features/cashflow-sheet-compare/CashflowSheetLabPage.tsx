@@ -115,7 +115,8 @@ function CashflowSheetGrid({ preview }: { preview: CashflowSheetLabPreviewResult
                   const title = [
                     `${columnName(columnIndex)}${rowIndex + 1}`,
                     raw ? `원본: ${raw}` : '원본: 빈 셀',
-                    mapped ? `Java: ${formatAmount(mapped.amount)} / ${mapped.lineId}` : '',
+                    mapped ? `매칭: ${mapped.label || mapped.canonicalLabel || mapped.lineId}` : '',
+                    mapped ? `Java: ${formatAmount(mapped.amount)}` : '',
                   ].filter(Boolean).join('\n');
                   return (
                     <td
@@ -452,8 +453,8 @@ export function CashflowSheetLabPage() {
                   <table className="w-full min-w-[560px] text-left text-[11px]">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
-                        <th className="px-3 py-2 font-medium">항목</th>
-                        <th className="px-3 py-2 font-medium">Line ID</th>
+                        <th className="px-3 py-2 font-medium">시트 라벨</th>
+                        <th className="px-3 py-2 font-medium">매칭 기준</th>
                         <th className="px-3 py-2 font-medium">행</th>
                         <th className="px-3 py-2 font-medium">첫 주차</th>
                         <th className="px-3 py-2 font-medium">마지막 주차</th>
@@ -463,7 +464,7 @@ export function CashflowSheetLabPage() {
                       {section.lineRows.map((row) => (
                         <tr key={`${section.mode}-${row.lineId}`} className="border-t border-slate-100">
                           <td className="px-3 py-2 text-slate-900">{row.label}</td>
-                          <td className="px-3 py-2 font-mono text-slate-700">{row.lineId}</td>
+                          <td className="px-3 py-2 text-slate-700" title={row.lineId}>{row.canonicalLabel || row.label}</td>
                           <td className="px-3 py-2 text-slate-500">{row.a1}</td>
                           <td className="px-3 py-2 text-slate-500">{section.weekColumns[0]?.a1 || '-'}</td>
                           <td className="px-3 py-2 text-slate-500">{section.weekColumns.at(-1)?.a1 || '-'}</td>
@@ -490,7 +491,8 @@ export function CashflowSheetLabPage() {
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-3 py-2 font-medium">Mode</th>
-                    <th className="px-3 py-2 font-medium">Line ID</th>
+                    <th className="px-3 py-2 font-medium">시트 라벨</th>
+                    <th className="px-3 py-2 font-medium">매칭 기준</th>
                     <th className="px-3 py-2 font-medium">주차</th>
                     <th className="px-3 py-2 font-medium">셀</th>
                     <th className="px-3 py-2 font-medium">원본</th>
@@ -501,7 +503,8 @@ export function CashflowSheetLabPage() {
                   {preview.previewValues.slice(0, 36).map((value) => (
                     <tr key={`${value.mode}-${value.lineId}-${value.yearMonth}-${value.weekNo}-${value.a1}`} className="border-t border-slate-100">
                       <td className="px-3 py-2 text-slate-700">{formatMode(value.mode)}</td>
-                      <td className="px-3 py-2 font-mono text-slate-700">{value.lineId}</td>
+                      <td className="px-3 py-2 text-slate-900">{value.label || value.canonicalLabel || value.lineId}</td>
+                      <td className="px-3 py-2 text-slate-500" title={value.lineId}>{value.canonicalLabel || value.label || '-'}</td>
                       <td className="px-3 py-2 text-slate-500">{value.yearMonth} W{value.weekNo}</td>
                       <td className="px-3 py-2 text-slate-500">{value.a1}</td>
                       <td className="max-w-48 truncate px-3 py-2 text-slate-500" title={value.sheetValue}>{value.sheetValue || '-'}</td>
@@ -510,7 +513,7 @@ export function CashflowSheetLabPage() {
                   ))}
                   {preview.previewValues.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-slate-500">
+                      <td colSpan={7} className="px-3 py-8 text-center text-[12px] text-slate-500">
                         표시할 좌표가 없습니다.
                       </td>
                     </tr>

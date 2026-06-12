@@ -21,6 +21,7 @@ export interface CashflowSheetLabWeekColumn {
 export interface CashflowSheetLabLineRow {
   rowIndex: number;
   label: string;
+  canonicalLabel?: string;
   labelColumnIndex: number;
   a1: string;
   lineId: string;
@@ -30,6 +31,8 @@ export interface CashflowSheetLabLineRow {
 export interface CashflowSheetLabMappingCandidate {
   mode: 'projection' | 'actual';
   lineId: string;
+  label: string;
+  canonicalLabel?: string;
   direction: 'IN' | 'OUT';
   yearMonth: string;
   weekNo: number;

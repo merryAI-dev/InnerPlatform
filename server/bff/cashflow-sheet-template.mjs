@@ -121,13 +121,53 @@ function detectSectionCandidates(rows) {
     .sort((a, b) => a.rowIndex - b.rowIndex);
 }
 
-function analyzeSection({ rows, candidate, nextCandidateRowIndex, mode }) {
+function resolveModeFromRow(row) {
+  const searchLimit = Math.min(6, row?.length || 0);
+  for (let index = 0; index < searchLimit; index += 1) {
+    const normalized = normalizeLabelKey(row[index]).toLowerCase();
+    if (!normalized) continue;
+    if (normalized.includes('projection')) return 'projection';
+    if (normalized.includes('actual')) return 'actual';
+  }
+  return null;
+}
+
+function detectCashflowSectionCandidates(rows) {
+  const sections = [];
+  const seenModes = new Set();
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const mode = resolveModeFromRow(rows[rowIndex]);
+    if (!SUPPORTED_MODES.includes(mode) || seenModes.has(mode)) continue;
+
+    for (let weekRowIndex = rowIndex + 1; weekRowIndex < Math.min(rows.length, rowIndex + 6); weekRowIndex += 1) {
+      const weekColumns = detectWeekColumns(rows[weekRowIndex]).map((week) => ({
+        ...week,
+        rowIndex: weekRowIndex,
+        a1: toA1(weekRowIndex, week.columnIndex),
+      }));
+      if (weekColumns.length < MIN_WEEK_LABELS_PER_SECTION) continue;
+      sections.push({
+        mode,
+        headerRowIndex: rowIndex,
+        rowIndex: weekRowIndex,
+        weekColumns,
+      });
+      seenModes.add(mode);
+      break;
+    }
+  }
+
+  return sections.sort((a, b) => a.rowIndex - b.rowIndex);
+}
+
+function analyzeSection({ rows, candidate, nextCandidate, mode }) {
   const lineRows = [];
   const derivedRows = [];
   const ignoredRows = [];
   const duplicateLineIds = new Set();
   const seenLineIds = new Set();
-  const endRowIndex = nextCandidateRowIndex ?? rows.length;
+  const endRowIndex = nextCandidate?.headerRowIndex ?? rows.length;
 
   for (let rowIndex = candidate.rowIndex + 1; rowIndex < endRowIndex; rowIndex += 1) {
     const row = rows[rowIndex] || [];
@@ -144,6 +184,7 @@ function analyzeSection({ rows, candidate, nextCandidateRowIndex, mode }) {
         labelColumnIndex: columnIndex,
         a1: toA1(rowIndex, columnIndex),
         lineId: lineEntry.lineId,
+        canonicalLabel: lineEntry.label,
         direction: lineEntry.direction,
       });
       continue;
@@ -176,6 +217,8 @@ function analyzeSection({ rows, candidate, nextCandidateRowIndex, mode }) {
       mappings.push({
         mode,
         lineId: lineRow.lineId,
+        label: lineRow.label,
+        canonicalLabel: lineRow.canonicalLabel,
         direction: lineRow.direction,
         yearMonth: week.yearMonth,
         weekNo: week.weekNo,
@@ -205,7 +248,9 @@ function analyzeSection({ rows, candidate, nextCandidateRowIndex, mode }) {
 
 export function analyzeCashflowSheetTemplate(matrix) {
   const rows = normalizeMatrix(matrix);
-  const candidates = detectSectionCandidates(rows);
+  const cashflowCandidates = detectCashflowSectionCandidates(rows);
+  const candidates = cashflowCandidates.length >= 2 ? cashflowCandidates : detectSectionCandidates(rows).slice(0, 2)
+    .map((candidate, index) => ({ ...candidate, mode: SUPPORTED_MODES[index], headerRowIndex: Math.max(0, candidate.rowIndex - 1) }));
   const reasons = [];
 
   if (candidates.length < 2) {
@@ -215,12 +260,14 @@ export function analyzeCashflowSheetTemplate(matrix) {
     });
   }
 
-  const selectedCandidates = candidates.slice(0, 2);
+  const selectedCandidates = SUPPORTED_MODES
+    .map((mode) => candidates.find((candidate) => candidate.mode === mode))
+    .filter(Boolean);
   const sections = selectedCandidates.map((candidate, index) => analyzeSection({
     rows,
     candidate,
-    nextCandidateRowIndex: selectedCandidates[index + 1]?.rowIndex,
-    mode: SUPPORTED_MODES[index],
+    nextCandidate: selectedCandidates[index + 1],
+    mode: candidate.mode || SUPPORTED_MODES[index],
   }));
 
   for (const section of sections) {
@@ -242,10 +289,10 @@ export function analyzeCashflowSheetTemplate(matrix) {
     }
   }
 
-  if (candidates.length > 2) {
+  if (cashflowCandidates.length > 2) {
     reasons.push({
       code: 'cashflow_extra_week_sections',
-      count: candidates.length,
+      count: cashflowCandidates.length,
       message: '지원 템플릿보다 많은 주차 라벨 섹션이 감지되었습니다.',
     });
   }
