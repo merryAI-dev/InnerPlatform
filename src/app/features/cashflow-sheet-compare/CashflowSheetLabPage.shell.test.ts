@@ -34,6 +34,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
+    expect(pageSource).toContain('const bffAuthReady = Boolean(actor.email && actor.idToken)');
+    expect(pageSource).toContain('!bffAuthReady');
     expect(pageSource).toContain('source:');
     expect(pageSource).toContain('캐시플로우 반영 미리보기');
     expect(pageSource).toContain('반영');

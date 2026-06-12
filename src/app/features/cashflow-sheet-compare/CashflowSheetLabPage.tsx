@@ -227,6 +227,7 @@ export function CashflowSheetLabPage() {
     authUser?.role,
     authUser?.idToken,
   ]);
+  const bffAuthReady = Boolean(actor.email && actor.idToken);
 
   useEffect(() => {
     if (projectIdInput || !initialProjectId) return;
@@ -239,7 +240,7 @@ export function CashflowSheetLabPage() {
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId || !actor.email) return;
+    if (!projectId || !bffAuthReady) return;
     let cancelled = false;
     setConfigLoading(true);
     setErrorMessage('');
@@ -264,10 +265,10 @@ export function CashflowSheetLabPage() {
     return () => {
       cancelled = true;
     };
-  }, [actor, orgId, projectId]);
+  }, [actor, bffAuthReady, orgId, projectId]);
 
   async function handleSaveConfig() {
-    if (!projectId || !spreadsheetId || savingConfig) return null;
+    if (!projectId || !spreadsheetId || savingConfig || !bffAuthReady) return null;
     setSavingConfig(true);
     setErrorMessage('');
     try {
@@ -297,7 +298,7 @@ export function CashflowSheetLabPage() {
   }
 
   async function handlePreview() {
-    if (!projectId || loading || editingConfig || !config) return;
+    if (!projectId || loading || editingConfig || !config || !bffAuthReady) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setLoading(true);
@@ -334,7 +335,7 @@ export function CashflowSheetLabPage() {
   }
 
   async function handleApply() {
-    if (!projectId || applying || editingConfig || !config) return;
+    if (!projectId || applying || editingConfig || !config || !bffAuthReady) return;
     setApplying(true);
     setApplyMessage('');
     setErrorMessage('');
@@ -415,7 +416,7 @@ export function CashflowSheetLabPage() {
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={!projectId || !spreadsheetId || savingConfig}
+                disabled={!projectId || !spreadsheetId || savingConfig || !bffAuthReady}
                 onClick={handleSaveConfig}
               >
                 {savingConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
@@ -458,7 +459,7 @@ export function CashflowSheetLabPage() {
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={!projectId || loading || configLoading}
+                disabled={!projectId || loading || configLoading || !bffAuthReady}
                 onClick={handlePreview}
               >
                 {loading || configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -601,7 +602,7 @@ export function CashflowSheetLabPage() {
                 <Button
                   type="button"
                   className="ml-auto h-9 gap-1.5 rounded-none text-[12px]"
-                  disabled={applying || !preview.template.supported}
+                  disabled={applying || !preview.template.supported || !bffAuthReady}
                   onClick={handleApply}
                 >
                   {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
