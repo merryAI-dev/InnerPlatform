@@ -19,8 +19,9 @@ The Google Sheet is a viewing format only. It is not a ledger, not a source of t
 - Java remains the authority for cashflow Actual and Projection read model data.
 - BFF remains a thin Google Sheet reader and Java proxy. It must not calculate cashflow.
 - Frontend renders user input, validation state, mapping, and preview only.
-- The lab route must use user-scoped Google access. It must not silently fall back to service-account Google Sheet access.
-- Phase 1 is finance/admin-only until project-level disclosure rules are explicitly widened.
+- The lab route reads Google Sheets through the MYSC system service account.
+- A Sheet is allowed when it is shared with the MYSC system account. User-by-user Google Sheets authorization is not required.
+- PM portal access is allowed for `workspace_user`, `pm`, `finance`, and `admin`.
 - No Google Sheet writeback.
 - No weekly ledger mutation.
 - No cashflow actual or read-model mutation.
@@ -100,8 +101,9 @@ Scope:
 - Add client helper for `spreadsheetId` extraction and request typing.
 - Add feature route/page shell for Cashflow Sheets Lab.
 - Display selected spreadsheet title, sheet tabs, selected tab, first N rows as non-authoritative layout evidence, and access errors.
-- Require a user Google access token for the lab route. Do not use service-account fallback.
-- Place the first lab page in the admin/finance cashflow area.
+- Read Google Sheets through the configured MYSC service account.
+- Place the first lab page in the PM portal cashflow area.
+- Allow `workspace_user`, `pm`, `finance`, and `admin`.
 
 Out of scope:
 
@@ -109,23 +111,24 @@ Out of scope:
 - Java snapshot joining.
 - DB writes.
 - Sheet writes.
-- Portal-wide workspace access.
+- User-by-user Google Sheets OAuth consent.
 
 Completion criteria:
 
 - Invalid link returns `spreadsheet_id_required`.
-- Missing Google access token returns `google_access_token_required`.
-- Missing Google permission returns a visible access error.
+- Missing service account configuration returns `google_sheets_not_configured`.
+- Sheet not shared with the MYSC system account returns a visible access error.
 - Valid sheet returns title, tabs, selected tab, and matrix.
-- A non-finance/non-admin actor cannot access the first lab route.
+- A non-workspace actor cannot access the lab route.
 - No mutation endpoint is introduced.
 
 Recommended tests:
 
 - `server/bff/google-sheets` extraction tests if missing coverage for target link forms.
 - BFF route test with fake Google Sheets service.
-- BFF route test proving missing user Google token does not fall back to service-account Sheets access.
-- BFF route test proving a non-finance/non-admin actor is denied in Phase 1.
+- BFF route test proving service account config is required.
+- BFF route test proving `workspace_user`, `pm`, `finance`, and `admin` are allowed.
+- BFF route test proving external/non-workspace actors are denied.
 - Client helper test for URL, raw ID, and bad input.
 - Component shell test for loading, error, and preview states.
 
@@ -306,7 +309,7 @@ Out of scope:
 Completion criteria:
 
 - Alias updated only at `inner-platform-sheets-lab-merryai-devs-projects.vercel.app`.
-- Invalid link, missing Google token, unauthorized actor, Java unavailable, and success states are smoke-tested against lab alias.
+- Invalid link, missing service account config, Sheet not shared with system account, unauthorized actor, Java unavailable, and success states are smoke-tested against lab alias.
 - Stage/live aliases remain unchanged.
 - Issue #274 contains the deployed commit and verification summary.
 
@@ -315,8 +318,7 @@ Completion criteria:
 | Error | User sees | System behavior | Rescue |
 | --- | --- | --- | --- |
 | Invalid Sheet link | "Google Sheet 링크를 확인해 주세요." | Stop before network call if possible | User edits link |
-| Sheet not shared | "시트를 읽을 권한이 없습니다." | No retry loop beyond request retry policy | User shares sheet or uses accessible account |
-| Google token missing | "Google Sheet 접근 권한을 확인할 수 없습니다." | Stop before Sheets request | User reconnects Google login |
+| Sheet not shared with system account | "MYSC 시스템 계정에 시트 읽기 권한이 없습니다." | No retry loop beyond request retry policy | User shares sheet with system account |
 | Service account missing | "시트 읽기 설정이 필요합니다." | 503 from BFF | Admin config fix |
 | Unauthorized project | "이 프로젝트의 Cashflow를 볼 권한이 없습니다." | Stop before Sheet and Java join | User switches project or requests access |
 | Unsupported template | Specific missing rows/columns | No auto repair | User selects correct tab or fixes template |
@@ -333,8 +335,8 @@ Completion criteria:
 | Unsupported template silently maps wrong cells | Audit preview becomes misleading | Fail closed on missing or duplicate labels |
 | Zero and missing are conflated | Users trust incomplete data | Use separate `mapped_zero` and `missing_value` states |
 | Lab deploy aliases over stage | Stage QA gets overwritten | Use `deploy_sheets_lab_vercel.sh` only |
-| User token falls back to service account | User sees data they cannot personally access | Lab route requires user token and disables fallback |
-| Arbitrary project ID disclosure | Workspace user can preview another project's cashflow | Phase 1 finance/admin-only, later membership check before portal access |
+| Service account reads unintended Sheet | System account can read any Sheet shared with it | Treat system-account sharing as explicit allowlist and log every preview |
+| Arbitrary project ID disclosure | Workspace user can preview another project's cashflow | PM portal project context and Java project authorization guard the project side |
 
 ## NOT In Scope
 
@@ -358,8 +360,8 @@ Completion criteria:
 | 4 | Eng | Use Java cashflow snapshot as the only value source | Mechanical | Authority boundary | Matches agreed ledger policy and prevents frontend/BFF actual calculation | BFF actual/projection calculation |
 | 5 | Design | No export/save/sync controls in Phase 1-4 | Mechanical | User clarity | Any write-looking affordance misleads users about read-only scope | Disabled export buttons |
 | 6 | DX | Add explicit error codes and UI messages for all stop states | Mechanical | Completeness | Internal SaaS users need clear next action, not stack traces | Generic error toast |
-| 7 | Eng | Require user-scoped Google Sheet access in lab route | Mechanical | Authority boundary | Prevents service-account fallback from reading Sheets the actor cannot access | Silent service-account fallback |
-| 8 | Eng | Start admin/finance-only until project disclosure rules are designed | Taste | Pragmatic | This is safer for a lab that combines arbitrary Sheet links with project cashflow data | Broad workspace-user lab access |
+| 7 | Eng | Use MYSC service-account Sheet access | Taste | Pragmatic | Internal SaaS users avoid per-user Sheets consent, and Sheet sharing becomes an operational allowlist | User-scoped Sheets OAuth |
+| 8 | Eng | Allow PM portal workspace roles in Phase 1 | Mechanical | User outcome | This feature lives in PM portal and must work for `workspace_user`, `pm`, `finance`, and `admin` | Admin/finance-only lab |
 | 9 | Eng | Extract shared Java weekly client before lab composition | Mechanical | DRY | Existing Java proxy helpers are private; duplication would create auth drift | Copying proxy logic |
 
 ## Review Scores
@@ -368,18 +370,20 @@ Completion criteria:
 | --- | --- | --- |
 | CEO | 8/10 | The plan solves the right first problem: safe preview before automation. It intentionally rejects writeback. |
 | Design | 7/10 | UI scope is clear. Needs exact page placement and visual hierarchy in Phase 4 before implementation. |
-| Eng | 8/10 | Existing code leverage is strong. Main risks are Google auth fallback, project disclosure, and private Java proxy reuse. |
+| Eng | 8/10 | Existing code leverage is strong. Main risks are service-account sharing discipline, project disclosure, and private Java proxy reuse. |
 | DX | 7/10 | Developer path is understandable. Needs typed contracts and error fixtures early to avoid guesswork. |
 
 ## Open Questions Before Coding
 
 1. Template sample: which real Google Sheet tab should become the golden fixture?
 2. Java validation boundary: keep deterministic layout validation in BFF first, or add Java validation endpoint immediately when semantics exceed layout?
-3. Portal widening: after Phase 1, should workspace users access only selected/assigned projects or all stage projects?
+3. Project disclosure rule: should PM portal preview be limited to the currently selected project only, or any project visible in the portal selector?
 
 Recommendation:
 
-- Start Phase 1 with admin/finance-only route placement.
+- Start Phase 1 in the PM portal cashflow area.
+- Use MYSC service-account Sheet read. No per-user Sheets OAuth.
+- Allow `workspace_user`, `pm`, `finance`, and `admin`.
 - Start Phase 1 without Java changes, except extracting shared Java weekly client helpers from the BFF proxy path.
 - In Phase 2, if validator needs canonical cashflow semantics beyond labels and coordinates, move that logic to Java before shipping Phase 2.
 
@@ -387,20 +391,20 @@ Recommendation:
 
 1. Extract shared Java weekly client helper from `server/bff/routes/jvm-weekly-api.mjs`.
 2. Create lab API contract and client types.
-3. Add BFF route with fake-service tests, user Google token requirement, and admin/finance gate.
+3. Add BFF route with fake-service tests, service-account Sheets read, and PM portal workspace-role gate.
 4. Add link helper and unit tests.
-5. Add page shell under admin/finance cashflow area.
+5. Add page shell under PM portal cashflow area.
 6. Add Phase 1 UI states with source labeling.
 7. Run targeted tests and guard dry-run.
 8. Comment progress on issue #274.
 
 ## Outside Review Findings Applied
 
-An adversarial read-only `codex exec` review flagged nine issues. The plan now applies the required fixes:
+An adversarial read-only `codex exec` review flagged nine issues. We accepted the authority-boundary findings, then intentionally changed the Sheet authorization policy for internal SaaS convenience:
 
-- User-scoped Google Sheet access is required for the lab route.
-- Service-account fallback is forbidden in the lab route.
-- Phase 1 starts admin/finance-only.
+- Service-account Sheet access is the explicit policy, not a fallback.
+- Sheets must be shared with the MYSC system account.
+- PM portal users with `workspace_user`, `pm`, `finance`, or `admin` can use the lab.
 - Sheet text is layout evidence only.
 - Java values carry authoritative source labels.
 - Java proxy helpers must be extracted before route composition.
