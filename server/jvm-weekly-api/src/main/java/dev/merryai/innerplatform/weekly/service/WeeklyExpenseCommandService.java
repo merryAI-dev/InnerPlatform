@@ -616,7 +616,7 @@ public class WeeklyExpenseCommandService {
             }
         }
 
-        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        List<WeeklyExpenseProjectionEntity> projectionEntities = new ArrayList<>();
         for (ProjectionLineAccumulator line : projectionPatches.values()) {
             WeeklyExpenseProjectionEntity projectionEntity = persistence
                 .findProjectionLine(
@@ -634,6 +634,11 @@ public class WeeklyExpenseCommandService {
                     line.cashflowLine
                 ));
             projectionEntity.setAmount(line.amount);
+            projectionEntities.add(projectionEntity);
+        }
+
+        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        for (WeeklyExpenseProjectionEntity projectionEntity : projectionEntities) {
             WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
             projection.add(new CashflowSnapshotResponse.ProjectionLine(
                 saved.getYearMonth(),
@@ -709,7 +714,7 @@ public class WeeklyExpenseCommandService {
             }
         }
 
-        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        List<WeeklyExpenseProjectionEntity> sheetLabProjectionEntities = new ArrayList<>();
         for (ProjectionLineAccumulator line : projectionPatches.values()) {
             WeeklyExpenseProjectionEntity projectionEntity = persistence
                 .findProjectionLine(
@@ -727,6 +732,11 @@ public class WeeklyExpenseCommandService {
                     line.cashflowLine
                 ));
             projectionEntity.setAmount(line.amount);
+            sheetLabProjectionEntities.add(projectionEntity);
+        }
+
+        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        for (WeeklyExpenseProjectionEntity projectionEntity : sheetLabProjectionEntities) {
             WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
             projection.add(new CashflowSnapshotResponse.ProjectionLine(
                 saved.getYearMonth(),
