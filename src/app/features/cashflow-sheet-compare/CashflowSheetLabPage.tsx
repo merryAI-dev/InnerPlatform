@@ -1,15 +1,19 @@
-import { useMemo, useRef, useState } from 'react';
-import { AlertCircle, FileSpreadsheet, Loader2, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, FileSpreadsheet, Loader2, Pencil, Search, Settings } from 'lucide-react';
+import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
-import { usePortalStore } from '../../data/portal-store';
 import { useFirebase } from '../../lib/firebase-context';
 import {
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
+  saveCashflowSheetLabConfigViaBff,
+  type CashflowSheetLabConfig,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 
 function formatMode(mode: string) {
   return mode === 'projection' ? 'Projection' : 'Actual';
@@ -38,6 +42,13 @@ function sheetCellKey(rowIndex: number, columnIndex: number) {
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
   return '시트 구조를 확인하지 못했습니다.';
+}
+
+function formatTimestamp(value: string | undefined) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 function StatusPill({ tone, children }: { tone: 'ok' | 'warn' | 'error'; children: string }) {
@@ -139,34 +150,105 @@ function CashflowSheetGrid({ preview }: { preview: CashflowSheetLabPreviewResult
 export function CashflowSheetLabPage() {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
-  const { activeProjectId, myProject, portalUser } = usePortalStore();
+  const [searchParams] = useSearchParams();
+  const initialProjectId = useMemo(() => (
+    searchParams.get('projectId')?.trim()
+    || authUser?.projectId
+    || authUser?.projectIds?.[0]
+    || readRecentPortalProjectIds()[0]
+    || ''
+  ), [authUser?.projectId, authUser?.projectIds, searchParams]);
+  const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
+  const [config, setConfig] = useState<CashflowSheetLabConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [editingConfig, setEditingConfig] = useState(true);
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
   const previewRequestRef = useRef(0);
 
-  const projectId = activeProjectId || myProject?.id || '';
-  const projectName = myProject?.name || '내 사업';
+  const projectId = projectIdInput.trim();
+  const projectName = projectId || '프로젝트';
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
   const actor = useMemo(() => ({
-    uid: authUser?.uid || portalUser?.id || 'portal-user',
-    email: authUser?.email || portalUser?.email || '',
-    role: authUser?.role || portalUser?.role || 'workspace_user',
+    uid: authUser?.uid || 'workspace-user',
+    email: authUser?.email || '',
+    role: authUser?.role || 'workspace_user',
     idToken: authUser?.idToken,
   }), [
     authUser?.uid,
     authUser?.email,
     authUser?.role,
     authUser?.idToken,
-    portalUser?.id,
-    portalUser?.email,
-    portalUser?.role,
   ]);
 
+  useEffect(() => {
+    if (projectIdInput || !initialProjectId) return;
+    setProjectIdInput(initialProjectId);
+  }, [initialProjectId, projectIdInput]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    rememberRecentPortalProject(projectId);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || !actor.email) return;
+    let cancelled = false;
+    setConfigLoading(true);
+    setErrorMessage('');
+    getCashflowSheetLabConfigViaBff({
+      tenantId: orgId,
+      actor,
+      projectId,
+    }).then((result) => {
+      if (cancelled) return;
+      const nextConfig = result.config || null;
+      setConfig(nextConfig);
+      setEditingConfig(!nextConfig);
+      setSheetLink(nextConfig?.value || '');
+      setSheetName(nextConfig?.sheetName || '');
+    }).catch((error) => {
+      if (!cancelled) setErrorMessage(formatError(error));
+    }).finally(() => {
+      if (!cancelled) setConfigLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, orgId, projectId]);
+
+  async function handleSaveConfig() {
+    if (!projectId || !spreadsheetId || savingConfig) return null;
+    setSavingConfig(true);
+    setErrorMessage('');
+    try {
+      const result = await saveCashflowSheetLabConfigViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        value: sheetLink,
+        sheetName: sheetName || undefined,
+      });
+      const nextConfig = result.config || null;
+      setConfig(nextConfig);
+      setEditingConfig(false);
+      setSheetLink(nextConfig?.value || sheetLink);
+      setSheetName(nextConfig?.sheetName || sheetName);
+      return nextConfig;
+    } catch (error) {
+      setErrorMessage(formatError(error));
+      return null;
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
   async function handlePreview() {
-    if (!projectId || !sheetLink.trim()) return;
+    if (!projectId || loading || editingConfig || !config) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setLoading(true);
@@ -176,8 +258,6 @@ export function CashflowSheetLabPage() {
         tenantId: orgId,
         actor,
         projectId,
-        value: sheetLink,
-        sheetName: sheetName || undefined,
         includeValues: false,
       });
       if (previewRequestRef.current !== requestId) return;
@@ -187,8 +267,6 @@ export function CashflowSheetLabPage() {
         tenantId: orgId,
         actor,
         projectId,
-        value: sheetLink,
-        sheetName: layoutResult.selectedSheetName,
         includeValues: true,
       }).then((valueResult) => {
         if (previewRequestRef.current === requestId) setPreview(valueResult);
@@ -203,14 +281,6 @@ export function CashflowSheetLabPage() {
     }
   }
 
-  if (!projectId) {
-    return (
-      <div className="p-6 text-[12px] text-muted-foreground">
-        배정된 사업이 없습니다. 관리자에게 사업 배정을 요청하세요.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4 p-4 sm:p-6">
       <div className="flex flex-col gap-2 border-b border-slate-200 pb-4">
@@ -222,35 +292,88 @@ export function CashflowSheetLabPage() {
       </div>
 
       <section className="grid gap-3 border border-slate-200 bg-white p-4">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+        <div className="grid gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
           <Input
-            value={sheetLink}
-            onChange={(event) => setSheetLink(event.target.value)}
-            placeholder="Google Sheet 링크"
-            aria-label="Google Sheet 링크"
+            value={projectIdInput}
+            onChange={(event) => setProjectIdInput(event.target.value)}
+            placeholder="Project ID"
+            aria-label="Project ID"
             className="h-10 rounded-none text-[12px]"
           />
-          <Input
-            value={sheetName}
-            onChange={(event) => setSheetName(event.target.value)}
-            placeholder="시트 탭 이름"
-            aria-label="시트 탭 이름"
-            className="h-10 rounded-none text-[12px]"
-          />
-          <Button
-            type="button"
-            className="h-10 gap-1.5 rounded-none text-[12px]"
-            disabled={!spreadsheetId || loading}
-            onClick={handlePreview}
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            검토
-          </Button>
+          {editingConfig ? (
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_240px_auto_auto]">
+              <Input
+                value={sheetLink}
+                onChange={(event) => setSheetLink(event.target.value)}
+                placeholder="Google Sheet 링크"
+                aria-label="Google Sheet 링크"
+                className="h-10 rounded-none text-[12px]"
+              />
+              <Input
+                value={sheetName}
+                onChange={(event) => setSheetName(event.target.value)}
+                placeholder="시트 탭 이름"
+                aria-label="시트 탭 이름"
+                className="h-10 rounded-none text-[12px]"
+              />
+              <Button
+                type="button"
+                className="h-10 gap-1.5 rounded-none text-[12px]"
+                disabled={!projectId || !spreadsheetId || savingConfig}
+                onClick={handleSaveConfig}
+              >
+                {savingConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                설정 저장
+              </Button>
+              {config && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-none text-[12px]"
+                  onClick={() => {
+                    setEditingConfig(false);
+                    setSheetLink(config.value);
+                    setSheetName(config.sheetName || '');
+                  }}
+                >
+                  취소
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <div className="min-w-0 border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="truncate text-[12px] font-medium text-slate-950">{config?.spreadsheetTitle || config?.spreadsheetId || '저장된 시트'}</div>
+                <div className="mt-1 truncate text-[11px] text-slate-500">
+                  {config?.sheetName || '-'} · {formatTimestamp(config?.updatedAt)}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-1.5 rounded-none text-[12px]"
+                onClick={() => setEditingConfig(true)}
+              >
+                <Pencil className="h-4 w-4" />
+                수정
+              </Button>
+              <Button
+                type="button"
+                className="h-10 gap-1.5 rounded-none text-[12px]"
+                disabled={!projectId || loading || configLoading}
+                onClick={handlePreview}
+              >
+                {loading || configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                검토
+              </Button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
           <span>Spreadsheet ID</span>
-          <code className="border border-slate-200 bg-slate-50 px-2 py-1">{spreadsheetId || '-'}</code>
+          <code className="border border-slate-200 bg-slate-50 px-2 py-1">{spreadsheetId || config?.spreadsheetId || '-'}</code>
           <span>MYSC 시스템 계정 읽기 기준</span>
+          {!editingConfig && <span>저장된 설정으로 검토</span>}
         </div>
         {errorMessage && (
           <div className="flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">

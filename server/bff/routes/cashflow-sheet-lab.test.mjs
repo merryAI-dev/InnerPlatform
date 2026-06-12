@@ -43,14 +43,19 @@ function buildMatrix() {
   ];
 }
 
-function createDb({ exists = true } = {}) {
+function createDb({ exists = true, data = { id: 'project-a' } } = {}) {
+  let document = { ...data };
+  const get = vi.fn(async () => ({
+    exists,
+    data: () => document,
+  }));
+  const set = vi.fn(async (patch) => {
+    document = { ...document, ...patch };
+  });
   return {
-    doc: vi.fn(() => ({
-      get: vi.fn(async () => ({
-        exists,
-        data: () => ({ id: 'project-a' }),
-      })),
-    })),
+    doc: vi.fn(() => ({ get, set })),
+    __getDocument: () => document,
+    __set: set,
   };
 }
 
@@ -96,6 +101,79 @@ function createApp({
 }
 
 describe('cashflow sheet lab route', () => {
+  it('returns an empty saved sheet config before the first setup', async () => {
+    const response = await request(createApp())
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      projectId: 'project-a',
+      configured: false,
+      config: null,
+    });
+  });
+
+  it('saves the validated cashflow sheet config for later previews', async () => {
+    const db = createDb();
+
+    const response = await request(createApp({ db }))
+      .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+      .send({
+        value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
+        sheetName: 'cashflow(사용내역 연동)',
+      })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      projectId: 'project-a',
+      configured: true,
+      config: {
+        value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
+        sheetName: 'cashflow(사용내역 연동)',
+        spreadsheetId: 'spreadsheet-a',
+        updatedBy: {
+          email: 'user@mysc.co.kr',
+          role: 'workspace_user',
+        },
+      },
+    });
+    expect(db.__getDocument().cashflowSheetLab).toMatchObject(response.body.config);
+  });
+
+  it('uses the saved sheet config when preview is requested without a sheet link', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          spreadsheetId: 'saved-spreadsheet-a',
+        },
+      },
+    });
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'saved-spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [],
+        matrix: buildMatrix(),
+      })),
+    };
+
+    const response = await request(createApp({ db, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ includeValues: false })
+      .expect(200);
+
+    expect(response.body.accessPolicy.sheetConfigSource).toBe('saved_config');
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledWith({
+      value: 'saved-spreadsheet-a',
+      sheetName: 'cashflow(사용내역 연동)',
+      rangeA1: 'A1:ZZ220',
+    });
+  });
+
   it('allows mysc workspace users and returns sheet mapping plus Java snapshot status', async () => {
     const response = await request(createApp())
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')

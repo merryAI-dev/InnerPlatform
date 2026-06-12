@@ -20,15 +20,19 @@ const portalCashflowSource = readFileSync(
 );
 
 describe('CashflowSheetLabPage shell', () => {
-  it('is mounted in the PM portal cashflow area', () => {
-    expect(routesSource).toContain("path: 'cashflow/sheets-lab'");
+  it('is mounted at the PM portal cashflow URL without the PortalStore shell', () => {
+    expect(routesSource).toContain("path: '/portal/cashflow/sheets-lab'");
+    expect(routesSource).not.toContain("path: 'cashflow/sheets-lab'");
     expect(routesSource).toContain('CashflowSheetLabPage');
     expect(portalLayoutSource).toContain('/portal/cashflow/sheets-lab');
     expect(portalCashflowSource).toContain('/portal/cashflow/sheets-lab');
+    expect(pageSource).not.toContain('usePortalStore');
+    expect(pageSource).not.toContain('../../data/portal-store');
   });
 
-  it('uses the readonly lab client and does not expose write-looking actions', () => {
+  it('uses the readonly lab client and does not expose cashflow write-looking actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
+    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('source:');
     expect(pageSource).not.toContain('upsertCashflowProjectionViaPlatformApi');
     expect(pageSource).not.toContain('exportCashflowWorkbookViaBff');
@@ -36,6 +40,5 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('markSheetSourceApplied');
     expect(pageSource).not.toContain('동기화');
     expect(pageSource).not.toContain('내보내기');
-    expect(pageSource).not.toContain('저장');
   });
 });

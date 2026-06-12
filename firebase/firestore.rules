@@ -92,13 +92,16 @@ service cloud.firestore {
     match /orgs/{orgId}/members/{memberId} {
       allow read: if canRead(orgId);
 
-      // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
+      // 최초 로그인 자기 등록: 본인 UID와 이메일로만 허용.
+      // 내부 SaaS 로그인에서는 bootstrap/directory role이 먼저 계산될 수 있으므로
+      // role을 pm 하나로 고정하지 않는다. 이후 타인 role 변경은 admin 경로에서만 처리한다.
       // (auth-store.tsx의 upsertMemberFromFirebase 지원)
       // 다른 역할 부여는 admin이 /users 페이지에서 변경
       allow create: if isSignedIn()
         && memberId == request.auth.uid
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.role == 'pm';
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['admin', 'tenant_admin', 'finance', 'pm', 'auditor', 'support', 'security'];
 
       // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
       allow update: if isSignedIn()

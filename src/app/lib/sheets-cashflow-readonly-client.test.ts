@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
+  saveCashflowSheetLabConfigViaBff,
 } from './sheets-cashflow-readonly-client';
 
 function asMockClient(client: {
@@ -99,6 +101,64 @@ describe('sheets cashflow readonly client', () => {
       }),
     );
     expect(client.post.mock.calls[0][1].headers).toBeUndefined();
+  });
+
+  it('reads and saves the persisted lab sheet config through same-origin BFF', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          configured: true,
+          config: {
+            value: 'sheet-001',
+            sheetName: 'cashflow(사용내역 연동)',
+            spreadsheetId: 'sheet-001',
+          },
+        },
+      })),
+      request: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          configured: true,
+          config: {
+            value: 'sheet-001',
+            sheetName: 'cashflow(사용내역 연동)',
+            spreadsheetId: 'sheet-001',
+          },
+        },
+      })),
+    });
+    const actor = { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' };
+
+    await getCashflowSheetLabConfigViaBff({
+      tenantId: 'mysc',
+      actor,
+      projectId: 'p001',
+      client,
+    });
+    await saveCashflowSheetLabConfigViaBff({
+      tenantId: 'mysc',
+      actor,
+      projectId: 'p001',
+      value: 'sheet-001',
+      sheetName: 'cashflow(사용내역 연동)',
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/config',
+      expect.objectContaining({ tenantId: 'mysc' }),
+    );
+    expect(client.request).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/config',
+      expect.objectContaining({
+        method: 'PUT',
+        body: {
+          value: 'sheet-001',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      }),
+    );
   });
 
   it('uses same-origin BFF instead of the global Java API base URL', async () => {

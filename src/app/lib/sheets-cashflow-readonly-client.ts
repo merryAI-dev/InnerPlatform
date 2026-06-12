@@ -110,11 +110,31 @@ export interface CashflowSheetLabPreviewResult {
     sheetReadRange: string;
     sheetPreviewCache: 'hit' | 'miss' | 'in_flight_join';
     sheetNamePolicy: 'cashflow_usage_linked_only';
+    sheetConfigSource?: 'request' | 'saved_config';
   };
   template: CashflowSheetLabTemplateResult;
   previewValues: CashflowSheetLabPreviewValue[];
   cashflowSnapshotStatus: 'pending' | 'ready' | 'unavailable';
   cashflowSnapshotError?: { code: string; message: string } | null;
+}
+
+export interface CashflowSheetLabConfig {
+  value: string;
+  sheetName?: string;
+  spreadsheetId?: string;
+  spreadsheetTitle?: string;
+  updatedAt?: string;
+  updatedBy?: {
+    uid?: string;
+    email?: string;
+    role?: string;
+  } | null;
+}
+
+export interface CashflowSheetLabConfigResult {
+  projectId: string;
+  configured: boolean;
+  config: CashflowSheetLabConfig | null;
 }
 
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
@@ -132,7 +152,7 @@ export async function previewCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
-  value: string;
+  value?: string;
   sheetName?: string;
   includeValues?: boolean;
   client?: PlatformApiClientLike;
@@ -144,9 +164,54 @@ export async function previewCashflowSheetLabViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
-        value: params.value,
+        ...(params.value ? { value: params.value } : {}),
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
         ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
+      },
+      timeoutMs: 25000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function getCashflowSheetLabConfigViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabConfigResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.get<CashflowSheetLabConfigResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function saveCashflowSheetLabConfigViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value: string;
+  sheetName?: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabConfigResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.request<CashflowSheetLabConfigResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
+    {
+      method: 'PUT',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        value: params.value,
+        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
       },
       timeoutMs: 25000,
       retries: 0,

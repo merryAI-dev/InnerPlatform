@@ -111,6 +111,7 @@ export const router = createBrowserRouter([
   { path: '/install/ios', element: <S C={PwaInstallPage} /> },
   { path: '/install/android', element: <S C={PwaInstallPage} /> },
   { path: '/mobile-entry', element: <S C={MobileEntryPage} /> },
+  { path: '/portal/cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> },
   // ── Admin (관리자) ──
   {
     path: '/',
@@ -176,7 +177,6 @@ export const router = createBrowserRouter([
       { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
-      { path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
       { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },

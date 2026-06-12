@@ -78,7 +78,7 @@ export function PortalCashflowPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" className="h-9 gap-1.5 text-[12px]" asChild>
-              <Link to="/portal/cashflow/sheets-lab">
+              <Link to={`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`}>
                 <FileSpreadsheet className="h-4 w-4" />
                 시트 연동 검토
               </Link>
