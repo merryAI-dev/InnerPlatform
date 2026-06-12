@@ -250,7 +250,7 @@ describe('cashflow sheet lab route', () => {
     ]));
   });
 
-  it('blocks apply when BFF and Java point at different Firestore projects', async () => {
+  it('allows apply when BFF stores sheet config and Java owns cashflow read models in different Firestore projects', async () => {
     const db = createDb({
       data: {
         id: 'project-a',
@@ -265,16 +265,28 @@ describe('cashflow sheet lab route', () => {
     const javaWeeklyClient = {
       workspaceEmailDomain: 'mysc.co.kr',
       firestoreProjectId: 'different-firestore',
-      applyCashflowSheetLab: vi.fn(),
+      applyCashflowSheetLab: vi.fn(async () => ({
+        ok: true,
+        commandName: 'weeklyExpense.cashflowSheetLab.apply',
+        projectId: 'project-a',
+        sourceSheetKey: 'cashflow-sheet-lab',
+        savedProjectionLineCount: 24,
+        savedActualLineCount: 24,
+        auditId: 'audit-1',
+      })),
     };
 
     const response = await request(createApp({ db, javaWeeklyClient }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ idempotencyKey: 'apply-mismatch-001' })
-      .expect(409);
+      .expect(200);
 
-    expect(response.body.code).toBe('cashflow_sheet_apply_environment_mismatch');
-    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(response.body.javaResult.auditId).toBe('audit-1');
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      idempotencyKey: 'apply-mismatch-001',
+      sourceSheetKey: 'cashflow-sheet-lab',
+    }));
   });
 
   it('parses Google Sheets formatted currency values before applying to Java', async () => {
