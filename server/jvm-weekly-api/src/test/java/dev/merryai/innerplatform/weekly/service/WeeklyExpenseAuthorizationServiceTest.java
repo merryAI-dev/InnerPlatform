@@ -109,4 +109,25 @@ class WeeklyExpenseAuthorizationServiceTest {
             .isInstanceOf(WeeklyExpenseForbiddenException.class)
             .hasMessageContaining("does not exist");
     }
+
+    @Test
+    void workspaceUserCanUseExistingJavaProjectDataWithoutProjectDocument() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> false,
+            (tenantId, projectId) -> "project-with-read-model".equals(projectId),
+            "internal_saas_workspace"
+        );
+        TrustedActorContext workspaceUser = new TrustedActorContext(
+            "tenant-a",
+            "firebase-user-1",
+            "user@mysc.co.kr",
+            "workspace_user"
+        );
+
+        assertThatCode(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND,
+            workspaceUser,
+            "project-with-read-model"
+        )).doesNotThrowAnyException();
+    }
 }

@@ -3,6 +3,7 @@ package dev.merryai.innerplatform.weekly.service;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
+import com.google.cloud.firestore.QuerySnapshot;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
@@ -38,10 +39,38 @@ public class FirestoreWeeklyProjectExistenceRepository implements WeeklyProjectE
         String project = text(projectId);
         if (tenant.isBlank() || project.isBlank()) return false;
         try {
-            return db.document("orgs/" + tenant + "/projects/" + project).get().get().exists();
+            if (db.document("orgs/" + tenant + "/projects/" + project).get().get().exists()) {
+                return true;
+            }
+            return hasExistingProjectScopedData(tenant, project);
         } catch (Exception error) {
             return false;
         }
+    }
+
+    private boolean hasExistingProjectScopedData(String tenantId, String projectId) throws Exception {
+        if (hasDocumentInProjectSubcollection(tenantId, projectId, "expense_sheets")) return true;
+        if (hasDocumentInProjectSubcollection(tenantId, projectId, "expense_intake")) return true;
+        if (hasTopLevelProjectReference(tenantId, "cashflow_weeks", projectId)) return true;
+        if (hasTopLevelProjectReference(tenantId, "weekly_api_audit_events", projectId)) return true;
+        return hasTopLevelProjectReference(tenantId, "weekly_api_audit_exports", projectId);
+    }
+
+    private boolean hasDocumentInProjectSubcollection(String tenantId, String projectId, String collectionName) throws Exception {
+        QuerySnapshot snap = db.collection("orgs/" + tenantId + "/projects/" + projectId + "/" + collectionName)
+            .limit(1)
+            .get()
+            .get();
+        return !snap.isEmpty();
+    }
+
+    private boolean hasTopLevelProjectReference(String tenantId, String collectionName, String projectId) throws Exception {
+        QuerySnapshot snap = db.collection("orgs/" + tenantId + "/" + collectionName)
+            .whereEqualTo("projectId", projectId)
+            .limit(1)
+            .get()
+            .get();
+        return !snap.isEmpty();
     }
 
     private static String text(Object value) {
