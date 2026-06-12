@@ -103,7 +103,7 @@ The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are
 | Actual | 46 | 출금 합계 | derived | total |
 | Actual | 47 | 잔액 | derived | balance |
 
-Phase 1 should show the parsed structure but should not validate every mapping yet. Phase 2 should use this section as the first golden template contract.
+Phase 1 should turn this structure into mapping candidates, not a summary. The join key is the weekly label row (`26-1-1`, `26-1-2`, etc.), not the merged month header. Phase 2 should harden this section into the first golden template contract.
 
 ## Architecture
 
@@ -155,28 +155,35 @@ Java extension should be deferred until Phase 2 unless the BFF template validati
 
 The BFF validator may identify layout evidence only: tab title, row labels, column coordinates, and A1 positions. It must not decide accounting meaning beyond mapping those labels to a versioned cashflow policy.
 
-## Phase 1 - Sheet Link Intake
+## Phase 1 - Sheet Structure Mapping
 
-Goal: prove that a user can paste a Google Sheet link and get a safe, readable sheet preview.
+Goal: prove that a user can paste a Google Sheet link and the app can remove irrelevant parts, detect the supported cashflow layout, and produce deterministic cell mapping candidates.
 
 Scope:
 
 - Add the lab route shell under BFF.
-- Extract shared Java weekly client helpers before composing Java data into the lab route.
 - Add client helper for `spreadsheetId` extraction and request typing.
 - Add feature route/page shell for Cashflow Sheets Lab.
-- Display selected spreadsheet title, sheet tabs, selected tab, first N rows as non-authoritative layout evidence, and access errors.
 - Read Google Sheets through the configured MYSC service account.
 - Place the first lab page in the PM portal cashflow area.
 - Allow `workspace_user`, `pm`, `finance`, and `admin`.
+- Parse the selected tab into normalized rows while preserving original row/column coordinates.
+- Detect Projection and Actual sections by section labels and row position.
+- Detect weekly columns by `YY-M-W` labels such as `26-1-1`; do not depend on merged month headers.
+- Map row labels to existing `cashflow-policy.json` line ids.
+- Separate derived rows such as deposit total, withdrawal total, and balance from cashflow line rows.
+- Ignore guidance/notes and other rows outside the detected Actual/Projection sections.
+- Return mapping candidates with `mode`, `lineId`, `yearMonth`, `weekNo`, `rowIndex`, `columnIndex`, `a1`, and `source: "sheet_layout"`.
+- Display selected spreadsheet title, sheet tabs, section candidates, week columns, derived rows, ignored rows, mapping candidates, and access errors.
 
 Out of scope:
 
-- Cashflow mapping.
 - Java snapshot joining.
 - DB writes.
 - Sheet writes.
 - User-by-user Google Sheets OAuth consent.
+- Sheet numeric cells as Actual or Projection values.
+- Full golden-template rejection rules beyond obvious unsupported/missing structure.
 
 Completion criteria:
 
@@ -184,7 +191,11 @@ Completion criteria:
 - Missing service account configuration returns `google_sheets_not_configured`.
 - Sheet not shared with the MYSC system account returns a visible access error.
 - Valid sheet returns title, tabs, selected tab, and matrix.
-- Valid sheet can be summarized as records, max columns, section candidates, and week-label candidates.
+- Valid sheet returns Projection and Actual section candidates.
+- Valid sheet returns 60 weekly columns per supported section when labels run `26-1-1` through `26-12-5`.
+- Valid sheet returns 12 cashflow line rows and 720 mapping cells per mode for the provided CSV-equivalent structure.
+- Derived rows are identified separately and are not assigned cashflow line ids.
+- Rows outside the detected cashflow sections are ignored for mapping.
 - A non-workspace actor cannot access the lab route.
 - No mutation endpoint is introduced.
 
@@ -197,29 +208,25 @@ Recommended tests:
 - BFF route test proving external/non-workspace actors are denied.
 - Client helper test for URL, raw ID, and bad input.
 - CSV parser/normalizer test using a sanitized fixture derived from the real cashflow CSV structure.
+- Week-label mapping test for `26-1-1` through `26-12-5`.
+- Row-label mapping test against `cashflow-policy.json` aliases.
+- Derived-row separation test.
 - Component shell test for loading, error, and preview states.
 
-## Phase 2 - Template Validation And Cell Mapping
+## Phase 2 - Template Contract Hardening
 
-Goal: determine whether the selected sheet is a supported cashflow template and show exact cell mappings.
+Goal: convert the Phase 1 mapping candidates into a stricter supported-template contract and reject ambiguous or unsafe layouts.
 
 Scope:
 
 - Define the supported template contract:
   - required tab family is `CASHFLOW`.
   - required row labels include cashflow line labels from the existing policy.
-  - required week columns are D through BK or equivalent detected `YY-M-W` labels.
+  - required week columns are detected from `YY-M-W` labels; D through BK is the first known template shape, not a hard dependency.
   - required columns can be matched to year-month/week labels.
   - Actual and Projection sections must be distinguishable.
   - derived rows are recognized as totals/balance, not cashflow line ids.
 - Build deterministic validator.
-- Return mapping entries:
-  - logical field
-  - row index
-  - column index
-  - A1 notation
-  - source line id
-  - mode: `actual` or `projection`
 - Show unsupported reasons in the UI.
 - Return `policyVersion` with mapping results when cashflow labels are resolved.
 

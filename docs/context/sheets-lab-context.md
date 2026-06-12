@@ -62,13 +62,15 @@ Phase 0 - Boundary lock:
 - Output: issue #274, bounded-module notes, and dry-run deployment guard verification.
 - No product code is required in this phase.
 
-Phase 1 - Sheet link intake:
+Phase 1 - Sheet structure mapping:
 
 - Link input, spreadsheet ID extraction, and BFF read-only Google Sheet access.
+- Detect Actual/Projection sections, weekly labels such as `26-1-1`, cashflow line rows, derived rows, and ignored rows.
+- Return layout mapping candidates with row/column/A1 coordinates. Do not treat Sheet numbers as cashflow values.
 
-Phase 2 - Template validation:
+Phase 2 - Template contract hardening:
 
-- Supported cashflow layout detection and cell coordinate mapping.
+- Turn Phase 1 mapping candidates into stricter supported-template validation and unsupported-layout reasons.
 
 Phase 3 - Java read model connection:
 
