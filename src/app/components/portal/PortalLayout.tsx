@@ -88,6 +88,7 @@ const NAV_SECTIONS = [
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
       { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
+      { to: '/portal/cashflow/sheets-lab', icon: FileSpreadsheet, label: '시트 연동 검토' },
     ],
   },
   {

@@ -9,6 +9,8 @@ describe('google-sheets helpers', () => {
   it('extracts spreadsheet ids from docs links and raw ids', () => {
     expect(extractSpreadsheetId('https://docs.google.com/spreadsheets/d/1abcDEFghiJKlmnOPQ_rst-123/edit#gid=0'))
       .toBe('1abcDEFghiJKlmnOPQ_rst-123');
+    expect(extractSpreadsheetId('https://docs.google.com/spreadsheets/u/1/d/1abcDEFghiJKlmnOPQ_rst-123/edit#gid=0'))
+      .toBe('1abcDEFghiJKlmnOPQ_rst-123');
     expect(extractSpreadsheetId('1abcDEFghiJKlmnOPQ_rst-123'))
       .toBe('1abcDEFghiJKlmnOPQ_rst-123');
     expect(extractSpreadsheetId('not-a-sheet-link')).toBe('');

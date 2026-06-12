@@ -53,6 +53,7 @@ const PortalProjectRegister = lazy(() => import('./components/portal/PortalProje
 const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
 const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
 const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
+const CashflowSheetLabPage = lazy(() => import('./features/cashflow-sheet-compare/CashflowSheetLabPage').then(m => ({ default: m.CashflowSheetLabPage })));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 function RouteChunkFallback() {
@@ -175,6 +176,7 @@ export const router = createBrowserRouter([
       { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
+      { path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
       { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },

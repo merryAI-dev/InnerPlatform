@@ -95,6 +95,11 @@ export const googleSheetImportPreviewSchema = z.object({
   sheetName: NON_EMPTY_STRING.optional(),
 }).strict();
 
+export const cashflowSheetLabPreviewSchema = z.object({
+  value: NON_EMPTY_STRING,
+  sheetName: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const googleSheetImportAnalyzeSchema = z.object({
   spreadsheetTitle: z.string().trim().optional(),
   selectedSheetName: NON_EMPTY_STRING,

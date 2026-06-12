@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { FileSpreadsheet } from 'lucide-react';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
 import { usePortalStore } from '../../data/portal-store';
@@ -75,10 +76,18 @@ export function PortalCashflowPage() {
             <p className="font-semibold text-slate-950">기존 캐시플로 가져오기</p>
             <p>Google Sheets, `.xlsx`, `.csv`에서 projection 시트를 불러올 수 있습니다.</p>
           </div>
-          <Button type="button" className="h-9 gap-1.5 text-[12px]" onClick={() => setGoogleSheetImportOpen(true)}>
-            <FileSpreadsheet className="h-4 w-4" />
-            기존 캐시플로 가져오기
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" className="h-9 gap-1.5 text-[12px]" asChild>
+              <Link to="/portal/cashflow/sheets-lab">
+                <FileSpreadsheet className="h-4 w-4" />
+                시트 연동 검토
+              </Link>
+            </Button>
+            <Button type="button" className="h-9 gap-1.5 text-[12px]" onClick={() => setGoogleSheetImportOpen(true)}>
+              <FileSpreadsheet className="h-4 w-4" />
+              기존 캐시플로 가져오기
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
