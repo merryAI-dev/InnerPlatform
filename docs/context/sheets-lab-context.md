@@ -54,6 +54,38 @@ Forbidden:
 - Unsupported layouts stop with a clear explanation instead of auto-correction.
 - No write occurs to Google Sheet, weekly ledger rows, cashflow actuals, or projection data.
 
+## Phase Plan
+
+Phase 0 - Boundary lock:
+
+- Status: complete when this document, the GitHub issue, branch tracking, and guarded deploy script all agree on the same scope.
+- Output: issue #274, bounded-module notes, and dry-run deployment guard verification.
+- No product code is required in this phase.
+
+Phase 1 - Sheet link intake:
+
+- Link input, spreadsheet ID extraction, and BFF read-only Google Sheet access.
+
+Phase 2 - Template validation:
+
+- Supported cashflow layout detection and cell coordinate mapping.
+
+Phase 3 - Java read model connection:
+
+- Actual and Projection values come only from Java cashflow snapshot data.
+
+Phase 4 - Read-only preview:
+
+- Render mapped values on a sheet-like preview without writeback.
+
+Phase 5 - Safety verification:
+
+- Tests and scans proving no sheet write, no ledger mutation, and no BFF/frontend cashflow calculation authority.
+
+Phase 6 - Sheets Lab deploy:
+
+- Deploy only through the guarded sheets-lab Vercel alias script.
+
 ## Bounded Module
 
 Keep experiment code inside:
@@ -65,6 +97,8 @@ src/app/lib/sheets-cashflow-readonly-client.ts
 ```
 
 If a change needs to edit core cashflow store, settlement ledger, or Java authority code, stop and move it into a separate core-change plan.
+
+Phase 1 implementation should start by creating the client file listed above. Do not add spreadsheet-lab entrypoints under existing settlement ledger or cashflow authority modules.
 
 ## Allowed Deployment
 
