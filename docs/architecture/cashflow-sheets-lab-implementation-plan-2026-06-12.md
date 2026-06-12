@@ -55,9 +55,11 @@ The source file is a Google Sheets CSV export with quoted multi-line cells. Pars
 - Projection section: rows 11-28.
 - Actual section: rows 30-47.
 - Week labels: row 12 for Projection, row 31 for Actual.
-- Week value columns: D through BK, 60 weekly columns total.
+- In this sample, week value columns are D through BK, 60 weekly columns total.
 - Week labels follow `YY-M-W`, for example `26-1-1` through `26-12-5`.
 - Total column observed at BO.
+
+These coordinates are sample evidence, not implementation constants. The mapper must scan each detected week row for `YY-M-W` labels and derive the first weekly column, last weekly column, and week count dynamically. A supported Sheet is not required to end at BK or contain exactly 60 week columns.
 
 The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are not authoritative cashflow values and must not be parsed as ledger Actual or Projection.
 
@@ -192,8 +194,9 @@ Completion criteria:
 - Sheet not shared with the MYSC system account returns a visible access error.
 - Valid sheet returns title, tabs, selected tab, and matrix.
 - Valid sheet returns Projection and Actual section candidates.
-- Valid sheet returns 60 weekly columns per supported section when labels run `26-1-1` through `26-12-5`.
-- Valid sheet returns 12 cashflow line rows and 720 mapping cells per mode for the provided CSV-equivalent structure.
+- Valid sheet returns weekly columns by scanning the detected week row for `YY-M-W` labels, without hardcoding the final column.
+- The provided CSV-equivalent fixture returns 60 weekly columns and 720 mapping cells per mode, but this fixture count is not a global template limit.
+- Valid sheet returns the detected cashflow line rows and mapping cell count for each mode.
 - Derived rows are identified separately and are not assigned cashflow line ids.
 - Rows outside the detected cashflow sections are ignored for mapping.
 - A non-workspace actor cannot access the lab route.
@@ -208,7 +211,8 @@ Recommended tests:
 - BFF route test proving external/non-workspace actors are denied.
 - Client helper test for URL, raw ID, and bad input.
 - CSV parser/normalizer test using a sanitized fixture derived from the real cashflow CSV structure.
-- Week-label mapping test for `26-1-1` through `26-12-5`.
+- Week-label mapping test for a known CSV-equivalent fixture with `26-1-1` through `26-12-5`.
+- Week-label mapping test where the final week column is not BK.
 - Row-label mapping test against `cashflow-policy.json` aliases.
 - Derived-row separation test.
 - Component shell test for loading, error, and preview states.
@@ -222,7 +226,7 @@ Scope:
 - Define the supported template contract:
   - required tab family is `CASHFLOW`.
   - required row labels include cashflow line labels from the existing policy.
-  - required week columns are detected from `YY-M-W` labels; D through BK is the first known template shape, not a hard dependency.
+  - required week columns are detected from `YY-M-W` labels; D through BK is only the first observed sample shape, not a dependency.
   - required columns can be matched to year-month/week labels.
   - Actual and Projection sections must be distinguishable.
   - derived rows are recognized as totals/balance, not cashflow line ids.
