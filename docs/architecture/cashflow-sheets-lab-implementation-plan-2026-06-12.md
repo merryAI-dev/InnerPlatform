@@ -40,6 +40,71 @@ The Google Sheet is a viewing format only. It is not a ledger, not a source of t
 | Export layout helpers | `src/app/platform/cashflow-export.ts` | Use as reference only. Do not expose export as a Phase 1-4 feature. |
 | Workbook family detection | `src/app/platform/google-sheet-workbook-plan.ts` | Reuse classification ideas for detecting cashflow tabs. Do not use AI analysis in this lab path. |
 
+## Golden Cashflow Template Evidence
+
+User-provided CSV inspected:
+
+```text
+/Users/boram/Downloads/[2026년 탐나는인재 창업트랙]사업비 관리 시트 - cashflow(사용내역 연동).csv
+```
+
+The source file is a Google Sheets CSV export with quoted multi-line cells. Parsed as CSV records, it has:
+
+- 65 records.
+- 68 max columns.
+- Projection section: rows 11-28.
+- Actual section: rows 30-47.
+- Week labels: row 12 for Projection, row 31 for Actual.
+- Week value columns: D through BK, 60 weekly columns total.
+- Week labels follow `YY-M-W`, for example `26-1-1` through `26-12-5`.
+- Total column observed at BO.
+
+The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are not authoritative cashflow values and must not be parsed as ledger Actual or Projection.
+
+### Section Structure
+
+| Mode | Header row | Week row | Line rows | Derived rows |
+| --- | ---: | ---: | --- | --- |
+| Projection | 11 | 12 | 14-18, 20-26 | 19 입금 합계, 27 출금 합계, 28 잔액 |
+| Actual | 30 | 31 | 33-37, 39-45 | 38 입금 합계, 46 출금 합계, 47 잔액 |
+
+### Line Mapping
+
+| Mode | Row | Label | Cashflow line id | Kind |
+| --- | ---: | --- | --- | --- |
+| Projection | 14 | MYSC 선입금(잔금 등 입금 필요 시) | `MYSC_PREPAY_IN` | line |
+| Projection | 15 | 매출액(입금) | `SALES_IN` | line |
+| Projection | 16 | 매출부가세(입금) | `SALES_VAT_IN` | line |
+| Projection | 17 | 팀지원금(입금) | `TEAM_SUPPORT_IN` | line |
+| Projection | 18 | 은행이자(입금) | `BANK_INTEREST_IN` | line |
+| Projection | 19 | 입금 합계 | derived | total |
+| Projection | 20 | 직접사업비(공급가액) | `DIRECT_COST_OUT` | line |
+| Projection | 21 | 매입부가세 | `INPUT_VAT_OUT` | line |
+| Projection | 22 | MYSC인건비 | `MYSC_LABOR_OUT` | line |
+| Projection | 23 | MYSC수익(간접비등) | `MYSC_PROFIT_OUT` | line |
+| Projection | 24 | 매출부가세(출금) | `SALES_VAT_OUT` | line |
+| Projection | 25 | 팀지원금(출금) | `TEAM_SUPPORT_OUT` | line |
+| Projection | 26 | 은행이자(출금) | `BANK_INTEREST_OUT` | line |
+| Projection | 27 | 출금 합계 | derived | total |
+| Projection | 28 | 잔액 (※ 중요) | derived | balance |
+| Actual | 33 | MYSC선입금(입금필요시) | `MYSC_PREPAY_IN` | line |
+| Actual | 34 | 매출액(입금) | `SALES_IN` | line |
+| Actual | 35 | 매출부가세(입금) | `SALES_VAT_IN` | line |
+| Actual | 36 | 팀지원금(입금) | `TEAM_SUPPORT_IN` | line |
+| Actual | 37 | 은행이자(입금) | `BANK_INTEREST_IN` | line |
+| Actual | 38 | 입금 합계 | derived | total |
+| Actual | 39 | 직접사업비(공급가액) | `DIRECT_COST_OUT` | line |
+| Actual | 40 | 매입부가세 | `INPUT_VAT_OUT` | line |
+| Actual | 41 | MYSC인건비 | `MYSC_LABOR_OUT` | line |
+| Actual | 42 | MYSC수익(간접비등) | `MYSC_PROFIT_OUT` | line |
+| Actual | 43 | 매출부가세(출금) | `SALES_VAT_OUT` | line |
+| Actual | 44 | 팀지원금(출금) | `TEAM_SUPPORT_OUT` | line |
+| Actual | 45 | 은행이자(출금) | `BANK_INTEREST_OUT` | line |
+| Actual | 46 | 출금 합계 | derived | total |
+| Actual | 47 | 잔액 | derived | balance |
+
+Phase 1 should show the parsed structure but should not validate every mapping yet. Phase 2 should use this section as the first golden template contract.
+
 ## Architecture
 
 ```text
@@ -119,6 +184,7 @@ Completion criteria:
 - Missing service account configuration returns `google_sheets_not_configured`.
 - Sheet not shared with the MYSC system account returns a visible access error.
 - Valid sheet returns title, tabs, selected tab, and matrix.
+- Valid sheet can be summarized as records, max columns, section candidates, and week-label candidates.
 - A non-workspace actor cannot access the lab route.
 - No mutation endpoint is introduced.
 
@@ -130,6 +196,7 @@ Recommended tests:
 - BFF route test proving `workspace_user`, `pm`, `finance`, and `admin` are allowed.
 - BFF route test proving external/non-workspace actors are denied.
 - Client helper test for URL, raw ID, and bad input.
+- CSV parser/normalizer test using a sanitized fixture derived from the real cashflow CSV structure.
 - Component shell test for loading, error, and preview states.
 
 ## Phase 2 - Template Validation And Cell Mapping
@@ -141,8 +208,10 @@ Scope:
 - Define the supported template contract:
   - required tab family is `CASHFLOW`.
   - required row labels include cashflow line labels from the existing policy.
+  - required week columns are D through BK or equivalent detected `YY-M-W` labels.
   - required columns can be matched to year-month/week labels.
   - Actual and Projection sections must be distinguishable.
+  - derived rows are recognized as totals/balance, not cashflow line ids.
 - Build deterministic validator.
 - Return mapping entries:
   - logical field
@@ -171,6 +240,7 @@ Completion criteria:
 Recommended tests:
 
 - Validator tests for supported sample.
+- Sanitized fixture test covering the real CSV row layout.
 - Missing header test.
 - Missing cashflow line test.
 - Ambiguous duplicate label test.
