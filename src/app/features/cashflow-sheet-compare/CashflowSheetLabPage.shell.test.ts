@@ -34,6 +34,12 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('source:');
+    expect(pageSource).toContain('캐시플로우 반영 미리보기');
+    expect(pageSource).toContain('가로 스크롤로 전체 주차 확인');
+    expect(pageSource).toContain('입금 합계');
+    expect(pageSource).toContain('출금 합계');
+    expect(pageSource).toContain('잔액');
+    expect(pageSource).not.toContain('현재 시트');
     expect(pageSource).not.toContain('upsertCashflowProjectionViaPlatformApi');
     expect(pageSource).not.toContain('exportCashflowWorkbookViaBff');
     expect(pageSource).not.toContain('saveExpenseSheetRows');

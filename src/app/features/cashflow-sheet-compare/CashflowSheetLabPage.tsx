@@ -9,6 +9,7 @@ import {
   previewCashflowSheetLabViaBff,
   saveCashflowSheetLabConfigViaBff,
   type CashflowSheetLabConfig,
+  type CashflowSheetLabPreviewValue,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
@@ -50,6 +51,101 @@ function formatTimestamp(value: string | undefined) {
   return date.toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function weekKey(yearMonth: string, weekNo: number) {
+  return `${yearMonth}:W${weekNo}`;
+}
+
+function previewValueKey(value: Pick<CashflowSheetLabPreviewValue, 'mode' | 'lineId' | 'yearMonth' | 'weekNo'>) {
+  return `${value.mode}:${value.lineId}:${weekKey(value.yearMonth, value.weekNo)}`;
+}
+
+function compareWeekLike(
+  a: Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>,
+  b: Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>,
+) {
+  return a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo;
+}
+
+function formatWeekLabel(yearMonth: string, weekNo: number) {
+  return `${yearMonth} W${weekNo}`;
+}
+
+function selectPreviewAmount(value: CashflowSheetLabPreviewValue | undefined) {
+  if (!value) return { sheetAmount: null, reflectedAmount: null, displayAmount: null, diff: null };
+  const sheetAmount = parseSheetAmount(value.sheetValue);
+  const reflectedAmount = value.amount;
+  const displayAmount = typeof sheetAmount === 'number' ? sheetAmount : reflectedAmount;
+  const diff = typeof reflectedAmount === 'number' && typeof sheetAmount === 'number'
+    ? reflectedAmount - sheetAmount
+    : null;
+  return { sheetAmount, reflectedAmount, displayAmount, diff };
+}
+
+function buildCashflowPreviewTables(preview: CashflowSheetLabPreviewResult | null) {
+  if (!preview) return [];
+  const valueIndex = new Map<string, CashflowSheetLabPreviewValue>();
+  const weeksByMode = new Map<string, Map<string, Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>>>();
+
+  for (const value of preview.previewValues) {
+    valueIndex.set(previewValueKey(value), value);
+    const modeWeeks = weeksByMode.get(value.mode) || new Map();
+    modeWeeks.set(weekKey(value.yearMonth, value.weekNo), {
+      yearMonth: value.yearMonth,
+      weekNo: value.weekNo,
+    });
+    weeksByMode.set(value.mode, modeWeeks);
+  }
+
+  return preview.template.sections.map((section) => {
+    const weeks = Array.from(weeksByMode.get(section.mode)?.values() || [])
+      .sort(compareWeekLike);
+    const rows = section.lineRows.map((line) => {
+      const cells = weeks.map((week) => {
+        const value = valueIndex.get(previewValueKey({
+          mode: section.mode,
+          lineId: line.lineId,
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+        }));
+        return {
+          ...week,
+          a1: value?.a1 || '',
+          sheetValue: value?.sheetValue || '',
+          ...selectPreviewAmount(value),
+        };
+      });
+      return { ...line, cells };
+    });
+    const inRows = rows.filter((row) => row.direction === 'IN');
+    const outRows = rows.filter((row) => row.direction === 'OUT');
+    const sumRows = (targetRows: typeof rows, index: number) => targetRows.reduce((total, row) => (
+      total + (row.cells[index]?.displayAmount || 0)
+    ), 0);
+    const totalIn = weeks.map((_, index) => sumRows(inRows, index));
+    const totalOut = weeks.map((_, index) => sumRows(outRows, index));
+    let runningBalance = 0;
+    const balances = weeks.map((_, index) => {
+      runningBalance += totalIn[index] - totalOut[index];
+      return runningBalance;
+    });
+    const nonEmptyCellCount = rows.reduce((count, row) => count + row.cells.filter((cell) => (
+      typeof cell.sheetAmount === 'number'
+      || typeof cell.reflectedAmount === 'number'
+      || cell.sheetValue.trim()
+    )).length, 0);
+    return {
+      mode: section.mode,
+      weeks,
+      inRows,
+      outRows,
+      totalIn,
+      totalOut,
+      balances,
+      nonEmptyCellCount,
+    };
+  });
+}
+
 function StatusPill({ tone, children }: { tone: 'ok' | 'warn' | 'error'; children: string }) {
   const className = tone === 'ok'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -60,6 +156,31 @@ function StatusPill({ tone, children }: { tone: 'ok' | 'warn' | 'error'; childre
     <span className={`inline-flex h-7 items-center rounded border px-2.5 text-[11px] font-medium ${className}`}>
       {children}
     </span>
+  );
+}
+
+function CashflowAmountCell({
+  value,
+}: {
+  value: ReturnType<typeof buildCashflowPreviewTables>[number]['inRows'][number]['cells'][number];
+}) {
+  const hasDiff = typeof value.diff === 'number' && value.diff !== 0;
+  const title = [
+    value.a1 ? `셀: ${value.a1}` : '',
+    value.sheetValue ? `원본 시트: ${value.sheetValue}` : '원본 시트: -',
+    `Java Read Model: ${formatAmount(value.reflectedAmount)}`,
+  ].filter(Boolean).join('\n');
+  return (
+    <td className="min-w-[112px] border-l border-slate-100 px-2 py-2 text-right tabular-nums" title={title}>
+      <div className={hasDiff ? 'font-semibold text-red-700' : 'text-slate-950'}>
+        {formatAmount(value.displayAmount)}
+      </div>
+      {hasDiff && (
+        <div className="mt-0.5 text-[10px] text-red-600">
+          차이 {formatAmount(value.diff)}
+        </div>
+      )}
+    </td>
   );
 }
 
@@ -209,41 +330,7 @@ export function CashflowSheetLabPage() {
     }
   }
 
-  const applicationRows = useMemo(() => {
-    if (!preview) return [];
-    return preview.previewValues
-      .map((value) => {
-        const sheetAmount = parseSheetAmount(value.sheetValue);
-        const reflectedAmount = value.amount;
-        const diff = typeof reflectedAmount === 'number' && typeof sheetAmount === 'number'
-          ? reflectedAmount - sheetAmount
-          : null;
-        return {
-          ...value,
-          sheetAmount,
-          reflectedAmount,
-          diff,
-        };
-      })
-      .filter((value) => (
-        typeof value.reflectedAmount === 'number'
-        || typeof value.sheetAmount === 'number'
-        || value.sheetValue.trim()
-      ));
-  }, [preview]);
-
-  const applicationSummary = useMemo(() => {
-    const totals = new Map<string, { sheet: number; reflected: number; count: number }>();
-    for (const row of applicationRows) {
-      const key = row.mode;
-      const current = totals.get(key) || { sheet: 0, reflected: 0, count: 0 };
-      current.sheet += row.sheetAmount || 0;
-      current.reflected += row.reflectedAmount || 0;
-      current.count += 1;
-      totals.set(key, current);
-    }
-    return Array.from(totals.entries()).map(([mode, value]) => ({ mode, ...value }));
-  }, [applicationRows]);
+  const cashflowPreviewTables = useMemo(() => buildCashflowPreviewTables(preview), [preview]);
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
@@ -466,7 +553,7 @@ export function CashflowSheetLabPage() {
             ))}
           </div>
           <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-            <DialogContent className="max-w-[calc(100vw-2rem)] rounded-none sm:max-w-6xl">
+            <DialogContent className="max-w-[calc(100vw-2rem)] rounded-none sm:max-w-[calc(100vw-2rem)] xl:max-w-7xl">
               <DialogHeader>
                 <DialogTitle className="text-base">캐시플로우 반영 미리보기</DialogTitle>
                 <DialogDescription>
@@ -474,13 +561,13 @@ export function CashflowSheetLabPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-2 sm:grid-cols-3">
-                {applicationSummary.map((item) => (
-                  <div key={item.mode} className="border border-slate-200 bg-white p-3">
-                    <div className="text-[11px] text-slate-500">{formatMode(item.mode)}</div>
-                    <div className="mt-1 text-[13px] font-semibold text-slate-950">{item.count.toLocaleString()}개 셀</div>
-                    <div className="mt-1 text-[11px] text-slate-600">
-                      시트 {formatAmount(item.sheet)} / 반영 {formatAmount(item.reflected)}
+                {cashflowPreviewTables.map((table) => (
+                  <div key={table.mode} className="border border-slate-200 bg-white p-3">
+                    <div className="text-[11px] text-slate-500">{formatMode(table.mode)}</div>
+                    <div className="mt-1 text-[13px] font-semibold text-slate-950">
+                      {table.weeks.length.toLocaleString()}주 · {table.nonEmptyCellCount.toLocaleString()}개 값
                     </div>
+                    <div className="mt-1 text-[11px] text-slate-600">가로 스크롤로 전체 주차 확인</div>
                   </div>
                 ))}
                 <div className="border border-slate-200 bg-white p-3">
@@ -492,42 +579,108 @@ export function CashflowSheetLabPage() {
                   </div>
                 </div>
               </div>
-              <div className="max-h-[62vh] overflow-auto border border-slate-200">
-                <table className="w-full min-w-[920px] text-left text-[11px]">
-                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Mode</th>
-                      <th className="px-3 py-2 font-medium">주차</th>
-                      <th className="px-3 py-2 font-medium">시트 라벨</th>
-                      <th className="px-3 py-2 font-medium">셀</th>
-                      <th className="px-3 py-2 text-right font-medium">현재 시트</th>
-                      <th className="px-3 py-2 text-right font-medium">반영값</th>
-                      <th className="px-3 py-2 text-right font-medium">차이</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {applicationRows.map((value) => (
-                      <tr key={`${value.mode}-${value.lineId}-${value.yearMonth}-${value.weekNo}-${value.a1}`} className="border-t border-slate-100">
-                        <td className="px-3 py-2 text-slate-700">{formatMode(value.mode)}</td>
-                        <td className="px-3 py-2 text-slate-500">{value.yearMonth} W{value.weekNo}</td>
-                        <td className="px-3 py-2 text-slate-900" title={value.lineId}>{value.label || value.canonicalLabel || value.lineId}</td>
-                        <td className="px-3 py-2 text-slate-500">{value.a1}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-700">{value.sheetValue || '-'}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-950">{formatAmount(value.reflectedAmount)}</td>
-                        <td className={`px-3 py-2 text-right tabular-nums ${value.diff ? 'text-red-700' : 'text-slate-500'}`}>
-                          {formatAmount(value.diff)}
-                        </td>
-                      </tr>
-                    ))}
-                    {applicationRows.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="px-3 py-10 text-center text-[12px] text-slate-500">
-                          반영 미리보기에 표시할 값이 없습니다.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <div className="max-h-[66vh] space-y-4 overflow-y-auto pr-1">
+                {cashflowPreviewTables.map((table) => (
+                  <div key={table.mode} className="border border-slate-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                      <h3 className="text-[13px] font-semibold text-slate-950">{formatMode(table.mode)}</h3>
+                      <span className="text-[11px] text-slate-500">
+                        {table.weeks.length.toLocaleString()}주 · 원본 시트 값 기준
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table
+                        className="text-left text-[11px]"
+                        style={{ minWidth: `${260 + table.weeks.length * 112}px` }}
+                      >
+                        <thead className="sticky top-0 z-20 bg-slate-50 text-slate-500">
+                          <tr>
+                            <th className="sticky left-0 z-30 w-[260px] min-w-[260px] border-r border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                              항목
+                            </th>
+                            {table.weeks.map((week) => (
+                              <th
+                                key={`${table.mode}-${weekKey(week.yearMonth, week.weekNo)}`}
+                                className="min-w-[112px] border-l border-slate-100 px-2 py-2 text-right font-medium"
+                              >
+                                {formatWeekLabel(week.yearMonth, week.weekNo)}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="bg-emerald-50 text-emerald-900">
+                            <td colSpan={table.weeks.length + 1} className="px-3 py-2 font-semibold">입금</td>
+                          </tr>
+                          {table.inRows.map((row) => (
+                            <tr key={`${table.mode}-${row.lineId}`} className="border-t border-slate-100">
+                              <td className="sticky left-0 z-10 w-[260px] min-w-[260px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900" title={row.lineId}>
+                                {row.canonicalLabel || row.label}
+                              </td>
+                              {row.cells.map((cell) => (
+                                <CashflowAmountCell
+                                  key={`${table.mode}-${row.lineId}-${weekKey(cell.yearMonth, cell.weekNo)}`}
+                                  value={cell}
+                                />
+                              ))}
+                            </tr>
+                          ))}
+                          <tr className="border-t border-slate-200 bg-emerald-50/70 font-semibold text-emerald-950">
+                            <td className="sticky left-0 z-10 w-[260px] min-w-[260px] border-r border-slate-200 bg-emerald-50 px-3 py-2">
+                              입금 합계
+                            </td>
+                            {table.totalIn.map((value, index) => (
+                              <td key={`${table.mode}-total-in-${index}`} className="min-w-[112px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
+                                {formatAmount(value)}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr className="bg-rose-50 text-rose-900">
+                            <td colSpan={table.weeks.length + 1} className="px-3 py-2 font-semibold">출금</td>
+                          </tr>
+                          {table.outRows.map((row) => (
+                            <tr key={`${table.mode}-${row.lineId}`} className="border-t border-slate-100">
+                              <td className="sticky left-0 z-10 w-[260px] min-w-[260px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900" title={row.lineId}>
+                                {row.canonicalLabel || row.label}
+                              </td>
+                              {row.cells.map((cell) => (
+                                <CashflowAmountCell
+                                  key={`${table.mode}-${row.lineId}-${weekKey(cell.yearMonth, cell.weekNo)}`}
+                                  value={cell}
+                                />
+                              ))}
+                            </tr>
+                          ))}
+                          <tr className="border-t border-slate-200 bg-rose-50/70 font-semibold text-rose-950">
+                            <td className="sticky left-0 z-10 w-[260px] min-w-[260px] border-r border-slate-200 bg-rose-50 px-3 py-2">
+                              출금 합계
+                            </td>
+                            {table.totalOut.map((value, index) => (
+                              <td key={`${table.mode}-total-out-${index}`} className="min-w-[112px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
+                                {formatAmount(value)}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr className="border-t border-slate-300 bg-slate-100 font-semibold text-slate-950">
+                            <td className="sticky left-0 z-10 w-[260px] min-w-[260px] border-r border-slate-200 bg-slate-100 px-3 py-2">
+                              잔액
+                            </td>
+                            {table.balances.map((value, index) => (
+                              <td key={`${table.mode}-balance-${index}`} className="min-w-[112px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
+                                {formatAmount(value)}
+                              </td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+                {cashflowPreviewTables.every((table) => table.weeks.length === 0) && (
+                  <div className="border border-slate-200 bg-white px-3 py-10 text-center text-[12px] text-slate-500">
+                    반영 미리보기에 표시할 주차가 없습니다.
+                  </div>
+                )}
               </div>
             </DialogContent>
           </Dialog>
