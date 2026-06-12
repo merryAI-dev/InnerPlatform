@@ -272,6 +272,74 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     @Override
+    public List<WeeklyExpenseActualEntity> replaceActualLines(
+        String tenantId,
+        String projectId,
+        String sheetKey,
+        List<SaveDraftResponse.ActualDelta> deltas
+    ) {
+        Map<String, Map<String, BigDecimal>> deltasByDoc = new LinkedHashMap<>();
+        for (SaveDraftResponse.ActualDelta delta : deltas) {
+            deltasByDoc
+                .computeIfAbsent(cashflowWeekId(projectId, delta.yearMonth(), delta.weekNo()), ignored -> new LinkedHashMap<>())
+                .merge(delta.cashflowLine(), amount(delta.amount()), BigDecimal::add);
+        }
+
+        Map<String, Map<String, Object>> docs = new LinkedHashMap<>();
+        QuerySnapshot existing = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
+        for (DocumentSnapshot doc : existing.getDocuments()) {
+            docs.put(doc.getId(), data(doc));
+        }
+        for (String docId : deltasByDoc.keySet()) {
+            docs.putIfAbsent(docId, baseCashflowWeekDoc(tenantId, projectId, docId));
+        }
+
+        for (Map.Entry<String, Map<String, Object>> entry : docs.entrySet()) {
+            String docId = entry.getKey();
+            Map<String, Object> doc = entry.getValue();
+            Map<String, BigDecimal> sheetDeltas = deltasByDoc.get(docId);
+            if (!deltasByDoc.containsKey(docId) && !doc.containsKey("weeklyExpenseActualBySheet")) {
+                continue;
+            }
+            WeekDocParts parsed = parseCashflowWeekId(projectId, docId);
+            List<SaveDraftResponse.ActualDelta> docDeltas = sheetDeltas == null
+                ? List.of()
+                : sheetDeltas.entrySet().stream()
+                    .map(delta -> new SaveDraftResponse.ActualDelta(
+                        parsed.yearMonth(),
+                        parsed.weekNo(),
+                        delta.getKey(),
+                        delta.getValue()
+                    ))
+                    .toList();
+            Map<String, Object> patch = FirestoreCashflowWeekActualMerge.buildPatch(
+                tenantId,
+                projectId,
+                sheetKey,
+                doc,
+                docDeltas,
+                Instant.now()
+            );
+            set(cashflowWeekRef(tenantId, docId), patch);
+        }
+
+        return deltas.stream()
+            .map(delta -> {
+                WeeklyExpenseActualEntity actual = new WeeklyExpenseActualEntity(
+                    tenantId,
+                    projectId,
+                    sheetKey,
+                    delta.yearMonth(),
+                    delta.weekNo(),
+                    delta.cashflowLine()
+                );
+                actual.setAmount(delta.amount());
+                return actual;
+            })
+            .toList();
+    }
+
+    @Override
     public List<WeeklyExpenseActualEntity> findActualLines(String tenantId, String projectId) {
         return readActualLines(tenantId, projectId, false);
     }

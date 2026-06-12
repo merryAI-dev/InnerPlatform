@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
@@ -161,6 +162,48 @@ describe('sheets cashflow readonly client', () => {
           startWeek: '26-1-1',
           endWeek: '26-6-5',
         },
+      }),
+    );
+  });
+
+  it('applies the reviewed sheet values through same-origin BFF', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          spreadsheetId: 'sheet-001',
+          spreadsheetTitle: 'cashflow',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          appliedLineCount: 24,
+          projectionLineCount: 12,
+          actualLineCount: 12,
+          javaResult: {
+            ok: true,
+            commandName: 'weeklyExpense.cashflowSheetLab.apply',
+            projectId: 'p001',
+            sourceSheetKey: 'cashflow-sheet-lab',
+            savedProjectionLineCount: 12,
+            savedActualLineCount: 12,
+            auditId: 'audit-1',
+          },
+        },
+      })),
+    });
+
+    await applyCashflowSheetLabViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      idempotencyKey: 'apply-001',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/apply',
+      expect.objectContaining({
+        tenantId: 'mysc',
+        body: { idempotencyKey: 'apply-001' },
+        idempotencyKey: 'apply-001',
       }),
     );
   });

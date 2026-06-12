@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CellCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CellPatchCommandRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
 import dev.merryai.innerplatform.weekly.api.CloseWeekResponse;
@@ -84,6 +86,7 @@ public class WeeklyExpenseCommandService {
     public static final String BANK_IMPORT_LIST_LINES_COMMAND = "weeklyExpense.bankStatement.listLines";
     public static final String BANK_IMPORT_APPLY_ITEMS_COMMAND = "weeklyExpense.bankStatement.applyItems";
     public static final String UPSERT_PROJECTION_COMMAND = "weeklyExpense.projection.upsert";
+    public static final String CASHFLOW_SHEET_LAB_APPLY_COMMAND = "weeklyExpense.cashflowSheetLab.apply";
     public static final String SUBMIT_WEEK_COMMAND = "weeklyExpense.submitWeek";
     public static final String CLOSE_WEEK_COMMAND = "weeklyExpense.closeWeek";
     public static final String WEEKLY_STATUS_READ_COMMAND = "weeklyExpense.status.read";
@@ -664,6 +667,126 @@ public class WeeklyExpenseCommandService {
             projectId,
             request.idempotencyKey(),
             UPSERT_PROJECTION_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowSheetLabApplyResponse applyCashflowSheetLab(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowSheetLabApplyRequest request
+    ) {
+        authorizationService.requireProjectAllowed(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId);
+        String requestHash = hashJson(request);
+        Optional<CashflowSheetLabApplyResponse> replay = readIdempotentResponse(
+            actor.tenantId(),
+            projectId,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowSheetLabApplyResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        String sourceSheetKey = defaultText(request.sourceSheetKey(), "cashflow-sheet-lab");
+        Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
+        Map<String, ProjectionLineAccumulator> actualPatches = new LinkedHashMap<>();
+        for (CashflowSheetLabApplyRequest.LinePatch line : request.lines()) {
+            String cashflowLine = CashflowLineCatalog.canonicalize(line.cashflowLine());
+            String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
+            BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
+            Map<String, ProjectionLineAccumulator> target = "actual".equals(line.mode())
+                ? actualPatches
+                : projectionPatches;
+            ProjectionLineAccumulator accumulator = target.get(key);
+            if (accumulator == null) {
+                target.put(key, new ProjectionLineAccumulator(line.yearMonth(), line.weekNo(), cashflowLine, amount));
+            } else {
+                accumulator.add(amount);
+            }
+        }
+
+        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
+        for (ProjectionLineAccumulator line : projectionPatches.values()) {
+            WeeklyExpenseProjectionEntity projectionEntity = persistence
+                .findProjectionLine(
+                    actor.tenantId(),
+                    projectId,
+                    line.yearMonth,
+                    line.weekNo,
+                    line.cashflowLine
+                )
+                .orElseGet(() -> new WeeklyExpenseProjectionEntity(
+                    actor.tenantId(),
+                    projectId,
+                    line.yearMonth,
+                    line.weekNo,
+                    line.cashflowLine
+                ));
+            projectionEntity.setAmount(line.amount);
+            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
+            projection.add(new CashflowSnapshotResponse.ProjectionLine(
+                saved.getYearMonth(),
+                saved.getWeekNo(),
+                saved.getCashflowLine(),
+                saved.getAmount()
+            ));
+        }
+
+        List<SaveDraftResponse.ActualDelta> actualDeltas = actualPatches.values().stream()
+            .map(line -> new SaveDraftResponse.ActualDelta(
+                line.yearMonth,
+                line.weekNo,
+                line.cashflowLine,
+                line.amount
+            ))
+            .toList();
+        List<WeeklyExpenseActualEntity> savedActual = persistence.replaceActualLines(
+            actor.tenantId(),
+            projectId,
+            sourceSheetKey,
+            actualDeltas
+        );
+        List<CashflowSnapshotResponse.ActualLine> actual = savedActual.stream()
+            .map(line -> new CashflowSnapshotResponse.ActualLine(
+                line.getSheetKey(),
+                line.getYearMonth(),
+                line.getWeekNo(),
+                line.getCashflowLine(),
+                line.getAmount()
+            ))
+            .toList();
+
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            actor.tenantId(),
+            projectId,
+            sourceSheetKey,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            actor.id(),
+            normalizeRole(actor.role()),
+            request.idempotencyKey(),
+            cashflowSheetLabMetadataJson(actor, sourceSheetKey, projection.size(), actual.size())
+        ));
+
+        CashflowSheetLabApplyResponse response = new CashflowSheetLabApplyResponse(
+            true,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            projectId,
+            sourceSheetKey,
+            projection.size(),
+            actual.size(),
+            projection,
+            actual,
+            auditEvent.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            actor.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
             requestHash,
             writeJson(response)
         ));
@@ -1812,6 +1935,20 @@ public class WeeklyExpenseCommandService {
     private String projectionMetadataJson(TrustedActorContext actor, int lineCount) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("lineCount", lineCount);
+        putActorMetadata(metadata, actor);
+        return writeJson(metadata);
+    }
+
+    private String cashflowSheetLabMetadataJson(
+        TrustedActorContext actor,
+        String sourceSheetKey,
+        int projectionLineCount,
+        int actualLineCount
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("sourceSheetKey", sourceSheetKey);
+        metadata.put("projectionLineCount", projectionLineCount);
+        metadata.put("actualLineCount", actualLineCount);
         putActorMetadata(metadata, actor);
         return writeJson(metadata);
     }

@@ -249,6 +249,18 @@ public class WeeklyExpenseController {
         return commandService.upsertProjection(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
     }
 
+    @PostMapping("/cashflow/{projectId}/sheet-lab/apply")
+    public CashflowSheetLabApplyResponse applyCashflowSheetLab(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody CashflowSheetLabApplyRequest request
+    ) {
+        return commandService.applyCashflowSheetLab(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+    }
+
     @PostMapping("/weekly-expenses/{projectId}/submit")
     public SubmitWeekResponse submitWeek(
         @PathVariable String projectId,

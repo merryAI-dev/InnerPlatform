@@ -170,6 +170,75 @@ describe('cashflow sheet lab route', () => {
     expect(new Set(response.body.previewValues.map((value) => value.weekNo))).toEqual(new Set([2]));
   });
 
+  it('applies saved sheet values to Java for both projection and actual', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      getCashflowSnapshot: vi.fn(),
+      applyCashflowSheetLab: vi.fn(async () => ({
+        ok: true,
+        commandName: 'weeklyExpense.cashflowSheetLab.apply',
+        projectId: 'project-a',
+        sourceSheetKey: 'cashflow-sheet-lab',
+        savedProjectionLineCount: 24,
+        savedActualLineCount: 24,
+        auditId: 'audit-1',
+      })),
+    };
+
+    const response = await request(createApp({ db, javaWeeklyClient }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-001' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      projectId: 'project-a',
+      appliedLineCount: 48,
+      projectionLineCount: 24,
+      actualLineCount: 24,
+    });
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledOnce();
+    const call = javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0];
+    expect(call).toMatchObject({
+      projectId: 'project-a',
+      idempotencyKey: 'apply-001',
+      sourceSheetKey: 'cashflow-sheet-lab',
+    });
+    expect(call.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mode: 'projection',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        cashflowLine: 'MYSC_PREPAY_IN',
+        amount: 999,
+      }),
+      expect.objectContaining({
+        mode: 'projection',
+        yearMonth: '2026-01',
+        weekNo: 2,
+        cashflowLine: 'MYSC_PREPAY_IN',
+        amount: 0,
+      }),
+      expect.objectContaining({
+        mode: 'actual',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        cashflowLine: 'SALES_IN',
+        amount: 999,
+      }),
+    ]));
+  });
+
   it('uses the saved sheet config when preview is requested without a sheet link', async () => {
     const db = createDb({
       data: {

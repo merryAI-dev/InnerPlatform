@@ -683,6 +683,37 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void cashflowSheetLabApplyPersistsProjectionAndActualLines() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "sheet-lab-apply-001",
+              "sourceSheetKey": "cashflow-sheet-lab",
+              "lines": [
+                {"mode": "projection", "yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "매출액(입금)", "amount": 5000000, "sourceCell": "D15", "sourceLabel": "매출액(입금)"},
+                {"mode": "actual", "yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "직접사업비(공급가액)", "amount": 1200000, "sourceCell": "D39", "sourceLabel": "직접사업비(공급가액)"}
+              ]
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.commandName").value("weeklyExpense.cashflowSheetLab.apply"))
+            .andExpect(jsonPath("$.savedProjectionLineCount").value(1))
+            .andExpect(jsonPath("$.savedActualLineCount").value(1))
+            .andExpect(jsonPath("$.projection[0].cashflowLine").value("SALES_IN"))
+            .andExpect(jsonPath("$.actual[0].sheetKey").value("cashflow-sheet-lab"))
+            .andExpect(jsonPath("$.actual[0].cashflowLine").value("DIRECT_COST_OUT"));
+
+        mockMvc.perform(asActor(get("/api/v1/cashflow/project-sheet-lab"), "tenant-sheet-lab", "viewer-sheet-lab", "viewer"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.SALES_IN").value(5000000))
+            .andExpect(jsonPath("$.readModel.months[0].actual.rowTotals.DIRECT_COST_OUT").value(1200000))
+            .andExpect(jsonPath("$.readModel.months[0].actual.weeks[0].weekOut").value(1200000));
+    }
+
+    @Test
     void cashflowSnapshotReadModelCanonicalizesAliasesAndMatchesRawProjectionActualTotals() throws Exception {
         String projection = """
             {

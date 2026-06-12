@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
@@ -207,6 +208,8 @@ export function CashflowSheetLabPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applyMessage, setApplyMessage] = useState('');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const previewRequestRef = useRef(0);
 
@@ -327,6 +330,34 @@ export function CashflowSheetLabPage() {
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleApply() {
+    if (!projectId || applying || editingConfig || !config) return;
+    setApplying(true);
+    setApplyMessage('');
+    setErrorMessage('');
+    const idempotencyKey = `cashflow-sheet-lab:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    try {
+      const result = await applyCashflowSheetLabViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        idempotencyKey,
+      });
+      setApplyMessage(`반영 완료: Projection ${result.projectionLineCount.toLocaleString()}개, Actual ${result.actualLineCount.toLocaleString()}개`);
+      const refreshed = await previewCashflowSheetLabViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        includeValues: true,
+      });
+      setPreview(refreshed);
+    } catch (error) {
+      setErrorMessage(formatError(error));
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -560,6 +591,23 @@ export function CashflowSheetLabPage() {
                   {preview.selectedSheetName} · {preview.activeWeekRange?.startWeek || '전체'} ~ {preview.activeWeekRange?.endWeek || '전체'}
                 </DialogDescription>
               </DialogHeader>
+              <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[12px] text-slate-600">
+                  검토한 원본 시트 값을 Projection/Actual에 반영합니다.
+                </div>
+                {applyMessage && (
+                  <div className="text-[12px] font-medium text-emerald-700">{applyMessage}</div>
+                )}
+                <Button
+                  type="button"
+                  className="ml-auto h-9 gap-1.5 rounded-none text-[12px]"
+                  disabled={applying || !preview.template.supported}
+                  onClick={handleApply}
+                >
+                  {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                  반영
+                </Button>
+              </div>
               <div className="grid gap-2 sm:grid-cols-3">
                 {cashflowPreviewTables.map((table) => (
                   <div key={table.mode} className="border border-slate-200 bg-white p-3">

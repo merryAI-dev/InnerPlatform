@@ -9,10 +9,12 @@ import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { isWorkspaceUser } from '../java-weekly-client.mjs';
 import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
 import {
+  cashflowSheetLabApplySchema,
   cashflowSheetLabConfigSchema,
   cashflowSheetLabPreviewSchema,
   parseWithSchema,
 } from '../schemas.mjs';
+import { randomUUID } from 'node:crypto';
 
 const CASHFLOW_SHEET_LAB_READ_RANGE = 'A1:ZZ220';
 const DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS = 15_000;
@@ -271,6 +273,13 @@ function readSheetCell(matrix, mapping) {
   return readOptionalText(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
 }
 
+function parseCashflowSheetAmount(value) {
+  const normalized = String(value || '').replace(/,/g, '').replace(/\s+/g, '').trim();
+  if (!normalized || normalized === '-') return 0;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function buildPreviewValues(template, cashflowSnapshot, matrix = []) {
   const amountIndex = cashflowSnapshot ? buildSnapshotAmountIndex(cashflowSnapshot) : null;
   return template.mappingCandidates.map((mapping) => ({
@@ -279,6 +288,20 @@ function buildPreviewValues(template, cashflowSnapshot, matrix = []) {
     amount: readIndexedSnapshotAmount(amountIndex, mapping),
     source: 'java_read_model',
   }));
+}
+
+function buildApplyLines(template, matrix = [], weekRange) {
+  return template.mappingCandidates
+    .filter((mapping) => isInWeekRange(mapping, weekRange))
+    .map((mapping) => ({
+      mode: mapping.mode,
+      yearMonth: mapping.yearMonth,
+      weekNo: mapping.weekNo,
+      cashflowLine: mapping.lineId,
+      amount: parseCashflowSheetAmount(readSheetCell(matrix, mapping)),
+      sourceCell: mapping.a1,
+      sourceLabel: mapping.label || mapping.canonicalLabel || mapping.lineId,
+    }));
 }
 
 function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS } = {}) {
@@ -458,6 +481,63 @@ export function mountCashflowSheetLabRoutes(app, {
         previewValues,
         cashflowSnapshotStatus,
         cashflowSnapshotError,
+      });
+    } catch (error) {
+      throw normalizeRouteError(error);
+    }
+  }));
+
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/apply', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, javaWeeklyClient?.workspaceEmailDomain || workspaceEmailDomain);
+    if (!javaWeeklyClient?.applyCashflowSheetLab) {
+      throw createHttpError(503, 'Java cashflow sheet apply API is not configured.', 'jvm_weekly_api_unconfigured');
+    }
+
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab apply payload');
+    const project = await readProjectDocument(db, tenantId, projectId);
+    const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
+    const weekRange = normalizeWeekRange(source);
+
+    try {
+      const preview = await loadSheetPreview({
+        value: source.value,
+        sheetName: source.sheetName,
+      });
+      assertCashflowUsageLinkedSheet(preview);
+      const template = analyzeCashflowSheetTemplate(preview.matrix);
+      if (!template.supported) {
+        throw createHttpError(
+          400,
+          '지원하지 않는 cashflow 시트 구조라 반영할 수 없습니다.',
+          'cashflow_sheet_template_unsupported',
+        );
+      }
+      const lines = buildApplyLines(template, preview.matrix, weekRange);
+      if (lines.length === 0) {
+        throw createHttpError(400, '반영할 cashflow 값이 없습니다.', 'cashflow_sheet_apply_empty');
+      }
+      const applyResult = await javaWeeklyClient.applyCashflowSheetLab({
+        context: buildJavaReadContext(req.context, javaWeeklyClient.workspaceEmailDomain || workspaceEmailDomain),
+        projectId,
+        idempotencyKey: parsed.idempotencyKey || `cashflow-sheet-lab:${projectId}:${randomUUID()}`,
+        sourceSheetKey: 'cashflow-sheet-lab',
+        lines,
+      });
+      res.status(200).json({
+        projectId,
+        spreadsheetId: preview.spreadsheetId,
+        spreadsheetTitle: preview.spreadsheetTitle,
+        selectedSheetName: preview.selectedSheetName,
+        activeWeekRange: {
+          startWeek: weekRange.startWeek,
+          endWeek: weekRange.endWeek,
+        },
+        appliedLineCount: lines.length,
+        projectionLineCount: lines.filter((line) => line.mode === 'projection').length,
+        actualLineCount: lines.filter((line) => line.mode === 'actual').length,
+        javaResult: applyResult,
       });
     } catch (error) {
       throw normalizeRouteError(error);

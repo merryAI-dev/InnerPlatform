@@ -49,6 +49,13 @@ public interface WeeklyExpensePersistence {
         List<SaveDraftResponse.ActualDelta> deltas
     );
 
+    List<WeeklyExpenseActualEntity> replaceActualLines(
+        String tenantId,
+        String projectId,
+        String sheetKey,
+        List<SaveDraftResponse.ActualDelta> deltas
+    );
+
     List<WeeklyExpenseActualEntity> findActualLines(String tenantId, String projectId);
 
     List<WeeklyExpenseActualEntity> findActualLinesForAudit(String tenantId, String projectId);

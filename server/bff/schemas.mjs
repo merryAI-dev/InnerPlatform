@@ -103,6 +103,14 @@ export const cashflowSheetLabPreviewSchema = z.object({
   includeValues: z.boolean().optional(),
 }).strict();
 
+export const cashflowSheetLabApplySchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+  idempotencyKey: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const cashflowSheetLabConfigSchema = z.object({
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),

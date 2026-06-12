@@ -30,11 +30,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('../../data/portal-store');
   });
 
-  it('uses the readonly lab client and does not expose cashflow write-looking actions', () => {
+  it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
+    expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('source:');
     expect(pageSource).toContain('캐시플로우 반영 미리보기');
+    expect(pageSource).toContain('반영');
     expect(pageSource).toContain('가로 스크롤로 전체 주차 확인');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');

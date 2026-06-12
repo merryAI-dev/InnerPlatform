@@ -140,6 +140,30 @@ public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
     }
 
     @Override
+    public List<WeeklyExpenseActualEntity> replaceActualLines(
+        String tenantId,
+        String projectId,
+        String sheetKey,
+        List<SaveDraftResponse.ActualDelta> deltas
+    ) {
+        actualRepository.deleteByTenantIdAndProjectIdAndSheetKey(tenantId, projectId, sheetKey);
+        List<WeeklyExpenseActualEntity> saved = new ArrayList<>();
+        for (SaveDraftResponse.ActualDelta delta : deltas) {
+            WeeklyExpenseActualEntity actual = new WeeklyExpenseActualEntity(
+                tenantId,
+                projectId,
+                sheetKey,
+                delta.yearMonth(),
+                delta.weekNo(),
+                delta.cashflowLine()
+            );
+            actual.setAmount(delta.amount());
+            saved.add(actualRepository.save(actual));
+        }
+        return saved;
+    }
+
+    @Override
     public List<WeeklyExpenseActualEntity> findActualLines(String tenantId, String projectId) {
         return actualRepository.findByTenantIdAndProjectId(tenantId, projectId);
     }

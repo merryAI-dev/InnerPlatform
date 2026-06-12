@@ -157,9 +157,27 @@ export function createJavaWeeklyClient({
     });
   }
 
+  async function applyCashflowSheetLab({ context, projectId, idempotencyKey, sourceSheetKey, lines }) {
+    const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
+    if (!normalizedProjectId) {
+      throw createHttpError(400, 'projectId is required.', 'project_id_required');
+    }
+    return requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/apply`,
+      body: {
+        idempotencyKey,
+        sourceSheetKey,
+        lines,
+      },
+    });
+  }
+
   return {
     requestJson,
     getCashflowSnapshot,
+    applyCashflowSheetLab,
     authMode,
     workspaceEmailDomain,
   };

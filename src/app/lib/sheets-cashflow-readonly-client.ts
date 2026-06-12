@@ -146,6 +146,29 @@ export interface CashflowSheetLabConfigResult {
   config: CashflowSheetLabConfig | null;
 }
 
+export interface CashflowSheetLabApplyResult {
+  projectId: string;
+  spreadsheetId: string;
+  spreadsheetTitle: string;
+  selectedSheetName: string;
+  activeWeekRange?: {
+    startWeek?: string;
+    endWeek?: string;
+  };
+  appliedLineCount: number;
+  projectionLineCount: number;
+  actualLineCount: number;
+  javaResult: {
+    ok: boolean;
+    commandName: string;
+    projectId: string;
+    sourceSheetKey: string;
+    savedProjectionLineCount: number;
+    savedActualLineCount: number;
+    auditId: string;
+  };
+}
+
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
 function createSameOriginBffClient(): PlatformApiClient {
@@ -182,6 +205,30 @@ export async function previewCashflowSheetLabViaBff(params: {
         ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
       },
       timeoutMs: 25000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function applyCashflowSheetLabViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabApplyResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.post<CashflowSheetLabApplyResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/apply`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        idempotencyKey: params.idempotencyKey,
+      },
+      idempotencyKey: params.idempotencyKey,
+      timeoutMs: 30000,
       retries: 0,
     },
   );
