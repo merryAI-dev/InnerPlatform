@@ -100,4 +100,59 @@ describe('sheets cashflow readonly client', () => {
     );
     expect(client.post.mock.calls[0][1].headers).toBeUndefined();
   });
+
+  it('uses same-origin BFF instead of the global Java API base URL', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      projectId: 'p001',
+      spreadsheetId: 'sheet-001',
+      spreadsheetTitle: 'cashflow',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [],
+      matrix: [],
+      accessPolicy: {
+        googleAuth: 'service_account',
+        googleScope: 'spreadsheets.readonly',
+        sheetPermission: 'shared_with_mysc_system_account',
+        layoutSource: 'google_sheet_formatted_values',
+        valueSource: 'java_cashflow_read_model',
+        actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
+        sheetReadRange: 'A1:ZZ220',
+        sheetPreviewCache: 'miss',
+        sheetNamePolicy: 'cashflow_usage_linked_only',
+      },
+      template: {
+        supported: true,
+        policyVersion: 'cashflow-policy-v1',
+        sectionOrder: ['projection', 'actual'],
+        sections: [],
+        mappingCandidates: [],
+        derivedRows: [],
+        ignoredRows: [],
+        reasons: [],
+        stats: { rowCount: 0, maxColumnCount: 0, sectionCount: 0, mappingCount: 0 },
+      },
+      previewValues: [],
+      cashflowSnapshotStatus: 'pending',
+      cashflowSnapshotError: null,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchImpl);
+
+    try {
+      await previewCashflowSheetLabViaBff({
+        tenantId: 'mysc',
+        actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+        projectId: 'p001',
+        value: 'sheet-001',
+        includeValues: false,
+      });
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/v1/projects/p001/cashflow-sheet-lab/preview');
+  });
 });

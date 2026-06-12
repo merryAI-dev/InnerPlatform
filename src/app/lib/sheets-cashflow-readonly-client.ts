@@ -1,10 +1,10 @@
 import {
-  createPlatformApiClient,
   toRequestActor,
   type ActorLike,
   type GoogleSheetPreviewSheet,
   type PlatformApiClientLike,
 } from './platform-bff-client';
+import { PlatformApiClient } from '../platform/api-client';
 import { extractSpreadsheetId } from '../integrations/google-sheets/link';
 
 export interface CashflowSheetLabWeekColumn {
@@ -119,6 +119,15 @@ export interface CashflowSheetLabPreviewResult {
 
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
+function createSameOriginBffClient(): PlatformApiClient {
+  return new PlatformApiClient({
+    baseUrl: '',
+    maxRetries: 1,
+    retryDelayMs: 200,
+    timeoutMs: 25000,
+  });
+}
+
 export async function previewCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -128,7 +137,7 @@ export async function previewCashflowSheetLabViaBff(params: {
   includeValues?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabPreviewResult> {
-  const apiClient = params.client || createPlatformApiClient();
+  const apiClient = params.client || createSameOriginBffClient();
   const response = await apiClient.post<CashflowSheetLabPreviewResult>(
     `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/preview`,
     {
