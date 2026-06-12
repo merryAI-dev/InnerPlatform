@@ -121,6 +121,8 @@ describe('cashflow sheet lab route', () => {
       .send({
         value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
         sheetName: 'cashflow(사용내역 연동)',
+        startWeek: '26-1-1',
+        endWeek: '26-1-3',
       })
       .expect(200);
 
@@ -131,6 +133,8 @@ describe('cashflow sheet lab route', () => {
         value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
         sheetName: 'cashflow(사용내역 연동)',
         spreadsheetId: 'spreadsheet-a',
+        startWeek: '26-1-1',
+        endWeek: '26-1-3',
         updatedBy: {
           email: 'user@mysc.co.kr',
           role: 'workspace_user',
@@ -138,6 +142,32 @@ describe('cashflow sheet lab route', () => {
       },
     });
     expect(db.__getDocument().cashflowSheetLab).toMatchObject(response.body.config);
+  });
+
+  it('filters preview values to the saved project week range', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-2',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+
+    const response = await request(createApp({ db }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ includeValues: false })
+      .expect(200);
+
+    expect(response.body.activeWeekRange).toEqual({
+      startWeek: '26-1-2',
+      endWeek: '26-1-2',
+    });
+    expect(response.body.previewValues).toHaveLength(24);
+    expect(new Set(response.body.previewValues.map((value) => value.weekNo))).toEqual(new Set([2]));
   });
 
   it('uses the saved sheet config when preview is requested without a sheet link', async () => {

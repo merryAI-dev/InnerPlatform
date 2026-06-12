@@ -115,6 +115,10 @@ export interface CashflowSheetLabPreviewResult {
     sheetNamePolicy: 'cashflow_usage_linked_only';
     sheetConfigSource?: 'request' | 'saved_config';
   };
+  activeWeekRange?: {
+    startWeek?: string;
+    endWeek?: string;
+  };
   template: CashflowSheetLabTemplateResult;
   previewValues: CashflowSheetLabPreviewValue[];
   cashflowSnapshotStatus: 'pending' | 'ready' | 'unavailable';
@@ -124,6 +128,8 @@ export interface CashflowSheetLabPreviewResult {
 export interface CashflowSheetLabConfig {
   value: string;
   sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
   spreadsheetId?: string;
   spreadsheetTitle?: string;
   updatedAt?: string;
@@ -157,6 +163,8 @@ export async function previewCashflowSheetLabViaBff(params: {
   projectId: string;
   value?: string;
   sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
   includeValues?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabPreviewResult> {
@@ -169,6 +177,8 @@ export async function previewCashflowSheetLabViaBff(params: {
       body: {
         ...(params.value ? { value: params.value } : {}),
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
+        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
         ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
       },
       timeoutMs: 25000,
@@ -203,6 +213,8 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
   projectId: string;
   value: string;
   sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabConfigResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -215,6 +227,8 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
       body: {
         value: params.value,
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
+        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
       },
       timeoutMs: 25000,
       retries: 0,

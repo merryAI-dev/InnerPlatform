@@ -142,6 +142,8 @@ describe('sheets cashflow readonly client', () => {
       projectId: 'p001',
       value: 'sheet-001',
       sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-6-5',
       client,
     });
 
@@ -156,6 +158,8 @@ describe('sheets cashflow readonly client', () => {
         body: {
           value: 'sheet-001',
           sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-6-5',
         },
       }),
     );

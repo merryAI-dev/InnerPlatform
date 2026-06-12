@@ -7,7 +7,7 @@ import {
 } from '../bff-utils.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { isWorkspaceUser } from '../java-weekly-client.mjs';
-import { analyzeCashflowSheetTemplate, cashflowMappingKey } from '../cashflow-sheet-template.mjs';
+import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
 import {
   cashflowSheetLabConfigSchema,
   cashflowSheetLabPreviewSchema,
@@ -96,6 +96,8 @@ function readCashflowSheetLabConfig(project = {}) {
     sheetName: readOptionalText(config.sheetName),
     spreadsheetId: readOptionalText(config.spreadsheetId),
     spreadsheetTitle: readOptionalText(config.spreadsheetTitle),
+    startWeek: readOptionalText(config.startWeek),
+    endWeek: readOptionalText(config.endWeek),
     updatedAt: readOptionalText(config.updatedAt),
     updatedBy: config.updatedBy && typeof config.updatedBy === 'object' ? {
       uid: readOptionalText(config.updatedBy.uid),
@@ -119,6 +121,8 @@ function resolvePreviewSource(parsed, savedConfig) {
     return {
       value,
       sheetName: readOptionalText(parsed.sheetName) || undefined,
+      startWeek: readOptionalText(parsed.startWeek),
+      endWeek: readOptionalText(parsed.endWeek),
       source: 'request',
     };
   }
@@ -126,6 +130,8 @@ function resolvePreviewSource(parsed, savedConfig) {
     return {
       value: savedConfig.value,
       sheetName: readOptionalText(parsed.sheetName) || savedConfig.sheetName || undefined,
+      startWeek: readOptionalText(parsed.startWeek) || savedConfig.startWeek,
+      endWeek: readOptionalText(parsed.endWeek) || savedConfig.endWeek,
       source: 'saved_config',
     };
   }
@@ -134,6 +140,46 @@ function resolvePreviewSource(parsed, savedConfig) {
     'Cashflow sheet URL is not configured. Save the sheet link first.',
     'cashflow_sheet_config_required',
   );
+}
+
+function weekSortKey(week) {
+  if (!week) return null;
+  return week.year * 10000 + week.month * 100 + week.weekNo;
+}
+
+function normalizeWeekRange({ startWeek, endWeek }) {
+  const start = readOptionalText(startWeek);
+  const end = readOptionalText(endWeek);
+  const parsedStart = start ? parseCashflowWeekLabel(start) : null;
+  const parsedEnd = end ? parseCashflowWeekLabel(end) : null;
+  if (start && !parsedStart) {
+    throw createHttpError(400, `Invalid startWeek: ${start}`, 'cashflow_week_range_invalid');
+  }
+  if (end && !parsedEnd) {
+    throw createHttpError(400, `Invalid endWeek: ${end}`, 'cashflow_week_range_invalid');
+  }
+  if (parsedStart && parsedEnd && weekSortKey(parsedStart) > weekSortKey(parsedEnd)) {
+    throw createHttpError(400, 'startWeek must be before or equal to endWeek.', 'cashflow_week_range_invalid');
+  }
+  return {
+    startWeek: parsedStart?.raw || '',
+    endWeek: parsedEnd?.raw || '',
+    startKey: weekSortKey(parsedStart),
+    endKey: weekSortKey(parsedEnd),
+  };
+}
+
+function isInWeekRange(value, range) {
+  if (!range?.startKey && !range?.endKey) return true;
+  const key = weekSortKey({
+    year: Number.parseInt(String(value.yearMonth).slice(0, 4), 10),
+    month: Number.parseInt(String(value.yearMonth).slice(5, 7), 10),
+    weekNo: Number(value.weekNo),
+  });
+  if (!Number.isFinite(key)) return false;
+  if (range.startKey && key < range.startKey) return false;
+  if (range.endKey && key > range.endKey) return false;
+  return true;
 }
 
 async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, preview, context }) {
@@ -146,6 +192,8 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, pre
     sheetName: preview.selectedSheetName,
     spreadsheetId: preview.spreadsheetId,
     spreadsheetTitle: preview.spreadsheetTitle,
+    startWeek: readOptionalText(parsed.startWeek),
+    endWeek: readOptionalText(parsed.endWeek),
     updatedAt: now,
     updatedBy: {
       uid: readOptionalText(context?.actorId),
@@ -318,6 +366,7 @@ export function mountCashflowSheetLabRoutes(app, {
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabConfigSchema, req.body, 'Invalid cashflow sheet lab config payload');
+    normalizeWeekRange(parsed);
 
     await readProjectDocument(db, tenantId, projectId);
 
@@ -349,6 +398,7 @@ export function mountCashflowSheetLabRoutes(app, {
     const parsed = parseWithSchema(cashflowSheetLabPreviewSchema, req.body, 'Invalid cashflow sheet lab preview payload');
     const project = await readProjectDocument(db, tenantId, projectId);
     const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
+    const weekRange = normalizeWeekRange(source);
 
     try {
       const preview = await loadSheetPreview({
@@ -378,6 +428,9 @@ export function mountCashflowSheetLabRoutes(app, {
         }
       }
 
+      const previewValues = buildPreviewValues(template, cashflowSnapshot, preview.matrix)
+        .filter((value) => isInWeekRange(value, weekRange));
+
       res.status(200).json({
         projectId,
         spreadsheetId: preview.spreadsheetId,
@@ -397,8 +450,12 @@ export function mountCashflowSheetLabRoutes(app, {
           sheetNamePolicy: 'cashflow_usage_linked_only',
           sheetConfigSource: source.source,
         },
+        activeWeekRange: {
+          startWeek: weekRange.startWeek,
+          endWeek: weekRange.endWeek,
+        },
         template,
-        previewValues: buildPreviewValues(template, cashflowSnapshot, preview.matrix),
+        previewValues,
         cashflowSnapshotStatus,
         cashflowSnapshotError,
       });
