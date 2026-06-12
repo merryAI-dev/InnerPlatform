@@ -75,6 +75,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
   it('keeps actual read-only and hydrates it from the Java read model', () => {
     expect(cashflowProjectSheetSource).toContain('hydrateProjectCashflowSnapshot({ projectId })');
     expect(cashflowProjectSheetSource).toContain("tableMode === 'actual' || !canEdit");
+    expect(cashflowProjectSheetSource).toContain('getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId })');
+    expect(cashflowProjectSheetSource).not.toContain("getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId })");
     expect(cashflowProjectSheetSource).not.toContain("mode: 'actual',\\n        amounts");
     expect(cashflowProjectSheetSource).not.toContain('실적값을 확인하고 필요 시 보정합니다.');
   });

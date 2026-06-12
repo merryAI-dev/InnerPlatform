@@ -741,7 +741,7 @@ export function CashflowProjectSheet({
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
                       if (tableMode === 'actual' || !canEdit) {
-                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
+                        const amount = getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           {fmt(amount)}
@@ -802,7 +802,7 @@ export function CashflowProjectSheet({
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
                       if (tableMode === 'actual' || !canEdit) {
-                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
+                        const amount = getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
                         return (
                         <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                           {fmt(amount)}
