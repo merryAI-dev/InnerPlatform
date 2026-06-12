@@ -98,6 +98,7 @@ export const googleSheetImportPreviewSchema = z.object({
 export const cashflowSheetLabPreviewSchema = z.object({
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),
+  includeValues: z.boolean().optional(),
 }).strict();
 
 export const googleSheetImportAnalyzeSchema = z.object({

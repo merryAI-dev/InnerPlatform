@@ -104,6 +104,16 @@ function quoteSheetNameForRange(sheetName) {
   return `'${normalized.replace(/'/g, "''")}'`;
 }
 
+function normalizeA1Range(rangeA1) {
+  return readOptionalText(rangeA1).replace(/^'+|'+$/g, '');
+}
+
+function buildValuesRange(sheetName, rangeA1) {
+  const quotedSheetName = quoteSheetNameForRange(sheetName);
+  const normalizedRange = normalizeA1Range(rangeA1);
+  return normalizedRange ? `${quotedSheetName}!${normalizedRange}` : quotedSheetName;
+}
+
 function normalizeSheetDescriptor(sheet) {
   return {
     sheetId: readOptionalNumber(sheet?.properties?.sheetId) ?? 0,
@@ -204,10 +214,10 @@ export function createGoogleSheetsService(options = {}) {
     };
   }
 
-  async function getSheetValues({ spreadsheetId, sheetName, accessToken }) {
+  async function getSheetValues({ spreadsheetId, sheetName, accessToken, rangeA1 }) {
     const normalizedId = extractSpreadsheetId(spreadsheetId);
     const normalizedSheetName = normalizeSheetTitle(sheetName);
-    const range = quoteSheetNameForRange(normalizedSheetName);
+    const range = buildValuesRange(normalizedSheetName, rangeA1);
     const params = new URLSearchParams({
       majorDimension: 'ROWS',
       valueRenderOption: 'FORMATTED_VALUE',
@@ -225,7 +235,7 @@ export function createGoogleSheetsService(options = {}) {
       : [];
   }
 
-  async function previewSpreadsheet({ value, sheetName, accessToken }) {
+  async function previewSpreadsheet({ value, sheetName, accessToken, rangeA1 }) {
     const spreadsheetId = extractSpreadsheetId(value);
     if (!spreadsheetId) {
       throw new GoogleSheetsServiceError(
@@ -264,6 +274,7 @@ export function createGoogleSheetsService(options = {}) {
       spreadsheetId: meta.spreadsheetId,
       sheetName: selectedSheet.title,
       accessToken,
+      rangeA1,
     });
 
     return {

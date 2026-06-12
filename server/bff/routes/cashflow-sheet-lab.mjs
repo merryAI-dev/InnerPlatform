@@ -6,10 +6,12 @@ import {
 } from '../bff-utils.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { isWorkspaceUser } from '../java-weekly-client.mjs';
-import { analyzeCashflowSheetTemplate } from '../cashflow-sheet-template.mjs';
+import { analyzeCashflowSheetTemplate, cashflowMappingKey } from '../cashflow-sheet-template.mjs';
 import { cashflowSheetLabPreviewSchema, parseWithSchema } from '../schemas.mjs';
 
-const CASHFLOW_SHEET_LAB_ROLES = ['workspace_user', 'pm', 'finance', 'admin'];
+const CASHFLOW_SHEET_LAB_READ_RANGE = 'A1:ZZ220';
+const DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS = 15_000;
+const CASHFLOW_USAGE_SHEET_NAME_PARTS = ['cashflow', '사용내역', '연동'];
 
 function normalizeRole(value) {
   const normalized = readOptionalText(value).toLowerCase();
@@ -18,9 +20,12 @@ function normalizeRole(value) {
 
 function assertCashflowSheetLabAccess(req, workspaceEmailDomain = 'mysc.co.kr') {
   const actorRole = normalizeRole(req.context?.actorRole);
-  if (CASHFLOW_SHEET_LAB_ROLES.includes(actorRole)) return;
   if (isWorkspaceUser(req.context, workspaceEmailDomain)) return;
-  throw createHttpError(403, `Role '${actorRole || 'unknown'}' is not allowed to preview cashflow sheets lab`, 'forbidden');
+  throw createHttpError(
+    403,
+    `Workspace email is required to preview cashflow sheets lab: ${actorRole || 'unknown'}`,
+    'forbidden',
+  );
 }
 
 function normalizeRouteError(error) {
@@ -45,43 +50,157 @@ function buildJavaReadContext(context, workspaceEmailDomain = 'mysc.co.kr') {
   };
 }
 
-function readSnapshotAmountFromReadModel(snapshot, mapping) {
+function normalizeSheetFamilyName(value) {
+  return readOptionalText(value).toLowerCase().replace(/\s+/g, '');
+}
+
+function isCashflowUsageLinkedSheetName(value) {
+  const normalized = normalizeSheetFamilyName(value);
+  return CASHFLOW_USAGE_SHEET_NAME_PARTS.every((part) => normalized.includes(part));
+}
+
+function findCashflowUsageLinkedSheet(sheets = []) {
+  return sheets.find((sheet) => isCashflowUsageLinkedSheetName(sheet?.title)) || null;
+}
+
+function assertCashflowUsageLinkedSheet(preview) {
+  if (isCashflowUsageLinkedSheetName(preview?.selectedSheetName)) return;
+  throw createHttpError(
+    400,
+    'cashflow(사용내역 연동) 계열 시트 탭만 검토할 수 있습니다.',
+    'cashflow_sheet_tab_unsupported',
+  );
+}
+
+function setFiniteAmount(index, mapping, amount) {
+  if (typeof amount === 'number' && Number.isFinite(amount)) {
+    index.set(cashflowMappingKey(mapping), amount);
+  }
+}
+
+function buildSnapshotAmountIndex(snapshot) {
+  const index = new Map();
+
   const months = Array.isArray(snapshot?.readModel?.months) ? snapshot.readModel.months : [];
-  const month = months.find((entry) => entry?.yearMonth === mapping.yearMonth);
-  const modeModel = month?.[mapping.mode];
-  const weeks = Array.isArray(modeModel?.weeks) ? modeModel.weeks : [];
-  const week = weeks.find((entry) => Number(entry?.weekNo) === mapping.weekNo);
-  const amount = week?.amounts?.[mapping.lineId];
-  return typeof amount === 'number' && Number.isFinite(amount) ? amount : null;
-}
+  for (const month of months) {
+    const yearMonth = readOptionalText(month?.yearMonth);
+    if (!yearMonth) continue;
+    for (const mode of ['projection', 'actual']) {
+      const weeks = Array.isArray(month?.[mode]?.weeks) ? month[mode].weeks : [];
+      for (const week of weeks) {
+        const weekNo = Number(week?.weekNo);
+        if (!Number.isFinite(weekNo)) continue;
+        const amounts = week?.amounts && typeof week.amounts === 'object' ? week.amounts : {};
+        for (const [lineId, amount] of Object.entries(amounts)) {
+          setFiniteAmount(index, { mode, yearMonth, weekNo, lineId }, amount);
+        }
+      }
+    }
+  }
 
-function readSnapshotAmountFromFlatRows(snapshot, mapping) {
-  const rows = Array.isArray(snapshot?.[mapping.mode]) ? snapshot[mapping.mode] : [];
-  const row = rows.find((entry) => (
-    entry?.yearMonth === mapping.yearMonth
-    && Number(entry?.weekNo) === mapping.weekNo
-    && entry?.cashflowLine === mapping.lineId
-  ));
-  return typeof row?.amount === 'number' && Number.isFinite(row.amount) ? row.amount : null;
-}
+  for (const mode of ['projection', 'actual']) {
+    const rows = Array.isArray(snapshot?.[mode]) ? snapshot[mode] : [];
+    for (const row of rows) {
+      const yearMonth = readOptionalText(row?.yearMonth);
+      const weekNo = Number(row?.weekNo);
+      const lineId = readOptionalText(row?.cashflowLine);
+      if (!yearMonth || !Number.isFinite(weekNo) || !lineId) continue;
+      setFiniteAmount(index, { mode, yearMonth, weekNo, lineId }, row?.amount);
+    }
+  }
 
-function readSnapshotAmountFromLegacyWeeks(snapshot, mapping) {
   const weeks = Array.isArray(snapshot?.weeks) ? snapshot.weeks : [];
-  const week = weeks.find((entry) => entry?.yearMonth === mapping.yearMonth && Number(entry?.weekNo) === mapping.weekNo);
-  const amount = week?.[mapping.mode]?.[mapping.lineId];
+  for (const week of weeks) {
+    const yearMonth = readOptionalText(week?.yearMonth);
+    const weekNo = Number(week?.weekNo);
+    if (!yearMonth || !Number.isFinite(weekNo)) continue;
+    for (const mode of ['projection', 'actual']) {
+      const amounts = week?.[mode] && typeof week[mode] === 'object' ? week[mode] : {};
+      for (const [lineId, amount] of Object.entries(amounts)) {
+        setFiniteAmount(index, { mode, yearMonth, weekNo, lineId }, amount);
+      }
+    }
+  }
+
+  return index;
+}
+
+function readIndexedSnapshotAmount(index, mapping) {
+  if (!index) return null;
+  const amount = index.get(cashflowMappingKey(mapping));
   return typeof amount === 'number' && Number.isFinite(amount) ? amount : null;
 }
 
-function buildPreviewValues(template, cashflowSnapshot) {
+function readSheetCell(matrix, mapping) {
+  return readOptionalText(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+}
+
+function buildPreviewValues(template, cashflowSnapshot, matrix = []) {
+  const amountIndex = cashflowSnapshot ? buildSnapshotAmountIndex(cashflowSnapshot) : null;
   return template.mappingCandidates.map((mapping) => ({
     ...mapping,
-    amount: cashflowSnapshot
-      ? readSnapshotAmountFromReadModel(cashflowSnapshot, mapping)
-        ?? readSnapshotAmountFromFlatRows(cashflowSnapshot, mapping)
-        ?? readSnapshotAmountFromLegacyWeeks(cashflowSnapshot, mapping)
-      : null,
+    sheetValue: readSheetCell(matrix, mapping),
+    amount: readIndexedSnapshotAmount(amountIndex, mapping),
     source: 'java_read_model',
   }));
+}
+
+function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS } = {}) {
+  const cache = new Map();
+  const inFlight = new Map();
+
+  function cacheKey({ value, sheetName }) {
+    return JSON.stringify({
+      value: readOptionalText(value),
+      sheetName: readOptionalText(sheetName),
+      rangeA1: CASHFLOW_SHEET_LAB_READ_RANGE,
+    });
+  }
+
+  return async function loadSheetPreview(params) {
+    const key = cacheKey(params);
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ...cached.value, cacheStatus: 'hit' };
+    }
+
+    const running = inFlight.get(key);
+    if (running) {
+      const value = await running;
+      return { ...value, cacheStatus: 'in_flight_join' };
+    }
+
+    async function requestPreview(sheetName) {
+      return googleSheetsService.previewSpreadsheet({
+        value: params.value,
+        sheetName,
+        rangeA1: CASHFLOW_SHEET_LAB_READ_RANGE,
+      });
+    }
+
+    const request = (async () => {
+      const first = await requestPreview(params.sheetName);
+      if (params.sheetName || isCashflowUsageLinkedSheetName(first.selectedSheetName)) {
+        return first;
+      }
+      const linkedSheet = findCashflowUsageLinkedSheet(first.availableSheets);
+      if (!linkedSheet) return first;
+      return requestPreview(linkedSheet.title);
+    })();
+    inFlight.set(key, request);
+    try {
+      const value = await request;
+      if (cacheTtlMs > 0) {
+        cache.set(key, {
+          value,
+          expiresAt: Date.now() + cacheTtlMs,
+        });
+      }
+      return { ...value, cacheStatus: 'miss' };
+    } finally {
+      inFlight.delete(key);
+    }
+  };
 }
 
 export function mountCashflowSheetLabRoutes(app, {
@@ -89,7 +208,13 @@ export function mountCashflowSheetLabRoutes(app, {
   googleSheetsService,
   javaWeeklyClient,
   workspaceEmailDomain = 'mysc.co.kr',
+  sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
 } = {}) {
+  const loadSheetPreview = createSheetPreviewLoader({
+    googleSheetsService,
+    cacheTtlMs: sheetPreviewCacheTtlMs,
+  });
+
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/preview', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, javaWeeklyClient?.workspaceEmailDomain || workspaceEmailDomain);
 
@@ -102,17 +227,18 @@ export function mountCashflowSheetLabRoutes(app, {
     }
 
     try {
-      const preview = await googleSheetsService.previewSpreadsheet({
+      const preview = await loadSheetPreview({
         value: parsed.value,
         sheetName: parsed.sheetName,
       });
+      assertCashflowUsageLinkedSheet(preview);
       const template = analyzeCashflowSheetTemplate(preview.matrix);
 
       let cashflowSnapshot = null;
-      let cashflowSnapshotStatus = 'unavailable';
+      let cashflowSnapshotStatus = parsed.includeValues === false ? 'pending' : 'unavailable';
       let cashflowSnapshotError = null;
 
-      if (javaWeeklyClient?.getCashflowSnapshot) {
+      if (parsed.includeValues !== false && javaWeeklyClient?.getCashflowSnapshot) {
         try {
           cashflowSnapshot = await javaWeeklyClient.getCashflowSnapshot({
             context: buildJavaReadContext(req.context, javaWeeklyClient.workspaceEmailDomain || workspaceEmailDomain),
@@ -142,11 +268,13 @@ export function mountCashflowSheetLabRoutes(app, {
           layoutSource: 'google_sheet_formatted_values',
           valueSource: 'java_cashflow_read_model',
           actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
+          sheetReadRange: CASHFLOW_SHEET_LAB_READ_RANGE,
+          sheetPreviewCache: preview.cacheStatus,
+          sheetNamePolicy: 'cashflow_usage_linked_only',
         },
         template,
-        previewValues: buildPreviewValues(template, cashflowSnapshot),
+        previewValues: buildPreviewValues(template, cashflowSnapshot, preview.matrix),
         cashflowSnapshotStatus,
-        cashflowSnapshot,
         cashflowSnapshotError,
       });
     } catch (error) {
@@ -154,5 +282,3 @@ export function mountCashflowSheetLabRoutes(app, {
     }
   }));
 }
-
-export const CASHFLOW_SHEET_LAB_ALLOWED_ROLES = CASHFLOW_SHEET_LAB_ROLES;

@@ -112,6 +112,9 @@ describe('cashflow sheet lab route', () => {
         googleScope: 'spreadsheets.readonly',
         valueSource: 'java_cashflow_read_model',
         actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
+        sheetReadRange: 'A1:ZZ220',
+        sheetPreviewCache: 'miss',
+        sheetNamePolicy: 'cashflow_usage_linked_only',
       },
     });
     expect(response.body.template.supported).toBe(true);
@@ -128,6 +131,7 @@ describe('cashflow sheet lab route', () => {
         lineId: 'SALES_IN',
         yearMonth: '2026-01',
         weekNo: 1,
+        sheetValue: '999',
         amount: 123,
         source: 'java_read_model',
       }),
@@ -136,11 +140,12 @@ describe('cashflow sheet lab route', () => {
         lineId: 'SALES_IN',
         yearMonth: '2026-01',
         weekNo: 1,
+        sheetValue: '999',
         amount: 456,
         source: 'java_read_model',
       }),
     ]));
-    expect(response.body.cashflowSnapshot.weeks[0].projection.SALES_IN).toBe(123);
+    expect(response.body).not.toHaveProperty('cashflowSnapshot');
   });
 
   it('sends mysc actors to Java as workspace_user for this read-only lab path', async () => {
@@ -174,7 +179,7 @@ describe('cashflow sheet lab route', () => {
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
         spreadsheetTitle: 'Cashflow workbook',
-        selectedSheetName: 'cashflow',
+        selectedSheetName: 'cashflow(사용내역 연동)',
         availableSheets: [],
         matrix: buildMatrix(),
       })),
@@ -190,7 +195,121 @@ describe('cashflow sheet lab route', () => {
     expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledWith({
       value: 'spreadsheet-a',
       sheetName: undefined,
+      rangeA1: 'A1:ZZ220',
     });
+  });
+
+  it('reuses the short-lived sheet layout cache but still reads Java values per request', async () => {
+    let javaAmount = 100;
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [],
+        matrix: buildMatrix(),
+      })),
+    };
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      getCashflowSnapshot: vi.fn(async () => {
+        javaAmount += 1;
+        return {
+          projectId: 'project-a',
+          readModel: {
+            months: [{
+              yearMonth: '2026-01',
+              projection: { weeks: [{ weekNo: 1, amounts: { SALES_IN: javaAmount } }] },
+              actual: { weeks: [] },
+            }],
+          },
+        };
+      }),
+    };
+    const app = createApp({ googleSheetsService, javaWeeklyClient });
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(200);
+    const second = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(200);
+
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.getCashflowSnapshot).toHaveBeenCalledTimes(2);
+    expect(first.body.accessPolicy.sheetPreviewCache).toBe('miss');
+    expect(second.body.accessPolicy.sheetPreviewCache).toBe('hit');
+    expect(first.body.previewValues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ mode: 'projection', lineId: 'SALES_IN', amount: 101 }),
+    ]));
+    expect(second.body.previewValues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ mode: 'projection', lineId: 'SALES_IN', amount: 102 }),
+    ]));
+  });
+
+  it('returns sheet layout first when Java values are deferred', async () => {
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      getCashflowSnapshot: vi.fn(async () => ({ projectId: 'project-a', weeks: [] })),
+    };
+
+    const response = await request(createApp({ javaWeeklyClient }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a', includeValues: false })
+      .expect(200);
+
+    expect(response.body.cashflowSnapshotStatus).toBe('pending');
+    expect(response.body.previewValues[0]).toMatchObject({
+      sheetValue: '999',
+      amount: null,
+    });
+    expect(javaWeeklyClient.getCashflowSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('auto-selects the cashflow usage linked tab when no sheet name is provided', async () => {
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async ({ sheetName }) => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: sheetName || '요약',
+        availableSheets: [
+          { sheetId: 1, title: '요약', index: 0 },
+          { sheetId: 2, title: 'cashflow(사용내역 연동)', index: 1 },
+        ],
+        matrix: buildMatrix(),
+      })),
+    };
+
+    const response = await request(createApp({ googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(200);
+
+    expect(response.body.selectedSheetName).toBe('cashflow(사용내역 연동)');
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenNthCalledWith(2, {
+      value: 'spreadsheet-a',
+      sheetName: 'cashflow(사용내역 연동)',
+      rangeA1: 'A1:ZZ220',
+    });
+  });
+
+  it('rejects non-cashflow usage linked sheet tabs', async () => {
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: '요약',
+        availableSheets: [{ sheetId: 1, title: '요약', index: 0 }],
+        matrix: buildMatrix(),
+      })),
+    };
+
+    await request(createApp({ googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(400);
   });
 
   it('allows mysc email even when actor role is only a recorded workspace user role', async () => {
@@ -217,6 +336,28 @@ describe('cashflow sheet lab route', () => {
       .expect(403);
   });
 
+  it('denies external emails even when a recorded role is allowed', async () => {
+    await request(createApp({
+      context: {
+        actorRole: 'pm',
+        actorEmail: 'pm@example.com',
+      },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(403);
+
+    await request(createApp({
+      context: {
+        actorRole: 'admin',
+        actorEmail: 'admin@example.com',
+      },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(403);
+  });
+
   it('keeps mapping available but does not synthesize values when Java is unconfigured', async () => {
     const javaWeeklyClient = {
       workspaceEmailDomain: 'mysc.co.kr',
@@ -233,7 +374,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(response.body.cashflowSnapshotStatus).toBe('unavailable');
-    expect(response.body.cashflowSnapshot).toBeNull();
+    expect(response.body).not.toHaveProperty('cashflowSnapshot');
     expect(response.body.template.mappingCandidates[0]).toMatchObject({
       source: 'sheet_layout',
     });

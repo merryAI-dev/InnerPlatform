@@ -41,6 +41,10 @@ export function toA1(rowIndex, columnIndex) {
   return `${columnName(columnIndex)}${rowIndex + 1}`;
 }
 
+export function cashflowMappingKey({ mode, lineId, yearMonth, weekNo }) {
+  return [mode, yearMonth, Number(weekNo), lineId].join('|');
+}
+
 export function parseCashflowWeekLabel(value) {
   const match = WEEK_LABEL_RE.exec(normalizeText(value));
   if (!match) return null;

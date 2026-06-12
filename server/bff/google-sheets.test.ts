@@ -62,6 +62,26 @@ describe('google-sheets helpers', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('can bound a values read to a cashflow lab range', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ values: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const service = createGoogleSheetsService({
+      fetchImpl,
+      authHeadersFactory: async () => ({ authorization: 'Bearer test-token' }),
+    });
+
+    await service.getSheetValues({
+      spreadsheetId: '1abcDEFghiJKlmnOPQ_rst-123',
+      sheetName: "cashflow's tab",
+      rangeA1: 'A1:ZZ220',
+    });
+
+    const requestUrl = String(fetchImpl.mock.calls[0]?.[0] || '');
+    expect(decodeURIComponent(requestUrl)).toContain("/values/'cashflow''s tab'!A1:ZZ220?");
+  });
+
   it('prefers caller google access token over service account auth', async () => {
     const fetchImpl = vi
       .fn()

@@ -42,13 +42,7 @@ The Google Sheet is a viewing format only. It is not a ledger, not a source of t
 
 ## Golden Cashflow Template Evidence
 
-User-provided CSV inspected:
-
-```text
-/Users/boram/Downloads/[2026년 탐나는인재 창업트랙]사업비 관리 시트 - cashflow(사용내역 연동).csv
-```
-
-The source file is a Google Sheets CSV export with quoted multi-line cells. Parsed as CSV records, it has:
+The source shape is Google Sheets API `values: string[][]`, not a CSV/file-upload route. The observed `cashflow(사용내역 연동)` tab shape has:
 
 - 65 records.
 - 68 max columns.
@@ -63,7 +57,7 @@ These coordinates are sample evidence, not implementation constants. The mapper 
 
 The section order is a template invariant, not a heuristic: the upper cashflow section is Projection and the lower cashflow section is Actual. The mapper should use this order to assign `mode`, then validate row labels and week labels inside each section.
 
-The raw Sheet cell text is layout evidence only. Numeric cells from this CSV are not authoritative cashflow values and must not be parsed as ledger Actual or Projection.
+The raw Sheet cell text is layout evidence only. Numeric cells from this Sheet API matrix are not authoritative cashflow values and must not be parsed as ledger Actual or Projection.
 
 ### Section Structure
 
@@ -169,6 +163,8 @@ Scope:
 - Add client helper for `spreadsheetId` extraction and request typing.
 - Add feature route/page shell for Cashflow Sheets Lab.
 - Read Google Sheets through the configured MYSC service account.
+- Only allow the `cashflow(사용내역 연동)` sheet-tab family.
+- Read only `A1:ZZ220` for this lab flow.
 - Place the first lab page in the PM portal cashflow area.
 - Allow `workspace_user`, `pm`, `finance`, and `admin`.
 - Parse the selected tab into normalized rows while preserving original row/column coordinates.
@@ -197,7 +193,7 @@ Completion criteria:
 - Valid sheet returns title, tabs, selected tab, and matrix.
 - Valid sheet returns exactly ordered Projection and Actual sections.
 - Valid sheet returns weekly columns by scanning the detected week row for `YY-M-W` labels, without hardcoding the final column.
-- The provided CSV-equivalent fixture returns 60 weekly columns and 720 mapping cells per mode, but this fixture count is not a global template limit.
+- The Sheet API matrix fixture returns 60 weekly columns and 720 mapping cells per mode, but this fixture count is not a global template limit.
 - Valid sheet returns the detected cashflow line rows and mapping cell count for each mode.
 - Derived rows are identified separately and are not assigned cashflow line ids.
 - Rows outside the detected cashflow sections are ignored for mapping.
@@ -212,8 +208,8 @@ Recommended tests:
 - BFF route test proving `workspace_user`, `pm`, `finance`, and `admin` are allowed.
 - BFF route test proving external/non-workspace actors are denied.
 - Client helper test for URL, raw ID, and bad input.
-- CSV parser/normalizer test using a sanitized fixture derived from the real cashflow CSV structure.
-- Week-label mapping test for a known CSV-equivalent fixture with `26-1-1` through `26-12-5`.
+- Sheet API matrix normalizer test using a sanitized fixture derived from the real cashflow tab structure.
+- Week-label mapping test for a known Sheet API matrix fixture with `26-1-1` through `26-12-5`.
 - Week-label mapping test where the final week column is not BK.
 - Row-label mapping test against `cashflow-policy.json` aliases.
 - Derived-row separation test.
@@ -253,7 +249,7 @@ Completion criteria:
 Recommended tests:
 
 - Validator tests for supported sample.
-- Sanitized fixture test covering the real CSV row layout.
+- Sanitized fixture test covering the real Sheet API matrix row layout.
 - Missing header test.
 - Missing cashflow line test.
 - Ambiguous duplicate label test.
@@ -320,12 +316,16 @@ Scope:
 - No export button.
 - No save button.
 - Strong source labeling: Sheet text is "layout evidence"; Java values are "internal ledger read model".
+- Sheet matrix appears as a coordinate grid with row and column headers.
+- Hover details expose raw Sheet cell text and mapped Java value when present.
+- Java values are fetched after the layout preview so the user can inspect the structure without waiting for cashflow read-model availability.
 
 Completion criteria:
 
 - User can tell which sheet tab was read.
 - User can tell which cells are mapped.
 - User can tell which Java values are present or missing.
+- User can inspect original Sheet cell text on hover.
 - There is no affordance implying writeback or sync.
 - A user cannot confuse Sheet-entered numbers with Java ledger values.
 

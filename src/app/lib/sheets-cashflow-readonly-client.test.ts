@@ -43,6 +43,9 @@ describe('sheets cashflow readonly client', () => {
             layoutSource: 'google_sheet_formatted_values',
             valueSource: 'java_cashflow_read_model',
             actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
+            sheetReadRange: 'A1:ZZ220',
+            sheetPreviewCache: 'miss',
+            sheetNamePolicy: 'cashflow_usage_linked_only',
           },
           template: {
             supported: true,
@@ -55,9 +58,8 @@ describe('sheets cashflow readonly client', () => {
             reasons: [],
             stats: { rowCount: 0, maxColumnCount: 0, sectionCount: 0, mappingCount: 0 },
           },
-          previewValues: [],
-          cashflowSnapshotStatus: 'ready',
-          cashflowSnapshot: { projectId: 'p001' },
+          previewValues: [{ mode: 'actual', lineId: 'SALES_IN', direction: 'IN', yearMonth: '2026-01', weekNo: 1, rowIndex: 1, columnIndex: 2, a1: 'C2', sheetValue: '원본', amount: 1000, source: 'java_read_model' }],
+          cashflowSnapshotStatus: 'pending',
           cashflowSnapshotError: null,
         },
       })),
@@ -75,6 +77,7 @@ describe('sheets cashflow readonly client', () => {
       projectId: 'p001',
       value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
       sheetName: 'cashflow(사용내역 연동)',
+      includeValues: false,
       client,
     });
 
@@ -91,6 +94,7 @@ describe('sheets cashflow readonly client', () => {
         body: {
           value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
           sheetName: 'cashflow(사용내역 연동)',
+          includeValues: false,
         },
       }),
     );

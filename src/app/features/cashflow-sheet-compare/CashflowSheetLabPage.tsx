@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { AlertCircle, FileSpreadsheet, Loader2, Search } from 'lucide-react';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -20,9 +20,19 @@ function formatAmount(value: number | null) {
   return `${value.toLocaleString('ko-KR')}원`;
 }
 
-function visiblePreviewValues(preview: CashflowSheetLabPreviewResult) {
-  const withAmounts = preview.previewValues.filter((value) => value.amount !== null);
-  return (withAmounts.length ? withAmounts : preview.previewValues).slice(0, 36);
+function columnName(columnIndex: number) {
+  let n = columnIndex + 1;
+  let name = '';
+  while (n > 0) {
+    const mod = (n - 1) % 26;
+    name = String.fromCharCode(65 + mod) + name;
+    n = Math.floor((n - 1) / 26);
+  }
+  return name;
+}
+
+function sheetCellKey(rowIndex: number, columnIndex: number) {
+  return `${rowIndex}:${columnIndex}`;
 }
 
 function formatError(error: unknown) {
@@ -43,6 +53,89 @@ function StatusPill({ tone, children }: { tone: 'ok' | 'warn' | 'error'; childre
   );
 }
 
+function CashflowSheetGrid({ preview }: { preview: CashflowSheetLabPreviewResult }) {
+  const valueByCell = useMemo(() => {
+    const map = new Map<string, CashflowSheetLabPreviewResult['previewValues'][number]>();
+    for (const value of preview.previewValues) {
+      map.set(sheetCellKey(value.rowIndex, value.columnIndex), value);
+    }
+    return map;
+  }, [preview.previewValues]);
+  const maxColumnCount = Math.max(
+    preview.template.stats.maxColumnCount,
+    ...preview.template.sections.flatMap((section) => section.weekColumns.map((week) => week.columnIndex + 1)),
+    1,
+  );
+  const rows = preview.matrix.length ? preview.matrix : [[]];
+  const columnIndexes = Array.from({ length: Math.min(maxColumnCount, 90) }, (_, index) => index);
+
+  return (
+    <div className="border border-slate-200 bg-white">
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+        <h2 className="text-[13px] font-semibold text-slate-950">시트 좌표 미리보기</h2>
+        <span className="text-[11px] text-slate-500">
+          {rows.length.toLocaleString()}행 · {maxColumnCount.toLocaleString()}열
+        </span>
+      </div>
+      <div className="max-h-[560px] overflow-auto">
+        <table className="border-separate border-spacing-0 text-left text-[11px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 top-0 z-30 h-7 min-w-12 border-b border-r border-slate-200 bg-slate-100 px-2 text-center font-medium text-slate-500">
+                #
+              </th>
+              {columnIndexes.map((columnIndex) => (
+                <th key={columnIndex} className="sticky top-0 z-20 h-7 min-w-24 border-b border-r border-slate-200 bg-slate-100 px-2 text-center font-medium text-slate-500">
+                  {columnName(columnIndex)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                <th className="sticky left-0 z-10 h-8 border-b border-r border-slate-200 bg-slate-50 px-2 text-right font-medium text-slate-500">
+                  {rowIndex + 1}
+                </th>
+                {columnIndexes.map((columnIndex) => {
+                  const mapped = valueByCell.get(sheetCellKey(rowIndex, columnIndex));
+                  const raw = row[columnIndex] || '';
+                  const display = mapped ? formatAmount(mapped.amount) : raw;
+                  const title = [
+                    `${columnName(columnIndex)}${rowIndex + 1}`,
+                    raw ? `원본: ${raw}` : '원본: 빈 셀',
+                    mapped ? `Java: ${formatAmount(mapped.amount)} / ${mapped.lineId}` : '',
+                  ].filter(Boolean).join('\n');
+                  return (
+                    <td
+                      key={columnIndex}
+                      title={title}
+                      className={`h-8 max-w-40 truncate border-b border-r px-2 tabular-nums ${
+                        mapped
+                          ? 'border-emerald-200 bg-emerald-50 text-slate-950'
+                          : raw
+                            ? 'border-slate-200 bg-white text-slate-700'
+                            : 'border-slate-100 bg-white text-slate-300'
+                      }`}
+                    >
+                      {display || ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {maxColumnCount > columnIndexes.length && (
+          <div className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+            화면 성능을 위해 앞쪽 {columnIndexes.length}개 열만 표시했습니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function CashflowSheetLabPage() {
   const { user: authUser } = useAuth();
   const { orgId } = useFirebase();
@@ -52,6 +145,7 @@ export function CashflowSheetLabPage() {
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const previewRequestRef = useRef(0);
 
   const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
@@ -73,18 +167,34 @@ export function CashflowSheetLabPage() {
 
   async function handlePreview() {
     if (!projectId || !sheetLink.trim()) return;
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
     setLoading(true);
     setErrorMessage('');
     try {
-      const result = await previewCashflowSheetLabViaBff({
+      const layoutResult = await previewCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
         projectId,
         value: sheetLink,
         sheetName: sheetName || undefined,
+        includeValues: false,
       });
-      setPreview(result);
-      if (!sheetName && result.selectedSheetName) setSheetName(result.selectedSheetName);
+      if (previewRequestRef.current !== requestId) return;
+      setPreview(layoutResult);
+      if (!sheetName && layoutResult.selectedSheetName) setSheetName(layoutResult.selectedSheetName);
+      void previewCashflowSheetLabViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        value: sheetLink,
+        sheetName: layoutResult.selectedSheetName,
+        includeValues: true,
+      }).then((valueResult) => {
+        if (previewRequestRef.current === requestId) setPreview(valueResult);
+      }).catch((error) => {
+        if (previewRequestRef.current === requestId) setErrorMessage(formatError(error));
+      });
     } catch (error) {
       setPreview(null);
       setErrorMessage(formatError(error));
@@ -176,7 +286,11 @@ export function CashflowSheetLabPage() {
               <div className="text-[11px] text-slate-500">Java Read Model</div>
               <div className="mt-1">
                 <StatusPill tone={preview.cashflowSnapshotStatus === 'ready' ? 'ok' : 'warn'}>
-                  {preview.cashflowSnapshotStatus === 'ready' ? '연결됨' : '미연결'}
+                  {preview.cashflowSnapshotStatus === 'ready'
+                    ? '연결됨'
+                    : preview.cashflowSnapshotStatus === 'pending'
+                      ? '조회 중'
+                      : '미연결'}
                 </StatusPill>
               </div>
               <div className="mt-1 font-mono text-[10px] text-slate-500">{preview.accessPolicy.valueSource}</div>
@@ -187,6 +301,9 @@ export function CashflowSheetLabPage() {
             <span>Google: {preview.accessPolicy.googleAuth}</span>
             <span>Scope: {preview.accessPolicy.googleScope}</span>
             <span>Role: {preview.accessPolicy.actorRolePolicy}</span>
+            <span>Range: {preview.accessPolicy.sheetReadRange}</span>
+            <span>Cache: {preview.accessPolicy.sheetPreviewCache}</span>
+            <span>Tab: {preview.accessPolicy.sheetNamePolicy}</span>
           </div>
 
           {preview.template.reasons.length > 0 && (
@@ -236,6 +353,8 @@ export function CashflowSheetLabPage() {
             ))}
           </div>
 
+          <CashflowSheetGrid preview={preview} />
+
           <div className="border border-slate-200 bg-white">
             <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
               <h2 className="text-[13px] font-semibold text-slate-950">Java 값 미리보기</h2>
@@ -251,22 +370,24 @@ export function CashflowSheetLabPage() {
                     <th className="px-3 py-2 font-medium">Line ID</th>
                     <th className="px-3 py-2 font-medium">주차</th>
                     <th className="px-3 py-2 font-medium">셀</th>
+                    <th className="px-3 py-2 font-medium">원본</th>
                     <th className="px-3 py-2 text-right font-medium">금액</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visiblePreviewValues(preview).map((value) => (
+                  {preview.previewValues.slice(0, 36).map((value) => (
                     <tr key={`${value.mode}-${value.lineId}-${value.yearMonth}-${value.weekNo}-${value.a1}`} className="border-t border-slate-100">
                       <td className="px-3 py-2 text-slate-700">{formatMode(value.mode)}</td>
                       <td className="px-3 py-2 font-mono text-slate-700">{value.lineId}</td>
                       <td className="px-3 py-2 text-slate-500">{value.yearMonth} W{value.weekNo}</td>
                       <td className="px-3 py-2 text-slate-500">{value.a1}</td>
+                      <td className="max-w-48 truncate px-3 py-2 text-slate-500" title={value.sheetValue}>{value.sheetValue || '-'}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-900">{formatAmount(value.amount)}</td>
                     </tr>
                   ))}
                   {preview.previewValues.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-[12px] text-slate-500">
+                      <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-slate-500">
                         표시할 좌표가 없습니다.
                       </td>
                     </tr>

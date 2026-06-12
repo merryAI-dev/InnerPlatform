@@ -40,6 +40,7 @@ export interface CashflowSheetLabMappingCandidate {
 }
 
 export interface CashflowSheetLabPreviewValue extends Omit<CashflowSheetLabMappingCandidate, 'source'> {
+  sheetValue: string;
   amount: number | null;
   source: 'java_read_model';
 }
@@ -106,11 +107,13 @@ export interface CashflowSheetLabPreviewResult {
     layoutSource: 'google_sheet_formatted_values';
     valueSource: 'java_cashflow_read_model';
     actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read';
+    sheetReadRange: string;
+    sheetPreviewCache: 'hit' | 'miss' | 'in_flight_join';
+    sheetNamePolicy: 'cashflow_usage_linked_only';
   };
   template: CashflowSheetLabTemplateResult;
   previewValues: CashflowSheetLabPreviewValue[];
-  cashflowSnapshotStatus: 'ready' | 'unavailable';
-  cashflowSnapshot: unknown | null;
+  cashflowSnapshotStatus: 'pending' | 'ready' | 'unavailable';
   cashflowSnapshotError?: { code: string; message: string } | null;
 }
 
@@ -122,6 +125,7 @@ export async function previewCashflowSheetLabViaBff(params: {
   projectId: string;
   value: string;
   sheetName?: string;
+  includeValues?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabPreviewResult> {
   const apiClient = params.client || createPlatformApiClient();
@@ -133,6 +137,7 @@ export async function previewCashflowSheetLabViaBff(params: {
       body: {
         value: params.value,
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+        ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
       },
       timeoutMs: 25000,
       retries: 0,
