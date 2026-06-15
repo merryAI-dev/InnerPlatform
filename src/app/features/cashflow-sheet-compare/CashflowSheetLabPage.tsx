@@ -4,13 +4,16 @@ import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  buildCashflowPreviewTables,
+  formatCashflowSheetWeekKey,
+} from './cashflow-sheet-preview-tables';
+import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
   saveCashflowSheetLabConfigViaBff,
   type CashflowSheetLabConfig,
-  type CashflowSheetLabPreviewValue,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
@@ -33,13 +36,6 @@ function formatAmount(value: number | null) {
   return `${value.toLocaleString('ko-KR')}원`;
 }
 
-function parseSheetAmount(value: string) {
-  const normalized = String(value || '').replace(/,/g, '').replace(/\s+/g, '').trim();
-  if (!normalized || normalized === '-') return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
   return '시트 구조를 확인하지 못했습니다.';
@@ -52,99 +48,8 @@ function formatTimestamp(value: string | undefined) {
   return date.toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-function weekKey(yearMonth: string, weekNo: number) {
-  return `${yearMonth}:W${weekNo}`;
-}
-
-function previewValueKey(value: Pick<CashflowSheetLabPreviewValue, 'mode' | 'lineId' | 'yearMonth' | 'weekNo'>) {
-  return `${value.mode}:${value.lineId}:${weekKey(value.yearMonth, value.weekNo)}`;
-}
-
-function compareWeekLike(
-  a: Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>,
-  b: Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>,
-) {
-  return a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo;
-}
-
 function formatWeekLabel(yearMonth: string, weekNo: number) {
   return `${yearMonth} W${weekNo}`;
-}
-
-function selectPreviewAmount(value: CashflowSheetLabPreviewValue | undefined) {
-  if (!value) return { sheetAmount: null, reflectedAmount: null, displayAmount: null, diff: null };
-  const sheetAmount = parseSheetAmount(value.sheetValue);
-  const reflectedAmount = value.amount;
-  const displayAmount = typeof sheetAmount === 'number' ? sheetAmount : reflectedAmount;
-  const diff = typeof reflectedAmount === 'number' && typeof sheetAmount === 'number'
-    ? reflectedAmount - sheetAmount
-    : null;
-  return { sheetAmount, reflectedAmount, displayAmount, diff };
-}
-
-function buildCashflowPreviewTables(preview: CashflowSheetLabPreviewResult | null) {
-  if (!preview) return [];
-  const valueIndex = new Map<string, CashflowSheetLabPreviewValue>();
-  const weeksByMode = new Map<string, Map<string, Pick<CashflowSheetLabPreviewValue, 'yearMonth' | 'weekNo'>>>();
-
-  for (const value of preview.previewValues) {
-    valueIndex.set(previewValueKey(value), value);
-    const modeWeeks = weeksByMode.get(value.mode) || new Map();
-    modeWeeks.set(weekKey(value.yearMonth, value.weekNo), {
-      yearMonth: value.yearMonth,
-      weekNo: value.weekNo,
-    });
-    weeksByMode.set(value.mode, modeWeeks);
-  }
-
-  return preview.template.sections.map((section) => {
-    const weeks = Array.from(weeksByMode.get(section.mode)?.values() || [])
-      .sort(compareWeekLike);
-    const rows = section.lineRows.map((line) => {
-      const cells = weeks.map((week) => {
-        const value = valueIndex.get(previewValueKey({
-          mode: section.mode,
-          lineId: line.lineId,
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-        }));
-        return {
-          ...week,
-          a1: value?.a1 || '',
-          sheetValue: value?.sheetValue || '',
-          ...selectPreviewAmount(value),
-        };
-      });
-      return { ...line, cells };
-    });
-    const inRows = rows.filter((row) => row.direction === 'IN');
-    const outRows = rows.filter((row) => row.direction === 'OUT');
-    const sumRows = (targetRows: typeof rows, index: number) => targetRows.reduce((total, row) => (
-      total + (row.cells[index]?.displayAmount || 0)
-    ), 0);
-    const totalIn = weeks.map((_, index) => sumRows(inRows, index));
-    const totalOut = weeks.map((_, index) => sumRows(outRows, index));
-    let runningBalance = 0;
-    const balances = weeks.map((_, index) => {
-      runningBalance += totalIn[index] - totalOut[index];
-      return runningBalance;
-    });
-    const nonEmptyCellCount = rows.reduce((count, row) => count + row.cells.filter((cell) => (
-      typeof cell.sheetAmount === 'number'
-      || typeof cell.reflectedAmount === 'number'
-      || cell.sheetValue.trim()
-    )).length, 0);
-    return {
-      mode: section.mode,
-      weeks,
-      inRows,
-      outRows,
-      totalIn,
-      totalOut,
-      balances,
-      nonEmptyCellCount,
-    };
-  });
 }
 
 function StatusPill({ tone, children }: { tone: 'ok' | 'warn' | 'error'; children: string }) {
@@ -661,7 +566,7 @@ export function CashflowSheetLabPage() {
                             </th>
                             {table.weeks.map((week) => (
                               <th
-                                key={`${table.mode}-${weekKey(week.yearMonth, week.weekNo)}`}
+                                key={`${table.mode}-${formatCashflowSheetWeekKey(week.yearMonth, week.weekNo)}`}
                                 className="min-w-[112px] border-l border-slate-100 px-2 py-2 text-right font-medium"
                               >
                                 {formatWeekLabel(week.yearMonth, week.weekNo)}
@@ -680,7 +585,7 @@ export function CashflowSheetLabPage() {
                               </td>
                               {row.cells.map((cell) => (
                                 <CashflowAmountCell
-                                  key={`${table.mode}-${row.lineId}-${weekKey(cell.yearMonth, cell.weekNo)}`}
+                                  key={`${table.mode}-${row.lineId}-${formatCashflowSheetWeekKey(cell.yearMonth, cell.weekNo)}`}
                                   value={cell}
                                 />
                               ))}
@@ -706,7 +611,7 @@ export function CashflowSheetLabPage() {
                               </td>
                               {row.cells.map((cell) => (
                                 <CashflowAmountCell
-                                  key={`${table.mode}-${row.lineId}-${weekKey(cell.yearMonth, cell.weekNo)}`}
+                                  key={`${table.mode}-${row.lineId}-${formatCashflowSheetWeekKey(cell.yearMonth, cell.weekNo)}`}
                                   value={cell}
                                 />
                               ))}
