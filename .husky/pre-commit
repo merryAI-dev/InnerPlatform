@@ -21,6 +21,27 @@ if [ -n "$UNDERSTAND_GATE_FILES" ]; then
   fi
 fi
 
+CASHFLOW_SHEET_LAB_GUARD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^(server/bff/routes/cashflow-sheet-lab(\.test)?\.mjs|src/app/features/cashflow-sheet-compare/CashflowSheetLabPage\.tsx|server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/(WeeklyExpenseAuthorizationService|WeeklyProjectExistenceRepository|PermissiveWeeklyProjectExistenceRepository|FirestoreWeeklyProjectExistenceRepository)\.java|server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseAuthorizationServiceTest\.java|server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/api/WeeklyExpenseControllerTest\.java)$' || true)
+if [ -n "$CASHFLOW_SHEET_LAB_GUARD_FILES" ]; then
+  echo "\033[36m🧪 Running cashflow sheet lab apply guard tests...\033[0m"
+  npm test -- server/bff/routes/cashflow-sheet-lab.test.mjs
+  if [ $? -ne 0 ]; then
+    echo "\033[31m✗ BFF cashflow sheet lab guard tests failed — commit blocked.\033[0m"
+    exit 1
+  fi
+  mvn -q -f server/jvm-weekly-api/pom.xml -Dtest=WeeklyExpenseAuthorizationServiceTest test
+  if [ $? -ne 0 ]; then
+    echo "\033[31m✗ Java cashflow sheet lab authorization tests failed — commit blocked.\033[0m"
+    exit 1
+  fi
+  mvn -q -f server/jvm-weekly-api/pom.xml '-Dtest=WeeklyExpenseControllerTest#cashflowSheetLabApplyRequiresCanonicalProjectHook' test
+  if [ $? -ne 0 ]; then
+    echo "\033[31m✗ Java cashflow sheet lab controller guard test failed — commit blocked.\033[0m"
+    exit 1
+  fi
+  echo "\033[32m✓ Cashflow sheet lab apply guard tests passed.\033[0m"
+fi
+
 if [ "$TOTAL" -gt 1500 ]; then
   echo "\033[31m⚠ XL COMMIT: ${TOTAL} LOC staged (${INS}+ / ${DEL}-)\033[0m"
   echo "\033[31m  Consider splitting into smaller commits for easier review/rollback.\033[0m"

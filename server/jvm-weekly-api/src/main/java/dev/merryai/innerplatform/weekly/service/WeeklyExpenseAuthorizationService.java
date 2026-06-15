@@ -89,7 +89,7 @@ public class WeeklyExpenseAuthorizationService {
 
     public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
         requireAllowed(commandName, actor);
-        if (!projectExistenceRepository.exists(actor == null ? "" : actor.tenantId(), projectId)) {
+        if (!projectExistsForCommand(commandName, actor, projectId)) {
             throw new WeeklyExpenseForbiddenException("Project does not exist in this workspace.");
         }
         String role = actor == null || actor.role() == null
@@ -109,5 +109,13 @@ public class WeeklyExpenseAuthorizationService {
 
     private boolean isWorkspaceMode() {
         return "internal_saas_workspace".equals(authMode) || "workspace".equals(authMode);
+    }
+
+    private boolean projectExistsForCommand(String commandName, TrustedActorContext actor, String projectId) {
+        String tenantId = actor == null ? "" : actor.tenantId();
+        if (WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND.equals(commandName)) {
+            return projectExistenceRepository.existsCanonicalProject(tenantId, projectId);
+        }
+        return projectExistenceRepository.exists(tenantId, projectId);
     }
 }

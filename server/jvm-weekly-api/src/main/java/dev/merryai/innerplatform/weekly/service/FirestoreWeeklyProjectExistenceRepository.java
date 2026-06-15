@@ -39,13 +39,29 @@ public class FirestoreWeeklyProjectExistenceRepository implements WeeklyProjectE
         String project = text(projectId);
         if (tenant.isBlank() || project.isBlank()) return false;
         try {
-            if (db.document("orgs/" + tenant + "/projects/" + project).get().get().exists()) {
+            if (canonicalProjectExists(tenant, project)) {
                 return true;
             }
             return hasExistingProjectScopedData(tenant, project);
         } catch (Exception error) {
             return false;
         }
+    }
+
+    @Override
+    public boolean existsCanonicalProject(String tenantId, String projectId) {
+        String tenant = text(tenantId);
+        String project = text(projectId);
+        if (tenant.isBlank() || project.isBlank()) return false;
+        try {
+            return canonicalProjectExists(tenant, project);
+        } catch (Exception error) {
+            return false;
+        }
+    }
+
+    private boolean canonicalProjectExists(String tenantId, String projectId) throws Exception {
+        return db.document("orgs/" + tenantId + "/projects/" + projectId).get().get().exists();
     }
 
     private boolean hasExistingProjectScopedData(String tenantId, String projectId) throws Exception {

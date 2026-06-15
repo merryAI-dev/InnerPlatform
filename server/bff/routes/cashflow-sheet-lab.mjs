@@ -57,6 +57,25 @@ function buildJavaReadContext(context, workspaceEmailDomain = 'mysc.co.kr') {
   };
 }
 
+function buildApplyEnvironmentPolicy({ bffProjectId, javaFirestoreProjectId } = {}) {
+  const bff = readOptionalText(bffProjectId);
+  const java = readOptionalText(javaFirestoreProjectId);
+  return {
+    bffFirestoreProjectId: bff || null,
+    javaFirestoreProjectId: java || null,
+    applyEnvironmentAligned: Boolean(bff && java && bff === java),
+  };
+}
+
+function assertApplyEnvironmentAligned(policy) {
+  if (policy?.applyEnvironmentAligned) return;
+  throw createHttpError(
+    409,
+    'Apply is disabled because this lab preview reads one Firebase project while Java writes another. Align the environments before enabling apply.',
+    'cashflow_sheet_apply_environment_mismatch',
+  );
+}
+
 function normalizeSheetFamilyName(value) {
   return readOptionalText(value).toLowerCase().replace(/\s+/g, '');
 }
@@ -434,6 +453,10 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
     const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
     const weekRange = normalizeWeekRange(source);
+    const applyEnvironmentPolicy = buildApplyEnvironmentPolicy({
+      bffProjectId,
+      javaFirestoreProjectId: javaWeeklyClient?.firestoreProjectId,
+    });
 
     try {
       const preview = await loadSheetPreview({
@@ -484,13 +507,7 @@ export function mountCashflowSheetLabRoutes(app, {
           sheetPreviewCache: preview.cacheStatus,
           sheetNamePolicy: 'cashflow_usage_linked_only',
           sheetConfigSource: source.source,
-          bffFirestoreProjectId: readOptionalText(bffProjectId) || null,
-          javaFirestoreProjectId: readOptionalText(javaWeeklyClient?.firestoreProjectId) || null,
-          applyEnvironmentAligned: Boolean(
-            readOptionalText(bffProjectId)
-            && readOptionalText(javaWeeklyClient?.firestoreProjectId)
-            && readOptionalText(bffProjectId) === readOptionalText(javaWeeklyClient?.firestoreProjectId),
-          ),
+          ...applyEnvironmentPolicy,
         },
         activeWeekRange: {
           startWeek: weekRange.startWeek,
@@ -517,6 +534,10 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
     const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
     const weekRange = normalizeWeekRange(source);
+    assertApplyEnvironmentAligned(buildApplyEnvironmentPolicy({
+      bffProjectId,
+      javaFirestoreProjectId: javaWeeklyClient?.firestoreProjectId,
+    }));
 
     try {
       const preview = await loadSheetPreview({

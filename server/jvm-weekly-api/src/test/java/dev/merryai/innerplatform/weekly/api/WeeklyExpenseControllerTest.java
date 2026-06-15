@@ -683,7 +683,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowSheetLabApplyPersistsProjectionAndActualLines() throws Exception {
+    void cashflowSheetLabApplyRequiresCanonicalProjectHook() throws Exception {
         String body = """
             {
               "idempotencyKey": "sheet-lab-apply-001",
@@ -699,21 +699,12 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.commandName").value("weeklyExpense.cashflowSheetLab.apply"))
-            .andExpect(jsonPath("$.savedProjectionLineCount").value(2))
-            .andExpect(jsonPath("$.savedActualLineCount").value(1))
-            .andExpect(jsonPath("$.projection[0].cashflowLine").value("SALES_IN"))
-            .andExpect(jsonPath("$.projection[1].cashflowLine").value("SALES_VAT_IN"))
-            .andExpect(jsonPath("$.actual[0].sheetKey").value("cashflow-sheet-lab"))
-            .andExpect(jsonPath("$.actual[0].cashflowLine").value("DIRECT_COST_OUT"));
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"))
+            .andExpect(jsonPath("$.message").value("Project does not exist in this workspace."));
 
-        mockMvc.perform(asActor(get("/api/v1/cashflow/project-sheet-lab"), "tenant-sheet-lab", "viewer-sheet-lab", "viewer"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.SALES_IN").value(5000000))
-            .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.SALES_VAT_IN").value(500000))
-            .andExpect(jsonPath("$.readModel.months[0].actual.rowTotals.DIRECT_COST_OUT").value(1200000))
-            .andExpect(jsonPath("$.readModel.months[0].actual.weeks[0].weekOut").value(1200000));
+        assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
+        assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
     }
 
     @Test

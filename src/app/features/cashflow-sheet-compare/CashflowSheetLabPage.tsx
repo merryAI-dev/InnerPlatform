@@ -336,6 +336,10 @@ export function CashflowSheetLabPage() {
 
   async function handleApply() {
     if (!projectId || applying || editingConfig || !config || !bffAuthReady) return;
+    if (preview?.accessPolicy.applyEnvironmentAligned !== true) {
+      setErrorMessage('Apply is disabled because this lab preview reads one Firebase project while Java writes another. Align the environments before enabling apply.');
+      return;
+    }
     setApplying(true);
     setApplyMessage('');
     setErrorMessage('');
@@ -363,6 +367,10 @@ export function CashflowSheetLabPage() {
   }
 
   const cashflowPreviewTables = useMemo(() => buildCashflowPreviewTables(preview), [preview]);
+  const applyEnvironmentAligned = preview?.accessPolicy.applyEnvironmentAligned === true;
+  const applyDisabledReason = preview && !applyEnvironmentAligned
+    ? 'Apply is disabled because this lab preview reads one Firebase project while Java writes another. Align the environments before enabling apply.'
+    : '';
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
@@ -527,6 +535,7 @@ export function CashflowSheetLabPage() {
             <span>Range: {preview.accessPolicy.sheetReadRange}</span>
             <span>Cache: {preview.accessPolicy.sheetPreviewCache}</span>
             <span>Tab: {preview.accessPolicy.sheetNamePolicy}</span>
+            <span>Apply env: {applyEnvironmentAligned ? 'aligned' : 'blocked'}</span>
             <span>Weeks: {preview.activeWeekRange?.startWeek || '전체'} ~ {preview.activeWeekRange?.endWeek || '전체'}</span>
             <Button
               type="button"
@@ -594,15 +603,18 @@ export function CashflowSheetLabPage() {
               </DialogHeader>
               <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="text-[12px] text-slate-600">
-                  검토한 원본 시트 값을 Projection/Actual에 반영합니다.
+                  Cashflow Sheets Lab은 미리보기 기준으로 동작하며, apply는 BFF와 Java Firestore 환경이 일치할 때만 사용할 수 있습니다.
                 </div>
                 {applyMessage && (
                   <div className="text-[12px] font-medium text-emerald-700">{applyMessage}</div>
                 )}
+                {applyDisabledReason && (
+                  <div className="text-[12px] font-medium text-amber-800">{applyDisabledReason}</div>
+                )}
                 <Button
                   type="button"
                   className="ml-auto h-9 gap-1.5 rounded-none text-[12px]"
-                  disabled={applying || !preview.template.supported || !bffAuthReady}
+                  disabled={applying || !preview.template.supported || !bffAuthReady || !applyEnvironmentAligned}
                   onClick={handleApply}
                 >
                   {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}

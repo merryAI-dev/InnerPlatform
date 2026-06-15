@@ -111,6 +111,73 @@ class WeeklyExpenseAuthorizationServiceTest {
     }
 
     @Test
+    void cashflowSheetLabApplyRequiresCanonicalProjectDocument() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> true,
+            new SplitProjectExistenceRepository(true, false),
+            "internal_saas_workspace"
+        );
+        TrustedActorContext workspaceUser = new TrustedActorContext(
+            "tenant-a",
+            "firebase-user-1",
+            "user@mysc.co.kr",
+            "workspace_user"
+        );
+
+        assertThatThrownBy(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            workspaceUser,
+            "project-with-orphan-read-model"
+        ))
+            .isInstanceOf(WeeklyExpenseForbiddenException.class)
+            .hasMessageContaining("does not exist");
+    }
+
+    @Test
+    void cashflowSheetLabApplyFailsClosedWithJpaPermissiveRepository() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> true,
+            new PermissiveWeeklyProjectExistenceRepository(),
+            "internal_saas_workspace"
+        );
+        TrustedActorContext workspaceUser = new TrustedActorContext(
+            "tenant-a",
+            "firebase-user-1",
+            "user@mysc.co.kr",
+            "workspace_user"
+        );
+
+        assertThatThrownBy(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            workspaceUser,
+            "project-any"
+        ))
+            .isInstanceOf(WeeklyExpenseForbiddenException.class)
+            .hasMessageContaining("does not exist");
+    }
+
+    @Test
+    void cashflowSheetLabApplyAllowsCanonicalProjectDocument() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> false,
+            new SplitProjectExistenceRepository(true, true),
+            "internal_saas_workspace"
+        );
+        TrustedActorContext workspaceUser = new TrustedActorContext(
+            "tenant-a",
+            "firebase-user-1",
+            "user@mysc.co.kr",
+            "workspace_user"
+        );
+
+        assertThatCode(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            workspaceUser,
+            "project-with-doc"
+        )).doesNotThrowAnyException();
+    }
+
+    @Test
     void workspaceUserCanUseExistingJavaProjectDataWithoutProjectDocument() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> false,
@@ -129,5 +196,25 @@ class WeeklyExpenseAuthorizationServiceTest {
             workspaceUser,
             "project-with-read-model"
         )).doesNotThrowAnyException();
+    }
+
+    private static final class SplitProjectExistenceRepository implements WeeklyProjectExistenceRepository {
+        private final boolean existingProjectScopedData;
+        private final boolean canonicalProject;
+
+        private SplitProjectExistenceRepository(boolean existingProjectScopedData, boolean canonicalProject) {
+            this.existingProjectScopedData = existingProjectScopedData;
+            this.canonicalProject = canonicalProject;
+        }
+
+        @Override
+        public boolean exists(String tenantId, String projectId) {
+            return existingProjectScopedData;
+        }
+
+        @Override
+        public boolean existsCanonicalProject(String tenantId, String projectId) {
+            return canonicalProject;
+        }
     }
 }

@@ -64,6 +64,7 @@ function createApp({
   googleSheetsService,
   javaWeeklyClient,
   db = createDb(),
+  bffProjectId = 'bff-firestore-a',
 } = {}) {
   const app = express();
   app.use(express.json());
@@ -100,7 +101,7 @@ function createApp({
       })),
     },
     javaWeeklyClient: resolvedJavaWeeklyClient,
-    bffProjectId: 'bff-firestore-a',
+    bffProjectId,
   });
   app.use((error, _req, res, _next) => {
     res.status(error.statusCode || 500).json({
@@ -250,7 +251,7 @@ describe('cashflow sheet lab route', () => {
     ]));
   });
 
-  it('allows apply when BFF stores sheet config and Java owns cashflow read models in different Firestore projects', async () => {
+  it('blocks apply when BFF stores sheet config and Java writes a different Firestore project', async () => {
     const db = createDb({
       data: {
         id: 'project-a',
@@ -275,18 +276,81 @@ describe('cashflow sheet lab route', () => {
         auditId: 'audit-1',
       })),
     };
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrix(),
+      })),
+    };
+
+    const response = await request(createApp({ db, javaWeeklyClient, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-mismatch-001' })
+      .expect(409);
+
+    expect(response.body).toMatchObject({
+      code: 'cashflow_sheet_apply_environment_mismatch',
+    });
+    expect(response.body.message).toContain('Align the environments');
+    expect(googleSheetsService.previewSpreadsheet).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when apply cannot identify the BFF Firestore project', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      firestoreProjectId: 'bff-firestore-a',
+      applyCashflowSheetLab: vi.fn(),
+    };
+
+    const response = await request(createApp({ db, javaWeeklyClient, bffProjectId: '' }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-missing-env-001' })
+      .expect(409);
+
+    expect(response.body.code).toBe('cashflow_sheet_apply_environment_mismatch');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when apply cannot identify the Java Firestore project', async () => {
+    const db = createDb({
+      data: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      workspaceEmailDomain: 'mysc.co.kr',
+      firestoreProjectId: '',
+      applyCashflowSheetLab: vi.fn(),
+    };
 
     const response = await request(createApp({ db, javaWeeklyClient }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ idempotencyKey: 'apply-mismatch-001' })
-      .expect(200);
+      .send({ idempotencyKey: 'apply-missing-java-env-001' })
+      .expect(409);
 
-    expect(response.body.javaResult.auditId).toBe('audit-1');
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: 'project-a',
-      idempotencyKey: 'apply-mismatch-001',
-      sourceSheetKey: 'cashflow-sheet-lab',
-    }));
+    expect(response.body.code).toBe('cashflow_sheet_apply_environment_mismatch');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
   it('parses Google Sheets formatted currency values before applying to Java', async () => {
