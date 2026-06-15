@@ -4,6 +4,7 @@ import { createFirestoreDb, isFirestoreEmulatorEnabled, resolveProjectId } from 
 import {
   createFirebaseAuthAdminService,
   createFirebaseTokenVerifier,
+  resolveFirebaseAuthProjectId,
   resolveAuthMode,
   resolveRequestIdentity,
 } from './auth.mjs';
@@ -663,9 +664,11 @@ export function createBffApp(options = {}) {
 
   const createDb = options.createDb || createFirestoreDb;
   const db = options.db || createDb({ projectId });
+  const authProjectId = resolveFirebaseAuthProjectId(options, env, projectId);
+  const authAppName = authProjectId === projectId ? undefined : `auth:${authProjectId}`;
   const authMode = options.authMode || resolveAuthMode();
-  const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId });
-  const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId });
+  const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId: authProjectId, appName: authAppName });
+  const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId: authProjectId, appName: authAppName });
   const idempotencyService = createIdempotencyService(db);
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();

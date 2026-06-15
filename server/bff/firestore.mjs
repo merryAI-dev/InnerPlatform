@@ -1,6 +1,7 @@
 import {
   applicationDefault,
   cert,
+  getApp,
   getApps,
   initializeApp,
 } from 'firebase-admin/app';
@@ -55,33 +56,40 @@ export function resolveServiceAccount(env = process.env) {
   return normalizeServiceAccount(parseJsonValue(decoded, 'FIREBASE_SERVICE_ACCOUNT_BASE64'));
 }
 
-export function getOrInitAdminApp({ projectId } = {}) {
-  if (getApps().length > 0) {
+export function getOrInitAdminApp({ projectId, appName } = {}) {
+  if (appName) {
+    try {
+      return getApp(appName);
+    } catch {
+      // Initialize below.
+    }
+  } else if (getApps().length > 0) {
     return getApps()[0];
   }
 
   const resolvedProjectId = projectId || resolveProjectId();
   const useEmulator = isFirestoreEmulatorEnabled();
   const serviceAccount = resolveServiceAccount();
+  const initialize = (options) => (appName ? initializeApp(options, appName) : initializeApp(options));
 
   if (useEmulator) {
-    return initializeApp({ projectId: resolvedProjectId });
+    return initialize({ projectId: resolvedProjectId });
   }
 
   if (serviceAccount) {
-    return initializeApp({
+    return initialize({
       projectId: resolvedProjectId,
       credential: cert(serviceAccount),
     });
   }
 
   try {
-    return initializeApp({
+    return initialize({
       projectId: resolvedProjectId,
       credential: applicationDefault(),
     });
   } catch {
-    return initializeApp({ projectId: resolvedProjectId });
+    return initialize({ projectId: resolvedProjectId });
   }
 }
 

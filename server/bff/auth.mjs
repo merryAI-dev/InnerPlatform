@@ -21,6 +21,10 @@ function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function readText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function normalizeActorName(value) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) return '';
@@ -102,13 +106,13 @@ export function extractRoleFromClaims(claims) {
 }
 
 export function createFirebaseTokenVerifier(options = {}) {
-  const app = getOrInitAdminApp({ projectId: options.projectId });
+  const app = getOrInitAdminApp({ projectId: options.projectId, appName: options.appName });
   const auth = getAuth(app);
   return async (token) => auth.verifyIdToken(token, true);
 }
 
 export function createFirebaseAuthAdminService(options = {}) {
-  const app = getOrInitAdminApp({ projectId: options.projectId });
+  const app = getOrInitAdminApp({ projectId: options.projectId, appName: options.appName });
   const auth = getAuth(app);
 
   return {
@@ -123,6 +127,14 @@ export function createFirebaseAuthAdminService(options = {}) {
       return claims;
     },
   };
+}
+
+export function resolveFirebaseAuthProjectId(options = {}, env = process.env, fallbackProjectId = '') {
+  return readText(options.firebaseAuthProjectId)
+    || readText(env.BFF_FIREBASE_AUTH_PROJECT_ID)
+    || readText(env.FIREBASE_AUTH_PROJECT_ID)
+    || readText(env.VITE_FIREBASE_PROJECT_ID)
+    || readText(fallbackProjectId);
 }
 
 function resolveIdentityFromHeaders({ readHeaderValue }) {
