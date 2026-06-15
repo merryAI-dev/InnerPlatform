@@ -6,6 +6,8 @@ cd "$ROOT_DIR"
 
 REQUIRED_BRANCH="experiment/sheets-cashflow-projection-readonly"
 TARGET_ALIAS="inner-platform-sheets-lab-merryai-devs-projects.vercel.app"
+SHEETS_LAB_FIRESTORE_PROJECT_ID="${SHEETS_LAB_FIRESTORE_PROJECT_ID:-inner-platform-qa-20260310}"
+SHEETS_LAB_FIREBASE_AUTH_PROJECT_ID="${SHEETS_LAB_FIREBASE_AUTH_PROJECT_ID:-mysc-bmp-14173451}"
 CURRENT_BRANCH="$(git branch --show-current)"
 
 fail() {
@@ -36,12 +38,19 @@ trap 'rm -f "$TMP_OUTPUT"' EXIT
 
 echo "[deploy-sheets-lab-vercel] deploying branch=$CURRENT_BRANCH alias=$TARGET_ALIAS"
 echo "[deploy-sheets-lab-vercel] commit=$(git rev-parse --short HEAD)"
+echo "[deploy-sheets-lab-vercel] bff firestore project=$SHEETS_LAB_FIRESTORE_PROJECT_ID"
+echo "[deploy-sheets-lab-vercel] bff firebase auth project=$SHEETS_LAB_FIREBASE_AUTH_PROJECT_ID"
 if [[ "${DRY_RUN:-}" == "1" ]]; then
   echo "[deploy-sheets-lab-vercel] dry run passed: branch, clean tree, and upstream HEAD match"
   exit 0
 fi
 
-vercel deploy --yes --archive=tgz 2>&1 | tee "$TMP_OUTPUT"
+vercel deploy \
+  --yes \
+  --archive=tgz \
+  --env "FIREBASE_PROJECT_ID=$SHEETS_LAB_FIRESTORE_PROJECT_ID" \
+  --env "BFF_FIREBASE_AUTH_PROJECT_ID=$SHEETS_LAB_FIREBASE_AUTH_PROJECT_ID" \
+  2>&1 | tee "$TMP_OUTPUT"
 
 PREVIEW_URL="$(
   perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "$TMP_OUTPUT" \
