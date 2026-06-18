@@ -1,0 +1,158 @@
+name: Stage Deploy
+
+on:
+  push:
+    branches:
+      - rescue/cli-preview-stage-combined-20260618
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy to stage
+        required: true
+        default: rescue/cli-preview-stage-combined-20260618
+        type: string
+      note:
+        description: Deployment note for the stage summary
+        required: false
+        type: string
+
+concurrency:
+  group: inner-platform-stage
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy stage from Git ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: Stage
+      url: https://inner-platform-stage-merryai-devs-projects.vercel.app
+    env:
+      STAGE_CANONICAL_HOST: inner-platform-stage-merryai-devs-projects.vercel.app
+      VERCEL_CLI_PACKAGE: vercel@50.14.0
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_STAGE }}
+
+    steps:
+      - name: Resolve deploy ref
+        id: deploy_ref
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            target_ref="${{ inputs.ref }}"
+          else
+            target_ref="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "${target_ref}" ]; then
+            echo "Stage deploy requires a Git ref." >&2
+            exit 1
+          fi
+          case "${target_ref}" in
+            rescue/cli-preview-stage-combined-20260618)
+              ;;
+            *)
+              echo "Stage deploy ref is not allowed: ${target_ref}" >&2
+              echo "Allowed ref: rescue/cli-preview-stage-combined-20260618" >&2
+              exit 1
+              ;;
+          esac
+          echo "target_ref=${target_ref}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.deploy_ref.outputs.target_ref }}
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify stage deploy policy and credentials
+        run: |
+          set -euo pipefail
+          node scripts/assert-safe-stage-deploy.mjs
+          test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_DEPLOY_TOKEN_STAGE" >&2; exit 1; }
+          test -n "${VERCEL_ORG_ID}" || { echo "Missing secret: VERCEL_ORG_ID" >&2; exit 1; }
+          test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
+          test -n "$(git rev-parse HEAD)" || { echo "Could not resolve deploy commit." >&2; exit 1; }
+
+      - run: npm ci
+
+      - name: RBAC policy verify
+        run: npm run policy:verify
+
+      - name: Cashflow stage smoke tests
+        run: |
+          npx vitest run \
+            src/app/features/cashflow-sheet-compare/cashflow-sheet-preview-tables.test.ts \
+            server/bff/routes/cashflow-sheet-lab.test.mjs \
+            server/bff/cashflow-sheet-template.test.mjs
+
+      - name: Stage build
+        run: npm run build
+
+      - name: Deploy Git artifact to Vercel preview
+        id: vercel_deploy
+        env:
+          TARGET_REF: ${{ steps.deploy_ref.outputs.target_ref }}
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          commit_sha="$(git rev-parse HEAD)"
+          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --token "${VERCEL_TOKEN}" \
+            --meta stagePolicy=github-actions-git-only \
+            --meta githubCommitSha="${commit_sha}" \
+            --meta githubCommitRef="${TARGET_REF}" \
+            2>&1 | tee "${output_file}"
+          deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
+          if [ -z "${deployment_url}" ]; then
+            echo "Could not parse Vercel deployment URL" >&2
+            exit 1
+          fi
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Promote stage alias
+        env:
+          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set "${DEPLOYMENT_URL}" "${STAGE_CANONICAL_HOST}" --token "${VERCEL_TOKEN}"
+
+      - name: Verify stage surface
+        run: |
+          set -euo pipefail
+          curl -fsSI "https://${STAGE_CANONICAL_HOST}/" >/dev/null
+          config_status="$(curl -sS -o /tmp/stage-config-response.txt -w '%{http_code}' \
+            "https://${STAGE_CANONICAL_HOST}/api/v1/projects/p1773651024850/cashflow-sheet-lab/config")"
+          case "${config_status}" in
+            200|401|403) ;;
+            *)
+              echo "Unexpected cashflow config status from stage: ${config_status}" >&2
+              cat /tmp/stage-config-response.txt >&2 || true
+              exit 1
+              ;;
+          esac
+
+      - name: Stage deployment summary
+        env:
+          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+          TARGET_REF: ${{ steps.deploy_ref.outputs.target_ref }}
+          DEPLOY_NOTE: ${{ inputs.note }}
+        run: |
+          {
+            printf '%s\n' "## InnerPlatform stage deploy"
+            printf '\n'
+            printf '%s\n' "- Canonical URL: https://${STAGE_CANONICAL_HOST}"
+            printf '%s\n' "- Deployment URL: ${DEPLOYMENT_URL}"
+            printf '%s\n' "- Commit: $(git rev-parse HEAD)"
+            printf '%s\n' "- Git ref: ${TARGET_REF}"
+            printf '%s\n' "- Actor: ${GITHUB_ACTOR}"
+            printf '%s\n' "- Note: ${DEPLOY_NOTE:-}"
+          } >> "${GITHUB_STEP_SUMMARY}"
