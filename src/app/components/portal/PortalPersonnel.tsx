@@ -78,6 +78,7 @@ export function PortalPersonnel() {
         title="인력 현황"
         description={myProject ? `${myProject.name} 투입 인력` : '인력 현황'}
         badge={`${totalHeadcount}명`}
+        headingVisible={false}
         actions={
           <Button size="sm" className="h-8 text-[12px] gap-1.5" onClick={() => navigate('/portal/change-requests')}>
             <ArrowRight className="w-3.5 h-3.5" /> 인력변경 신청

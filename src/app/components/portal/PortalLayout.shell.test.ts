@@ -85,9 +85,11 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain("portal-nav-${path");
   });
 
-  it('uses a wider content canvas for the weekly expense work surface', () => {
-    expect(portalLayoutSource).toContain("const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses';");
-    expect(portalLayoutSource).toContain("w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8");
-    expect(portalLayoutSource).toContain("mx-auto w-full max-w-[1480px] p-4 md:p-6");
+  it('uses reduced content padding for workbook-style work surfaces', () => {
+    expect(portalLayoutSource).toContain("location.pathname === '/portal/weekly-expenses' ||");
+    expect(portalLayoutSource).toContain("location.pathname.startsWith('/portal/cashflow')");
+    expect(portalLayoutSource).toContain("w-full max-w-none px-5 py-2.5");
+    expect(portalLayoutSource).toContain("mx-auto w-full max-w-[1480px] px-5 py-2.5");
+    expect(portalLayoutSource).not.toContain("p-4 md:p-6");
   });
 });

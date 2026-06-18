@@ -1406,6 +1406,7 @@ export function PortalBudget() {
           title="예산 편집"
           description={myProject ? myProject.name : '예산 현황'}
           badge={`${meta.year}년`}
+          headingVisible={false}
           actions={(
             <div className="flex items-center gap-2">
               {editMode ? (

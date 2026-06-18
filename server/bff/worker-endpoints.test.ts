@@ -10,6 +10,7 @@ const INTERNAL_WORKER_PATHS = [
   '/api/internal/workers/work-queue/run',
   '/api/internal/workers/payroll/run',
   '/api/internal/workers/monthly-close/run',
+  '/api/internal/workers/cashflow-sheet-sync/run',
   '/api/internal/workers/client-errors/run',
 ];
 

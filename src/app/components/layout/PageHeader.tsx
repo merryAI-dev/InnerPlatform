@@ -9,6 +9,7 @@ interface PageHeaderProps {
   badge?: string;
   badgeVariant?: 'default' | 'secondary' | 'outline';
   actions?: ReactNode;
+  headingVisible?: boolean;
 }
 
 export function PageHeader({
@@ -18,7 +19,22 @@ export function PageHeader({
   badge,
   badgeVariant = 'secondary',
   actions,
+  headingVisible = true,
 }: PageHeaderProps) {
+  if (!headingVisible) {
+    if (!actions && !badge) return null;
+    return (
+      <div className="flex w-full flex-wrap items-center justify-end gap-2">
+        {badge && (
+          <Badge variant={badgeVariant} className="text-[10px] h-5 px-2">
+            {badge}
+          </Badge>
+        )}
+        {actions}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
       <div className="flex min-w-0 items-start gap-3">

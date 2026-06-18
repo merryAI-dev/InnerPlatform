@@ -79,7 +79,7 @@ interface AuthState {
 interface AuthActions {
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   loginWithDevHarness: (preset?: DevHarnessPreset) => Promise<{ success: boolean; error?: string }>;
-  ensureGoogleWorkspaceAccess: () => Promise<string | null>;
+  ensureGoogleWorkspaceAccess: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   setWorkspacePreference: (workspace: WorkspaceId, options?: { persistDefault?: boolean }) => Promise<boolean>;
   logout: () => void;
   isAdmin: () => boolean;
@@ -617,20 +617,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }, []);
 
-  const ensureGoogleWorkspaceAccess = useCallback(async (): Promise<string | null> => {
+  const ensureGoogleWorkspaceAccess = useCallback(async (options: { forceRefresh?: boolean } = {}): Promise<string | null> => {
     const currentUser = user;
     if (!featureFlags.firebaseAuthEnabled || !currentUser || currentUser.source !== 'firebase') {
       return null;
     }
 
     const cached = loadGoogleWorkspaceAccessToken(currentUser.uid);
-    if (cached) {
+    if (cached && !options.forceRefresh) {
       if (!currentUser.googleAccessToken) {
         const nextUser = { ...currentUser, googleAccessToken: cached };
         setUser(nextUser);
         saveUser(nextUser);
       }
       return cached;
+    }
+    if (options.forceRefresh) {
+      persistGoogleWorkspaceAccessToken(currentUser.uid, undefined);
     }
 
     const auth = getAuthInstance();

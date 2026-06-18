@@ -12,26 +12,26 @@ const cashflowWeeksStoreSource = readFileSync(
 );
 
 describe('CashflowProjectSheet actual sync flow', () => {
-  it('exposes the cashflow guide dialog from the project sheet toolbar', () => {
-    expect(cashflowProjectSheetSource).toContain('CashflowGuideButton');
-    expect(cashflowProjectSheetSource).toContain('CashflowGuideDialog');
-    expect(cashflowProjectSheetSource).toContain('guideOpen');
+  it('exposes the rescue operations dashboard from the project sheet shell', () => {
+    expect(cashflowProjectSheetSource).toContain('renderOperationsPanel');
+    expect(cashflowProjectSheetSource).toContain('운영 대시보드');
+    expect(cashflowProjectSheetSource).toContain('opsSummary');
   });
 
-  it('keeps actual sync separate from manual actual save', () => {
-    expect(cashflowProjectSheetSource).toContain('Actual 불러오기');
-    expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');
+  it('keeps actual audit and sync store helpers separate from manual actual completion', () => {
+    expect(cashflowProjectSheetSource).toContain('prepareAuditedWeekAmounts');
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
     expect(cashflowWeeksStoreSource).toContain('applyProjectActualSyncResultLocally');
-    expect(cashflowProjectSheetSource).toContain('Actual 저장');
+    expect(cashflowProjectSheetSource).toContain('handleSubmitWeek');
+    expect(cashflowProjectSheetSource).toContain('작성완료');
   });
 
   it('saves visible month values instead of draft-only input changes', () => {
     expect(cashflowProjectSheetSource).toContain('persistWeekValues');
     expect(cashflowProjectSheetSource).toContain('persisted.hasValue');
-    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[cellKey])');
-    expect(cashflowProjectSheetSource).toContain('await persistWeekValues({ weekNo, mode: targetMode })');
+    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
+    expect(cashflowProjectSheetSource).toContain('void persistWeekValues(input)');
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 
@@ -45,7 +45,7 @@ describe('CashflowProjectSheet actual sync flow', () => {
 
   it('formats persisted input values for display without changing numeric save parsing', () => {
     expect(cashflowProjectSheetSource).toContain('formatAmountInput(String(persisted.amount))');
-    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[cellKey])');
+    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
   });
 
   it('shows projection 작성 from projectionUpdated on the project sheet header', () => {
@@ -63,9 +63,11 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
   });
 
-  it('can initialize directly on the projection tab from routing', () => {
-    expect(cashflowProjectSheetSource).toContain("initialViewMode = 'compare'");
-    expect(cashflowProjectSheetSource).toContain("useState<'projection' | 'actual' | 'compare'>(initialViewMode)");
+  it('keeps the projection, actual, and compare route contract available for embedding', () => {
+    expect(cashflowProjectSheetSource).toContain("initialViewMode?: 'projection' | 'actual' | 'compare'");
+    expect(cashflowProjectSheetSource).toContain("function renderSheetTable(tableMode: 'projection' | 'actual'");
+    expect(cashflowProjectSheetSource).toContain('renderUnifiedMonthlyBoard');
+    expect(cashflowProjectSheetSource).toContain('renderProjectionActualDiffTable');
   });
 
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {

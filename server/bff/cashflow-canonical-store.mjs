@@ -23,6 +23,8 @@ const COLUMN_INDEX = Object.fromEntries(SETTLEMENT_COLUMN_HEADERS.map((header, i
 const CASHFLOW_IN_LINE_IDS = new Set(CASHFLOW_IN_LINES);
 const LINE_BY_LABEL = new Map();
 const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
+const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
+const WEEKLY_SUBMISSION_STATUS_COLLECTION_ID = 'weekly_submission_status';
 
 function normalizePolicyLabel(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -483,23 +485,53 @@ function buildStatusPatch({ tenantId, actorId, actorName, projectId, week, mode,
   };
 }
 
-export async function upsertCashflowWeekAmounts({ db, tenantId, actorId, actorName, projectId, mode, yearMonth, weekNo, amounts, now }) {
+function buildSheetWeekFallback(yearMonth, weekNo) {
+  const parsed = parseYearMonth(yearMonth);
+  if (!parsed) return null;
+  return {
+    yearMonth: parsed.yearMonth,
+    weekNo,
+    weekStart: '',
+    weekEnd: '',
+    label: `${parsed.year % 100}-${parsed.month}-${weekNo}`,
+    sheetOnly: true,
+  };
+}
+
+export async function upsertCashflowWeekAmounts({
+  db,
+  tenantId,
+  actorId,
+  actorName,
+  projectId,
+  mode,
+  yearMonth,
+  weekNo,
+  amounts,
+  now,
+  allowSheetWeek = false,
+}) {
   const parsed = parseYearMonth(yearMonth);
   if (!parsed) {
     const error = new Error('Invalid yearMonth');
     error.statusCode = 400;
     throw error;
   }
-  const targetWeek = getMonthCashflowWeeks(parsed.yearMonth).find((week) => week.weekNo === weekNo);
+  const canonicalWeek = getMonthCashflowWeeks(parsed.yearMonth).find((week) => week.weekNo === weekNo);
+  const targetWeek = canonicalWeek || (allowSheetWeek ? buildSheetWeekFallback(parsed.yearMonth, weekNo) : null);
   if (!targetWeek) {
     const error = new Error('Invalid cashflow week');
     error.statusCode = 400;
     throw error;
   }
 
-  const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const statusPatch = buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now });
+  const weekRef = db.doc(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
+  const statusRef = canonicalWeek
+    ? db.doc(`orgs/${tenantId}/${WEEKLY_SUBMISSION_STATUS_COLLECTION_ID}/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`)
+    : null;
+  const statusPatch = canonicalWeek
+    ? buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now })
+    : null;
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(weekRef);
@@ -517,8 +549,9 @@ export async function upsertCashflowWeekAmounts({ db, tenantId, actorId, actorNa
     tx.set(weekRef, {
       ...(snap.exists ? {} : { createdAt: now, pmSubmitted: false, adminClosed: false }),
       ...patch,
+      ...(canonicalWeek ? {} : { sheetWeekSource: 'cashflow-sheet-lab' }),
     }, { merge: true });
-    tx.set(statusRef, statusPatch, { merge: true });
+    if (statusRef && statusPatch) tx.set(statusRef, statusPatch, { merge: true });
   });
 
   return {
@@ -565,8 +598,8 @@ export async function syncProjectCashflowActualsFromExpenseSheets({ db, tenantId
 
   const mutations = [];
   for (const week of writeWeeks) {
-    const weekRef = db.doc(`orgs/${tenantId}/cashflow_weeks/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
-    const statusRef = db.doc(`orgs/${tenantId}/weekly_submission_status/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
+    const weekRef = db.doc(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
+    const statusRef = db.doc(`orgs/${tenantId}/${WEEKLY_SUBMISSION_STATUS_COLLECTION_ID}/${resolveWeekDocId(projectId, week.yearMonth, week.weekNo)}`);
     const existingSnap = await weekRef.get().catch(() => null);
     const patch = buildWeekPatch({
       tenantId,

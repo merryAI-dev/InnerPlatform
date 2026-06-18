@@ -3,7 +3,7 @@ import { JWT } from 'google-auth-library';
 import { resolveServiceAccount } from './firestore.mjs';
 
 const SHEETS_API_BASE_URL = 'https://sheets.googleapis.com/v4';
-const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
 export class GoogleSheetsServiceError extends Error {
   constructor(message, options = {}) {
@@ -73,7 +73,7 @@ export function extractSpreadsheetId(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
 
-  const linkMatch = raw.match(/\/spreadsheets\/d\/([A-Za-z0-9-_]+)/);
+  const linkMatch = raw.match(/\/d\/([A-Za-z0-9-_]+)/);
   if (linkMatch) return linkMatch[1];
 
   const urlIdMatch = raw.match(/[?&]id=([A-Za-z0-9-_]+)/);
@@ -102,6 +102,16 @@ function normalizeSheetTitle(title) {
 function quoteSheetNameForRange(sheetName) {
   const normalized = normalizeSheetTitle(sheetName);
   return `'${normalized.replace(/'/g, "''")}'`;
+}
+
+function normalizeA1Range(rangeA1) {
+  return readOptionalText(rangeA1).replace(/^'+|'+$/g, '');
+}
+
+function buildValuesRange(sheetName, rangeA1) {
+  const quotedSheetName = quoteSheetNameForRange(sheetName);
+  const normalizedRange = normalizeA1Range(rangeA1);
+  return normalizedRange ? `${quotedSheetName}!${normalizedRange}` : quotedSheetName;
 }
 
 function normalizeSheetDescriptor(sheet) {
@@ -204,10 +214,10 @@ export function createGoogleSheetsService(options = {}) {
     };
   }
 
-  async function getSheetValues({ spreadsheetId, sheetName, accessToken }) {
+  async function getSheetValues({ spreadsheetId, sheetName, accessToken, rangeA1 }) {
     const normalizedId = extractSpreadsheetId(spreadsheetId);
     const normalizedSheetName = normalizeSheetTitle(sheetName);
-    const range = quoteSheetNameForRange(normalizedSheetName);
+    const range = buildValuesRange(normalizedSheetName, rangeA1);
     const params = new URLSearchParams({
       majorDimension: 'ROWS',
       valueRenderOption: 'FORMATTED_VALUE',
@@ -225,7 +235,52 @@ export function createGoogleSheetsService(options = {}) {
       : [];
   }
 
-  async function previewSpreadsheet({ value, sheetName, accessToken }) {
+  async function batchUpdateValues({ spreadsheetId, sheetName, updates, accessToken }) {
+    const normalizedId = extractSpreadsheetId(spreadsheetId);
+    const normalizedSheetName = normalizeSheetTitle(sheetName);
+    const normalizedUpdates = Array.isArray(updates)
+      ? updates
+        .map((update) => ({
+          range: buildValuesRange(normalizedSheetName, update?.rangeA1),
+          values: Array.isArray(update?.values) ? update.values : [[update?.value ?? '']],
+        }))
+        .filter((update) => update.range)
+      : [];
+
+    if (!normalizedId) {
+      throw new GoogleSheetsServiceError(
+        'Google Sheets 링크 또는 spreadsheet ID를 입력해 주세요.',
+        { statusCode: 400, code: 'spreadsheet_id_required' },
+      );
+    }
+    if (normalizedUpdates.length === 0) {
+      return { spreadsheetId: normalizedId, totalUpdatedCells: 0, responses: [] };
+    }
+
+    const data = await sheetsFetch(
+      `/spreadsheets/${encodeURIComponent(normalizedId)}/values:batchUpdate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          valueInputOption: 'USER_ENTERED',
+          data: normalizedUpdates,
+        }),
+      },
+      accessToken,
+    );
+
+    return {
+      spreadsheetId: normalizedId,
+      totalUpdatedCells: Number(data?.totalUpdatedCells) || 0,
+      totalUpdatedRows: Number(data?.totalUpdatedRows) || 0,
+      totalUpdatedColumns: Number(data?.totalUpdatedColumns) || 0,
+      totalUpdatedSheets: Number(data?.totalUpdatedSheets) || 0,
+      responses: Array.isArray(data?.responses) ? data.responses : [],
+    };
+  }
+
+  async function previewSpreadsheet({ value, sheetName, accessToken, rangeA1 }) {
     const spreadsheetId = extractSpreadsheetId(value);
     if (!spreadsheetId) {
       throw new GoogleSheetsServiceError(
@@ -264,6 +319,7 @@ export function createGoogleSheetsService(options = {}) {
       spreadsheetId: meta.spreadsheetId,
       sheetName: selectedSheet.title,
       accessToken,
+      rangeA1,
     });
 
     return {
@@ -278,6 +334,7 @@ export function createGoogleSheetsService(options = {}) {
   return {
     getSpreadsheetMeta,
     getSheetValues,
+    batchUpdateValues,
     previewSpreadsheet,
   };
 }

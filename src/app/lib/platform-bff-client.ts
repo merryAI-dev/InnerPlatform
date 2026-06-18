@@ -579,6 +579,173 @@ export interface ProjectCashflowActualSyncResult {
   updatedAt: string;
 }
 
+export interface CashflowLaborRiskWeek {
+  yearMonth: string;
+  weekNo: number;
+  label: string;
+  weekStart: string;
+  weekEnd: string;
+  weekRange: string;
+}
+
+export interface CashflowLaborRiskResult {
+  projectId: string;
+  asOfDate: string;
+  snapshotKind: 'cashflow_labor_risk';
+  range: {
+    startYearMonth: string;
+    endYearMonth: string;
+    weekCount: number;
+  };
+  current: {
+    balance: number;
+    week: CashflowLaborRiskWeek | null;
+  };
+  labor: {
+    lastMonth: {
+      yearMonth: string;
+      label: string;
+      actualAmount: number;
+    };
+    latestActualMonth: {
+      yearMonth: string;
+      label: string;
+      actualAmount: number;
+    } | null;
+    referenceActualAmount: number;
+    nextProjection: (CashflowLaborRiskWeek & { amount: number }) | null;
+    nextMonthProjection: {
+      yearMonth: string;
+      label: string;
+      isWritten: boolean;
+      status: 'written' | 'missing';
+      projectionAmount: number;
+      laborWeeks: Array<CashflowLaborRiskWeek & { amount: number }>;
+    };
+    projectionCoverageMonths: Array<{
+      yearMonth: string;
+      label: string;
+      isWritten: boolean;
+      status: 'written' | 'missing';
+      projectionAmount: number;
+      laborWeeks: Array<CashflowLaborRiskWeek & { amount: number }>;
+    }>;
+    missingProjectionMonths: Array<{
+      yearMonth: string;
+      label: string;
+      referenceActualAmount: number;
+      weeks: CashflowLaborRiskWeek[];
+    }>;
+    balanceAfterNextLabor: number;
+  };
+  shortage: {
+    status: 'ok' | 'warning' | 'danger';
+    reliable: boolean;
+    week: CashflowLaborRiskWeek | null;
+    projectedBalance: number | null;
+    shortageAmount: number;
+    message: string;
+    actions: string[];
+  };
+  snapshot?: {
+    persisted: boolean;
+    path: string;
+  };
+}
+
+export interface BankStatementImportBatchPayload {
+  idempotencyKey: string;
+  uploadName?: string;
+  columns: string[];
+  lines: Array<{
+    lineIndex: number;
+    sourceLineKey: string;
+    transactionDate: string;
+    counterparty: string;
+    memo: string;
+    signedAmount: number | null;
+    balanceAfter: number;
+    rawCells: string[];
+  }>;
+}
+
+export interface BankStatementImportBatchResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  batchId: string;
+  stagedLineCount: number;
+  duplicateLineCount: number;
+  lines: Array<{
+    id: string | null;
+    lineIndex: number;
+    sourceLineKey: string;
+    status: string;
+    signedAmount: number;
+    duplicate: boolean;
+  }>;
+  auditId: string;
+}
+
+export interface BankStatementImportLineResult {
+  id: string;
+  batchId: string;
+  uploadName: string;
+  batchStatus: string;
+  batchCreatedBy: string;
+  batchCreatedAt: string;
+  columns: string[];
+  lineIndex: number;
+  sourceLineKey: string;
+  transactionDate: string;
+  counterparty: string;
+  memo: string;
+  signedAmount: number;
+  balanceAfter: number;
+  rawCells: string[];
+  status: string;
+  appliedSheetKey?: string | null;
+  appliedRowId?: string | null;
+  appliedAt?: string | null;
+  appliedBy?: string | null;
+}
+
+export interface BankStatementImportLinesResult {
+  ok: boolean;
+  projectId: string;
+  status: string;
+  lines: BankStatementImportLineResult[];
+}
+
+export interface ApplyBankStatementItemsPayload {
+  idempotencyKey: string;
+  sheetKey: string;
+  expectedSheetVersion?: number | null;
+  sheetName?: string;
+  items: Array<{
+    importLineId: string;
+    cells: Array<{
+      columnIndex: number;
+      rawValue: string;
+      userEdited?: boolean;
+    }>;
+  }>;
+}
+
+export interface ApplyBankStatementItemsResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  appliedLineCount: number;
+  touchedRows: number[];
+  cellIssues?: unknown[];
+  actualDelta?: unknown[];
+  auditId: string;
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -630,12 +797,35 @@ function normalizeBaseUrl(value: unknown): string {
   return value.trim().replace(/\/$/, '');
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function resolveBrowserBffBaseUrl(configured: string): string {
+  if (typeof window === 'undefined' || !window.location?.origin) return configured;
+  const runtimeHost = window.location.hostname;
+  if (isLoopbackHostname(runtimeHost)) return configured;
+  try {
+    const configuredUrl = new URL(configured);
+    if (
+      isLoopbackHostname(configuredUrl.hostname)
+      || configuredUrl.hostname.includes('innerplatform-jvm-weekly-api')
+    ) {
+      return window.location.origin;
+    }
+  } catch {
+    return configured;
+  }
+  return configured;
+}
+
 export function readPlatformApiRuntimeConfig(
   env: Record<string, unknown> = import.meta.env,
 ): PlatformApiRuntimeConfig {
+  const baseUrl = normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL);
   return {
     enabled: parseFeatureFlag(env.VITE_PLATFORM_API_ENABLED, false),
-    baseUrl: normalizeBaseUrl(env.VITE_PLATFORM_API_BASE_URL),
+    baseUrl: resolveBrowserBffBaseUrl(baseUrl),
   };
 }
 
@@ -1365,6 +1555,92 @@ export async function syncProjectCashflowActualsViaBff(params: {
       body: {},
       retries: 0,
       timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowLaborRiskViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowLaborRiskResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<CashflowLaborRiskResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-labor-risk`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function importBankStatementBatchViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: BankStatementImportBatchPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<BankStatementImportBatchResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<BankStatementImportBatchResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/import-batch`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyBankStatementItemsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: ApplyBankStatementItemsPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<ApplyBankStatementItemsResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ApplyBankStatementItemsResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/apply-items`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function listBankStatementImportLinesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  status?: 'staged' | 'applied' | 'all';
+  client?: PlatformApiClientLike;
+}): Promise<BankStatementImportLinesResult> {
+  const apiClient = resolveClient(params.client);
+  const suffix = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
+  const response = await apiClient.get<BankStatementImportLinesResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/bank-statements/import-lines${suffix}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
     },
   );
   return response.data;

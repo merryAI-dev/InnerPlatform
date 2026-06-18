@@ -178,11 +178,45 @@ export function getBankStatementProfileLabel(profile: BankStatementProfile): str
 export interface BankStatementRow {
   tempId: string;
   cells: string[];
+  status?: 'staged' | 'applied';
 }
 
 export interface BankStatementSheet {
   columns: string[];
   rows: BankStatementRow[];
+}
+
+export interface BankStatementServerImportLine {
+  lineIndex: number;
+  sourceLineKey: string;
+  transactionDate: string;
+  counterparty: string;
+  memo: string;
+  signedAmount: number | null;
+  balanceAfter: number;
+  rawCells: string[];
+}
+
+export function buildBankStatementServerImportLines(sheet: BankStatementSheet): BankStatementServerImportLine[] {
+  const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
+  return rows.map((row, index) => {
+    const snapshot = resolveBankSnapshotFromStatementRow(sheet, row);
+    const signedAmount = snapshot
+      ? snapshot.entryKind === 'EXPENSE'
+        ? -Math.abs(snapshot.signedAmount)
+        : Math.abs(snapshot.signedAmount)
+      : null;
+    return {
+      lineIndex: index,
+      sourceLineKey: row.tempId || (snapshot ? buildBankFingerprint(snapshot) : `row-${index}`),
+      transactionDate: snapshot?.dateTime || '',
+      counterparty: snapshot?.counterparty || '',
+      memo: snapshot?.memo || '',
+      signedAmount,
+      balanceAfter: snapshot?.balanceAfter || 0,
+      rawCells: Array.isArray(row.cells) ? row.cells : [],
+    };
+  });
 }
 
 function cleanHeader(value: string): string {
@@ -397,9 +431,17 @@ function pickAmount(
   return fallback || { amount: null };
 }
 
-function inferCashflowCategoryFromLineLabel(rawLineLabel: string, signedAmount: number): CashflowCategory | undefined {
+function asBankImportEntryKind(entryKind: SettlementEntryKind | undefined): BankImportSnapshot['entryKind'] {
+  return entryKind === 'DEPOSIT' || entryKind === 'EXPENSE' ? entryKind : undefined;
+}
+
+function inferCashflowCategoryFromLineLabel(
+  rawLineLabel: string,
+  signedAmount: number,
+  entryKind?: SettlementEntryKind,
+): CashflowCategory | undefined {
   const lineId = parseCashflowLineLabel(rawLineLabel);
-  return mapCashflowLineToCategory(lineId, signedAmount >= 0 ? 'IN' : 'OUT');
+  return mapCashflowLineToCategory(lineId, entryKind === 'EXPENSE' ? 'OUT' : signedAmount >= 0 ? 'IN' : 'OUT');
 }
 
 function resolveEvidenceStatusFromExpenseRow(row: ImportRow | null | undefined): EvidenceStatus {
@@ -437,7 +479,7 @@ function extractManualFieldsFromExpenseRow(row: ImportRow | null | undefined): B
   if (cashflowIdx >= 0) {
     const value = normalizeSpace(String(row.cells[cashflowIdx] || ''));
     const lineId = parseCashflowLineLabel(value);
-    const category = inferCashflowCategoryFromLineLabel(value, signedAmount);
+    const category = inferCashflowCategoryFromLineLabel(value, signedAmount, row.entryKind);
     if (lineId) manualFields.cashflowLineId = lineId;
     if (category) manualFields.cashflowCategory = category;
   }
@@ -506,11 +548,7 @@ function resolveBankSnapshotFromStatementRow(
   }
 
   const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
-  const signedAmount = resolvedAmount.amount == null
-    ? 0
-    : resolvedAmount.entryKind === 'DEPOSIT'
-      ? resolvedAmount.amount
-      : -Math.abs(resolvedAmount.amount);
+  const signedAmount = resolvedAmount.amount == null ? 0 : Math.abs(resolvedAmount.amount);
   const balanceAfter = balanceIdx >= 0 ? (parseNumber(String(rowCells[balanceIdx] || '')) || 0) : 0;
 
   return {
@@ -519,6 +557,7 @@ function resolveBankSnapshotFromStatementRow(
     counterparty,
     memo,
     signedAmount,
+    ...(asBankImportEntryKind(resolvedAmount.entryKind) ? { entryKind: asBankImportEntryKind(resolvedAmount.entryKind) } : {}),
     balanceAfter,
   };
 }

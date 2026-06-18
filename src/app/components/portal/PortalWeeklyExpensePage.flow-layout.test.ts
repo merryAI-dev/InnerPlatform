@@ -8,12 +8,13 @@ const weeklyExpenseSource = readFileSync(
 );
 
 describe('PortalWeeklyExpensePage flow layout', () => {
-  it('surfaces bank-statement-to-weekly alignment with a direct source message', () => {
-    expect(weeklyExpenseSource).toContain('통장내역 기준본에서 이어서 작업');
-  });
-
-  it('makes direct-entry projects explicitly use the weekly sheet or excel template instead of bank upload wording', () => {
-    expect(weeklyExpenseSource).toContain('주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력');
+  it('lets the portal shell own the page heading instead of rendering a duplicate body header', () => {
+    expect(weeklyExpenseSource).not.toContain('<h2 className="text-base font-bold">사업비 입력(주간)</h2>');
+    expect(weeklyExpenseSource).not.toContain('현재 탭: {activeSheetName}');
+    expect(weeklyExpenseSource).not.toContain('거래 {expenseRowCount}건');
+    expect(weeklyExpenseSource).not.toContain('통장내역 ${bankStatementCount}건 연결');
+    expect(weeklyExpenseSource).not.toContain('기본 폴더 열기');
+    expect(weeklyExpenseSource).not.toContain('기존 통장내역 가져오기');
     expect(weeklyExpenseSource).not.toContain('기존 시트 가져오기');
   });
 
@@ -22,6 +23,8 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('탭 추가');
     expect(weeklyExpenseSource).not.toContain('이름 변경');
     expect(weeklyExpenseSource).not.toContain('탭 삭제');
+    expect(weeklyExpenseSource).toContain('shouldShowExpenseSheetTabs');
+    expect(weeklyExpenseSource).not.toContain("name: '기본 탭'");
   });
 
   it('shows a blocking full-screen saving overlay while save is in flight', () => {
@@ -44,9 +47,9 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).not.toContain('Next Action');
   });
 
-  it('compresses status chrome into a single operator bar and keeps the work surface wide', () => {
-    expect(weeklyExpenseSource).toContain('원본 입력은 이 화면입니다.');
-    expect(weeklyExpenseSource).toContain('max-w-4xl text-[12px] text-muted-foreground');
+  it('keeps only the conditional setup panel above the work surface', () => {
+    expect(weeklyExpenseSource).toContain('data-testid="weekly-expense-setup-panel"');
+    expect(weeklyExpenseSource).toContain('max-w-4xl text-[12px] leading-6 text-slate-600');
     expect(weeklyExpenseSource).not.toContain('현재 입력 탭');
   });
 

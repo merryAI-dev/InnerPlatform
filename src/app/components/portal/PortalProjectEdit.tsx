@@ -278,6 +278,7 @@ export function PortalProjectEdit() {
       mode="portal-edit"
       title="프로젝트 수정"
       description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
+      embeddedInShell
       initialDraft={initialDraft}
       draftKey={autosaveKey}
       members={members}

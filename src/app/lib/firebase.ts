@@ -267,6 +267,7 @@ export function getStorageInstance(): FirebaseStorage | null {
 export function getGoogleAuthProvider(): GoogleAuthProvider {
   if (_googleProvider) return _googleProvider;
   _googleProvider = new GoogleAuthProvider();
+  _googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
   _googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
   _googleProvider.addScope('https://www.googleapis.com/auth/drive');
   const domains = getAllowedEmailDomains(import.meta.env);
@@ -295,7 +296,10 @@ export const ORG_COLLECTIONS = {
   boardPosts: 'board_posts',
   boardComments: 'board_comments',
   boardVotes: 'board_votes',
+  // App-facing alias is camelCase, Firestore wire collection remains snake_case.
   cashflowWeeks: 'cashflow_weeks',
+  cashflowEditLocks: 'cashflow_edit_locks',
+  cashflowPresence: 'cashflow_presence',
   payrollSchedules: 'payroll_schedules',
   payrollRuns: 'payroll_runs',
   monthlyCloses: 'monthly_closes',

@@ -160,7 +160,10 @@ function resolveInternalApiBaseUrl(env: Record<string, unknown> = import.meta.en
 
   try {
     const parsed = new URL(configured, runtimeOrigin || 'http://localhost');
-    if (hostedOrigin && isLoopbackHostname(parsed.hostname)) {
+    if (
+      hostedOrigin
+      && (isLoopbackHostname(parsed.hostname) || parsed.hostname.includes('innerplatform-jvm-weekly-api'))
+    ) {
       return runtimeOrigin;
     }
   } catch {
