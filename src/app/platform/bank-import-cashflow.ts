@@ -3,6 +3,7 @@ import {
   type CashflowCategory,
   type CashflowSheetLineId,
   type Direction,
+  type SettlementEntryKind,
 } from '../data/types';
 import {
   getCashflowCategoryFromSheetLineId,
@@ -11,7 +12,9 @@ import {
   listCashflowLineOptions,
 } from './policies/cashflow-policy';
 
-function resolveDirectionForAmount(signedAmount: number): Direction {
+function resolveDirectionForAmount(signedAmount: number, entryKind?: SettlementEntryKind): Direction {
+  if (entryKind === 'DEPOSIT') return 'IN';
+  if (entryKind === 'EXPENSE') return 'OUT';
   return signedAmount >= 0 ? 'IN' : 'OUT';
 }
 
@@ -22,12 +25,12 @@ export function mapCashflowLineToCategory(
   return getCashflowCategoryFromSheetLineId(lineId, direction);
 }
 
-export function resolveBankImportCashflowOptionsForAmount(signedAmount: number) {
-  return listCashflowLineOptions(signedAmount >= 0 ? 'IN' : 'OUT');
+export function resolveBankImportCashflowOptionsForAmount(signedAmount: number, entryKind?: SettlementEntryKind) {
+  return listCashflowLineOptions(resolveDirectionForAmount(signedAmount, entryKind));
 }
 
-export function resolveBankImportCashflowCategoryOptionsForAmount(signedAmount: number) {
-  return listCashflowCategoryOptionsForDirection(signedAmount >= 0 ? 'IN' : 'OUT');
+export function resolveBankImportCashflowCategoryOptionsForAmount(signedAmount: number, entryKind?: SettlementEntryKind) {
+  return listCashflowCategoryOptionsForDirection(resolveDirectionForAmount(signedAmount, entryKind));
 }
 
 function isCashflowCategory(value: string): value is CashflowCategory {
@@ -40,8 +43,9 @@ function isCashflowCategory(value: string): value is CashflowCategory {
 export function resolveBankImportCashflowSelection(
   lineIdOrCategory: CashflowSheetLineId | CashflowCategory,
   signedAmount: number,
+  entryKind?: SettlementEntryKind,
 ): Pick<BankImportManualFields, 'cashflowLineId' | 'cashflowCategory'> {
-  const direction = resolveDirectionForAmount(signedAmount);
+  const direction = resolveDirectionForAmount(signedAmount, entryKind);
   const category = isCashflowCategory(lineIdOrCategory)
     ? lineIdOrCategory
     : mapCashflowLineToCategory(lineIdOrCategory, direction);
@@ -54,8 +58,9 @@ export function resolveBankImportCashflowSelection(
 export function resolveBankImportCashflowLineId(
   fields: Pick<BankImportManualFields, 'cashflowLineId' | 'cashflowCategory'> | null | undefined,
   signedAmount: number,
+  entryKind?: SettlementEntryKind,
 ): CashflowSheetLineId | undefined {
   if (fields?.cashflowLineId) return fields.cashflowLineId;
   if (!fields?.cashflowCategory) return undefined;
-  return getCashflowSheetLineIdFromCategory(fields.cashflowCategory, resolveDirectionForAmount(signedAmount));
+  return getCashflowSheetLineIdFromCategory(fields.cashflowCategory, resolveDirectionForAmount(signedAmount, entryKind));
 }

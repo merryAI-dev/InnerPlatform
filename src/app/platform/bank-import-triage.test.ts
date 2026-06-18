@@ -14,7 +14,8 @@ function makeSnapshot(overrides: Partial<BankImportIntakeItem['bankSnapshot']> =
     dateTime: '2026-04-06',
     counterparty: '메리 사업팀',
     memo: '법인카드 결제',
-    signedAmount: -120000,
+    signedAmount: 120000,
+    entryKind: 'EXPENSE',
     balanceAfter: 910000,
     ...overrides,
   };
@@ -85,13 +86,13 @@ describe('bank-import-triage', () => {
     const matchState = resolveBankImportMatchState({
       fingerprint: 'fp-3',
       incomingSourceTxId: 'bank:fp-3',
-      bankSnapshot: makeSnapshot({ signedAmount: -130000 }),
+      bankSnapshot: makeSnapshot({ signedAmount: 130000 }),
       existingItem: {
         id: 'fp-3',
         projectId: 'p-1',
         sourceTxId: 'bank:fp-3',
         bankFingerprint: 'fp-3',
-        bankSnapshot: makeSnapshot({ signedAmount: -120000 }),
+        bankSnapshot: makeSnapshot({ signedAmount: 120000 }),
         matchState: 'AUTO_CONFIRMED',
         projectionStatus: 'PROJECTED',
         evidenceStatus: 'COMPLETE',

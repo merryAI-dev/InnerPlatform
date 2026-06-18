@@ -184,6 +184,7 @@ export function PortalProjectRegister() {
       mode="portal-register"
       title="프로젝트 등록"
       description="기본 정보, 계약/재무, 팀/인력, 입금/정산 정보를 같은 기준으로 입력합니다."
+      embeddedInShell
       initialDraft={initialDraft}
       draftKey={`portal-register-${authUser?.uid || 'anonymous'}`}
       members={members}

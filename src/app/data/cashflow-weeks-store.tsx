@@ -40,6 +40,7 @@ import {
 } from '../lib/platform-bff-client';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
+import { recordDevtoolsLog, summarizeAmountMap, toDevtoolsError } from '../platform/devtools-transaction-log';
 
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
@@ -215,28 +216,73 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const monthWeeks = getMonthMondayWeeks(ym);
     const def = monthWeeks.find((w) => w.weekNo === weekNo);
     if (!def) return;
+    const amountSummary = summarizeAmountMap(input.amounts || {});
 
     if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
       const normalizedAmounts = input.amounts || {};
-      await upsertCashflowWeekAmountsViaBff({
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'start',
+        operation: 'cashflow.week.upsert',
+        transport: 'bff',
         tenantId: orgId,
-        actor: {
-          uid: actor.uid,
-          email: actor.email,
-          role: actor.role,
-          idToken: (actor as any).idToken,
-          googleAccessToken: (actor as any).googleAccessToken,
-        },
+        actorId: actor.uid,
         projectId,
-        payload: {
+        yearMonth: ym,
+        weekNo,
+        mode: input.mode,
+        summary: amountSummary,
+      });
+      try {
+        await upsertCashflowWeekAmountsViaBff({
+          tenantId: orgId,
+          actor: {
+            uid: actor.uid,
+            email: actor.email,
+            role: actor.role,
+            idToken: (actor as any).idToken,
+            googleAccessToken: (actor as any).googleAccessToken,
+          },
+          projectId,
+          payload: {
+            yearMonth: ym,
+            weekNo,
+            mode: input.mode,
+            amounts: Object.fromEntries(
+              Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
+            ),
+          },
+        });
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'success',
+          operation: 'cashflow.week.upsert',
+          transport: 'bff',
+          tenantId: orgId,
+          actorId: actor.uid,
+          projectId,
           yearMonth: ym,
           weekNo,
           mode: input.mode,
-          amounts: Object.fromEntries(
-            Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
-          ),
-        },
-      });
+          summary: amountSummary,
+        });
+      } catch (error) {
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'error',
+          operation: 'cashflow.week.upsert',
+          transport: 'bff',
+          tenantId: orgId,
+          actorId: actor.uid,
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          mode: input.mode,
+          summary: amountSummary,
+          error: toDevtoolsError(error),
+        });
+        throw error;
+      }
       const now = new Date().toISOString();
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({
         weeks: prev,
@@ -257,6 +303,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     if (!db && actor.source === 'dev_harness') {
       const now = new Date().toISOString();
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'success',
+        operation: 'cashflow.week.upsert',
+        transport: 'local',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        mode: input.mode,
+        summary: amountSummary,
+      });
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({
         weeks: prev,
         orgId,
@@ -280,22 +339,94 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
 
-    const existingSnap = await getDoc(ref).catch(() => null);
-    const existingData = existingSnap?.exists() ? (existingSnap.data() as CashflowWeekSheet) : undefined;
-    const patch = buildCashflowWeekUpdatePatch({
-      orgId,
-      actorUid: actor.uid,
-      actorName: actor.name,
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'start',
+      operation: 'cashflow.week.upsert',
+      transport: 'firestore',
+      tenantId: orgId,
+      actorId: actor.uid,
+      projectId,
+      yearMonth: ym,
+      weekNo,
       mode: input.mode,
-      amounts: input.amounts || {},
-      now,
-      weekStart: def.weekStart,
-      existingProjection: existingData?.projection,
-      existingActual: existingData?.actual,
+      summary: { ...amountSummary, docId: id },
     });
 
-    if (existingSnap?.exists()) {
-      await updateDoc(ref, patch as any);
+    try {
+      const existingSnap = await getDoc(ref).catch(() => null);
+      const existingData = existingSnap?.exists() ? (existingSnap.data() as CashflowWeekSheet) : undefined;
+      const patch = buildCashflowWeekUpdatePatch({
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        mode: input.mode,
+        amounts: input.amounts || {},
+        now,
+        weekStart: def.weekStart,
+        existingProjection: existingData?.projection,
+        existingActual: existingData?.actual,
+      });
+
+      if (existingSnap?.exists()) {
+        await updateDoc(ref, patch as any);
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'success',
+          operation: 'cashflow.week.upsert',
+          transport: 'firestore',
+          tenantId: orgId,
+          actorId: actor.uid,
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          mode: input.mode,
+          summary: { ...amountSummary, docId: id, created: false },
+        });
+        setWeeks((prev) => applyWeekAmountsToLocalWeeks({
+          weeks: prev,
+          orgId,
+          actorUid: actor.uid,
+          actorName: actor.name,
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          weekStart: def.weekStart,
+          weekEnd: def.weekEnd,
+          mode: input.mode,
+          amounts: input.amounts || {},
+          now,
+        }));
+        return;
+      }
+
+      const initial: CashflowWeekSheet = buildInitialCashflowWeekDoc({
+        orgId,
+        actorUid: actor.uid,
+        actorName: actor.name,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        weekStart: def.weekStart,
+        weekEnd: def.weekEnd,
+        mode: input.mode,
+        amounts: input.amounts || {},
+        now,
+      });
+      await setDoc(ref, initial, { merge: false });
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'success',
+        operation: 'cashflow.week.upsert',
+        transport: 'firestore',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        mode: input.mode,
+        summary: { ...amountSummary, docId: id, created: true },
+      });
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({
         weeks: prev,
         orgId,
@@ -311,36 +442,23 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         now,
       }));
       return;
+    } catch (error) {
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'error',
+        operation: 'cashflow.week.upsert',
+        transport: 'firestore',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        mode: input.mode,
+        summary: { ...amountSummary, docId: id },
+        error: toDevtoolsError(error),
+      });
+      throw error;
     }
-
-    const initial: CashflowWeekSheet = buildInitialCashflowWeekDoc({
-      orgId,
-      actorUid: actor.uid,
-      actorName: actor.name,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      weekStart: def.weekStart,
-      weekEnd: def.weekEnd,
-      mode: input.mode,
-      amounts: input.amounts || {},
-      now,
-    });
-    await setDoc(ref, initial, { merge: false });
-    setWeeks((prev) => applyWeekAmountsToLocalWeeks({
-      weeks: prev,
-      orgId,
-      actorUid: actor.uid,
-      actorName: actor.name,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      weekStart: def.weekStart,
-      weekEnd: def.weekEnd,
-      mode: input.mode,
-      amounts: input.amounts || {},
-      now,
-    }));
   }, [db, orgId, user]);
 
   const upsertLineAmount = useCallback(async (input: {
@@ -370,17 +488,57 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       throw new Error('Actual 동기화 API가 연결되어 있지 않습니다.');
     }
 
-    const result = await syncProjectCashflowActualsViaBff({
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'start',
+      operation: 'cashflow.actual.sync',
+      transport: 'bff',
       tenantId: orgId,
-      actor: {
-        uid: actor.uid,
-        email: actor.email,
-        role: actor.role,
-        idToken: (actor as any).idToken,
-        googleAccessToken: (actor as any).googleAccessToken,
-      },
+      actorId: actor.uid,
       projectId,
     });
+    let result: ProjectCashflowActualSyncResult;
+    try {
+      result = await syncProjectCashflowActualsViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+      });
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'success',
+        operation: 'cashflow.actual.sync',
+        transport: 'bff',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        summary: {
+          skipped: result.skipped,
+          sourceRows: result.sourceRows,
+          sheetCount: result.sheetCount,
+          upsertedWeeks: result.upsertedWeeks,
+          clearedWeeks: result.clearedWeeks,
+        },
+      });
+    } catch (error) {
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'error',
+        operation: 'cashflow.actual.sync',
+        transport: 'bff',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        error: toDevtoolsError(error),
+      });
+      throw error;
+    }
 
     applyProjectActualSyncResultLocally({ projectId, result });
 
@@ -416,6 +574,20 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
 
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'start',
+      operation: 'cashflow.week.submitActual',
+      transport: 'firestore',
+      tenantId: orgId,
+      actorId: actor.uid,
+      projectId,
+      yearMonth: ym,
+      weekNo,
+      mode: 'actual',
+      summary: { docId: id },
+    });
+
     try {
       await updateDoc(ref, {
         pmSubmitted: true,
@@ -427,9 +599,36 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         updatedByName: actor.name,
         tenantId: orgId,
       } as Partial<CashflowWeekSheet> as any);
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'success',
+        operation: 'cashflow.week.submitActual',
+        transport: 'firestore',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        mode: 'actual',
+        summary: { docId: id, created: false },
+      });
       return;
     } catch (error) {
       if (!shouldCreateDocOnUpdateError(error)) {
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'error',
+          operation: 'cashflow.week.submitActual',
+          transport: 'firestore',
+          tenantId: orgId,
+          actorId: actor.uid,
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          mode: 'actual',
+          summary: { docId: id },
+          error: toDevtoolsError(error),
+        });
         throw error;
       }
     }
@@ -454,6 +653,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedByUid: actor.uid,
       updatedByName: actor.name,
     } as CashflowWeekSheet, { merge: false });
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'success',
+      operation: 'cashflow.week.submitActual',
+      transport: 'firestore',
+      tenantId: orgId,
+      actorId: actor.uid,
+      projectId,
+      yearMonth: ym,
+      weekNo,
+      mode: 'actual',
+      summary: { docId: id, created: true },
+    });
   }, [db, orgId, user]);
 
   const closeWeekAsAdmin = useCallback(async (input: {
@@ -477,6 +689,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
 
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'start',
+      operation: 'cashflow.week.close',
+      transport: 'firestore',
+      tenantId: orgId,
+      actorId: actor.uid,
+      projectId,
+      yearMonth: ym,
+      weekNo,
+      summary: { docId: id },
+    });
+
     try {
       await updateDoc(ref, {
         adminClosed: true,
@@ -488,9 +713,34 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         updatedByName: actor.name,
         tenantId: orgId,
       } as Partial<CashflowWeekSheet> as any);
+      recordDevtoolsLog({
+        kind: 'cashflow_transaction',
+        phase: 'success',
+        operation: 'cashflow.week.close',
+        transport: 'firestore',
+        tenantId: orgId,
+        actorId: actor.uid,
+        projectId,
+        yearMonth: ym,
+        weekNo,
+        summary: { docId: id, created: false },
+      });
       return;
     } catch (error) {
       if (!shouldCreateDocOnUpdateError(error)) {
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'error',
+          operation: 'cashflow.week.close',
+          transport: 'firestore',
+          tenantId: orgId,
+          actorId: actor.uid,
+          projectId,
+          yearMonth: ym,
+          weekNo,
+          summary: { docId: id },
+          error: toDevtoolsError(error),
+        });
         throw error;
       }
     }
@@ -515,6 +765,18 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedByUid: actor.uid,
       updatedByName: actor.name,
     } as CashflowWeekSheet, { merge: false });
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'success',
+      operation: 'cashflow.week.close',
+      transport: 'firestore',
+      tenantId: orgId,
+      actorId: actor.uid,
+      projectId,
+      yearMonth: ym,
+      weekNo,
+      summary: { docId: id, created: true },
+    });
   }, [db, orgId, user]);
 
   const updateVarianceFlag = useCallback(async (input: {

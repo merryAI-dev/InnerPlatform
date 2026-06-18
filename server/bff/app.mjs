@@ -4,6 +4,7 @@ import { createFirestoreDb, isFirestoreEmulatorEnabled, resolveProjectId } from 
 import {
   createFirebaseAuthAdminService,
   createFirebaseTokenVerifier,
+  resolveFirebaseAuthProjectId,
   resolveAuthMode,
   resolveRequestIdentity,
 } from './auth.mjs';
@@ -96,6 +97,9 @@ import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
+import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
+import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './routes/cashflow-sheet-lab.mjs';
+import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
@@ -546,6 +550,7 @@ export async function resolveApiRequestContext(req, {
 
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
+  const actorName = identity.actorName;
 
   if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
     const memberIdentity = await resolveMemberIdentity({
@@ -561,6 +566,7 @@ export async function resolveApiRequestContext(req, {
     actorId: identity.actorId,
     actorRole,
     actorEmail,
+    actorName,
     authSource: identity.source,
     requestId,
     idempotencyKey: idempotencyKey.trim() || undefined,
@@ -658,9 +664,11 @@ export function createBffApp(options = {}) {
 
   const createDb = options.createDb || createFirestoreDb;
   const db = options.db || createDb({ projectId });
+  const authProjectId = resolveFirebaseAuthProjectId(options, env, projectId);
+  const authAppName = authProjectId === projectId ? undefined : `auth:${authProjectId}`;
   const authMode = options.authMode || resolveAuthMode();
-  const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId });
-  const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId });
+  const verifyToken = options.tokenVerifier || createFirebaseTokenVerifier({ projectId: authProjectId, appName: authAppName });
+  const authAdminService = options.authAdminService || createFirebaseAuthAdminService({ projectId: authProjectId, appName: authAppName });
   const idempotencyService = createIdempotencyService(db);
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
@@ -910,6 +918,30 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
   app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
+
+  const runCashflowSheetSyncWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantIds = readOptionalText(req.body?.tenantIds ?? req.query?.tenantIds ?? env.BFF_CASHFLOW_SHEET_SYNC_TENANTS) || 'mysc';
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId);
+    const projectIdFilter = readOptionalText(req.body?.projectId ?? req.query?.projectId);
+    const limit = parseLimit(req.body?.limit ?? req.query?.limit, 100, 500);
+
+    const result = await runCashflowSheetLabSyncWorker({
+      db,
+      googleSheetsService,
+      tenantIds: tenantId || tenantIds,
+      projectId: projectIdFilter,
+      limit,
+      nowIso: now(),
+    });
+
+    res.status(result.failed > 0 ? 207 : 200).json({
+      bffProjectId: projectId,
+      ...result,
+    });
+  });
+  app.get('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
+  app.post('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
 
   const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
@@ -1375,7 +1407,31 @@ export function createBffApp(options = {}) {
     projectRequestContractAiService, projectRequestContractStorageService,
     projectSheetSourceStorageService, projectRegistrationSlackService,
   });
-  mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now });
+  mountCashflowExportRoutes(app, {
+    db,
+    rbacPolicy,
+    idempotencyService,
+    now,
+    legacyCashflowWritesEnabled: options.legacyCashflowWritesEnabled,
+  });
+  mountCashflowSheetLabRoutes(app, {
+    db,
+    googleSheetsService,
+  });
+  mountCashflowLaborRiskRoutes(app, {
+    db,
+    now,
+  });
+  mountJvmWeeklyApiRoutes(app, {
+    idempotencyService,
+    env,
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+    jvmWeeklyApiBaseUrl: options.jvmWeeklyApiBaseUrl,
+    jvmWeeklyApiServiceToken: options.jvmWeeklyApiServiceToken,
+    jvmWeeklyApiIdTokenAudience: options.jvmWeeklyApiIdTokenAudience,
+    jvmWeeklyAuthMode: options.jvmWeeklyAuthMode,
+    jvmWeeklyWorkspaceEmailDomain: options.jvmWeeklyWorkspaceEmailDomain,
+  });
   mountLedgerRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector });
   mountTransactionRoutes(app, { db, now, idempotencyService, auditChainService, piiProtector, rbacPolicy, driveService });
   mountAuditRoutes(app, { db, auditChainService });
@@ -1427,6 +1483,7 @@ export function createBffApp(options = {}) {
       error: errorCode,
       message,
       requestId: req.requestId || req.context?.requestId,
+      ...(statusCode < 500 && error?.details ? { details: error.details } : {}),
     });
   });
 

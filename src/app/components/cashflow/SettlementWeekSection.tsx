@@ -26,6 +26,7 @@ export interface WeekSectionProps {
   onChangeTransactionState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
   allowEditSubmitted?: boolean;
+  readOnly?: boolean;
 }
 
 export function SettlementWeekSection({
@@ -41,11 +42,12 @@ export function SettlementWeekSection({
   onChangeTransactionState,
   userRole,
   allowEditSubmitted,
+  readOnly = false,
 }: WeekSectionProps) {
   const [submitting, setSubmitting] = useState(false);
   const colCount = SETTLEMENT_COLUMNS.length;
   const draftTxIds = txRows.filter(({ tx }) => tx.state === 'DRAFT').map(({ tx }) => tx.id);
-  const hasDrafts = draftTxIds.length > 0 && userRole === 'pm' && week.weekNo > 0;
+  const hasDrafts = !readOnly && draftTxIds.length > 0 && userRole === 'pm' && week.weekNo > 0;
   const evSummary = txRows.length > 0 ? computeEvidenceSummary(txRows.map(({ tx }) => tx)) : null;
 
   return (
@@ -124,6 +126,7 @@ export function SettlementWeekSection({
             onChangeState={onChangeTransactionState}
             userRole={userRole}
             allowEditSubmitted={allowEditSubmitted}
+            readOnly={readOnly}
           />
         ))}
       {!collapsed && txCount === 0 && (

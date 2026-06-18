@@ -46,6 +46,26 @@ describe('platform-bff-client', () => {
     });
   });
 
+  it('keeps hosted browser calls on the BFF when env points at the Java API', () => {
+    const originalWindow = globalThis.window;
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+        hostname: 'inner-platform-stage-merryai-devs-projects.vercel.app',
+      },
+    });
+
+    expect(readPlatformApiRuntimeConfig({
+      VITE_PLATFORM_API_ENABLED: 'true',
+      VITE_PLATFORM_API_BASE_URL: 'https://innerplatform-jvm-weekly-api-c3pm5gv7ia-du.a.run.app',
+    })).toEqual({
+      enabled: true,
+      baseUrl: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+    });
+
+    vi.stubGlobal('window', originalWindow);
+  });
+
   it('normalizes actor shape', () => {
     expect(toRequestActor({ uid: 'u001', email: 'a@x.com', role: 'admin' })).toEqual({
       id: 'u001',

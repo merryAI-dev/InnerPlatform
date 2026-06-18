@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PlatformApiClient, PlatformApiError } from './api-client';
+import { clearDevtoolsLogs, getDevtoolsLogs } from './devtools-transaction-log';
 
 describe('PlatformApiClient', () => {
   it('injects standard headers and parses json body', async () => {
@@ -183,5 +184,45 @@ describe('PlatformApiClient', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('records BFF request lifecycle logs without leaking auth tokens', async () => {
+    clearDevtoolsLogs();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-request-id': 'req-server',
+      },
+    }));
+    const client = new PlatformApiClient({ baseUrl: 'https://api.example.com', fetchImpl });
+
+    await client.post<{ ok: boolean }>('/api/v1/projects/p001/cashflow-weeks/upsert', {
+      tenantId: 'mysc',
+      actor: { id: 'u001', role: 'admin', idToken: 'id-token-1' },
+      body: { yearMonth: '2026-06', weekNo: 2, mode: 'projection' },
+      requestId: 'req-client',
+    });
+
+    const logs = getDevtoolsLogs();
+    expect(logs).toEqual([
+      expect.objectContaining({
+        kind: 'bff_request',
+        phase: 'start',
+        operation: '/api/v1/projects/p001/cashflow-weeks/upsert',
+        method: 'POST',
+        requestId: 'req-client',
+        tenantId: 'mysc',
+        actorId: 'u001',
+      }),
+      expect.objectContaining({
+        kind: 'bff_request',
+        phase: 'success',
+        operation: '/api/v1/projects/p001/cashflow-weeks/upsert',
+        responseRequestId: 'req-server',
+        status: 200,
+      }),
+    ]);
+    expect(JSON.stringify(logs)).not.toContain('id-token-1');
   });
 });

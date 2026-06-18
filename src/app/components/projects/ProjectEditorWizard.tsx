@@ -116,6 +116,7 @@ interface ProjectEditorWizardProps {
   draftKey: string;
   title: string;
   description?: string;
+  embeddedInShell?: boolean;
   members?: OrgMember[];
   departmentOptions?: string[];
   topSlot?: ReactNode;
@@ -441,6 +442,7 @@ export function ProjectEditorWizard({
   draftKey,
   title,
   description,
+  embeddedInShell = false,
   members = [],
   departmentOptions,
   topSlot,
@@ -1508,22 +1510,33 @@ export function ProjectEditorWizard({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">{STEPS.length}단계</Badge>
-            <Badge variant="outline" className="rounded-full">{mode === 'admin' ? 'Admin' : 'Portal'}</Badge>
+      {embeddedInShell ? (
+        onCancel ? (
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" className="gap-2" onClick={onCancel}>
+              <ArrowLeft className="h-4 w-4" />
+              나가기
+            </Button>
           </div>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{title}</h1>
-          {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+        ) : null
+      ) : (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="rounded-full">{STEPS.length}단계</Badge>
+              <Badge variant="outline" className="rounded-full">{mode === 'admin' ? 'Admin' : 'Portal'}</Badge>
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{title}</h1>
+            {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+          </div>
+          {onCancel ? (
+            <Button variant="outline" className="gap-2" onClick={onCancel}>
+              <ArrowLeft className="h-4 w-4" />
+              나가기
+            </Button>
+          ) : null}
         </div>
-        {onCancel ? (
-          <Button variant="outline" className="gap-2" onClick={onCancel}>
-            <ArrowLeft className="h-4 w-4" />
-            나가기
-          </Button>
-        ) : null}
-      </div>
+      )}
 
       {topSlot}
 

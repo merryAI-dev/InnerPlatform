@@ -33,7 +33,7 @@ function nextYearMonth(yearMonth) {
 export function mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now }) {
   app.post('/api/v1/projects/:projectId/cashflow-weeks/upsert', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'write cashflow week amounts');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCashflowWeek, 'write cashflow week amounts');
     const projectId = readOptionalText(req.params.projectId);
     const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
     if (!projectSnap.exists) {
@@ -58,7 +58,7 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyServ
 
   app.post('/api/v1/projects/:projectId/cashflow-actuals/sync', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'sync cashflow actuals');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCashflowWeek, 'sync cashflow actuals');
     parseWithSchema(cashflowActualSyncSchema, req.body || {}, 'Invalid cashflow actual sync request');
     const projectId = readOptionalText(req.params.projectId);
     const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();

@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
-import { CheckCircle2, ClipboardCheck, ClipboardList, Columns2, CircleDollarSign, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { collection, doc, getDoc, limit, onSnapshot, query, runTransaction, setDoc, where } from 'firebase/firestore';
+import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, Save, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   AlertDialog,
@@ -19,31 +18,154 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import { PageHeader } from '../layout/PageHeader';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import {
   CASHFLOW_SHEET_LINE_LABELS,
   type CashflowSheetLineId,
   type CashflowWeekSheet,
-  type Transaction,
   type UserRole,
   type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
-import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
 import { hasUnsavedChanges } from './cashflow-unsaved';
-import { triggerDownload } from '../../platform/csv-utils';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgDocumentPath } from '../../lib/firebase';
-import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
-import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
-import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
+import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import {
+  fetchCashflowLaborRiskViaBff,
+  type CashflowLaborRiskResult,
+} from '../../lib/platform-bff-client';
+import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
+import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
+import { buildCashflowOpsSummary, type CashflowOpsTimelineItem, type CashflowOpsTone } from './cashflow-ops-summary';
+import { RollingAmount } from '../ui/rolling-amount';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
+}
+
+function fmtSigned(n: number): string {
+  if (n === 0) return '0';
+  return `${n > 0 ? '+' : '-'}${Math.abs(n).toLocaleString('ko-KR')}`;
+}
+
+const CASHFLOW_EDIT_LOCK_TTL_MS = 2 * 60 * 1000;
+const CASHFLOW_PRESENCE_TTL_MS = 75 * 1000;
+const CASHFLOW_HEARTBEAT_MS = 25 * 1000;
+
+type CashflowEditLock = {
+  projectId: string;
+  editorUid?: string | null;
+  editorName?: string | null;
+  editorEmail?: string | null;
+  status?: 'editing' | 'idle';
+  startedAt?: number;
+  updatedAt?: number;
+  expiresAt?: number;
+  releasedAt?: number;
+  releasedByUid?: string | null;
+  releaseReason?: string | null;
+  lastEditedAt?: number;
+  lastEditedByUid?: string | null;
+  lastEditedByName?: string | null;
+  lastEditedByEmail?: string | null;
+};
+
+type CashflowPresence = {
+  projectId: string;
+  uid: string;
+  name: string;
+  email?: string;
+  updatedAt: number;
+  expiresAt: number;
+};
+
+function safeDocId(value: string): string {
+  return String(value || '').replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+function getUserDisplayName(user: unknown): string {
+  const source = (user || {}) as { name?: unknown; displayName?: unknown; email?: unknown; uid?: unknown };
+  const name = String(source.name || source.displayName || '').trim();
+  if (name) return name;
+  const email = String(source.email || '').trim();
+  if (email) return email.split('@')[0] || email;
+  return String(source.uid || '사용자');
+}
+
+function getInitials(name: string): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return '?';
+  const compact = trimmed.replace(/\s+/g, '');
+  return compact.slice(0, 2).toUpperCase();
+}
+
+function formatPresenceTime(timestamp?: number): string {
+  if (!timestamp) return '';
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(timestamp));
+}
+
+function diffColorExplanation(section: '입금' | '출금', diff: number): string {
+  if (diff === 0) return '차이가 없습니다.';
+  if (section === '입금') {
+    return diff > 0
+      ? '초록색: 실제 입금이 계획보다 많습니다.'
+      : '빨간색: 실제 입금이 계획보다 적습니다. 확인이 필요합니다.';
+  }
+  return diff > 0
+    ? '빨간색: 실제 출금이 계획보다 많습니다. 확인이 필요합니다.'
+    : '초록색: 실제 출금이 계획보다 적습니다.';
+}
+
+function HoverExplain({
+  children,
+  message,
+}: {
+  children: ReactNode;
+  message: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-pointer underline decoration-dotted underline-offset-2">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[280px] text-[11px] leading-relaxed">
+        {message}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function DiffMetricCard({
+  label,
+  value,
+  className,
+  message,
+}: {
+  label: string;
+  value: string;
+  className: string;
+  message: ReactNode;
+}) {
+  return (
+    <div className="rounded-[16px] bg-white px-3 py-2 shadow-[0_6px_18px_rgba(15,23,42,0.05)]">
+      <div className="text-[10px] text-slate-500">
+        <HoverExplain message={message}>{label}</HoverExplain>
+      </div>
+      <div className={className}>{value}</div>
+    </div>
+  );
 }
 
 function parseAmount(raw: string): number {
@@ -62,17 +184,84 @@ function formatAmountInput(raw: string): string {
   return Math.trunc(n).toLocaleString('ko-KR');
 }
 
+function formatSheetWeekLabel(yearMonth: string, weekNo: number): string {
+  const year = Number.parseInt(yearMonth.slice(2, 4), 10);
+  const month = Number.parseInt(yearMonth.slice(5, 7), 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return `w${weekNo}`;
+  return `${year}-${month}-${weekNo}`;
+}
+
+function formatShortWeekRange(week: Pick<MonthMondayWeek, 'weekStart' | 'weekEnd'>): string {
+  if (!week.weekStart || !week.weekEnd) return '';
+  return `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}`;
+}
+
+function renderCashflowLineLabel(label: string): ReactNode {
+  const parenIndex = label.indexOf('(');
+  if (parenIndex < 0) return label;
+  const main = label.slice(0, parenIndex).trim();
+  const detail = label.slice(parenIndex).trim();
+  return (
+    <>
+      <span className="block">{main}</span>
+      <span className="block text-[8px] font-normal leading-3 text-slate-500">{detail}</span>
+    </>
+  );
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function parseCashflowSheetWeekLabel(value: unknown): { year: number; month: number; yearMonth: string; weekNo: number; sortKey: number } | null {
+  const match = /^(\d{2})-(\d{1,2})-(\d{1,2})$/.exec(String(value || '').trim());
+  if (!match) return null;
+  const year = 2000 + Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const weekNo = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(weekNo)) return null;
+  if (month < 1 || month > 12 || weekNo < 1 || weekNo > 6) return null;
+  return {
+    year,
+    month,
+    yearMonth: `${year}-${pad2(month)}`,
+    weekNo,
+    sortKey: year * 10000 + month * 100 + weekNo,
+  };
+}
+
+function normalizeActiveSheetWeeks(raw: unknown): MonthMondayWeek[] {
+  if (!Array.isArray(raw)) return [];
+  const weeks: MonthMondayWeek[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const source = item as { label?: unknown; yearMonth?: unknown; weekNo?: unknown; weekStart?: unknown; weekEnd?: unknown };
+    const label = String(source.label || '').trim();
+    const parsedLabel = parseCashflowSheetWeekLabel(label);
+    const yearMonth = String(source.yearMonth || parsedLabel?.yearMonth || '').trim();
+    const weekNo = Number(source.weekNo ?? parsedLabel?.weekNo);
+    if (!/^\d{4}-\d{2}$/.test(yearMonth) || !Number.isFinite(weekNo)) continue;
+    const key = `${yearMonth}:${weekNo}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    weeks.push({
+      yearMonth,
+      weekNo,
+      weekStart: String(source.weekStart || ''),
+      weekEnd: String(source.weekEnd || ''),
+      label: label || formatSheetWeekLabel(yearMonth, weekNo),
+    });
+  }
+  return weeks.sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
+}
+
 export function CashflowProjectSheet({
   projectId,
-  projectName,
-  transactions,
   roleOverride,
-  initialViewMode = 'compare',
   onUpdateWeeklySubmissionStatus,
 }: {
   projectId: string;
-  projectName: string;
-  transactions: Transaction[];
   roleOverride?: UserRole | string;
   initialViewMode?: 'projection' | 'actual' | 'compare';
   onUpdateWeeklySubmissionStatus?: (input: {
@@ -89,45 +278,152 @@ export function CashflowProjectSheet({
   const { db, orgId } = useFirebase();
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
-  const isPm = role === 'pm';
-  const canClose = role === 'admin' || role === 'finance';
-  const canEdit = isPm || canClose;
+  const canUseCashflowActions = Boolean(role || user);
+  const canSubmitActual = canUseCashflowActions;
+  const canClose = canUseCashflowActions;
+  const canEdit = canUseCashflowActions;
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
+  const bffActor = useMemo(() => ({
+    uid: user?.uid || 'cashflow-user',
+    email: user?.email || '',
+    role: user?.role || role || 'workspace_user',
+    idToken: user?.idToken,
+    googleAccessToken: user?.googleAccessToken,
+  }), [
+    role,
+    user?.email,
+    user?.googleAccessToken,
+    user?.idToken,
+    user?.role,
+    user?.uid,
+  ]);
 
   const {
     yearMonth,
     weeks,
     isLoading,
-    goPrevMonth,
-    goNextMonth,
     upsertWeekAmounts,
     submitWeekAsPm,
     closeWeekAsAdmin,
-    syncProjectActualsFromExpenseSheets,
   } = useCashflowWeeks();
 
+  const [cashflowSheetRange, setCashflowSheetRange] = useState<{
+    startWeek: string;
+    endWeek: string;
+    startYearMonth: string;
+    endYearMonth: string;
+    label: string;
+    activeWeeks: MonthMondayWeek[];
+  } | null>(null);
+  const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
+  const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
+  const [laborRiskLoading, setLaborRiskLoading] = useState(false);
+  const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
+  const [presenceUsers, setPresenceUsers] = useState<CashflowPresence[]>([]);
+  const [editLock, setEditLock] = useState<CashflowEditLock | null>(null);
+  const [editLockBusy, setEditLockBusy] = useState(false);
+  const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
+  const currentUserUid = user?.uid || '';
+  const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
+  const activeEditLock = useMemo(() => {
+    if (!editLock || editLock.status !== 'editing') return null;
+    if (Number(editLock.expiresAt || 0) <= Date.now()) return null;
+    return editLock;
+  }, [editLock]);
+  const isEditLockMine = Boolean(activeEditLock?.editorUid && activeEditLock.editorUid === currentUserUid);
+  const isEditLockedByOther = Boolean(activeEditLock && !isEditLockMine);
+  const lastEditedLabel = editLock?.lastEditedAt && editLock?.lastEditedByName
+    ? `${editLock.lastEditedByName}이 ${formatPresenceTime(editLock.lastEditedAt)} 수정`
+    : '';
+
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
+  const selectedYear = useMemo(() => {
+    const parsed = Number.parseInt(yearMonth.slice(0, 4), 10);
+    return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
+  }, [yearMonth]);
+  const yearWeeks = useMemo(() => getYearMondayWeeks(selectedYear), [selectedYear]);
+  const sheetRangeWeeks = cashflowSheetRange?.activeWeeks || [];
+  const allProjectCashflowWeeks = useMemo(() => {
+    const byKey = new Map<string, CashflowWeekSheet>();
+    for (const week of [...weeks, ...rangeLoadedWeeks]) {
+      if (week.projectId !== projectId) continue;
+      byKey.set(`${week.yearMonth}:${week.weekNo}`, week);
+    }
+    return Array.from(byKey.values());
+  }, [projectId, rangeLoadedWeeks, weeks]);
+  const annualWeeks = useMemo<MonthMondayWeek[]>(() => {
+    const byKey = new Map<string, MonthMondayWeek>();
+    const baseWeeks = sheetRangeWeeks.length > 0 ? sheetRangeWeeks : yearWeeks;
+    const rangeStart = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.startWeek) : null;
+    const rangeEnd = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.endWeek) : null;
+    for (const week of baseWeeks) {
+      byKey.set(`${week.yearMonth}:${week.weekNo}`, week);
+    }
+    for (const week of allProjectCashflowWeeks) {
+      if (week.projectId !== projectId) continue;
+      const weekNo = Number(week.weekNo);
+      if (!Number.isFinite(weekNo)) continue;
+      const parsedWeek = parseCashflowSheetWeekLabel(formatSheetWeekLabel(week.yearMonth, weekNo));
+      if (rangeStart && rangeEnd) {
+        if (!parsedWeek || parsedWeek.sortKey < rangeStart.sortKey || parsedWeek.sortKey > rangeEnd.sortKey) continue;
+      } else if (!week.yearMonth?.startsWith(`${selectedYear}-`)) {
+        continue;
+      }
+      const key = `${week.yearMonth}:${weekNo}`;
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        yearMonth: week.yearMonth,
+        weekNo,
+        weekStart: week.weekStart || '',
+        weekEnd: week.weekEnd || '',
+        label: formatSheetWeekLabel(week.yearMonth, weekNo),
+      });
+    }
+    return Array.from(byKey.values())
+      .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
+  }, [allProjectCashflowWeeks, cashflowSheetRange, projectId, selectedYear, sheetRangeWeeks, yearWeeks]);
   const normalizedYearMonth = useMemo(() => {
     const [y, m] = yearMonth.split('-');
     if (!y || !m) return yearMonth;
     return `${y}-${m.padStart(2, '0')}`;
   }, [yearMonth]);
   const projectWeeks = useMemo(
-    () => weeks.filter((w) => {
+    () => allProjectCashflowWeeks.filter((w) => {
       if (w.projectId !== projectId) return false;
       const ym = typeof w.yearMonth === 'string' ? w.yearMonth : '';
       const [yy, mm] = ym.split('-');
       const normalized = yy && mm ? `${yy}-${mm.padStart(2, '0')}` : ym;
       return normalized === normalizedYearMonth;
     }),
-    [projectId, weeks, normalizedYearMonth],
+    [allProjectCashflowWeeks, projectId, normalizedYearMonth],
   );
   const byWeekNo = useMemo(() => {
     const map = new Map<number, CashflowWeekSheet>();
     for (const w of projectWeeks) map.set(w.weekNo, w);
     return map;
   }, [projectWeeks]);
+  const byYearMonthWeek = useMemo(() => {
+    const map = new Map<string, CashflowWeekSheet>();
+    for (const week of allProjectCashflowWeeks) {
+      if (week.projectId !== projectId) continue;
+      map.set(`${week.yearMonth}:${week.weekNo}`, week);
+    }
+    return map;
+  }, [allProjectCashflowWeeks, projectId]);
+  const cashflowWeeksStreamKey = useMemo(() => (
+    allProjectCashflowWeeks
+      .map((week) => [
+        week.id,
+        week.yearMonth,
+        week.weekNo,
+        week.weekStart,
+        week.weekEnd,
+        JSON.stringify(week.projection || {}),
+        JSON.stringify(week.actual || {}),
+      ].join(':'))
+      .join('|')
+  ), [allProjectCashflowWeeks]);
 
   const openingTotalsByMode = useMemo(() => {
     return computeOpeningCashflowTotals({
@@ -136,15 +432,31 @@ export function CashflowProjectSheet({
       yearMonth: normalizedYearMonth,
     });
   }, [normalizedYearMonth, projectId, weeks]);
+  const yearOpeningTotalsByMode = useMemo(() => {
+    return computeOpeningCashflowTotals({
+      weeks: allProjectCashflowWeeks,
+      projectId,
+      yearMonth: cashflowSheetRange?.startYearMonth || `${selectedYear}-01`,
+    });
+  }, [allProjectCashflowWeeks, cashflowSheetRange?.startYearMonth, projectId, selectedYear]);
 
 
   // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
 
-  const [viewMode, setViewMode] = useState<'projection' | 'actual' | 'compare'>(initialViewMode);
+  const [differenceViewMode, setDifferenceViewMode] = useState<'diff' | 'all'>('diff');
+  const [showEmptyCashflowRows, setShowEmptyCashflowRows] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
+  const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
+  type CashflowAuditIssue = { key: string; label: string; detail: string };
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
+  const [auditDialog, setAuditDialog] = useState<{
+    title: string;
+    weekLabel: string;
+    issues: CashflowAuditIssue[];
+  } | null>(null);
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -152,15 +464,13 @@ export function CashflowProjectSheet({
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeDialog, setCloseDialog] = useState<{
     kind: 'prerequisite' | 'warning' | 'confirm';
+    yearMonth: string;
     weekNo: number;
     projectionDone: boolean;
     expenseDone: boolean;
     expenseStatusLabel?: string;
     expenseStatusDescription?: string;
   } | null>(null);
-  const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
-  const [downloadPreparing, setDownloadPreparing] = useState(false);
-  const [actualSyncing, setActualSyncing] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -190,9 +500,258 @@ export function CashflowProjectSheet({
   useEffect(() => {
     // Clear drafts when switching month to avoid writing into wrong docs.
     setDrafts({});
+    setEditingWeekModes({});
     setWeekSaveState({});
     setSubmitConfirm(null);
   }, [yearMonth, projectId]);
+
+  useEffect(() => {
+    if (!db || !projectId || !user?.uid) {
+      setPresenceUsers([]);
+      return undefined;
+    }
+    const uid = user.uid;
+    const name = getUserDisplayName(user);
+    const presenceId = `${safeDocId(projectId)}_${safeDocId(uid)}`;
+    const presenceRef = doc(db, getOrgDocumentPath(orgId, 'cashflowPresence', presenceId));
+    const writePresence = () => {
+      const now = Date.now();
+      void setDoc(presenceRef, {
+        projectId,
+        uid,
+        name,
+        email: user.email || '',
+        updatedAt: now,
+        expiresAt: now + CASHFLOW_PRESENCE_TTL_MS,
+      } satisfies CashflowPresence, { merge: true }).catch(() => undefined);
+    };
+    writePresence();
+    const heartbeatId = window.setInterval(writePresence, CASHFLOW_HEARTBEAT_MS);
+    return () => {
+      window.clearInterval(heartbeatId);
+      void setDoc(presenceRef, {
+        projectId,
+        uid,
+        name,
+        email: user.email || '',
+        updatedAt: Date.now(),
+        expiresAt: Date.now(),
+      } satisfies CashflowPresence, { merge: true }).catch(() => undefined);
+    };
+  }, [db, orgId, projectId, user]);
+
+  useEffect(() => {
+    if (!db || !projectId) {
+      setPresenceUsers([]);
+      setEditLock(null);
+      return undefined;
+    }
+    const presenceQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'cashflowPresence')),
+      where('projectId', '==', projectId),
+      limit(20),
+    );
+    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
+    const unsubscribePresence = onSnapshot(presenceQuery, (snap) => {
+      const now = Date.now();
+      setPresenceUsers(
+        snap.docs
+          .map((item) => item.data() as CashflowPresence)
+          .filter((item) => item.uid && Number(item.expiresAt || 0) > now)
+          .sort((a, b) => String(a.name || a.email || a.uid).localeCompare(String(b.name || b.email || b.uid))),
+      );
+    }, () => setPresenceUsers([]));
+    const unsubscribeLock = onSnapshot(lockRef, (snap) => {
+      setEditLock(snap.exists() ? (snap.data() as CashflowEditLock) : null);
+    }, () => setEditLock(null));
+    return () => {
+      unsubscribePresence();
+      unsubscribeLock();
+    };
+  }, [db, lockDocId, orgId, projectId]);
+
+  const acquireCashflowEditLock = useCallback(async (): Promise<boolean> => {
+    if (!db || !user?.uid || !projectId) return true;
+    setEditLockBusy(true);
+    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
+    const now = Date.now();
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(lockRef);
+        const existing = snap.exists() ? (snap.data() as CashflowEditLock) : null;
+        const active = existing?.status === 'editing' && Number(existing.expiresAt || 0) > now;
+        if (active && existing?.editorUid && existing.editorUid !== user.uid) {
+          throw new Error('cashflow_edit_locked');
+        }
+        tx.set(lockRef, {
+          projectId,
+          editorUid: user.uid,
+          editorName: currentUserName,
+          editorEmail: user.email || '',
+          status: 'editing',
+          startedAt: active && existing?.editorUid === user.uid ? existing.startedAt || now : now,
+          updatedAt: now,
+          expiresAt: now + CASHFLOW_EDIT_LOCK_TTL_MS,
+        } satisfies CashflowEditLock, { merge: true });
+      });
+      return true;
+    } catch (error) {
+      const lockOwner = activeEditLock?.editorName || '다른 사용자';
+      toast.error(`${lockOwner}이 수정 중입니다. 저장 또는 이탈 후 다시 시도해 주세요.`);
+      return false;
+    } finally {
+      setEditLockBusy(false);
+    }
+  }, [activeEditLock?.editorName, currentUserName, db, lockDocId, orgId, projectId, user]);
+
+  const releaseCashflowEditLock = useCallback(async (reason: 'save' | 'leave' | 'cancel' = 'save'): Promise<void> => {
+    if (!db || !user?.uid || !projectId) return;
+    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
+    const now = Date.now();
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(lockRef);
+      if (!snap.exists()) return;
+      const existing = snap.data() as CashflowEditLock;
+      if (existing.editorUid !== user.uid) return;
+      tx.set(lockRef, {
+        projectId,
+        status: 'idle',
+        editorUid: null,
+        editorName: null,
+        editorEmail: null,
+        updatedAt: now,
+        expiresAt: now,
+        releasedAt: now,
+        releasedByUid: user.uid,
+        releaseReason: reason,
+        lastEditedAt: reason === 'save' ? now : existing.lastEditedAt || null,
+        lastEditedByUid: reason === 'save' ? user.uid : existing.lastEditedByUid || null,
+        lastEditedByName: reason === 'save' ? currentUserName : existing.lastEditedByName || null,
+        lastEditedByEmail: reason === 'save' ? user.email || '' : existing.lastEditedByEmail || null,
+      } satisfies CashflowEditLock, { merge: true });
+    });
+  }, [currentUserName, db, lockDocId, orgId, projectId, user]);
+
+  useEffect(() => {
+    return () => {
+      if (!isEditLockMine) return;
+      void releaseCashflowEditLock('leave').catch(() => undefined);
+    };
+  }, [isEditLockMine, releaseCashflowEditLock]);
+
+  useEffect(() => {
+    if (!db || !user?.uid || !isEditLockMine) return undefined;
+    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
+    const extendLock = () => {
+      const now = Date.now();
+      void setDoc(lockRef, {
+        projectId,
+        editorUid: user.uid,
+        editorName: currentUserName,
+        editorEmail: user.email || '',
+        status: 'editing',
+        updatedAt: now,
+        expiresAt: now + CASHFLOW_EDIT_LOCK_TTL_MS,
+      } satisfies CashflowEditLock, { merge: true }).catch(() => undefined);
+    };
+    const intervalId = window.setInterval(extendLock, CASHFLOW_HEARTBEAT_MS);
+    return () => window.clearInterval(intervalId);
+  }, [currentUserName, db, isEditLockMine, lockDocId, orgId, projectId, user]);
+
+  useEffect(() => {
+    if (!db || !projectId) {
+      setCashflowSheetRange(null);
+      return;
+    }
+    let cancelled = false;
+    getDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)))
+      .then((snap) => {
+        if (cancelled) return;
+        const config = snap.exists()
+          ? (snap.data() as { cashflowSheetLab?: { startWeek?: string; endWeek?: string; activeWeeks?: unknown } }).cashflowSheetLab
+          : null;
+        const start = parseCashflowSheetWeekLabel(config?.startWeek);
+        const end = parseCashflowSheetWeekLabel(config?.endWeek);
+        const activeWeeks = normalizeActiveSheetWeeks(config?.activeWeeks);
+        if (!start || !end || start.sortKey > end.sortKey || activeWeeks.length === 0) {
+          setCashflowSheetRange(null);
+          return;
+        }
+        setCashflowSheetRange({
+          startWeek: config?.startWeek || '',
+          endWeek: config?.endWeek || '',
+          startYearMonth: start.yearMonth,
+          endYearMonth: end.yearMonth,
+          label: `${config?.startWeek} ~ ${config?.endWeek}`,
+          activeWeeks,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setCashflowSheetRange(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, orgId, projectId]);
+
+  useEffect(() => {
+    if (!db || !cashflowSheetRange) {
+      setRangeLoadedWeeks([]);
+      return undefined;
+    }
+    const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
+    const q = query(
+      base,
+      where('yearMonth', '>=', cashflowSheetRange.startYearMonth),
+      where('yearMonth', '<=', cashflowSheetRange.endYearMonth),
+      limit(5000),
+    );
+    return onSnapshot(q, (snap) => {
+      setRangeLoadedWeeks(
+        snap.docs
+          .map((d) => d.data() as CashflowWeekSheet)
+          .filter((week) => week.projectId === projectId),
+      );
+    }, (error) => {
+      console.warn('[CashflowProjectSheet] sheet range listen failed:', error);
+      setRangeLoadedWeeks([]);
+    });
+  }, [cashflowSheetRange, db, orgId, projectId]);
+
+  useEffect(() => {
+    if (!projectId || !orgId || !user) {
+      setLaborRisk(null);
+      setLaborRiskError(null);
+      setLaborRiskLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      setLaborRiskLoading(true);
+      setLaborRiskError(null);
+      fetchCashflowLaborRiskViaBff({
+        tenantId: orgId,
+        actor: bffActor,
+        projectId,
+      })
+        .then((result) => {
+          if (cancelled) return;
+          setLaborRisk(result);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setLaborRisk(null);
+          setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
+        })
+        .finally(() => {
+          if (!cancelled) setLaborRiskLoading(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [bffActor, cashflowWeeksStreamKey, orgId, projectId, user]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -230,6 +789,15 @@ export function CashflowProjectSheet({
     return `${resolveWeekKey(params)}:${params.lineId}`;
   }
 
+  function isWeekModeEditing(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number }): boolean {
+    return editingWeekModes[resolveWeekKey(params)] === true;
+  }
+
+  function setWeekModeEditing(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number; editing: boolean }) {
+    const key = resolveWeekKey(params);
+    setEditingWeekModes((prev) => ({ ...prev, [key]: params.editing }));
+  }
+
   function getPersistedCell(params: {
     doc: CashflowWeekSheet | undefined;
     mode: 'projection' | 'actual';
@@ -239,6 +807,138 @@ export function CashflowProjectSheet({
     const hasValue = !!src && Object.prototype.hasOwnProperty.call(src, params.lineId);
     const amount = Number(src?.[params.lineId] ?? 0);
     return { amount, hasValue };
+  }
+
+  function getWeekLabel(weekNo: number, targetYearMonth = yearMonth): string {
+    return annualWeeks.find((week) => week.yearMonth === targetYearMonth && week.weekNo === weekNo)?.label
+      || monthWeeks.find((week) => week.weekNo === weekNo)?.label
+      || `w${weekNo}`;
+  }
+
+  function isAuditSettledWeek(weekNo: number, targetYearMonth = yearMonth): boolean {
+    const week = annualWeeks.find((candidate) => candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo)
+      || monthWeeks.find((candidate) => candidate.weekNo === weekNo);
+    return Boolean(week && week.weekEnd <= todayIso);
+  }
+
+  function readAuditedCell(params: {
+    yearMonth?: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+    lineId: CashflowSheetLineId;
+    overrideMode?: 'projection' | 'actual';
+    overrideAmounts?: Partial<Record<CashflowSheetLineId, number>>;
+  }): { amount: number; hasValue: boolean } {
+    if (
+      params.overrideMode === params.mode
+      && params.overrideAmounts
+      && Object.prototype.hasOwnProperty.call(params.overrideAmounts, params.lineId)
+    ) {
+      return { amount: Number(params.overrideAmounts[params.lineId] || 0), hasValue: true };
+    }
+
+    const targetYearMonth = params.yearMonth || yearMonth;
+    const key = resolveCellKey({ yearMonth: targetYearMonth, mode: params.mode, weekNo: params.weekNo, lineId: params.lineId });
+    if (Object.prototype.hasOwnProperty.call(drafts, key)) {
+      const raw = drafts[key];
+      if (raw.trim() === '') return { amount: 0, hasValue: false };
+      return { amount: parseAmount(raw), hasValue: true };
+    }
+
+    return getPersistedCell({ doc: byYearMonthWeek.get(`${targetYearMonth}:${params.weekNo}`), mode: params.mode, lineId: params.lineId });
+  }
+
+  function addAuditIssue(
+    issuesByKey: Map<string, CashflowAuditIssue>,
+    issue: CashflowAuditIssue,
+  ): void {
+    if (!issuesByKey.has(issue.key)) issuesByKey.set(issue.key, issue);
+  }
+
+  function prepareAuditedWeekAmounts(input: {
+    yearMonth?: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+  }): {
+    amounts: Partial<Record<CashflowSheetLineId, number>>;
+    issues: CashflowAuditIssue[];
+  } {
+    const issuesByKey = new Map<string, CashflowAuditIssue>();
+    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
+    const targetYearMonth = input.yearMonth || yearMonth;
+
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+      const hasDraft = Object.prototype.hasOwnProperty.call(drafts, key);
+      const persisted = getPersistedCell({ doc: byYearMonthWeek.get(`${targetYearMonth}:${input.weekNo}`), mode: input.mode, lineId });
+
+      if (hasDraft && drafts[key].trim() === '') {
+        addAuditIssue(issuesByKey, {
+          key: `${input.mode}:${lineId}:missing`,
+          label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+          detail: `${input.mode === 'projection' ? 'Projection' : 'Actual'} 입력값이 비어 있습니다. 0원인 경우 0을 입력해 주세요.`,
+        });
+        continue;
+      }
+
+      if (hasDraft) {
+        amounts[lineId] = parseAmount(drafts[key]);
+      } else if (persisted.hasValue) {
+        amounts[lineId] = persisted.amount;
+      }
+    }
+
+    return { amounts, issues: Array.from(issuesByKey.values()) };
+  }
+
+  function collectAuditIssues(input: {
+    yearMonth?: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+    amounts: Partial<Record<CashflowSheetLineId, number>>;
+  }): CashflowAuditIssue[] {
+    const issuesByKey = new Map<string, CashflowAuditIssue>();
+    const targetYearMonth = input.yearMonth || yearMonth;
+
+    for (const issue of prepareAuditedWeekAmounts({ yearMonth: targetYearMonth, weekNo: input.weekNo, mode: input.mode }).issues) {
+      addAuditIssue(issuesByKey, issue);
+    }
+
+    if (!isAuditSettledWeek(input.weekNo, targetYearMonth)) return Array.from(issuesByKey.values());
+
+    for (const lineId of CASHFLOW_ALL_LINES) {
+      const projection = readAuditedCell({
+        yearMonth: targetYearMonth,
+        weekNo: input.weekNo,
+        mode: 'projection',
+        lineId,
+        overrideMode: input.mode,
+        overrideAmounts: input.amounts,
+      });
+      const actual = readAuditedCell({
+        yearMonth: targetYearMonth,
+        weekNo: input.weekNo,
+        mode: 'actual',
+        lineId,
+        overrideMode: input.mode,
+        overrideAmounts: input.amounts,
+      });
+
+      if (projection.hasValue && actual.hasValue && projection.amount !== actual.amount) {
+        addAuditIssue(issuesByKey, {
+          key: `settled:${lineId}:mismatch`,
+          label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+          detail: `과거 주차는 Projection ${fmt(projection.amount)} / Actual ${fmt(actual.amount)}로 같아야 합니다.`,
+        });
+      }
+    }
+
+    return Array.from(issuesByKey.values());
+  }
+
+  function showAuditBlock(title: string, weekNo: number, issues: CashflowAuditIssue[], targetYearMonth = yearMonth): void {
+    setAuditDialog({ title, weekLabel: getWeekLabel(weekNo, targetYearMonth), issues });
+    toast.error('감사 필수값을 먼저 확인해 주세요.');
   }
 
   function getEffectiveAmount(params: {
@@ -253,6 +953,16 @@ export function CashflowProjectSheet({
     const key = resolveCellKey(params);
     const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
     return raw !== undefined ? parseAmount(raw) : persisted.amount;
+  }
+
+  function getPersistedYearAmount(params: {
+    yearMonth: string;
+    mode: 'projection' | 'actual';
+    weekNo: number;
+    lineId: CashflowSheetLineId;
+  }): number {
+    const doc = byYearMonthWeek.get(`${params.yearMonth}:${params.weekNo}`);
+    return getPersistedCell({ doc, mode: params.mode, lineId: params.lineId }).amount;
   }
 
   const derivedByMode = useMemo(() => {
@@ -278,100 +988,164 @@ export function CashflowProjectSheet({
     };
   }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
 
-  const buildExportMatrix = useCallback((tableMode: 'projection' | 'actual') => {
-    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
-    const headerRow = ['항목', ...monthWeeks.map((w) => w.label), '월 합계'];
-    const dateRow = ['기간', ...monthWeeks.map((w) => `${w.weekStart} ~ ${w.weekEnd}`), ''];
+  const annualDerivedByMode = useMemo(() => {
+    function compute(mode: 'projection' | 'actual') {
+      const openingIn = mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn;
+      const openingOut = mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut;
+      return computeCashflowDerivedTotals({
+        openingIn,
+        openingOut,
+        weeks: annualWeeks.map((def) => ({
+          weekNo: def.weekNo,
+          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+            lineId,
+            getPersistedYearAmount({ yearMonth: def.yearMonth, mode, weekNo: def.weekNo, lineId }),
+          ])) as Partial<Record<CashflowSheetLineId, number>>,
+        })),
+      });
+    }
 
-    const rows: (string | number)[][] = [];
-    rows.push(headerRow, dateRow, []);
-    rows.push([`입금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
-    for (const lineId of CASHFLOW_IN_LINES) {
-      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
-      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
-    }
-    rows.push(['입금 합계', ...derived.weekTotals.map((w) => w.totalIn), derived.monthTotals.totalIn]);
-    rows.push([]);
-    rows.push([`출금 (${tableMode === 'projection' ? 'Projection' : 'Actual'})`, ...Array(monthWeeks.length + 1).fill('')]);
-    for (const lineId of CASHFLOW_OUT_LINES) {
-      const weekValues = monthWeeks.map((w) => getEffectiveAmount({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId }));
-      rows.push([CASHFLOW_SHEET_LINE_LABELS[lineId], ...weekValues, derived.rowTotals[lineId] || 0]);
-    }
-    rows.push(['출금 합계', ...derived.weekTotals.map((w) => w.totalOut), derived.monthTotals.totalOut]);
-    rows.push(['잔액', ...derived.weekTotals.map((w) => w.net), derived.monthTotals.net]);
-    return rows;
-  }, [derivedByMode, getEffectiveAmount, monthWeeks, yearMonth]);
+    return {
+      projection: compute('projection'),
+      actual: compute('actual'),
+    };
+  }, [annualWeeks, getPersistedYearAmount, yearOpeningTotalsByMode]);
 
-  const handleDownload = useCallback(async () => {
-    setDownloadPreparing(true);
-    try {
-      if (isPlatformApiEnabled() && user) {
-        const response = await exportCashflowWorkbookViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: user.uid,
-            email: user.email,
-            role: user.role,
-            idToken: user.idToken,
-            googleAccessToken: user.googleAccessToken,
-          },
-          body: {
-            scope: 'single',
-            projectId,
-            startYearMonth: yearMonth,
-            endYearMonth: yearMonth,
-            variant: 'single-project',
-          },
-        });
-        triggerDownload(response.blob, response.fileName);
-      } else {
-        const ExcelJS = await loadExcelJs();
-        const workbookSpec = buildCashflowExportWorkbookSpec({
-          variant: 'single-project',
-          projects: [
-            {
-              projectId,
-              projectName,
-              weeks: projectWeeks,
-              transactions: transactions.filter((tx) => tx.projectId === projectId && tx.dateTime.slice(0, 7) === yearMonth),
-            },
-          ],
-          yearMonths: [yearMonth],
-        });
-        const workbook = new ExcelJS.Workbook();
-        for (const sheet of workbookSpec.sheets) {
-          const worksheet = workbook.addWorksheet(sheet.name);
-          sheet.rows.forEach((row) => worksheet.addRow(row));
-          worksheet.views = [{ state: 'frozen', ySplit: 2 }];
-        }
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob(
-          [buffer],
-          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-        );
-        triggerDownload(blob, `프로젝트_캐시플로(주간)_${projectName}_${yearMonth}.xlsx`);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '엑셀 다운로드에 실패했습니다.';
-      toast.error(message);
-    } finally {
-      setDownloadPreparing(false);
-    }
-  }, [orgId, projectId, projectName, projectWeeks, transactions, user, yearMonth]);
+  const projectionActualDiff = useMemo(() => {
+    const rows = [
+      ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
+      ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
+    ].flatMap(({ section, lineId }) => monthWeeks.map((week) => {
+      const projection = getEffectiveAmount({ yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
+      const actual = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
+      return {
+        section,
+        lineId,
+        label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+        weekNo: week.weekNo,
+        weekLabel: week.label,
+        weekRange: `${week.weekStart} ~ ${week.weekEnd}`,
+        projection,
+        actual,
+        diff: actual - projection,
+      };
+    }));
+    const incomeDiff = rows
+      .filter((row) => row.section === '입금')
+      .reduce((sum, row) => sum + row.diff, 0);
+    const expenseDiff = rows
+      .filter((row) => row.section === '출금')
+      .reduce((sum, row) => sum + row.diff, 0);
+    const changedRows = rows.filter((row) => row.diff !== 0);
+    return {
+      rows,
+      changedRows,
+      incomeDiff,
+      expenseDiff,
+      netDiff: incomeDiff - expenseDiff,
+    };
+  }, [getEffectiveAmount, monthWeeks, yearMonth]);
+
+  const projectionActualYearDiff = useMemo(() => {
+    const lineDefs = [
+      ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
+      ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
+    ];
+    const rows = lineDefs.map(({ section, lineId }) => {
+      const cells = annualWeeks.map((week) => {
+        const projection = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
+        const actual = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
+        return {
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          weekLabel: week.label,
+          weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
+          projection,
+          actual,
+          diff: actual - projection,
+        };
+      });
+      return {
+        section,
+        lineId,
+        label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+        cells,
+        changed: cells.some((cell) => cell.diff !== 0),
+      };
+    });
+    const incomeDiff = rows
+      .filter((row) => row.section === '입금')
+      .flatMap((row) => row.cells)
+      .reduce((sum, cell) => sum + cell.diff, 0);
+    const expenseDiff = rows
+      .filter((row) => row.section === '출금')
+      .flatMap((row) => row.cells)
+      .reduce((sum, cell) => sum + cell.diff, 0);
+    const changedCellCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.diff !== 0).length, 0);
+    return {
+      rows,
+      changedRows: rows.filter((row) => row.changed),
+      incomeDiff,
+      expenseDiff,
+      netDiff: incomeDiff - expenseDiff,
+      changedCellCount,
+    };
+  }, [annualWeeks, getPersistedYearAmount]);
+
+  const cashflowTotalPeriodLabel = cashflowSheetRange?.label || `${selectedYear}년`;
+
+  const opsSummary = useMemo(() => {
+    return buildCashflowOpsSummary({
+      asOfDate: todayIso,
+      weeks: annualWeeks.map((week) => {
+        const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
+        const projectionHasValue = Object.values(doc?.projection || {}).some((value) => Number(value) !== 0);
+        const actualHasValue = Object.values(doc?.actual || {}).some((value) => Number(value) !== 0);
+        return {
+          key: `${week.yearMonth}:${week.weekNo}`,
+          label: week.label,
+          weekStart: week.weekStart,
+          weekEnd: week.weekEnd,
+          projectionWritten: Boolean(doc?.projectionUpdated || projectionHasValue),
+          actualWritten: Boolean(doc?.pmSubmitted || actualHasValue),
+          adminClosed: Boolean(doc?.adminClosed),
+          updatedAt: doc?.updatedAt,
+          updatedByName: doc?.updatedByName,
+          projectionUpdatedAt: doc?.projectionUpdatedAt,
+          projectionUpdatedByName: doc?.projectionUpdatedByName,
+          pmSubmittedAt: doc?.pmSubmittedAt,
+          pmSubmittedByName: doc?.pmSubmittedByName,
+          adminClosedAt: doc?.adminClosedAt,
+          adminClosedByName: doc?.adminClosedByName,
+        };
+      }),
+      diffCellCount: projectionActualYearDiff.changedCellCount,
+      labor: {
+        nextMonthProjectionWritten: laborRisk ? laborRisk.labor.nextMonthProjection.isWritten : true,
+        missingProjectionMonthCount: laborRisk ? laborRisk.labor.missingProjectionMonths.length : 0,
+        shortageStatus: laborRisk ? laborRisk.shortage.status : 'ok',
+        shortageWeekLabel: laborRisk?.shortage.week?.label || null,
+        shortageAmount: laborRisk?.shortage.shortageAmount || 0,
+      },
+      lastEditedLabel,
+    });
+  }, [annualWeeks, byYearMonthWeek, laborRisk, lastEditedLabel, projectionActualYearDiff.changedCellCount, todayIso]);
 
   const flushWeek = useCallback(async (input: {
+    yearMonth?: string;
     weekNo: number;
     mode: 'projection' | 'actual';
     silent?: boolean;
   }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
-    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
-    const doc = byWeekNo.get(input.weekNo);
+    if (input.mode === 'actual') return;
+    const targetYearMonth = input.yearMonth || yearMonth;
+    const wkKey = resolveWeekKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo });
+    const doc = byYearMonthWeek.get(`${targetYearMonth}:${input.weekNo}`);
 
     const rawByLine: Partial<Record<CashflowSheetLineId, string>> = {};
     const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
     for (const lineId of CASHFLOW_ALL_LINES) {
-      const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+      const cellKey = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
       const hasDraft = Object.prototype.hasOwnProperty.call(drafts, cellKey);
       if (!hasDraft) continue;
 
@@ -394,7 +1168,7 @@ export function CashflowProjectSheet({
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+          const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
           if (next[key] === rawByLine[lineId]) delete next[key];
         }
         return next;
@@ -406,7 +1180,7 @@ export function CashflowProjectSheet({
     try {
       await upsertWeekAmounts({
         projectId,
-        yearMonth,
+        yearMonth: targetYearMonth,
         weekNo: input.weekNo,
         mode: input.mode,
         amounts,
@@ -414,7 +1188,7 @@ export function CashflowProjectSheet({
       if (onUpdateWeeklySubmissionStatus) {
         await onUpdateWeeklySubmissionStatus({
           projectId,
-          yearMonth,
+          yearMonth: targetYearMonth,
           weekNo: input.weekNo,
           ...(input.mode === 'projection'
             ? { projectionEdited: true, projectionUpdated: true }
@@ -426,7 +1200,7 @@ export function CashflowProjectSheet({
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
+          const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
           if (next[key] === rawByLine[lineId]) delete next[key];
         }
         return next;
@@ -438,41 +1212,37 @@ export function CashflowProjectSheet({
       }
       throw error;
     }
-  }, [byWeekNo, canEdit, drafts, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
+  }, [byYearMonthWeek, canEdit, drafts, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
 
-  const markDirty = useCallback((input: { weekNo: number; mode: 'projection' | 'actual' }) => {
-    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
+  const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
+    const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
   }, [resolveWeekKey, yearMonth]);
 
   const persistWeekValues = useCallback(async (input: {
+    yearMonth?: string;
     weekNo: number;
     mode: 'projection' | 'actual';
   }): Promise<void> => {
-    if (!canEdit && input.mode === 'actual') return;
+    if (input.mode === 'actual') return;
 
-    const wkKey = resolveWeekKey({ yearMonth, mode: input.mode, weekNo: input.weekNo });
-    const doc = byWeekNo.get(input.weekNo);
-    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const cellKey = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      if (Object.prototype.hasOwnProperty.call(drafts, cellKey)) {
-        amounts[lineId] = parseAmount(drafts[cellKey]);
-        continue;
-      }
+    const targetYearMonth = input.yearMonth || yearMonth;
+    const wkKey = resolveWeekKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo });
+    const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({ ...input, yearMonth: targetYearMonth });
+    const auditIssues = [
+      ...preparedIssues,
+      ...collectAuditIssues({ ...input, yearMonth: targetYearMonth, amounts })
+        .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
+    ];
 
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
-      if (persisted.hasValue) {
-        amounts[lineId] = persisted.amount;
-      }
+    if (auditIssues.length > 0) {
+      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'error' }));
+      showAuditBlock('저장 전에 확인이 필요합니다', input.weekNo, auditIssues, targetYearMonth);
+      throw new Error('cashflow_audit_validation_failed');
     }
 
     if (Object.keys(amounts).length === 0) {
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        delete next[wkKey];
-        return next;
-      });
+      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
       return;
     }
 
@@ -480,7 +1250,7 @@ export function CashflowProjectSheet({
     try {
       await upsertWeekAmounts({
         projectId,
-        yearMonth,
+        yearMonth: targetYearMonth,
         weekNo: input.weekNo,
         mode: input.mode,
         amounts,
@@ -488,7 +1258,7 @@ export function CashflowProjectSheet({
       if (onUpdateWeeklySubmissionStatus) {
         await onUpdateWeeklySubmissionStatus({
           projectId,
-          yearMonth,
+          yearMonth: targetYearMonth,
           weekNo: input.weekNo,
           ...(input.mode === 'projection'
             ? { projectionEdited: true, projectionUpdated: true }
@@ -498,7 +1268,7 @@ export function CashflowProjectSheet({
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of CASHFLOW_ALL_LINES) {
-          delete next[resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId })];
+          delete next[resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId })];
         }
         return next;
       });
@@ -508,7 +1278,7 @@ export function CashflowProjectSheet({
       throw error;
     }
   }, [
-    byWeekNo,
+    byYearMonthWeek,
     canEdit,
     drafts,
     onUpdateWeeklySubmissionStatus,
@@ -519,84 +1289,49 @@ export function CashflowProjectSheet({
     yearMonth,
   ]);
 
-  const flushAllDirtyBeforeMonthChange = useCallback(async () => {
-    const entries = Object.entries(weekSaveState).filter(([, state]) => state === 'dirty' || state === 'error');
-    for (const [key] of entries) {
-      const parts = key.split(':');
-      // `${yearMonth}:${mode}:${weekNo}`
-      if (parts.length < 3) continue;
-      const keyYearMonth = parts[0];
-      const keyMode = parts[1] as 'projection' | 'actual';
-      const keyWeekNo = Number(parts[2]);
-      if (keyYearMonth !== yearMonth) continue;
-      if (!Number.isFinite(keyWeekNo)) continue;
-      await flushWeek({ weekNo: keyWeekNo, mode: keyMode, silent: false });
+  const handleSaveWeekValues = useCallback((input: {
+    yearMonth?: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+  }) => {
+    if (input.mode === 'actual') {
+      toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
+      return;
     }
-  }, [flushWeek, weekSaveState, yearMonth]);
-
-  const goPrevMonthSafe = useCallback(() => {
-    void flushAllDirtyBeforeMonthChange()
-      .then(() => goPrevMonth())
-      .catch(() => {});
-  }, [flushAllDirtyBeforeMonthChange, goPrevMonth]);
-
-  const goNextMonthSafe = useCallback(() => {
-    void flushAllDirtyBeforeMonthChange()
-      .then(() => goNextMonth())
-      .catch(() => {});
-  }, [flushAllDirtyBeforeMonthChange, goNextMonth]);
-
-  const saveMonth = useCallback((targetMode: 'actual') => {
-    const targets = monthWeeks.map((w) => w.weekNo);
-    void (async () => {
-      setMonthSavingMode(targetMode);
-      for (const weekNo of targets) {
-        await persistWeekValues({ weekNo, mode: targetMode });
-      }
-      toast.success('이번 달 Actual을 저장했습니다.');
-    })().catch((err) => {
-      console.error('[Cashflow] month actual save failed:', err);
-      toast.error('월 저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    }).finally(() => {
-      setMonthSavingMode((prev) => (prev === targetMode ? null : prev));
-    });
-  }, [monthWeeks, persistWeekValues]);
-
-  const syncActualsFromExpenseSheet = useCallback(() => {
-    void (async () => {
-      setActualSyncing(true);
-      const result = await syncProjectActualsFromExpenseSheets({ projectId });
-      if (result.skipped) {
-        toast.message('불러올 정산대장 행이 없습니다.');
-        return;
-      }
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const key of Object.keys(next)) {
-          if (key.startsWith(`${yearMonth}:actual:`)) delete next[key];
-        }
-        return next;
+    void persistWeekValues(input)
+      .then(() => toast.success('저장했습니다.'))
+      .catch((error) => {
+        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
+        toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
       });
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        for (const week of monthWeeks) {
-          delete next[resolveWeekKey({ yearMonth, mode: 'actual', weekNo: week.weekNo })];
-        }
-        return next;
+  }, [persistWeekValues]);
+
+  const handleSaveBoardWeekValues = useCallback((input: {
+    yearMonth: string;
+    weekNo: number;
+    mode: 'projection' | 'actual';
+  }) => {
+    if (input.mode === 'actual') {
+      toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
+      return;
+    }
+    void persistWeekValues(input)
+      .then(() => {
+        setEditingWeekModes((prev) => ({
+          ...prev,
+          [resolveWeekKey(input)]: false,
+        }));
+        toast.success('저장했습니다.');
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
+        toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
       });
-      toast.success(`Actual ${result.upsertedWeeks}개 주차를 불러왔습니다.`);
-    })().catch((error) => {
-      console.error('[Cashflow] actual sync failed:', error);
-      toast.error('Actual 불러오기에 실패했습니다. 정산대장 저장 상태를 확인해 주세요.');
-    }).finally(() => {
-      setActualSyncing(false);
-    });
-  }, [monthWeeks, projectId, resolveWeekKey, syncProjectActualsFromExpenseSheets, yearMonth]);
+  }, [persistWeekValues, resolveWeekKey]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
     try {
-      await persistWeekValues({ weekNo: input.weekNo, mode: 'actual' });
       await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
       toast.success('작성완료 처리했습니다.');
     } catch (e) {
@@ -605,21 +1340,28 @@ export function CashflowProjectSheet({
       setSubmitBusy(false);
       setSubmitConfirm(null);
     }
-  }, [persistWeekValues, projectId, submitWeekAsPm]);
+  }, [projectId, submitWeekAsPm]);
 
-  const handleCompleteProjectionWeek = useCallback((weekNo: number) => {
+  const handleCompleteProjectionWeek = useCallback((weekNo: number, targetYearMonth = yearMonth) => {
     if (!canEdit) return;
 
     void (async () => {
       setProjectionCompleteWeek(weekNo);
-      const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-        lineId,
-        getEffectiveAmount({ yearMonth, mode: 'projection', weekNo, lineId }),
-      ])) as Partial<Record<CashflowSheetLineId, number>>;
+      const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({ yearMonth: targetYearMonth, weekNo, mode: 'projection' });
+      const auditIssues = [
+        ...preparedIssues,
+        ...collectAuditIssues({ yearMonth: targetYearMonth, weekNo, mode: 'projection', amounts })
+          .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
+      ];
+      if (auditIssues.length > 0) {
+        setWeekSaveState((prev) => ({ ...prev, [resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })]: 'error' }));
+        showAuditBlock('작성완료 전에 확인이 필요합니다', weekNo, auditIssues, targetYearMonth);
+        return;
+      }
 
       await upsertWeekAmounts({
         projectId,
-        yearMonth,
+        yearMonth: targetYearMonth,
         weekNo,
         mode: 'projection',
         amounts,
@@ -628,7 +1370,7 @@ export function CashflowProjectSheet({
       if (onUpdateWeeklySubmissionStatus) {
         await onUpdateWeeklySubmissionStatus({
           projectId,
-          yearMonth,
+          yearMonth: targetYearMonth,
           weekNo,
           projectionEdited: true,
           projectionUpdated: true,
@@ -638,13 +1380,13 @@ export function CashflowProjectSheet({
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of CASHFLOW_ALL_LINES) {
-          delete next[resolveCellKey({ yearMonth, mode: 'projection', weekNo, lineId })];
+          delete next[resolveCellKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo, lineId })];
         }
         return next;
       });
       setWeekSaveState((prev) => {
         const next = { ...prev };
-        delete next[resolveWeekKey({ yearMonth, mode: 'projection', weekNo })];
+        delete next[resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })];
         return next;
       });
       toast.success('주차 Projection을 작성완료 처리했습니다.');
@@ -665,11 +1407,11 @@ export function CashflowProjectSheet({
     yearMonth,
   ]);
 
-  const handleCloseWeek = useCallback(async (weekNo: number) => {
+  const handleCloseWeek = useCallback(async (weekNo: number, targetYearMonth = yearMonth) => {
     setCloseBusy(true);
     try {
-      await persistWeekValues({ weekNo, mode: 'projection' });
-      await closeWeekAsAdmin({ projectId, yearMonth, weekNo });
+      await persistWeekValues({ yearMonth: targetYearMonth, weekNo, mode: 'projection' });
+      await closeWeekAsAdmin({ projectId, yearMonth: targetYearMonth, weekNo });
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
       toast.error('결산완료 처리에 실패했습니다.');
@@ -683,6 +1425,7 @@ export function CashflowProjectSheet({
     if (!db) {
       setCloseDialog({
         kind: 'confirm',
+        yearMonth,
         weekNo,
         projectionDone: true,
         expenseDone: true,
@@ -699,6 +1442,7 @@ export function CashflowProjectSheet({
 
       setCloseDialog({
         kind: accountingState.closeDialogKind,
+        yearMonth,
         weekNo,
         projectionDone: accountingState.projectionDone,
         expenseDone: accountingState.expenseDone,
@@ -724,16 +1468,617 @@ export function CashflowProjectSheet({
     return empty;
   }
 
-  function renderSheetTable(tableMode: 'projection' | 'actual') {
+  function diffTextClass(diff: number): string {
+    return diff === 0 ? 'text-slate-400' : 'text-slate-800';
+  }
+
+  function getBoardEffectiveAmount(params: {
+    targetYearMonth: string;
+    mode: 'projection' | 'actual';
+    weekNo: number;
+    lineId: CashflowSheetLineId;
+  }): number {
+    const doc = byYearMonthWeek.get(`${params.targetYearMonth}:${params.weekNo}`);
+    const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
+    const key = resolveCellKey({
+      yearMonth: params.targetYearMonth,
+      mode: params.mode,
+      weekNo: params.weekNo,
+      lineId: params.lineId,
+    });
+    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
+    return raw !== undefined ? parseAmount(raw) : persisted.amount;
+  }
+
+  function renderProjectionCell(input: {
+    targetYearMonth: string;
+    weekNo: number;
+    lineId: CashflowSheetLineId;
+    isThisWeek: boolean;
+  }) {
+    const projectionDoc = byYearMonthWeek.get(`${input.targetYearMonth}:${input.weekNo}`);
+    const persisted = getPersistedCell({ doc: projectionDoc, mode: 'projection', lineId: input.lineId });
+    const key = resolveCellKey({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
+    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
+    const projectionValue = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
+    const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
+    const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
+    const diff = actual - projection;
+    const shouldHighlightMismatch = shouldHighlightProjectionAmountMismatch({ projection, actual });
+    const isEditing = isWeekModeEditing({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo }) || raw !== undefined;
+    const bgClass = input.isThisWeek ? 'bg-blue-50/70' : 'bg-white';
+    const isCollapsedEmpty = !showEmptyCashflowRows && !isEditing && projection === 0 && actual === 0 && diff === 0 && raw === undefined;
+
+    return (
+      <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
+        {isCollapsedEmpty ? (
+          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
+        ) : isEditing ? (
+          <Input
+            value={projectionValue}
+            inputMode="numeric"
+            className={`h-6 rounded-lg border-slate-200 bg-white px-1.5 py-0 text-right text-[8px] tabular-nums shadow-[0_1px_2px_rgba(15,23,42,0.04)] focus-visible:ring-1 focus-visible:ring-blue-400 ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}
+            placeholder="0"
+            disabled={!canEdit}
+            onChange={(e) => {
+              const formatted = formatAmountInput(e.target.value);
+              setDrafts((prev) => ({ ...prev, [key]: formatted }));
+              markDirty({ yearMonth: input.targetYearMonth, weekNo: input.weekNo, mode: 'projection' });
+            }}
+          />
+        ) : (
+          <div className={`h-5 rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
+            <RollingAmount value={projection} />
+          </div>
+        )}
+      </td>
+    );
+  }
+
+  function renderActualCell(input: {
+    targetYearMonth: string;
+    weekNo: number;
+    lineId: CashflowSheetLineId;
+    isThisWeek: boolean;
+  }) {
+    const actualDoc = byYearMonthWeek.get(`${input.targetYearMonth}:${input.weekNo}`);
+    const persisted = getPersistedCell({ doc: actualDoc, mode: 'actual', lineId: input.lineId });
+    const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
+    const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
+    const diff = actual - projection;
+    const bgClass = input.isThisWeek ? 'bg-blue-50/80' : 'bg-slate-50/80';
+    const isCollapsedEmpty = !showEmptyCashflowRows && projection === 0 && actual === 0 && diff === 0 && !persisted.hasValue;
+
+    return (
+      <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
+        {isCollapsedEmpty ? (
+          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
+        ) : (
+          <div className="h-5 px-1 text-right text-[8px] leading-5 tabular-nums text-slate-700">
+            <RollingAmount value={actual} />
+          </div>
+        )}
+      </td>
+    );
+  }
+
+  function renderSummaryCell(input: {
+    keyName: string;
+    value: number;
+    mode: 'projection' | 'actual';
+    isThisWeek?: boolean;
+    emphasis?: 'income' | 'expense' | 'balance';
+    stickyRight?: boolean;
+    rowTone?: 'income' | 'expense';
+  }) {
+    const bgClass = input.rowTone === 'income'
+      ? (input.mode === 'actual' ? 'bg-emerald-50/70' : 'bg-emerald-50')
+      : input.rowTone === 'expense'
+        ? (input.mode === 'actual' ? 'bg-rose-50/70' : 'bg-rose-50')
+        : input.mode === 'actual'
+          ? (input.isThisWeek ? 'bg-blue-50/80' : 'bg-slate-50/80')
+          : (input.isThisWeek ? 'bg-blue-50/70' : 'bg-white');
+    const valueClass = input.emphasis === 'income'
+      ? 'text-emerald-800'
+      : input.emphasis === 'expense'
+        ? 'text-rose-800'
+        : 'text-slate-950';
+    return (
+      <td key={input.keyName} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${input.stickyRight ? 'sticky right-0 z-20 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]' : ''} ${bgClass}`}>
+        <div className="flex items-center justify-end gap-1 text-[8px] leading-4">
+          <span className={`font-semibold tabular-nums ${input.mode === 'actual' ? 'text-slate-700' : valueClass}`}>
+            <RollingAmount value={input.value} />
+          </span>
+        </div>
+      </td>
+    );
+  }
+
+  function renderUnifiedMonthlyBoard() {
+    const visibleWeeks = annualWeeks;
+    function computeBoardDerived(mode: 'projection' | 'actual') {
+      const openingIn = mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn;
+      const openingOut = mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut;
+      return computeCashflowDerivedTotals({
+        openingIn,
+        openingOut,
+        weeks: visibleWeeks.map((def) => ({
+          weekNo: def.weekNo,
+          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+            lineId,
+            getBoardEffectiveAmount({ targetYearMonth: def.yearMonth, mode, weekNo: def.weekNo, lineId }),
+          ])) as Partial<Record<CashflowSheetLineId, number>>,
+        })),
+      });
+    }
+    const projection = computeBoardDerived('projection');
+    const actual = computeBoardDerived('actual');
+    const projectionWeeksByKey = new Map(projection.weekTotals.map((week, index) => [`${annualWeeks[index]?.yearMonth}:${annualWeeks[index]?.weekNo}`, week]));
+    const actualWeeksByKey = new Map(actual.weekTotals.map((week, index) => [`${annualWeeks[index]?.yearMonth}:${annualWeeks[index]?.weekNo}`, week]));
+    const weekCount = visibleWeeks.length;
+    const scrollBoard = (direction: -1 | 1) => {
+      const container = cashflowBoardScrollRef.current;
+      if (!container) return;
+      const weekColumn = container.querySelector<HTMLElement>('[data-cashflow-week-column="true"]');
+      const weekWidth = weekColumn?.getBoundingClientRect().width || 84;
+      const targetLeft = getSnappedWeekScrollLeft({
+        currentLeft: container.scrollLeft,
+        direction,
+        viewportWidth: container.clientWidth,
+        maxScrollLeft: container.scrollWidth - container.clientWidth,
+        weekWidth,
+      });
+      container.scrollTo({
+        left: targetLeft,
+        behavior: 'smooth',
+      });
+    };
+    const dirtyProjectionWeeks = visibleWeeks.filter((week) => (
+      weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
+    ));
+    const dirtyBoardWeeks = visibleWeeks.filter((week) => (
+      weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
+    ));
+    const boardIsEditing = visibleWeeks.some((week) => (
+      isWeekModeEditing({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })
+    ));
+    const setBoardEditing = (editing: boolean) => {
+      setShowEmptyCashflowRows((prev) => (editing ? true : prev));
+      setEditingWeekModes((prev) => {
+        const next = { ...prev };
+        for (const week of visibleWeeks) {
+          next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] = editing;
+          next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo })] = false;
+        }
+        return next;
+      });
+    };
+    const startBoardEditing = () => {
+      void acquireCashflowEditLock().then((locked) => {
+        if (!locked) return;
+        setBoardEditing(true);
+      });
+    };
+    const saveBoardDrafts = async () => {
+      for (const week of visibleWeeks) {
+        await flushWeek({ yearMonth: week.yearMonth, weekNo: week.weekNo, mode: 'projection', silent: true });
+      }
+      setBoardEditing(false);
+      await releaseCashflowEditLock('save');
+    };
+    const saveBoard = () => {
+      void saveBoardDrafts()
+        .then(() => {
+          toast.success('저장했습니다.');
+          if (dirtyProjectionWeeks.length > 0 && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('mysc:cashflow-projection-saved', {
+              detail: {
+                projectId,
+                changedWeekCount: dirtyProjectionWeeks.length,
+              },
+            }));
+          }
+        })
+        .catch(() => toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.'));
+    };
+    const settleWeek = (week: MonthMondayWeek) => {
+      void (async () => {
+        await saveBoardDrafts();
+        const issues: CashflowAuditIssue[] = [];
+        for (const lineId of CASHFLOW_ALL_LINES) {
+          const projectionAmount = getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
+          const actualAmount = getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
+          if (projectionAmount !== actualAmount) {
+            issues.push({
+              key: `${week.yearMonth}:${week.weekNo}:${lineId}:settle-mismatch`,
+              label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+              detail: `결산 시 Projection ${fmt(projectionAmount)} / Actual ${fmt(actualAmount)}로 같아야 합니다.`,
+            });
+          }
+        }
+        if (issues.length > 0) {
+          showAuditBlock('결산 전에 Projection/Actual 확인이 필요합니다', week.weekNo, issues, week.yearMonth);
+          return;
+        }
+        setCloseDialog({
+          kind: 'confirm',
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          projectionDone: true,
+          expenseDone: true,
+        });
+      })().catch((error) => {
+        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
+        toast.error('결산 확인에 실패했습니다.');
+      });
+    };
+    const renderLineRows = (
+      lineIds: CashflowSheetLineId[],
+      sectionTone: 'income' | 'expense',
+    ) => lineIds.flatMap((lineId) => {
+      const sectionLabelToneClass = sectionTone === 'income'
+        ? 'bg-emerald-50/80 border-l-[3px] border-l-emerald-400'
+        : 'bg-rose-50/80 border-l-[3px] border-l-rose-400';
+      const projectionRow = (
+        <tr key={`${lineId}-projection`} className="border-t border-white">
+          <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[8px] font-semibold leading-4 text-slate-900 ${sectionLabelToneClass}`}>
+            <div className="flex items-start">
+              <span>{renderCashflowLineLabel(CASHFLOW_SHEET_LINE_LABELS[lineId])}</span>
+            </div>
+          </td>
+          <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">
+            Projection
+          </td>
+          {visibleWeeks.map((week) => {
+            const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+            return renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
+          })}
+          {renderSummaryCell({
+            keyName: `${lineId}-range-total-projection`,
+            value: projection.rowTotals[lineId] || 0,
+            mode: 'projection',
+            stickyRight: true,
+          })}
+        </tr>
+      );
+      const actualRow = (
+        <tr key={`${lineId}-actual`} className="border-t border-white">
+          <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-slate-100/80 px-1 py-1 text-[8px] font-semibold text-slate-500">
+            Actual
+          </td>
+          {visibleWeeks.map((week) => {
+            const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+            return renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
+          })}
+          {renderSummaryCell({
+            keyName: `${lineId}-range-total-actual`,
+            value: actual.rowTotals[lineId] || 0,
+            mode: 'actual',
+            stickyRight: true,
+          })}
+        </tr>
+      );
+      return [projectionRow, actualRow];
+    });
+
+    return (
+      <Card className="overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <CardContent className="p-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
+            <div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
+                <span>기준 범위 {cashflowTotalPeriodLabel} · 항목별 Projection 입력 / Actual 확인</span>
+                {lastEditedLabel && (
+                  <span className="text-slate-700">· 마지막 수정: {lastEditedLabel}</span>
+                )}
+                {activeEditLock?.editorName && (
+                  <span className={isEditLockMine ? 'font-semibold text-blue-700' : 'font-semibold text-rose-700'}>
+                    · {activeEditLock.editorName}이 수정 중입니다
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
+                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><Pencil className="h-3 w-3" />전체 수정</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><Save className="h-3 w-3" />전체 저장</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><CheckCircle2 className="h-3 w-3" />주차별 결산</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><ChevronLeft className="h-3 w-3" /><ChevronRight className="h-3 w-3" />주차 이동</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-full bg-white px-2 py-1.5 shadow-[0_4px_14px_rgba(15,23,42,0.07)]" title="현재 이 화면을 보고 있는 사용자">
+                <Users className="h-3 w-3 text-slate-500" />
+                <div className="flex -space-x-1">
+                  {presenceUsers.slice(0, 4).map((item) => (
+                    <span
+                      key={item.uid}
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-full border border-white text-[7px] font-semibold ${item.uid === currentUserUid ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
+                      title={`${item.name || item.email || item.uid} 접속 중`}
+                    >
+                      {getInitials(item.name || item.email || item.uid)}
+                    </span>
+                  ))}
+                  {presenceUsers.length > 4 && (
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-slate-100 text-[7px] font-semibold text-slate-600">
+                      +{presenceUsers.length - 4}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={boardIsEditing ? 'default' : 'outline'}
+                className="h-8 rounded-full px-3 text-[11px] shadow-sm"
+                onClick={startBoardEditing}
+                disabled={!canEdit || boardIsEditing || editLockBusy || isEditLockedByOther}
+                title={isEditLockedByOther && activeEditLock?.editorName ? `${activeEditLock.editorName}이 수정 중입니다` : '수정'}
+              >
+                {editLockBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
+                {isEditLockedByOther ? '수정중' : '수정'}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
+                onClick={saveBoard}
+                disabled={!canEdit || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
+              >
+                <Save className="mr-1 h-3 w-3" />
+                저장
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={showEmptyCashflowRows ? 'default' : 'outline'}
+                className="h-8 rounded-full border-0 px-3 text-[11px] shadow-sm"
+                onClick={() => setShowEmptyCashflowRows((prev) => !prev)}
+              >
+                0원 포함
+              </Button>
+              <Badge variant="outline" className="rounded-full border-0 bg-white px-2.5 py-1 text-[10px] text-slate-600 shadow-sm">
+                {weekCount.toLocaleString()}주
+              </Badge>
+            </div>
+          </div>
+
+          <div className="relative bg-slate-50/80 px-4 pb-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)] backdrop-blur"
+              onClick={() => scrollBoard(-1)}
+              aria-label="왼쪽 주차로 이동"
+              title="왼쪽 주차로 이동"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)] backdrop-blur"
+              onClick={() => scrollBoard(1)}
+              aria-label="오른쪽 주차로 이동"
+              title="오른쪽 주차로 이동"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          <div ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth rounded-[20px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
+            <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + weekCount * 84 + 84}px` }}>
+              <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+                <tr>
+                  <th className="sticky left-0 z-50 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-white px-2 py-2 text-left text-[11px] font-bold text-slate-800">
+                    항목
+                  </th>
+                  <th className="sticky left-[132px] z-50 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800">
+                    구분
+                  </th>
+                  {visibleWeeks.map((week) => {
+                    const projectionWeekKey = resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo });
+                    const actualWeekKey = resolveWeekKey({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo });
+                    const projectionSaveState = weekSaveState[projectionWeekKey];
+                    const actualSaveState = weekSaveState[actualWeekKey];
+                    const isSavingWeek = projectionSaveState === 'saving' || actualSaveState === 'saving';
+                    const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+                    const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
+                    return (
+                      <th key={`${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-left align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
+                        <div className="flex min-h-[72px] flex-col gap-0.5">
+                          <div className="relative min-h-5 leading-4">
+                            <span className="block truncate text-center text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
+                            {canEdit && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="absolute right-0 top-0 h-5 w-5 shrink-0 rounded-full border-0 bg-white/95 p-0 shadow-sm"
+                                onClick={() => settleWeek(week)}
+                                disabled={closeBusy}
+                                aria-label={`${week.label} 결산`}
+                                title={`${week.label} 결산`}
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="truncate text-center text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
+                          <div className="grid gap-0.5">
+                            {doc?.projectionUpdated ? (
+                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-white px-1 text-[7px] text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">Prj 작성</Badge>
+                            ) : (
+                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Prj 미작성</Badge>
+                            )}
+                            {doc?.pmSubmitted || Object.values(doc?.actual || {}).some((value) => Number(value) !== 0) ? (
+                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-white px-1 text-[7px] text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">Act 작성</Badge>
+                            ) : (
+                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Act 미작성</Badge>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-0.5">
+                          {projectionSaveState === 'dirty' && (
+                            <Badge className="h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">Prj 미저장</Badge>
+                          )}
+                          {actualSaveState === 'dirty' && (
+                            <Badge className="h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">Act 미저장</Badge>
+                          )}
+                          {isSavingWeek && (
+                            <Badge className="h-3.5 rounded-full border-0 bg-slate-200 px-1 text-[7px] text-slate-600">저장중</Badge>
+                          )}
+                          {(projectionSaveState === 'error' || actualSaveState === 'error') && (
+                            <Badge className="h-3.5 rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">오류</Badge>
+                          )}
+                          </div>
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left align-top text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
+                    범위 합계
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {renderLineRows(CASHFLOW_IN_LINES, 'income')}
+                <tr className="border-t-[6px] border-white bg-emerald-50/80">
+                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-emerald-50 px-2.5 py-1.5 text-[8px] font-bold text-emerald-950">입금 합계</td>
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-emerald-50 px-1 py-1 text-[8px] font-semibold text-emerald-900">Projection</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `total-in-${week.yearMonth}-${week.weekNo}-projection`,
+                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalIn || 0,
+                    mode: 'projection',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'income',
+                    rowTone: 'income',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'total-in-range-projection',
+                    value: projection.monthTotals.totalIn,
+                    mode: 'projection',
+                    emphasis: 'income',
+                    stickyRight: true,
+                    rowTone: 'income',
+                  })}
+                </tr>
+                <tr className="border-t border-white bg-emerald-50/50">
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-emerald-50/70 px-1 py-1 text-[8px] font-semibold text-emerald-900">Actual</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `total-in-${week.yearMonth}-${week.weekNo}-actual`,
+                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalIn || 0,
+                    mode: 'actual',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'income',
+                    rowTone: 'income',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'total-in-range-actual',
+                    value: actual.monthTotals.totalIn,
+                    mode: 'actual',
+                    emphasis: 'income',
+                    stickyRight: true,
+                    rowTone: 'income',
+                  })}
+                </tr>
+
+                {renderLineRows(CASHFLOW_OUT_LINES, 'expense')}
+                <tr className="border-t-[6px] border-white bg-rose-50/80">
+                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-rose-50 px-2.5 py-1.5 text-[8px] font-bold text-rose-950">출금 합계</td>
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-rose-50 px-1 py-1 text-[8px] font-semibold text-rose-900">Projection</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `total-out-${week.yearMonth}-${week.weekNo}-projection`,
+                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalOut || 0,
+                    mode: 'projection',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'expense',
+                    rowTone: 'expense',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'total-out-range-projection',
+                    value: projection.monthTotals.totalOut,
+                    mode: 'projection',
+                    emphasis: 'expense',
+                    stickyRight: true,
+                    rowTone: 'expense',
+                  })}
+                </tr>
+                <tr className="border-t border-white bg-rose-50/50">
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-rose-50/70 px-1 py-1 text-[8px] font-semibold text-rose-900">Actual</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `total-out-${week.yearMonth}-${week.weekNo}-actual`,
+                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalOut || 0,
+                    mode: 'actual',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'expense',
+                    rowTone: 'expense',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'total-out-range-actual',
+                    value: actual.monthTotals.totalOut,
+                    mode: 'actual',
+                    emphasis: 'expense',
+                    stickyRight: true,
+                    rowTone: 'expense',
+                  })}
+                </tr>
+
+                <tr className="border-t-[6px] border-white bg-slate-100/90">
+                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-slate-100 px-2.5 py-1.5 text-[8px] font-bold text-slate-950">잔액</td>
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">Projection</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `net-${week.yearMonth}-${week.weekNo}-projection`,
+                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.net || 0,
+                    mode: 'projection',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'balance',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'net-range-projection',
+                    value: projection.monthTotals.net,
+                    mode: 'projection',
+                    emphasis: 'balance',
+                    stickyRight: true,
+                  })}
+                </tr>
+                <tr className="border-t border-white bg-slate-100/90">
+                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-slate-100 px-1 py-1 text-[8px] font-semibold text-slate-600">Actual</td>
+                  {visibleWeeks.map((week) => renderSummaryCell({
+                    keyName: `net-${week.yearMonth}-${week.weekNo}-actual`,
+                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.net || 0,
+                    mode: 'actual',
+                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+                    emphasis: 'balance',
+                  }))}
+                  {renderSummaryCell({
+                    keyName: 'net-range-actual',
+                    value: actual.monthTotals.net,
+                    mode: 'actual',
+                    emphasis: 'balance',
+                    stickyRight: true,
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          </div>
+          {isLoading && (
+            <div className="px-3 py-2 text-[11px] text-slate-500">불러오는 중...</div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function renderSheetTable(tableMode: 'projection' | 'actual', compact = false) {
     const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
     return (
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="min-w-[860px] w-full text-[11px]">
+            <table className={`${compact ? 'min-w-[760px]' : 'min-w-[860px]'} w-full text-[11px]`}>
               <thead>
                 <tr className="bg-muted/30">
-                  <th className="px-4 py-2 text-left" style={{ fontWeight: 700, minWidth: 180 }}>항목</th>
+                  <th className={`${compact ? 'px-3' : 'px-4'} py-2 text-left`} style={{ fontWeight: 700, minWidth: compact ? 150 : 180 }}>항목</th>
                   {monthWeeks.map((w) => {
                     const wkKey = resolveWeekKey({ yearMonth, mode: tableMode, weekNo: w.weekNo });
                     const saveState = weekSaveState[wkKey];
@@ -742,7 +2087,7 @@ export function CashflowProjectSheet({
                     const colClass = isThisWeek ? 'bg-teal-50/40 dark:bg-teal-950/10' : '';
 
                     return (
-                      <th key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontWeight: 700, minWidth: 150 }}>
+                      <th key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontWeight: 700, minWidth: compact ? 112 : 150 }}>
                         <div className="flex items-center justify-end gap-2">
                           <span>{w.label}</span>
                           {weekMeta[w.weekNo]?.adminClosed ? (
@@ -768,28 +2113,46 @@ export function CashflowProjectSheet({
                             <Badge className="h-4 px-1 text-[9px] bg-rose-500/15 text-rose-700 dark:text-rose-300 border-0">오류</Badge>
                           )}
                         </div>
-                        <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
-                        <div className="mt-2 flex items-center justify-end gap-1.5">
-                          {tableMode === 'projection' && canEdit && (
-                            <Button
-                              size="sm"
+	                        <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
+	                        <div className="mt-2 flex items-center justify-end gap-1.5">
+	                          {tableMode === 'projection' && canEdit && (
+	                            <Button
+	                              size="sm"
+	                              variant="outline"
+	                              className="h-7 text-[10px] gap-1"
+	                              onClick={() => handleSaveWeekValues({ weekNo: w.weekNo, mode: tableMode })}
+	                              disabled={saveState === 'saving'}
+	                              aria-label="저장"
+	                              title="저장"
+	                            >
+	                              {saveState === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ClipboardCheck className="w-3 h-3" />}
+	                              {!compact && '저장'}
+	                            </Button>
+	                          )}
+	                          {tableMode === 'projection' && canEdit && (
+	                            <Button
+	                              size="sm"
                               variant="outline"
                               className="h-7 text-[10px] gap-1"
                               onClick={() => handleCompleteProjectionWeek(w.weekNo)}
                               disabled={projectionCompleteWeek === w.weekNo}
+                              aria-label="작성완료"
+                              title="작성완료"
                             >
                               {projectionCompleteWeek === w.weekNo ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                              작성완료
+                              {!compact && '작성완료'}
                             </Button>
                           )}
-                          {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && isPm && (
+                          {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && canSubmitActual && (
                             <Button
                               size="sm"
                               variant="outline"
                               className="h-7 text-[10px] gap-1"
                               onClick={() => setSubmitConfirm({ weekNo: w.weekNo, yearMonth })}
+                              aria-label="작성완료"
+                              title="작성완료"
                             >
-                              <CheckCircle2 className="w-3 h-3" /> 작성완료
+                              <CheckCircle2 className="w-3 h-3" /> {!compact && '작성완료'}
                             </Button>
                           )}
                           {tableMode === 'projection' && !weekMeta[w.weekNo]?.adminClosed && canClose && (
@@ -798,8 +2161,10 @@ export function CashflowProjectSheet({
                               className="h-7 text-[10px] gap-1"
                               onClick={() => void handleStartCloseWeek(w.weekNo)}
                               style={{ background: 'linear-gradient(135deg, #059669, #0d9488)' }}
+                              aria-label="결산"
+                              title="결산"
                             >
-                              <CheckCircle2 className="w-3 h-3" /> 결산
+                              <CheckCircle2 className="w-3 h-3" /> {!compact && '결산'}
                             </Button>
                           )}
                         </div>
@@ -809,7 +2174,7 @@ export function CashflowProjectSheet({
                       </th>
                     );
                   })}
-                  <th className="px-3 py-2 text-right" style={{ fontWeight: 700, minWidth: 120 }}>월 합계</th>
+                  <th className="px-3 py-2 text-right" style={{ fontWeight: 700, minWidth: compact ? 100 : 120 }}>월 합계</th>
                 </tr>
               </thead>
               <tbody>
@@ -820,17 +2185,17 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_IN_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className={`${compact ? 'px-3' : 'px-4'} py-1.5 text-[10px] whitespace-nowrap`} style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {fmt(amount)}
-                        </td>
+                          <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right text-slate-600 ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {fmt(amount)}
+                          </td>
                         );
                       }
 
@@ -881,17 +2246,17 @@ export function CashflowProjectSheet({
                 </tr>
                 {CASHFLOW_OUT_LINES.map((lineId) => (
                   <tr key={lineId} className="border-t border-border/30">
-                    <td className="px-4 py-1.5 text-[10px] whitespace-nowrap" style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
+                    <td className={`${compact ? 'px-3' : 'px-4'} py-1.5 text-[10px] whitespace-nowrap`} style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
                     {monthWeeks.map((w) => {
                       const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                       const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
 
-                      if (tableMode === 'actual' && !canEdit) {
+                      if (tableMode === 'actual') {
                         const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
                         return (
-                        <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {fmt(amount)}
-                        </td>
+                          <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right text-slate-600 ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {fmt(amount)}
+                          </td>
                         );
                       }
 
@@ -963,136 +2328,825 @@ export function CashflowProjectSheet({
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <PageHeader
-        icon={CircleDollarSign}
-        iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-        title="프로젝트 캐시플로(주간)"
-        description={`${projectName} · ${yearMonth}`}
-        actions={(
-          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-[12px] gap-1.5"
-              onClick={handleDownload}
-              onMouseEnter={() => warmExcelJs()}
-              onFocus={() => warmExcelJs()}
-              disabled={downloadPreparing}
-            >
-              {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} {downloadPreparing ? '엑셀 준비 중' : '엑셀 다운로드'}
-            </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={syncActualsFromExpenseSheet}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {actualSyncing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 불러오기
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 불러오기</p>
-                <p>주간 사업비 입력표에 저장된 실제 입금/지출을 읽어와 이 캐시플로 Actual 칸에 채웁니다. 새로 계산해 보여주는 단계이며, 최종 반영은 Actual 저장까지 눌러야 끝납니다.</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-[12px] gap-1.5"
-                    onClick={() => saveMonth('actual')}
-                    disabled={!canEdit || actualSyncing || monthSavingMode !== null}
-                  >
-                    {monthSavingMode === 'actual' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    Actual 저장
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[320px] text-[11px] leading-5">
-                <p className="font-semibold">Actual 저장</p>
-                <p>화면에 보이는 Actual 값을 서버 기준값으로 저장합니다. 저장해야 다른 화면과 다음 접속에서도 같은 실제값을 볼 수 있습니다.</p>
-              </TooltipContent>
-            </Tooltip>
-            <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonthSafe}>
-              <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goNextMonthSafe}>
-              다음 달 <ChevronRight className="w-3.5 h-3.5" />
-            </Button>
+  function renderAnnualSheetMatrix(tableMode: 'projection' | 'actual') {
+    const derived = tableMode === 'projection' ? annualDerivedByMode.projection : annualDerivedByMode.actual;
+    const tone = tableMode === 'projection' ? 'text-slate-950' : 'text-slate-950';
+    return (
+      <Card className="overflow-hidden rounded-[20px] border-0 bg-slate-50/80 shadow-none">
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+            <h3 className="text-[13px] font-semibold text-slate-950">
+              저장된 {tableMode === 'projection' ? 'Projection' : 'Actual'}
+            </h3>
+            <span className="text-[11px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · {annualWeeks.length.toLocaleString()}주</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="border-collapse text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r border-slate-200 bg-slate-50 px-3 py-2 text-left font-medium">
+                    항목
+                  </th>
+                  {annualWeeks.map((week) => (
+                    <th key={`${tableMode}-${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right font-medium">
+                      <div>{week.label}</div>
+                      {formatShortWeekRange(week) ? (
+                        <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div>
+                      ) : null}
+                    </th>
+                  ))}
+                  <th className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-medium">범위 합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="bg-emerald-50 text-emerald-900">
+                  <td colSpan={annualWeeks.length + 2} className="px-3 py-2 font-semibold">입금</td>
+                </tr>
+                {CASHFLOW_IN_LINES.map((lineId) => (
+                  <tr key={`${tableMode}-${lineId}`} className="border-t border-slate-100">
+                    <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900">
+                      {CASHFLOW_SHEET_LINE_LABELS[lineId]}
+                    </td>
+                    {annualWeeks.map((week) => {
+                      const amount = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: tableMode, weekNo: week.weekNo, lineId });
+                      return (
+                        <td
+                          key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
+                          className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
+                        >
+                          <RollingAmount value={amount} />
+                        </td>
+                      );
+                    })}
+                    <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
+                      <RollingAmount value={derived.rowTotals[lineId] || 0} />
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t border-slate-200 bg-emerald-50/70 font-semibold text-emerald-950">
+                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-emerald-50 px-3 py-2">입금 합계</td>
+                  {derived.weekTotals.map((week, index) => (
+                    <td key={`${tableMode}-year-total-in-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
+                      <RollingAmount value={week.totalIn} />
+                    </td>
+                  ))}
+                  <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
+                    <RollingAmount value={derived.monthTotals.totalIn} />
+                  </td>
+                </tr>
+                <tr className="bg-rose-50 text-rose-900">
+                  <td colSpan={annualWeeks.length + 2} className="px-3 py-2 font-semibold">출금</td>
+                </tr>
+                {CASHFLOW_OUT_LINES.map((lineId) => (
+                  <tr key={`${tableMode}-${lineId}`} className="border-t border-slate-100">
+                    <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900">
+                      {CASHFLOW_SHEET_LINE_LABELS[lineId]}
+                    </td>
+                    {annualWeeks.map((week) => {
+                      const amount = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: tableMode, weekNo: week.weekNo, lineId });
+                      return (
+                        <td
+                          key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
+                          className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
+                        >
+                          <RollingAmount value={amount} />
+                        </td>
+                      );
+                    })}
+                    <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
+                      <RollingAmount value={derived.rowTotals[lineId] || 0} />
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t border-slate-200 bg-rose-50/70 font-semibold text-rose-950">
+                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-rose-50 px-3 py-2">출금 합계</td>
+                  {derived.weekTotals.map((week, index) => (
+                    <td key={`${tableMode}-year-total-out-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
+                      <RollingAmount value={week.totalOut} />
+                    </td>
+                  ))}
+                  <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
+                    <RollingAmount value={derived.monthTotals.totalOut} />
+                  </td>
+                </tr>
+                <tr className="border-t border-slate-300 bg-slate-100 font-semibold text-slate-950">
+                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-slate-100 px-3 py-2">잔액</td>
+                  {derived.weekTotals.map((week, index) => (
+                    <td
+                      key={`${tableMode}-year-balance-${index}`}
+                      className={`min-w-[96px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${week.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}
+                    >
+                      <RollingAmount value={week.net} />
+                    </td>
+                  ))}
+                  <td className={`min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${derived.monthTotals.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    <RollingAmount value={derived.monthTotals.net} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function renderProjectionActualDiffTable() {
+    const rows = differenceViewMode === 'diff' ? projectionActualDiff.changedRows : projectionActualDiff.rows;
+    const yearRows = differenceViewMode === 'diff' ? projectionActualYearDiff.changedRows : projectionActualYearDiff.rows;
+    return (
+      <Card className="overflow-hidden border-slate-200">
+        <CardContent className="space-y-3 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-[12px] font-semibold text-slate-950">
+                <HoverExplain
+                  message={
+                    <span>
+                      Projection은 계획값, Actual은 실적값입니다. 모든 차이는 Actual에서 Projection을 뺀 값으로 표시합니다.
+                    </span>
+                  }
+                >
+                  Projection / Actual 차이
+                </HoverExplain>
+              </div>
+              <div className="text-[10px] text-slate-500">
+                기준 범위 {cashflowTotalPeriodLabel} ·{' '}
+                <HoverExplain
+                  message={
+                    <span>
+                      차이 = Actual - Projection. 입금은 실제가 계획보다 많으면 초록색, 적으면 빨간색입니다. 출금은 실제가 계획보다 적으면 초록색, 많으면 빨간색입니다.
+                    </span>
+                  }
+                >
+                  차이 = Actual - Projection
+                </HoverExplain>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={differenceViewMode === 'diff' ? 'default' : 'outline'}
+                className="h-8 rounded-full px-3 text-[11px]"
+                onClick={() => setDifferenceViewMode('diff')}
+              >
+                차이만
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={differenceViewMode === 'all' ? 'default' : 'outline'}
+                className="h-8 rounded-full px-3 text-[11px]"
+                onClick={() => setDifferenceViewMode('all')}
+              >
+                전체
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-4">
+            <DiffMetricCard
+              label="입금 차이"
+              value={fmtSigned(projectionActualYearDiff.incomeDiff)}
+              className={projectionActualYearDiff.incomeDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-emerald-700'}
+              message="기준 범위 전체의 입금 Actual - Projection 합계입니다. +는 Actual 입금이 Projection보다 큼, -는 Actual 입금이 Projection보다 작음을 의미합니다."
+            />
+            <DiffMetricCard
+              label="출금 차이"
+              value={fmtSigned(projectionActualYearDiff.expenseDiff)}
+              className={projectionActualYearDiff.expenseDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-rose-700'}
+              message="기준 범위 전체의 출금 Actual - Projection 합계입니다. +는 Actual 출금이 Projection보다 큼, -는 Actual 출금이 Projection보다 작음을 의미합니다."
+            />
+            <DiffMetricCard
+              label="순차이"
+              value={fmtSigned(projectionActualYearDiff.netDiff)}
+              className={projectionActualYearDiff.netDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-slate-950'}
+              message="입금 차이에서 출금 차이를 뺀 값입니다. +는 Actual 순잔액이 Projection보다 큼, -는 Actual 순잔액이 Projection보다 작음을 의미합니다."
+            />
+            <DiffMetricCard
+              label="차이 셀"
+              value={`${projectionActualYearDiff.changedCellCount.toLocaleString()}건`}
+              className="text-[13px] font-semibold text-slate-950"
+              message="Projection과 Actual이 서로 다른 주차별 항목 셀 개수입니다. 차이만 보기에서는 이 셀들이 있는 행만 남깁니다."
+            />
+          </div>
+
+          <div className="overflow-x-auto rounded-[18px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
+            <table className="border-separate border-spacing-0 text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
+              <thead className="bg-white text-slate-500">
+                <tr>
+                  <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">
+                    항목
+                  </th>
+                  {annualWeeks.map((week) => (
+                    <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
+                      <div>{week.label}</div>
+                      {formatShortWeekRange(week) ? (
+                        <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div>
+                      ) : null}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {yearRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={annualWeeks.length + 1} className="px-3 py-8 text-center text-[12px] text-slate-500">
+                      Projection과 Actual 차이가 없습니다.
+                    </td>
+                  </tr>
+                ) : yearRows.map((row) => (
+                  <tr key={row.lineId} className="border-t-[6px] border-white">
+                    <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${row.section === '입금' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'}`}>
+                      <div className="truncate text-slate-900">
+                        {row.label}
+                      </div>
+                    </td>
+                    {row.cells.map((cell) => {
+                      const diffClass = cell.diff === 0
+                        ? 'text-slate-300'
+                        : row.section === '입금'
+                          ? cell.diff > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                          : cell.diff > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700';
+                      return (
+                        <td
+                          key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
+                          className={`min-w-[96px] cursor-pointer border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${diffClass}`}
+                          title={`${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.diff)}\n${diffColorExplanation(row.section, cell.diff)}`}
+                        >
+                          {fmtSigned(cell.diff)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="border border-slate-200 bg-slate-50 px-3 py-8 text-center text-[12px] text-slate-500">
+              Projection과 Actual 차이가 없습니다.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-[11px]">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">항목</th>
+                    <th className="px-3 py-2 text-left font-medium">주차</th>
+                    <th className="px-3 py-2 text-right font-medium">Projection</th>
+                    <th className="px-3 py-2 text-right font-medium">Actual</th>
+                    <th className="px-3 py-2 text-right font-medium">차이</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const diffClass = row.diff === 0
+                      ? 'text-slate-400'
+                      : row.section === '입금'
+                        ? row.diff > 0 ? 'text-emerald-700' : 'text-rose-700'
+                        : row.diff > 0 ? 'text-rose-700' : 'text-emerald-700';
+                    return (
+                      <tr key={`${row.section}-${row.lineId}-${row.weekNo}`} className={row.diff === 0 ? 'border-t border-slate-100 text-slate-400' : 'border-t border-slate-100'}>
+                        <td className={`px-3 py-2 text-slate-900 ${row.section === '입금' ? 'border-l-2 border-l-emerald-400 bg-emerald-50/70' : 'border-l-2 border-l-rose-400 bg-rose-50/70'}`}>{row.label}</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <div className="font-medium text-slate-800">{row.weekLabel}</div>
+                          <div className="text-[10px] text-slate-500">{row.weekRange}</div>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{fmt(row.projection)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{fmt(row.actual)}</td>
+                        <td
+                          className={`cursor-pointer px-3 py-2 text-right font-semibold tabular-nums ${diffClass}`}
+                          title={`Projection ${fmt(row.projection)} / Actual ${fmt(row.actual)} / 차이 ${fmtSigned(row.diff)}\n${diffColorExplanation(row.section, row.diff)}`}
+                        >
+                          {fmtSigned(row.diff)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function opsToneClass(tone: CashflowOpsTone): string {
+    if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-800';
+    if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800';
+    if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    if (tone === 'info') return 'border-blue-200 bg-blue-50 text-blue-800';
+    return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+
+  function opsDotClass(tone: CashflowOpsTone): string {
+    if (tone === 'danger') return 'bg-rose-500';
+    if (tone === 'warning') return 'bg-amber-500';
+    if (tone === 'success') return 'bg-emerald-500';
+    if (tone === 'info') return 'bg-blue-500';
+    return 'bg-slate-400';
+  }
+
+  function opsSubtleBgClass(tone: CashflowOpsTone): string {
+    if (tone === 'danger') return 'bg-rose-50';
+    if (tone === 'warning') return 'bg-amber-50';
+    if (tone === 'success') return 'bg-emerald-50';
+    if (tone === 'info') return 'bg-blue-50';
+    return 'bg-slate-50';
+  }
+
+  function opsTextClass(tone: CashflowOpsTone): string {
+    if (tone === 'danger') return 'text-rose-700';
+    if (tone === 'warning') return 'text-amber-700';
+    if (tone === 'success') return 'text-emerald-700';
+    if (tone === 'info') return 'text-blue-700';
+    return 'text-slate-700';
+  }
+
+  function opsTimelineSourceClass(source: CashflowOpsTimelineItem['source']): string {
+    if (source === 'record') return 'border-blue-200 bg-blue-50 text-blue-700';
+    if (source === 'computed') return 'border-amber-200 bg-amber-50 text-amber-700';
+    return 'border-slate-200 bg-slate-50 text-slate-600';
+  }
+
+  function renderOpsStatusDonut() {
+    const blockedMatch = opsSummary.status.detail.match(/(\d+)/);
+    const blockedCount = blockedMatch ? Number(blockedMatch[1]) : 0;
+    const closedPercent = Math.min(100, Math.max(0, opsSummary.rates.closed.percent));
+    const actualPercent = Math.min(100, Math.max(0, opsSummary.rates.actual.percent));
+    const projectionPercent = Math.min(100, Math.max(0, opsSummary.rates.projection.percent));
+    const totalPercent = Math.max(1, projectionPercent + actualPercent + closedPercent);
+    const projectionEnd = (projectionPercent / totalPercent) * 360;
+    const actualEnd = projectionEnd + (actualPercent / totalPercent) * 360;
+    const closedEnd = actualEnd + (closedPercent / totalPercent) * 360;
+    const gradient = `conic-gradient(#3b82f6 0deg ${projectionEnd}deg, #fb7185 ${projectionEnd}deg ${actualEnd}deg, #f59e0b ${actualEnd}deg ${closedEnd}deg, #e5e7eb ${closedEnd}deg 360deg)`;
+
+    return (
+      <div className="flex items-center justify-center">
+        <div className="relative h-[78px] w-[78px] rounded-full" style={{ background: gradient }}>
+          <div className="absolute inset-[15px] flex flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
+            <div className={`text-[15px] font-bold leading-4 tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
+              {blockedCount > 0 ? <RollingAmount value={`${blockedCount}건`} /> : opsSummary.status.label}
+            </div>
+            <div className="mt-0.5 text-[9px] leading-3 text-slate-500">
+              {blockedCount > 0 ? '확인 필요' : '상태'}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderRateTile(label: string, rate: { done: number; total: number; percent: number; missingLabels: string[] }) {
+    const missingWord = label === '결산' ? '미결산' : '미작성';
+    const visibleMissing = rate.missingLabels.slice(0, 2).join(', ');
+    const hiddenMissingCount = Math.max(0, rate.missingLabels.length - 2);
+    const missingText = rate.missingLabels.length > 0
+      ? `${missingWord} ${visibleMissing}${hiddenMissingCount > 0 ? ` 외 ${hiddenMissingCount}건` : ''}`
+      : '이번 주차까지 완료';
+
+    return (
+      <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={rate.missingLabels.length > 0 ? `${missingWord}: ${rate.missingLabels.join(', ')}` : '이번 주차까지 완료'}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[11px] font-semibold leading-4 text-slate-600">{label}</div>
+          <div className="text-[10px] tabular-nums text-slate-500">
+            <RollingAmount value={`${rate.done}/${rate.total}`} />
+          </div>
+        </div>
+        <div className="mt-1 flex items-end justify-between gap-2">
+          <span className="text-[22px] font-bold leading-6 tabular-nums text-blue-700">
+            <RollingAmount value={`${rate.percent}%`} />
+          </span>
+          <span className={`truncate text-right text-[9px] font-semibold leading-3 ${rate.missingLabels.length > 0 ? 'text-rose-700' : 'text-blue-700'}`}>
+            {rate.missingLabels.length > 0 ? <RollingAmount value={`${rate.missingLabels.length}건`} /> : 'OK'}
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
+        </div>
+        <div className={`mt-1.5 truncate text-[9px] leading-3 ${rate.missingLabels.length > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
+          {missingText}
+        </div>
+      </div>
+    );
+  }
+
+  function renderLaborRiskCopy() {
+    if (laborRiskLoading) {
+      return (
+        <div className="flex items-center gap-2 text-[11px] text-slate-600">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          인건비/잔액 체크를 불러오는 중입니다.
+        </div>
+      );
+    }
+    if (laborRiskError) {
+      return <div className="text-[11px] font-semibold text-amber-700">인건비/잔액 체크 실패: {laborRiskError}</div>;
+    }
+    if (!laborRisk) return <div className="text-[11px] text-slate-500">인건비/잔액 체크 결과가 아직 없습니다.</div>;
+
+    const missingMonths = laborRisk.labor.missingProjectionMonths;
+    const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
+    const nextLaborAmount = laborRisk.labor.nextProjection?.amount
+      ?? laborRisk.labor.nextMonthProjection.projectionAmount
+      ?? laborRisk.labor.referenceActualAmount
+      ?? 0;
+    const laborChanged = laborRisk.labor.lastMonth.actualAmount !== nextLaborAmount;
+    const minBalanceText = laborRisk.shortage.week
+      ? `${laborRisk.shortage.week.label} 예상 잔액 ${fmt(laborRisk.shortage.projectedBalance || 0)}원`
+      : '현재 Projection 기준 잔액 부족 예상 주차는 없습니다';
+
+    return (
+      <div className="space-y-1.5 text-[11px] leading-5 text-slate-700">
+        {nextMonthProjectionMissing ? (
+          <p>
+            지난달 Actual 인건비는 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
+            오늘 기준 Actual 잔액은 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>입니다.{' '}
+            <span className="font-semibold text-rose-700">다음 달 Projection 인건비가 미작성이라 잔액 부족 여부를 확정할 수 없습니다.</span>
+          </p>
+        ) : (
+          <div className="space-y-1">
+            <p>
+              오늘 기준 Actual 잔액은 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>입니다.
+              다음 인건비 <span className="font-semibold tabular-nums text-blue-700">{fmt(nextLaborAmount)}원</span> 반영 후 예상 잔액은{' '}
+              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.balanceAfterNextLabor)}원</span>이며, {minBalanceText}.
+            </p>
+            {laborChanged && (
+              <p className="font-semibold text-amber-700">
+                지난달 인건비는 {fmt(laborRisk.labor.lastMonth.actualAmount)}원인데 이번달 인건비는 {fmt(nextLaborAmount)}원이라서 확인 필요합니다.
+              </p>
+            )}
           </div>
         )}
-      />
-
-      <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-[11px] text-slate-600">
-        비교 모드에서는 Firestore에 저장된 Projection과 Actual을 동시에 대조합니다. 직접 입력한 값은 각 영역의 저장/작성완료 버튼을 눌렀을 때 서버 기준값으로 반영됩니다.
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-200 pt-1.5 text-[10px] text-slate-500">
+          <span>지난달: {laborRisk.labor.lastMonth.label}</span>
+          <span>현재 주차: {laborRisk.current.week?.label || '없음'}</span>
+          <span>다음 인건비 주차: {laborRisk.labor.nextProjection?.label || '없음'}</span>
+          <span>
+            다음 달 Projection: {laborRisk.labor.nextMonthProjection.label} ·{' '}
+            <span className={laborRisk.labor.nextMonthProjection.isWritten ? 'text-slate-600' : 'font-semibold text-rose-700'}>
+              {laborRisk.labor.nextMonthProjection.isWritten ? '작성됨' : '미작성'}
+            </span>
+          </span>
+        </div>
+        {missingMonths.length > 0 && (
+          <div className="text-[11px] text-amber-700">
+            MYSC 인건비 Projection 미산입 월: {missingMonths.slice(0, 6).map((month) => month.label).join(', ')}
+            {missingMonths.length > 6 ? ` 외 ${missingMonths.length - 6}개월` : ''}
+          </div>
+        )}
       </div>
+    );
+  }
 
-      <Tabs value={viewMode} onValueChange={(v) => (v === 'projection' || v === 'actual' || v === 'compare') && setViewMode(v)}>
-        <TabsList className="w-full sm:w-fit bg-transparent p-0 border-b border-border/60 rounded-md">
-          <TabsTrigger
-            value="projection"
-            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
-          >
-            <ClipboardList className="w-4 h-4" />
-            Projection
-          </TabsTrigger>
-          <TabsTrigger
-            value="actual"
-            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
-          >
-            <ClipboardCheck className="w-4 h-4" />
-            Actual
-          </TabsTrigger>
-          <TabsTrigger
-            value="compare"
-            className="gap-2 rounded-md border border-transparent px-3 py-2 -mb-px text-muted-foreground hover:bg-muted/40 data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-foreground/30 data-[state=active]:font-semibold"
-          >
-            <Columns2 className="w-4 h-4" />
-            비교
-          </TabsTrigger>
-        </TabsList>
+  function renderOperationsPanel() {
+    const compactStatusDetail = opsSummary.status.detail
+      .replace(' 항목이 있습니다.', ' 항목')
+      .replace('차단 항목', '차단 항목')
+      .replace('확인 항목', '확인 항목');
+    const visibleInbox = opsSummary.inbox.slice(0, 4);
+    const hiddenInboxCount = Math.max(0, opsSummary.inbox.length - visibleInbox.length);
 
-        <TabsContent value="projection">
-          {renderSheetTable('projection')}
-        </TabsContent>
-
-        <TabsContent value="actual">
-          {renderSheetTable('actual')}
-        </TabsContent>
-
-        <TabsContent value="compare">
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[12px] font-semibold">Projection</div>
-                  <div className="text-[10px] text-muted-foreground">계획값을 편집하고 저장합니다.</div>
-                </div>
-              </div>
-              {renderSheetTable('projection')}
+    return (
+      <Card className="overflow-hidden rounded-[24px] border-0 bg-slate-50/80 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <ClipboardList className="h-4 w-4 shrink-0 text-blue-600" />
+              <div className="truncate text-[15px] font-bold tracking-[-0.01em] text-slate-950">운영 대시보드</div>
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[12px] font-semibold">Actual</div>
-                  <div className="text-[10px] text-muted-foreground">실적값을 확인하고 필요 시 보정합니다.</div>
-                </div>
-              </div>
-              {renderSheetTable('actual')}
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="hidden text-[10px] text-slate-400 sm:inline">기준일 {todayIso}</span>
+              <Badge className={`rounded-full border-0 px-2.5 py-1 text-[10px] shadow-sm ${opsToneClass(opsSummary.status.tone)}`}>
+                {opsSummary.status.label}
+              </Badge>
             </div>
           </div>
-        </TabsContent>
-      </Tabs>
+
+          <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
+            <div className="grid gap-2 md:grid-cols-[210px_repeat(3,minmax(158px,1fr))]">
+              <div className="flex min-w-[190px] items-center gap-3 rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={opsSummary.status.detail}>
+                {renderOpsStatusDonut()}
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold leading-3 text-slate-500">이번 주 기준</div>
+                  <div className={`mt-1 truncate text-[13px] font-bold leading-4 ${opsTextClass(opsSummary.status.tone)}`}>
+                    {opsSummary.status.label}
+                  </div>
+                  <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">{compactStatusDetail}</div>
+                </div>
+              </div>
+              {renderRateTile('Projection', opsSummary.rates.projection)}
+              {renderRateTile('Actual', opsSummary.rates.actual)}
+              {renderRateTile('결산', opsSummary.rates.closed)}
+            </div>
+
+            <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
+                <div className={`text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
+                  <RollingAmount value={`${opsSummary.inbox.length}건`} />
+                </div>
+              </div>
+              <div className="divide-y divide-slate-50">
+                {visibleInbox.map((item) => (
+                  <div key={item.id} className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
+                    <div className="flex h-4 items-center justify-center">
+                      <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass(item.tone)}`}>{item.title}</div>
+                      <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">{item.detail}</div>
+                    </div>
+                  </div>
+                ))}
+                {hiddenInboxCount > 0 && (
+                  <div className="px-2 py-1 text-[9px] font-semibold text-slate-500">
+                    외 <RollingAmount value={`${hiddenInboxCount}건`} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <div className="text-[11px] font-bold text-slate-900">
+              <HoverExplain message="BFF가 Firebase cashflow_weeks를 읽어 계산합니다. 프론트는 결과를 표시만 합니다.">
+                인건비/잔액 체크
+              </HoverExplain>
+              </div>
+              <span className={`text-[10px] font-semibold ${opsTextClass(opsSummary.status.tone)}`}>{opsSummary.status.label}</span>
+            </div>
+            {renderLaborRiskCopy()}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function renderOpsTimeline() {
+    const countBadges = [
+      { key: 'record' as const, label: '기록', value: opsSummary.timelineCounts.record },
+      { key: 'computed' as const, label: '계산', value: opsSummary.timelineCounts.computed },
+      { key: 'system' as const, label: '시스템', value: opsSummary.timelineCounts.system },
+    ].filter((item) => item.value > 0);
+
+    return (
+      <Card className="h-full overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-2 pb-3">
+            <div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">운영 로그</div>
+              <div className="text-[10px] text-slate-500">저장 필드와 계산 신호를 구분해 표시합니다.</div>
+            </div>
+            <div className="flex shrink-0 flex-wrap justify-end gap-1">
+              {countBadges.map((badge) => (
+                <span
+                  key={badge.key}
+                  className={`rounded-full border-0 px-2 py-1 text-[9px] font-semibold leading-3 ${opsTimelineSourceClass(badge.key)}`}
+                >
+                  {badge.label} {badge.value}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="max-h-[230px] space-y-0 overflow-auto rounded-[18px] bg-slate-50/70 px-2 py-2 pr-1">
+            {opsSummary.timeline.map((item, index) => (
+              <div key={item.id} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-3">
+                {index < opsSummary.timeline.length - 1 && (
+                  <div className="absolute left-[6px] top-3 h-full w-px bg-slate-200/80" />
+                )}
+                <div className={`relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white ${opsDotClass(item.tone)}`} />
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[9px] font-semibold leading-3 ${opsTimelineSourceClass(item.source)}`}>
+                          {item.sourceLabel}
+                        </span>
+                        <span className="truncate text-[11px] font-bold text-slate-900">{item.title}</span>
+                      </div>
+                      {item.fieldLabel && (
+                        <div className="mt-0.5 truncate font-mono text-[9px] leading-3 text-slate-400">{item.fieldLabel}</div>
+                      )}
+                    </div>
+                    {item.timeLabel && <div className="shrink-0 text-[9px] tabular-nums text-slate-400">{item.timeLabel}</div>}
+                  </div>
+                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function renderLaborRiskPanel() {
+    if (laborRiskLoading) {
+      return (
+        <Card className="border-slate-200">
+          <CardContent className="flex items-center gap-2 p-3 text-[12px] text-slate-600">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            인건비/잔액 체크를 불러오는 중입니다.
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (laborRiskError) {
+      return (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="space-y-1 p-3">
+            <div className="text-[12px] font-semibold text-amber-900">인건비/잔액 체크 실패</div>
+            <div className="text-[11px] text-amber-800">{laborRiskError}</div>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (!laborRisk) return null;
+
+    const missingMonths = laborRisk.labor.missingProjectionMonths;
+    const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
+    const nextLaborAmount = laborRisk.labor.nextProjection?.amount
+      ?? laborRisk.labor.nextMonthProjection.projectionAmount
+      ?? laborRisk.labor.referenceActualAmount
+      ?? 0;
+    const laborChanged = laborRisk.labor.lastMonth.actualAmount !== nextLaborAmount;
+    const needsReview = laborChanged || nextMonthProjectionMissing || missingMonths.length > 0 || laborRisk.shortage.status !== 'ok';
+    const statusLabel = laborRisk.shortage.status === 'danger'
+      ? '부족 예상'
+      : needsReview
+        ? '확인 필요'
+        : '확인 필요 없음';
+
+    return (
+      <Card className="overflow-hidden border-slate-200">
+        <CardContent className="space-y-2 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-[12px] font-semibold text-slate-950">
+                <HoverExplain
+                  message="BFF가 Firebase cashflow_weeks를 읽어 계산합니다. 프론트는 결과를 표시만 합니다."
+                >
+                  인건비/잔액 체크
+                </HoverExplain>
+              </div>
+              <div className="text-[10px] text-slate-500">
+                기준일 {laborRisk.asOfDate} · 범위 {laborRisk.range.startYearMonth} ~ {laborRisk.range.endYearMonth}
+              </div>
+            </div>
+            <div className={needsReview ? 'text-[11px] font-semibold text-rose-700' : 'text-[11px] font-semibold text-blue-700'}>
+              {statusLabel}
+            </div>
+          </div>
+
+          <div className="text-[12px] leading-6 text-slate-700">
+            {nextMonthProjectionMissing ? (
+              <>
+                지난달 Actual 인건비는{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
+                오늘 기준 Actual 잔액은{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>
+                입니다.{' '}
+                <span className="font-semibold text-rose-700">다음 달 Projection 인건비가 미작성이라 잔액 부족 여부를 확정할 수 없습니다.</span>{' '}
+                지난달 인건비 기준으로 Projection 작성 여부를 먼저 확인해 주세요.
+              </>
+            ) : (
+              <>
+                지난달 Actual 인건비는{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
+                오늘 기준 Actual 잔액은{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>
+                입니다. 다음 인건비{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(nextLaborAmount)}원</span>
+                이 나가도 예상 잔액은{' '}
+                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.balanceAfterNextLabor)}원</span>
+                이므로{' '}
+                <span className={laborRisk.labor.balanceAfterNextLabor < 0 ? 'font-semibold text-rose-700' : 'font-semibold text-blue-700'}>
+                  {laborRisk.labor.balanceAfterNextLabor < 0 ? '인건비 부족 가능성이 있습니다.' : '인건비 부족은 없습니다.'}
+                </span>
+                {laborChanged && (
+                  <span className="ml-1 font-semibold text-amber-700">
+                    지난달 인건비는 {fmt(laborRisk.labor.lastMonth.actualAmount)}원인데 이번달 인건비는 {fmt(nextLaborAmount)}원이라서 확인 필요합니다.
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+            <div>지난달: {laborRisk.labor.lastMonth.label}</div>
+            <div>현재 주차: {laborRisk.current.week?.label || '없음'}</div>
+            <div>다음 인건비 주차: {laborRisk.labor.nextProjection?.label || '없음'}</div>
+            <div>
+              다음 달 Projection: {laborRisk.labor.nextMonthProjection.label} ·{' '}
+              <span className={laborRisk.labor.nextMonthProjection.isWritten ? 'text-slate-600' : 'font-semibold text-rose-700'}>
+                {laborRisk.labor.nextMonthProjection.isWritten ? '작성됨' : '미작성'}
+              </span>
+            </div>
+          </div>
+
+          {missingMonths.length > 0 && (
+            <div className="text-[11px] leading-relaxed text-slate-700">
+              <span className="font-semibold text-amber-700">확인 필요:</span>{' '}
+              MYSC 인건비 Projection 미산입 월은{' '}
+              <span className="font-semibold text-blue-700">
+                {missingMonths.slice(0, 6).map((month) => month.label).join(', ')}
+                {missingMonths.length > 6 ? ` 외 ${missingMonths.length - 6}개월` : ''}
+              </span>
+              입니다. 지난 실제 인건비{' '}
+              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.referenceActualAmount)}원</span>
+              을 기준으로 확인했습니다.
+            </div>
+          )}
+
+          {laborRisk.shortage.week && (
+            <div className="text-[11px] leading-relaxed text-slate-700">
+              <span className="font-semibold text-rose-700">부족 예상:</span>{' '}
+              <span className="font-semibold text-blue-700">
+                {laborRisk.shortage.week.label} ({laborRisk.shortage.week.weekRange})
+              </span>
+              기준 예상 잔액은{' '}
+              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.shortage.projectedBalance || 0)}원</span>
+              입니다. 선입금 또는 지출 조정 필요 여부를 확인해 주세요.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {renderOperationsPanel()}
+        {renderOpsTimeline()}
+      </section>
+
+      {renderUnifiedMonthlyBoard()}
+
+      <section className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
+            <Columns2 className="h-4 w-4 text-slate-600" />
+          </span>
+          <div>
+            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection / Actual 차이</div>
+            <div className="text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
+          </div>
+        </div>
+        {renderProjectionActualDiffTable()}
+      </section>
+
+      <AlertDialog
+        open={!!auditDialog}
+        onOpenChange={(open) => {
+          if (!open) setAuditDialog(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{auditDialog?.title || '확인이 필요합니다'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {auditDialog?.weekLabel} 주차는 아래 항목을 직접 확인한 뒤 다시 저장해 주세요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {auditDialog && (
+            <div className="max-h-[320px] overflow-auto rounded-md border border-border/60">
+              <table className="w-full text-[12px]">
+                <thead className="bg-muted/50 text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">항목</th>
+                    <th className="px-3 py-2 text-left font-medium">확인 내용</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditDialog.issues.slice(0, 20).map((issue) => (
+                    <tr key={issue.key} className="border-t border-border/40">
+                      <td className="px-3 py-2 font-medium">{issue.label}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{issue.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {auditDialog.issues.length > 20 && (
+                <div className="border-t border-border/40 px-3 py-2 text-[12px] text-muted-foreground">
+                  외 {auditDialog.issues.length - 20}건
+                </div>
+              )}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setAuditDialog(null)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!submitConfirm}
@@ -1195,7 +3249,7 @@ export function CashflowProjectSheet({
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">주차</span>
                 <span style={{ fontWeight: 700 }}>
-                  {monthWeeks.find((x) => x.weekNo === closeDialog.weekNo)?.label || `w${closeDialog.weekNo}`}
+                  {annualWeeks.find((x) => x.yearMonth === closeDialog.yearMonth && x.weekNo === closeDialog.weekNo)?.label || formatSheetWeekLabel(closeDialog.yearMonth, closeDialog.weekNo)}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -1243,7 +3297,7 @@ export function CashflowProjectSheet({
                 onClick={(e) => {
                   e.preventDefault();
                   if (!closeDialog) return;
-                  void handleCloseWeek(closeDialog.weekNo);
+                  void handleCloseWeek(closeDialog.weekNo, closeDialog.yearMonth);
                 }}
               >
                 {closeBusy ? '처리 중…' : '결산완료'}

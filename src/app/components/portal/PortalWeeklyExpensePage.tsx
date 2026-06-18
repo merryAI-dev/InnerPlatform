@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
   ArrowRight,
-  ExternalLink,
   FolderPlus,
   Loader2,
   Send,
@@ -13,13 +12,10 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import type { EvidenceUploadSelection } from '../cashflow/SettlementLedgerPage';
 import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
 import {
-  formatSettlementSheetPolicySummary,
   normalizeSettlementSheetPolicy,
   normalizeProjectFundInputMode,
-  PROJECT_FUND_INPUT_MODE_LABELS,
   type CashflowWeekSheet,
   type Transaction,
   type TransactionState,
@@ -137,10 +133,13 @@ export function PortalWeeklyExpensePage() {
   const visibleExpenseSheets = useMemo(() => (
     expenseSheets.length > 0
       ? expenseSheets
-      : [{ id: 'default', name: '기본 탭', rows: expenseSheetRows, order: 0 }]
+      : [{ id: 'default', name: '', rows: expenseSheetRows, order: 0 }]
   ), [expenseSheets, expenseSheetRows]);
+  const shouldShowExpenseSheetTabs = visibleExpenseSheets.length > 1;
   const activeSheetName = useMemo(() => {
-    return visibleExpenseSheets.find((sheet) => sheet.id === activeExpenseSheetId)?.name || visibleExpenseSheets[0]?.name || '기본 탭';
+    const sheet = visibleExpenseSheets.find((item) => item.id === activeExpenseSheetId) || visibleExpenseSheets[0];
+    const name = sheet?.name?.trim();
+    return sheet?.id !== 'default' && name ? name : '사업비 입력';
   }, [visibleExpenseSheets, activeExpenseSheetId]);
   const bankStatementCount = bankStatementRows?.rows?.length || 0;
 
@@ -154,10 +153,8 @@ export function PortalWeeklyExpensePage() {
     project: myProject,
     ledgers,
   }), [authUser, portalUser, myProject, ledgers]);
-  const isENaraProject = myProject?.settlementType === 'TYPE5' || myProject?.accountType === 'DEDICATED';
   const fundInputMode = normalizeProjectFundInputMode(myProject?.fundInputMode);
   const isDirectEntryMode = fundInputMode === 'DIRECT_ENTRY';
-  const expenseRowCount = expenseSheetRows?.length || 0;
   const weeklySetupPanel = useMemo(() => {
     if (!happyPath.canOpenWeeklyExpenses) {
       return {
@@ -849,167 +846,60 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border bg-background/95 px-5 py-4 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold">사업비 입력(주간)</h2>
-              <Badge variant="outline" className="text-[10px]">
-                {PROJECT_FUND_INPUT_MODE_LABELS[fundInputMode]}
-              </Badge>
-              {isENaraProject && (
-                <Badge variant="outline" className="text-[10px]">
-                  TYPE5 / 전용계좌
-                </Badge>
-              )}
-            </div>
-            <p className="max-w-4xl text-[12px] text-muted-foreground">
-              {isDirectEntryMode
-                ? '주간 사업비 시트 또는 엑셀 템플릿으로 직접 입력하고, 저장 후 actual 반영 상태까지 같은 작업면에서 확인합니다.'
-                : bankStatementCount > 0
-                  ? '통장내역 기준본에서 이어서 작업합니다. 이 화면에서 분류 확인, 행 입력, 저장까지 바로 마무리하세요.'
-                  : '통장내역 기준본을 먼저 만들면 이 화면에서 바로 입력과 저장을 이어갈 수 있습니다.'}
-            </p>
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-slate-50/80 px-3 py-2.5">
-              <Badge variant="secondary" className="text-[10px]">
-                현재 탭: {activeSheetName}
-              </Badge>
-              <Badge variant="outline" className="text-[10px]">
-                거래 {expenseRowCount}건
-              </Badge>
-              {!isDirectEntryMode && (
-                <Badge variant="outline" className="text-[10px]">
-                  {bankStatementCount > 0 ? `통장내역 ${bankStatementCount}건 연결` : '통장내역 기준본 미준비'}
-                </Badge>
-              )}
-              <span className="text-[11px] text-muted-foreground">
-                {isDirectEntryMode
-                  ? '원본 입력은 이 화면입니다.'
-                  : bankStatementCount > 0
-                    ? '원본 기준과 같은 흐름으로 저장과 actual 반영을 이어갑니다.'
-                    : '원본 기준본을 준비하면 이 화면에서 바로 이어서 저장할 수 있습니다.'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap xl:justify-end">
-          {isDirectEntryMode ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="weekly-expense-bank-statement-action"
-                onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}
-              >
-                기존 통장내역 가져오기
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </>
-          ) : (
-            <Button
-              size="sm"
-              data-testid="weekly-expense-bank-statement-action"
-              onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}
-            >
-              {bankStatementCount > 0 ? '통장내역 검토' : '통장내역 열기'}
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          )}
-          {myProject?.evidenceDriveRootFolderLink && (
-            <Button asChild variant="outline" size="sm">
-              <a href={myProject.evidenceDriveRootFolderLink} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                기본 폴더 열기
-              </a>
-            </Button>
-          )}
-          {!happyPath.canUseEvidenceWorkflow && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void provisionProjectDriveRoot()}
-              disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-            >
-              {projectDriveProvisioning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FolderPlus className="h-4 w-4" />
-              )}
-              기본 폴더 준비
-            </Button>
-          )}
-            <Button
-              variant="outline"
-              size="sm"
-            onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}
-          >
-            사업 선택
-          </Button>
-          </div>
-        </div>
-          <div className={`mt-4 grid gap-3 ${weeklySetupPanel ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]' : ''}`}>
-          {weeklySetupPanel ? (
-            <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
-              <CardContent className="px-4 py-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0 space-y-1.5">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
-                    <p className="text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
-                    <p className="max-w-4xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
-                  </div>
-                  {weeklySetupPanel.actionLabel && (
-                    <div className="shrink-0">
-                      {weeklySetupPanel.actionKind === 'drive' ? (
-                        <Button
-                          size="sm"
-                          onClick={() => void provisionProjectDriveRoot()}
-                          disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
-                        >
-                          {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
-                          {weeklySetupPanel.actionLabel}
-                        </Button>
-                      ) : weeklySetupPanel.actionKind === 'settings' ? (
-                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}>
-                          {weeklySetupPanel.actionLabel}
-                        </Button>
-                      ) : (
-                        <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
-                          {weeklySetupPanel.actionLabel}
-                          <ArrowRight className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
+      {weeklySetupPanel ? (
+        <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
+          <CardContent className="px-4 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">지금 해야 할 일</p>
+                <p className="text-[15px] font-semibold text-slate-900">{weeklySetupPanel.title}</p>
+                <p className="max-w-4xl text-[12px] leading-6 text-slate-600">{weeklySetupPanel.description}</p>
+              </div>
+              {weeklySetupPanel.actionLabel && (
+                <div className="shrink-0">
+                  {weeklySetupPanel.actionKind === 'drive' ? (
+                    <Button
+                      size="sm"
+                      onClick={() => void provisionProjectDriveRoot()}
+                      disabled={projectDriveProvisioning || !happyPath.canOpenWeeklyExpenses}
+                    >
+                      {projectDriveProvisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+                      {weeklySetupPanel.actionLabel}
+                    </Button>
+                  ) : weeklySetupPanel.actionKind === 'settings' ? (
+                    <Button size="sm" onClick={() => requestRouteNavigation('/portal/project-select', '사업 선택')}>
+                      {weeklySetupPanel.actionLabel}
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => requestRouteNavigation('/portal/bank-statements', '통장내역')}>
+                      {weeklySetupPanel.actionLabel}
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
                   )}
                 </div>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <div className="rounded-xl border bg-slate-50/80 px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">입력 정책</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{formatSettlementSheetPolicySummary(settlementSheetPolicy)}</div>
-            <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {expenseRowCount}건의 거래를 현재 탭에서 관리하고 있고, 저장 후 actual 반영 상태를 같은 화면에서 확인합니다.
+              )}
             </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {shouldShowExpenseSheetTabs && (
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {visibleExpenseSheets.map((sheet) => (
+              <Button
+                key={sheet.id}
+                variant={sheet.id === activeExpenseSheetId ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-[11px]"
+                onClick={() => requestSheetSwitch(sheet.id)}
+              >
+                {sheet.id === 'default' ? '사업비 입력' : sheet.name || '사업비 입력'}
+              </Button>
+            ))}
           </div>
         </div>
-
-      </div>
-
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          {visibleExpenseSheets.map((sheet) => (
-            <Button
-              key={sheet.id}
-              variant={sheet.id === activeExpenseSheetId ? 'default' : 'outline'}
-              size="sm"
-              className="h-8 text-[11px]"
-              onClick={() => requestSheetSwitch(sheet.id)}
-            >
-              {sheet.name}
-            </Button>
-          ))}
-        </div>
-      </div>
+      )}
 
       <VarianceFlagBanner
         projectId={projectId}
@@ -1040,7 +930,7 @@ export function PortalWeeklyExpensePage() {
           hideCountBadge
           saveMode={weeklyExpenseSavePolicy.mode}
           autoSaveIdleMs={weeklyExpenseSavePolicy.idleMs}
-          autoSaveSyncCashflow={weeklyExpenseSavePolicy.syncCashflowOnAutoSave}
+          autoSaveSyncCashflow={false}
           showSaveStatusButton={weeklyExpenseSavePolicy.showStatusButton}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
@@ -1070,6 +960,7 @@ export function PortalWeeklyExpensePage() {
           onSavingStateChange={setIsSettlementSaving}
           weeklySubmissionStatuses={weeklySubmissionStatuses}
           discardChangesRequestToken={0}
+          ledgerViewOnly
         />
       </Suspense>
       {isSettlementSaving && (

@@ -306,6 +306,7 @@ export function PortalChangeRequests() {
         title="인력변경 신청"
         description="인력 투입/해제/변경을 신청하고 관리자 승인을 받습니다"
         badge={`${kpi.total}건`}
+        headingVisible={false}
         actions={
           <Button size="sm" className="h-8 text-[12px] gap-1.5" onClick={() => setShowCreate(true)}>
             <Plus className="w-3.5 h-3.5" /> 새 변경 신청

@@ -199,6 +199,7 @@ export const PROJECT_REQUEST_ROUTE_ROLES = [...CORE_WRITE_ROUTE_ROLES, 'viewer']
 export const ROUTE_ROLES = {
   readCore: ALL_INTERNAL_ROUTE_ROLES,
   writeCore: CORE_WRITE_ROUTE_ROLES,
+  writeCashflowWeek: ALL_INTERNAL_ROUTE_ROLES,
   writeTransaction: ALL_INTERNAL_ROUTE_ROLES,
   writeProjectDrive: ALL_INTERNAL_ROUTE_ROLES,
   writeEvidenceDrive: ALL_INTERNAL_ROUTE_ROLES,

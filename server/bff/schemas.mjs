@@ -95,6 +95,46 @@ export const googleSheetImportPreviewSchema = z.object({
   sheetName: NON_EMPTY_STRING.optional(),
 }).strict();
 
+export const cashflowSheetLabPreviewSchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+  includeValues: z.boolean().optional(),
+}).strict();
+
+export const cashflowSheetLabApplySchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+  idempotencyKey: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const cashflowSheetLabWritebackPreviewSchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const cashflowSheetLabWritebackApplySchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+  baselineHash: NON_EMPTY_STRING.optional(),
+  conflictResolution: z.enum(['abort', 'overwrite']).optional(),
+  idempotencyKey: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const cashflowSheetLabConfigSchema = z.object({
+  value: NON_EMPTY_STRING,
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+}).strict();
+
 export const googleSheetImportAnalyzeSchema = z.object({
   spreadsheetTitle: z.string().trim().optional(),
   selectedSheetName: NON_EMPTY_STRING,

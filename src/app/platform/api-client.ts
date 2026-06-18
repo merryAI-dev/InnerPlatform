@@ -4,6 +4,7 @@ import {
   type RequestActor,
 } from './request-context';
 import { captureException } from './observability';
+import { recordDevtoolsLog, toDevtoolsError } from './devtools-transaction-log';
 
 const DEFAULT_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -229,6 +230,7 @@ export class PlatformApiClient {
   async request<T>(path: string, options: PlatformRequestOptions): Promise<ApiResponse<T>> {
     const method = (options.method || 'GET').toUpperCase();
     const requestUrl = buildRequestUrl(this.baseUrl, path);
+    const startedAt = Date.now();
 
     const headerInput: BuildStandardHeadersInput = {
       tenantId: options.tenantId,
@@ -256,6 +258,30 @@ export class PlatformApiClient {
     const maxRetries = normalizeRetryCount(options.retries ?? this.maxRetries);
     const timeoutMs = normalizeDelay(options.timeoutMs ?? this.timeoutMs, 0);
     const retryOnStatuses = new Set(options.retryOnStatuses || Array.from(this.retryOnStatuses));
+    const clientRequestId = headers.get('x-request-id') || '';
+
+    recordDevtoolsLog({
+      kind: 'bff_request',
+      phase: 'start',
+      operation: path,
+      method,
+      path,
+      requestId: clientRequestId,
+      tenantId: options.tenantId,
+      actorId: options.actor.id,
+      maxRetries,
+      summary: {
+        hasBody: options.body !== undefined && options.body !== null,
+        bodyKind: options.body === undefined || options.body === null
+          ? 'none'
+          : options.body instanceof FormData
+            ? 'form-data'
+            : isBinaryBody(options.body)
+              ? 'binary'
+              : 'json',
+        timeoutMs,
+      },
+    });
 
     for (let attempt = 0; ; attempt += 1) {
       try {
@@ -282,6 +308,22 @@ export class PlatformApiClient {
           );
         }
 
+        recordDevtoolsLog({
+          kind: 'bff_request',
+          phase: 'success',
+          operation: path,
+          method,
+          path,
+          requestId: clientRequestId,
+          responseRequestId: requestId,
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          attempt,
+          maxRetries,
+          tenantId: options.tenantId,
+          actorId: options.actor.id,
+        });
+
         return {
           status: response.status,
           requestId,
@@ -300,6 +342,22 @@ export class PlatformApiClient {
         });
 
         if (!shouldRetry) {
+          recordDevtoolsLog({
+            kind: 'bff_request',
+            phase: 'error',
+            operation: path,
+            method,
+            path,
+            requestId: clientRequestId,
+            responseRequestId: error instanceof PlatformApiError ? error.requestId : undefined,
+            status: error instanceof PlatformApiError ? error.status : undefined,
+            durationMs: Date.now() - startedAt,
+            attempt,
+            maxRetries,
+            tenantId: options.tenantId,
+            actorId: options.actor.id,
+            error: toDevtoolsError(error),
+          });
           captureException(error, {
             level: 'error',
             tags: {
@@ -319,6 +377,23 @@ export class PlatformApiClient {
           });
           throw error;
         }
+
+        recordDevtoolsLog({
+          kind: 'bff_request',
+          phase: 'retry',
+          operation: path,
+          method,
+          path,
+          requestId: clientRequestId,
+          responseRequestId: error instanceof PlatformApiError ? error.requestId : undefined,
+          status: error instanceof PlatformApiError ? error.status : undefined,
+          durationMs: Date.now() - startedAt,
+          attempt,
+          maxRetries,
+          tenantId: options.tenantId,
+          actorId: options.actor.id,
+          error: toDevtoolsError(error),
+        });
 
         const delayMs = this.getRetryDelayMs(attempt);
         if (delayMs > 0) {

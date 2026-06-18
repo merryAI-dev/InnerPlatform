@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
+import { collection, doc, limit, onSnapshot, query, where } from 'firebase/firestore';
 import {
   Calculator,
   LogOut,
@@ -20,9 +21,12 @@ import {
   UserCircle2,
   User,
   UserRoundCheck,
+  type LucideIcon,
 } from 'lucide-react';
 import { PortalProvider, usePortalStore } from '../../data/portal-store';
 import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useHrAnnouncements } from '../../data/hr-announcements-store';
 import { usePayroll } from '../../data/payroll-store';
 import { Button } from '../ui/button';
@@ -77,7 +81,21 @@ import { resolvePortalProjectCandidates } from '../../platform/portal-project-se
 // 하나의 프로젝트만 볼 수 있는 간소화된 UI
 // ═══════════════════════════════════════════════════════════════
 
-const NAV_SECTIONS = [
+type PortalNavItem = {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  accent?: boolean;
+  exact?: boolean;
+  hidden?: boolean;
+};
+
+type PortalNavSection = {
+  title: string;
+  items: PortalNavItem[];
+};
+
+const NAV_SECTIONS: PortalNavSection[] = [
   {
     title: '마이메뉴',
     items: [
@@ -91,6 +109,7 @@ const NAV_SECTIONS = [
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
       { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
+      { to: '/portal/cashflow/sheets-lab', icon: FileSpreadsheet, label: '시트 연동 검토' },
     ],
   },
   {
@@ -117,6 +136,32 @@ const PortalNavigationGuardContext = createContext<PortalNavigationGuardValue>({
 });
 
 const PORTAL_SIDEBAR_STORAGE_KEY = 'mysc-portal-sidebar-collapsed';
+
+type CashflowPresence = {
+  projectId: string;
+  uid: string;
+  name: string;
+  email?: string;
+  expiresAt: number;
+};
+
+type CashflowEditLock = {
+  projectId: string;
+  editorUid?: string | null;
+  editorName?: string | null;
+  editorEmail?: string | null;
+  status?: 'editing' | 'idle';
+  expiresAt?: number;
+};
+
+function safeDocId(value: string): string {
+  return String(value || '').replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+function getInitials(name: string): string {
+  const compact = String(name || '').trim().replace(/\s+/g, '');
+  return compact ? compact.slice(0, 2).toUpperCase() : '?';
+}
 
 function readPortalSidebarCollapsed(uid?: string | null): boolean {
   const normalizedUid = String(uid || '').trim();
@@ -164,6 +209,7 @@ function PortalContent() {
     logout: authLogout,
     setWorkspacePreference,
   } = useAuth();
+  const { db, orgId } = useFirebase();
   const { getUnacknowledgedCount } = useHrAnnouncements();
   const { runs, monthlyCloses } = usePayroll();
   const location = useLocation();
@@ -172,6 +218,8 @@ function PortalContent() {
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [labEnabled, setLabEnabled] = useShellLabEnabled();
+  const [cashflowPresenceUsers, setCashflowPresenceUsers] = useState<CashflowPresence[]>([]);
+  const [cashflowEditLock, setCashflowEditLock] = useState<CashflowEditLock | null>(null);
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const blockedPortalAccess = Boolean(
@@ -241,6 +289,39 @@ function PortalContent() {
     rememberRecentPortalProject(currentProject.id);
   }, [currentProject?.id]);
 
+  const isCashflowWorkspace = location.pathname.startsWith('/portal/cashflow');
+
+  useEffect(() => {
+    if (!db || !isCashflowWorkspace || !currentProject?.id) {
+      setCashflowPresenceUsers([]);
+      setCashflowEditLock(null);
+      return undefined;
+    }
+    const projectId = currentProject.id;
+    const presenceQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'cashflowPresence')),
+      where('projectId', '==', projectId),
+      limit(20),
+    );
+    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', safeDocId(projectId)));
+    const unsubscribePresence = onSnapshot(presenceQuery, (snap) => {
+      const now = Date.now();
+      setCashflowPresenceUsers(
+        snap.docs
+          .map((item) => item.data() as CashflowPresence)
+          .filter((item) => item.uid && Number(item.expiresAt || 0) > now)
+          .sort((a, b) => String(a.name || a.email || a.uid).localeCompare(String(b.name || b.email || b.uid))),
+      );
+    }, () => setCashflowPresenceUsers([]));
+    const unsubscribeLock = onSnapshot(lockRef, (snap) => {
+      setCashflowEditLock(snap.exists() ? (snap.data() as CashflowEditLock) : null);
+    }, () => setCashflowEditLock(null));
+    return () => {
+      unsubscribePresence();
+      unsubscribeLock();
+    };
+  }, [currentProject?.id, db, isCashflowWorkspace, orgId]);
+
   useEffect(() => {
     setCollapsed(readPortalSidebarCollapsed(authUser?.uid));
   }, [authUser?.uid]);
@@ -274,6 +355,11 @@ function PortalContent() {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
     return current?.label || '프로젝트 선택';
   }, [topNavItems, location.pathname]);
+  const activeCashflowEditLock = useMemo(() => {
+    if (!cashflowEditLock || cashflowEditLock.status !== 'editing') return null;
+    if (Number(cashflowEditLock.expiresAt || 0) <= Date.now()) return null;
+    return cashflowEditLock;
+  }, [cashflowEditLock]);
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,
     currentPath,
@@ -499,7 +585,7 @@ function PortalContent() {
     return null;
   }
 
-  const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses';
+  const useWidePortalCanvas = location.pathname === '/portal/weekly-expenses' || isCashflowWorkspace;
 
   return (
     <PortalNavigationGuardContext.Provider value={{ registerNavigationHandler }}>
@@ -879,6 +965,38 @@ function PortalContent() {
                       <Badge className="h-5 rounded-full bg-[#e8f0fb] px-2 text-[10px] font-semibold text-[#1b4f8f]">
                         {portalDisplayRole}
                       </Badge>
+                      {isCashflowWorkspace && (
+                        <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-sm">
+                          <div className="flex -space-x-1">
+                            {cashflowPresenceUsers.slice(0, 4).map((item) => (
+                              <span
+                                key={item.uid}
+                                className={`inline-flex h-5 w-5 items-center justify-center rounded-full border border-white text-[7px] font-semibold ${
+                                  item.uid === authUser?.uid ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
+                                }`}
+                                title={`${item.name || item.email || item.uid} 접속 중`}
+                              >
+                                {getInitials(item.name || item.email || item.uid)}
+                              </span>
+                            ))}
+                            {cashflowPresenceUsers.length > 4 && (
+                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-slate-100 text-[7px] font-semibold text-slate-600">
+                                +{cashflowPresenceUsers.length - 4}
+                              </span>
+                            )}
+                            {cashflowPresenceUsers.length === 0 && (
+                              <span className="text-[10px] font-medium text-slate-500">접속자 확인 중</span>
+                            )}
+                          </div>
+                          {activeCashflowEditLock?.editorName && (
+                            <span className={`text-[10px] font-semibold ${
+                              activeCashflowEditLock.editorUid === authUser?.uid ? 'text-blue-700' : 'text-rose-700'
+                            }`}>
+                              {activeCashflowEditLock.editorName}이 수정 중입니다
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -951,7 +1069,7 @@ function PortalContent() {
 
           {/* Content */}
           <main className="flex-1 overflow-y-auto">
-            <div className={useWidePortalCanvas ? 'w-full max-w-none px-3 py-4 md:px-5 md:py-6 xl:px-8' : 'mx-auto w-full max-w-[1480px] p-4 md:p-6'}>
+            <div className={useWidePortalCanvas ? 'w-full max-w-none px-5 py-2.5' : 'mx-auto w-full max-w-[1480px] px-5 py-2.5'}>
               <PageTransition>
                 <ErrorBoundary homePath="/portal/project-select" resetKey={location.pathname}>
                   <Outlet />
