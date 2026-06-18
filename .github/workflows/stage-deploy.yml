@@ -27,7 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: Stage
+      # VERCEL_TOKEN is currently scoped to this GitHub environment.
+      # The deployment itself is still promoted only to the fixed stage alias below.
+      name: Preview
       url: https://inner-platform-stage-merryai-devs-projects.vercel.app
     env:
       VERCEL_CLI_PACKAGE: vercel@54.14.2
