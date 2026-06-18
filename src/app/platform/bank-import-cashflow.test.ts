@@ -7,7 +7,7 @@ import {
 
 describe('bank-import-cashflow helpers', () => {
   it('shows only outflow sheet lines for expense rows', () => {
-    const options = resolveBankImportCashflowOptionsForAmount(-15000);
+    const options = resolveBankImportCashflowOptionsForAmount(15000, 'EXPENSE');
 
     expect(options.map((option) => option.value)).toEqual([
       'DIRECT_COST_OUT',
@@ -21,7 +21,7 @@ describe('bank-import-cashflow helpers', () => {
   });
 
   it('stores sheet line id alongside compatibility category', () => {
-    expect(resolveBankImportCashflowSelection('MYSC_LABOR_OUT', -120000)).toEqual({
+    expect(resolveBankImportCashflowSelection('MYSC_LABOR_OUT', 120000, 'EXPENSE')).toEqual({
       cashflowLineId: 'MYSC_LABOR_OUT',
       cashflowCategory: 'LABOR_COST',
     });
@@ -30,10 +30,10 @@ describe('bank-import-cashflow helpers', () => {
   it('falls back from legacy category to a stable sheet line id', () => {
     expect(resolveBankImportCashflowLineId({
       cashflowCategory: 'TRAVEL',
-    }, -15000)).toBe('DIRECT_COST_OUT');
+    }, 15000, 'EXPENSE')).toBe('DIRECT_COST_OUT');
 
     expect(resolveBankImportCashflowLineId({
       cashflowCategory: 'VAT_REFUND',
-    }, 50000)).toBe('SALES_VAT_IN');
+    }, 50000, 'DEPOSIT')).toBe('SALES_VAT_IN');
   });
 });

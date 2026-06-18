@@ -107,7 +107,9 @@ export function BankImportTriageWizard({
     manualFields: activeManualFields || selectedItem.manualFields,
   }) : null;
   const cashflowOptions = useMemo(
-    () => (selectedItem ? resolveBankImportCashflowCategoryOptionsForAmount(selectedItem.bankSnapshot.signedAmount) : []),
+    () => (selectedItem
+      ? resolveBankImportCashflowCategoryOptionsForAmount(selectedItem.bankSnapshot.signedAmount, selectedItem.bankSnapshot.entryKind)
+      : []),
     [selectedItem],
   );
 
@@ -361,8 +363,7 @@ export function BankImportTriageWizard({
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                               <p className="text-[11px] text-slate-500">입출금액</p>
                               <p className="mt-1 text-[13px] font-medium text-slate-950">
-                                {selectedItem.bankSnapshot.signedAmount < 0 ? '-' : '+'}
-                                {formatMoney(Math.abs(selectedItem.bankSnapshot.signedAmount))}원
+                                {selectedItem.bankSnapshot.entryKind === 'EXPENSE' ? '출금' : '입금'} {formatMoney(Math.abs(selectedItem.bankSnapshot.signedAmount))}원
                               </p>
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -446,6 +447,7 @@ export function BankImportTriageWizard({
                                       ? resolveBankImportCashflowSelection(
                                           event.target.value as typeof cashflowOptions[number]['value'],
                                           selectedItem.bankSnapshot.signedAmount,
+                                          selectedItem.bankSnapshot.entryKind,
                                         )
                                       : {
                                           cashflowLineId: undefined,

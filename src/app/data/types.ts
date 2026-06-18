@@ -970,6 +970,7 @@ export interface BankImportSnapshot {
   counterparty: string;
   memo: string;
   signedAmount: number;
+  entryKind?: Extract<SettlementEntryKind, 'DEPOSIT' | 'EXPENSE'>;
   balanceAfter: number;
 }
 

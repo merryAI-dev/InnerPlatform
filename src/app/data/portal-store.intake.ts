@@ -59,12 +59,19 @@ function normalizeManualFields(value: unknown): BankImportManualFields {
 function normalizeBankSnapshot(value: unknown): BankImportSnapshot | null {
   const candidate = (value && typeof value === 'object') ? value as Record<string, unknown> : null;
   if (!candidate) return null;
+  const rawSignedAmount = normalizeNumber(candidate.signedAmount);
+  const entryKind = candidate.entryKind === 'DEPOSIT' || candidate.entryKind === 'EXPENSE'
+    ? candidate.entryKind
+    : rawSignedAmount < 0
+      ? 'EXPENSE'
+      : 'DEPOSIT';
   return {
     accountNumber: normalizeString(candidate.accountNumber),
     dateTime: normalizeString(candidate.dateTime),
     counterparty: normalizeString(candidate.counterparty),
     memo: normalizeString(candidate.memo),
-    signedAmount: normalizeNumber(candidate.signedAmount),
+    signedAmount: Math.abs(rawSignedAmount),
+    entryKind,
     balanceAfter: normalizeNumber(candidate.balanceAfter),
   };
 }
@@ -80,7 +87,8 @@ export function serializeBankImportIntakeItemForPersistence(item: BankImportInta
       dateTime: item.bankSnapshot.dateTime,
       counterparty: item.bankSnapshot.counterparty,
       memo: item.bankSnapshot.memo,
-      signedAmount: item.bankSnapshot.signedAmount,
+      signedAmount: Math.abs(item.bankSnapshot.signedAmount),
+      ...(item.bankSnapshot.entryKind ? { entryKind: item.bankSnapshot.entryKind } : {}),
       balanceAfter: item.bankSnapshot.balanceAfter,
     },
     matchState: item.matchState,

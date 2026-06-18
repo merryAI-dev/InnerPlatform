@@ -397,9 +397,13 @@ function pickAmount(
   return fallback || { amount: null };
 }
 
-function inferCashflowCategoryFromLineLabel(rawLineLabel: string, signedAmount: number): CashflowCategory | undefined {
+function inferCashflowCategoryFromLineLabel(
+  rawLineLabel: string,
+  signedAmount: number,
+  entryKind?: SettlementEntryKind,
+): CashflowCategory | undefined {
   const lineId = parseCashflowLineLabel(rawLineLabel);
-  return mapCashflowLineToCategory(lineId, signedAmount >= 0 ? 'IN' : 'OUT');
+  return mapCashflowLineToCategory(lineId, entryKind === 'EXPENSE' ? 'OUT' : signedAmount >= 0 ? 'IN' : 'OUT');
 }
 
 function resolveEvidenceStatusFromExpenseRow(row: ImportRow | null | undefined): EvidenceStatus {
@@ -437,7 +441,7 @@ function extractManualFieldsFromExpenseRow(row: ImportRow | null | undefined): B
   if (cashflowIdx >= 0) {
     const value = normalizeSpace(String(row.cells[cashflowIdx] || ''));
     const lineId = parseCashflowLineLabel(value);
-    const category = inferCashflowCategoryFromLineLabel(value, signedAmount);
+    const category = inferCashflowCategoryFromLineLabel(value, signedAmount, row.entryKind);
     if (lineId) manualFields.cashflowLineId = lineId;
     if (category) manualFields.cashflowCategory = category;
   }
@@ -506,11 +510,7 @@ function resolveBankSnapshotFromStatementRow(
   }
 
   const resolvedAmount = pickAmount(rowCells, amountIdxs, columns);
-  const signedAmount = resolvedAmount.amount == null
-    ? 0
-    : resolvedAmount.entryKind === 'DEPOSIT'
-      ? resolvedAmount.amount
-      : -Math.abs(resolvedAmount.amount);
+  const signedAmount = resolvedAmount.amount == null ? 0 : Math.abs(resolvedAmount.amount);
   const balanceAfter = balanceIdx >= 0 ? (parseNumber(String(rowCells[balanceIdx] || '')) || 0) : 0;
 
   return {
@@ -519,6 +519,7 @@ function resolveBankSnapshotFromStatementRow(
     counterparty,
     memo,
     signedAmount,
+    ...(resolvedAmount.entryKind ? { entryKind: resolvedAmount.entryKind } : {}),
     balanceAfter,
   };
 }
