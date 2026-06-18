@@ -1,0 +1,182 @@
+name: Stage Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit SHA to deploy to stage
+        required: false
+        default: main
+        type: string
+      note:
+        description: Deployment note for the stage summary
+        required: false
+        type: string
+
+concurrency:
+  group: inner-platform-stage
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy stage alias
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: Stage
+      url: https://inner-platform-stage-merryai-devs-projects.vercel.app
+    env:
+      VERCEL_CLI_PACKAGE: vercel@54.14.2
+      VERCEL_PROJECT: inner-platform
+      VERCEL_SCOPE: merryai-devs-projects
+      VERCEL_STAGE_ALIAS: inner-platform-stage-merryai-devs-projects.vercel.app
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Verify Vercel token is configured
+        run: |
+          test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_TOKEN" >&2; exit 1; }
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: RBAC policy verify
+        run: npm run policy:verify
+
+      - name: Production build
+        run: npm run build
+
+      - name: Deploy Vercel stage artifact
+        id: vercel_deploy
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          npx --yes "${VERCEL_CLI_PACKAGE}" deploy \
+            --yes \
+            --target preview \
+            --project "${VERCEL_PROJECT}" \
+            --scope "${VERCEL_SCOPE}" \
+            --token "${VERCEL_TOKEN}" 2>&1 | tee "${output_file}"
+          deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
+          if [ -z "${deployment_url}" ]; then
+            echo "Could not parse Vercel preview deployment URL" >&2
+            exit 1
+          fi
+          deployment_host="${deployment_url#https://}"
+          echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify stage artifact before alias
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+        run: |
+          set -euo pipefail
+          inspect_file="$(mktemp)"
+          npx --yes "${VERCEL_CLI_PACKAGE}" inspect \
+            "${DEPLOYMENT_HOST}" \
+            --format=json \
+            --scope "${VERCEL_SCOPE}" \
+            --token "${VERCEL_TOKEN}" > "${inspect_file}"
+          node -e '
+            const fs = require("fs");
+            const path = process.argv[1];
+            const raw = fs.readFileSync(path, "utf8");
+            const jsonStart = raw.indexOf("{");
+            if (jsonStart < 0) {
+              throw new Error(`Could not parse Vercel inspect output: ${raw.slice(0, 200)}`);
+            }
+            const inspect = JSON.parse(raw.slice(jsonStart));
+            if (inspect.readyState !== "READY") {
+              throw new Error(`Stage artifact is not READY: ${inspect.readyState}`);
+            }
+            if (inspect.target === "production") {
+              throw new Error("Stage artifact must not be a production deployment");
+            }
+          ' "${inspect_file}"
+          status_and_type="$(curl -sS -o /tmp/stage-missing-asset.txt -w '%{http_code} %{content_type}' "https://${DEPLOYMENT_HOST}/assets/__stage_missing_asset_probe__.css")"
+          echo "Missing asset response: ${status_and_type}"
+          if [[ "${status_and_type}" != 404\ * ]]; then
+            cat /tmp/stage-missing-asset.txt
+            echo "Missing static assets must return 404." >&2
+            exit 1
+          fi
+          if [[ "${status_and_type}" == *"text/html"* ]]; then
+            cat /tmp/stage-missing-asset.txt
+            echo "Missing static assets must not return index.html." >&2
+            exit 1
+          fi
+
+      - name: Pin fixed stage alias
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+        run: |
+          set -euo pipefail
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${DEPLOYMENT_HOST}" \
+            "${VERCEL_STAGE_ALIAS}" \
+            --scope "${VERCEL_SCOPE}" \
+            --token "${VERCEL_TOKEN}"
+
+      - name: Verify stage alias
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+        run: |
+          set -euo pipefail
+          inspect_file="$(mktemp)"
+          npx --yes "${VERCEL_CLI_PACKAGE}" inspect \
+            "${VERCEL_STAGE_ALIAS}" \
+            --format=json \
+            --scope "${VERCEL_SCOPE}" \
+            --token "${VERCEL_TOKEN}" > "${inspect_file}"
+          node -e '
+            const fs = require("fs");
+            const path = process.argv[1];
+            const expectedHost = process.env.DEPLOYMENT_HOST;
+            const raw = fs.readFileSync(path, "utf8");
+            const jsonStart = raw.indexOf("{");
+            if (jsonStart < 0) {
+              throw new Error(`Could not parse Vercel inspect output: ${raw.slice(0, 200)}`);
+            }
+            const inspect = JSON.parse(raw.slice(jsonStart));
+            if (inspect.readyState !== "READY") {
+              throw new Error(`Stage alias is not READY: ${inspect.readyState}`);
+            }
+            if (inspect.target === "production") {
+              throw new Error("Stage alias must not point to a production deployment");
+            }
+            if (inspect.url !== expectedHost) {
+              throw new Error(`Stage alias points to ${inspect.url}, expected ${expectedHost}`);
+            }
+          ' "${inspect_file}"
+
+      - name: Stage summary
+        env:
+          DEPLOY_NOTE: ${{ inputs.note }}
+          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
+        run: |
+          {
+            printf '%s\n' "## InnerPlatform stage deploy"
+            printf '\n'
+            printf '%s\n' "- Stage URL: https://${VERCEL_STAGE_ALIAS}"
+            printf '%s\n' "- Deployment URL: ${DEPLOYMENT_URL}"
+            printf '%s\n' "- Ref: ${{ inputs.ref || 'main' }}"
+            printf '%s\n' "- Commit: $(git rev-parse HEAD)"
+            printf '%s\n' "- Actor: ${GITHUB_ACTOR}"
+            printf '%s\n' "- Note: ${DEPLOY_NOTE}"
+          } >> "${GITHUB_STEP_SUMMARY}"
