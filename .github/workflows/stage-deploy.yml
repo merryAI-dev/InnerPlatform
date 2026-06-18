@@ -27,21 +27,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      # VERCEL_TOKEN is currently scoped to this GitHub environment.
-      # The deployment itself is still promoted only to the fixed stage alias below.
-      name: Preview
+      name: Stage
       url: https://inner-platform-stage-merryai-devs-projects.vercel.app
     env:
-      VERCEL_CLI_PACKAGE: vercel@54.14.2
-      VERCEL_PROJECT: inner-platform
-      VERCEL_SCOPE: merryai-devs-projects
+      VERCEL_CLI_PACKAGE: vercel@50.14.0
       VERCEL_STAGE_ALIAS: inner-platform-stage-merryai-devs-projects.vercel.app
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_STAGE }}
 
     steps:
-      - name: Verify Vercel token is configured
+      - name: Verify Vercel credentials are configured
         run: |
-          test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_TOKEN" >&2; exit 1; }
+          test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_DEPLOY_TOKEN_STAGE" >&2; exit 1; }
+          test -n "${VERCEL_ORG_ID}" || { echo "Missing secret: VERCEL_ORG_ID" >&2; exit 1; }
+          test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
 
       - uses: actions/checkout@v5
         with:
@@ -71,9 +71,9 @@ jobs:
           output_file="$(mktemp)"
           npx --yes "${VERCEL_CLI_PACKAGE}" deploy \
             --yes \
-            --target preview \
-            --project "${VERCEL_PROJECT}" \
-            --scope "${VERCEL_SCOPE}" \
+            --meta stagePolicy=github-actions-git-only \
+            --meta githubCommitSha="$(git rev-parse HEAD)" \
+            --meta githubCommitRef="${{ inputs.ref || 'main' }}" \
             --token "${VERCEL_TOKEN}" 2>&1 | tee "${output_file}"
           deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
           if [ -z "${deployment_url}" ]; then
@@ -93,7 +93,6 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" inspect \
             "${DEPLOYMENT_HOST}" \
             --format=json \
-            --scope "${VERCEL_SCOPE}" \
             --token "${VERCEL_TOKEN}" > "${inspect_file}"
           node -e '
             const fs = require("fs");
@@ -132,7 +131,6 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${DEPLOYMENT_HOST}" \
             "${VERCEL_STAGE_ALIAS}" \
-            --scope "${VERCEL_SCOPE}" \
             --token "${VERCEL_TOKEN}"
 
       - name: Verify stage alias
@@ -144,7 +142,6 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" inspect \
             "${VERCEL_STAGE_ALIAS}" \
             --format=json \
-            --scope "${VERCEL_SCOPE}" \
             --token "${VERCEL_TOKEN}" > "${inspect_file}"
           node -e '
             const fs = require("fs");
