@@ -7,7 +7,7 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 export function ProjectCashflowSheetPage() {
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
-  const { getProjectById, transactions } = useAppStore();
+  const { getProjectById } = useAppStore();
   const { setYearMonth } = useCashflowWeeks();
 
   const ym = searchParams.get('ym') || '';
@@ -35,8 +35,6 @@ export function ProjectCashflowSheetPage() {
   return (
     <CashflowProjectSheet
       projectId={projectId}
-      projectName={project.name}
-      transactions={transactions}
       initialViewMode={initialViewMode}
     />
   );

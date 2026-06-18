@@ -33,6 +33,7 @@ export interface TransactionRowProps {
   onChangeState?: (txId: string, newState: TransactionState, reason?: string) => void | Promise<void>;
   userRole?: 'pm' | 'admin';
   allowEditSubmitted?: boolean;
+  readOnly?: boolean;
 }
 
 export function SettlementTransactionRow({
@@ -45,9 +46,10 @@ export function SettlementTransactionRow({
   onChangeState,
   userRole,
   allowEditSubmitted = false,
+  readOnly = false,
 }: TransactionRowProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
-  const locked = allowEditSubmitted ? tx.state === 'APPROVED' : !isEditable(tx.state);
+  const locked = readOnly || (allowEditSubmitted ? tx.state === 'APPROVED' : !isEditable(tx.state));
   const [driveAction, setDriveAction] = useState<'' | 'provision' | 'sync'>('');
 
   const debouncedUpdate = useCallback(
@@ -238,7 +240,7 @@ export function SettlementTransactionRow({
               ({tx.rejectedReason})
             </span>
           )}
-          {tx.state === 'REJECTED' && userRole === 'pm' && onChangeState && (
+          {tx.state === 'REJECTED' && userRole === 'pm' && onChangeState && !readOnly && (
             <button
               className="shrink-0 text-[8px] text-blue-600 hover:underline"
               onClick={() => {
@@ -377,7 +379,7 @@ export function SettlementTransactionRow({
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[9px] shrink-0"
-            disabled={driveAction !== '' || !onProvisionEvidenceDrive}
+            disabled={readOnly || driveAction !== '' || !onProvisionEvidenceDrive}
             onClick={(e) => {
               e.stopPropagation();
               void runDriveAction('provision', onProvisionEvidenceDrive);
@@ -392,7 +394,7 @@ export function SettlementTransactionRow({
             variant="ghost"
             size="sm"
             className="h-5 px-1.5 text-[9px] shrink-0"
-            disabled={driveAction !== '' || !onSyncEvidenceDrive}
+            disabled={readOnly || driveAction !== '' || !onSyncEvidenceDrive}
             onClick={(e) => {
               e.stopPropagation();
               void runDriveAction('sync', onSyncEvidenceDrive);

@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ListChecks, FileText, ArrowRightLeft, ArrowRight, Search } from 'lucide-react';
+import { FileText, ArrowRightLeft, ArrowRight, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { PageHeader } from '../layout/PageHeader';
 import { usePortalStore } from '../../data/portal-store';
 import {
   EXPENSE_STATUS_COLORS,
@@ -158,13 +157,6 @@ export function PortalSubmissions() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        icon={ListChecks}
-        iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-        title="내 제출 현황"
-        description="제출한 건의 승인 상태와 반려 사유를 빠르게 확인합니다"
-      />
-
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="relative max-w-md">

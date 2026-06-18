@@ -128,6 +128,16 @@ export interface PortalUser {
   registeredAt: string;
 }
 
+export interface BankStatementApplyCellPatch {
+  columnIndex: number;
+  rawValue: string;
+  userEdited?: boolean;
+}
+
+export interface BankStatementApplyOptions {
+  cellPatchesByRowKey?: Record<string, BankStatementApplyCellPatch[]>;
+}
+
 const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
 
 function getActivePortalProjectStorageKey(uid: string | null | undefined): string {
@@ -426,6 +436,34 @@ export function syncExpenseIntakeEvidenceState(params: {
   };
 }
 
+function sanitizeBankStatementSheet(sheet: BankStatementSheet): BankStatementSheet {
+  const incomingColumns = Array.isArray(sheet?.columns) ? sheet.columns : [];
+  const maxLenFromRows = Array.isArray(sheet?.rows)
+    ? sheet.rows.reduce((max, row) => Math.max(max, Array.isArray(row?.cells) ? row.cells.length : 0), 0)
+    : 0;
+  const rawColumns = incomingColumns.length > 0
+    ? incomingColumns
+    : Array.from({ length: maxLenFromRows }, (_, i) => BANK_STATEMENT_COLUMNS[i] || `컬럼${i + 1}`);
+  const seen = new Set<string>();
+  const columns = rawColumns.map((column, i) => {
+    const base = normalizeSpace(String(column || `컬럼${i + 1}`)) || `컬럼${i + 1}`;
+    let next = base;
+    let suffix = 2;
+    while (seen.has(next)) {
+      next = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    seen.add(next);
+    return next;
+  });
+  const rows = (Array.isArray(sheet?.rows) ? sheet.rows : []).map((row, i) => ({
+    tempId: row?.tempId || `bank-${Date.now()}-${i}`,
+    cells: columns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
+    status: row?.status === 'applied' ? 'applied' : 'staged',
+  }));
+  return { columns, rows: rows as BankStatementRow[] };
+}
+
 interface PortalState {
   isRegistered: boolean;
   isLoading: boolean;
@@ -490,6 +528,8 @@ interface PortalActions {
   deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
   saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[]>;
   saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
+  applyBankStatementRowsToExpenseSheet: (sheet: BankStatementSheet & { selectedRowIds?: string[] }, options?: BankStatementApplyOptions) => Promise<{ appliedCount: number }>;
+  refreshBankStatementRows: (status?: 'staged' | 'applied') => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
   saveBudgetCodeBook: (rows: BudgetCodeEntry[], renames?: BudgetCodeRename[]) => Promise<void>;
   saveBudgetTreeV2: (codes: BudgetTreeCode[]) => Promise<void>;
@@ -1529,6 +1569,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           cells: Array.isArray(row?.cells)
             ? columns.map((_, index) => normalizeSpace(String(row.cells[index] ?? '')))
             : columns.map(() => ''),
+          status: row?.status === 'applied' ? 'applied' as const : 'staged' as const,
         }));
         setBankStatementRows({ columns, rows });
       });
@@ -2518,32 +2559,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const sanitizedRows = (Array.isArray(sheet?.rows) ? sheet.rows : []).map((row, i) => ({
       tempId: row?.tempId || `bank-${Date.now()}-${i}`,
       cells: sanitizedColumns.map((_, colIdx) => normalizeSpace(String(Array.isArray(row?.cells) ? (row.cells[colIdx] ?? '') : ''))),
+      status: row?.status === 'applied' ? 'applied' as const : 'staged' as const,
     }));
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
-    const targetSheetId = activeExpenseSheetIdRef.current || 'default';
-    const targetSheet = expenseSheetsRef.current.find((sheetItem) => sheetItem.id === targetSheetId) || null;
-    const targetRows = targetSheet?.rows || (targetSheetId === 'default' ? expenseSheetRowsRef.current : []);
-    const mergedExpenseRows = mergeBankRowsIntoExpenseSheet(
-      targetRows,
-      mapBankStatementsToImportRows(sanitizedSheet),
-    );
-    const uploadBatchId = `bank-upload-${Date.now()}`;
-    const intakeItems = buildBankImportIntakeItemsFromBankSheet({
-      projectId: currentProjectId || '',
-      sheet: sanitizedSheet,
-      existingItems: expenseIntakeItemsRef.current,
-      existingRows: targetRows,
-      existingExpenseSheetId: targetSheetId,
-      lastUploadBatchId: uploadBatchId,
-      now,
-      updatedBy: portalUser?.name || authUser?.name || '',
-    });
-    const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
-    await saveExpenseSheetRows(mergedExpenseRows);
     if (isDevHarnessUser || !db || !currentProjectId) {
       setBankStatementRows(sanitizedSheet);
-      expenseIntakeItemsRef.current = reconciledIntakeItems;
-      setExpenseIntakeItems(reconciledIntakeItems);
       return;
     }
     const payload = withTenantScope(orgId, {
@@ -2559,6 +2579,75 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       { merge: true },
     );
     setBankStatementRows(sanitizedSheet);
+  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
+
+  const applyBankStatementRowsToExpenseSheet = useCallback(async (sheet: BankStatementSheet & { selectedRowIds?: string[] }, options?: BankStatementApplyOptions) => {
+    const now = new Date().toISOString();
+    const selectedIds = new Set((sheet.selectedRowIds || []).map((value) => String(value)));
+    const fullSheet = sanitizeBankStatementSheet(sheet);
+    const selectedRows = selectedIds.size > 0
+      ? fullSheet.rows.filter((row) => selectedIds.has(row.tempId))
+      : fullSheet.rows;
+    const selectedSheet = { columns: fullSheet.columns, rows: selectedRows };
+    if (selectedSheet.rows.length === 0) return { appliedCount: 0 };
+
+    const currentSheet = bankStatementRows ? sanitizeBankStatementSheet(bankStatementRows) : fullSheet;
+    const targetSheetId = activeExpenseSheetIdRef.current || 'default';
+    const targetSheet = expenseSheetsRef.current.find((sheetItem) => sheetItem.id === targetSheetId) || null;
+    const targetRows = targetSheet?.rows || (targetSheetId === 'default' ? expenseSheetRowsRef.current : []);
+    const cellPatchesByRowKey = options?.cellPatchesByRowKey || {};
+    const importRows = mapBankStatementsToImportRows(selectedSheet).map((row, index) => {
+      const rowKey = selectedSheet.rows[index]?.tempId || `row-${index}`;
+      const patches = cellPatchesByRowKey[rowKey] || [];
+      if (patches.length === 0) return row;
+      const cells = [...row.cells];
+      patches.forEach((patch) => {
+        if (patch.columnIndex >= 0 && patch.columnIndex < cells.length) {
+          cells[patch.columnIndex] = normalizeSpace(String(patch.rawValue || ''));
+        }
+      });
+      return { ...row, cells };
+    });
+    const mergedExpenseRows = mergeBankRowsIntoExpenseSheet(targetRows, importRows);
+    const uploadBatchId = `bank-apply-${Date.now()}`;
+    const intakeItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: currentProjectId || '',
+      sheet: selectedSheet,
+      existingItems: expenseIntakeItemsRef.current,
+      existingRows: targetRows,
+      existingExpenseSheetId: targetSheetId,
+      lastUploadBatchId: uploadBatchId,
+      now,
+      updatedBy: portalUser?.name || authUser?.name || '',
+    });
+    const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
+
+    await saveExpenseSheetRows(mergedExpenseRows);
+
+    const shouldMarkApplied = (row: BankStatementRow) => selectedIds.size === 0 || selectedIds.has(row.tempId);
+    const nextBankSheet = {
+      columns: currentSheet.columns.length > 0 ? currentSheet.columns : fullSheet.columns,
+      rows: currentSheet.rows.map((row) => (
+        shouldMarkApplied(row) ? { ...row, status: 'applied' as const } : row
+      )),
+    };
+    if (isDevHarnessUser || !db || !currentProjectId) {
+      setBankStatementRows(nextBankSheet);
+      expenseIntakeItemsRef.current = reconciledIntakeItems;
+      setExpenseIntakeItems(reconciledIntakeItems);
+      return { appliedCount: importRows.length };
+    }
+    await setDoc(
+      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
+      withTenantScope(orgId, {
+        projectId: currentProjectId,
+        columns: nextBankSheet.columns,
+        rows: nextBankSheet.rows,
+        updatedAt: now,
+        updatedBy: portalUser?.name || authUser?.name || '',
+      }),
+      { merge: true },
+    );
     await Promise.all(
       reconciledIntakeItems.map((item) => setDoc(
         doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${item.id}`),
@@ -2568,7 +2657,23 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
     expenseIntakeItemsRef.current = reconciledIntakeItems;
     setExpenseIntakeItems(reconciledIntakeItems);
-  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
+    setBankStatementRows(nextBankSheet);
+    return { appliedCount: importRows.length };
+  }, [authUser?.name, bankStatementRows, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
+
+  const refreshBankStatementRows = useCallback(async () => {
+    if (isDevHarnessUser || !db || !currentProjectId) return;
+    const snap = await getDoc(doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`));
+    if (!snap.exists()) {
+      setBankStatementRows(null);
+      return;
+    }
+    const data = snap.data() as { columns?: string[]; rows?: BankStatementRow[] };
+    setBankStatementRows(sanitizeBankStatementSheet({
+      columns: Array.isArray(data.columns) ? data.columns : [],
+      rows: Array.isArray(data.rows) ? data.rows : [],
+    }));
+  }, [currentProjectId, db, isDevHarnessUser, orgId]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
     if (!Array.isArray(items) || items.length === 0) return;
@@ -3374,6 +3479,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     deleteExpenseSheet,
     saveExpenseSheetRows,
     saveBankStatementRows,
+    applyBankStatementRowsToExpenseSheet,
+    refreshBankStatementRows,
     saveBudgetPlanRows,
     saveBudgetCodeBook,
     saveBudgetTreeV2,

@@ -970,6 +970,7 @@ export interface BankImportSnapshot {
   counterparty: string;
   memo: string;
   signedAmount: number;
+  entryKind?: Extract<SettlementEntryKind, 'DEPOSIT' | 'EXPENSE'>;
   balanceAfter: number;
 }
 
@@ -1220,9 +1221,10 @@ export interface CashflowWeekSheet {
   tenantId?: string;
   projectId: string;
   yearMonth: string; // "2026-01"
-  weekNo: number; // 1..5 (nth Monday in month)
-  weekStart: string; // "YYYY-MM-DD" (Monday)
-  weekEnd: string; // "YYYY-MM-DD" (Sunday)
+  weekNo: number; // sheet-range cashflow week number, usually 1..5 and occasionally 6
+  weekStart: string; // "YYYY-MM-DD"
+  weekEnd: string; // "YYYY-MM-DD"
+  sheetWeekSource?: 'cashflow-sheet-lab';
   projection: Partial<Record<CashflowSheetLineId, number>>;
   actual: Partial<Record<CashflowSheetLineId, number>>;
   projectionTotals?: CashflowWeekTotals;

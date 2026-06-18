@@ -1,63 +1,36 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
-import { FileSpreadsheet } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Pencil, Search, Settings } from 'lucide-react';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
+import { CashflowSheetLabPage } from '../../features/cashflow-sheet-compare/CashflowSheetLabPage';
 import { usePortalStore } from '../../data/portal-store';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { useAuth } from '../../data/auth-store';
-import { useFirebase } from '../../lib/firebase-context';
-import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
-import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
-
-const GoogleSheetMigrationWizard = lazy(
-  () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
-);
+import { Badge } from '../ui/badge';
 
 export function PortalCashflowPage() {
-  const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
-  const { orgId } = useFirebase();
   const {
     activeProjectId,
     portalUser,
     myProject,
-    transactions,
-    expenseSheetRows,
-    budgetPlanRows,
-    evidenceRequiredMap,
-    sheetSources,
-    saveExpenseSheetRows,
-    saveBudgetPlanRows,
-    saveBudgetCodeBook,
-    saveBankStatementRows,
-    saveEvidenceRequiredMap,
-    markSheetSourceApplied,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { upsertWeekAmounts } = useCashflowWeeks();
-  const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
-  const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
 
   const projectId = activeProjectId || myProject?.id || '';
-  const projectName = myProject?.name || '내 사업';
-  const activeSheetName = '캐시플로우 Projection';
+  const [sheetHeader, setSheetHeader] = useState({
+    spreadsheetTitle: '저장된 시트',
+    sheetName: 'cashflow(사용내역 연동)',
+    startWeek: '',
+    endWeek: '',
+  });
 
   const ready = useMemo(() => Boolean(projectId), [projectId]);
-  const bffActor = useMemo(() => ({
-    uid: authUser?.uid || portalUser?.id || 'portal-user',
-    email: authUser?.email || portalUser?.email || '',
-    role: authUser?.role || portalUser?.role || 'pm',
-    idToken: authUser?.idToken,
-    googleAccessToken: authUser?.googleAccessToken,
-  }), [
-    authUser?.uid,
-    authUser?.email,
-    authUser?.role,
-    authUser?.idToken,
-    authUser?.googleAccessToken,
-    portalUser?.id,
-    portalUser?.email,
-    portalUser?.role,
-  ]);
+  const sheetRangeLabel = sheetHeader.startWeek || sheetHeader.endWeek
+    ? `합계 기준 ${sheetHeader.startWeek || '시작 미지정'} ~ ${sheetHeader.endWeek || '종료 미지정'}`
+    : '합계 기준 미지정';
+  const dispatchSheetAction = (action: 'apply' | 'preview' | 'edit') => {
+    window.dispatchEvent(new CustomEvent('mysc:cashflow-sheet-lab-action', {
+      detail: { action, projectId },
+    }));
+  };
 
   if (!ready) {
     return (
@@ -68,66 +41,64 @@ export function PortalCashflowPage() {
   }
 
   return (
-    <>
-      <Card className="mb-4 border-slate-200 bg-white">
-        <CardContent className="flex flex-col gap-3 px-5 py-4 text-[12px] text-slate-700 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <p className="font-semibold text-slate-950">기존 캐시플로 가져오기</p>
-            <p>Google Sheets, `.xlsx`, `.csv`에서 projection 시트를 불러올 수 있습니다.</p>
+    <div className="space-y-3">
+      <section className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-[12px] font-semibold text-slate-950">
+              {sheetHeader.spreadsheetTitle || myProject?.name || '저장된 시트'}
+            </div>
+            <Badge variant="outline" className="h-5 rounded-full px-2 text-[9px] text-blue-700">
+              시트 연동
+            </Badge>
           </div>
-          <Button type="button" className="h-9 gap-1.5 text-[12px]" onClick={() => setGoogleSheetImportOpen(true)}>
-            <FileSpreadsheet className="h-4 w-4" />
-            기존 캐시플로 가져오기
+          <div className="mt-0.5 truncate text-[10px] text-slate-500">
+            {sheetHeader.sheetName || 'cashflow(사용내역 연동)'} · {sheetRangeLabel}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('apply')}
+          >
+            <Settings className="h-3 w-3" />
+            시트와 연동하기
           </Button>
-        </CardContent>
-      </Card>
-
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('preview')}
+          >
+            <Search className="h-3 w-3" />
+            검토
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('edit')}
+          >
+            <Pencil className="h-3 w-3" />
+            수정
+          </Button>
+        </div>
+      </section>
+      <CashflowSheetLabPage
+        projectIdOverride={projectId}
+        embedded
+        hideConfigChrome
+        onHeaderSummaryChange={setSheetHeader}
+      />
       <CashflowProjectSheet
         projectId={projectId}
-        projectName={projectName}
-        transactions={transactions}
         roleOverride={portalUser?.role}
         onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
       />
-
-      {googleSheetImportOpen && (
-        <Suspense fallback={null}>
-          <GoogleSheetMigrationWizard
-            open={googleSheetImportOpen}
-            onOpenChange={setGoogleSheetImportOpen}
-            orgId={orgId}
-            projectId={projectId}
-            projectName={projectName}
-            projectSettlementType={myProject?.settlementType}
-            projectAccountType={myProject?.accountType}
-            activeSheetName={activeSheetName}
-            bffActor={bffActor}
-            expenseSheetRows={expenseSheetRows || []}
-            budgetPlanRows={budgetPlanRows || []}
-            evidenceRequiredMap={evidenceRequiredMap}
-            sheetSources={sheetSources}
-            devHarnessEnabled={devHarnessConfig.enabled}
-            ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-            saveExpenseSheetRows={saveExpenseSheetRows}
-            saveBudgetPlanRows={saveBudgetPlanRows}
-            saveBudgetCodeBook={saveBudgetCodeBook}
-            saveBankStatementRows={saveBankStatementRows}
-            saveEvidenceRequiredMap={saveEvidenceRequiredMap}
-            markSheetSourceApplied={markSheetSourceApplied}
-            upsertWeekAmounts={async (input) => {
-              await upsertWeekAmounts(input);
-              await upsertWeeklySubmissionStatus({
-                projectId: input.projectId,
-                yearMonth: input.yearMonth,
-                weekNo: input.weekNo,
-                ...(input.mode === 'projection'
-                  ? { projectionEdited: true, projectionUpdated: true }
-                  : { expenseEdited: true, expenseUpdated: true }),
-              });
-            }}
-          />
-        </Suspense>
-      )}
-    </>
+    </div>
   );
 }

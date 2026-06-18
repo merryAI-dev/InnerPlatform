@@ -58,6 +58,7 @@ function buildProjectionRowFromIntake(
     evidenceDriveFolderId: '',
   });
 
+  const entryKind = item.bankSnapshot.entryKind || (item.bankSnapshot.signedAmount < 0 ? 'EXPENSE' : 'DEPOSIT');
   const dateOnly = String(item.bankSnapshot.dateTime || '').slice(0, 10);
   if (dateIdx >= 0) cells[dateIdx] = dateOnly;
   if (weekIdx >= 0 && dateOnly) {
@@ -69,7 +70,7 @@ function buildProjectionRowFromIntake(
   if (subBudgetIdx >= 0) cells[subBudgetIdx] = item.manualFields.budgetSubCategory || '';
   if (cashflowIdx >= 0) {
     cells[cashflowIdx] = getCashflowLineLabelForExport(
-      resolveBankImportCashflowLineId(item.manualFields, item.bankSnapshot.signedAmount),
+      resolveBankImportCashflowLineId(item.manualFields, item.bankSnapshot.signedAmount, entryKind),
     );
   }
   if (balanceIdx >= 0) {
@@ -83,7 +84,7 @@ function buildProjectionRowFromIntake(
       : '';
   }
   if (depositIdx >= 0) {
-    cells[depositIdx] = item.bankSnapshot.signedAmount > 0
+    cells[depositIdx] = entryKind === 'DEPOSIT'
       ? Math.abs(item.bankSnapshot.signedAmount).toLocaleString('ko-KR')
       : '';
   }
@@ -103,7 +104,7 @@ function buildProjectionRowFromIntake(
     ...base,
     tempId: existingRow?.tempId || `bank-${item.bankFingerprint}`,
     sourceTxId: item.sourceTxId,
-    entryKind: item.bankSnapshot.signedAmount >= 0 ? 'DEPOSIT' : 'EXPENSE',
+    entryKind,
     cells,
     userEditedCells: new Set([
       budgetIdx,

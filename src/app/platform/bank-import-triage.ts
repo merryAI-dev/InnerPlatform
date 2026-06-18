@@ -14,13 +14,14 @@ function normalizeBankSnapshotValue(value: string | number): string {
 }
 
 export function buildBankFingerprint(snapshot: BankImportSnapshot): string {
+  const directionalAmount = snapshot.entryKind === 'EXPENSE'
+    ? -Math.abs(snapshot.signedAmount)
+    : Math.abs(snapshot.signedAmount);
   return stableHash([
     normalizeBankSnapshotValue(snapshot.accountNumber),
     normalizeBankSnapshotValue(snapshot.dateTime),
     normalizeBankSnapshotValue(snapshot.counterparty),
-    normalizeBankSnapshotValue(snapshot.memo),
-    normalizeBankSnapshotValue(snapshot.signedAmount),
-    normalizeBankSnapshotValue(snapshot.balanceAfter),
+    normalizeBankSnapshotValue(directionalAmount),
   ].join('|'));
 }
 
@@ -38,7 +39,8 @@ function hasCriticalBankDrift(
 ): boolean {
   return normalizeSpace(current.accountNumber) !== normalizeSpace(incoming.accountNumber)
     || normalizeSpace(current.dateTime) !== normalizeSpace(incoming.dateTime)
-    || current.signedAmount !== incoming.signedAmount;
+    || current.signedAmount !== incoming.signedAmount
+    || current.entryKind !== incoming.entryKind;
 }
 
 export function resolveBankImportMatchState(input: {

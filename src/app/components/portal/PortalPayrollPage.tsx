@@ -8,7 +8,6 @@ import {
   where,
 } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -283,14 +282,6 @@ export function PortalPayrollPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        icon={CircleDollarSign}
-        iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-        title="인건비 지급 준비"
-        description="지급일을 등록해 두면 지급 창 D-3부터 D+3까지 잔액 여력과 지급 확정 상태를 함께 점검할 수 있습니다."
-        badge={myProject?.shortName || myProject?.id || ''}
-      />
-
       {(needsPayrollAck || needsMonthlyCloseAck) && (
         <Card className="border-rose-200/60 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-950/10">
           <CardContent className="p-4 space-y-3">

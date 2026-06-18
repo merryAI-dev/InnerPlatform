@@ -55,6 +55,7 @@ describe('observability', () => {
     delete (globalThis as any).localStorage;
     delete (globalThis as any).window;
     delete (globalThis as any).__MYSC_OBSERVABILITY__;
+    vi.unstubAllEnvs();
   });
 
   it('does not initialize sentry without DSN', async () => {
@@ -136,5 +137,18 @@ describe('observability', () => {
     expect(body.message).toBe('internal boom');
     expect(body.source).toBe('portal_store');
     expect(body.clientRequestId).toBe('req_123');
+  });
+
+  it('keeps hosted client errors on the BFF when env points at the Java API', async () => {
+    vi.stubEnv('VITE_PLATFORM_API_BASE_URL', 'https://innerplatform-jvm-weekly-api-c3pm5gv7ia-du.a.run.app');
+    const mod = await import('./observability');
+
+    mod.captureMessage('java url should not receive client errors', {
+      tags: { surface: 'test' },
+    });
+    await Promise.resolve();
+
+    const [url] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('https://inner-platform.vercel.app/api/v1/client-errors');
   });
 });

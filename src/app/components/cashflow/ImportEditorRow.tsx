@@ -213,6 +213,7 @@ function ImportEditorRow({
   budgetSuggestion,
   counterpartyHint,
   onBudgetSuggestionAccepted,
+  readOnly = false,
 }: {
   row: ImportRow;
   rowIdx: number;
@@ -256,6 +257,7 @@ function ImportEditorRow({
   budgetSuggestion?: { budgetCategory: string; budgetSubCategory: string; confidence?: 'history' | 'codebook' } | null;
   counterpartyHint?: CounterpartySuggestion | null;
   onBudgetSuggestionAccepted?: (confidence: 'history' | 'codebook') => void;
+  readOnly?: boolean;
 }) {
   const hasError = Boolean(row.error);
   const hasReviewHint = hasImportRowReviewRequirement(row);
@@ -420,7 +422,7 @@ function ImportEditorRow({
     } transition-colors`}>
       {/* Data cells */}
       {SETTLEMENT_COLUMNS.map((col, colIdx) => {
-        const isReadOnly = col.csvHeader === 'No.';
+        const isReadOnly = readOnly || col.csvHeader === 'No.';
         const isBudgetCode = colIdx === budgetCodeIdx;
         const isSubCode = colIdx === subCodeIdx;
         const isSubSubCode = colIdx === subSubCodeIdx;
@@ -460,7 +462,7 @@ function ImportEditorRow({
             onMouseEnter={() => onCellMouseEnter(rowIdx, colIdx)}
           >
             <div className={`group relative ${showCellBadge ? 'pt-4' : ''}`}>
-              {isFirstColumn && (
+              {isFirstColumn && !readOnly && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -779,7 +781,7 @@ function ImportEditorRow({
                       variant="outline"
                       size="sm"
                       className="h-5 px-1.5 text-[9px]"
-                      disabled={driveAction !== '' || !canUseDrive || !onProvisionEvidenceDriveById}
+                      disabled={readOnly || driveAction !== '' || !canUseDrive || !onProvisionEvidenceDriveById}
                       title={hasSourceTransaction ? '거래별 증빙 폴더 생성' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
                       onClick={() => {
                         void runDriveAction('provision', onProvisionEvidenceDriveById);
@@ -792,7 +794,7 @@ function ImportEditorRow({
                       variant="outline"
                       size="sm"
                       className="h-5 px-1.5 text-[9px]"
-                      disabled={!canUseDrive || !onOpenEvidenceUpload}
+                      disabled={readOnly || !canUseDrive || !onOpenEvidenceUpload}
                       title={hasSourceTransaction ? '파일 업로드 및 분류 검토' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
                       onClick={() => {
                         if (!onOpenEvidenceUpload) return;
@@ -811,7 +813,7 @@ function ImportEditorRow({
                       variant="outline"
                       size="sm"
                       className="h-5 px-1.5 text-[9px]"
-                      disabled={driveAction !== '' || !canUseDrive || !onSyncEvidenceDriveById}
+                      disabled={readOnly || driveAction !== '' || !canUseDrive || !onSyncEvidenceDriveById}
                       title={hasSourceTransaction ? 'Drive 폴더 파일을 다시 읽어 완료 목록에 반영' : '필요한 값을 확인한 뒤 실제 거래로 저장하고 계속합니다'}
                       onClick={() => {
                         void runDriveAction('sync', onSyncEvidenceDriveById);
@@ -898,7 +900,7 @@ function ImportEditorRow({
                   {cellSource.label}
                 </span>
               )}
-              {isCounterparty && counterpartyHint && (
+              {isCounterparty && counterpartyHint && !readOnly && (
                 <button
                   type="button"
                   className="mt-0.5 w-full text-left text-[9px] bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-amber-700 hover:bg-amber-100 truncate leading-tight"

@@ -286,4 +286,21 @@ describe('buildSettlementActualSyncPayload', () => {
     expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(0);
     expect(payload[0]?.amounts.INPUT_VAT_OUT).toBe(0);
   });
+
+  it('treats bank-imported expenses on inflow lines as negative actual adjustments', () => {
+    const base = createEmptyCells();
+    const row = createRow(
+      withCell(
+        withCell(base, 2, '2024-12-26'),
+        8,
+        'MYSC 선입금(잔금 등 입금 필요 시)',
+      ).map((cell, index) => (index === 10 ? '96,500,000' : cell)),
+    );
+    row.sourceTxId = 'bank:prepay-return-1';
+    row.entryKind = 'EXPENSE';
+
+    const payload = buildSettlementActualSyncPayload([row], getYearMondayWeeks(2024));
+
+    expect(payload[0]?.amounts.MYSC_PREPAY_IN).toBe(-96500000);
+  });
 });

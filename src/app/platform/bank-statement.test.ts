@@ -81,6 +81,35 @@ describe('bank statement helpers', () => {
     expect(rows[1]?.cells[depositIdx]).toBe('');
   });
 
+  it('keeps bank-stamped amounts positive and uses entry kind for deposit or withdrawal direction', () => {
+    const bankAmountIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '통장에 찍힌 입/출금액');
+    const depositIdx = SETTLEMENT_COLUMNS.findIndex((column) => column.csvHeader === '입금액(사업비,공급가액,은행이자)');
+    const sheet = {
+      columns: ['No', '거래일시', '적요', '입금액', '출금액', '내용', '잔액', '거래점명', '입금인코드'],
+      rows: [
+        { tempId: 'bank-1', cells: ['1', '2024.12.26 16:13:24', 'BZ뱅크', '0', '96,500,000', '선입금환수(2)', '53,541,013', 'MC영업', ''] },
+        { tempId: 'bank-2', cells: ['2', '2024.12.26 16:13:24', 'BZ뱅크', '0', '500,000', '선입금환수(1)', '150,041,013', 'MC영업', ''] },
+        { tempId: 'bank-3', cells: ['3', '2024.12.21 02:54:17', '이자', '16,772', '0', '09.21~12.20', '150,541,013', 'MC영업', ''] },
+        { tempId: 'bank-4', cells: ['4', '2024.12.16 13:05:16', '타행MB', '50,335', '0', '김혜령', '150,524,241', '(토스)', ''] },
+      ],
+    };
+
+    const rows = mapBankStatementsToImportRows(sheet);
+    const intakeItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: 'p-1',
+      sheet,
+      lastUploadBatchId: 'batch-1',
+      now: '2026-04-06T00:00:00.000Z',
+      updatedBy: 'PM 보람',
+    });
+
+    expect(rows.map((row) => row.cells[bankAmountIdx])).toEqual(['96,500,000', '500,000', '16,772', '50,335']);
+    expect(rows.map((row) => row.entryKind)).toEqual(['EXPENSE', 'EXPENSE', 'DEPOSIT', 'DEPOSIT']);
+    expect(rows.map((row) => row.cells[depositIdx])).toEqual(['', '', '16,772', '50,335']);
+    expect(intakeItems.map((item) => item.bankSnapshot.signedAmount)).toEqual([96500000, 500000, 16772, 50335]);
+    expect(intakeItems.map((item) => item.bankSnapshot.entryKind)).toEqual(['EXPENSE', 'EXPENSE', 'DEPOSIT', 'DEPOSIT']);
+  });
+
   it('derives intake items that preserve existing manual weekly classification', () => {
     const sheet = {
       columns: ['통장번호', '거래일시', '적요', '의뢰인/수취인', '출금금액', '잔액'],
@@ -135,6 +164,46 @@ describe('bank statement helpers', () => {
         cashflowCategory: 'OUTSOURCING',
       },
     });
+  });
+
+  it('keeps the bank source id stable when only memo or balance changes on re-upload', () => {
+    const firstSheet = {
+      columns: ['통장번호', '거래일시', '적요', '의뢰인/수취인', '출금금액', '잔액'],
+      rows: [
+        {
+          tempId: 'bank-1',
+          cells: ['111-222-333', '2026-04-06 10:00', 'KTX 예매', '코레일', '15,000', '500,000'],
+        },
+      ],
+    };
+    const secondSheet = {
+      ...firstSheet,
+      rows: [
+        {
+          tempId: 'bank-1',
+          cells: ['111-222-333', '2026-04-06 10:00', 'KTX 예매 상세', '코레일', '15,000', '485,000'],
+        },
+      ],
+    };
+
+    const firstItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: 'p-1',
+      sheet: firstSheet,
+      lastUploadBatchId: 'batch-1',
+      now: '2026-04-06T00:00:00.000Z',
+      updatedBy: 'PM 보람',
+    });
+    const secondItems = buildBankImportIntakeItemsFromBankSheet({
+      projectId: 'p-1',
+      sheet: secondSheet,
+      existingItems: firstItems,
+      lastUploadBatchId: 'batch-2',
+      now: '2026-04-06T01:00:00.000Z',
+      updatedBy: 'PM 보람',
+    });
+
+    expect(secondItems[0].sourceTxId).toBe(firstItems[0].sourceTxId);
+    expect(secondItems[0].matchState).toBe('PENDING_INPUT');
   });
 
   it('does not fall back to row index when bank uploads arrive in a different order', () => {
