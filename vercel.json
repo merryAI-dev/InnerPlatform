@@ -100,6 +100,10 @@
       "destination": "/api/bff?__path=/api/internal/workers/client-errors/run"
     },
     {
+      "source": "/assets/:path*",
+      "destination": "/api/static-asset-not-found?path=:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

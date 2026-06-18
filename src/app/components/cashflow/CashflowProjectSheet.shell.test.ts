@@ -12,6 +12,12 @@ const cashflowWeeksStoreSource = readFileSync(
 );
 
 describe('CashflowProjectSheet actual sync flow', () => {
+  it('exposes the cashflow guide dialog from the project sheet toolbar', () => {
+    expect(cashflowProjectSheetSource).toContain('CashflowGuideButton');
+    expect(cashflowProjectSheetSource).toContain('CashflowGuideDialog');
+    expect(cashflowProjectSheetSource).toContain('guideOpen');
+  });
+
   it('keeps actual sync separate from manual actual save', () => {
     expect(cashflowProjectSheetSource).toContain('Actual 불러오기');
     expect(cashflowProjectSheetSource).toContain('syncProjectActualsFromExpenseSheets');

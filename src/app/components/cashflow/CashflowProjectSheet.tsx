@@ -41,6 +41,7 @@ import { getOrgDocumentPath } from '../../lib/firebase';
 import { loadExcelJs, warmExcelJs } from '../../platform/lazy-heavy-modules';
 import { buildCashflowExportWorkbookSpec } from '../../platform/cashflow-export';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
+import { CashflowGuideButton, CashflowGuideDialog } from './CashflowGuideDialog';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -161,6 +162,7 @@ export function CashflowProjectSheet({
   const [monthSavingMode, setMonthSavingMode] = useState<null | 'actual'>(null);
   const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [actualSyncing, setActualSyncing] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
@@ -972,6 +974,7 @@ export function CashflowProjectSheet({
         description={`${projectName} · ${yearMonth}`}
         actions={(
           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            <CashflowGuideButton onClick={() => setGuideOpen(true)} />
             <Button
               variant="outline"
               size="sm"
@@ -1144,6 +1147,8 @@ export function CashflowProjectSheet({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CashflowGuideDialog open={guideOpen} onOpenChange={setGuideOpen} />
 
       <AlertDialog
         open={blocker.state === 'blocked'}
