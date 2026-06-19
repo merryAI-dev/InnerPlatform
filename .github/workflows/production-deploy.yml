@@ -100,7 +100,19 @@ jobs:
             echo "Could not parse Vercel deployment URL" >&2
             exit 1
           fi
+          deployment_host="${deployment_url#https://}"
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
+          echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
+
+      - name: Promote canonical production alias
+        env:
+          DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
+        run: |
+          set -euo pipefail
+          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
+            "${DEPLOYMENT_HOST}" \
+            "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
+            --token "${VERCEL_TOKEN}"
 
       - name: Verify canonical production alias
         env:

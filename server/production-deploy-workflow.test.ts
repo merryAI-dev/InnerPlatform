@@ -47,7 +47,18 @@ describe('production deployment workflow safety', () => {
 
     expect(runBlocks.some((block) => block.includes('${{ steps.'))).toBe(false);
     expect(workflowText).toContain('DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}');
+    expect(workflowText).toContain('DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}');
     expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
+  });
+
+  it('promotes the canonical production alias before verifying it', () => {
+    expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
+    expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
+    expect(workflowText).toContain('Promote canonical production alias');
+    expect(workflowText).toContain('"${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(workflowText.indexOf('Promote canonical production alias')).toBeLessThan(
+      workflowText.indexOf('Verify canonical production alias'),
+    );
   });
 
   it('keeps the Vercel deployment URL parse failure path reachable under pipefail', () => {
