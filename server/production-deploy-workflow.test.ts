@@ -84,7 +84,7 @@ describe('stage release workflow safety', () => {
   });
 
   it('does not hang indefinitely when Vercel returns a blocked preview deployment', () => {
-    expect(stageWorkflowText).toContain('deploy --yes --no-wait --token "${VERCEL_TOKEN}"');
+    expect(stageWorkflowText).toContain('deploy --yes --no-wait --target preview --token "${VERCEL_TOKEN}"');
     expect(stageWorkflowText).toContain('--wait');
     expect(stageWorkflowText).toContain('--timeout 10m');
     expect(stageWorkflowText).toContain('Stage artifact is not READY');

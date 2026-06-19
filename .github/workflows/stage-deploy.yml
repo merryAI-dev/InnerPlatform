@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           output_file="$(mktemp)"
           commit_sha="$(git rev-parse HEAD)"
-          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --no-wait --token "${VERCEL_TOKEN}" \
+          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --no-wait --target preview --token "${VERCEL_TOKEN}" \
             --meta stagePolicy=github-actions-git-only \
             --meta githubCommitSha="${commit_sha}" \
             --meta githubCommitRef="${TARGET_REF}" \
