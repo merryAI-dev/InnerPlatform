@@ -1,0 +1,9 @@
+[
+  { "project": "inner-platform", "hostname": "soc.myscguard.app" },
+  { "project": "inner-platform", "hostname": "devops.myscguard.app" },
+  { "project": "inner-platform", "hostname": "drive.myscguard.app" },
+  { "project": "inner-platform", "hostname": "github.myscguard.app" },
+  { "project": "inner-platform", "hostname": "firestore.myscguard.app" },
+  { "project": "inner-platform", "hostname": "audit.myscguard.app" },
+  { "project": "inner-platform", "hostname": "edge.myscguard.app" }
+]

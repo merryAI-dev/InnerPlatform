@@ -7,7 +7,7 @@ const LIVE_WORKER_DISABLED_ENV = {
   ...process.env,
   BFF_DEPLOY_ENV: 'live',
   FIREBASE_PROJECT_ID: 'inner-platform-live-20260316',
-  BFF_ALLOWED_ORIGINS: 'https://inner-platform.vercel.app',
+  BFF_ALLOWED_ORIGINS: 'https://soc.myscguard.app',
   BFF_WORKERS_ENABLED: 'false',
   FIRESTORE_EMULATOR_HOST: '',
 };

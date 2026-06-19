@@ -1,5 +1,6 @@
 .DS_Store
 node_modules/
+.venv-security/
 dist/
 coverage/
 test-results/
@@ -43,3 +44,7 @@ docs/superpowers/plans/*
 !docs/superpowers/specs/2026-05-23-business-card-db-pwa-vertex-gemini-design.md
 !docs/superpowers/plans/2026-05-23-business-card-db-*.md
 .codex-stack/
+infra/cloudflare/production.tfvars
+infra/cloudflare/.terraform/
+infra/cloudflare/*.tfstate
+infra/cloudflare/*.tfstate.*

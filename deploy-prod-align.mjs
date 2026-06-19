@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 
 const CANONICAL_PRODUCTION_HOST =
-  process.env.VERCEL_CANONICAL_PRODUCTION_HOST?.trim() || 'inner-platform.vercel.app';
+  process.env.VERCEL_CANONICAL_PRODUCTION_HOST?.trim() || 'soc.myscguard.app';
 const CANONICAL_PRODUCTION_URL = `https://${CANONICAL_PRODUCTION_HOST}`;
 const MAX_ALIAS_CHECK_ATTEMPTS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_ATTEMPTS ?? '10', 10);
 const ALIAS_CHECK_DELAY_MS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_DELAY_MS ?? '2000', 10);

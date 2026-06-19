@@ -185,7 +185,6 @@ function isKnownMyscPreviewOrigin(origin) {
 function isKnownMyscVercelOrigin(origin, deployEnv = 'local') {
   const normalized = readOptionalText(origin);
   if (!normalized) return false;
-  if (normalized === 'https://inner-platform.vercel.app') return true;
   if (deployEnv === 'live') return false;
   return isKnownMyscPreviewOrigin(normalized);
 }

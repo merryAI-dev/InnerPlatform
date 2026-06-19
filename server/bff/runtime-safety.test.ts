@@ -8,6 +8,8 @@ import {
 } from './runtime-safety.mjs';
 
 const LIVE_PROJECT_ID = 'inner-platform-live-20260316';
+const LIVE_ORIGIN = 'https://soc.myscguard.app';
+const LEGACY_VERCEL_LIVE_ORIGIN = 'https://inner-platform.vercel.app';
 const LONG_CRON_SECRET = 'vercel-cron-secret-32-characters-ok';
 const LONG_K8S_SECRET = 'k8s-worker-secret-32-characters-ok';
 
@@ -86,7 +88,7 @@ describe('BFF runtime safety', () => {
   it('rejects live BFF when the Firebase project is not the declared live project', () => {
     const config = buildConfig({
       projectId: 'inner-platform-stage-20260316',
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LEGACY_VERCEL_LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
       BFF_SCHEDULER_OWNER: 'vercel',
@@ -94,6 +96,46 @@ describe('BFF runtime safety', () => {
     });
 
     expect(() => assertBffRuntimeSafety(config)).toThrow(/live BFF must use live Firebase project/);
+  });
+
+  it('accepts the Cloudflare live hostname as the default live BFF origin', () => {
+    const config = buildConfig({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: [LIVE_ORIGIN],
+    }, {
+      BFF_DEPLOY_ENV: 'live',
+      BFF_SCHEDULER_OWNER: 'vercel',
+      CRON_SECRET: LONG_CRON_SECRET,
+    });
+
+    expect(() => assertBffRuntimeSafety(config)).not.toThrow();
+  });
+
+  it('rejects the legacy Vercel live hostname unless explicitly approved', () => {
+    const config = buildConfig({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: [LEGACY_VERCEL_LIVE_ORIGIN],
+    }, {
+      BFF_DEPLOY_ENV: 'live',
+      BFF_SCHEDULER_OWNER: 'vercel',
+      CRON_SECRET: LONG_CRON_SECRET,
+    });
+
+    expect(() => assertBffRuntimeSafety(config)).toThrow(`approved live origins: ${LIVE_ORIGIN}`);
+  });
+
+  it('supports explicit live origin overrides for staged cutovers', () => {
+    const config = buildConfig({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: [LIVE_ORIGIN, LEGACY_VERCEL_LIVE_ORIGIN],
+    }, {
+      BFF_DEPLOY_ENV: 'live',
+      BFF_SCHEDULER_OWNER: 'vercel',
+      BFF_LIVE_ALLOWED_ORIGINS: `${LIVE_ORIGIN},${LEGACY_VERCEL_LIVE_ORIGIN}`,
+      CRON_SECRET: LONG_CRON_SECRET,
+    });
+
+    expect(() => assertBffRuntimeSafety(config)).not.toThrow();
   });
 
   it('rejects non-live BFF pointed at the live Firebase project without emulator', () => {
@@ -123,7 +165,7 @@ describe('BFF runtime safety', () => {
   it('rejects weak stage/live scheduler secrets when workers are enabled', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
       BFF_SCHEDULER_OWNER: 'vercel',
@@ -150,7 +192,7 @@ describe('BFF runtime safety', () => {
   it('blocks standalone worker CLIs when workers are disabled', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
       BFF_WORKERS_ENABLED: 'false',
@@ -162,7 +204,7 @@ describe('BFF runtime safety', () => {
   it('blocks standalone worker CLIs when Vercel owns the scheduler', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
       BFF_SCHEDULER_OWNER: 'vercel',
@@ -175,7 +217,7 @@ describe('BFF runtime safety', () => {
   it('blocks Kubernetes scheduler ownership for stage/live while Vercel crons remain configured', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
       BFF_SCHEDULER_OWNER: 'k8s',

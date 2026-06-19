@@ -35,6 +35,26 @@
       "schedule": "0 9 * * *"
     }
   ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "inner-platform.vercel.app" }],
+      "destination": "https://soc.myscguard.app/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "inner-platform-stage-merryai-devs-projects.vercel.app" }],
+      "destination": "https://soc.myscguard.app/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "inner-platform-h799435np-merryai-devs-projects.vercel.app" }],
+      "destination": "https://soc.myscguard.app/:path*",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/__/auth/(.*)",

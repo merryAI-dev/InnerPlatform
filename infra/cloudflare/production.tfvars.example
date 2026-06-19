@@ -1,0 +1,65 @@
+config_status      = "candidate"
+cloudflare_zone_id = "00000000000000000000000000000000"
+web_records_proxied = false
+enable_managed_waf  = false
+enable_rate_limits  = false
+
+# Authoritative inventory source:
+#   node scripts/collect_vercel_edge_inventory.mjs
+#
+# IMPORTANT:
+# - This file is a draft inventory template, not an apply-ready production file.
+# - This POC uses a dedicated security/DevOps control-plane domain.
+# - Domain registered in Cloudflare Registrar on 2026-06-19: `myscguard.app`.
+# - Replace the placeholder zone id with the Cloudflare zone id before using a real production.tfvars.
+# - This does not replace the future official product domain for MYSCube.
+# - Add each hostname as a custom domain in the matching Vercel project first.
+# - Confirm the Vercel-provided DNS target for each custom domain before apply.
+# - Vercel CLI 54.14.2 requested A records to 76.76.21.21 for these subdomains.
+# - Keep web records proxied so Cloudflare WAF/DDoS/rate-limit rules inspect traffic.
+vercel_apps = [
+  {
+    app_name       = "MYSC Security Operations Console"
+    hostname       = "soc.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC DevOps Console"
+    hostname       = "devops.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC Drive Security Console"
+    hostname       = "drive.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC GitHub Security Console"
+    hostname       = "github.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC Firestore Security Console"
+    hostname       = "firestore.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC Audit Console"
+    hostname       = "audit.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  },
+  {
+    app_name       = "MYSC Edge WAF Canary"
+    hostname       = "edge.myscguard.app"
+    vercel_origin  = "inner-platform.vercel.app"
+    origin_project = "inner-platform"
+  }
+]
+
+extra_web_records = []

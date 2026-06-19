@@ -22,7 +22,7 @@ const SCHEDULER_OWNER_ALIASES = new Map([
 ]);
 
 export const DEFAULT_LIVE_FIREBASE_PROJECT_ID = 'inner-platform-live-20260316';
-const LIVE_ALLOWED_ORIGINS = new Set(['https://inner-platform.vercel.app']);
+export const DEFAULT_LIVE_ALLOWED_ORIGINS = ['https://soc.myscguard.app'];
 
 function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -45,6 +45,14 @@ function readBooleanFlag(value) {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return null;
+}
+
+function parseOriginList(value, fallback = []) {
+  const parsed = String(value || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return parsed.length > 0 ? parsed : fallback;
 }
 
 function resolveDeployEnv(env = process.env) {
@@ -78,8 +86,8 @@ function isKnownMyscPreviewOrigin(origin) {
   return /^https:\/\/inner-platform(?:-[a-z0-9-]+)?-merryai-devs-projects\.vercel\.app$/i.test(origin);
 }
 
-function isLiveAllowedOrigin(origin) {
-  return LIVE_ALLOWED_ORIGINS.has(readOptionalText(origin));
+function isLiveAllowedOrigin(origin, liveAllowedOrigins = DEFAULT_LIVE_ALLOWED_ORIGINS) {
+  return new Set(liveAllowedOrigins.map(readOptionalText).filter(Boolean)).has(readOptionalText(origin));
 }
 
 function buildRuntimeSafetyError(violations) {
@@ -121,12 +129,14 @@ export function resolveBffRuntimeSafetyConfig(input = {}, env = process.env) {
   const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID)
     || readOptionalText(env.FIREBASE_LIVE_PROJECT_ID)
     || DEFAULT_LIVE_FIREBASE_PROJECT_ID;
+  const liveAllowedOrigins = parseOriginList(env.BFF_LIVE_ALLOWED_ORIGINS, DEFAULT_LIVE_ALLOWED_ORIGINS);
   const workerSecrets = input.workerSecrets || resolveWorkerSecrets(input, env);
 
   return {
     deployEnv,
     schedulerOwner,
     liveProjectId,
+    liveAllowedOrigins,
     projectId: readOptionalText(input.projectId),
     allowedOrigins: Array.isArray(input.allowedOrigins) ? input.allowedOrigins : [],
     workerSecrets,
@@ -150,6 +160,7 @@ export function assertBffRuntimeSafety(config) {
     deployEnv,
     schedulerOwner,
     liveProjectId,
+    liveAllowedOrigins,
     projectId,
     allowedOrigins,
     workerSecrets,
@@ -176,8 +187,8 @@ export function assertBffRuntimeSafety(config) {
     violations.push('live BFF cannot allow Vercel preview deployment origins');
   }
 
-  if (deployEnv === 'live' && (allowedOrigins.length === 0 || allowedOrigins.some((origin) => !isLiveAllowedOrigin(origin)))) {
-    violations.push('live BFF_ALLOWED_ORIGINS must contain only https://inner-platform.vercel.app');
+  if (deployEnv === 'live' && (allowedOrigins.length === 0 || allowedOrigins.some((origin) => !isLiveAllowedOrigin(origin, liveAllowedOrigins)))) {
+    violations.push(`live BFF_ALLOWED_ORIGINS must contain only approved live origins: ${liveAllowedOrigins.join(', ')}`);
   }
 
   if ((deployEnv === 'stage' || deployEnv === 'live') && schedulerOwner === 'manual') {

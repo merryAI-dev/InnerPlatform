@@ -13,7 +13,7 @@ Production deployment authority belongs to GitHub Actions running from `main` th
 
 | Kind | URL | Use |
 | --- | --- | --- |
-| Live canonical | `https://inner-platform.vercel.app` | Product status, meeting demos, smoke tests |
+| Live canonical | `https://soc.myscguard.app` | Security/DevOps control plane POC, smoke tests |
 | Vercel deployment URL | `*.vercel.app` deployment host | Debugging a specific artifact only |
 | Preview URL | Vercel random deployment URL | Artifact debugging only, not QA login |
 | Stage URL | `https://inner-platform-stage-merryai-devs-projects.vercel.app` | Live rehearsal, Firebase Auth QA, never live evidence |
@@ -86,7 +86,7 @@ Still required before using the workflow:
 - Keep production BFF environment variables in Vercel:
   - `BFF_DEPLOY_ENV=live`
   - `FIREBASE_PROJECT_ID=inner-platform-live-20260316`
-  - `BFF_ALLOWED_ORIGINS=https://inner-platform.vercel.app`
+  - `BFF_ALLOWED_ORIGINS=https://soc.myscguard.app`
   - `BFF_SCHEDULER_OWNER=vercel` or `disabled`
   - 32+ char `CRON_SECRET` when Vercel crons are enabled.
 
@@ -112,7 +112,7 @@ Required BFF environment contract:
 | --- | --- | --- | --- |
 | `BFF_DEPLOY_ENV` | `local` | `stage` | `live` |
 | `FIREBASE_PROJECT_ID` | emulator or non-live project | stage project | `inner-platform-live-20260316` |
-| `BFF_ALLOWED_ORIGINS` | localhost origins | explicit stage/preview origins | `https://inner-platform.vercel.app` only |
+| `BFF_ALLOWED_ORIGINS` | localhost origins | explicit stage/preview origins | `https://soc.myscguard.app` only |
 | `BFF_WORKERS_ENABLED` | usually `false` | explicit | explicit |
 | `BFF_SCHEDULER_OWNER` | `manual`, `disabled`, or local `k8s` testing | `disabled` or `vercel` until cron cutover | `disabled` or `vercel` until cron cutover |
 | Worker secret | optional for disabled | 32+ chars if workers enabled | 32+ chars if workers enabled |

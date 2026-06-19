@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createBffApp } from './app.mjs';
 
 const LIVE_PROJECT_ID = 'inner-platform-live-20260316';
+const LIVE_ORIGIN = 'https://soc.myscguard.app';
 const LONG_CRON_SECRET = 'vercel-cron-secret-32-characters-ok';
 const LONG_K8S_SECRET = 'k8s-worker-secret-32-characters-ok';
 const INTERNAL_WORKER_PATHS = [
@@ -43,7 +44,7 @@ describe('internal worker endpoints (cron)', () => {
   it.each(INTERNAL_WORKER_PATHS)('fails closed before DB access when live workers are disabled for %s', async (workerPath) => {
     const app = createTestApp({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
       env: {
         BFF_DEPLOY_ENV: 'live',
         BFF_WORKERS_ENABLED: 'false',
@@ -61,7 +62,7 @@ describe('internal worker endpoints (cron)', () => {
   it('rejects Vercel-owned worker calls that do not use the Vercel cron bearer token', async () => {
     const app = createTestApp({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
       env: {
         BFF_DEPLOY_ENV: 'live',
         BFF_SCHEDULER_OWNER: 'vercel',
@@ -132,7 +133,7 @@ describe('internal worker endpoints (cron)', () => {
   it('does not auto-allow Vercel preview origins in live mode', async () => {
     const app = createTestApp({
       projectId: LIVE_PROJECT_ID,
-      allowedOrigins: ['https://inner-platform.vercel.app'],
+      allowedOrigins: [LIVE_ORIGIN],
       env: {
         BFF_DEPLOY_ENV: 'live',
         BFF_SCHEDULER_OWNER: 'vercel',
