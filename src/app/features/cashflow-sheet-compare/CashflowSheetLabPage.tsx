@@ -401,10 +401,14 @@ export function CashflowSheetLabPage({
           hideConfigChrome,
         });
       } catch (error) {
-        if (isBffAuthError(error)) {
-          requestLoginFlow();
+        logCashflowLab('config.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
+        if (!cancelled) {
+          if (isBffAuthError(error)) {
+            setConfig(null);
+            setEditingConfig(true);
+          }
+          setErrorMessage(formatError(error));
         }
-        if (!cancelled) setErrorMessage(formatError(error));
       } finally {
         if (!cancelled) setConfigLoading(false);
       }

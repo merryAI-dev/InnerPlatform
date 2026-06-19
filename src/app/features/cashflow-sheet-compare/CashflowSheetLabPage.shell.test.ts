@@ -90,4 +90,15 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('saveExpenseSheetRows');
     expect(pageSource).not.toContain('markSheetSourceApplied');
   });
+
+  it('keeps automatic config load auth failures inline instead of redirecting', () => {
+    const configLoadSource = pageSource.slice(
+      pageSource.indexOf('const result = await getCashflowSheetLabConfigViaBff'),
+      pageSource.indexOf('async function handleSaveConfig'),
+    );
+
+    expect(configLoadSource).toContain('config.load.error');
+    expect(configLoadSource).toContain('setEditingConfig(true)');
+    expect(configLoadSource).not.toContain('requestLoginFlow();');
+  });
 });
