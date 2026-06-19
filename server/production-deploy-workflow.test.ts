@@ -51,6 +51,12 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
   });
 
+  it('runs the production deploy policy guard before deploy', () => {
+    expect(workflowText).toContain('node scripts/assert-safe-live-deploy.mjs');
+    expect(workflowText.indexOf('Verify production deploy policy'))
+      .toBeLessThan(workflowText.indexOf('Deploy to Vercel production'));
+  });
+
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');

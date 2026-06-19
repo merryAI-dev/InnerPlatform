@@ -28,6 +28,8 @@ For a company-wide SaaS surface, stage must be reproducible from Git. A stage in
 
 The workflow currently allows only `main` as the stage source ref. This keeps stage reproducible from the integration branch while production remains separated behind the production workflow and token.
 
+The stage alias must stay on the internal stage host and must not pass through the `myscube.myscguard.app` security redirect path.
+
 ## Required Secrets
 
 The Stage environment or repository must define:

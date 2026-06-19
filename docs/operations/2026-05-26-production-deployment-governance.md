@@ -38,6 +38,18 @@ node deploy-prod-align.mjs
 
 The second command intentionally fails closed.
 
+### Fixed Policy Enforcement
+
+Production deployments must now pass a local workflow policy guard:
+
+- `scripts/assert-safe-live-deploy.mjs`
+- Workflow assertion currently requires:
+  - GitHub Actions execution context
+  - `main` ref (`GITHUB_REF`)
+  - `GITHUB_SHA`
+  - canonical host `myscube.myscguard.app`
+  - VERCEL token presence in production workflow scope
+
 ## Rollback Policy
 
 Rollback means moving the canonical live URL back to a known-good production deployment or reverting a future live manifest commit.
