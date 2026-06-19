@@ -72,6 +72,7 @@ jobs:
           test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_DEPLOY_TOKEN_STAGE" >&2; exit 1; }
           test -n "${VERCEL_ORG_ID}" || { echo "Missing secret: VERCEL_ORG_ID" >&2; exit 1; }
           test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
+          npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
           test -n "$(git rev-parse HEAD)" || { echo "Could not resolve deploy commit." >&2; exit 1; }
 
       - run: npm ci
