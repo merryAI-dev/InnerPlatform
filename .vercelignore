@@ -1,0 +1,14 @@
+.git
+.github
+.terraform
+infra/cloudflare/.terraform
+infra/cloudflare/*.tfstate
+infra/cloudflare/*.tfstate.*
+infra/cloudflare/production.tfvars
+node_modules
+dist
+coverage
+test-results
+playwright-report
+tmp
+.venv-security
