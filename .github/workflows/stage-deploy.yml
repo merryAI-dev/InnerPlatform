@@ -31,9 +31,9 @@ jobs:
     timeout-minutes: 30
     environment:
       name: Stage
-      url: https://inner-platform-stage-merryai-devs-projects.vercel.app
+      url: https://inner-platform-internal-stage-merryai-devs-projects.vercel.app
     env:
-      STAGE_CANONICAL_HOST: inner-platform-stage-merryai-devs-projects.vercel.app
+      STAGE_CANONICAL_HOST: inner-platform-internal-stage-merryai-devs-projects.vercel.app
       VERCEL_CLI_PACKAGE: vercel@50.14.0
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

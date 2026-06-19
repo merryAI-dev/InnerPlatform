@@ -72,7 +72,7 @@ User
 - `myscguard.app`은 Cloudflare Registrar에서 등록 완료된 도메인이다. Zone id는 Cloudflare dashboard에서 확인해 로컬 `infra/cloudflare/production.tfvars`에 반영했다.
 - Vercel custom domain은 `inner-platform` production deployment에 alias로 연결했다. Vercel CLI는 각 hostname에 `A 76.76.21.21` DNS 레코드를 요구했다.
 - Cloudflare final proxy apply는 완료됐다. 7개 `myscguard.app` host가 Cloudflare edge를 통과하고, scanner path/query smoke는 `403`을 반환한다.
-- Vercel direct host 보상통제는 project-level routes를 사용한다. `inner-platform.vercel.app`, stage alias, current generated production URL은 `307`로 `https://myscube.myscguard.app`에 보낸다.
+- Vercel direct host 보상통제는 project-level routes를 사용한다. `inner-platform.vercel.app` 및 current generated production URL은 `307`로 `https://myscube.myscguard.app`에 보낸다. Internal stage alias는 이 보상통제 대상이 아니며 stage route에서 직접 검증한다.
 - Vercel routes publish 후 생성되는 route-version alias는 project-level route가 적용되지 않으므로 publish 직후 제거해야 한다.
 - Google Drive/GitHub/Firestore 관제 기능은 MYSCube `inner-platform` control plane에서 제공한다.
 
@@ -143,7 +143,7 @@ CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run
 검증 기준:
 
 - `inner-platform.vercel.app` -> `307 https://myscube.myscguard.app/...`
-- `inner-platform-stage-merryai-devs-projects.vercel.app` -> internal stage surface, not redirected through `myscube.myscguard.app`
+- `inner-platform-internal-stage-merryai-devs-projects.vercel.app` -> internal stage surface, not redirected through `myscube.myscguard.app`
 - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`

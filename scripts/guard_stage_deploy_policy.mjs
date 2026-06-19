@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
-const STAGE_HOST = 'inner-platform-stage-merryai-devs-projects.vercel.app';
+const STAGE_HOST = 'inner-platform-internal-stage-merryai-devs-projects.vercel.app';
 
 const ALLOWED_FILES = new Set([
   '.github/workflows/stage-deploy.yml',
   'docs/operations/2026-05-26-production-deployment-governance.md',
   'docs/operations/2026-06-18-stage-deployment-governance.md',
+  'server/production-deploy-workflow.test.ts',
   'scripts/assert-safe-stage-deploy.mjs',
   'scripts/guard_stage_deploy_policy.mjs',
 ]);
@@ -61,7 +62,7 @@ function hasForbiddenStageCommand(content) {
   const mentionsStage = compact.includes(STAGE_HOST);
   const aliasesStage =
     /vercel\s+alias\s+set/i.test(compact) &&
-    (mentionsStage || /inner-platform-stage/i.test(compact));
+    (mentionsStage || /inner-platform-(?:internal-)?stage/i.test(compact));
   const deploysStage =
     /vercel\s+deploy/i.test(compact) &&
     (mentionsStage || /stagePolicy=|deploy:stage|Stage Deploy/i.test(compact));

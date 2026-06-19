@@ -24,7 +24,6 @@ const outputPath = process.env.CLOUDFLARE_EDGE_SMOKE_OUTPUT || "tmp/edge-smoke/c
 const expectedTitle = "MYSCube InnerPlatform";
 const defaultDirectHosts = [
   "inner-platform.vercel.app",
-  "inner-platform-stage-merryai-devs-projects.vercel.app",
   "inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app",
   "inner-platform-h799435np-merryai-devs-projects.vercel.app",
   "inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app",
