@@ -60,6 +60,11 @@ The financeWeek code change itself was already merged and tested. The long tail 
    - macOS `getaddrinfo` remained stale, so local `curl` and the final live PWA verify fetch failed.
    - Use `dig @1.1.1.1`, `dig @8.8.8.8`, Cloudflare API evidence, and `curl --resolve` when local resolver cache disagrees.
 
+10. Stage-only UI/API work was merged to `main`, so production inherited it.
+   - `feat(cashflow): add stage guide dialog` and `fix(stage): merge rescue cashflow snapshot into main` put the cashflow sheet-lab surface on the shared production branch.
+   - Stage and live can share financeWeek policy code, but stage-only UX and experimental API surfaces must have an explicit live exposure guard.
+   - A production deploy from `main` is enough to expose stage-only UI unless the route, navigation, embedded component, and BFF mount are all guarded.
+
 ## Policy For Next Time
 
 Do not start repeated stage/live retries until this preflight is complete.
@@ -104,6 +109,13 @@ Do not start repeated stage/live retries until this preflight is complete.
    - Vercel deployment URL
    - Cloudflare DNS record id and final proxied state
    - Firebase Auth authorized-domain evidence
+
+8. Keep stage-only product surfaces out of live by default.
+   - Do not merge a stage-only UI/API to `main` without a live exposure guard.
+   - The guard must cover all entry points: nav item, direct route, embedded component, and BFF route mount.
+   - The guard must not branch financeWeek calculation, financeYear, financeMonth, or financeWeek persistence logic.
+   - Add tests that prove live hosts hide the stage-only UI and live BFF returns 404 for the stage-only API.
+   - If the stage-only surface should become live, ship a separate release note and verification checklist that explicitly says it is no longer stage-only.
 
 ## Required Cutover Order
 

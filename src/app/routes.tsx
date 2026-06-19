@@ -6,6 +6,7 @@ import { AdminRouteProviders } from './data/admin-route-providers';
 import { PortalRouteProviders } from './data/portal-route-providers';
 import { loadLazyRouteModule } from './platform/lazy-route';
 import { shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
+import { shouldShowStageOnlyCashflowSheetLab } from './platform/deployment-surface';
 
 // Lazy-loaded pages — each becomes a separate chunk
 const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
@@ -103,6 +104,12 @@ function MobileAwareAdminHome() {
     : <S C={FeatureSearchPage} />;
 }
 
+function StageOnlyCashflowSheetLabRoute() {
+  return shouldShowStageOnlyCashflowSheetLab()
+    ? <S C={CashflowSheetLabPage} />
+    : <S C={NotFoundPage} />;
+}
+
 export const router = createBrowserRouter([
   // ── Login ──
   { path: '/login', element: <S C={LoginPage} /> },
@@ -176,7 +183,7 @@ export const router = createBrowserRouter([
       { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
       { path: 'payroll', element: <S C={PortalPayrollPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
-      { path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> },
+      { path: 'cashflow/sheets-lab', element: <StageOnlyCashflowSheetLabRoute /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
       { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
       { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
