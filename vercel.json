@@ -44,12 +44,6 @@
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "inner-platform-stage-merryai-devs-projects.vercel.app" }],
-      "destination": "https://myscube.myscguard.app/:path*",
-      "permanent": false
-    },
-    {
-      "source": "/:path*",
       "has": [{ "type": "host", "value": "inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app" }],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
