@@ -222,6 +222,7 @@ function PortalContent() {
   const [cashflowEditLock, setCashflowEditLock] = useState<CashflowEditLock | null>(null);
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const isCashflowWorkspace = location.pathname.startsWith('/portal/cashflow');
   const blockedPortalAccess = Boolean(
     !authLoading
     && !portalLoading
@@ -289,8 +290,6 @@ function PortalContent() {
     rememberRecentPortalProject(currentProject.id);
   }, [currentProject?.id]);
 
-  const isCashflowWorkspace = location.pathname.startsWith('/portal/cashflow');
-
   useEffect(() => {
     if (!db || !isCashflowWorkspace || !currentProject?.id) {
       setCashflowPresenceUsers([]);
@@ -335,6 +334,13 @@ function PortalContent() {
   }, [authUser?.uid]);
 
   const currentProjectName = currentProject?.name || myProject?.name || '';
+  const cashflowHasProjectContext = Boolean(
+    portalUser
+    && (activeProjectId || myProject?.id || authUser?.projectId || currentProject?.id || assignedProjectIds.length > 0),
+  );
+  const shouldShowPortalLoading = authLoading || (
+    portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext)
+  );
   const portalDisplayName = portalUser?.name || authUser?.name || '사용자';
   const portalDisplayRole = portalUser?.role || authUser?.role || 'pm';
   const currentFundInputMode = normalizeProjectFundInputMode(currentProject?.fundInputMode);
@@ -421,7 +427,7 @@ function PortalContent() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (authLoading || portalLoading) {
+  if (shouldShowPortalLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">

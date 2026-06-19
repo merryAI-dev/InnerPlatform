@@ -4,7 +4,6 @@ import React, {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -12,16 +11,14 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
-  onSnapshot,
   query,
   setDoc,
   updateDoc,
   where,
-  type Unsubscribe,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
 import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
 import { filterCashflowWeeksThroughSelectedYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
 import {
@@ -88,16 +85,37 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
 }
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
 
+function patchCashflowWeekLocally(
+  rows: CashflowWeekSheet[],
+  id: string,
+  patch: Partial<CashflowWeekSheet>,
+  fallback?: CashflowWeekSheet,
+): CashflowWeekSheet[] {
+  let matched = false;
+  const nextRows = rows.map((row) => {
+    if (row.id !== id) return row;
+    matched = true;
+    return { ...row, ...patch };
+  });
+  if (!matched && fallback) {
+    nextRows.push({ ...fallback, ...patch });
+  }
+  nextRows.sort((a, b) => {
+    if (a.projectId !== b.projectId) return String(a.projectId).localeCompare(String(b.projectId));
+    if (a.yearMonth !== b.yearMonth) return String(a.yearMonth).localeCompare(String(b.yearMonth));
+    return (a.weekNo || 0) - (b.weekNo || 0);
+  });
+  return nextRows;
+}
+
 export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { routeMode } = useFirestoreAccessPolicy(user?.role);
   const { db, isOnline, orgId } = useFirebase();
   const firestoreEnabled = isOnline && !!db;
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const unsubsRef = useRef<Unsubscribe[]>([]);
 
   const setYearMonth = useCallback((value: string) => {
     const next = typeof value === 'string' ? value.trim() : '';
@@ -144,19 +162,22 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   }, [orgId, user]);
 
   useEffect(() => {
-    unsubsRef.current.forEach((u) => u());
-    unsubsRef.current = [];
+    let cancelled = false;
 
     if (authLoading || !isAuthenticated || !user) {
       setWeeks([]);
       setIsLoading(false);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (!firestoreEnabled || !db) {
       setWeeks([]);
       setIsLoading(false);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     setIsLoading(true);
@@ -172,8 +193,9 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       limit(5000),
     );
 
-    unsubsRef.current.push(
-      onSnapshot(q, (snap) => {
+    void getDocs(q)
+      .then((snap) => {
+        if (cancelled) return;
         const docs = filterCashflowWeeksThroughSelectedYear(
           snap.docs.map((d) => d.data() as CashflowWeekSheet),
           yearMonth,
@@ -185,18 +207,18 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         });
         setWeeks(docs);
         setIsLoading(false);
-      }, (err) => {
-        console.error('[CashflowWeeks] listen error:', err);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[CashflowWeeks] fetch error:', err);
         setWeeks([]);
         setIsLoading(false);
-      }),
-    );
+      });
 
     return () => {
-      unsubsRef.current.forEach((u) => u());
-      unsubsRef.current = [];
+      cancelled = true;
     };
-  }, [authLoading, isAuthenticated, user, db, firestoreEnabled, orgId, routeMode, yearMonth]);
+  }, [authLoading, isAuthenticated, user?.uid, db, firestoreEnabled, orgId, yearMonth]);
 
   const upsertWeekAmounts = useCallback(async (input: {
     projectId: string;
@@ -589,7 +611,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     });
 
     try {
-      await updateDoc(ref, {
+      const patch: Partial<CashflowWeekSheet> = {
         pmSubmitted: true,
         pmSubmittedAt: now,
         pmSubmittedByUid: actor.uid,
@@ -598,6 +620,9 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         updatedByUid: actor.uid,
         updatedByName: actor.name,
         tenantId: orgId,
+      };
+      await updateDoc(ref, {
+        ...patch,
       } as Partial<CashflowWeekSheet> as any);
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
@@ -612,6 +637,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         mode: 'actual',
         summary: { docId: id, created: false },
       });
+      setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch));
       return;
     } catch (error) {
       if (!shouldCreateDocOnUpdateError(error)) {
@@ -633,7 +659,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await setDoc(ref, {
+    const initial: CashflowWeekSheet = {
       id,
       tenantId: orgId,
       projectId,
@@ -652,7 +678,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedByUid: actor.uid,
       updatedByName: actor.name,
-    } as CashflowWeekSheet, { merge: false });
+    };
+    await setDoc(ref, initial, { merge: false });
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'success',
@@ -666,6 +693,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       mode: 'actual',
       summary: { docId: id, created: true },
     });
+    setWeeks((prev) => patchCashflowWeekLocally(prev, id, initial, initial));
   }, [db, orgId, user]);
 
   const closeWeekAsAdmin = useCallback(async (input: {
@@ -703,7 +731,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     });
 
     try {
-      await updateDoc(ref, {
+      const patch: Partial<CashflowWeekSheet> = {
         adminClosed: true,
         adminClosedAt: now,
         adminClosedByUid: actor.uid,
@@ -712,6 +740,9 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         updatedByUid: actor.uid,
         updatedByName: actor.name,
         tenantId: orgId,
+      };
+      await updateDoc(ref, {
+        ...patch,
       } as Partial<CashflowWeekSheet> as any);
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
@@ -725,6 +756,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         weekNo,
         summary: { docId: id, created: false },
       });
+      setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch));
       return;
     } catch (error) {
       if (!shouldCreateDocOnUpdateError(error)) {
@@ -745,7 +777,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await setDoc(ref, {
+    const initial: CashflowWeekSheet = {
       id,
       tenantId: orgId,
       projectId,
@@ -764,7 +796,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       updatedByUid: actor.uid,
       updatedByName: actor.name,
-    } as CashflowWeekSheet, { merge: false });
+    };
+    await setDoc(ref, initial, { merge: false });
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'success',
@@ -777,6 +810,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       weekNo,
       summary: { docId: id, created: true },
     });
+    setWeeks((prev) => patchCashflowWeekLocally(prev, id, initial, initial));
   }, [db, orgId, user]);
 
   const updateVarianceFlag = useCallback(async (input: {
@@ -787,12 +821,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!db) return;
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
     const now = new Date().toISOString();
-    await updateDoc(ref, {
+    const firestorePatch = {
       varianceFlag: input.varianceFlag ?? null,
       varianceHistory: input.varianceHistory,
       updatedAt: now,
       tenantId: orgId,
-    } as any);
+    };
+    await updateDoc(ref, firestorePatch as any);
+    setWeeks((prev) => patchCashflowWeekLocally(prev, input.sheetId, {
+      varianceFlag: input.varianceFlag,
+      varianceHistory: input.varianceHistory,
+      updatedAt: now,
+      tenantId: orgId,
+    }));
   }, [db, orgId]);
 
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
