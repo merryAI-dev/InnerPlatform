@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           output_file="$(mktemp)"
           commit_sha="$(git rev-parse HEAD)"
-          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --token "${VERCEL_TOKEN}" \
+          npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --no-wait --token "${VERCEL_TOKEN}" \
             --meta stagePolicy=github-actions-git-only \
             --meta githubCommitSha="${commit_sha}" \
             --meta githubCommitRef="${TARGET_REF}" \
@@ -123,6 +123,8 @@ jobs:
           inspect_file="$(mktemp)"
           npx --yes "${VERCEL_CLI_PACKAGE}" inspect \
             "${DEPLOYMENT_HOST}" \
+            --wait \
+            --timeout 10m \
             --format=json \
             --token "${VERCEL_TOKEN}" > "${inspect_file}"
           node -e '
