@@ -49,9 +49,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('requestLoginFlow');
     expect(pageSource).toContain('runWithGoogleSheetsAuthRetry');
     expect(pageSource).toContain("runWithGoogleSheetsAuthRetry('config.save'");
-    expect(pageSource).toContain('}, { forceRefresh: true })');
-    expect(pageSource).toContain('google_token_required');
-    expect(pageSource).toContain('Google Sheets 권한 연결이 필요합니다.');
+    expect(pageSource).toContain('service_account_fallback');
+    expect(pageSource).not.toContain('google_token_required');
+    expect(pageSource).not.toContain('Google Sheets 권한 연결이 필요합니다.');
     expect(pageSource).toContain('isGoogleSheetsTokenExpiredError');
     expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
     expect(pageSource).toContain('onHeaderSummaryChange');

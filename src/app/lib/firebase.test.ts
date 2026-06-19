@@ -125,10 +125,11 @@ describe('Firebase auth domain proxy', () => {
 });
 
 describe('Google workspace auth provider', () => {
-  it('forces consent when requesting Sheets access tokens', () => {
+  it('requests the Google Sheets scopes without forcing consent on every login', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'firebase.ts'), 'utf8');
     expect(source).toContain("addScope('https://www.googleapis.com/auth/spreadsheets')");
-    expect(source).toContain("prompt: 'consent select_account'");
+    expect(source).toContain("prompt: 'select_account'");
+    expect(source).not.toContain("prompt: 'consent select_account'");
   });
 });
 

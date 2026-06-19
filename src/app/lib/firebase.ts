@@ -273,7 +273,7 @@ export function getGoogleAuthProvider(): GoogleAuthProvider {
   const domains = getAllowedEmailDomains(import.meta.env);
   const hd = domains.length === 1 ? domains[0] : '';
   _googleProvider.setCustomParameters({
-    prompt: 'consent select_account',
+    prompt: 'select_account',
     ...(hd ? { hd } : {}),
   });
   return _googleProvider;
