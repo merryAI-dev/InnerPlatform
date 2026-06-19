@@ -92,4 +92,11 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain("mx-auto w-full max-w-[1480px] px-5 py-2.5");
     expect(portalLayoutSource).not.toContain("p-4 md:p-6");
   });
+
+  it('does not block cashflow pages on unrelated portal background loading once a project is resolved', () => {
+    expect(portalLayoutSource).toContain('cashflowHasProjectContext');
+    expect(portalLayoutSource).toContain('shouldShowPortalLoading');
+    expect(portalLayoutSource).toContain('portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext)');
+    expect(portalLayoutSource).not.toContain('if (authLoading || portalLoading)');
+  });
 });

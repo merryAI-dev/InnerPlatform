@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const providerFiles = [
   'board-store.tsx',
-  'cashflow-weeks-store.tsx',
   'hr-announcements-store.tsx',
   'payroll-store.tsx',
   'portal-store.tsx',
@@ -22,10 +21,11 @@ describe('route-aware firestore realtime providers', () => {
     });
   }
 
-  it('keeps cashflow weeks realtime for project-scoped users so actual values do not go stale', () => {
+  it('loads cashflow weeks once so sheet-link imports are static until an explicit user action', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'cashflow-weeks-store.tsx'), 'utf8');
 
-    expect(source).toContain('onSnapshot(q,');
-    expect(source).not.toContain('getDocs(q)');
+    expect(source).toContain('getDocs(q)');
+    expect(source).not.toContain('onSnapshot(q,');
+    expect(source).not.toContain('useFirestoreAccessPolicy');
   });
 });
