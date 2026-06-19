@@ -98,18 +98,34 @@ describe('route provider behavior', () => {
     });
   });
 
-  it('limits portal cashflow route providers to cashflow weeks only', () => {
+  it('keeps portal shell providers mounted while limiting route-specific providers', () => {
     expect(resolvePortalProviderScope('/portal/cashflow')).toEqual({
-      hrAnnouncements: false,
-      payroll: false,
+      hrAnnouncements: true,
+      payroll: true,
       cashflowWeeks: true,
       board: false,
       careerProfile: false,
       training: false,
     });
-    expect(resolvePortalProviderScope('/portal/payroll')).toMatchObject({
+    expect(resolvePortalProviderScope('/portal/cashflow/sheets-lab')).toMatchObject({
+      hrAnnouncements: true,
       payroll: true,
-      cashflowWeeks: false,
+      cashflowWeeks: true,
+      board: false,
+      careerProfile: false,
+      training: false,
+    });
+    expect(resolvePortalProviderScope('/portal/payroll')).toEqual({
+      hrAnnouncements: true,
+      payroll: true,
+      cashflowWeeks: true,
+      board: false,
+      careerProfile: false,
+      training: false,
+    });
+    expect(resolvePortalProviderScope('/portal/career-profile')).toMatchObject({
+      careerProfile: true,
+      training: true,
     });
   });
 });

@@ -12,8 +12,8 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   const path = pathname.replace(/\/+$/, '') || '/portal';
   if (path === '/portal/cashflow' || path === '/portal/cashflow/sheets-lab') {
     return {
-      hrAnnouncements: false,
-      payroll: false,
+      hrAnnouncements: true,
+      payroll: true,
       cashflowWeeks: true,
       board: false,
       careerProfile: false,
@@ -22,9 +22,9 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   }
   if (path === '/portal/payroll') {
     return {
-      hrAnnouncements: false,
+      hrAnnouncements: true,
       payroll: true,
-      cashflowWeeks: false,
+      cashflowWeeks: true,
       board: false,
       careerProfile: false,
       training: false,
@@ -32,8 +32,8 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   }
   if (path.startsWith('/portal/board')) {
     return {
-      hrAnnouncements: false,
-      payroll: false,
+      hrAnnouncements: true,
+      payroll: true,
       cashflowWeeks: false,
       board: true,
       careerProfile: false,
@@ -42,8 +42,8 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   }
   if (path === '/portal/training') {
     return {
-      hrAnnouncements: false,
-      payroll: false,
+      hrAnnouncements: true,
+      payroll: true,
       cashflowWeeks: false,
       board: false,
       careerProfile: false,
@@ -52,12 +52,12 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   }
   if (path === '/portal/career-profile') {
     return {
-      hrAnnouncements: false,
-      payroll: false,
+      hrAnnouncements: true,
+      payroll: true,
       cashflowWeeks: false,
       board: false,
       careerProfile: true,
-      training: false,
+      training: true,
     };
   }
   return {
