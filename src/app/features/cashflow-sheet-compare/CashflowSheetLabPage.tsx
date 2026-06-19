@@ -1,6 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpToLine, Copy, Loader2, Pencil, Search, Settings } from 'lucide-react';
-import Lottie from 'lottie-react';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
@@ -30,7 +29,6 @@ import {
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { RollingAmount } from '../../components/ui/rolling-amount';
-import { sheetWritebackAnimation } from './sheet-writeback-animation';
 
 function formatMode(mode: string) {
   return mode === 'projection' ? 'Projection' : 'Actual';
@@ -108,15 +106,22 @@ function formatDurationMs(value: number | undefined) {
 
 function SheetWritebackIllustration() {
   return (
-    <div className="relative mx-8 mt-5 overflow-hidden rounded-[26px] bg-gradient-to-br from-white via-slate-50 to-cyan-50 px-5 pb-5 pt-4 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.72)]">
-      <div className="flex min-h-[138px] items-center justify-end">
-        <Lottie
-          animationData={sheetWritebackAnimation}
-          loop
-          autoplay
-          className="h-[132px] w-[190px] shrink-0"
-          aria-label="Google Sheet 업데이트 일러스트"
-        />
+    <div className="mx-8 mt-5 overflow-hidden rounded-[22px] bg-slate-50 px-5 py-5 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.72)]">
+      <div className="flex min-h-[116px] items-center justify-end">
+        <div className="grid w-full max-w-[240px] gap-2 rounded-[14px] border border-slate-200 bg-white p-3 shadow-sm" aria-label="Google Sheet 업데이트 미리보기">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
+            <div className="h-2.5 w-20 rounded bg-slate-200" />
+            <ArrowUpToLine className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {Array.from({ length: 9 }).map((_, index) => (
+              <div
+                key={index}
+                className={`h-5 rounded ${index % 4 === 0 ? 'bg-blue-100' : 'bg-slate-100'}`}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
