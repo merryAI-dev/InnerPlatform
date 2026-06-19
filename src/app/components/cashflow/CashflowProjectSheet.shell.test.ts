@@ -77,4 +77,11 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowWeeksStoreSource).not.toContain('allowPrivilegedReadAll');
     expect(cashflowWeeksStoreSource).not.toContain('projectIds.length === 0');
   });
+
+  it('prefers a freshly resolved Firebase ID token for BFF calls', () => {
+    expect(cashflowProjectSheetSource).toContain('firebaseToken || bffActor.idToken');
+    expect(cashflowProjectSheetSource).toContain('getIdToken(Boolean(options.forceRefresh))');
+    expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
+    expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
+  });
 });

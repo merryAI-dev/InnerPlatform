@@ -166,7 +166,7 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
-  it('passes Google access token when saving the lab sheet config if available', async () => {
+  it('does not pass Google access tokens when saving the lab sheet config', async () => {
     const client = asMockClient({
       request: vi.fn(async () => ({
         data: {
@@ -187,17 +187,14 @@ describe('sheets cashflow readonly client', () => {
       projectId: 'p001',
       value: 'sheet-001',
       sheetName: 'cashflow(사용내역 연동)',
-      googleAccessToken: 'google-token-123',
       client,
     });
 
     expect(client.request).toHaveBeenCalledWith(
       '/api/v1/projects/p001/cashflow-sheet-lab/config',
-      expect.objectContaining({
-        method: 'PUT',
-        headers: { 'x-google-access-token': 'google-token-123' },
-      }),
+      expect.objectContaining({ method: 'PUT' }),
     );
+    expect(client.request.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('applies the reviewed sheet values through same-origin BFF', async () => {
