@@ -102,7 +102,7 @@ describeRust('settlement-rust-kernel', () => {
     if (build.status !== 0) {
       throw new Error(build.stderr || build.stdout || 'Rust settlement kernel build failed.');
     }
-  });
+  }, 60_000);
 
   it('matches TypeScript usage-ledger replay on the tracked normal balance window', () => {
     const fixture = loadFixture();
