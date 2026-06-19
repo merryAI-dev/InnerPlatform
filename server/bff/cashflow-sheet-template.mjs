@@ -52,7 +52,7 @@ export function parseCashflowWeekLabel(value) {
   const month = Number.parseInt(match[2], 10);
   const weekNo = Number.parseInt(match[3], 10);
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(weekNo)) return null;
-  if (month < 1 || month > 12 || weekNo < 1 || weekNo > 6) return null;
+  if (month < 1 || month > 12 || weekNo < 1 || weekNo > 5) return null;
   return {
     raw: normalizeText(value),
     year: 2000 + year,

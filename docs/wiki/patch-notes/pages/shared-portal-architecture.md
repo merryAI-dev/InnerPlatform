@@ -34,6 +34,7 @@
 
 ## Recent Changes
 
+- [2026-06-19] Cashflow/사업비 주차 계산을 stage/live 공통 finance week core로 통합했다. 월 내부 Monday-based 5-slot 정책을 적용하고 raw 6주차는 financeWeek 5로 저장/집계되도록 BFF, 포털 저장, export 표면을 같은 로직으로 맞췄다.
 - [2026-06-02] 프로젝트 등록/수정 editor contract에 견적서와 제안서 첨부를 추가하고, 25MB를 넘는 문서는 BFF raw upload 대신 Firebase Storage direct upload로 처리하도록 분리했다. 포털 safe fetch 경로는 ledgers/transactions/comments/evidences/auditLogs/partEntries를 초기 fetch하고 write 후 로컬 상태도 갱신해 화면 데이터 공백을 줄였다.
 - [2026-05-20] 프로젝트 등록, 포털 수정, Admin 승인 화면이 같은 5단계 editor contract를 쓰도록 공통 draft/payload/patch builder를 분리했다. 승인/재제출은 request 조회를 먼저 검증하고 project/request 상태 patch를 같은 Firestore transaction에서 쓰도록 보강했다.
 - [2026-04-21] 세세목 도입 프로젝트는 `budget_tree_v2`를 원본으로 사용하고, 저장 시 `budget_code_book`을 2단 파생본으로 함께 동기화하도록 정리했다.

@@ -320,7 +320,7 @@ export const cashflowExportSchema = z.object({
 
 export const cashflowWeekAmountsSchema = z.object({
   yearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
-  weekNo: z.number().int().min(1).max(6),
+  weekNo: z.number().int().min(1).max(5),
   mode: z.enum(['projection', 'actual']),
   amounts: z.record(z.string().trim().min(1), z.number().finite()),
 }).strict();

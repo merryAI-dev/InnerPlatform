@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { getMonthMondayWeeks, isYearMonth } from './cashflow-weeks';
+import { findWeekForDate, getMonthMondayWeeks, getYearMondayWeeks, isYearMonth, resolveFinanceWeekForDate } from './cashflow-weeks';
 
-describe('cashflow week buckets (Wednesday-based)', () => {
+describe('cashflow week buckets (finance month policy)', () => {
   it('validates YYYY-MM inputs', () => {
     expect(isYearMonth('2026-01')).toBe(true);
     expect(isYearMonth('2026-1')).toBe(false);
@@ -10,29 +10,70 @@ describe('cashflow week buckets (Wednesday-based)', () => {
     expect(isYearMonth(null)).toBe(false);
   });
 
-  it('computes January 2026 as 5 Wednesday-based weeks', () => {
+  it('computes January 2026 as 5 Monday-based finance weeks', () => {
     const weeks = getMonthMondayWeeks('2026-01');
     expect(weeks.map((w) => w.weekStart)).toEqual([
-      '2025-12-31',
-      '2026-01-07',
-      '2026-01-14',
-      '2026-01-21',
-      '2026-01-28',
+      '2026-01-01',
+      '2026-01-05',
+      '2026-01-12',
+      '2026-01-19',
+      '2026-01-26',
     ]);
     expect(weeks.map((w) => w.label)).toEqual(['26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5']);
-    expect(weeks[0]).toMatchObject({ yearMonth: '2026-01', weekNo: 1, weekEnd: '2026-01-06' });
-    expect(weeks[4]).toMatchObject({ weekNo: 5, weekEnd: '2026-02-03' });
+    expect(weeks[0]).toMatchObject({ yearMonth: '2026-01', weekNo: 1, weekEnd: '2026-01-04' });
+    expect(weeks[4]).toMatchObject({ weekNo: 5, weekEnd: '2026-01-31' });
   });
 
-  it('computes March 2026 as 4 Wednesday-based weeks', () => {
+  it('computes every month as 5 finance weeks for cashflow slots', () => {
     const weeks = getMonthMondayWeeks('2026-03');
     expect(weeks.map((w) => w.weekStart)).toEqual([
-      '2026-03-04',
-      '2026-03-11',
-      '2026-03-18',
-      '2026-03-25',
+      '2026-03-01',
+      '2026-03-02',
+      '2026-03-09',
+      '2026-03-16',
+      '2026-03-23',
     ]);
-    expect(weeks.map((w) => w.label)).toEqual(['26-3-1', '26-3-2', '26-3-3', '26-3-4']);
+    expect(weeks.map((w) => w.label)).toEqual(['26-3-1', '26-3-2', '26-3-3', '26-3-4', '26-3-5']);
+    expect(weeks[4]).toMatchObject({ weekNo: 5, weekEnd: '2026-03-31' });
+  });
+
+  it('resolves required stage/live finance week boundary dates without environment branching', () => {
+    expect(resolveFinanceWeekForDate('2026-06-29')).toMatchObject({
+      financeYear: 2026,
+      financeMonth: 6,
+      rawWeek: 5,
+      financeWeek: 5,
+      yearMonth: '2026-06',
+      weekNo: 5,
+      label: '26-6-5',
+    });
+    expect(resolveFinanceWeekForDate('2026-07-01')).toMatchObject({
+      financeYear: 2026,
+      financeMonth: 7,
+      rawWeek: 1,
+      financeWeek: 1,
+      yearMonth: '2026-07',
+      weekNo: 1,
+      label: '26-7-1',
+    });
+    expect(resolveFinanceWeekForDate('2026-08-31')).toMatchObject({
+      financeYear: 2026,
+      financeMonth: 8,
+      rawWeek: 6,
+      financeWeek: 5,
+      yearMonth: '2026-08',
+      weekNo: 5,
+      label: '26-8-5',
+      weekStart: '2026-08-24',
+      weekEnd: '2026-08-31',
+    });
+  });
+
+  it('finds dates by their own finance month even when adjacent month ranges overlap', () => {
+    const weeks = getYearMondayWeeks(2026);
+    expect(findWeekForDate('2026-06-29', weeks)).toMatchObject({ yearMonth: '2026-06', weekNo: 5 });
+    expect(findWeekForDate('2026-07-01', weeks)).toMatchObject({ yearMonth: '2026-07', weekNo: 1 });
+    expect(findWeekForDate('2026-08-31', weeks)).toMatchObject({ yearMonth: '2026-08', weekNo: 5, rawWeek: 6 });
   });
 
   it('returns empty for invalid yearMonth', () => {

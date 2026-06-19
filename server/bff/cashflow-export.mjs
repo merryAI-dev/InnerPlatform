@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { getMonthFinanceWeeks } from '../../src/app/platform/cashflow-week-core.mjs';
 import {
   CASHFLOW_ALL_LINES,
   CASHFLOW_IN_LINES,
@@ -38,78 +39,8 @@ function formatWeekLabel(yearMonth, weekNo) {
   return `${String(parsed.year % 100).padStart(2, '0')}-${parsed.month}-${weekNo}`;
 }
 
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
-function formatIsoDate(year, month, day) {
-  return `${String(year)}-${pad2(month)}-${pad2(day)}`;
-}
-
-function addDaysUtc(isoDate, deltaDays) {
-  const [yRaw, mRaw, dRaw] = isoDate.split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  const day = Number.parseInt(dRaw, 10);
-  const base = Date.UTC(year, month - 1, day);
-  const next = new Date(base + deltaDays * 24 * 60 * 60 * 1000);
-  return formatIsoDate(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate());
-}
-
-function dayOfWeekUtc(year, month, day) {
-  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-}
-
-function daysInMonthUtc(year, month) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function startOfWeekWednesday(isoDate) {
-  const [yRaw, mRaw, dRaw] = isoDate.split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  const day = Number.parseInt(dRaw, 10);
-  const dow = dayOfWeekUtc(year, month, day);
-  const delta = -((dow - 3 + 7) % 7);
-  return addDaysUtc(isoDate, delta);
-}
-
-function countDaysInMonthForWeek(weekStart, year, month) {
-  let count = 0;
-  for (let i = 0; i < 7; i += 1) {
-    const date = addDaysUtc(weekStart, i);
-    const [yy, mm] = date.split('-');
-    if (Number.parseInt(yy, 10) === year && Number.parseInt(mm, 10) === month) count += 1;
-  }
-  return count;
-}
-
 function getMonthWeeks(yearMonth) {
-  const parsed = parseYearMonth(yearMonth);
-  if (!parsed) return [];
-  const { year, month } = parsed;
-  const firstDay = formatIsoDate(year, month, 1);
-  const lastDay = formatIsoDate(year, month, daysInMonthUtc(year, month));
-  let weekStart = startOfWeekWednesday(firstDay);
-  const weeks = [];
-  const yy = year % 100;
-  let weekNo = 0;
-  while (weekStart <= lastDay) {
-    const daysInMonth = countDaysInMonthForWeek(weekStart, year, month);
-    if (daysInMonth >= 4) {
-      weekNo += 1;
-      const weekEnd = addDaysUtc(weekStart, 6);
-      weeks.push({
-        yearMonth,
-        weekNo,
-        weekStart,
-        weekEnd,
-        label: `${yy}-${month}-${weekNo}`,
-      });
-    }
-    weekStart = addDaysUtc(weekStart, 7);
-  }
-  return weeks;
+  return getMonthFinanceWeeks(yearMonth);
 }
 
 export function expandCashflowYearMonthRange(startYearMonth, endYearMonth) {

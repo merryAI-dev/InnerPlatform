@@ -940,7 +940,7 @@ export interface WeeklySubmissionStatus {
   tenantId?: string;
   projectId: string;
   yearMonth: string; // "YYYY-MM"
-  weekNo: number; // 1..6
+  weekNo: number; // financeWeek 1..5
   projectionEdited?: boolean;
   projectionEditedAt?: string;
   projectionEditedByName?: string;
@@ -1221,7 +1221,7 @@ export interface CashflowWeekSheet {
   tenantId?: string;
   projectId: string;
   yearMonth: string; // "2026-01"
-  weekNo: number; // sheet-range cashflow week number, usually 1..5 and occasionally 6
+  weekNo: number; // financeWeek 1..5
   weekStart: string; // "YYYY-MM-DD"
   weekEnd: string; // "YYYY-MM-DD"
   sheetWeekSource?: 'cashflow-sheet-lab';

@@ -32,38 +32,27 @@ function findRow(rows: Array<Array<string | number>>, label: string): Array<stri
   return rows.find((row) => row[0] === label);
 }
 
-function findMonthWithMissingFifthWeek(year: number): string {
-  for (let month = 1; month <= 12; month += 1) {
-    const ym = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
-    const slots = buildCashflowWeekSlots(ym);
-    if (slots.length === 5 && slots.filter((slot) => slot.present).length === 4) {
-      return ym;
-    }
-  }
-  throw new Error('Expected at least one month with only four fixed weeks');
-}
-
 describe('cashflow-export', () => {
   it('normalizes year-month input and expands contiguous ranges', () => {
     expect(normalizeCashflowYearMonths(['2026-03', '2026-01', 'bad', '2026-01'])).toEqual(['2026-01', '2026-03']);
     expect(expandCashflowYearMonthRange('2026-01', '2026-03')).toEqual(['2026-01', '2026-02', '2026-03']);
   });
 
-  it('keeps a fixed five-slot month shape even when the fifth week does not exist', () => {
-    const yearMonth = findMonthWithMissingFifthWeek(2026);
+  it('keeps a fixed five-slot month shape and merges raw week 6 into finance week 5', () => {
+    const yearMonth = '2026-08';
     const slots = buildCashflowWeekSlots(yearMonth);
 
     expect(slots).toHaveLength(5);
     expect(slots[4]).toMatchObject({
       weekNo: 5,
-      present: false,
-      weekStart: '',
-      weekEnd: '',
+      present: true,
+      weekStart: '2026-08-24',
+      weekEnd: '2026-08-31',
     });
   });
 
   it('builds single-project workbook sheets with projection and actual separated', () => {
-    const yearMonth = findMonthWithMissingFifthWeek(2026);
+    const yearMonth = '2026-08';
     const slots = buildCashflowWeekSlots(yearMonth);
     const week1 = slots[0];
     const week2 = slots[1];
@@ -116,7 +105,7 @@ describe('cashflow-export', () => {
   });
 
   it('builds combined and multi-sheet workbooks for multiple projects', () => {
-    const yearMonth = findMonthWithMissingFifthWeek(2026);
+    const yearMonth = '2026-08';
     const slots = buildCashflowWeekSlots(yearMonth);
     const week1 = slots[0];
 

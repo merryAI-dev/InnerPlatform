@@ -68,8 +68,8 @@ describe('payroll-cashflow-alignment', () => {
           projectId: 'p-1',
           yearMonth: '2026-04',
           weekNo: 3,
-          weekStart: '2026-04-15',
-          weekEnd: '2026-04-21',
+          weekStart: '2026-04-13',
+          weekEnd: '2026-04-19',
           projection: {
             MYSC_LABOR_OUT: 3100000,
           },
@@ -81,8 +81,8 @@ describe('payroll-cashflow-alignment', () => {
       yearMonth: '2026-04',
       weekNo: 3,
       weekLabel: '26-4-3',
-      weekStart: '2026-04-15',
-      weekEnd: '2026-04-21',
+      weekStart: '2026-04-13',
+      weekEnd: '2026-04-19',
     });
     expect(alignment.cashflowProjectedPayrollAmount).toBe(3100000);
     expect(alignment.pmExpectedPayrollAmount).toBe(3500000);
