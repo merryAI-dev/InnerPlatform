@@ -114,16 +114,6 @@ jobs:
             "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
             --token "${VERCEL_TOKEN}"
 
-      - name: Promote production alias
-        env:
-          DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
-        run: |
-          set -euo pipefail
-          npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
-            "${DEPLOYMENT_URL}" \
-            "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            --token "${VERCEL_TOKEN}"
-
       - name: Verify canonical production alias
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
