@@ -178,25 +178,42 @@ jobs:
               throw new Error(`Stage alias points to ${inspect.url}, expected ${expectedHost}`);
             }
           ' "${inspect_file}"
-          root_status="$(curl -sS -o /tmp/stage-root-response.txt -w '%{http_code}' "https://${STAGE_CANONICAL_HOST}/")"
+          root_status="$(curl -sS -D /tmp/stage-root-headers.txt -o /tmp/stage-root-response.txt -w '%{http_code}' "https://${STAGE_CANONICAL_HOST}/")"
           case "${root_status}" in
-            200|403) ;;
+            200) ;;
             *)
               echo "Unexpected stage root status: ${root_status}" >&2
+              cat /tmp/stage-root-headers.txt >&2 || true
               cat /tmp/stage-root-response.txt >&2 || true
               exit 1
               ;;
           esac
-          config_status="$(curl -sS -o /tmp/stage-config-response.txt -w '%{http_code}' \
+          if grep -iq '^cf-ray:' /tmp/stage-root-headers.txt || grep -iq '^server: cloudflare' /tmp/stage-root-headers.txt; then
+            echo "Stage must stay on the internal Vercel route and must not traverse Cloudflare." >&2
+            cat /tmp/stage-root-headers.txt >&2 || true
+            exit 1
+          fi
+          if grep -iq '^content-security-policy-report-only:' /tmp/stage-root-headers.txt; then
+            echo "Stage must not receive security-domain CSP report-only headers." >&2
+            cat /tmp/stage-root-headers.txt >&2 || true
+            exit 1
+          fi
+          config_status="$(curl -sS -D /tmp/stage-config-headers.txt -o /tmp/stage-config-response.txt -w '%{http_code}' \
             "https://${STAGE_CANONICAL_HOST}/api/v1/projects/p1773651024850/cashflow-sheet-lab/config")"
           case "${config_status}" in
-            200|401|403) ;;
+            200|401) ;;
             *)
               echo "Unexpected cashflow config status from stage: ${config_status}" >&2
+              cat /tmp/stage-config-headers.txt >&2 || true
               cat /tmp/stage-config-response.txt >&2 || true
               exit 1
               ;;
           esac
+          if grep -iq '^cf-ray:' /tmp/stage-config-headers.txt || grep -iq '^server: cloudflare' /tmp/stage-config-headers.txt; then
+            echo "Stage API must stay on the internal Vercel route and must not traverse Cloudflare." >&2
+            cat /tmp/stage-config-headers.txt >&2 || true
+            exit 1
+          fi
 
       - name: Stage deployment summary
         env:

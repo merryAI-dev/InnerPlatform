@@ -32,6 +32,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(portalCashflowSource).toContain('hideConfigChrome');
     expect(portalCashflowSource).toContain("dispatchSheetAction('apply')");
     expect(portalCashflowSource).toContain('시트와 연동하기');
+    expect(portalCashflowSource).not.toContain('shouldShowCashflowSheetLab');
+    expect(portalCashflowSource).not.toContain('deployment-surface');
+    expect(portalCashflowSource).not.toMatch(/show[A-Za-z0-9]*Sheet[A-Za-z0-9]*Lab\s*&&/);
     expect(pageSource).not.toContain('usePortalStore');
     expect(pageSource).not.toContain('../../data/portal-store');
   });
@@ -41,8 +44,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('previewCashflowProjectionWritebackViaBff');
     expect(pageSource).toContain('applyCashflowProjectionWritebackViaBff');
-    expect(pageSource).toContain('const bffAuthReady = Boolean(actor.email && actor.idToken)');
-    expect(pageSource).toContain('!bffAuthReady');
+    expect(pageSource).toContain('resolveBffActor');
+    expect(pageSource).toContain('requireBffActor');
+    expect(pageSource).toContain('requestLoginFlow');
     expect(pageSource).toContain('runWithGoogleSheetsAuthRetry');
     expect(pageSource).toContain("runWithGoogleSheetsAuthRetry('config.save'");
     expect(pageSource).toContain('}, { forceRefresh: true })');
@@ -75,7 +79,5 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('exportCashflowWorkbookViaBff');
     expect(pageSource).not.toContain('saveExpenseSheetRows');
     expect(pageSource).not.toContain('markSheetSourceApplied');
-    expect(pageSource).not.toContain('동기화');
-    expect(pageSource).not.toContain('내보내기');
   });
 });

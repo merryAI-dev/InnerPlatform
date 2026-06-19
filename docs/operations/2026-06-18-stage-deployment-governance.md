@@ -30,6 +30,13 @@ The workflow currently allows only `main` as the stage source ref. This keeps st
 
 The stage alias must stay on the internal stage host and must not pass through the `myscube.myscguard.app` security redirect path.
 
+The stage surface check treats security-route symptoms as failures, not acceptable degraded states:
+
+- Stage root must return `200`.
+- Stage root must not include Cloudflare response markers such as `cf-ray` or `server: cloudflare`.
+- Stage root must not receive security-domain `Content-Security-Policy-Report-Only` headers.
+- Stage cashflow config API may return `200` or unauthenticated `401`; `403` is not accepted because it can mask an edge/security guard block.
+
 ## Required Secrets
 
 The Stage environment or repository must define:

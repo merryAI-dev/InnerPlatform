@@ -33,7 +33,7 @@ import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-s
 import { useAuth } from '../../data/auth-store';
 import { hasUnsavedChanges } from './cashflow-unsaved';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   fetchCashflowLaborRiskViaBff,
@@ -298,6 +298,21 @@ export function CashflowProjectSheet({
     user?.role,
     user?.uid,
   ]);
+  const resolveBffActor = useCallback(async () => {
+    const firebaseToken = await getAuthInstance()?.currentUser?.getIdToken().catch(() => undefined);
+    const nextToken = bffActor.idToken || firebaseToken;
+    if (!nextToken) return null;
+    if (!bffActor.idToken) {
+      console.info('[CashflowProjectSheet] refreshed BFF token from Firebase', {
+        projectId,
+        actorEmail: bffActor.email,
+      });
+    }
+    return {
+      ...bffActor,
+      idToken: nextToken,
+    };
+  }, [bffActor, projectId]);
 
   const {
     yearMonth,
@@ -729,29 +744,58 @@ export function CashflowProjectSheet({
     const timeoutId = window.setTimeout(() => {
       setLaborRiskLoading(true);
       setLaborRiskError(null);
-      fetchCashflowLaborRiskViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-      })
-        .then((result) => {
+      void (async () => {
+        const resolvedActor = await resolveBffActor();
+        if (!resolvedActor?.idToken) {
+          console.warn('[CashflowProjectSheet] labor risk auth missing, skipping API call', {
+            projectId,
+            actorEmail: bffActor.email,
+            hasStoredToken: Boolean(bffActor.idToken),
+          });
+          if (!cancelled) {
+            setLaborRisk(null);
+            setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
+            setLaborRiskLoading(false);
+          }
+          return;
+        }
+
+        console.info('[CashflowProjectSheet] requesting labor risk', {
+          projectId,
+          orgId,
+          actorEmail: resolvedActor.email,
+          hasIdToken: Boolean(resolvedActor.idToken),
+        });
+        try {
+          const result = await fetchCashflowLaborRiskViaBff({
+            tenantId: orgId,
+            actor: resolvedActor,
+            projectId,
+          });
           if (cancelled) return;
           setLaborRisk(result);
-        })
-        .catch((error) => {
+        } catch (error) {
           if (cancelled) return;
+          console.warn('[CashflowProjectSheet] labor risk fetch failed', {
+            projectId,
+            status: (error as { status?: number }).status,
+            code: (error as { body?: { code?: string; error?: string } }).body?.code
+              || (error as { body?: { error?: string } }).body?.error,
+            requestId: (error as { requestId?: string }).requestId,
+            message: error instanceof Error ? error.message : String(error),
+          });
           setLaborRisk(null);
           setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
-        })
-        .finally(() => {
+        } finally {
           if (!cancelled) setLaborRiskLoading(false);
-        });
+        }
+      })();
     }, 250);
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [bffActor, cashflowWeeksStreamKey, orgId, projectId, user]);
+  }, [bffActor, cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
