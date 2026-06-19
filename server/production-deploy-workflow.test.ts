@@ -74,4 +74,12 @@ describe('stage release workflow safety', () => {
       stageWorkflowText.indexOf('run: npm ci'),
     );
   });
+
+  it('accepts the protected stage alias redirect to the Cloudflare security domain', () => {
+    expect(stageWorkflowText).toContain('curl -fsSLI "https://${STAGE_CANONICAL_HOST}/"');
+    expect(stageWorkflowText).toContain('200|401|403) ;;');
+    expect(stageWorkflowText).toContain('307)');
+    expect(stageWorkflowText).toContain('https://soc.myscguard.app/*');
+    expect(stageWorkflowText).toContain('Unexpected stage redirect location');
+  });
 });
