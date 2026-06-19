@@ -6,7 +6,7 @@ import {
   readOptionalText,
   stripUndefinedDeep,
 } from '../bff-utils.mjs';
-import { GoogleSheetsServiceError } from '../google-sheets.mjs';
+import { GoogleSheetsServiceError, extractSpreadsheetId } from '../google-sheets.mjs';
 import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
 import { upsertCashflowWeekAmounts } from '../cashflow-canonical-store.mjs';
 import {
@@ -52,6 +52,20 @@ function normalizeRouteError(error) {
     return createHttpError(error.statusCode, error.message, error.code);
   }
   return error;
+}
+
+function isGoogleSheetsAuthFailure(error) {
+  const normalized = normalizeRouteError(error);
+  const code = readOptionalText(normalized?.code || error?.code || error?.body?.code || error?.body?.error);
+  const message = readOptionalText(normalized?.message || error?.message || error?.body?.message);
+  const rawStatusCode = normalized?.statusCode
+    ?? normalized?.status
+    ?? error?.statusCode
+    ?? error?.status
+    ?? error?.body?.status;
+  const statusCode = Number(rawStatusCode);
+  return (code === 'google_sheets_api_error' || message.includes('Google Sheets API request failed'))
+    && [401, 403].includes(statusCode);
 }
 
 function createDetailedHttpError(statusCode, message, code, details) {
@@ -253,22 +267,36 @@ function buildActiveWeeksFromTemplate(template, weekRange) {
     .filter(Boolean);
 }
 
-async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, preview, template, context }) {
+function resolveGoogleSheetAuthMode(preview, accessToken) {
+  return readOptionalText(preview?.authMode) || (readOptionalText(accessToken) ? 'token_pass_through' : 'service_account');
+}
+
+function resolveGoogleSheetPermission(authMode) {
+  return authMode === 'token_pass_through'
+    ? 'viewer_access_from_google_token'
+    : 'shared_with_mysc_system_account';
+}
+
+async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, context, existingConfig = null }) {
   if (!db) {
     throw createHttpError(503, 'Firestore is required to save cashflow sheet config.', 'firestore_unconfigured');
   }
   const now = new Date().toISOString();
-  const weekRange = normalizeWeekRange(parsed);
+  const spreadsheetId = extractSpreadsheetId(parsed.value);
+  const existingSpreadsheetId = readOptionalText(existingConfig?.spreadsheetId);
+  const shouldKeepVerifiedMetadata = Boolean(existingConfig)
+    && existingSpreadsheetId
+    && existingSpreadsheetId === spreadsheetId
+    && readOptionalText(existingConfig?.sheetName) === readOptionalText(parsed.sheetName);
   const config = {
     value: parsed.value,
-    sheetName: preview.selectedSheetName,
-    spreadsheetId: preview.spreadsheetId,
-    spreadsheetTitle: preview.spreadsheetTitle,
+    sheetName: readOptionalText(parsed.sheetName),
+    spreadsheetId,
+    spreadsheetTitle: shouldKeepVerifiedMetadata ? readOptionalText(existingConfig?.spreadsheetTitle) : '',
     startWeek: readOptionalText(parsed.startWeek),
     endWeek: readOptionalText(parsed.endWeek),
     weekBasis: CASHFLOW_WEEK_BASIS,
     totalBasis: CASHFLOW_WEEK_BASIS,
-    activeWeeks: buildActiveWeeksFromTemplate(template, weekRange),
     updatedAt: now,
     updatedBy: {
       uid: readOptionalText(context?.actorId),
@@ -507,10 +535,12 @@ function buildProjectionWritebackResponse({
   template,
   weekRange,
   plan,
+  authMode,
   cashflowSnapshotStatus = 'ready',
   job = null,
   durationMs,
 }) {
+  const googleAuth = readOptionalText(authMode || preview?.authMode) || 'service_account';
   return {
     projectId,
     ...(typeof durationMs === 'number' ? { durationMs } : {}),
@@ -525,8 +555,9 @@ function buildProjectionWritebackResponse({
       activeWeeks: buildActiveWeeksFromTemplate(template, weekRange),
     },
     accessPolicy: {
-      googleAuth: 'token_pass_through_or_service_account',
+      googleAuth,
       googleScope: 'spreadsheets',
+      sheetPermission: resolveGoogleSheetPermission(googleAuth),
       writePolicy: 'projection_only',
       conflictPolicy: 'baseline_hash_required_before_write',
       sheetNamePolicy: 'cashflow_usage_linked_only',
@@ -670,12 +701,13 @@ async function applyConfiguredCashflowSheetLab({
     sheetName: source.sheetName,
     accessToken,
   });
+  const authMode = resolveGoogleSheetAuthMode(preview, accessToken);
   assertCashflowUsageLinkedSheet(preview);
   const template = analyzeCashflowSheetTemplate(preview.matrix);
   assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
   logger('template', {
     projectId,
-    authMode: accessToken ? 'token_pass_through' : 'service_account',
+    authMode,
     spreadsheetId: preview.spreadsheetId,
     selectedSheetName: preview.selectedSheetName,
     cacheStatus: preview.cacheStatus,
@@ -696,7 +728,7 @@ async function applyConfiguredCashflowSheetLab({
   const { lines, skippedInvalidWeekKeys } = applyPlan;
   logger('lines', {
     projectId,
-    authMode: accessToken ? 'token_pass_through' : 'service_account',
+    authMode,
     applyLineCount: lines.length,
     projectionLineCount: lines.filter((line) => line.mode === 'projection').length,
     actualLineCount: lines.filter((line) => line.mode === 'actual').length,
@@ -747,7 +779,7 @@ async function applyConfiguredCashflowSheetLab({
   };
   logger('ok', {
     projectId,
-    authMode: accessToken ? 'token_pass_through' : 'service_account',
+    authMode,
     appliedLineCount: lines.length,
     projectionLineCount,
     actualLineCount,
@@ -771,9 +803,9 @@ async function applyConfiguredCashflowSheetLab({
     },
     matrix: preview.matrix,
     accessPolicy: {
-      googleAuth: readOptionalText(accessToken) ? 'token_pass_through' : 'service_account',
+      googleAuth: authMode,
       googleScope: 'spreadsheets.readonly',
-      sheetPermission: readOptionalText(accessToken) ? 'viewer_access_from_google_token' : 'shared_with_mysc_system_account',
+      sheetPermission: resolveGoogleSheetPermission(authMode),
       layoutSource: 'google_sheet_formatted_values',
       valueSource: 'firebase_cashflow_weeks',
       actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
@@ -824,7 +856,10 @@ function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SH
       return { ...value, cacheStatus: 'in_flight_join' };
     }
 
-    async function requestPreview(sheetName, accessToken = params.accessToken) {
+    async function requestPreview(sheetName, options = {}) {
+      const accessToken = Object.prototype.hasOwnProperty.call(options, 'accessToken')
+        ? options.accessToken
+        : params.accessToken;
       return googleSheetsService.previewSpreadsheet({
         value: params.value,
         sheetName,
@@ -834,29 +869,32 @@ function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SH
     }
 
     function shouldRetryWithServiceAccount(error) {
-      return readOptionalText(params.accessToken)
-        && error?.code === 'google_sheets_api_error'
-        && error?.statusCode === 401;
+      return Boolean(readOptionalText(params.accessToken)) && isGoogleSheetsAuthFailure(error);
     }
 
     const request = (async () => {
+      let authMode = readOptionalText(params.accessToken) ? 'token_pass_through' : 'service_account';
       let first;
       try {
         first = await requestPreview(params.sheetName);
       } catch (error) {
         if (!shouldRetryWithServiceAccount(error)) throw error;
-        first = await requestPreview(params.sheetName, undefined);
+        authMode = 'service_account_fallback';
+        first = await requestPreview(params.sheetName, { accessToken: undefined });
       }
       if (params.sheetName || isCashflowUsageLinkedSheetName(first.selectedSheetName)) {
-        return first;
+        return { ...first, authMode };
       }
       const linkedSheet = findCashflowUsageLinkedSheet(first.availableSheets);
-      if (!linkedSheet) return first;
+      if (!linkedSheet) return { ...first, authMode };
       try {
-        return await requestPreview(linkedSheet.title);
+        const linkedPreview = await requestPreview(linkedSheet.title);
+        return { ...linkedPreview, authMode };
       } catch (error) {
         if (!shouldRetryWithServiceAccount(error)) throw error;
-        return requestPreview(linkedSheet.title, undefined);
+        authMode = 'service_account_fallback';
+        const linkedPreview = await requestPreview(linkedSheet.title, { accessToken: undefined });
+        return { ...linkedPreview, authMode };
       }
     })();
     inFlight.set(key, request);
@@ -913,56 +951,38 @@ export function mountCashflowSheetLabRoutes(app, {
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabConfigSchema, req.body, 'Invalid cashflow sheet lab config payload');
     normalizeWeekRange(parsed);
-    const accessToken = readOptionalText(req.header('x-google-access-token'));
     logCashflowSheetLab('config.save.start', req, {
       projectId,
-      authMode: accessToken ? 'token_pass_through' : 'service_account',
+      authMode: 'bff_config_only',
       sheetName: parsed.sheetName || null,
       valueProvided: Boolean(parsed.value),
       startWeek: parsed.startWeek || null,
       endWeek: parsed.endWeek || null,
     });
 
-    await readProjectDocument(db, tenantId, projectId);
+    const project = await readProjectDocument(db, tenantId, projectId);
 
     try {
-      const preview = await loadSheetPreview({
-        value: parsed.value,
-        sheetName: parsed.sheetName,
-        accessToken,
-      });
-      assertCashflowUsageLinkedSheet(preview);
-      const template = analyzeCashflowSheetTemplate(preview.matrix);
-      if (!template.supported) {
-        throw createHttpError(
-          400,
-          '지원하지 않는 cashflow 시트 구조라 설정을 저장할 수 없습니다.',
-          'cashflow_sheet_template_unsupported',
-        );
-      }
-      assertConfiguredWeekRangeExistsInTemplate(template, parsed);
       const config = await saveCashflowSheetLabConfig({
         db,
         tenantId,
         projectId,
         parsed,
-        preview,
-        template,
         context: req.context,
+        existingConfig: readCashflowSheetLabConfig(project),
       });
       logCashflowSheetLab('config.save.ok', req, {
         projectId,
-        authMode: accessToken ? 'token_pass_through' : 'service_account',
-        spreadsheetId: preview.spreadsheetId,
-        selectedSheetName: preview.selectedSheetName,
-        cacheStatus: preview.cacheStatus,
+        authMode: 'bff_config_only',
+        spreadsheetId: config.spreadsheetId,
+        selectedSheetName: config.sheetName,
         weekBasis: CASHFLOW_WEEK_BASIS,
       });
       res.status(200).json(buildConfigResponse(projectId, config));
     } catch (error) {
       logCashflowSheetLab('config.save.error', req, {
         projectId,
-        authMode: accessToken ? 'token_pass_through' : 'service_account',
+        authMode: 'bff_config_only',
         ...routeErrorDetails(normalizeRouteError(error)),
       }, 'warn');
       throw normalizeRouteError(error);
@@ -996,6 +1016,7 @@ export function mountCashflowSheetLabRoutes(app, {
         sheetName: source.sheetName,
         accessToken,
       });
+      const authMode = resolveGoogleSheetAuthMode(preview, accessToken);
       assertCashflowUsageLinkedSheet(preview);
       const template = analyzeCashflowSheetTemplate(preview.matrix);
       assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
@@ -1010,7 +1031,7 @@ export function mountCashflowSheetLabRoutes(app, {
       const activeWeeks = buildActiveWeeksFromTemplate(template, weekRange);
       logCashflowSheetLab('preview.ok', req, {
         projectId,
-        authMode: accessToken ? 'token_pass_through' : 'service_account',
+        authMode,
         spreadsheetId: preview.spreadsheetId,
         selectedSheetName: preview.selectedSheetName,
         cacheStatus: preview.cacheStatus,
@@ -1028,9 +1049,9 @@ export function mountCashflowSheetLabRoutes(app, {
         availableSheets: preview.availableSheets,
         matrix: preview.matrix,
         accessPolicy: {
-          googleAuth: readOptionalText(accessToken) ? 'token_pass_through' : 'service_account',
+          googleAuth: authMode,
           googleScope: 'spreadsheets.readonly',
-          sheetPermission: readOptionalText(accessToken) ? 'viewer_access_from_google_token' : 'shared_with_mysc_system_account',
+          sheetPermission: resolveGoogleSheetPermission(authMode),
           layoutSource: 'google_sheet_formatted_values',
           valueSource: 'firebase_cashflow_weeks',
           actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
@@ -1104,6 +1125,7 @@ export function mountCashflowSheetLabRoutes(app, {
       const plan = buildProjectionWritebackPlan(template, preview.matrix, cashflowSnapshot, weekRange);
       logCashflowSheetLab('writeback.preview.ok', req, {
         projectId,
+        authMode: preview.authMode,
         spreadsheetId: preview.spreadsheetId,
         selectedSheetName: preview.selectedSheetName,
         changeCount: plan.changeCount,
@@ -1117,6 +1139,7 @@ export function mountCashflowSheetLabRoutes(app, {
         template,
         weekRange,
         plan,
+        authMode: preview.authMode,
         durationMs: Date.now() - startedAt,
       }));
     } catch (error) {
@@ -1146,6 +1169,7 @@ export function mountCashflowSheetLabRoutes(app, {
       cacheTtlMs: 0,
     });
     let job = null;
+    let applyAuthMode = accessToken ? 'token_pass_through' : 'service_account';
 
     try {
       const preview = await loadFreshSheetPreview({
@@ -1153,6 +1177,7 @@ export function mountCashflowSheetLabRoutes(app, {
         sheetName: source.sheetName,
         accessToken,
       });
+      applyAuthMode = preview.authMode || applyAuthMode;
       assertCashflowUsageLinkedSheet(preview);
       const template = analyzeCashflowSheetTemplate(preview.matrix);
       assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
@@ -1220,6 +1245,7 @@ export function mountCashflowSheetLabRoutes(app, {
             template,
             weekRange,
             plan,
+            authMode: applyAuthMode,
             job: conflictJob,
             durationMs: Date.now() - startedAt,
           }),
@@ -1231,12 +1257,25 @@ export function mountCashflowSheetLabRoutes(app, {
         if (typeof googleSheetsService?.batchUpdateValues !== 'function') {
           throw createHttpError(503, 'Google Sheets write service is not configured.', 'google_sheets_write_unconfigured');
         }
-        updateResult = await googleSheetsService.batchUpdateValues({
-          spreadsheetId: preview.spreadsheetId,
-          sheetName: preview.selectedSheetName,
-          updates: plan.updates,
-          accessToken,
-        });
+        async function batchUpdateProjection(options = {}) {
+          const updateAccessToken = Object.prototype.hasOwnProperty.call(options, 'accessToken')
+            ? options.accessToken
+            : accessToken;
+          return googleSheetsService.batchUpdateValues({
+            spreadsheetId: preview.spreadsheetId,
+            sheetName: preview.selectedSheetName,
+            updates: plan.updates,
+            accessToken: updateAccessToken,
+          });
+        }
+        const initialWriteAccessToken = applyAuthMode === 'service_account_fallback' ? undefined : accessToken;
+        try {
+          updateResult = await batchUpdateProjection({ accessToken: initialWriteAccessToken });
+        } catch (error) {
+          if (!readOptionalText(accessToken) || !isGoogleSheetsAuthFailure(error)) throw error;
+          applyAuthMode = 'service_account_fallback';
+          updateResult = await batchUpdateProjection({ accessToken: undefined });
+        }
       }
 
       const doneJob = await writeProjectionSyncJob({
@@ -1262,6 +1301,7 @@ export function mountCashflowSheetLabRoutes(app, {
       });
       logCashflowSheetLab('writeback.apply.ok', req, {
         projectId,
+        authMode: applyAuthMode,
         spreadsheetId: preview.spreadsheetId,
         selectedSheetName: preview.selectedSheetName,
         changeCount: plan.changeCount,
@@ -1276,6 +1316,7 @@ export function mountCashflowSheetLabRoutes(app, {
           template,
           weekRange,
           plan,
+          authMode: applyAuthMode,
           job: doneJob,
           durationMs: Date.now() - startedAt,
         }),
@@ -1301,7 +1342,7 @@ export function mountCashflowSheetLabRoutes(app, {
       }
       logCashflowSheetLab('writeback.apply.error', req, {
         projectId,
-        authMode: accessToken ? 'token_pass_through' : 'service_account',
+        authMode: applyAuthMode,
         durationMs: Date.now() - startedAt,
         ...routeErrorDetails(normalized),
       }, 'warn');

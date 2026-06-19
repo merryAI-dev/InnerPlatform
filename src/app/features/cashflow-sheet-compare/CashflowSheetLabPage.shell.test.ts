@@ -49,14 +49,21 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
     expect(pageSource).toContain('requestLoginFlow');
+    expect(pageSource).toContain('auth.popup.start');
+    expect(pageSource).toContain('loginWithGoogle');
+    expect(pageSource).not.toContain("navigate('/login'");
     expect(pageSource).toContain('runWithGoogleSheetsAuthRetry');
-    expect(pageSource).toContain("runWithGoogleSheetsAuthRetry('config.save'");
+    expect(pageSource).toContain('runWithBffAuthRetry');
+    expect(pageSource).not.toContain("runWithGoogleSheetsAuthRetry('config.save'");
+    expect(pageSource).toContain("runWithGoogleSheetsAuthRetry('preview'");
     expect(pageSource).toContain('service_account_fallback');
     expect(pageSource).not.toContain('google_token_required');
     expect(pageSource).not.toContain('Google Sheets 권한 연결이 필요합니다.');
     expect(pageSource).toContain('isGoogleSheetsTokenExpiredError');
+    expect(pageSource).toContain('apiError?.status === 401 || apiError?.status === 403');
     expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
-    expect(pageSource).toContain("action === 'connect' || action === 'edit'");
+    expect(pageSource).toContain("action === 'connect'");
+    expect(pageSource).toContain('handleConnectSheet');
     expect(pageSource).toContain('config.load.ok');
     expect(pageSource).toContain('config.save.ok');
     expect(pageSource).toContain('toolbar.action');
@@ -91,14 +98,20 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('markSheetSourceApplied');
   });
 
-  it('keeps automatic config load auth failures inline instead of redirecting', () => {
+  it('recovers BFF auth failures with a popup retry instead of redirecting', () => {
     const configLoadSource = pageSource.slice(
-      pageSource.indexOf('const result = await getCashflowSheetLabConfigViaBff'),
+      pageSource.indexOf('const fetchConfig ='),
       pageSource.indexOf('async function handleSaveConfig'),
     );
 
     expect(configLoadSource).toContain('config.load.error');
     expect(configLoadSource).toContain('setEditingConfig(true)');
-    expect(configLoadSource).not.toContain('requestLoginFlow();');
+    expect(pageSource).toContain('requestBffActorAfterAuth');
+    expect(pageSource).toContain('bffAuth.popup.required');
+    expect(pageSource).toContain('bffAuth.rejected');
+    expect(pageSource).toContain('firebaseToken || actor.idToken');
+    expect(pageSource).toContain('getIdToken(Boolean(options.forceRefresh))');
+    expect(pageSource).not.toContain('actor.idToken || firebaseToken');
+    expect(pageSource).not.toContain("navigate('/login'");
   });
 });

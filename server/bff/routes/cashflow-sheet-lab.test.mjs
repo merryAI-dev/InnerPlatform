@@ -2,6 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './cashflow-sheet-lab.mjs';
+import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 
 const IN_LABELS = [
   'MYSC 선입금(잔금 등 입금 필요 시)',
@@ -160,10 +161,11 @@ describe('cashflow sheet lab route', () => {
       });
   });
 
-  it('saves the validated cashflow sheet config', async () => {
+  it('saves the cashflow sheet config without reading Google Sheets', async () => {
     const db = createDb();
+    const previewSpreadsheet = vi.fn();
 
-    const response = await request(createApp({ db }))
+    const response = await request(createApp({ db, googleSheetsService: { previewSpreadsheet } }))
       .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
       .send({
         value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
@@ -181,12 +183,25 @@ describe('cashflow sheet lab route', () => {
       totalBasis: 'sheet_range',
       updatedBy: { email: 'user@mysc.co.kr', role: 'workspace_user' },
     });
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
     expect(db.__getDocument().cashflowSheetLab).toMatchObject(response.body.config);
   });
 
-  it('rejects saved ranges that are not present in the sheet headers', async () => {
+  it('allows saving ranges before sheet headers are verified', async () => {
     await request(createApp())
       .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+      .send({
+        value: 'spreadsheet-a',
+        sheetName: 'cashflow(사용내역 연동)',
+        startWeek: '26-1-1',
+        endWeek: '26-1-4',
+      })
+      .expect(200);
+  });
+
+  it('rejects preview ranges that are not present in the sheet headers', async () => {
+    await request(createApp())
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
       .send({
         value: 'spreadsheet-a',
         sheetName: 'cashflow(사용내역 연동)',
@@ -240,6 +255,36 @@ describe('cashflow sheet lab route', () => {
 
     expect(previewSpreadsheet).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'google-token' }));
     expect(response.body.accessPolicy.googleAuth).toBe('token_pass_through');
+  });
+
+  it('falls back to the service account when token pass-through is forbidden', async () => {
+    const previewSpreadsheet = vi.fn(async ({ accessToken }) => {
+      if (accessToken) {
+        throw new GoogleSheetsServiceError('Google Sheets API request failed', {
+          code: 'google_sheets_api_error',
+          statusCode: 403,
+        });
+      }
+      return {
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [],
+        matrix: buildMatrix(),
+      };
+    });
+
+    const response = await request(createApp({ googleSheetsService: { previewSpreadsheet } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .set('x-google-access-token', 'expired-or-forbidden-token')
+      .send({ value: 'spreadsheet-a' })
+      .expect(200);
+
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+    expect(previewSpreadsheet).toHaveBeenNthCalledWith(1, expect.objectContaining({ accessToken: 'expired-or-forbidden-token' }));
+    expect(previewSpreadsheet).toHaveBeenNthCalledWith(2, expect.objectContaining({ accessToken: undefined }));
+    expect(response.body.accessPolicy.googleAuth).toBe('service_account_fallback');
+    expect(response.body.accessPolicy.sheetPermission).toBe('shared_with_mysc_system_account');
   });
 
   it('applies saved sheet values directly to Firebase cashflow_weeks', async () => {
@@ -476,6 +521,68 @@ describe('cashflow sheet lab route', () => {
       entityType: 'cashflow_projection_sync_job',
       status: 'PENDING',
     });
+  });
+
+  it('falls back to the service account when Projection write-back token is forbidden', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        projection: { MYSC_PREPAY_IN: 123 },
+        actual: { MYSC_PREPAY_IN: 456 },
+      }],
+    });
+    const batchUpdateValues = vi.fn(async ({ accessToken }) => {
+      if (accessToken) {
+        throw new GoogleSheetsServiceError('Google Sheets API request failed', {
+          code: 'google_sheets_api_error',
+          statusCode: 403,
+        });
+      }
+      return { totalUpdatedCells: 12, responses: [] };
+    });
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrix(),
+      })),
+      batchUpdateValues,
+    };
+
+    const previewResponse = await request(createApp({ db, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview')
+      .set('x-google-access-token', 'google-token')
+      .send({})
+      .expect(200);
+    const response = await request(createApp({ db, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/apply')
+      .set('x-google-access-token', 'google-token')
+      .send({
+        baselineHash: previewResponse.body.plan.baselineHash,
+        idempotencyKey: 'writeback-fallback-001',
+      })
+      .expect(200);
+
+    expect(batchUpdateValues).toHaveBeenCalledTimes(2);
+    expect(batchUpdateValues).toHaveBeenNthCalledWith(1, expect.objectContaining({ accessToken: 'google-token' }));
+    expect(batchUpdateValues).toHaveBeenNthCalledWith(2, expect.objectContaining({ accessToken: undefined }));
+    expect(response.body.accessPolicy.googleAuth).toBe('service_account_fallback');
+    expect(response.body.accessPolicy.sheetPermission).toBe('shared_with_mysc_system_account');
+    expect(response.body.ok).toBe(true);
   });
 
   it('blocks Projection write-back when the sheet changed after preview', async () => {

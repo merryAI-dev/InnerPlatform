@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpToLine, Loader2, Pencil, Search, Settings } from 'lucide-react';
 import Lottie from 'lottie-react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
@@ -31,8 +31,6 @@ import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../p
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { RollingAmount } from '../../components/ui/rolling-amount';
 import { sheetWritebackAnimation } from './sheet-writeback-animation';
-
-const MYSC_CASHFLOW_SPREADSHEET_ID = '1cXi5FD--brA2dCdtNBsxJaIacd3FdcdsuZh2WuclsSQ';
 
 function formatMode(mode: string) {
   return mode === 'projection' ? 'Projection' : 'Actual';
@@ -92,7 +90,7 @@ function isGoogleSheetsTokenExpiredError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; status?: number };
   const code = apiError?.body?.code || apiError?.body?.error;
   const message = apiError?.body?.message || '';
-  return apiError?.status === 401
+  return (apiError?.status === 401 || apiError?.status === 403)
     && (code === 'google_sheets_api_error' || message.includes('Google Sheets API request failed'));
 }
 
@@ -132,6 +130,7 @@ function isBffAuthError(error: unknown): boolean {
     : typeof apiError?.body?.error === 'string'
       ? apiError.body.error
       : '';
+  if (code === 'google_sheets_api_error') return false;
   return status === 401 || status === 403 || code === 'missing_bearer_token' || code === 'invalid_token';
 }
 
@@ -141,9 +140,9 @@ function ReconciliationSummary({
   table: ReturnType<typeof buildCashflowPreviewTables>[number];
 }) {
   const rows = [
-    ...table.inRows.map((row) => ({ section: '입금', label: row.canonicalLabel || row.label, ...row })),
+    ...table.inRows.map((row) => ({ ...row, section: '입금', label: row.canonicalLabel || row.label })),
     { section: '입금', label: '입금 합계', sheetTotal: table.sheetIncomeTotal, reflectedTotal: table.reflectedIncomeTotal, diffTotal: table.reflectedIncomeTotal - table.sheetIncomeTotal },
-    ...table.outRows.map((row) => ({ section: '출금', label: row.canonicalLabel || row.label, ...row })),
+    ...table.outRows.map((row) => ({ ...row, section: '출금', label: row.canonicalLabel || row.label })),
     { section: '출금', label: '출금 합계', sheetTotal: table.sheetExpenseTotal, reflectedTotal: table.reflectedExpenseTotal, diffTotal: table.reflectedExpenseTotal - table.sheetExpenseTotal },
     {
       section: '잔액',
@@ -227,10 +226,8 @@ export function CashflowSheetLabPage({
     endWeek: string;
   }) => void;
 } = {}) {
-  const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
+  const { user: authUser, ensureGoogleWorkspaceAccess, loginWithGoogle } = useAuth();
   const { orgId } = useFirebase();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const initialProjectId = useMemo(() => (
     projectIdOverride?.trim()
@@ -241,7 +238,7 @@ export function CashflowSheetLabPage({
     || ''
   ), [authUser?.projectId, authUser?.projectIds, projectIdOverride, searchParams]);
   const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
-  const [sheetLink, setSheetLink] = useState(MYSC_CASHFLOW_SPREADSHEET_ID);
+  const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
   const [startWeek, setStartWeek] = useState('');
   const [endWeek, setEndWeek] = useState('');
@@ -272,24 +269,48 @@ export function CashflowSheetLabPage({
     authUser?.role,
     authUser?.idToken,
   ]);
-  const requestLoginFlow = useCallback(() => {
-    logCashflowLab('auth.required', {
+  const requestLoginFlow = useCallback(async () => {
+    logCashflowLab('auth.popup.start', {
       projectId,
       actorEmail: actor.email,
       hasIdToken: Boolean(actor.idToken),
     }, 'warn');
-    navigate('/login', { state: { from: location.pathname } });
-  }, [actor.email, actor.idToken, location.pathname, navigate, projectId]);
-
-  const resolveBffActor = useCallback(async () => {
-    const firebaseToken = await getAuthInstance()?.currentUser?.getIdToken().catch(() => undefined);
-    const resolvedToken = actor.idToken || firebaseToken;
-    if (!resolvedToken) return null;
-    if (!actor.idToken) {
-      logCashflowLab('auth.refresh', {
+    const result = await loginWithGoogle();
+    if (!result.success) {
+      logCashflowLab('auth.popup.error', {
         projectId,
         actorEmail: actor.email,
-        tokenSource: 'firebase',
+        error: result.error || 'Google OAuth popup failed',
+      }, 'warn');
+      setErrorMessage(result.error || 'Google 계정 권한을 확인하지 못했습니다.');
+      return false;
+    }
+    logCashflowLab('auth.popup.ok', {
+      projectId,
+      actorEmail: actor.email,
+    });
+    return true;
+  }, [actor.email, actor.idToken, loginWithGoogle, projectId]);
+
+  const resolveBffActor = useCallback(async (options: { forceRefresh?: boolean } = {}) => {
+    const firebaseAuthUser = getAuthInstance()?.currentUser;
+    const firebaseToken = await firebaseAuthUser?.getIdToken(Boolean(options.forceRefresh)).catch((error) => {
+      logCashflowLab('auth.token.resolve.error', {
+        projectId,
+        actorEmail: actor.email,
+        forceRefresh: Boolean(options.forceRefresh),
+        message: error instanceof Error ? error.message : String(error),
+      }, 'warn');
+      return undefined;
+    });
+    const resolvedToken = firebaseToken || actor.idToken;
+    if (!resolvedToken) return null;
+    if (firebaseToken || options.forceRefresh) {
+      logCashflowLab('auth.token.resolve', {
+        projectId,
+        actorEmail: actor.email,
+        tokenSource: firebaseToken ? 'firebase' : 'store',
+        forceRefresh: Boolean(options.forceRefresh),
       });
     }
     return {
@@ -298,27 +319,43 @@ export function CashflowSheetLabPage({
     };
   }, [actor, projectId]);
 
-  const requireBffActor = useCallback(async () => {
-    const resolved = await resolveBffActor();
+  const requestBffActorAfterAuth = useCallback(async (action: string) => {
+    logCashflowLab(`${action}.bffAuth.popup.required`, {
+      projectId,
+      actorEmail: actor.email,
+      hasStoredToken: Boolean(actor.idToken),
+    }, 'warn');
+    const popupOk = await requestLoginFlow();
+    if (!popupOk) return null;
+    const resolved = await resolveBffActor({ forceRefresh: true });
     if (!resolved?.idToken) {
-      requestLoginFlow();
+      logCashflowLab(`${action}.bffAuth.token_missing`, { projectId }, 'warn');
+      setErrorMessage('Google 로그인 후에도 서버 인증 토큰을 확인하지 못했습니다. 다시 시도해 주세요.');
       return null;
     }
     return resolved;
-  }, [requestLoginFlow, resolveBffActor]);
+  }, [actor.email, actor.idToken, projectId, requestLoginFlow, resolveBffActor]);
 
-  async function resolveGoogleAccessToken(action: string, options: { forceRefresh?: boolean } = {}) {
-    if (authUser?.googleAccessToken && !options.forceRefresh) {
+  const requireBffActor = useCallback(async () => {
+    let resolved = await resolveBffActor();
+    if (!resolved?.idToken) {
+      resolved = await requestBffActorAfterAuth('auth.required');
+    }
+    return resolved;
+  }, [requestBffActorAfterAuth, resolveBffActor]);
+
+  async function resolveGoogleAccessToken(action: string, options: { popup?: boolean } = {}) {
+    if (authUser?.googleAccessToken && !options.popup) {
       logCashflowLab(`${action}.googleToken.cached`, { projectId, hasGoogleAccessToken: true });
       return authUser.googleAccessToken;
     }
-    logCashflowLab(`${action}.googleToken.request`, { projectId, hasGoogleAccessToken: false, forceRefresh: Boolean(options.forceRefresh) });
-    const token = await ensureGoogleWorkspaceAccess({ forceRefresh: Boolean(options.forceRefresh) });
+    logCashflowLab(`${action}.googleToken.popup.request`, { projectId, hasGoogleAccessToken: false, popup: Boolean(options.popup) });
+    const token = await ensureGoogleWorkspaceAccess({ forceRefresh: Boolean(options.popup) });
     logCashflowLab(`${action}.googleToken.result`, {
       projectId,
       hasGoogleAccessToken: Boolean(token),
       authMode: token ? 'token_pass_through' : 'service_account_fallback',
-      forceRefresh: Boolean(options.forceRefresh),
+      popup: Boolean(options.popup),
     }, token ? 'info' : 'warn');
     return token || undefined;
   }
@@ -331,12 +368,43 @@ export function CashflowSheetLabPage({
     try {
       return await operation(googleAccessToken);
     } catch (error) {
-      if (!googleAccessToken || !isGoogleSheetsTokenExpiredError(error)) {
+      if (!isGoogleSheetsTokenExpiredError(error)) {
         throw error;
       }
-      logCashflowLab(`${action}.googleToken.expired`, { projectId, ...errorDiagnostics(error) }, 'warn');
-      const refreshedToken = await resolveGoogleAccessToken(action, { forceRefresh: true });
-      return operation(refreshedToken);
+      logCashflowLab(`${action}.googleToken.popup.required`, {
+        projectId,
+        hadGoogleAccessToken: Boolean(googleAccessToken),
+        ...errorDiagnostics(error),
+      }, 'warn');
+      const popupToken = await resolveGoogleAccessToken(action, { popup: true });
+      if (!popupToken) {
+        throw error;
+      }
+      return operation(popupToken);
+    }
+  }
+
+  async function runWithBffAuthRetry<T>(
+    action: string,
+    operation: (requestActor: typeof actor) => Promise<T>,
+  ): Promise<T | null> {
+    const requestActor = await requireBffActor();
+    if (!requestActor) return null;
+    try {
+      return await operation(requestActor);
+    } catch (error) {
+      if (!isBffAuthError(error)) {
+        throw error;
+      }
+      logCashflowLab(`${action}.bffAuth.rejected`, {
+        projectId,
+        ...errorDiagnostics(error),
+      }, 'warn');
+      const retryActor = await requestBffActorAfterAuth(action);
+      if (!retryActor) {
+        throw error;
+      }
+      return operation(retryActor);
     }
   }
 
@@ -362,7 +430,7 @@ export function CashflowSheetLabPage({
     setConfigLoading(true);
     setErrorMessage('');
     void (async () => {
-      const resolvedActor = await resolveBffActor();
+      const resolvedActor = await resolveBffActor({ forceRefresh: true });
       if (!resolvedActor?.idToken) {
         logCashflowLab('config.load.auth_missing', {
           projectId,
@@ -379,17 +447,34 @@ export function CashflowSheetLabPage({
       }
 
       try {
-        const result = await getCashflowSheetLabConfigViaBff({
+        const fetchConfig = (requestActor: typeof actor) => getCashflowSheetLabConfigViaBff({
           tenantId: orgId,
-          actor: resolvedActor,
+          actor: requestActor,
           projectId,
         });
+        let result;
+        try {
+          result = await fetchConfig(resolvedActor);
+        } catch (error) {
+          if (!isBffAuthError(error)) {
+            throw error;
+          }
+          logCashflowLab('config.load.bffAuth.rejected', {
+            projectId,
+            ...errorDiagnostics(error),
+          }, 'warn');
+          const retryActor = await requestBffActorAfterAuth('config.load');
+          if (!retryActor) {
+            throw error;
+          }
+          result = await fetchConfig(retryActor);
+        }
         if (cancelled) return;
         const nextConfig = result.config || null;
         const nextEditingConfig = !nextConfig;
         setConfig(nextConfig);
         setEditingConfig(nextEditingConfig);
-        setSheetLink(nextConfig?.value || MYSC_CASHFLOW_SPREADSHEET_ID);
+        setSheetLink(nextConfig?.value || '');
         setSheetName(nextConfig?.sheetName || '');
         setStartWeek(nextConfig?.startWeek || '');
         setEndWeek(nextConfig?.endWeek || '');
@@ -416,22 +501,15 @@ export function CashflowSheetLabPage({
     return () => {
       cancelled = true;
     };
-  }, [actor, orgId, projectId, requestLoginFlow, resolveBffActor]);
+  }, [actor, orgId, projectId, requestBffActorAfterAuth, resolveBffActor]);
 
   async function handleSaveConfig() {
     if (!projectId || !spreadsheetId || savingConfig) return null;
-    const requestActor = await requireBffActor();
-    if (!requestActor) {
-      return null;
-    }
     setSavingConfig(true);
     setErrorMessage('');
     try {
       logCashflowLab('config.save.start', { projectId, spreadsheetId, sheetName: sheetName || null, startWeek: startWeek || null, endWeek: endWeek || null });
-      let usedGoogleAccessToken: string | undefined;
-      const result = await runWithGoogleSheetsAuthRetry('config.save', (googleAccessToken) => {
-        usedGoogleAccessToken = googleAccessToken;
-        return saveCashflowSheetLabConfigViaBff({
+      const result = await runWithBffAuthRetry('config.save', (requestActor) => saveCashflowSheetLabConfigViaBff({
         tenantId: orgId,
         actor: requestActor,
         projectId,
@@ -439,9 +517,8 @@ export function CashflowSheetLabPage({
         sheetName: sheetName || undefined,
         startWeek: startWeek || undefined,
         endWeek: endWeek || undefined,
-        googleAccessToken,
-        });
-      });
+      }));
+      if (!result) return null;
       const nextConfig = result.config || null;
       const nextEditingConfig = false;
       setConfig(nextConfig);
@@ -454,16 +531,13 @@ export function CashflowSheetLabPage({
         projectId,
         spreadsheetId: nextConfig?.spreadsheetId || spreadsheetId,
         sheetName: nextConfig?.sheetName || sheetName || null,
-        authMode: usedGoogleAccessToken ? 'token_pass_through' : 'service_account_fallback',
+        authMode: 'bff_config_only',
         editingConfig: nextEditingConfig,
         summaryVisible: Boolean(nextConfig),
       });
       return nextConfig;
     } catch (error) {
       logCashflowLab('config.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
-      if (isBffAuthError(error)) {
-        requestLoginFlow();
-      }
       setErrorMessage(formatError(error));
       return null;
     } finally {
@@ -471,29 +545,45 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handlePreview() {
-    if (!projectId || loading || editingConfig || !config) return;
-    const requestActor = await requireBffActor();
-    if (!requestActor) {
-      return;
-    }
+  async function handlePreview(sourceOverride?: {
+    value?: string;
+    sheetName?: string;
+    startWeek?: string;
+    endWeek?: string;
+  }) {
+    if (!projectId || loading || (!sourceOverride && (editingConfig || !config))) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setLoading(true);
     setErrorMessage('');
     try {
-      logCashflowLab('preview.start', { projectId, spreadsheetId: config?.spreadsheetId || spreadsheetId, sheetName: config?.sheetName || null });
-      let usedGoogleAccessToken: string | undefined;
-      const layoutResult = await runWithGoogleSheetsAuthRetry('preview', (googleAccessToken) => {
-        usedGoogleAccessToken = googleAccessToken;
-        return previewCashflowSheetLabViaBff({
-        tenantId: orgId,
-        actor: requestActor,
+      const previewSource = {
+        value: sourceOverride?.value,
+        sheetName: sourceOverride?.sheetName,
+        startWeek: sourceOverride?.startWeek,
+        endWeek: sourceOverride?.endWeek,
+      };
+      logCashflowLab('preview.start', {
         projectId,
-        includeValues: false,
-        googleAccessToken,
-        });
+        spreadsheetId: config?.spreadsheetId || spreadsheetId,
+        sheetName: previewSource.sheetName || config?.sheetName || null,
+        explicitSource: Boolean(sourceOverride),
       });
+      let usedGoogleAccessToken: string | undefined;
+      const layoutResult = await runWithBffAuthRetry('preview.layout', (requestActor) => (
+        runWithGoogleSheetsAuthRetry('preview', (googleAccessToken) => {
+          usedGoogleAccessToken = googleAccessToken;
+          return previewCashflowSheetLabViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+            ...previewSource,
+            includeValues: false,
+            googleAccessToken,
+          });
+        })
+      ));
+      if (!layoutResult) return;
       if (previewRequestRef.current !== requestId) return;
       setPreview(layoutResult);
       logCashflowLab('preview.layout.ok', {
@@ -505,13 +595,15 @@ export function CashflowSheetLabPage({
         mappingCount: layoutResult.template.stats.mappingCount,
       });
       if (!sheetName && layoutResult.selectedSheetName) setSheetName(layoutResult.selectedSheetName);
-      void previewCashflowSheetLabViaBff({
-        tenantId: orgId,
-        actor: requestActor,
-        projectId,
-        includeValues: true,
-        googleAccessToken: usedGoogleAccessToken,
-      }).then((valueResult) => {
+      void runWithBffAuthRetry('preview.values', (requestActor) => previewCashflowSheetLabViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          ...previewSource,
+          includeValues: true,
+          googleAccessToken: usedGoogleAccessToken,
+        })).then((valueResult) => {
+        if (!valueResult) return;
         if (previewRequestRef.current === requestId) {
           setPreview(valueResult);
           logCashflowLab('preview.values.ok', {
@@ -522,25 +614,37 @@ export function CashflowSheetLabPage({
             previewValueCount: valueResult.previewValues.length,
           });
         }
-      }).catch((error) => {
+      }).catch(async (error) => {
         if (previewRequestRef.current === requestId) {
           logCashflowLab('preview.values.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-          if (isBffAuthError(error)) {
-            requestLoginFlow();
-          }
           setErrorMessage(formatError(error));
         }
       });
     } catch (error) {
       logCashflowLab('preview.error', { projectId, spreadsheetId: config?.spreadsheetId || spreadsheetId, ...errorDiagnostics(error) }, 'warn');
-      if (isBffAuthError(error)) {
-        requestLoginFlow();
-      }
       setPreview(null);
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleConnectSheet() {
+    if (!projectId || loading || savingConfig || !spreadsheetId) return;
+    const savedConfig = editingConfig ? await handleSaveConfig() : config;
+    if (editingConfig && !savedConfig) return;
+    const source = {
+      value: savedConfig?.value || sheetLink,
+      sheetName: savedConfig?.sheetName || sheetName || undefined,
+      startWeek: savedConfig?.startWeek || startWeek || undefined,
+      endWeek: savedConfig?.endWeek || endWeek || undefined,
+    };
+    logCashflowLab('connect.start', {
+      projectId,
+      spreadsheetId: extractSpreadsheetIdFromSheetInput(source.value || ''),
+      savedBeforePreview: Boolean(editingConfig),
+    });
+    await handlePreview(source);
   }
 
   function openSyncWizard() {
@@ -552,25 +656,24 @@ export function CashflowSheetLabPage({
 
   async function handleWritebackPreview() {
     if (!projectId || writebackLoading || editingConfig || !config) return null;
-    const requestActor = await requireBffActor();
-    if (!requestActor) {
-      return null;
-    }
     const startedAt = Date.now();
     setWritebackLoading(true);
     setWritebackMessage('');
     setErrorMessage('');
     try {
       let usedGoogleAccessToken: string | undefined;
-      const result = await runWithGoogleSheetsAuthRetry('writeback.preview', (googleAccessToken) => {
-        usedGoogleAccessToken = googleAccessToken;
-        return previewCashflowProjectionWritebackViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          googleAccessToken,
-        });
-      });
+      const result = await runWithBffAuthRetry('writeback.preview', (requestActor) => (
+        runWithGoogleSheetsAuthRetry('writeback.preview', (googleAccessToken) => {
+          usedGoogleAccessToken = googleAccessToken;
+          return previewCashflowProjectionWritebackViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+            googleAccessToken,
+          });
+        })
+      ));
+      if (!result) return null;
       setWritebackPreview(result);
       logCashflowLab('writeback.preview.ok', {
         projectId,
@@ -585,9 +688,6 @@ export function CashflowSheetLabPage({
       return result;
     } catch (error) {
       logCashflowLab('writeback.preview.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
-      if (isBffAuthError(error)) {
-        requestLoginFlow();
-      }
       setErrorMessage(formatError(error));
       return null;
     } finally {
@@ -597,10 +697,6 @@ export function CashflowSheetLabPage({
 
   async function handleWritebackApply(overwrite = false) {
     if (!projectId || writebackApplying || editingConfig || !config) return false;
-    const requestActor = await requireBffActor();
-    if (!requestActor) {
-      return false;
-    }
     const startedAt = Date.now();
     const baselineHash = writebackPreview?.plan.baselineHash;
     setWritebackApplying(true);
@@ -609,18 +705,21 @@ export function CashflowSheetLabPage({
     const idempotencyKey = `cashflow-projection-writeback:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     try {
       let usedGoogleAccessToken: string | undefined;
-      const result = await runWithGoogleSheetsAuthRetry('writeback.apply', (googleAccessToken) => {
-        usedGoogleAccessToken = googleAccessToken;
-        return applyCashflowProjectionWritebackViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          baselineHash,
-          conflictResolution: overwrite ? 'overwrite' : 'abort',
-          idempotencyKey,
-          googleAccessToken,
-        });
-      });
+      const result = await runWithBffAuthRetry('writeback.apply', (requestActor) => (
+        runWithGoogleSheetsAuthRetry('writeback.apply', (googleAccessToken) => {
+          usedGoogleAccessToken = googleAccessToken;
+          return applyCashflowProjectionWritebackViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+            baselineHash,
+            conflictResolution: overwrite ? 'overwrite' : 'abort',
+            idempotencyKey,
+            googleAccessToken,
+          });
+        })
+      ));
+      if (!result) return false;
       setWritebackPreview(result);
       setWritebackMessage(`시트 업데이트 완료: ${Number(result.updatedCellCount || 0).toLocaleString()}개 셀 · ${formatDurationMs(result.durationMs || Date.now() - startedAt)}`);
       logCashflowLab('writeback.apply.ok', {
@@ -640,9 +739,6 @@ export function CashflowSheetLabPage({
         setErrorMessage(formatError(error));
       }
       logCashflowLab('writeback.apply.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
-      if (isBffAuthError(error)) {
-        requestLoginFlow();
-      }
       return false;
     } finally {
       setWritebackApplying(false);
@@ -681,7 +777,9 @@ export function CashflowSheetLabPage({
       });
       if (action === 'preview') {
         void handlePreview();
-      } else if (action === 'connect' || action === 'edit') {
+      } else if (action === 'connect') {
+        void handleConnectSheet();
+      } else if (action === 'edit') {
         logCashflowLab('config.editor.open', { projectId, source: action });
         setEditingConfig(true);
       } else if (action === 'projection-writeback') {
@@ -796,7 +894,9 @@ export function CashflowSheetLabPage({
                 variant="outline"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
                 disabled={!projectId || loading || configLoading}
-                onClick={handlePreview}
+                onClick={() => {
+                  void handlePreview();
+                }}
               >
                 {loading || configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 검토

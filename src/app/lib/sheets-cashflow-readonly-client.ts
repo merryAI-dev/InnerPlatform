@@ -428,7 +428,6 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
   sheetName?: string;
   startWeek?: string;
   endWeek?: string;
-  googleAccessToken?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabConfigResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -444,7 +443,6 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
       },
-      headers: googleAccessHeaders(params.googleAccessToken),
       timeoutMs: 25000,
       retries: 0,
     },

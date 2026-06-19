@@ -298,14 +298,25 @@ export function CashflowProjectSheet({
     user?.role,
     user?.uid,
   ]);
-  const resolveBffActor = useCallback(async () => {
-    const firebaseToken = await getAuthInstance()?.currentUser?.getIdToken().catch(() => undefined);
-    const nextToken = bffActor.idToken || firebaseToken;
+  const resolveBffActor = useCallback(async (options: { forceRefresh?: boolean } = {}) => {
+    const firebaseAuthUser = getAuthInstance()?.currentUser;
+    const firebaseToken = await firebaseAuthUser?.getIdToken(Boolean(options.forceRefresh)).catch((error) => {
+      console.warn('[CashflowProjectSheet] BFF token resolve failed', {
+        projectId,
+        actorEmail: bffActor.email,
+        forceRefresh: Boolean(options.forceRefresh),
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    });
+    const nextToken = firebaseToken || bffActor.idToken;
     if (!nextToken) return null;
-    if (!bffActor.idToken) {
+    if (firebaseToken || options.forceRefresh) {
       console.info('[CashflowProjectSheet] refreshed BFF token from Firebase', {
         projectId,
         actorEmail: bffActor.email,
+        tokenSource: firebaseToken ? 'firebase' : 'store',
+        forceRefresh: Boolean(options.forceRefresh),
       });
     }
     return {
@@ -745,7 +756,7 @@ export function CashflowProjectSheet({
       setLaborRiskLoading(true);
       setLaborRiskError(null);
       void (async () => {
-        const resolvedActor = await resolveBffActor();
+        const resolvedActor = await resolveBffActor({ forceRefresh: true });
         if (!resolvedActor?.idToken) {
           console.warn('[CashflowProjectSheet] labor risk auth missing, skipping API call', {
             projectId,
