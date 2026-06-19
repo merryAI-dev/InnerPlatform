@@ -28,12 +28,12 @@ The selected path is a dedicated security/DevOps control-plane domain:
 | Hostname | Role | Vercel project | Status |
 |---|---|---|---|
 | `myscube.myscguard.app` | Security operations console | `inner-platform` | Canonical host selected; Cloudflare DNS/proxy apply and strict edge smoke passed |
-| `devops.myscguard.app` | Deployment and infrastructure operations | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied |
-| `drive.myscguard.app` | Google Drive permission and sharing monitoring | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied |
-| `github.myscguard.app` | GitHub repository and Actions monitoring | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied |
-| `firestore.myscguard.app` | Firestore rules, access, and anomaly monitoring | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied |
-| `audit.myscguard.app` | Audit and evidence review | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied |
-| `edge.myscguard.app` | WAF/canary edge tests | `inner-platform` | Vercel alias points to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`; Cloudflare proxied; scanner-path/query WAF smoke passed |
+| `devops.myscguard.app` | Deployment and infrastructure operations | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `drive.myscguard.app` | Google Drive permission and sharing monitoring | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `github.myscguard.app` | GitHub repository and Actions monitoring | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `firestore.myscguard.app` | Firestore rules, access, and anomaly monitoring | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `audit.myscguard.app` | Audit and evidence review | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `edge.myscguard.app` | WAF/canary edge tests | `inner-platform` | Vercel alias points to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`; Cloudflare proxied; scanner-path/query WAF smoke passed |
 
 ## Original Vercel Inventory Findings
 

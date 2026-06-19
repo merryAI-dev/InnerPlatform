@@ -65,6 +65,12 @@
       "has": [{ "type": "host", "value": "inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app" }],
       "destination": "https://myscube.myscguard.app/:path*",
       "permanent": false
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "inner-platform-gq6813nqh-merryai-devs-projects.vercel.app" }],
+      "destination": "https://myscube.myscguard.app/:path*",
+      "permanent": false
     }
   ],
   "headers": [

@@ -36,7 +36,7 @@ Legacy hostname:
 - Updated production BFF origin earlier in the rollout:
   - `BFF_ALLOWED_ORIGINS=https://myscube.myscguard.app`
 - Set all security-domain Vercel aliases to the current production deployment:
-  - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`
+  - `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
 - Removed the stale Vercel alias:
   - `soc.myscguard.app`
 - Added and published Vercel project-level direct-origin redirects for current generated hosts:
@@ -45,6 +45,7 @@ Legacy hostname:
   - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app`
   - `inner-platform-h799435np-merryai-devs-projects.vercel.app`
   - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`
+  - `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
 - Removed the temporary Vercel route-version alias after route publish:
   - `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`
 
