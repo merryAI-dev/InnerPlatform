@@ -106,4 +106,17 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('--timeout 10m');
     expect(stageWorkflowText).toContain('Stage artifact is not READY');
   });
+
+  it('keeps deploy workflows focused on deployment after CI gates have passed', () => {
+    expect(stageWorkflowText).not.toContain('run: npm ci');
+    expect(stageWorkflowText).not.toContain('Unit tests');
+    expect(stageWorkflowText).not.toContain('RBAC policy verify');
+    expect(stageWorkflowText).not.toContain('Stage build');
+
+    expect(workflowText).toContain('Verify CI succeeded for this commit');
+    expect(workflowText).not.toContain('run: npm ci');
+    expect(workflowText).not.toContain('Unit tests');
+    expect(workflowText).not.toContain('RBAC policy verify');
+    expect(workflowText).not.toContain('Production build');
+  });
 });
