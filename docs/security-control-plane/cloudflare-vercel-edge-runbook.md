@@ -20,7 +20,7 @@ node scripts/collect_vercel_edge_inventory.mjs
 
 - `mysc-merry`가 아니라 현재 프로젝트명은 `mysc-merry-inv`로 확인됐다.
 - `submit-mysc.com`은 이미 존재하며 `inner-platform` production alias로 보인다.
-- `server/bff/runtime-safety.mjs`의 기본 live allowed origin은 `https://soc.myscguard.app`이다. 임시 rollback/cutover 예외는 `BFF_LIVE_ALLOWED_ORIGINS`에 명시해야 한다.
+- `server/bff/runtime-safety.mjs`의 기본 live allowed origin은 `https://myscube.myscguard.app`이다. 임시 rollback/cutover 예외는 `BFF_LIVE_ALLOWED_ORIGINS`에 명시해야 한다.
 
 ## 구조
 
@@ -32,7 +32,7 @@ User
   -> App / BFF / Firebase auth helper
 ```
 
-`*.vercel.app`는 Cloudflare zone에서 직접 프록시할 수 없다. 운영은 `soc.myscguard.app` 같은 커스텀 도메인을 Vercel 프로젝트에 등록하고, Cloudflare DNS에서 해당 hostname을 proxied CNAME으로 관리해야 한다.
+`*.vercel.app`는 Cloudflare zone에서 직접 프록시할 수 없다. 운영은 `myscube.myscguard.app` 같은 커스텀 도메인을 Vercel 프로젝트에 등록하고, Cloudflare DNS에서 해당 hostname을 proxied CNAME으로 관리해야 한다.
 
 ## 적용 순서
 
@@ -57,7 +57,7 @@ User
 
 | Hostname | Role | Vercel project |
 |---|---|
-| `soc.myscguard.app` | 보안 관제 메인 콘솔 | `inner-platform` |
+| `myscube.myscguard.app` | 보안 관제 메인 콘솔 | `inner-platform` |
 | `devops.myscguard.app` | 배포/infra 운영 | `inner-platform` |
 | `drive.myscguard.app` | Google Drive 권한/공유 관제 | `inner-platform` |
 | `github.myscguard.app` | GitHub repo/Actions/secret 관제 | `inner-platform` |
@@ -72,7 +72,7 @@ User
 - `myscguard.app`은 Cloudflare Registrar에서 등록 완료된 도메인이다. Zone id는 Cloudflare dashboard에서 확인해 로컬 `infra/cloudflare/production.tfvars`에 반영했다.
 - Vercel custom domain은 `inner-platform` production deployment에 alias로 연결했다. Vercel CLI는 각 hostname에 `A 76.76.21.21` DNS 레코드를 요구했다.
 - Cloudflare final proxy apply는 완료됐다. 7개 `myscguard.app` host가 Cloudflare edge를 통과하고, scanner path/query smoke는 `403`을 반환한다.
-- Vercel direct host 보상통제는 project-level routes를 사용한다. `inner-platform.vercel.app`, stage alias, current generated production URL은 `307`로 `https://soc.myscguard.app`에 보낸다.
+- Vercel direct host 보상통제는 project-level routes를 사용한다. `inner-platform.vercel.app`, stage alias, current generated production URL은 `307`로 `https://myscube.myscguard.app`에 보낸다.
 - Vercel routes publish 후 생성되는 route-version alias는 project-level route가 적용되지 않으므로 publish 직후 제거해야 한다.
 - Google Drive/GitHub/Firestore 관제 기능은 MYSCube `inner-platform` control plane에서 제공한다.
 
@@ -127,7 +127,7 @@ npm run security:edge-gate
 - `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`: pass with real zone id before final apply
 - `terraform -chdir=infra/cloudflare apply -var-file=production.tfvars`: final proxy apply completed for the 7 `myscguard.app` hostnames
 - `CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate`: pass with accepted POC warnings
-- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`: pass after direct-origin redirect and removed route-version alias verification
+- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`: required after Cloudflare DNS/proxy apply and route-version alias cleanup
 
 ## Vercel direct-origin 보상통제
 
@@ -142,9 +142,9 @@ CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run
 
 검증 기준:
 
-- `inner-platform.vercel.app` -> `307 https://soc.myscguard.app/...`
-- `inner-platform-stage-merryai-devs-projects.vercel.app` -> `307 https://soc.myscguard.app/...`
-- `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://soc.myscguard.app/...`
+- `inner-platform.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-stage-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - route-version alias -> `404 DEPLOYMENT_NOT_FOUND`
 
 route-version alias는 Vercel routes publish 때 다시 생길 수 있다. route를 publish한 작업자는 alias removal과 smoke evidence 갱신까지 같은 change window 안에서 끝내야 한다.

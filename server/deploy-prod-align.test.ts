@@ -65,7 +65,7 @@ describe('deploy-prod-align', () => {
     const tempDir = makeTempDir();
     const { binDir, logPath } = makeVercelStub(
       tempDir,
-      `if [ "$1" = "inspect" ] && [ "$2" = "soc.myscguard.app" ]; then
+      `if [ "$1" = "inspect" ] && [ "$2" = "myscube.myscguard.app" ]; then
   printf '> Fetched deployment "inner-platform-hwoa12b1l-merryai-devs-projects.vercel.app" in merryai-devs-projects\\n'
   exit 0
 fi
@@ -114,7 +114,7 @@ exit 1
 
     expect(result.status).not.toBe(0);
     expect(readFileSync(logPath, 'utf8')).toContain(
-      '--yes vercel@50.14.0 inspect soc.myscguard.app --token secret-ci-token',
+      '--yes vercel@50.14.0 inspect myscube.myscguard.app --token secret-ci-token',
     );
     expect(`${result.stdout}\n${result.stderr}`).toContain('--token [redacted]');
     expect(`${result.stdout}\n${result.stderr}`).not.toContain('secret-ci-token');

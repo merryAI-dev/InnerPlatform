@@ -10,7 +10,7 @@ function printUsage() {
 
 Manifest shape:
 [
-  { "project": "inner-platform", "hostname": "soc.myscguard.app" }
+  { "project": "inner-platform", "hostname": "myscube.myscguard.app" }
 ]
 
 Without --apply this prints the Vercel commands only.

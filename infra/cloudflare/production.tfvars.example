@@ -20,7 +20,7 @@ enable_rate_limits  = false
 vercel_apps = [
   {
     app_name       = "MYSC Security Operations Console"
-    hostname       = "soc.myscguard.app"
+    hostname       = "myscube.myscguard.app"
     vercel_origin  = "inner-platform.vercel.app"
     origin_project = "inner-platform"
   },

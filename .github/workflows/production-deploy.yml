@@ -24,9 +24,9 @@ jobs:
     timeout-minutes: 30
     environment:
       name: Production
-      url: https://soc.myscguard.app
+      url: https://myscube.myscguard.app
     env:
-      VERCEL_CANONICAL_PRODUCTION_HOST: soc.myscguard.app
+      VERCEL_CANONICAL_PRODUCTION_HOST: myscube.myscguard.app
       VERCEL_CLI_PACKAGE: vercel@50.14.0
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -112,7 +112,8 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" alias set \
             "${DEPLOYMENT_HOST}" \
             "${VERCEL_CANONICAL_PRODUCTION_HOST}" \
-            --token "${VERCEL_TOKEN}"
+            --token "${VERCEL_TOKEN}" \
+            --scope merryai-devs-projects
 
       - name: Verify canonical production alias
         env:
@@ -127,7 +128,7 @@ jobs:
           {
             printf '%s\n' "## InnerPlatform production deploy"
             printf '\n'
-            printf '%s\n' "- Canonical URL: https://soc.myscguard.app"
+            printf '%s\n' "- Canonical URL: https://myscube.myscguard.app"
             printf '%s\n' "- Deployment URL: ${DEPLOYMENT_URL}"
             printf '%s\n' "- Commit: $(git rev-parse HEAD)"
             printf '%s\n' "- Branch: main"

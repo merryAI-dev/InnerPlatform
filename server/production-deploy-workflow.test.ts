@@ -56,6 +56,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
     expect(workflowText).toContain('Promote canonical production alias');
     expect(workflowText).toContain('"${VERCEL_CANONICAL_PRODUCTION_HOST}"');
+    expect(workflowText).toContain('--scope merryai-devs-projects');
     expect(workflowText.indexOf('Promote canonical production alias')).toBeLessThan(
       workflowText.indexOf('Verify canonical production alias'),
     );
@@ -91,8 +92,8 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('200|401|403) ;;');
     expect(stageWorkflowText).toContain('200|403) ;;');
     expect(stageWorkflowText).toContain('307)');
-    expect(stageWorkflowText).toContain('https://soc.myscguard.app/)');
-    expect(stageWorkflowText).toContain('https://soc.myscguard.app/*');
+    expect(stageWorkflowText).toContain('https://myscube.myscguard.app/)');
+    expect(stageWorkflowText).toContain('https://myscube.myscguard.app/*');
     expect(stageWorkflowText).toContain('Unexpected stage root redirect location');
     expect(stageWorkflowText).toContain('Unexpected stage redirect location');
   });

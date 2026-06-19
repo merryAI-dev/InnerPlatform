@@ -27,7 +27,7 @@ The selected path is a dedicated security/DevOps control-plane domain:
 
 | Hostname | Role | Vercel project | Status |
 |---|---|---|---|
-| `soc.myscguard.app` | Security operations console | `inner-platform` | Vercel alias points to `inner-platform-h799435np-merryai-devs-projects.vercel.app`; Cloudflare proxied |
+| `myscube.myscguard.app` | Security operations console | `inner-platform` | Canonical host selected; Cloudflare DNS/proxy apply and edge smoke pending |
 | `devops.myscguard.app` | Deployment and infrastructure operations | `inner-platform` | Vercel alias points to `inner-platform-h799435np-merryai-devs-projects.vercel.app`; Cloudflare proxied |
 | `drive.myscguard.app` | Google Drive permission and sharing monitoring | `inner-platform` | Vercel alias points to `inner-platform-h799435np-merryai-devs-projects.vercel.app`; Cloudflare proxied |
 | `github.myscguard.app` | GitHub repository and Actions monitoring | `inner-platform` | Vercel alias points to `inner-platform-h799435np-merryai-devs-projects.vercel.app`; Cloudflare proxied |
@@ -49,4 +49,4 @@ The selected path is a dedicated security/DevOps control-plane domain:
 
 ## Remaining Evidence Needed
 
-- Deploy the updated production workflow from `main` so `soc.myscguard.app` becomes the official production gate URL.
+- Deploy the updated production workflow from `main`, apply Cloudflare DNS/proxy, and rerun edge smoke so `myscube.myscguard.app` becomes the official production gate URL.

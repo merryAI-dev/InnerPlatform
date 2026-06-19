@@ -22,7 +22,7 @@ const SCHEDULER_OWNER_ALIASES = new Map([
 ]);
 
 export const DEFAULT_LIVE_FIREBASE_PROJECT_ID = 'inner-platform-live-20260316';
-export const DEFAULT_LIVE_ALLOWED_ORIGINS = ['https://soc.myscguard.app'];
+export const DEFAULT_LIVE_ALLOWED_ORIGINS = ['https://myscube.myscguard.app'];
 
 function readOptionalText(value) {
   return typeof value === 'string' ? value.trim() : '';

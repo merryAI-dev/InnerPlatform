@@ -26,7 +26,7 @@ This domain is for MYSC security operations, DevOps, and audit control plane wor
 
 | Hostname | Role |
 |---|---|
-| `soc.myscguard.app` | Security operations console |
+| `myscube.myscguard.app` | Security operations console |
 | `devops.myscguard.app` | Deployment and infrastructure operations |
 | `drive.myscguard.app` | Google Drive permission and sharing monitoring |
 | `github.myscguard.app` | GitHub repository and Actions monitoring |
@@ -46,7 +46,7 @@ Vercel project: `inner-platform`
 
 Initial hostnames:
 
-- `soc.myscguard.app`
+- `myscube.myscguard.app`
 - `devops.myscguard.app`
 - `drive.myscguard.app`
 - `github.myscguard.app`

@@ -8,7 +8,7 @@ import {
 } from './runtime-safety.mjs';
 
 const LIVE_PROJECT_ID = 'inner-platform-live-20260316';
-const LIVE_ORIGIN = 'https://soc.myscguard.app';
+const LIVE_ORIGIN = 'https://myscube.myscguard.app';
 const LEGACY_VERCEL_LIVE_ORIGIN = 'https://inner-platform.vercel.app';
 const LONG_CRON_SECRET = 'vercel-cron-secret-32-characters-ok';
 const LONG_K8S_SECRET = 'k8s-worker-secret-32-characters-ok';

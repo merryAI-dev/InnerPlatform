@@ -205,7 +205,7 @@ jobs:
                 | tr -d '\r' \
                 | tail -n 1)"
               case "${root_location}" in
-                https://soc.myscguard.app/) ;;
+                https://myscube.myscguard.app/) ;;
                 *)
                   echo "Unexpected stage root redirect location: ${root_location}" >&2
                   exit 1
@@ -229,7 +229,7 @@ jobs:
                 | tr -d '\r' \
                 | tail -n 1)"
               case "${location}" in
-                https://soc.myscguard.app/*) ;;
+                https://myscube.myscguard.app/*) ;;
                 *)
                   echo "Unexpected stage redirect location: ${location}" >&2
                   exit 1

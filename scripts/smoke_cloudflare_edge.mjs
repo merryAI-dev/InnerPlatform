@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const defaultHosts = [
-  "soc.myscguard.app",
+  "myscube.myscguard.app",
   "devops.myscguard.app",
   "drive.myscguard.app",
   "github.myscguard.app",
@@ -158,7 +158,7 @@ async function checkDirectOrigin(host) {
       headers: { "user-agent": "MYSCube-edge-smoke/1.0" },
     });
     const location = response.headers.get("location") || "";
-    const canonicalRedirect = response.status >= 300 && response.status < 400 && location.startsWith("https://soc.myscguard.app/");
+    const canonicalRedirect = response.status >= 300 && response.status < 400 && location.startsWith("https://myscube.myscguard.app/");
     const removedAlias = response.status === 404;
     return result(`https://${host}/ direct-origin`, canonicalRedirect || removedAlias, {
       status: response.status,
