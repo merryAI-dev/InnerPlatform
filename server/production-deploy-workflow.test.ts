@@ -79,6 +79,8 @@ describe('production deployment workflow safety', () => {
 describe('stage release workflow safety', () => {
   it('validates the stage Vercel token against the expected team before release work', () => {
     expect(stageWorkflowText).toMatch(/environment:\n\s+name: Stage/);
+    expect(stageWorkflowText).toContain('inner-platform-internal-stage-merryai-devs-projects.vercel.app');
+    expect(stageWorkflowText).not.toContain('inner-platform-stage-merryai-devs-projects.vercel.app');
     expect(stageWorkflowText).toContain('VERCEL_DEPLOY_TOKEN_STAGE');
     expect(stageWorkflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_STAGE');
     expect(stageWorkflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');

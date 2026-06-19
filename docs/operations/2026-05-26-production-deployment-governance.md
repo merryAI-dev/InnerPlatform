@@ -16,7 +16,7 @@ Production deployment authority belongs to GitHub Actions running from `main` th
 | Live canonical | `https://myscube.myscguard.app` | Security/DevOps control plane POC, smoke tests |
 | Vercel deployment URL | `*.vercel.app` deployment host | Debugging a specific artifact only |
 | Preview URL | Vercel random deployment URL | Artifact debugging only, not QA login |
-| Stage URL | `https://inner-platform-stage-merryai-devs-projects.vercel.app` | Live rehearsal, Firebase Auth QA, never live evidence |
+| Stage URL | `https://inner-platform-internal-stage-merryai-devs-projects.vercel.app` | Live rehearsal, Firebase Auth QA, never live evidence |
 
 Do not treat a preview URL or a one-off deployment URL as the product status URL.
 Because Firebase Auth only allows registered domains, do not share random Vercel preview URLs as Stage QA links. After each preview deployment, move the fixed Stage alias to the new deployment and share only the fixed Stage URL.

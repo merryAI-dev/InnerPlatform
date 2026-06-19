@@ -6,7 +6,7 @@ Date: 2026-06-18
 
 The stage canonical URL is fixed to:
 
-`https://inner-platform-stage-merryai-devs-projects.vercel.app`
+`https://inner-platform-internal-stage-merryai-devs-projects.vercel.app`
 
 Stage deployments must be promoted only by the GitHub Actions workflow:
 

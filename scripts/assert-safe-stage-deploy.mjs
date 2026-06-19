@@ -4,7 +4,7 @@ function fail(message) {
 }
 
 const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
-const canonicalHost = 'inner-platform-stage-merryai-devs-projects.vercel.app';
+const canonicalHost = 'inner-platform-internal-stage-merryai-devs-projects.vercel.app';
 
 if (!isGitHubActions) {
   fail(
