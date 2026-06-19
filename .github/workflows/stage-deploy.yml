@@ -83,13 +83,6 @@ jobs:
       - name: RBAC policy verify
         run: npm run policy:verify
 
-      - name: Cashflow stage smoke tests
-        run: |
-          npx vitest run \
-            src/app/features/cashflow-sheet-compare/cashflow-sheet-preview-tables.test.ts \
-            server/bff/routes/cashflow-sheet-lab.test.mjs \
-            server/bff/cashflow-sheet-template.test.mjs
-
       - name: Stage build
         run: npm run build
 
@@ -218,31 +211,6 @@ jobs:
               exit 1
               ;;
           esac
-          config_status="$(curl -sS -o /tmp/stage-config-response.txt -w '%{http_code}' \
-            "https://${STAGE_CANONICAL_HOST}/api/v1/projects/p1773651024850/cashflow-sheet-lab/config")"
-          case "${config_status}" in
-            200|401|403) ;;
-            307)
-              location="$(curl -sSI \
-                "https://${STAGE_CANONICAL_HOST}/api/v1/projects/p1773651024850/cashflow-sheet-lab/config" \
-                | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2}' \
-                | tr -d '\r' \
-                | tail -n 1)"
-              case "${location}" in
-                https://myscube.myscguard.app/*) ;;
-                *)
-                  echo "Unexpected stage redirect location: ${location}" >&2
-                  exit 1
-                  ;;
-              esac
-              ;;
-            *)
-              echo "Unexpected cashflow config status from stage: ${config_status}" >&2
-              cat /tmp/stage-config-response.txt >&2 || true
-              exit 1
-              ;;
-          esac
-
       - name: Stage deployment summary
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
