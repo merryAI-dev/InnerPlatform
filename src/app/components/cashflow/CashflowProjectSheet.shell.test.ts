@@ -87,19 +87,21 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
   });
 
-  it('does not force-refresh BFF auth on the background labor risk poll loop', () => {
-    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef');
-    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef.current === requestKey');
-    expect(cashflowProjectSheetSource).toContain('const resolvedActor = await resolveBffActor();');
-    expect(cashflowProjectSheetSource).toContain('labor risk BFF auth rejected, retrying with refreshed token');
+  it('keeps labor risk checks behind a manual action', () => {
+    expect(cashflowProjectSheetSource).toContain('handleManualLaborRiskCheck');
+    expect(cashflowProjectSheetSource).toContain('수동 체크');
+    expect(cashflowProjectSheetSource).toContain('fetchCashflowLaborRiskViaBff({');
     expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
+    expect(cashflowProjectSheetSource).not.toContain('laborRiskRequestKeyRef');
+    expect(cashflowProjectSheetSource).not.toContain('requesting labor risk');
   });
 
-  it('does not refetch labor risk for every cashflow week stream update', () => {
-    expect(cashflowProjectSheetSource).toContain('const cashflowWeeksStreamKey = useMemo(() => (');
-    expect(cashflowProjectSheetSource).toContain('todayIso,');
-    expect(cashflowProjectSheetSource).toContain('}, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);');
-    expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey,\n    ].join');
-    expect(cashflowProjectSheetSource).not.toContain('}, [cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user?.uid]);');
+  it('does not start cashflow realtime streams from the project sheet shell', () => {
+    expect(cashflowProjectSheetSource).toContain('getDocs(q)');
+    expect(cashflowProjectSheetSource).not.toContain('onSnapshot');
+    expect(cashflowProjectSheetSource).not.toContain('setInterval');
+    expect(cashflowProjectSheetSource).not.toContain('cashflowPresence');
+    expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey');
+    expect(cashflowProjectSheetSource).not.toContain('mysc:cashflow-projection-saved');
   });
 });
