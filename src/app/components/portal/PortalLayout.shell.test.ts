@@ -99,4 +99,12 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext)');
     expect(portalLayoutSource).not.toContain('if (authLoading || portalLoading)');
   });
+
+  it('does not start cashflow realtime presence or edit-lock listeners from the portal shell', () => {
+    expect(portalLayoutSource).not.toContain('cashflowPresence');
+    expect(portalLayoutSource).not.toContain('cashflowEditLocks');
+    expect(portalLayoutSource).not.toContain('cashflowPresenceUsers');
+    expect(portalLayoutSource).not.toContain('cashflowEditLock');
+    expect(portalLayoutSource).not.toContain('onSnapshot');
+  });
 });
