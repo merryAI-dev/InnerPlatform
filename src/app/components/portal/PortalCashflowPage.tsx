@@ -26,7 +26,7 @@ export function PortalCashflowPage() {
   const sheetRangeLabel = sheetHeader.startWeek || sheetHeader.endWeek
     ? `합계 기준 ${sheetHeader.startWeek || '시작 미지정'} ~ ${sheetHeader.endWeek || '종료 미지정'}`
     : '합계 기준 미지정';
-  const dispatchSheetAction = (action: 'apply' | 'preview' | 'edit') => {
+  const dispatchSheetAction = (action: 'connect' | 'preview' | 'edit') => {
     window.dispatchEvent(new CustomEvent('mysc:cashflow-sheet-lab-action', {
       detail: { action, projectId },
     }));
@@ -61,7 +61,7 @@ export function PortalCashflowPage() {
             type="button"
             size="sm"
             className="h-7 gap-1 rounded-none px-2 text-[10px]"
-            onClick={() => dispatchSheetAction('apply')}
+            onClick={() => dispatchSheetAction('connect')}
           >
             <Settings className="h-3 w-3" />
             시트와 연동하기

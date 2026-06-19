@@ -166,6 +166,40 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
+  it('passes Google access token when saving the lab sheet config if available', async () => {
+    const client = asMockClient({
+      request: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          configured: true,
+          config: {
+            value: 'sheet-001',
+            sheetName: 'cashflow(사용내역 연동)',
+            spreadsheetId: 'sheet-001',
+          },
+        },
+      })),
+    });
+
+    await saveCashflowSheetLabConfigViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'sheet-001',
+      sheetName: 'cashflow(사용내역 연동)',
+      googleAccessToken: 'google-token-123',
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/config',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: { 'x-google-access-token': 'google-token-123' },
+      }),
+    );
+  });
+
   it('applies the reviewed sheet values through same-origin BFF', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({

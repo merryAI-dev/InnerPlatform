@@ -432,7 +432,7 @@ export function CashflowSheetLabPage({
       });
       const nextConfig = result.config || null;
       setConfig(nextConfig);
-      setEditingConfig(false);
+      setEditingConfig(embedded && hideConfigChrome);
       setSheetLink(nextConfig?.value || sheetLink);
       setSheetName(nextConfig?.sheetName || sheetName);
       setStartWeek(nextConfig?.startWeek || startWeek);
@@ -662,7 +662,7 @@ export function CashflowSheetLabPage({
         void handleWritebackPreview();
       } else if (action === 'preview') {
         void handlePreview();
-      } else if (action === 'edit') {
+      } else if (action === 'connect' || action === 'edit') {
         setEditingConfig(true);
       } else if (action === 'projection-writeback') {
         openSyncWizard();
