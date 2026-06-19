@@ -272,6 +272,7 @@ function mapFirebaseUserToAuthUser(
     name: member?.name || firebaseUser.displayName || '사용자',
     email: normalizedEmail,
     role,
+    source: 'firebase',
     idToken,
     googleAccessToken: loadGoogleWorkspaceAccessToken(firebaseUser.uid),
     avatarUrl: member?.avatarUrl || firebaseUser.photoURL || undefined,

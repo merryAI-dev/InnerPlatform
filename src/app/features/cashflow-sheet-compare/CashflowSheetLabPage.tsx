@@ -91,8 +91,12 @@ function isGoogleSheetsTokenExpiredError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; status?: number };
   const code = apiError?.body?.code || apiError?.body?.error;
   const message = apiError?.body?.message || '';
-  return apiError?.status === 401
+  return (apiError?.status === 401 || apiError?.status === 403)
     && (code === 'google_sheets_api_error' || message.includes('Google Sheets API request failed'));
+}
+
+function createGoogleSheetsAccessRequiredError() {
+  return new Error('Google Sheets 권한 연결이 필요합니다. Google 계정 권한 요청 창을 완료한 뒤 다시 시도해 주세요.');
 }
 
 function formatDiffAmount(value: number) {
@@ -270,21 +274,23 @@ export function CashflowSheetLabPage({
     logCashflowLab(`${action}.googleToken.result`, {
       projectId,
       hasGoogleAccessToken: Boolean(token),
-      authMode: token ? 'token_pass_through' : 'service_account_fallback',
+      authMode: token ? 'token_pass_through' : 'google_token_required',
       forceRefresh: Boolean(options.forceRefresh),
     }, token ? 'info' : 'warn');
-    return token || undefined;
+    if (!token) throw createGoogleSheetsAccessRequiredError();
+    return token;
   }
 
   async function runWithGoogleSheetsAuthRetry<T>(
     action: string,
-    operation: (googleAccessToken: string | undefined) => Promise<T>,
+    operation: (googleAccessToken: string) => Promise<T>,
+    options: { forceRefresh?: boolean } = {},
   ): Promise<T> {
-    const googleAccessToken = await resolveGoogleAccessToken(action);
+    const googleAccessToken = await resolveGoogleAccessToken(action, { forceRefresh: Boolean(options.forceRefresh) });
     try {
       return await operation(googleAccessToken);
     } catch (error) {
-      if (!googleAccessToken || !isGoogleSheetsTokenExpiredError(error)) {
+      if (!isGoogleSheetsTokenExpiredError(error)) {
         throw error;
       }
       logCashflowLab(`${action}.googleToken.expired`, { projectId, ...errorDiagnostics(error) }, 'warn');
@@ -356,7 +362,7 @@ export function CashflowSheetLabPage({
         endWeek: endWeek || undefined,
         googleAccessToken,
         });
-      });
+      }, { forceRefresh: true });
       const nextConfig = result.config || null;
       setConfig(nextConfig);
       setEditingConfig(false);

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   getDefaultOrgId,
   getOrgCollectionPath,
@@ -119,6 +121,14 @@ describe('Firebase auth domain proxy', () => {
     });
 
     expect(selected?.authDomain).toBe('inner-platform-git-dev-merryai-devs-projects.vercel.app');
+  });
+});
+
+describe('Google workspace auth provider', () => {
+  it('forces consent when requesting Sheets access tokens', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'firebase.ts'), 'utf8');
+    expect(source).toContain("addScope('https://www.googleapis.com/auth/spreadsheets')");
+    expect(source).toContain("prompt: 'consent select_account'");
   });
 });
 
