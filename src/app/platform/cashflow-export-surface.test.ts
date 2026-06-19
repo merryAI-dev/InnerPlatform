@@ -44,12 +44,18 @@ function createStatus(input: {
 }
 
 describe('cashflow-export-surface', () => {
-  it('resolves the current week using Wednesday-based buckets', () => {
+  it('resolves the current week using finance month buckets', () => {
     expect(resolveCurrentCashflowWeek('2026-04-09')).toMatchObject({
       yearMonth: '2026-04',
       weekNo: 2,
-      weekStart: '2026-04-08',
-      weekEnd: '2026-04-14',
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+    });
+    expect(resolveCurrentCashflowWeek('2026-07-01')).toMatchObject({
+      yearMonth: '2026-07',
+      weekNo: 1,
+      weekStart: '2026-07-01',
+      weekEnd: '2026-07-05',
     });
   });
 
@@ -64,8 +70,8 @@ describe('cashflow-export-surface', () => {
           projectId: 'p1',
           yearMonth: '2026-04',
           weekNo: 2,
-          weekStart: '2026-04-08',
-          weekEnd: '2026-04-14',
+          weekStart: '2026-04-06',
+          weekEnd: '2026-04-12',
           updatedAt: '2026-04-09T09:00:00.000Z',
         }),
       ],

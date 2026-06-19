@@ -887,8 +887,8 @@ describe('스트레스 2: 5년치 주차 계산 — 빈틈 없는 커버리지',
 
       expect(weeks.length).toBeGreaterThan(40,
         `${year}년 주차 수가 40 이상이어야 한다 (일반적으로 48~53)`);
-      expect(weeks.length).toBeLessThan(60,
-        `${year}년 주차 수가 60 미만이어야 한다`);
+      expect(weeks.length).toBe(60,
+        `${year}년 주차 수는 월별 5개 고정 슬롯이므로 60이어야 한다`);
 
       // 해당 연도의 모든 날짜가 어딘가의 주차에 속하는지 검증
       const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
@@ -925,7 +925,7 @@ describe('스트레스 2: 5년치 주차 계산 — 빈틈 없는 커버리지',
     }
   });
 
-  it('모든 주차가 정확히 7일(수~화)이다', () => {
+  it('모든 주차가 월 내부 Monday-based finance slot이다', () => {
     const weeks = getYearMondayWeeks(2026);
 
     for (const week of weeks) {
@@ -934,26 +934,37 @@ describe('스트레스 2: 5년치 주차 계산 — 빈틈 없는 커버리지',
       const diffMs = end.getTime() - start.getTime();
       const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
-      expect(diffDays).toBe(6,
-        `주차 ${week.label}의 기간이 6일(수~화, 7일간)이어야 한다 (weekStart~weekEnd 차이)`);
+      expect(diffDays).toBeGreaterThanOrEqual(0,
+        `주차 ${week.label}의 종료일은 시작일 이후여야 한다`);
+      expect(diffDays).toBeLessThanOrEqual(8,
+        `주차 ${week.label}은 raw 6주차 병합을 포함해 최대 9일 이내여야 한다`);
+      expect(week.weekStart.slice(0, 7)).toBe(week.yearMonth,
+        `주차 ${week.label}의 시작일은 finance month 내부여야 한다`);
+      expect(week.weekEnd.slice(0, 7)).toBe(week.yearMonth,
+        `주차 ${week.label}의 종료일은 finance month 내부여야 한다`);
 
-      // 수요일(3) 시작 확인
       const startDay = new Date(Date.UTC(
         parseInt(week.weekStart.slice(0, 4)),
         parseInt(week.weekStart.slice(5, 7)) - 1,
         parseInt(week.weekStart.slice(8, 10)),
       )).getUTCDay();
-      expect(startDay).toBe(3,
-        `주차 ${week.label}이 수요일(3)에 시작해야 한다 (실제: ${startDay})`);
+      expect([1, new Date(Date.UTC(
+        parseInt(week.yearMonth.slice(0, 4)),
+        parseInt(week.yearMonth.slice(5, 7)) - 1,
+        1,
+      )).getUTCDay()]).toContain(startDay);
 
-      // 화요일(2) 종료 확인
       const endDay = new Date(Date.UTC(
         parseInt(week.weekEnd.slice(0, 4)),
         parseInt(week.weekEnd.slice(5, 7)) - 1,
         parseInt(week.weekEnd.slice(8, 10)),
       )).getUTCDay();
-      expect(endDay).toBe(2,
-        `주차 ${week.label}이 화요일(2)에 끝나야 한다 (실제: ${endDay})`);
+      const monthEndDay = new Date(Date.UTC(
+        parseInt(week.yearMonth.slice(0, 4)),
+        parseInt(week.yearMonth.slice(5, 7)),
+        0,
+      )).getUTCDay();
+      expect([0, monthEndDay]).toContain(endDay);
     }
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
-import { parseWithSchema, cashflowExportSchema } from './schemas.mjs';
+import { parseWithSchema, cashflowExportSchema, cashflowWeekAmountsSchema } from './schemas.mjs';
 import {
   buildCashflowExportFileName,
   buildCashflowExportWorkbookBuffer,
@@ -32,6 +32,15 @@ describe('cashflow export bff helper', () => {
     })).not.toThrow();
   });
 
+  it('rejects raw week 6 for cashflow week writes because storage uses financeWeek 1..5', () => {
+    expect(() => parseWithSchema(cashflowWeekAmountsSchema, {
+      yearMonth: '2026-08',
+      weekNo: 6,
+      mode: 'actual',
+      amounts: { DIRECT_COST_OUT: 1000 },
+    }, 'Invalid cashflow week request')).toThrow(/expected number to be <=5/);
+  });
+
   it('creates a non-empty xlsx buffer', async () => {
     const buffer = await buildCashflowExportWorkbookBuffer({
       variant: 'single-project',
@@ -47,8 +56,8 @@ describe('cashflow export bff helper', () => {
               projectId: 'proj-a',
               yearMonth: '2026-01',
               weekNo: 1,
-              weekStart: '2025-12-31',
-              weekEnd: '2026-01-06',
+              weekStart: '2026-01-01',
+              weekEnd: '2026-01-04',
               projection: { SALES_IN: 1000 },
               actual: { SALES_IN: 900 },
               pmSubmitted: true,

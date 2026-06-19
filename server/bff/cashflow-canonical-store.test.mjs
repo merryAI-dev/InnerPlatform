@@ -19,7 +19,7 @@ function row(cells, extra = {}) {
 }
 
 describe('cashflow canonical BFF helpers', () => {
-  it('uses the same Wednesday-based week buckets as the app cashflow sheet', () => {
+  it('uses the shared finance week buckets as the app cashflow sheet', () => {
     expect(getMonthCashflowWeeks('2027-01').map((week) => week.label)).toEqual([
       '27-1-1',
       '27-1-2',
@@ -30,8 +30,14 @@ describe('cashflow canonical BFF helpers', () => {
     expect(getMonthCashflowWeeks('2027-01')[0]).toMatchObject({
       yearMonth: '2027-01',
       weekNo: 1,
-      weekStart: '2026-12-30',
-      weekEnd: '2027-01-05',
+      weekStart: '2027-01-01',
+      weekEnd: '2027-01-03',
+    });
+    expect(getMonthCashflowWeeks('2026-08')[4]).toMatchObject({
+      rawWeek: 6,
+      weekNo: 5,
+      weekStart: '2026-08-24',
+      weekEnd: '2026-08-31',
     });
   });
 
@@ -183,7 +189,7 @@ describe('cashflow canonical BFF helpers', () => {
       totalAbsDelta: 100000000,
       largestLineId: 'DIRECT_COST_OUT',
       largestLineDelta: 100000000,
-      daysBeforeWeekStart: 2,
+      daysBeforeWeekStart: 0,
     });
   });
 

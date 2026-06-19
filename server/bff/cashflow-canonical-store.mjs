@@ -1,4 +1,9 @@
 import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
+import {
+  findFinanceWeekForDate,
+  getMonthFinanceWeeks,
+  getYearFinanceWeeks,
+} from '../../src/app/platform/cashflow-week-core.mjs';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from './cashflow-policy.mjs';
 
 const SETTLEMENT_COLUMN_HEADERS = [
@@ -40,123 +45,25 @@ for (const entry of cashflowPolicyData.lineEntries || []) {
   }
 }
 
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
 function parseYearMonth(value) {
   const match = /^(\d{4})-(\d{2})$/.exec(String(value || '').trim());
   if (!match) return null;
   const year = Number.parseInt(match[1], 10);
   const month = Number.parseInt(match[2], 10);
   if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
-  return { year, month, yearMonth: `${String(year).padStart(4, '0')}-${pad2(month)}` };
-}
-
-function formatIsoDate(year, month, day) {
-  return `${String(year)}-${pad2(month)}-${pad2(day)}`;
-}
-
-function addDaysUtc(isoDate, deltaDays) {
-  const [yRaw, mRaw, dRaw] = String(isoDate || '').split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  const day = Number.parseInt(dRaw, 10);
-  const base = Date.UTC(year, month - 1, day);
-  const next = new Date(base + deltaDays * 24 * 60 * 60 * 1000);
-  return formatIsoDate(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate());
-}
-
-function dayOfWeekUtc(year, month, day) {
-  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-}
-
-function daysInMonthUtc(year, month) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function startOfWeekWednesday(isoDate) {
-  const [yRaw, mRaw, dRaw] = String(isoDate || '').split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  const day = Number.parseInt(dRaw, 10);
-  const dow = dayOfWeekUtc(year, month, day);
-  const delta = -((dow - 3 + 7) % 7);
-  return addDaysUtc(isoDate, delta);
-}
-
-function countDaysInMonthForWeek(weekStart, year, month) {
-  let count = 0;
-  for (let i = 0; i < 7; i += 1) {
-    const date = addDaysUtc(weekStart, i);
-    const [yy, mm] = date.split('-');
-    if (Number.parseInt(yy, 10) === year && Number.parseInt(mm, 10) === month) count += 1;
-  }
-  return count;
+  return { year, month, yearMonth: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}` };
 }
 
 export function getMonthCashflowWeeks(yearMonth) {
-  const parsed = parseYearMonth(yearMonth);
-  if (!parsed) return [];
-
-  const { year, month } = parsed;
-  const firstDay = formatIsoDate(year, month, 1);
-  const lastDay = formatIsoDate(year, month, daysInMonthUtc(year, month));
-  let weekStart = startOfWeekWednesday(firstDay);
-  const weeks = [];
-  const yy = year % 100;
-  let weekNo = 0;
-
-  while (weekStart <= lastDay) {
-    const daysInMonth = countDaysInMonthForWeek(weekStart, year, month);
-    if (daysInMonth >= 4) {
-      weekNo += 1;
-      weeks.push({
-        yearMonth: parsed.yearMonth,
-        weekNo,
-        weekStart,
-        weekEnd: addDaysUtc(weekStart, 6),
-        label: `${yy}-${month}-${weekNo}`,
-      });
-    }
-    weekStart = addDaysUtc(weekStart, 7);
-  }
-
-  return weeks;
+  return getMonthFinanceWeeks(yearMonth);
 }
 
 function getYearCashflowWeeks(year) {
-  const all = [];
-  for (let month = 1; month <= 12; month += 1) {
-    all.push(...getMonthCashflowWeeks(`${year}-${pad2(month)}`));
-  }
-  return all;
+  return getYearFinanceWeeks(year);
 }
 
 function findWeekForDate(dateStr, weeks) {
-  if (!dateStr) return undefined;
-  const direct = weeks.find((week) => dateStr >= week.weekStart && dateStr <= week.weekEnd);
-  if (direct) return direct;
-
-  const [yRaw, mRaw] = dateStr.split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month)) return undefined;
-
-  const current = getMonthCashflowWeeks(`${year}-${pad2(month)}`);
-  const inCurrent = current.find((week) => dateStr >= week.weekStart && dateStr <= week.weekEnd);
-  if (inCurrent) return inCurrent;
-
-  const prevMonth = month === 1 ? 12 : month - 1;
-  const prevYear = month === 1 ? year - 1 : year;
-  const prev = getMonthCashflowWeeks(`${prevYear}-${pad2(prevMonth)}`);
-  const inPrev = prev.find((week) => dateStr >= week.weekStart && dateStr <= week.weekEnd);
-  if (inPrev) return inPrev;
-
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear = month === 12 ? year + 1 : year;
-  return getMonthCashflowWeeks(`${nextYear}-${pad2(nextMonth)}`)
-    .find((week) => dateStr >= week.weekStart && dateStr <= week.weekEnd);
+  return findFinanceWeekForDate(dateStr, weeks);
 }
 
 function resolveWeekFromLabel(label, anchorWeeks) {
@@ -171,7 +78,7 @@ function resolveWeekFromLabel(label, anchorWeeks) {
   const month = Number.parseInt(match[2], 10);
   const weekNo = Number.parseInt(match[3], 10);
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(weekNo)) return undefined;
-  return getMonthCashflowWeeks(`${year}-${pad2(month)}`).find((week) => week.weekNo === weekNo);
+  return getMonthCashflowWeeks(`${year}-${String(month).padStart(2, '0')}`).find((week) => week.weekNo === weekNo);
 }
 
 function parseDateIso(value) {
@@ -179,11 +86,11 @@ function parseDateIso(value) {
   if (!raw) return '';
   const compact = raw.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
   if (compact) {
-    return `${compact[1]}-${pad2(Number.parseInt(compact[2], 10))}-${pad2(Number.parseInt(compact[3], 10))}`;
+    return `${compact[1]}-${String(Number.parseInt(compact[2], 10)).padStart(2, '0')}-${String(Number.parseInt(compact[3], 10)).padStart(2, '0')}`;
   }
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
-  return formatIsoDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+  return `${String(date.getUTCFullYear())}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 function resolveWeekFromRow(row, anchorWeeks) {

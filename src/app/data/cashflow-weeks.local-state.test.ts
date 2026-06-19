@@ -59,8 +59,8 @@ describe('applyWeekAmountsToLocalWeeks', () => {
       projectId: 'p002',
       yearMonth: '2026-06',
       weekNo: 1,
-      weekStart: '2026-06-03',
-      weekEnd: '2026-06-09',
+      weekStart: '2026-06-01',
+      weekEnd: '2026-06-07',
       projection: { DIRECT_COST_OUT: 1000000 },
       actual: {},
       pmSubmitted: false,
@@ -77,8 +77,8 @@ describe('applyWeekAmountsToLocalWeeks', () => {
       projectId: 'p002',
       yearMonth: '2026-06',
       weekNo: 1,
-      weekStart: '2026-06-03',
-      weekEnd: '2026-06-09',
+      weekStart: '2026-06-01',
+      weekEnd: '2026-06-07',
       mode: 'projection',
       amounts: { DIRECT_COST_OUT: 101000000 },
       now: '2026-06-01T10:00:00.000Z',
@@ -88,7 +88,7 @@ describe('applyWeekAmountsToLocalWeeks', () => {
       triggered: true,
       totalAbsDelta: 100000000,
       largestLineId: 'DIRECT_COST_OUT',
-      daysBeforeWeekStart: 2,
+      daysBeforeWeekStart: 0,
     });
   });
 

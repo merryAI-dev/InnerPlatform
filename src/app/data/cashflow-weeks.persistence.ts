@@ -6,7 +6,7 @@ export const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
 export function resolveWeekDocId(projectId: string, yearMonth: string, weekNo: number): string {
   const safeProjectId = projectId.trim();
   const safeYm = yearMonth.trim();
-  const safeNo = Math.max(1, Math.min(6, Math.trunc(weekNo)));
+  const safeNo = Math.max(1, Math.min(5, Math.trunc(weekNo)));
   return `${safeProjectId}-${safeYm}-w${safeNo}`;
 }
 

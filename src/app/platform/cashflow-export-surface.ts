@@ -1,5 +1,5 @@
 import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
-import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
+import { findWeekForDate, getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 
 export interface CashflowExportSurfaceProject {
   id: string;
@@ -25,7 +25,7 @@ function buildStatusKey(projectId: string, yearMonth: string, weekNo: number): s
 export function resolveCurrentCashflowWeek(todayIso: string): MonthMondayWeek | undefined {
   const yearMonth = typeof todayIso === 'string' ? todayIso.slice(0, 7) : '';
   if (!/^\d{4}-\d{2}$/.test(yearMonth)) return undefined;
-  return getMonthMondayWeeks(yearMonth).find((week) => todayIso >= week.weekStart && todayIso <= week.weekEnd);
+  return findWeekForDate(todayIso, getMonthMondayWeeks(yearMonth));
 }
 
 export function buildCashflowExportProjectRows(input: {

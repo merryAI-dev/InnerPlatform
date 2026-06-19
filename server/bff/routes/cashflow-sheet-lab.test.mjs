@@ -310,7 +310,7 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
-  it('applies fixed-sheet week labels even when they are not canonical cashflow weeks', async () => {
+  it('applies fixed-sheet week labels through canonical finance weeks', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -349,7 +349,6 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w5')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 999 },
       actual: { MYSC_PREPAY_IN: 999 },
-      sheetWeekSource: 'cashflow-sheet-lab',
     });
   });
 

@@ -2323,7 +2323,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
     const projectId = input.projectId?.trim();
     const yearMonth = input.yearMonth?.trim();
-    const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
+    const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(yearMonth)) return;
 
     const now = new Date().toISOString();

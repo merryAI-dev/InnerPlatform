@@ -147,6 +147,10 @@
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 내사업 현황을 좌측 포털형 툴에서 상단 workspace bar, 앱 탭, 사업 전환 rail을 가진 cold enterprise SaaS 구조로 재편했다.
 
+## [2026-06-19] patch-note | shared-portal-architecture | finance week 공통화 hotfix
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: cashflow/actual/projection/expense 주차 계산을 stage/live 공통 core로 모으고, 2026년 8월처럼 raw 6주차가 생기는 달은 financeWeek 5에 강제 산입되도록 저장/API/export 경로를 맞췄다.
+
 ## [2026-04-14] patch-note | portal-dashboard | 0건 운영 정보 축소와 주간 상태 전면 배치
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 0건 운영 알림과 설정성 바로가기를 걷어내고, 이번 주 Projection 작성 여부·최근 Projection 수정일·사업비 입력 상태를 홈 첫 화면에서 바로 보이도록 압축했다.

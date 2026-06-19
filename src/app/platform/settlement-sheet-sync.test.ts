@@ -180,7 +180,7 @@ describe('buildSettlementActualSyncPayload', () => {
 
     expect(payload).toHaveLength(1);
     expect(payload[0]?.yearMonth).toBe('2026-03');
-    expect(payload[0]?.weekNo).toBe(1);
+    expect(payload[0]?.weekNo).toBe(2);
     expect(payload[0]?.amounts.DIRECT_COST_OUT).toBe(30000);
   });
 

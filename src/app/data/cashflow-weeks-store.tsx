@@ -210,7 +210,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
-    const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
+    const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
@@ -563,7 +563,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
-    const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
+    const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
@@ -678,7 +678,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!actor) return;
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
-    const weekNo = Math.max(1, Math.min(6, Math.trunc(input.weekNo)));
+    const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
 
     const monthWeeks = getMonthMondayWeeks(ym);
