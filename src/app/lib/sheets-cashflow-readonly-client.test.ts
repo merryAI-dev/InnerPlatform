@@ -2,9 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
-  getCashflowSheetLabConfigViaBff,
   previewCashflowSheetLabViaBff,
-  saveCashflowSheetLabConfigViaBff,
 } from './sheets-cashflow-readonly-client';
 
 function asMockClient(client: {
@@ -103,100 +101,7 @@ describe('sheets cashflow readonly client', () => {
     expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
-  it('reads and saves the persisted lab sheet config through same-origin BFF', async () => {
-    const client = asMockClient({
-      get: vi.fn(async () => ({
-        data: {
-          projectId: 'p001',
-          configured: true,
-          config: {
-            value: 'sheet-001',
-            sheetName: 'cashflow(사용내역 연동)',
-            spreadsheetId: 'sheet-001',
-          },
-        },
-      })),
-      request: vi.fn(async () => ({
-        data: {
-          projectId: 'p001',
-          configured: true,
-          config: {
-            value: 'sheet-001',
-            sheetName: 'cashflow(사용내역 연동)',
-            spreadsheetId: 'sheet-001',
-          },
-        },
-      })),
-    });
-    const actor = { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' };
-
-    await getCashflowSheetLabConfigViaBff({
-      tenantId: 'mysc',
-      actor,
-      projectId: 'p001',
-      client,
-    });
-    await saveCashflowSheetLabConfigViaBff({
-      tenantId: 'mysc',
-      actor,
-      projectId: 'p001',
-      value: 'sheet-001',
-      sheetName: 'cashflow(사용내역 연동)',
-      startWeek: '26-1-1',
-      endWeek: '26-6-5',
-      client,
-    });
-
-    expect(client.get).toHaveBeenCalledWith(
-      '/api/v1/projects/p001/cashflow-sheet-lab/config',
-      expect.objectContaining({ tenantId: 'mysc' }),
-    );
-    expect(client.request).toHaveBeenCalledWith(
-      '/api/v1/projects/p001/cashflow-sheet-lab/config',
-      expect.objectContaining({
-        method: 'PUT',
-        body: {
-          value: 'sheet-001',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-6-5',
-        },
-      }),
-    );
-  });
-
-  it('does not pass Google access tokens when saving the lab sheet config', async () => {
-    const client = asMockClient({
-      request: vi.fn(async () => ({
-        data: {
-          projectId: 'p001',
-          configured: true,
-          config: {
-            value: 'sheet-001',
-            sheetName: 'cashflow(사용내역 연동)',
-            spreadsheetId: 'sheet-001',
-          },
-        },
-      })),
-    });
-
-    await saveCashflowSheetLabConfigViaBff({
-      tenantId: 'mysc',
-      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
-      projectId: 'p001',
-      value: 'sheet-001',
-      sheetName: 'cashflow(사용내역 연동)',
-      client,
-    });
-
-    expect(client.request).toHaveBeenCalledWith(
-      '/api/v1/projects/p001/cashflow-sheet-lab/config',
-      expect.objectContaining({ method: 'PUT' }),
-    );
-    expect(client.request.mock.calls[0]?.[1]?.headers).toBeUndefined();
-  });
-
-  it('applies the reviewed sheet values through same-origin BFF', async () => {
+  it('applies explicitly provided sheet values through same-origin BFF', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -224,6 +129,10 @@ describe('sheets cashflow readonly client', () => {
       tenantId: 'mysc',
       actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
       projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-6-5',
       idempotencyKey: 'apply-001',
       client,
     });
@@ -232,7 +141,13 @@ describe('sheets cashflow readonly client', () => {
       '/api/v1/projects/p001/cashflow-sheet-lab/apply',
       expect.objectContaining({
         tenantId: 'mysc',
-        body: { idempotencyKey: 'apply-001' },
+        body: {
+          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-6-5',
+          idempotencyKey: 'apply-001',
+        },
         idempotencyKey: 'apply-001',
       }),
     );

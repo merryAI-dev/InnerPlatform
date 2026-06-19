@@ -20,20 +20,20 @@ const portalCashflowSource = readFileSync(
 );
 
 describe('CashflowSheetLabPage shell', () => {
-  it('is mounted inside the PM portal cashflow route shell', () => {
+  it('keeps sheet lab as an explicit route, not auto-mounted inside portal cashflow', () => {
     expect(routesSource).toContain("path: '/portal'");
     expect(routesSource).toContain("path: 'cashflow/sheets-lab'");
     expect(routesSource).toContain('CashflowSheetLabPage');
     expect(routesSource).not.toContain('StageOnlyCashflowSheetLabRoute');
     expect(portalLayoutSource).toContain('/portal/cashflow/sheets-lab');
-    expect(portalCashflowSource).toContain('CashflowSheetLabPage');
-    expect(portalCashflowSource).toContain('projectIdOverride={projectId}');
-    expect(portalCashflowSource).toContain('embedded');
-    expect(portalCashflowSource).toContain('hideConfigChrome');
-    expect(portalCashflowSource).toContain("dispatchSheetAction('apply')");
+    expect(portalCashflowSource).not.toContain('CashflowSheetLabPage');
+    expect(portalCashflowSource).not.toContain('projectIdOverride={projectId}');
+    expect(portalCashflowSource).not.toContain('embedded');
+    expect(portalCashflowSource).not.toContain('hideConfigChrome');
+    expect(portalCashflowSource).not.toContain('dispatchSheetAction');
     expect(portalCashflowSource).not.toContain("dispatchSheetAction('connect')");
-    expect(portalCashflowSource).toContain('cashflow.sheet_lab.portal.toolbar.dispatch');
-    expect(portalCashflowSource).toContain('시트 값 반영하기');
+    expect(portalCashflowSource).not.toContain('cashflow.sheet_lab.portal.toolbar.dispatch');
+    expect(portalCashflowSource).not.toContain('시트 값 반영하기');
     expect(portalCashflowSource).not.toContain('시트와 연동하기');
     expect(portalCashflowSource).not.toContain('shouldShowCashflowSheetLab');
     expect(portalCashflowSource).not.toContain('deployment-surface');
@@ -45,9 +45,6 @@ describe('CashflowSheetLabPage shell', () => {
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
-    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
-    expect(pageSource).toContain('previewCashflowProjectionWritebackViaBff');
-    expect(pageSource).toContain('applyCashflowProjectionWritebackViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
     expect(pageSource).toContain('requestLoginFlow');
@@ -65,23 +62,28 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('isGoogleSheetsTokenExpiredError');
     expect(pageSource).toContain('google_sheet_service_account_forbidden');
     expect(pageSource).toContain('시트를 시스템 계정');
-    expect(pageSource).toContain('systemAccountEmail');
-    expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
-    expect(pageSource).toContain("action === 'apply'");
     expect(pageSource).toContain('handleApplySheetValues');
-    expect(pageSource).toContain('config.load.ok');
-    expect(pageSource).toContain('config.save.ok');
-    expect(pageSource).toContain('toolbar.action');
-    expect(pageSource).toContain('config.editor.open');
-    expect(pageSource).toContain('config.editor.cancel');
-    expect(pageSource).toContain('writeback.wizard.open');
-    expect(pageSource).toContain('!hideConfigChrome || editingConfig || config || errorMessage');
-    expect(pageSource).toContain('onHeaderSummaryChange');
-    expect(pageSource).toContain('시트 업데이트');
+    expect(pageSource).toContain('value: sheetLink');
+    expect(pageSource).toContain('시트 값 반영하기');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');
     expect(pageSource).toContain('잔액');
     expect(pageSource).toContain('합계 기준');
+    expect(pageSource).not.toContain('getCashflowSheetLabConfigViaBff');
+    expect(pageSource).not.toContain('saveCashflowSheetLabConfigViaBff');
+    expect(pageSource).not.toContain('previewCashflowProjectionWritebackViaBff');
+    expect(pageSource).not.toContain('applyCashflowProjectionWritebackViaBff');
+    expect(pageSource).not.toContain('systemAccountEmail');
+    expect(pageSource).not.toContain('mysc:cashflow-sheet-lab-action');
+    expect(pageSource).not.toContain("action === 'apply'");
+    expect(pageSource).not.toContain('config.load');
+    expect(pageSource).not.toContain('config.save');
+    expect(pageSource).not.toContain('toolbar.action');
+    expect(pageSource).not.toContain('config.editor');
+    expect(pageSource).not.toContain('writeback');
+    expect(pageSource).not.toContain('!hideConfigChrome || editingConfig || config || errorMessage');
+    expect(pageSource).not.toContain('onHeaderSummaryChange');
+    expect(pageSource).not.toContain('시트 업데이트');
     expect(pageSource).not.toContain('시트와 연동할까요?');
     expect(pageSource).not.toContain('주차별 원본');
     expect(pageSource).not.toContain('원본 접기');
@@ -89,7 +91,6 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('nonEmptyCellCount');
     expect(pageSource).not.toContain('Spreadsheet ID');
     expect(pageSource).not.toContain('Google 토큰');
-    expect(pageSource).toContain('MYSC 시스템 계정');
     expect(pageSource).not.toContain("action === 'connect'");
     expect(pageSource).not.toContain('Scope:');
     expect(pageSource).not.toContain('Role:');
@@ -104,13 +105,6 @@ describe('CashflowSheetLabPage shell', () => {
   });
 
   it('recovers BFF auth failures with a popup retry instead of redirecting', () => {
-    const configLoadSource = pageSource.slice(
-      pageSource.indexOf('const fetchConfig ='),
-      pageSource.indexOf('async function handleSaveConfig'),
-    );
-
-    expect(configLoadSource).toContain('config.load.error');
-    expect(configLoadSource).toContain('setEditingConfig(true)');
     expect(pageSource).toContain('requestBffActorAfterAuth');
     expect(pageSource).toContain('bffAuth.popup.required');
     expect(pageSource).toContain('bffAuth.rejected');

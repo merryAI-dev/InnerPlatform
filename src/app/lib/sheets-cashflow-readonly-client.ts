@@ -129,35 +129,6 @@ export interface CashflowSheetLabPreviewResult {
   cashflowSnapshotError?: { code: string; message: string } | null;
 }
 
-export interface CashflowSheetLabConfig {
-  value: string;
-  sheetName?: string;
-  startWeek?: string;
-  endWeek?: string;
-  weekBasis?: 'sheet_range';
-  totalBasis?: 'sheet_range';
-  spreadsheetId?: string;
-  spreadsheetTitle?: string;
-  updatedAt?: string;
-  updatedBy?: {
-    uid?: string;
-    email?: string;
-    role?: string;
-  } | null;
-}
-
-export interface CashflowSheetLabConfigResult {
-  projectId: string;
-  configured: boolean;
-  config: CashflowSheetLabConfig | null;
-  systemAccountEmail?: string;
-  accessPolicy?: {
-    googleAuth: 'service_account';
-    serviceAccountEmail?: string;
-    sheetPermission: 'shared_with_mysc_system_account';
-  };
-}
-
 export interface CashflowSheetLabApplyResult {
   projectId: string;
   spreadsheetId: string;
@@ -202,73 +173,6 @@ export interface CashflowSheetLabApplyResult {
       updatedAt: string;
     }>;
   };
-}
-
-export interface CashflowSheetLabProjectionWritebackCell {
-  mode: 'projection';
-  lineId: string;
-  label: string;
-  canonicalLabel?: string;
-  direction: 'IN' | 'OUT';
-  yearMonth: string;
-  weekNo: number;
-  rowIndex: number;
-  columnIndex: number;
-  a1: string;
-  sheetValue: string;
-  sheetAmount: number;
-  platformAmount: number;
-  nextSheetValue: number;
-  changed: boolean;
-}
-
-export interface CashflowSheetLabProjectionWritebackResult {
-  projectId: string;
-  durationMs?: number;
-  spreadsheetId: string;
-  spreadsheetTitle: string;
-  selectedSheetName: string;
-  activeWeekRange: {
-    startWeek?: string;
-    endWeek?: string;
-    weekBasis?: 'sheet_range';
-    totalBasis?: 'sheet_range';
-  };
-  accessPolicy: {
-    googleAuth: 'service_account';
-    googleScope: 'spreadsheets';
-    writePolicy: 'projection_only';
-    conflictPolicy: 'baseline_hash_required_before_write';
-    sheetNamePolicy: 'cashflow_usage_linked_only';
-    valueSource: 'firebase_cashflow_weeks.projection';
-  };
-  template: {
-    supported: boolean;
-    mappingCount: number;
-    projectionMappingCount: number;
-    reasons: CashflowSheetLabTemplateResult['reasons'];
-  };
-  plan: {
-    baselineHash: string;
-    totalCellCount: number;
-    changeCount: number;
-    changedAmountTotal: number;
-    hasChanges: boolean;
-    changedCells: CashflowSheetLabProjectionWritebackCell[];
-    omittedChangedCellCount: number;
-    baseline: {
-      cellCount: number;
-      hashAlgorithm: 'sha256';
-    };
-  };
-  cashflowSnapshotStatus: 'ready';
-  job?: {
-    id: string;
-    status: 'RUNNING' | 'DONE' | 'CONFLICT' | 'FAILED';
-    updatedAt?: string;
-  } | null;
-  ok?: boolean;
-  updatedCellCount?: number;
 }
 
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
@@ -317,6 +221,10 @@ export async function applyCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  value?: string;
+  sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabApplyResult> {
@@ -327,116 +235,14 @@ export async function applyCashflowSheetLabViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
-        idempotencyKey: params.idempotencyKey,
-      },
-      idempotencyKey: params.idempotencyKey,
-      timeoutMs: 30000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
-export async function previewCashflowProjectionWritebackViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  value?: string;
-  sheetName?: string;
-  startWeek?: string;
-  endWeek?: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetLabProjectionWritebackResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.post<CashflowSheetLabProjectionWritebackResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/writeback/preview`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
         ...(params.value ? { value: params.value } : {}),
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
-      },
-      timeoutMs: 25000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
-export async function applyCashflowProjectionWritebackViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  baselineHash?: string;
-  conflictResolution?: 'abort' | 'overwrite';
-  idempotencyKey: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetLabProjectionWritebackResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.post<CashflowSheetLabProjectionWritebackResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/writeback/apply`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        baselineHash: params.baselineHash,
-        conflictResolution: params.conflictResolution || 'abort',
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
       timeoutMs: 30000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
-export async function getCashflowSheetLabConfigViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetLabConfigResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.get<CashflowSheetLabConfigResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      timeoutMs: 15000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
-export async function saveCashflowSheetLabConfigViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  value: string;
-  sheetName?: string;
-  startWeek?: string;
-  endWeek?: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetLabConfigResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.request<CashflowSheetLabConfigResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
-    {
-      method: 'PUT',
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        value: params.value,
-        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
-        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
-        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
-      },
-      timeoutMs: 25000,
       retries: 0,
     },
   );
