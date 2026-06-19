@@ -137,7 +137,29 @@ function createApp({ context = {}, db = createDb(), googleSheetsService } = {}) 
   return app;
 }
 
+function createDisabledApp() {
+  const app = express();
+  app.use(express.json());
+  mountCashflowSheetLabRoutes(app, {
+    enabled: false,
+    db: createDb(),
+    googleSheetsService: {
+      previewSpreadsheet: vi.fn(),
+    },
+  });
+  return app;
+}
+
 describe('cashflow sheet lab route', () => {
+  it('returns 404 when the deployment surface disables sheet lab', async () => {
+    await request(createDisabledApp())
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_lab_not_available');
+      });
+  });
+
   it('saves the validated cashflow sheet config', async () => {
     const db = createDb();
 

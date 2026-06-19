@@ -878,9 +878,20 @@ function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SH
 export function mountCashflowSheetLabRoutes(app, {
   db,
   googleSheetsService,
+  enabled = true,
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
 } = {}) {
+  if (enabled === false) {
+    app.use('/api/v1/projects/:projectId/cashflow-sheet-lab', (_req, res) => {
+      res.status(404).json({
+        code: 'cashflow_sheet_lab_not_available',
+        message: 'Cashflow sheet lab is not available on this deployment surface.',
+      });
+    });
+    return;
+  }
+
   const loadSheetPreview = createSheetPreviewLoader({
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
