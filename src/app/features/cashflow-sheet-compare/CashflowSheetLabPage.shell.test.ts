@@ -24,11 +24,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(routesSource).toContain("path: '/portal'");
     expect(routesSource).toContain("path: 'cashflow/sheets-lab'");
     expect(routesSource).toContain('CashflowSheetLabPage');
-    expect(routesSource).toContain('StageOnlyCashflowSheetLabRoute');
-    expect(routesSource).toContain('shouldShowStageOnlyCashflowSheetLab');
+    expect(routesSource).not.toContain('StageOnlyCashflowSheetLabRoute');
     expect(portalLayoutSource).toContain('/portal/cashflow/sheets-lab');
     expect(portalCashflowSource).toContain('CashflowSheetLabPage');
-    expect(portalCashflowSource).toContain('shouldShowStageOnlyCashflowSheetLab');
     expect(portalCashflowSource).toContain('projectIdOverride={projectId}');
     expect(portalCashflowSource).toContain('embedded');
     expect(portalCashflowSource).toContain('hideConfigChrome');

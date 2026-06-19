@@ -25,6 +25,6 @@ export function isLiveMyscguardHost(hostname = readCurrentHostname()): boolean {
   return normalized.endsWith('.myscguard.app') && !normalized.includes('stage');
 }
 
-export function shouldShowStageOnlyCashflowSheetLab(hostname = readCurrentHostname()): boolean {
-  return !isLiveMyscguardHost(hostname);
+export function shouldShowCashflowSheetLab(_hostname = readCurrentHostname()): boolean {
+  return true;
 }
