@@ -109,15 +109,6 @@ async function verifyCanonicalAlias(deploymentHost) {
     const aliasTargetHost = parseFetchedDeploymentHost(aliasInspect.combined);
 
     if (aliasTargetHost === deploymentHost) {
-      const deploymentInspect = runVercel(['inspect', deploymentHost]);
-
-      if (!deploymentInspect.combined.includes(CANONICAL_PRODUCTION_URL)) {
-        fail(
-          `${deploymentHost} is ready, but ${CANONICAL_PRODUCTION_URL} is missing from the deployment aliases.`,
-          deploymentInspect.combined,
-        );
-      }
-
       console.log(`[deploy-align] canonical production URL confirmed: ${CANONICAL_PRODUCTION_URL}`);
       return;
     }

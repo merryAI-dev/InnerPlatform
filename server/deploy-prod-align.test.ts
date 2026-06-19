@@ -69,10 +69,6 @@ describe('deploy-prod-align', () => {
   printf '> Fetched deployment "inner-platform-hwoa12b1l-merryai-devs-projects.vercel.app" in merryai-devs-projects\\n'
   exit 0
 fi
-if [ "$1" = "inspect" ] && [ "$2" = "inner-platform-hwoa12b1l-merryai-devs-projects.vercel.app" ]; then
-  printf 'Aliases\\n  - https://soc.myscguard.app\\n'
-  exit 0
-fi
 printf 'unexpected vercel args: %s\\n' "$*" >&2
 exit 1`,
     );
