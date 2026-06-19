@@ -32,6 +32,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(portalCashflowSource).toContain('hideConfigChrome');
     expect(portalCashflowSource).toContain("dispatchSheetAction('connect')");
     expect(portalCashflowSource).not.toContain("dispatchSheetAction('apply')");
+    expect(portalCashflowSource).toContain('cashflow.sheet_lab.portal.toolbar.dispatch');
     expect(portalCashflowSource).toContain('시트와 연동하기');
     expect(portalCashflowSource).not.toContain('shouldShowCashflowSheetLab');
     expect(portalCashflowSource).not.toContain('deployment-surface');
@@ -56,6 +57,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('isGoogleSheetsTokenExpiredError');
     expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
     expect(pageSource).toContain("action === 'connect' || action === 'edit'");
+    expect(pageSource).toContain('config.load.ok');
+    expect(pageSource).toContain('config.save.ok');
+    expect(pageSource).toContain('toolbar.action');
+    expect(pageSource).toContain('config.editor.open');
+    expect(pageSource).toContain('config.editor.cancel');
+    expect(pageSource).toContain('writeback.wizard.open');
+    expect(pageSource).toContain('!hideConfigChrome || editingConfig || config || errorMessage');
     expect(pageSource).toContain('onHeaderSummaryChange');
     expect(pageSource).toContain('시트 업데이트');
     expect(pageSource).toContain('입금 합계');
@@ -70,7 +78,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('Spreadsheet ID');
     expect(pageSource).not.toContain('Google 토큰');
     expect(pageSource).not.toContain('MYSC 시스템 계정');
-    expect(pageSource).not.toContain('source:');
+    expect(pageSource).not.toContain("action === 'apply'");
     expect(pageSource).not.toContain('Scope:');
     expect(pageSource).not.toContain('Role:');
     expect(pageSource).not.toContain('Cache:');

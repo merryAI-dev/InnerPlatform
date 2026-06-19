@@ -5,6 +5,7 @@ import { CashflowSheetLabPage } from '../../features/cashflow-sheet-compare/Cash
 import { usePortalStore } from '../../data/portal-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 
 export function PortalCashflowPage() {
   const {
@@ -27,6 +28,14 @@ export function PortalCashflowPage() {
     ? `합계 기준 ${sheetHeader.startWeek || '시작 미지정'} ~ ${sheetHeader.endWeek || '종료 미지정'}`
     : '합계 기준 미지정';
   const dispatchSheetAction = (action: 'connect' | 'preview' | 'edit') => {
+    recordDevtoolsLog({
+      kind: 'cashflow_transaction',
+      phase: 'info',
+      operation: 'cashflow.sheet_lab.portal.toolbar.dispatch',
+      transport: 'local',
+      projectId,
+      summary: { action, projectId },
+    });
     window.dispatchEvent(new CustomEvent('mysc:cashflow-sheet-lab-action', {
       detail: { action, projectId },
     }));

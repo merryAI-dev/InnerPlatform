@@ -386,12 +386,20 @@ export function CashflowSheetLabPage({
         });
         if (cancelled) return;
         const nextConfig = result.config || null;
+        const nextEditingConfig = !nextConfig;
         setConfig(nextConfig);
-        setEditingConfig(!nextConfig);
+        setEditingConfig(nextEditingConfig);
         setSheetLink(nextConfig?.value || MYSC_CASHFLOW_SPREADSHEET_ID);
         setSheetName(nextConfig?.sheetName || '');
         setStartWeek(nextConfig?.startWeek || '');
         setEndWeek(nextConfig?.endWeek || '');
+        logCashflowLab('config.load.ok', {
+          projectId,
+          hasConfig: Boolean(nextConfig),
+          editingConfig: nextEditingConfig,
+          embedded,
+          hideConfigChrome,
+        });
       } catch (error) {
         if (isBffAuthError(error)) {
           requestLoginFlow();
@@ -431,8 +439,9 @@ export function CashflowSheetLabPage({
         });
       });
       const nextConfig = result.config || null;
+      const nextEditingConfig = false;
       setConfig(nextConfig);
-      setEditingConfig(embedded && hideConfigChrome);
+      setEditingConfig(nextEditingConfig);
       setSheetLink(nextConfig?.value || sheetLink);
       setSheetName(nextConfig?.sheetName || sheetName);
       setStartWeek(nextConfig?.startWeek || startWeek);
@@ -442,6 +451,8 @@ export function CashflowSheetLabPage({
         spreadsheetId: nextConfig?.spreadsheetId || spreadsheetId,
         sheetName: nextConfig?.sheetName || sheetName || null,
         authMode: usedGoogleAccessToken ? 'token_pass_through' : 'service_account_fallback',
+        editingConfig: nextEditingConfig,
+        summaryVisible: Boolean(nextConfig),
       });
       return nextConfig;
     } catch (error) {
@@ -529,6 +540,7 @@ export function CashflowSheetLabPage({
   }
 
   function openSyncWizard() {
+    logCashflowLab('writeback.wizard.open', { projectId, hasConfig: Boolean(config) });
     setSyncWizardOpen(true);
     setWritebackMessage('');
     setErrorMessage('');
@@ -657,12 +669,16 @@ export function CashflowSheetLabPage({
       const action = (event as CustomEvent<{ action?: string; projectId?: string }>).detail?.action;
       const targetProjectId = (event as CustomEvent<{ action?: string; projectId?: string }>).detail?.projectId;
       if (targetProjectId && targetProjectId !== projectId) return;
-      if (action === 'apply') {
-        openSyncWizard();
-        void handleWritebackPreview();
-      } else if (action === 'preview') {
+      logCashflowLab('toolbar.action', {
+        projectId,
+        action: action || null,
+        targetProjectId: targetProjectId || null,
+        editingConfig,
+      });
+      if (action === 'preview') {
         void handlePreview();
       } else if (action === 'connect' || action === 'edit') {
+        logCashflowLab('config.editor.open', { projectId, source: action });
         setEditingConfig(true);
       } else if (action === 'projection-writeback') {
         openSyncWizard();
@@ -691,7 +707,7 @@ export function CashflowSheetLabPage({
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-4 p-4 sm:p-6'}>
-      {(!hideConfigChrome || editingConfig || errorMessage) && (
+      {(!hideConfigChrome || editingConfig || config || errorMessage) && (
       <section className="grid gap-3 border border-slate-200 bg-white p-4">
         <div className="grid gap-2">
           {editingConfig ? (
@@ -739,6 +755,7 @@ export function CashflowSheetLabPage({
                   variant="outline"
                   className="h-10 rounded-none text-[12px]"
                   onClick={() => {
+                    logCashflowLab('config.editor.cancel', { projectId });
                     setEditingConfig(false);
                     setSheetLink(config.value);
                     setSheetName(config.sheetName || '');
@@ -784,7 +801,10 @@ export function CashflowSheetLabPage({
                 type="button"
                 variant="outline"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                onClick={() => setEditingConfig(true)}
+                onClick={() => {
+                  logCashflowLab('config.editor.open', { projectId, source: 'inline_edit' });
+                  setEditingConfig(true);
+                }}
               >
                 <Pencil className="h-4 w-4" />
                 수정
