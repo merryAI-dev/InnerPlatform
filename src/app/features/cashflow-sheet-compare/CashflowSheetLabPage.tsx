@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowUpToLine, Loader2, Pencil, Search, Settings } from 'lucide-react';
+import { AlertCircle, ArrowUpToLine, Copy, Loader2, Pencil, Search, Settings } from 'lucide-react';
 import Lottie from 'lottie-react';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
@@ -41,12 +41,20 @@ function formatAmount(value: number | null) {
   return `${value.toLocaleString('ko-KR')}원`;
 }
 
-function formatError(error: unknown) {
+function formatError(error: unknown, systemAccountEmail = '') {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
+  const code = apiError?.body?.code || apiError?.body?.error;
+  if (code === 'google_sheets_not_configured') {
+    return '서버의 Google Sheets 서비스 계정이 설정되지 않았습니다. 관리자에게 환경 변수 설정을 요청하세요.';
+  }
+  if (code === 'google_sheet_service_account_forbidden') {
+    const suffix = systemAccountEmail ? ` (${systemAccountEmail})` : '';
+    return `시트를 시스템 계정${suffix}에 공유해 주세요. 공유 후 다시 검토하면 됩니다.`;
+  }
   const bodyMessage = apiError?.body?.message;
   if (bodyMessage) {
     return [
-      apiError.body?.code || apiError.body?.error ? `[${apiError.body.code || apiError.body.error}]` : '',
+      code ? `[${code}]` : '',
       bodyMessage,
       apiError.requestId ? `(requestId: ${apiError.requestId})` : '',
     ].filter(Boolean).join(' ');
@@ -84,14 +92,6 @@ function errorDiagnostics(error: unknown) {
     message: apiError?.body?.message || apiError?.message || 'Unknown error',
     requestId: apiError?.requestId || null,
   };
-}
-
-function isGoogleSheetsTokenExpiredError(error: unknown) {
-  const apiError = error as { body?: { code?: string; error?: string; message?: string }; status?: number };
-  const code = apiError?.body?.code || apiError?.body?.error;
-  const message = apiError?.body?.message || '';
-  return (apiError?.status === 401 || apiError?.status === 403)
-    && (code === 'google_sheets_api_error' || message.includes('Google Sheets API request failed'));
 }
 
 function formatDiffAmount(value: number) {
@@ -226,7 +226,7 @@ export function CashflowSheetLabPage({
     endWeek: string;
   }) => void;
 } = {}) {
-  const { user: authUser, ensureGoogleWorkspaceAccess, loginWithGoogle } = useAuth();
+  const { user: authUser, loginWithGoogle } = useAuth();
   const { orgId } = useFirebase();
   const [searchParams] = useSearchParams();
   const initialProjectId = useMemo(() => (
@@ -247,6 +247,7 @@ export function CashflowSheetLabPage({
   const [editingConfig, setEditingConfig] = useState(true);
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [syncWizardOpen, setSyncWizardOpen] = useState(false);
@@ -344,46 +345,6 @@ export function CashflowSheetLabPage({
     return resolved;
   }, [requestBffActorAfterAuth, resolveBffActor]);
 
-  async function resolveGoogleAccessToken(action: string, options: { popup?: boolean } = {}) {
-    if (authUser?.googleAccessToken && !options.popup) {
-      logCashflowLab(`${action}.googleToken.cached`, { projectId, hasGoogleAccessToken: true });
-      return authUser.googleAccessToken;
-    }
-    logCashflowLab(`${action}.googleToken.popup.request`, { projectId, hasGoogleAccessToken: false, popup: Boolean(options.popup) });
-    const token = await ensureGoogleWorkspaceAccess({ forceRefresh: Boolean(options.popup) });
-    logCashflowLab(`${action}.googleToken.result`, {
-      projectId,
-      hasGoogleAccessToken: Boolean(token),
-      authMode: token ? 'token_pass_through' : 'service_account_fallback',
-      popup: Boolean(options.popup),
-    }, token ? 'info' : 'warn');
-    return token || undefined;
-  }
-
-  async function runWithGoogleSheetsAuthRetry<T>(
-    action: string,
-    operation: (googleAccessToken: string | undefined) => Promise<T>,
-  ): Promise<T> {
-    const googleAccessToken = await resolveGoogleAccessToken(action);
-    try {
-      return await operation(googleAccessToken);
-    } catch (error) {
-      if (!isGoogleSheetsTokenExpiredError(error)) {
-        throw error;
-      }
-      logCashflowLab(`${action}.googleToken.popup.required`, {
-        projectId,
-        hadGoogleAccessToken: Boolean(googleAccessToken),
-        ...errorDiagnostics(error),
-      }, 'warn');
-      const popupToken = await resolveGoogleAccessToken(action, { popup: true });
-      if (!popupToken) {
-        throw error;
-      }
-      return operation(popupToken);
-    }
-  }
-
   async function runWithBffAuthRetry<T>(
     action: string,
     operation: (requestActor: typeof actor) => Promise<T>,
@@ -471,6 +432,7 @@ export function CashflowSheetLabPage({
         }
         if (cancelled) return;
         const nextConfig = result.config || null;
+        setSystemAccountEmail(result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '');
         const nextEditingConfig = !nextConfig;
         setConfig(nextConfig);
         setEditingConfig(nextEditingConfig);
@@ -492,7 +454,7 @@ export function CashflowSheetLabPage({
             setConfig(null);
             setEditingConfig(true);
           }
-          setErrorMessage(formatError(error));
+          setErrorMessage(formatError(error, systemAccountEmail));
         }
       } finally {
         if (!cancelled) setConfigLoading(false);
@@ -520,6 +482,7 @@ export function CashflowSheetLabPage({
       }));
       if (!result) return null;
       const nextConfig = result.config || null;
+      setSystemAccountEmail(result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || systemAccountEmail);
       const nextEditingConfig = false;
       setConfig(nextConfig);
       setEditingConfig(nextEditingConfig);
@@ -538,7 +501,7 @@ export function CashflowSheetLabPage({
       return nextConfig;
     } catch (error) {
       logCashflowLab('config.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
-      setErrorMessage(formatError(error));
+      setErrorMessage(formatError(error, systemAccountEmail));
       return null;
     } finally {
       setSavingConfig(false);
@@ -569,18 +532,13 @@ export function CashflowSheetLabPage({
         sheetName: previewSource.sheetName || config?.sheetName || null,
         explicitSource: Boolean(sourceOverride),
       });
-      let usedGoogleAccessToken: string | undefined;
       const layoutResult = await runWithBffAuthRetry('preview.layout', (requestActor) => (
-        runWithGoogleSheetsAuthRetry('preview', (googleAccessToken) => {
-          usedGoogleAccessToken = googleAccessToken;
-          return previewCashflowSheetLabViaBff({
-            tenantId: orgId,
-            actor: requestActor,
-            projectId,
-            ...previewSource,
-            includeValues: false,
-            googleAccessToken,
-          });
+        previewCashflowSheetLabViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          ...previewSource,
+          includeValues: false,
         })
       ));
       if (!layoutResult) return;
@@ -601,7 +559,6 @@ export function CashflowSheetLabPage({
           projectId,
           ...previewSource,
           includeValues: true,
-          googleAccessToken: usedGoogleAccessToken,
         })).then((valueResult) => {
         if (!valueResult) return;
         if (previewRequestRef.current === requestId) {
@@ -617,13 +574,13 @@ export function CashflowSheetLabPage({
       }).catch(async (error) => {
         if (previewRequestRef.current === requestId) {
           logCashflowLab('preview.values.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-          setErrorMessage(formatError(error));
+          setErrorMessage(formatError(error, systemAccountEmail));
         }
       });
     } catch (error) {
       logCashflowLab('preview.error', { projectId, spreadsheetId: config?.spreadsheetId || spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setPreview(null);
-      setErrorMessage(formatError(error));
+      setErrorMessage(formatError(error, systemAccountEmail));
     } finally {
       setLoading(false);
     }
@@ -661,23 +618,18 @@ export function CashflowSheetLabPage({
     setWritebackMessage('');
     setErrorMessage('');
     try {
-      let usedGoogleAccessToken: string | undefined;
       const result = await runWithBffAuthRetry('writeback.preview', (requestActor) => (
-        runWithGoogleSheetsAuthRetry('writeback.preview', (googleAccessToken) => {
-          usedGoogleAccessToken = googleAccessToken;
-          return previewCashflowProjectionWritebackViaBff({
-            tenantId: orgId,
-            actor: requestActor,
-            projectId,
-            googleAccessToken,
-          });
+        previewCashflowProjectionWritebackViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
         })
       ));
       if (!result) return null;
       setWritebackPreview(result);
       logCashflowLab('writeback.preview.ok', {
         projectId,
-        authMode: usedGoogleAccessToken ? 'token_pass_through' : 'service_account_fallback',
+        authMode: result.accessPolicy.googleAuth,
         changeCount: result.plan.changeCount,
         baselineHash: result.plan.baselineHash,
         durationMs: result.durationMs || Date.now() - startedAt,
@@ -688,7 +640,7 @@ export function CashflowSheetLabPage({
       return result;
     } catch (error) {
       logCashflowLab('writeback.preview.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
-      setErrorMessage(formatError(error));
+      setErrorMessage(formatError(error, systemAccountEmail));
       return null;
     } finally {
       setWritebackLoading(false);
@@ -704,19 +656,14 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
     const idempotencyKey = `cashflow-projection-writeback:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     try {
-      let usedGoogleAccessToken: string | undefined;
       const result = await runWithBffAuthRetry('writeback.apply', (requestActor) => (
-        runWithGoogleSheetsAuthRetry('writeback.apply', (googleAccessToken) => {
-          usedGoogleAccessToken = googleAccessToken;
-          return applyCashflowProjectionWritebackViaBff({
-            tenantId: orgId,
-            actor: requestActor,
-            projectId,
-            baselineHash,
-            conflictResolution: overwrite ? 'overwrite' : 'abort',
-            idempotencyKey,
-            googleAccessToken,
-          });
+        applyCashflowProjectionWritebackViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          baselineHash,
+          conflictResolution: overwrite ? 'overwrite' : 'abort',
+          idempotencyKey,
         })
       ));
       if (!result) return false;
@@ -724,7 +671,7 @@ export function CashflowSheetLabPage({
       setWritebackMessage(`시트 업데이트 완료: ${Number(result.updatedCellCount || 0).toLocaleString()}개 셀 · ${formatDurationMs(result.durationMs || Date.now() - startedAt)}`);
       logCashflowLab('writeback.apply.ok', {
         projectId,
-        authMode: usedGoogleAccessToken ? 'token_pass_through' : 'service_account_fallback',
+        authMode: result.accessPolicy.googleAuth,
         updatedCellCount: result.updatedCellCount || 0,
         jobId: result.job?.id || null,
         durationMs: result.durationMs || Date.now() - startedAt,
@@ -736,7 +683,7 @@ export function CashflowSheetLabPage({
         setWritebackPreview(conflict);
         setErrorMessage('Google Sheet가 검토 후에 변경되었습니다. 아래 값을 다시 확인한 뒤 시트 업데이트를 다시 눌러 주세요.');
       } else {
-        setErrorMessage(formatError(error));
+        setErrorMessage(formatError(error, systemAccountEmail));
       }
       logCashflowLab('writeback.apply.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
       return false;
@@ -806,6 +753,11 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
+  const copySystemAccountEmail = useCallback(() => {
+    if (!systemAccountEmail) return;
+    void navigator.clipboard?.writeText(systemAccountEmail).catch(() => undefined);
+    logCashflowLab('service_account.copy', { projectId, systemAccountEmail });
+  }, [projectId, systemAccountEmail]);
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-4 p-4 sm:p-6'}>
@@ -920,6 +872,22 @@ export function CashflowSheetLabPage({
           <div className="flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
             <AlertCircle className="h-4 w-4" />
             <span>{errorMessage}</span>
+          </div>
+        )}
+        {systemAccountEmail && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-900">
+            <span className="min-w-0 truncate">
+              Google Sheet를 MYSC 시스템 계정 <span className="font-semibold">{systemAccountEmail}</span>에 공유해 주세요.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-7 gap-1 rounded-none border-blue-200 bg-white px-2 text-[11px] text-blue-900 hover:bg-blue-100"
+              onClick={copySystemAccountEmail}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              복사
+            </Button>
           </div>
         )}
       </section>

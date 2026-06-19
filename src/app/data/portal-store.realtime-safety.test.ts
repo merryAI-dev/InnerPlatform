@@ -20,4 +20,15 @@ describe('portal-store realtime safety', () => {
     expect(portalStoreSource).toContain("} else if (scopedProjectIds.length > 0) {");
     expect(portalStoreSource).toContain('sessionStorage.removeItem(storageKey);');
   });
+
+  it('keeps assigned project ids usable when the project catalog cannot be read', () => {
+    expect(portalStoreSource).toContain('...portalProjectCandidates.searchProjects.map((project) => project.id),');
+    expect(portalStoreSource).toContain('...assignedProjectIds,');
+
+    const handleProjectsErrorSlice = portalStoreSource.slice(
+      portalStoreSource.indexOf('const handleProjectsError ='),
+      portalStoreSource.indexOf('const projectsQuery ='),
+    );
+    expect(handleProjectsErrorSlice).not.toContain('setProjectsIfChanged([]);');
+  });
 });

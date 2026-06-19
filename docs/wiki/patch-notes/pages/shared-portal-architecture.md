@@ -3,7 +3,7 @@
 - route: `shared / architecture`
 - primary users: 운영자, 개발자, QA, 의사결정자
 - status: draft-active
-- last updated: 2026-06-02
+- last updated: 2026-06-19
 
 ## Purpose
 
@@ -29,11 +29,14 @@
 - [x] `v2` 예산 구조는 `budget_tree_v2`를 원본으로 두고, `budget_code_book`은 2단 파생본으로 동기화함
 - [x] 프로젝트 등록/수정의 계약서, 견적서, 제안서 첨부 필드를 같은 editor contract로 처리함
 - [x] 포털 safe fetch 경로에서 주요 운영 컬렉션은 초기 fetch와 로컬 write mirror로 화면 흔들림을 줄임
+- [x] Cashflow Sheet Lab의 Google Sheets 연동은 서버 서비스 계정 전용으로 고정하고 사용자 OAuth token pass-through를 제거함
+- [x] `/portal/cashflow`는 route-scoped provider만 로딩하고, catalog 권한 오류가 있어도 배정 프로젝트 선택을 유지함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-06-19] Cashflow Sheet Lab의 Google Sheets 접근을 서버 서비스 계정으로 고정하고, 설정 저장과 시트 검증/반영 액션을 분리했다. `/portal/cashflow`에서는 HR/Payroll/Board/Training/Career provider 로딩을 제외하고, projects catalog 권한 오류가 배정 프로젝트 선택을 지우지 않도록 했으며, labor risk 배경 요청 키를 사용자/프로젝트/날짜 기준으로 안정화했다.
 - [2026-06-19] Cashflow/사업비 주차 계산을 stage/live 공통 finance week core로 통합했다. 월 내부 Monday-based 5-slot 정책을 적용하고 raw 6주차는 financeWeek 5로 저장/집계되도록 BFF, 포털 저장, export 표면을 같은 로직으로 맞췄다.
 - [2026-06-02] 프로젝트 등록/수정 editor contract에 견적서와 제안서 첨부를 추가하고, 25MB를 넘는 문서는 BFF raw upload 대신 Firebase Storage direct upload로 처리하도록 분리했다. 포털 safe fetch 경로는 ledgers/transactions/comments/evidences/auditLogs/partEntries를 초기 fetch하고 write 후 로컬 상태도 갱신해 화면 데이터 공백을 줄였다.
 - [2026-05-20] 프로젝트 등록, 포털 수정, Admin 승인 화면이 같은 5단계 editor contract를 쓰도록 공통 draft/payload/patch builder를 분리했다. 승인/재제출은 request 조회를 먼저 검증하고 project/request 상태 patch를 같은 Firestore transaction에서 쓰도록 보강했다.

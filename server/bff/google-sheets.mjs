@@ -332,6 +332,8 @@ export function createGoogleSheetsService(options = {}) {
   }
 
   return {
+    serviceAccountEmail: readOptionalText(config.serviceAccount?.client_email),
+    getServiceAccountEmail: () => readOptionalText(config.serviceAccount?.client_email),
     getSpreadsheetMeta,
     getSheetValues,
     batchUpdateValues,

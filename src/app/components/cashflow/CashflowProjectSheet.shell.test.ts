@@ -94,4 +94,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('labor risk BFF auth rejected, retrying with refreshed token');
     expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
   });
+
+  it('does not refetch labor risk for every cashflow week stream update', () => {
+    expect(cashflowProjectSheetSource).toContain('const cashflowWeeksStreamKey = useMemo(() => (');
+    expect(cashflowProjectSheetSource).toContain('todayIso,');
+    expect(cashflowProjectSheetSource).toContain('}, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);');
+    expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey,\n    ].join');
+    expect(cashflowProjectSheetSource).not.toContain('}, [cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user?.uid]);');
+  });
 });

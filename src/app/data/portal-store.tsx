@@ -765,8 +765,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }), [assignedProjectIdsKey, authUser?.role, authUser?.uid, candidateProjectsSource, portalUser?.role]);
 
   const scopedProjectIds = useMemo(
-    () => portalProjectCandidates.searchProjects.map((project) => project.id),
-    [portalProjectCandidates.searchProjects],
+    () => normalizeProjectIds([
+      ...portalProjectCandidates.searchProjects.map((project) => project.id),
+      ...assignedProjectIds,
+    ]),
+    [assignedProjectIdsKey, portalProjectCandidates.searchProjects],
   );
   const scopedProjectIdsKey = scopedProjectIds.join('|');
 
@@ -1063,7 +1066,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           },
         },
       });
-      setProjectsIfChanged([]);
       ifActive(() => setProjectCatalogLoading(false));
     };
     const projectsQuery = query(collection(db, getOrgCollectionPath(orgId, 'projects')), limit(500));

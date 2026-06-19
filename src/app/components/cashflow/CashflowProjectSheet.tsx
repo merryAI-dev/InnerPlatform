@@ -772,7 +772,7 @@ export function CashflowProjectSheet({
       orgId,
       projectId,
       userUid,
-      cashflowWeeksStreamKey,
+      todayIso,
     ].join('::');
     if (laborRiskRequestKeyRef.current === requestKey) return;
 
@@ -852,7 +852,7 @@ export function CashflowProjectSheet({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user?.uid]);
+  }, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};

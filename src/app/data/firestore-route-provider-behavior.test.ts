@@ -32,7 +32,7 @@ vi.mock('./training-store', () => ({
 }));
 
 import { AdminRouteProviders } from './admin-route-providers';
-import { PortalRouteProviders } from './portal-route-providers';
+import { PortalRouteProviderFrame, PortalRouteProviders, resolvePortalProviderScope } from './portal-route-providers';
 
 function PolicyProbe({ role }: { role: string }) {
   const policy = useFirestoreAccessPolicy(role);
@@ -49,8 +49,8 @@ function PolicyProbe({ role }: { role: string }) {
 function readPolicy(wrapper: typeof AdminRouteProviders | typeof PortalRouteProviders, role: string) {
   const markup = renderToStaticMarkup(
     React.createElement(
-      wrapper,
-      null,
+      wrapper === PortalRouteProviders ? PortalRouteProviderFrame : wrapper,
+      wrapper === PortalRouteProviders ? { pathname: '/portal/cashflow' } : null,
       React.createElement(PolicyProbe, { role }),
     ),
   );
@@ -95,6 +95,21 @@ describe('route provider behavior', () => {
       allowRealtimeListeners: 'false',
       allowPrivilegedReadAll: 'false',
       useSafeFetchMode: 'true',
+    });
+  });
+
+  it('limits portal cashflow route providers to cashflow weeks only', () => {
+    expect(resolvePortalProviderScope('/portal/cashflow')).toEqual({
+      hrAnnouncements: false,
+      payroll: false,
+      cashflowWeeks: true,
+      board: false,
+      careerProfile: false,
+      training: false,
+    });
+    expect(resolvePortalProviderScope('/portal/payroll')).toMatchObject({
+      payroll: true,
+      cashflowWeeks: false,
     });
   });
 });

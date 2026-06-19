@@ -104,9 +104,9 @@ export interface CashflowSheetLabPreviewResult {
   availableSheets: GoogleSheetPreviewSheet[];
   matrix: string[][];
   accessPolicy: {
-    googleAuth: 'token_pass_through' | 'service_account';
+    googleAuth: 'service_account';
     googleScope: 'spreadsheets.readonly';
-    sheetPermission: 'viewer_access_from_google_token' | 'shared_with_mysc_system_account';
+    sheetPermission: 'shared_with_mysc_system_account';
     layoutSource: 'google_sheet_formatted_values';
     valueSource: 'firebase_cashflow_weeks';
     actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read';
@@ -150,6 +150,12 @@ export interface CashflowSheetLabConfigResult {
   projectId: string;
   configured: boolean;
   config: CashflowSheetLabConfig | null;
+  systemAccountEmail?: string;
+  accessPolicy?: {
+    googleAuth: 'service_account';
+    serviceAccountEmail?: string;
+    sheetPermission: 'shared_with_mysc_system_account';
+  };
 }
 
 export interface CashflowSheetLabApplyResult {
@@ -229,7 +235,7 @@ export interface CashflowSheetLabProjectionWritebackResult {
     totalBasis?: 'sheet_range';
   };
   accessPolicy: {
-    googleAuth: 'token_pass_through_or_service_account';
+    googleAuth: 'service_account';
     googleScope: 'spreadsheets';
     writePolicy: 'projection_only';
     conflictPolicy: 'baseline_hash_required_before_write';
@@ -276,11 +282,6 @@ function createSameOriginBffClient(): PlatformApiClient {
   });
 }
 
-function googleAccessHeaders(token?: string): HeadersInit | undefined {
-  const normalized = String(token || '').trim();
-  return normalized ? { 'x-google-access-token': normalized } : undefined;
-}
-
 export async function previewCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -290,7 +291,6 @@ export async function previewCashflowSheetLabViaBff(params: {
   startWeek?: string;
   endWeek?: string;
   includeValues?: boolean;
-  googleAccessToken?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabPreviewResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -306,7 +306,6 @@ export async function previewCashflowSheetLabViaBff(params: {
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
         ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
       },
-      headers: googleAccessHeaders(params.googleAccessToken),
       timeoutMs: 25000,
       retries: 0,
     },
@@ -319,7 +318,6 @@ export async function applyCashflowSheetLabViaBff(params: {
   actor: ActorLike;
   projectId: string;
   idempotencyKey: string;
-  googleAccessToken?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabApplyResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -332,7 +330,6 @@ export async function applyCashflowSheetLabViaBff(params: {
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
-      headers: googleAccessHeaders(params.googleAccessToken),
       timeoutMs: 30000,
       retries: 0,
     },
@@ -348,7 +345,6 @@ export async function previewCashflowProjectionWritebackViaBff(params: {
   sheetName?: string;
   startWeek?: string;
   endWeek?: string;
-  googleAccessToken?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabProjectionWritebackResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -363,7 +359,6 @@ export async function previewCashflowProjectionWritebackViaBff(params: {
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
       },
-      headers: googleAccessHeaders(params.googleAccessToken),
       timeoutMs: 25000,
       retries: 0,
     },
@@ -378,7 +373,6 @@ export async function applyCashflowProjectionWritebackViaBff(params: {
   baselineHash?: string;
   conflictResolution?: 'abort' | 'overwrite';
   idempotencyKey: string;
-  googleAccessToken?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabProjectionWritebackResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -393,7 +387,6 @@ export async function applyCashflowProjectionWritebackViaBff(params: {
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
-      headers: googleAccessHeaders(params.googleAccessToken),
       timeoutMs: 30000,
       retries: 0,
     },

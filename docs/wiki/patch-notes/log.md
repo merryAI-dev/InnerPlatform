@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-19] patch-note | shared-portal-architecture | Cashflow service account and portal stability
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: Cashflow Sheet Lab의 Google Sheets 접근을 사용자 OAuth token pass-through에서 서버 서비스 계정 전용으로 전환하고, 설정 저장은 시트 검증 없이 config만 저장하도록 분리했다. `/portal/cashflow`는 route-scoped provider만 로딩하고, 프로젝트 catalog 권한 오류가 있어도 배정 프로젝트 선택을 유지하며 labor risk 배경 요청이 cashflow week stream 변화마다 반복되지 않도록 고정했다.
+
 ## [2026-06-19] patch-note | portal-bank-statement | secure XLSX parser
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md)
 - summary: 통장내역 업로드의 XLSX 파싱을 취약 `xlsx` 직접 의존성에서 `exceljs` 기반 공통 파서로 전환하고, 일반 binary `.xls`는 CSV/XLSX 변환 안내로 제한했다. HTML로 위장된 은행 내보내기는 기존 HTML 파서 경로만 유지한다.

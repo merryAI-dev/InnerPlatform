@@ -29,7 +29,7 @@ describe('sheets cashflow readonly client', () => {
     expect(extractSpreadsheetIdFromSheetInput('not a sheet')).toBe('');
   });
 
-  it('passes Google OAuth tokens to the lab preview endpoint when available', async () => {
+  it('uses the service-account lab preview endpoint without Google OAuth token headers', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -80,7 +80,6 @@ describe('sheets cashflow readonly client', () => {
       value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
       sheetName: 'cashflow(사용내역 연동)',
       includeValues: false,
-      googleAccessToken: 'google-token',
       client,
     });
 
@@ -94,7 +93,6 @@ describe('sheets cashflow readonly client', () => {
           role: 'workspace_user',
           idToken: 'firebase-token',
         }),
-        headers: { 'x-google-access-token': 'google-token' },
         body: {
           value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
           sheetName: 'cashflow(사용내역 연동)',
@@ -102,6 +100,7 @@ describe('sheets cashflow readonly client', () => {
         },
       }),
     );
+    expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('reads and saves the persisted lab sheet config through same-origin BFF', async () => {
