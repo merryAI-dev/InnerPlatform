@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '..');
 const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/production-deploy.yml'), 'utf8');
+const stageWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/stage-deploy.yml'), 'utf8');
 
 function extractRunBlocks(text: string) {
   const lines = text.split('\n');
@@ -59,5 +60,18 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('VERCEL_DEPLOY_TOKEN_PRODUCTION');
     expect(workflowText).not.toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
     expect(workflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_PRODUCTION');
+    expect(workflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
+  });
+});
+
+describe('stage release workflow safety', () => {
+  it('validates the stage Vercel token against the expected team before release work', () => {
+    expect(stageWorkflowText).toMatch(/environment:\n\s+name: Stage/);
+    expect(stageWorkflowText).toContain('VERCEL_DEPLOY_TOKEN_STAGE');
+    expect(stageWorkflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_STAGE');
+    expect(stageWorkflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
+    expect(stageWorkflowText.indexOf('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects')).toBeLessThan(
+      stageWorkflowText.indexOf('run: npm ci'),
+    );
   });
 });
