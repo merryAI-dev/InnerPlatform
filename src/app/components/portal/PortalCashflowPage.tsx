@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pencil, Search, Settings } from 'lucide-react';
+import { ArrowDownToLine, Pencil, Search } from 'lucide-react';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
 import { CashflowSheetLabPage } from '../../features/cashflow-sheet-compare/CashflowSheetLabPage';
 import { usePortalStore } from '../../data/portal-store';
@@ -27,7 +27,7 @@ export function PortalCashflowPage() {
   const sheetRangeLabel = sheetHeader.startWeek || sheetHeader.endWeek
     ? `합계 기준 ${sheetHeader.startWeek || '시작 미지정'} ~ ${sheetHeader.endWeek || '종료 미지정'}`
     : '합계 기준 미지정';
-  const dispatchSheetAction = (action: 'connect' | 'preview' | 'edit') => {
+  const dispatchSheetAction = (action: 'apply' | 'preview' | 'edit') => {
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'info',
@@ -70,10 +70,10 @@ export function PortalCashflowPage() {
             type="button"
             size="sm"
             className="h-7 gap-1 rounded-none px-2 text-[10px]"
-            onClick={() => dispatchSheetAction('connect')}
+            onClick={() => dispatchSheetAction('apply')}
           >
-            <Settings className="h-3 w-3" />
-            시트와 연동하기
+            <ArrowDownToLine className="h-3 w-3" />
+            시트 값 반영하기
           </Button>
           <Button
             type="button"

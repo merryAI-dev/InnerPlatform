@@ -30,10 +30,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(portalCashflowSource).toContain('projectIdOverride={projectId}');
     expect(portalCashflowSource).toContain('embedded');
     expect(portalCashflowSource).toContain('hideConfigChrome');
-    expect(portalCashflowSource).toContain("dispatchSheetAction('connect')");
-    expect(portalCashflowSource).not.toContain("dispatchSheetAction('apply')");
+    expect(portalCashflowSource).toContain("dispatchSheetAction('apply')");
+    expect(portalCashflowSource).not.toContain("dispatchSheetAction('connect')");
     expect(portalCashflowSource).toContain('cashflow.sheet_lab.portal.toolbar.dispatch');
-    expect(portalCashflowSource).toContain('시트와 연동하기');
+    expect(portalCashflowSource).toContain('시트 값 반영하기');
+    expect(portalCashflowSource).not.toContain('시트와 연동하기');
     expect(portalCashflowSource).not.toContain('shouldShowCashflowSheetLab');
     expect(portalCashflowSource).not.toContain('deployment-surface');
     expect(portalCashflowSource).not.toMatch(/show[A-Za-z0-9]*Sheet[A-Za-z0-9]*Lab\s*&&/);
@@ -43,6 +44,7 @@ describe('CashflowSheetLabPage shell', () => {
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
+    expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('previewCashflowProjectionWritebackViaBff');
     expect(pageSource).toContain('applyCashflowProjectionWritebackViaBff');
@@ -65,8 +67,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트를 시스템 계정');
     expect(pageSource).toContain('systemAccountEmail');
     expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
-    expect(pageSource).toContain("action === 'connect'");
-    expect(pageSource).toContain('handleConnectSheet');
+    expect(pageSource).toContain("action === 'apply'");
+    expect(pageSource).toContain('handleApplySheetValues');
     expect(pageSource).toContain('config.load.ok');
     expect(pageSource).toContain('config.save.ok');
     expect(pageSource).toContain('toolbar.action');
@@ -88,7 +90,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('Spreadsheet ID');
     expect(pageSource).not.toContain('Google 토큰');
     expect(pageSource).toContain('MYSC 시스템 계정');
-    expect(pageSource).not.toContain("action === 'apply'");
+    expect(pageSource).not.toContain("action === 'connect'");
     expect(pageSource).not.toContain('Scope:');
     expect(pageSource).not.toContain('Role:');
     expect(pageSource).not.toContain('Cache:');

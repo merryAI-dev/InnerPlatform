@@ -7,6 +7,7 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
+  applyCashflowSheetLabViaBff,
   applyCashflowProjectionWritebackViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabConfigViaBff,
@@ -586,22 +587,60 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handleConnectSheet() {
-    if (!projectId || loading || savingConfig || !spreadsheetId) return;
+  async function handleApplySheetValues() {
+    if (!projectId || loading || savingConfig || (!spreadsheetId && !config?.spreadsheetId)) return;
     const savedConfig = editingConfig ? await handleSaveConfig() : config;
     if (editingConfig && !savedConfig) return;
-    const source = {
-      value: savedConfig?.value || sheetLink,
-      sheetName: savedConfig?.sheetName || sheetName || undefined,
-      startWeek: savedConfig?.startWeek || startWeek || undefined,
-      endWeek: savedConfig?.endWeek || endWeek || undefined,
-    };
-    logCashflowLab('connect.start', {
+    const startedAt = Date.now();
+    const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    setLoading(true);
+    setErrorMessage('');
+    logCashflowLab('apply.sheet_values.start', {
       projectId,
-      spreadsheetId: extractSpreadsheetIdFromSheetInput(source.value || ''),
+      spreadsheetId: savedConfig?.spreadsheetId || config?.spreadsheetId || spreadsheetId,
       savedBeforePreview: Boolean(editingConfig),
     });
-    await handlePreview(source);
+    try {
+      const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
+        applyCashflowSheetLabViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          idempotencyKey,
+        })
+      ));
+      if (!result) return;
+      if (result.accessPolicy && result.template && result.availableSheets && result.matrix && result.previewValues && result.cashflowSnapshotStatus) {
+        setPreview({
+          projectId: result.projectId,
+          spreadsheetId: result.spreadsheetId,
+          spreadsheetTitle: result.spreadsheetTitle,
+          selectedSheetName: result.selectedSheetName,
+          availableSheets: result.availableSheets,
+          matrix: result.matrix,
+          accessPolicy: result.accessPolicy,
+          activeWeekRange: result.activeWeekRange,
+          template: result.template,
+          previewValues: result.previewValues,
+          cashflowSnapshotStatus: result.cashflowSnapshotStatus,
+          cashflowSnapshotError: result.cashflowSnapshotError,
+        });
+      }
+      logCashflowLab('apply.sheet_values.ok', {
+        projectId,
+        spreadsheetId: result.spreadsheetId,
+        sheetName: result.selectedSheetName,
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      logCashflowLab('apply.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      setErrorMessage(formatError(error, systemAccountEmail));
+    } finally {
+      setLoading(false);
+    }
   }
 
   function openSyncWizard() {
@@ -724,8 +763,8 @@ export function CashflowSheetLabPage({
       });
       if (action === 'preview') {
         void handlePreview();
-      } else if (action === 'connect') {
-        void handleConnectSheet();
+      } else if (action === 'apply') {
+        void handleApplySheetValues();
       } else if (action === 'edit') {
         logCashflowLab('config.editor.open', { projectId, source: action });
         setEditingConfig(true);
