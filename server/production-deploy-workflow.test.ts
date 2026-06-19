@@ -76,10 +76,13 @@ describe('stage release workflow safety', () => {
   });
 
   it('accepts the protected stage alias redirect to the Cloudflare security domain', () => {
-    expect(stageWorkflowText).toContain('curl -fsSLI "https://${STAGE_CANONICAL_HOST}/"');
+    expect(stageWorkflowText).toContain('root_status="$(curl -sS -o /tmp/stage-root-response.txt -w');
     expect(stageWorkflowText).toContain('200|401|403) ;;');
+    expect(stageWorkflowText).toContain('200|403) ;;');
     expect(stageWorkflowText).toContain('307)');
+    expect(stageWorkflowText).toContain('https://soc.myscguard.app/)');
     expect(stageWorkflowText).toContain('https://soc.myscguard.app/*');
+    expect(stageWorkflowText).toContain('Unexpected stage root redirect location');
     expect(stageWorkflowText).toContain('Unexpected stage redirect location');
   });
 

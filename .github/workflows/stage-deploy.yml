@@ -196,7 +196,28 @@ jobs:
               throw new Error(`Stage alias points to ${inspect.url}, expected ${expectedHost}`);
             }
           ' "${inspect_file}"
-          curl -fsSLI "https://${STAGE_CANONICAL_HOST}/" >/dev/null
+          root_status="$(curl -sS -o /tmp/stage-root-response.txt -w '%{http_code}' "https://${STAGE_CANONICAL_HOST}/")"
+          case "${root_status}" in
+            200|403) ;;
+            307)
+              root_location="$(curl -sSI "https://${STAGE_CANONICAL_HOST}/" \
+                | awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2}' \
+                | tr -d '\r' \
+                | tail -n 1)"
+              case "${root_location}" in
+                https://soc.myscguard.app/) ;;
+                *)
+                  echo "Unexpected stage root redirect location: ${root_location}" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "Unexpected stage root status: ${root_status}" >&2
+              cat /tmp/stage-root-response.txt >&2 || true
+              exit 1
+              ;;
+          esac
           config_status="$(curl -sS -o /tmp/stage-config-response.txt -w '%{http_code}' \
             "https://${STAGE_CANONICAL_HOST}/api/v1/projects/p1773651024850/cashflow-sheet-lab/config")"
           case "${config_status}" in
