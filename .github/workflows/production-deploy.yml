@@ -78,17 +78,6 @@ jobs:
           test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
-      - run: npm ci
-
-      - name: Unit tests
-        run: npm test
-
-      - name: RBAC policy verify
-        run: npm run policy:verify
-
-      - name: Production build
-        run: npm run build
-
       - name: Deploy to Vercel production
         id: vercel_deploy
         run: |

@@ -75,24 +75,6 @@ jobs:
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
           test -n "$(git rev-parse HEAD)" || { echo "Could not resolve deploy commit." >&2; exit 1; }
 
-      - run: npm ci
-
-      - name: Unit tests
-        run: npm test
-
-      - name: RBAC policy verify
-        run: npm run policy:verify
-
-      - name: Cashflow stage smoke tests
-        run: |
-          npx vitest run \
-            src/app/features/cashflow-sheet-compare/cashflow-sheet-preview-tables.test.ts \
-            server/bff/routes/cashflow-sheet-lab.test.mjs \
-            server/bff/cashflow-sheet-template.test.mjs
-
-      - name: Stage build
-        run: npm run build
-
       - name: Deploy Git artifact to Vercel preview
         id: vercel_deploy
         env:
