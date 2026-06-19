@@ -85,7 +85,7 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_STAGE');
     expect(stageWorkflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
     expect(stageWorkflowText.indexOf('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects')).toBeLessThan(
-      stageWorkflowText.indexOf('run: npm ci'),
+      stageWorkflowText.indexOf('Deploy Git artifact to Vercel preview'),
     );
   });
 
