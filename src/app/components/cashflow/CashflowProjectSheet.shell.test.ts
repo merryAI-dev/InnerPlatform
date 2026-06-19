@@ -79,9 +79,19 @@ describe('CashflowProjectSheet actual sync flow', () => {
   });
 
   it('prefers a freshly resolved Firebase ID token for BFF calls', () => {
-    expect(cashflowProjectSheetSource).toContain('firebaseToken || bffActor.idToken');
+    expect(cashflowProjectSheetSource).toContain('firebaseToken || currentActor.idToken');
     expect(cashflowProjectSheetSource).toContain('getIdToken(Boolean(options.forceRefresh))');
-    expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
+    expect(cashflowProjectSheetSource).toContain('latestBffActorRef.current = bffActor');
+    expect(cashflowProjectSheetSource).toContain('if (options.forceRefresh)');
+    expect(cashflowProjectSheetSource).not.toContain('if (firebaseToken || options.forceRefresh)');
     expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
+  });
+
+  it('does not force-refresh BFF auth on the background labor risk poll loop', () => {
+    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef');
+    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef.current === requestKey');
+    expect(cashflowProjectSheetSource).toContain('const resolvedActor = await resolveBffActor();');
+    expect(cashflowProjectSheetSource).toContain('labor risk BFF auth rejected, retrying with refreshed token');
+    expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
   });
 });

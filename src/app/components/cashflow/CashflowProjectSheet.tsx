@@ -256,6 +256,15 @@ function normalizeActiveSheetWeeks(raw: unknown): MonthMondayWeek[] {
   return weeks.sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
 }
 
+function isBffAuthRejection(error: unknown): boolean {
+  const source = error as { status?: number; body?: { code?: string; error?: string } };
+  const code = source.body?.code || source.body?.error || '';
+  return source.status === 401
+    || source.status === 403
+    || code === 'missing_bearer_token'
+    || code === 'invalid_token';
+}
+
 export function CashflowProjectSheet({
   projectId,
   roleOverride,
@@ -298,32 +307,37 @@ export function CashflowProjectSheet({
     user?.role,
     user?.uid,
   ]);
+  const latestBffActorRef = useRef(bffActor);
+  useEffect(() => {
+    latestBffActorRef.current = bffActor;
+  }, [bffActor]);
   const resolveBffActor = useCallback(async (options: { forceRefresh?: boolean } = {}) => {
+    const currentActor = latestBffActorRef.current;
     const firebaseAuthUser = getAuthInstance()?.currentUser;
     const firebaseToken = await firebaseAuthUser?.getIdToken(Boolean(options.forceRefresh)).catch((error) => {
       console.warn('[CashflowProjectSheet] BFF token resolve failed', {
         projectId,
-        actorEmail: bffActor.email,
+        actorEmail: currentActor.email,
         forceRefresh: Boolean(options.forceRefresh),
         message: error instanceof Error ? error.message : String(error),
       });
       return undefined;
     });
-    const nextToken = firebaseToken || bffActor.idToken;
+    const nextToken = firebaseToken || currentActor.idToken;
     if (!nextToken) return null;
-    if (firebaseToken || options.forceRefresh) {
+    if (options.forceRefresh) {
       console.info('[CashflowProjectSheet] refreshed BFF token from Firebase', {
         projectId,
-        actorEmail: bffActor.email,
+        actorEmail: currentActor.email,
         tokenSource: firebaseToken ? 'firebase' : 'store',
         forceRefresh: Boolean(options.forceRefresh),
       });
     }
     return {
-      ...bffActor,
+      ...currentActor,
       idToken: nextToken,
     };
-  }, [bffActor, projectId]);
+  }, [projectId]);
 
   const {
     yearMonth,
@@ -474,6 +488,7 @@ export function CashflowProjectSheet({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
   const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
+  const laborRiskRequestKeyRef = useRef('');
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   type CashflowAuditIssue = { key: string; label: string; detail: string };
@@ -745,23 +760,35 @@ export function CashflowProjectSheet({
   }, [cashflowSheetRange, db, orgId, projectId]);
 
   useEffect(() => {
-    if (!projectId || !orgId || !user) {
+    const userUid = user?.uid || '';
+    if (!projectId || !orgId || !userUid) {
+      laborRiskRequestKeyRef.current = '';
       setLaborRisk(null);
       setLaborRiskError(null);
       setLaborRiskLoading(false);
       return;
     }
+    const requestKey = [
+      orgId,
+      projectId,
+      userUid,
+      cashflowWeeksStreamKey,
+    ].join('::');
+    if (laborRiskRequestKeyRef.current === requestKey) return;
+
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
+      if (laborRiskRequestKeyRef.current === requestKey) return;
+      laborRiskRequestKeyRef.current = requestKey;
       setLaborRiskLoading(true);
       setLaborRiskError(null);
       void (async () => {
-        const resolvedActor = await resolveBffActor({ forceRefresh: true });
+        const resolvedActor = await resolveBffActor();
         if (!resolvedActor?.idToken) {
           console.warn('[CashflowProjectSheet] labor risk auth missing, skipping API call', {
             projectId,
-            actorEmail: bffActor.email,
-            hasStoredToken: Boolean(bffActor.idToken),
+            actorEmail: latestBffActorRef.current.email,
+            hasStoredToken: Boolean(latestBffActorRef.current.idToken),
           });
           if (!cancelled) {
             setLaborRisk(null);
@@ -771,18 +798,37 @@ export function CashflowProjectSheet({
           return;
         }
 
-        console.info('[CashflowProjectSheet] requesting labor risk', {
-          projectId,
-          orgId,
-          actorEmail: resolvedActor.email,
-          hasIdToken: Boolean(resolvedActor.idToken),
-        });
         try {
-          const result = await fetchCashflowLaborRiskViaBff({
-            tenantId: orgId,
-            actor: resolvedActor,
+          console.info('[CashflowProjectSheet] requesting labor risk', {
             projectId,
+            orgId,
+            actorEmail: resolvedActor.email,
+            hasIdToken: Boolean(resolvedActor.idToken),
           });
+          let result: CashflowLaborRiskResult;
+          try {
+            result = await fetchCashflowLaborRiskViaBff({
+              tenantId: orgId,
+              actor: resolvedActor,
+              projectId,
+            });
+          } catch (error) {
+            if (!isBffAuthRejection(error)) throw error;
+            console.warn('[CashflowProjectSheet] labor risk BFF auth rejected, retrying with refreshed token', {
+              projectId,
+              status: (error as { status?: number }).status,
+              code: (error as { body?: { code?: string; error?: string } }).body?.code
+                || (error as { body?: { error?: string } }).body?.error,
+              requestId: (error as { requestId?: string }).requestId,
+            });
+            const refreshedActor = await resolveBffActor({ forceRefresh: true });
+            if (!refreshedActor?.idToken) throw error;
+            result = await fetchCashflowLaborRiskViaBff({
+              tenantId: orgId,
+              actor: refreshedActor,
+              projectId,
+            });
+          }
           if (cancelled) return;
           setLaborRisk(result);
         } catch (error) {
@@ -806,7 +852,7 @@ export function CashflowProjectSheet({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [bffActor, cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user]);
+  }, [cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user?.uid]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
