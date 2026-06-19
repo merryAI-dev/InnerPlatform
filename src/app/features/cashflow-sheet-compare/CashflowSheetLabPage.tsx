@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpToLine, Copy, Loader2, Pencil, Search, Settings } from 'lucide-react';
 import Lottie from 'lottie-react';
 import { useSearchParams } from 'react-router';
@@ -210,14 +210,12 @@ function ReconciliationSummary({
   );
 }
 
-export type CashflowSheetLabPageHandle = {
-  connect: () => void;
-  preview: () => void;
-  edit: () => void;
-  projectionWriteback: () => void;
-};
-
-type CashflowSheetLabPageProps = {
+export function CashflowSheetLabPage({
+  projectIdOverride,
+  embedded = false,
+  hideConfigChrome = false,
+  onHeaderSummaryChange,
+}: {
   projectIdOverride?: string;
   embedded?: boolean;
   hideConfigChrome?: boolean;
@@ -227,14 +225,7 @@ type CashflowSheetLabPageProps = {
     startWeek: string;
     endWeek: string;
   }) => void;
-};
-
-export const CashflowSheetLabPage = forwardRef<CashflowSheetLabPageHandle, CashflowSheetLabPageProps>(function CashflowSheetLabPage({
-  projectIdOverride,
-  embedded = false,
-  hideConfigChrome = false,
-  onHeaderSummaryChange,
-}, ref) {
+} = {}) {
   const { user: authUser, loginWithGoogle } = useAuth();
   const { orgId } = useFirebase();
   const [searchParams] = useSearchParams();
@@ -394,77 +385,85 @@ export const CashflowSheetLabPage = forwardRef<CashflowSheetLabPageHandle, Cashf
     rememberRecentPortalProject(projectId);
   }, [projectId]);
 
-  async function handleLoadConfig() {
-    if (!projectId || configLoading) return null;
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
     setConfigLoading(true);
     setErrorMessage('');
-    const resolvedActor = await resolveBffActor({ forceRefresh: true });
-    if (!resolvedActor?.idToken) {
-      logCashflowLab('config.load.auth_missing', {
-        projectId,
-        actorEmail: actor.email,
-        hasStoredToken: Boolean(actor.idToken),
-      }, 'warn');
-      setConfig(null);
-      setEditingConfig(true);
-      setErrorMessage('BFF 인증 토큰이 없어 동기화 API 호출이 보류됩니다. 저장/검토를 하면 로그인을 먼저 진행해 주세요.');
-      setConfigLoading(false);
-      return null;
-    }
-
-    try {
-      const fetchConfig = (requestActor: typeof actor) => getCashflowSheetLabConfigViaBff({
-        tenantId: orgId,
-        actor: requestActor,
-        projectId,
-      });
-      let result;
-      try {
-        result = await fetchConfig(resolvedActor);
-      } catch (error) {
-        if (!isBffAuthError(error)) {
-          throw error;
-        }
-        logCashflowLab('config.load.bffAuth.rejected', {
+    void (async () => {
+      const resolvedActor = await resolveBffActor({ forceRefresh: true });
+      if (!resolvedActor?.idToken) {
+        logCashflowLab('config.load.auth_missing', {
           projectId,
-          ...errorDiagnostics(error),
+          actorEmail: actor.email,
+          hasStoredToken: Boolean(actor.idToken),
         }, 'warn');
-        const retryActor = await requestBffActorAfterAuth('config.load');
-        if (!retryActor) {
-          throw error;
+        if (!cancelled) {
+          setConfig(null);
+          setEditingConfig(true);
+          setErrorMessage('BFF 인증 토큰이 없어 동기화 API 호출이 보류됩니다. 저장/검토를 하면 로그인 화면이 열립니다.');
+          setConfigLoading(false);
         }
-        result = await fetchConfig(retryActor);
+        return;
       }
 
-      const nextConfig = result.config || null;
-      setSystemAccountEmail(result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '');
-      const nextEditingConfig = !nextConfig;
-      setConfig(nextConfig);
-      setEditingConfig(nextEditingConfig);
-      setSheetLink(nextConfig?.value || '');
-      setSheetName(nextConfig?.sheetName || '');
-      setStartWeek(nextConfig?.startWeek || '');
-      setEndWeek(nextConfig?.endWeek || '');
-      logCashflowLab('config.load.ok', {
-        projectId,
-        hasConfig: Boolean(nextConfig),
-        editingConfig: nextEditingConfig,
-        embedded,
-        hideConfigChrome,
-      });
-      return nextConfig;
-    } catch (error) {
-      logCashflowLab('config.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-      if (isBffAuthError(error)) {
-        setConfig(null);
-        setEditingConfig(true);
+      try {
+        const fetchConfig = (requestActor: typeof actor) => getCashflowSheetLabConfigViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+        });
+        let result;
+        try {
+          result = await fetchConfig(resolvedActor);
+        } catch (error) {
+          if (!isBffAuthError(error)) {
+            throw error;
+          }
+          logCashflowLab('config.load.bffAuth.rejected', {
+            projectId,
+            ...errorDiagnostics(error),
+          }, 'warn');
+          const retryActor = await requestBffActorAfterAuth('config.load');
+          if (!retryActor) {
+            throw error;
+          }
+          result = await fetchConfig(retryActor);
+        }
+        if (cancelled) return;
+        const nextConfig = result.config || null;
+        setSystemAccountEmail(result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '');
+        const nextEditingConfig = !nextConfig;
+        setConfig(nextConfig);
+        setEditingConfig(nextEditingConfig);
+        setSheetLink(nextConfig?.value || '');
+        setSheetName(nextConfig?.sheetName || '');
+        setStartWeek(nextConfig?.startWeek || '');
+        setEndWeek(nextConfig?.endWeek || '');
+        logCashflowLab('config.load.ok', {
+          projectId,
+          hasConfig: Boolean(nextConfig),
+          editingConfig: nextEditingConfig,
+          embedded,
+          hideConfigChrome,
+        });
+      } catch (error) {
+        logCashflowLab('config.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
+        if (!cancelled) {
+          if (isBffAuthError(error)) {
+            setConfig(null);
+            setEditingConfig(true);
+          }
+          setErrorMessage(formatError(error, systemAccountEmail));
+        }
+      } finally {
+        if (!cancelled) setConfigLoading(false);
       }
-      setErrorMessage(formatError(error, systemAccountEmail));
-      return null;
-    } finally {
-      setConfigLoading(false);
-    }
-  }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, orgId, projectId, requestBffActorAfterAuth, resolveBffActor]);
 
   async function handleSaveConfig() {
     if (!projectId || !spreadsheetId || savingConfig) return null;
@@ -712,25 +711,43 @@ export const CashflowSheetLabPage = forwardRef<CashflowSheetLabPageHandle, Cashf
     preview?.spreadsheetTitle,
   ]);
 
-  useImperativeHandle(ref, () => ({
-    preview: () => {
-      logCashflowLab('toolbar.action', { projectId, action: 'preview', editingConfig });
-      void handlePreview();
-    },
-    connect: () => {
-      logCashflowLab('toolbar.action', { projectId, action: 'connect', editingConfig });
-      void handleConnectSheet();
-    },
-    edit: () => {
-      logCashflowLab('config.editor.open', { projectId, source: 'toolbar' });
-      setEditingConfig(true);
-    },
-    projectionWriteback: () => {
-      logCashflowLab('toolbar.action', { projectId, action: 'projection-writeback', editingConfig });
+  useEffect(() => {
+    const handleToolbarAction = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: string; projectId?: string }>).detail?.action;
+      const targetProjectId = (event as CustomEvent<{ action?: string; projectId?: string }>).detail?.projectId;
+      if (targetProjectId && targetProjectId !== projectId) return;
+      logCashflowLab('toolbar.action', {
+        projectId,
+        action: action || null,
+        targetProjectId: targetProjectId || null,
+        editingConfig,
+      });
+      if (action === 'preview') {
+        void handlePreview();
+      } else if (action === 'connect') {
+        void handleConnectSheet();
+      } else if (action === 'edit') {
+        logCashflowLab('config.editor.open', { projectId, source: action });
+        setEditingConfig(true);
+      } else if (action === 'projection-writeback') {
+        openSyncWizard();
+        void handleWritebackPreview();
+      }
+    };
+    window.addEventListener('mysc:cashflow-sheet-lab-action', handleToolbarAction);
+    return () => window.removeEventListener('mysc:cashflow-sheet-lab-action', handleToolbarAction);
+  });
+
+  useEffect(() => {
+    const handleProjectionSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== projectId) return;
       openSyncWizard();
       void handleWritebackPreview();
-    },
-  }));
+    };
+    window.addEventListener('mysc:cashflow-projection-saved', handleProjectionSaved);
+    return () => window.removeEventListener('mysc:cashflow-projection-saved', handleProjectionSaved);
+  });
 
   const cashflowPreviewTables = useMemo(() => buildCashflowPreviewTables(preview), [preview]);
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
@@ -785,18 +802,6 @@ export const CashflowSheetLabPage = forwardRef<CashflowSheetLabPageHandle, Cashf
               >
                 {savingConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
                 설정 저장
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={!projectId || configLoading}
-                onClick={() => {
-                  void handleLoadConfig();
-                }}
-              >
-                {configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                저장된 설정 불러오기
               </Button>
               {config && (
                 <Button
@@ -1046,6 +1051,4 @@ export const CashflowSheetLabPage = forwardRef<CashflowSheetLabPageHandle, Cashf
       )}
     </div>
   );
-});
-
-CashflowSheetLabPage.displayName = 'CashflowSheetLabPage';
+}

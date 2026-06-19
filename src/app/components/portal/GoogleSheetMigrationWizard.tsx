@@ -502,7 +502,7 @@ export function GoogleSheetMigrationWizard({
     selectedDescriptor,
   ]);
 
-  const handleAnalyzeSelectedSheet = async () => {
+  useEffect(() => {
     if (!preview || step === 'source') return;
     const key = `${preview.spreadsheetId}:${preview.selectedSheetName}`;
     if (!showAnalysisAssist) {
@@ -514,27 +514,43 @@ export function GoogleSheetMigrationWizard({
     }
     if (analysisLoading || analysisKey === key) return;
 
+    let cancelled = false;
     setAnalysisLoading(true);
     setAnalysisError('');
 
-    try {
-      const result = await analyzeGoogleSheetImportViaBff({
-        tenantId: orgId,
-        actor: bffActor,
-        projectId,
-        spreadsheetTitle: preview.spreadsheetTitle,
-        selectedSheetName: preview.selectedSheetName,
-        matrix: buildAnalysisMatrixSample(preview.matrix),
-      });
+    void analyzeGoogleSheetImportViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      projectId,
+      spreadsheetTitle: preview.spreadsheetTitle,
+      selectedSheetName: preview.selectedSheetName,
+      matrix: buildAnalysisMatrixSample(preview.matrix),
+    }).then((result) => {
+      if (cancelled) return;
       setAnalysis(result);
       setAnalysisKey(key);
-    } catch (error) {
+    }).catch((error) => {
+      if (cancelled) return;
       setAnalysis(null);
       setAnalysisError(resolveApiErrorMessage(error, '추가 분석을 불러오지 못했습니다.'));
-    } finally {
+    }).finally(() => {
+      if (cancelled) return;
       setAnalysisLoading(false);
-    }
-  };
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    analysisKey,
+    analysisLoading,
+    bffActor,
+    orgId,
+    preview,
+    projectId,
+    showAnalysisAssist,
+    step,
+  ]);
 
   const persistLocalSheetSource = async (
     workbook: LocalWorkbookState,
@@ -924,7 +940,6 @@ export function GoogleSheetMigrationWizard({
       onSelectSheet={handleSelectSheet}
       onUploadLocalWorkbook={(file) => void handleLocalWorkbookUpload(file)}
       onLoadSavedSource={handleSavedSourcePreview}
-      onAnalyzeSelectedSheet={() => void handleAnalyzeSelectedSheet()}
       onApply={() => void applyGoogleSheetImport()}
     />
   );
@@ -958,7 +973,6 @@ function GoogleSheetImportDialog({
   onSelectSheet,
   onUploadLocalWorkbook,
   onLoadSavedSource,
-  onAnalyzeSelectedSheet,
   onApply,
 }: {
   open: boolean;
@@ -988,7 +1002,6 @@ function GoogleSheetImportDialog({
   onSelectSheet: (sheetName: string) => void;
   onUploadLocalWorkbook: (file: File) => void;
   onLoadSavedSource: (source: ProjectSheetSourceSnapshot) => void;
-  onAnalyzeSelectedSheet: () => void;
   onApply: () => void;
 }) {
   const protectedHeaderSet = useMemo<Set<string>>(
@@ -1282,7 +1295,6 @@ function GoogleSheetImportDialog({
                       analysisLoading={analysisLoading}
                       analysisError={analysisError}
                       selectedSheetName={selectedSheetName}
-                      onAnalyze={onAnalyzeSelectedSheet}
                     />
                   )}
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1623,7 +1635,6 @@ function GoogleSheetImportDialog({
                     analysisLoading={analysisLoading}
                     analysisError={analysisError}
                     step={step}
-                    onAnalyze={onAnalyzeSelectedSheet}
                   />
                 )}
               </div>
@@ -1683,13 +1694,11 @@ function GoogleSheetMigrationAiInlineCard({
   analysisLoading,
   analysisError,
   selectedSheetName,
-  onAnalyze,
 }: {
   analysis: GoogleSheetMigrationAnalysisResult | null;
   analysisLoading: boolean;
   analysisError: string;
   selectedSheetName: string;
-  onAnalyze: () => void;
 }) {
   const safeAnalysis = analysis ? normalizeGoogleSheetMigrationAnalysisResult(analysis) : null;
 
@@ -1704,7 +1713,7 @@ function GoogleSheetMigrationAiInlineCard({
         )}
       </div>
       {!selectedSheetName ? (
-        <p className="mt-2 text-sky-900/85">탭을 하나 선택한 뒤 필요한 경우 분석을 실행합니다.</p>
+        <p className="mt-2 text-sky-900/85">탭을 하나 선택하면 구조와 반영 포인트를 바로 정리합니다.</p>
       ) : analysisLoading ? (
         <div className="mt-2 flex items-center gap-2 text-sky-900/85">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -1723,12 +1732,7 @@ function GoogleSheetMigrationAiInlineCard({
           )}
         </div>
       ) : (
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <p className="text-sky-900/85">선택한 탭은 버튼을 눌렀을 때만 분석합니다.</p>
-          <Button type="button" size="sm" variant="outline" className="h-8 bg-white text-[11px]" onClick={onAnalyze}>
-            분석
-          </Button>
-        </div>
+        <p className="mt-2 text-sky-900/85">선택한 탭에 대한 AI 분석을 준비 중입니다.</p>
       )}
     </div>
   );
@@ -1739,13 +1743,11 @@ function GoogleSheetMigrationAiPanel({
   analysisLoading,
   analysisError,
   step,
-  onAnalyze,
 }: {
   analysis: GoogleSheetMigrationAnalysisResult | null;
   analysisLoading: boolean;
   analysisError: string;
   step: GoogleSheetWizardStep;
-  onAnalyze: () => void;
 }) {
   const safeAnalysis = analysis ? normalizeGoogleSheetMigrationAnalysisResult(analysis) : null;
 
@@ -1761,7 +1763,7 @@ function GoogleSheetMigrationAiPanel({
       </div>
       {step === 'source' ? (
         <p className="mt-2 text-slate-600">
-          시트를 불러온 뒤 필요한 경우 버튼으로 탭 구조 분석을 실행합니다.
+          시트를 불러오면 탭 구조를 읽고, 추천 매핑과 주의사항을 자동으로 정리합니다.
         </p>
       ) : analysisLoading ? (
         <div className="mt-3 flex items-center gap-2 text-slate-600">
@@ -1808,12 +1810,7 @@ function GoogleSheetMigrationAiPanel({
           )}
         </div>
       ) : (
-        <div className="mt-2 space-y-2">
-          <p className="text-slate-600">아직 분석 결과가 없습니다. 버튼을 눌렀을 때만 분석합니다.</p>
-          <Button type="button" size="sm" variant="outline" className="h-8 text-[11px]" onClick={onAnalyze}>
-            분석
-          </Button>
-        </div>
+        <p className="mt-2 text-slate-600">아직 분석 결과가 없습니다.</p>
       )}
     </div>
   );

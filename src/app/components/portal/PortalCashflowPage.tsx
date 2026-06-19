@@ -1,10 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pencil, Search, Settings } from 'lucide-react';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
-import {
-  CashflowSheetLabPage,
-  type CashflowSheetLabPageHandle,
-} from '../../features/cashflow-sheet-compare/CashflowSheetLabPage';
+import { CashflowSheetLabPage } from '../../features/cashflow-sheet-compare/CashflowSheetLabPage';
 import { usePortalStore } from '../../data/portal-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -25,7 +22,6 @@ export function PortalCashflowPage() {
     startWeek: '',
     endWeek: '',
   });
-  const sheetLabRef = useRef<CashflowSheetLabPageHandle | null>(null);
 
   const ready = useMemo(() => Boolean(projectId), [projectId]);
   const sheetRangeLabel = sheetHeader.startWeek || sheetHeader.endWeek
@@ -40,9 +36,9 @@ export function PortalCashflowPage() {
       projectId,
       summary: { action, projectId },
     });
-    if (action === 'connect') sheetLabRef.current?.connect();
-    if (action === 'preview') sheetLabRef.current?.preview();
-    if (action === 'edit') sheetLabRef.current?.edit();
+    window.dispatchEvent(new CustomEvent('mysc:cashflow-sheet-lab-action', {
+      detail: { action, projectId },
+    }));
   };
 
   if (!ready) {
@@ -102,7 +98,6 @@ export function PortalCashflowPage() {
         </div>
       </section>
       <CashflowSheetLabPage
-        ref={sheetLabRef}
         projectIdOverride={projectId}
         embedded
         hideConfigChrome

@@ -3,7 +3,7 @@
 - route: `/portal/cashflow`
 - primary users: PM, projection 입력 담당자
 - status: active
-- last updated: 2026-06-19
+- last updated: 2026-04-15
 
 ## Purpose
 
@@ -14,7 +14,6 @@
 - 기본 화면은 시트 작업면과 가져오기 액션만 먼저 보여준다.
 - 형식 설명은 import wizard 안으로 밀고, 상단에는 import action만 남긴다.
 - projection 입력/수정은 프로젝트 시트 화면에서 직접 처리한다.
-- 시트 연동, 검토, 반영, 인건비/잔액 체크는 자동 실행하지 않고 사용자가 누른 버튼으로만 실행한다.
 
 ## Current Feature Checklist
 
@@ -23,13 +22,10 @@
 - [x] 상단 explainer 카드 없이 compact import action 유지
 - [x] 가져오기 이후 주간 제출 상태와 연결 가능
 - [x] PM 포털 부팅 시 cashflow 실시간 구독이 연도 범위 composite index에 직접 의존하지 않음
-- [x] Cashflow 화면 local tree에서 realtime/listen/heartbeat/custom event 기반 자동 연동 제거
-- [x] 인건비/잔액 체크는 `수동 체크` 버튼으로만 실행
 - [ ] import wizard 내부 안내 문구 추가 감산 여지 있음
 
 ## Recent Changes
 
-- [2026-06-19] presence heartbeat, edit lock realtime listen, sheet range realtime listen, labor-risk 자동 요청, sheet lab 전역 custom event, actual 자동 sync/retry를 제거하고 버튼 기반 수동 연동만 남겼다.
 - [2026-04-14] migration 설명 카드와 긴 형식 안내를 제거하고 compact import action만 남겼다.
 - [2026-04-15] PM용 cashflow 주차 구독은 Firestore에서 project 기준으로만 listen하고, 연도 범위는 클라이언트에서 필터링하도록 바꿔 PM 포털 전체가 cashflow index drift에 덜 민감하게 만들었다.
 

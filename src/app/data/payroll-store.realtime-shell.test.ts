@@ -8,14 +8,12 @@ const payrollStoreSource = readFileSync(
 );
 
 describe('PayrollProvider scoped realtime listeners', () => {
-  it('keeps realtime listeners behind route policy and uses fetch mode for portal-safe routes', () => {
-    expect(payrollStoreSource).toContain('allowRealtimeListeners: liveMode');
-    expect(payrollStoreSource).toContain('if (liveMode) {');
+  it('keeps PM-scoped payroll data on realtime snapshots instead of one-shot fetches', () => {
     expect(payrollStoreSource).toContain("onSnapshot(scheduleRef");
     expect(payrollStoreSource).toContain("onSnapshot(runQuery");
     expect(payrollStoreSource).toContain("onSnapshot(closeQuery");
-    expect(payrollStoreSource).toContain('getDoc(scheduleRef)');
-    expect(payrollStoreSource).toContain('getDocs(runQuery)');
-    expect(payrollStoreSource).toContain('getDocs(closeQuery)');
+    expect(payrollStoreSource).not.toContain("getDoc(scheduleRef)");
+    expect(payrollStoreSource).not.toContain("getDocs(runQuery)");
+    expect(payrollStoreSource).not.toContain("getDocs(closeQuery)");
   });
 });

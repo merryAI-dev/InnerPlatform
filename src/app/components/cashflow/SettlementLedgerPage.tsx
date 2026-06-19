@@ -34,7 +34,6 @@ import {
   resolveWeeklyAccountingProductStatusDomHooks,
   serializeWeeklyAccountingImportRowsMaterially,
   type WeeklyAccountingSheetRowsHydrationReason,
-  type WeeklyAccountingSheetRowsSyncState,
 } from '../../platform/weekly-accounting-state';
 import { resolveWeeklyExpenseAutosavePlan } from '../../platform/weekly-expense-save-policy';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -75,10 +74,6 @@ interface WeekBucket {
 }
 
 type CashflowExpenseSyncState = 'idle' | 'pending' | 'syncing' | 'synced' | 'sync_failed';
-
-function normalizeCashflowExpenseSyncState(state: WeeklyAccountingSheetRowsSyncState): CashflowExpenseSyncState {
-  return state === 'review_required' ? 'pending' : state;
-}
 
 function resolveCashflowSyncStateFromStatuses(
   payload: Array<{ yearMonth: string; weekNo: number }>,
@@ -214,7 +209,7 @@ export function SettlementLedgerPage({
   weeklySubmissionStatuses = [],
   discardChangesRequestToken = 0,
   autoSaveIdleMs = 60_000,
-  autoSaveSyncCashflow = false,
+  autoSaveSyncCashflow = true,
   ledgerViewOnly = false,
 }: SettlementLedgerProps) {
   const { upsertWeekAmounts } = useCashflowWeeks();
@@ -239,6 +234,7 @@ export function SettlementLedgerPage({
   const restoredDraftCacheKeyRef = useRef('');
   const hasAppliedSheetRowsRef = useRef(false);
   const lastDiscardChangesRequestTokenRef = useRef(0);
+  const pendingCashflowSyncRetryKeyRef = useRef('');
   const pendingSheetRowsEchoSignatureRef = useRef<string | null>(null);
   const pendingSheetRowsSyncRef = useRef<{ rows: ImportRow[] | null; reason: WeeklyAccountingSheetRowsHydrationReason } | null>(null);
   const cloneImportRows = useCallback((input: ImportRow[]) => (
@@ -359,7 +355,7 @@ export function SettlementLedgerPage({
       : null;
     setImportDirty(false);
     setSheetSaveState(hydration.nextSaveState);
-    setCashflowSyncState(persistedSyncState || normalizeCashflowExpenseSyncState(hydration.nextSyncState));
+    setCashflowSyncState(persistedSyncState || hydration.nextSyncState);
     if (reason !== 'persistence_echo') {
       clearImportDraftCache(draftCacheKey);
     } else {
@@ -776,7 +772,7 @@ export function SettlementLedgerPage({
   const handleImportSave = useCallback(async (options?: { silent?: boolean; syncCashflow?: boolean }) => {
     if (!importRows) return;
     const silent = options?.silent ?? false;
-    const syncCashflow = options?.syncCashflow ?? false;
+    const syncCashflow = options?.syncCashflow ?? true;
     const persistedRows = await persistImportRowsSnapshot(importRows, { silent });
     if (!persistedRows) return;
     if (syncCashflow) {
@@ -794,8 +790,24 @@ export function SettlementLedgerPage({
       toast.error(`작성본 업로드는 완료됐지만 저장에 실패했습니다: ${sheetName}`);
       return;
     }
-    toast.success(`작성본 ${persistedRows.length}건을 저장했습니다.`);
-  }, [cloneImportRows, persistImportRowsSnapshot]);
+    const syncOutcome = await syncImportRowsToCashflow(persistedRows, { silent: true });
+    if (syncOutcome === 'synced') {
+      toast.success(`작성본 ${persistedRows.length}건을 저장하고 캐시플로 actual까지 반영했습니다.`);
+      return;
+    }
+    toast.error(`작성본 ${persistedRows.length}건은 저장했지만 캐시플로 actual 반영은 다시 확인이 필요합니다.`);
+  }, [cloneImportRows, persistImportRowsSnapshot, syncImportRowsToCashflow]);
+
+  useEffect(() => {
+    if (sheetSaveState !== 'saved') return;
+    if (importDirty || !importRows || importRows.length === 0) return;
+    if (cashflowSyncState !== 'pending' && cashflowSyncState !== 'sync_failed') return;
+    const signature = serializeWeeklyAccountingImportRowsMaterially(importRows);
+    const retryKey = `${draftCacheKey}:${cashflowSyncState}:${signature}`;
+    if (pendingCashflowSyncRetryKeyRef.current === retryKey) return;
+    pendingCashflowSyncRetryKeyRef.current = retryKey;
+    void syncImportRowsToCashflow(importRows, { silent: true });
+  }, [cashflowSyncState, draftCacheKey, importDirty, importRows, sheetSaveState, syncImportRowsToCashflow]);
 
   const handleDirectEntryWorkbookFile = useCallback(async (file: File) => {
     setDirectEntryUploading(true);

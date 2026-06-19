@@ -380,18 +380,3 @@ export function useHrAnnouncements() {
   if (!ctx) throw new Error('useHrAnnouncements must be inside HrAnnouncementProvider');
   return ctx;
 }
-
-export function useOptionalHrAnnouncements() {
-  const ctx = useContext(HrContext);
-  return ctx || {
-    announcements: [],
-    alerts: [],
-    createAnnouncement: () => undefined,
-    acknowledgeAlert: () => undefined,
-    markAlertResolved: () => undefined,
-    resolveAnnouncement: () => undefined,
-    getProjectAlerts: () => [],
-    getUnacknowledgedCount: () => 0,
-    getAllPendingCount: () => 0,
-  };
-}

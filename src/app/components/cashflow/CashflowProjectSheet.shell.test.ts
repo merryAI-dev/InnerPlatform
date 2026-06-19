@@ -87,18 +87,19 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
   });
 
-  it('keeps labor risk as an explicit manual action only', () => {
-    expect(cashflowProjectSheetSource).toContain('const handleManualLaborRiskCheck = useCallback(async () => {');
-    expect(cashflowProjectSheetSource).toContain('fetchCashflowLaborRiskViaBff({');
-    expect(cashflowProjectSheetSource).not.toContain('laborRiskRequestKeyRef');
-    expect(cashflowProjectSheetSource).not.toContain('requesting labor risk');
-    expect(cashflowProjectSheetSource).not.toContain('background labor risk');
+  it('does not force-refresh BFF auth on the background labor risk poll loop', () => {
+    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef');
+    expect(cashflowProjectSheetSource).toContain('laborRiskRequestKeyRef.current === requestKey');
+    expect(cashflowProjectSheetSource).toContain('const resolvedActor = await resolveBffActor();');
+    expect(cashflowProjectSheetSource).toContain('labor risk BFF auth rejected, retrying with refreshed token');
+    expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
   });
 
-  it('does not stream or broadcast cashflow sheet state from the project sheet', () => {
-    expect(cashflowProjectSheetSource).not.toContain('onSnapshot');
-    expect(cashflowProjectSheetSource).not.toContain('setInterval');
-    expect(cashflowProjectSheetSource).not.toContain('cashflowPresence');
-    expect(cashflowProjectSheetSource).not.toContain("dispatchEvent(new CustomEvent('mysc:cashflow-projection-saved'");
+  it('does not refetch labor risk for every cashflow week stream update', () => {
+    expect(cashflowProjectSheetSource).toContain('const cashflowWeeksStreamKey = useMemo(() => (');
+    expect(cashflowProjectSheetSource).toContain('todayIso,');
+    expect(cashflowProjectSheetSource).toContain('}, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);');
+    expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey,\n    ].join');
+    expect(cashflowProjectSheetSource).not.toContain('}, [cashflowWeeksStreamKey, orgId, projectId, resolveBffActor, user?.uid]);');
   });
 });
