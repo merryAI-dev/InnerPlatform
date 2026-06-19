@@ -119,7 +119,6 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
-  const actualSyncSignatureRef = useRef('');
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
     weekNo: number;
@@ -358,45 +357,6 @@ export function PortalWeeklyExpensePage() {
     }
     return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
   }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
-
-  useEffect(() => {
-    if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
-    const signature = projectExpenseSourceSignature;
-    if (actualSyncSignatureRef.current === signature) return;
-    actualSyncSignatureRef.current = signature;
-    let cancelled = false;
-    void (async () => {
-      try {
-        await syncCashflowActualsFromCanonicalSource();
-        if (cancelled) return;
-      } catch (error) {
-        actualSyncSignatureRef.current = '';
-        reportError(error, {
-          message: '[PortalWeeklyExpensePage] actual realtime sync failed:',
-          options: {
-            level: 'error',
-            tags: {
-              surface: 'portal_weekly_expense',
-              action: 'actual_realtime_sync',
-            },
-            extra: {
-              projectId,
-            },
-          },
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasUnsavedSettlementChanges,
-    isSettlementSaving,
-    portalStoreLoading,
-    projectExpenseSourceSignature,
-    projectId,
-    syncCashflowActualsFromCanonicalSource,
-  ]);
 
   const handleEvidenceDriveError = useCallback((error: unknown, actionLabel: string) => {
     reportError(error, {

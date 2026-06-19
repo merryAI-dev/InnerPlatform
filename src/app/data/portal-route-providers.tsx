@@ -12,8 +12,8 @@ export function resolvePortalProviderScope(pathname = typeof window !== 'undefin
   const path = pathname.replace(/\/+$/, '') || '/portal';
   if (path === '/portal/cashflow' || path === '/portal/cashflow/sheets-lab') {
     return {
-      hrAnnouncements: true,
-      payroll: true,
+      hrAnnouncements: false,
+      payroll: false,
       cashflowWeeks: true,
       board: false,
       careerProfile: false,

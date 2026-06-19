@@ -47,13 +47,11 @@ function PolicyProbe({ role }: { role: string }) {
 }
 
 function readPolicy(wrapper: typeof AdminRouteProviders | typeof PortalRouteProviders, role: string) {
-  const markup = renderToStaticMarkup(
-    React.createElement(
-      wrapper === PortalRouteProviders ? PortalRouteProviderFrame : wrapper,
-      wrapper === PortalRouteProviders ? { pathname: '/portal/cashflow' } : null,
-      React.createElement(PolicyProbe, { role }),
-    ),
-  );
+  const child = React.createElement(PolicyProbe, { role });
+  const tree = wrapper === PortalRouteProviders
+    ? React.createElement(PortalRouteProviderFrame, { pathname: '/portal/cashflow' }, child)
+    : React.createElement(wrapper, null, child);
+  const markup = renderToStaticMarkup(tree);
 
   const match = markup.match(/<pre id="policy">([^<]+)<\/pre>/);
   expect(match?.[1]).toBeTruthy();
@@ -100,16 +98,16 @@ describe('route provider behavior', () => {
 
   it('keeps portal shell providers mounted while limiting route-specific providers', () => {
     expect(resolvePortalProviderScope('/portal/cashflow')).toEqual({
-      hrAnnouncements: true,
-      payroll: true,
+      hrAnnouncements: false,
+      payroll: false,
       cashflowWeeks: true,
       board: false,
       careerProfile: false,
       training: false,
     });
     expect(resolvePortalProviderScope('/portal/cashflow/sheets-lab')).toMatchObject({
-      hrAnnouncements: true,
-      payroll: true,
+      hrAnnouncements: false,
+      payroll: false,
       cashflowWeeks: true,
       board: false,
       careerProfile: false,

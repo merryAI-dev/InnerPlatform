@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { collection, doc, getDoc, limit, onSnapshot, query, runTransaction, setDoc, where } from 'firebase/firestore';
-import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, Save, Users } from 'lucide-react';
+import { collection, doc, getDoc, getDocs, limit, query, runTransaction, setDoc, where } from 'firebase/firestore';
+import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -54,8 +54,6 @@ function fmtSigned(n: number): string {
 }
 
 const CASHFLOW_EDIT_LOCK_TTL_MS = 2 * 60 * 1000;
-const CASHFLOW_PRESENCE_TTL_MS = 75 * 1000;
-const CASHFLOW_HEARTBEAT_MS = 25 * 1000;
 
 type CashflowEditLock = {
   projectId: string;
@@ -75,15 +73,6 @@ type CashflowEditLock = {
   lastEditedByEmail?: string | null;
 };
 
-type CashflowPresence = {
-  projectId: string;
-  uid: string;
-  name: string;
-  email?: string;
-  updatedAt: number;
-  expiresAt: number;
-};
-
 function safeDocId(value: string): string {
   return String(value || '').replace(/[^A-Za-z0-9._-]/g, '_');
 }
@@ -95,25 +84,6 @@ function getUserDisplayName(user: unknown): string {
   const email = String(source.email || '').trim();
   if (email) return email.split('@')[0] || email;
   return String(source.uid || '사용자');
-}
-
-function getInitials(name: string): string {
-  const trimmed = String(name || '').trim();
-  if (!trimmed) return '?';
-  const compact = trimmed.replace(/\s+/g, '');
-  return compact.slice(0, 2).toUpperCase();
-}
-
-function formatPresenceTime(timestamp?: number): string {
-  if (!timestamp) return '';
-  return new Intl.DateTimeFormat('ko-KR', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Seoul',
-  }).format(new Date(timestamp));
 }
 
 function diffColorExplanation(section: '입금' | '출금', diff: number): string {
@@ -360,22 +330,9 @@ export function CashflowProjectSheet({
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
-  const [presenceUsers, setPresenceUsers] = useState<CashflowPresence[]>([]);
-  const [editLock, setEditLock] = useState<CashflowEditLock | null>(null);
   const [editLockBusy, setEditLockBusy] = useState(false);
   const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
-  const currentUserUid = user?.uid || '';
   const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
-  const activeEditLock = useMemo(() => {
-    if (!editLock || editLock.status !== 'editing') return null;
-    if (Number(editLock.expiresAt || 0) <= Date.now()) return null;
-    return editLock;
-  }, [editLock]);
-  const isEditLockMine = Boolean(activeEditLock?.editorUid && activeEditLock.editorUid === currentUserUid);
-  const isEditLockedByOther = Boolean(activeEditLock && !isEditLockMine);
-  const lastEditedLabel = editLock?.lastEditedAt && editLock?.lastEditedByName
-    ? `${editLock.lastEditedByName}이 ${formatPresenceTime(editLock.lastEditedAt)} 수정`
-    : '';
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
   const selectedYear = useMemo(() => {
@@ -488,7 +445,6 @@ export function CashflowProjectSheet({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
   const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
-  const laborRiskRequestKeyRef = useRef('');
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   type CashflowAuditIssue = { key: string; label: string; detail: string };
@@ -546,82 +502,19 @@ export function CashflowProjectSheet({
     setSubmitConfirm(null);
   }, [yearMonth, projectId]);
 
-  useEffect(() => {
-    if (!db || !projectId || !user?.uid) {
-      setPresenceUsers([]);
-      return undefined;
-    }
-    const uid = user.uid;
-    const name = getUserDisplayName(user);
-    const presenceId = `${safeDocId(projectId)}_${safeDocId(uid)}`;
-    const presenceRef = doc(db, getOrgDocumentPath(orgId, 'cashflowPresence', presenceId));
-    const writePresence = () => {
-      const now = Date.now();
-      void setDoc(presenceRef, {
-        projectId,
-        uid,
-        name,
-        email: user.email || '',
-        updatedAt: now,
-        expiresAt: now + CASHFLOW_PRESENCE_TTL_MS,
-      } satisfies CashflowPresence, { merge: true }).catch(() => undefined);
-    };
-    writePresence();
-    const heartbeatId = window.setInterval(writePresence, CASHFLOW_HEARTBEAT_MS);
-    return () => {
-      window.clearInterval(heartbeatId);
-      void setDoc(presenceRef, {
-        projectId,
-        uid,
-        name,
-        email: user.email || '',
-        updatedAt: Date.now(),
-        expiresAt: Date.now(),
-      } satisfies CashflowPresence, { merge: true }).catch(() => undefined);
-    };
-  }, [db, orgId, projectId, user]);
-
-  useEffect(() => {
-    if (!db || !projectId) {
-      setPresenceUsers([]);
-      setEditLock(null);
-      return undefined;
-    }
-    const presenceQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'cashflowPresence')),
-      where('projectId', '==', projectId),
-      limit(20),
-    );
-    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
-    const unsubscribePresence = onSnapshot(presenceQuery, (snap) => {
-      const now = Date.now();
-      setPresenceUsers(
-        snap.docs
-          .map((item) => item.data() as CashflowPresence)
-          .filter((item) => item.uid && Number(item.expiresAt || 0) > now)
-          .sort((a, b) => String(a.name || a.email || a.uid).localeCompare(String(b.name || b.email || b.uid))),
-      );
-    }, () => setPresenceUsers([]));
-    const unsubscribeLock = onSnapshot(lockRef, (snap) => {
-      setEditLock(snap.exists() ? (snap.data() as CashflowEditLock) : null);
-    }, () => setEditLock(null));
-    return () => {
-      unsubscribePresence();
-      unsubscribeLock();
-    };
-  }, [db, lockDocId, orgId, projectId]);
-
   const acquireCashflowEditLock = useCallback(async (): Promise<boolean> => {
     if (!db || !user?.uid || !projectId) return true;
     setEditLockBusy(true);
     const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
     const now = Date.now();
+    let lockedBy = '다른 사용자';
     try {
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(lockRef);
         const existing = snap.exists() ? (snap.data() as CashflowEditLock) : null;
         const active = existing?.status === 'editing' && Number(existing.expiresAt || 0) > now;
         if (active && existing?.editorUid && existing.editorUid !== user.uid) {
+          lockedBy = existing.editorName || existing.editorEmail || lockedBy;
           throw new Error('cashflow_edit_locked');
         }
         tx.set(lockRef, {
@@ -637,13 +530,12 @@ export function CashflowProjectSheet({
       });
       return true;
     } catch (error) {
-      const lockOwner = activeEditLock?.editorName || '다른 사용자';
-      toast.error(`${lockOwner}이 수정 중입니다. 저장 또는 이탈 후 다시 시도해 주세요.`);
+      toast.error(`${lockedBy}이 수정 중입니다. 저장 후 다시 시도해 주세요.`);
       return false;
     } finally {
       setEditLockBusy(false);
     }
-  }, [activeEditLock?.editorName, currentUserName, db, lockDocId, orgId, projectId, user]);
+  }, [currentUserName, db, lockDocId, orgId, projectId, user]);
 
   const releaseCashflowEditLock = useCallback(async (reason: 'save' | 'leave' | 'cancel' = 'save'): Promise<void> => {
     if (!db || !user?.uid || !projectId) return;
@@ -665,39 +557,13 @@ export function CashflowProjectSheet({
         releasedAt: now,
         releasedByUid: user.uid,
         releaseReason: reason,
-        lastEditedAt: reason === 'save' ? now : existing.lastEditedAt || null,
-        lastEditedByUid: reason === 'save' ? user.uid : existing.lastEditedByUid || null,
-        lastEditedByName: reason === 'save' ? currentUserName : existing.lastEditedByName || null,
-        lastEditedByEmail: reason === 'save' ? user.email || '' : existing.lastEditedByEmail || null,
+        lastEditedAt: reason === 'save' ? now : existing.lastEditedAt,
+        lastEditedByUid: reason === 'save' ? user.uid : existing.lastEditedByUid,
+        lastEditedByName: reason === 'save' ? currentUserName : existing.lastEditedByName,
+        lastEditedByEmail: reason === 'save' ? user.email || '' : existing.lastEditedByEmail,
       } satisfies CashflowEditLock, { merge: true });
     });
   }, [currentUserName, db, lockDocId, orgId, projectId, user]);
-
-  useEffect(() => {
-    return () => {
-      if (!isEditLockMine) return;
-      void releaseCashflowEditLock('leave').catch(() => undefined);
-    };
-  }, [isEditLockMine, releaseCashflowEditLock]);
-
-  useEffect(() => {
-    if (!db || !user?.uid || !isEditLockMine) return undefined;
-    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
-    const extendLock = () => {
-      const now = Date.now();
-      void setDoc(lockRef, {
-        projectId,
-        editorUid: user.uid,
-        editorName: currentUserName,
-        editorEmail: user.email || '',
-        status: 'editing',
-        updatedAt: now,
-        expiresAt: now + CASHFLOW_EDIT_LOCK_TTL_MS,
-      } satisfies CashflowEditLock, { merge: true }).catch(() => undefined);
-    };
-    const intervalId = window.setInterval(extendLock, CASHFLOW_HEARTBEAT_MS);
-    return () => window.clearInterval(intervalId);
-  }, [currentUserName, db, isEditLockMine, lockDocId, orgId, projectId, user]);
 
   useEffect(() => {
     if (!db || !projectId) {
@@ -738,8 +604,9 @@ export function CashflowProjectSheet({
   useEffect(() => {
     if (!db || !cashflowSheetRange) {
       setRangeLoadedWeeks([]);
-      return undefined;
+      return;
     }
+    let cancelled = false;
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const q = query(
       base,
@@ -747,112 +614,80 @@ export function CashflowProjectSheet({
       where('yearMonth', '<=', cashflowSheetRange.endYearMonth),
       limit(5000),
     );
-    return onSnapshot(q, (snap) => {
-      setRangeLoadedWeeks(
-        snap.docs
-          .map((d) => d.data() as CashflowWeekSheet)
-          .filter((week) => week.projectId === projectId),
-      );
-    }, (error) => {
-      console.warn('[CashflowProjectSheet] sheet range listen failed:', error);
-      setRangeLoadedWeeks([]);
-    });
+    getDocs(q)
+      .then((snap) => {
+        if (cancelled) return;
+        setRangeLoadedWeeks(
+          snap.docs
+            .map((d) => d.data() as CashflowWeekSheet)
+            .filter((week) => week.projectId === projectId),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('[CashflowProjectSheet] sheet range fetch failed:', error);
+        setRangeLoadedWeeks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [cashflowSheetRange, db, orgId, projectId]);
 
   useEffect(() => {
-    const userUid = user?.uid || '';
-    if (!projectId || !orgId || !userUid) {
-      laborRiskRequestKeyRef.current = '';
+    setLaborRisk(null);
+    setLaborRiskError(null);
+    setLaborRiskLoading(false);
+  }, [projectId]);
+
+  const handleManualLaborRiskCheck = useCallback(async () => {
+    if (!projectId || !orgId || !user?.uid) {
       setLaborRisk(null);
-      setLaborRiskError(null);
-      setLaborRiskLoading(false);
+      setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
       return;
     }
-    const requestKey = [
-      orgId,
-      projectId,
-      userUid,
-      todayIso,
-    ].join('::');
-    if (laborRiskRequestKeyRef.current === requestKey) return;
+    setLaborRiskLoading(true);
+    setLaborRiskError(null);
+    try {
+      const resolvedActor = await resolveBffActor();
+      if (!resolvedActor?.idToken) {
+        setLaborRisk(null);
+        setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
+        return;
+      }
 
-    let cancelled = false;
-    const timeoutId = window.setTimeout(() => {
-      if (laborRiskRequestKeyRef.current === requestKey) return;
-      laborRiskRequestKeyRef.current = requestKey;
-      setLaborRiskLoading(true);
-      setLaborRiskError(null);
-      void (async () => {
-        const resolvedActor = await resolveBffActor();
-        if (!resolvedActor?.idToken) {
-          console.warn('[CashflowProjectSheet] labor risk auth missing, skipping API call', {
-            projectId,
-            actorEmail: latestBffActorRef.current.email,
-            hasStoredToken: Boolean(latestBffActorRef.current.idToken),
-          });
-          if (!cancelled) {
-            setLaborRisk(null);
-            setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
-            setLaborRiskLoading(false);
-          }
-          return;
-        }
-
-        try {
-          console.info('[CashflowProjectSheet] requesting labor risk', {
-            projectId,
-            orgId,
-            actorEmail: resolvedActor.email,
-            hasIdToken: Boolean(resolvedActor.idToken),
-          });
-          let result: CashflowLaborRiskResult;
-          try {
-            result = await fetchCashflowLaborRiskViaBff({
-              tenantId: orgId,
-              actor: resolvedActor,
-              projectId,
-            });
-          } catch (error) {
-            if (!isBffAuthRejection(error)) throw error;
-            console.warn('[CashflowProjectSheet] labor risk BFF auth rejected, retrying with refreshed token', {
-              projectId,
-              status: (error as { status?: number }).status,
-              code: (error as { body?: { code?: string; error?: string } }).body?.code
-                || (error as { body?: { error?: string } }).body?.error,
-              requestId: (error as { requestId?: string }).requestId,
-            });
-            const refreshedActor = await resolveBffActor({ forceRefresh: true });
-            if (!refreshedActor?.idToken) throw error;
-            result = await fetchCashflowLaborRiskViaBff({
-              tenantId: orgId,
-              actor: refreshedActor,
-              projectId,
-            });
-          }
-          if (cancelled) return;
-          setLaborRisk(result);
-        } catch (error) {
-          if (cancelled) return;
-          console.warn('[CashflowProjectSheet] labor risk fetch failed', {
-            projectId,
-            status: (error as { status?: number }).status,
-            code: (error as { body?: { code?: string; error?: string } }).body?.code
-              || (error as { body?: { error?: string } }).body?.error,
-            requestId: (error as { requestId?: string }).requestId,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          setLaborRisk(null);
-          setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
-        } finally {
-          if (!cancelled) setLaborRiskLoading(false);
-        }
-      })();
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);
+      let result: CashflowLaborRiskResult;
+      try {
+        result = await fetchCashflowLaborRiskViaBff({
+          tenantId: orgId,
+          actor: resolvedActor,
+          projectId,
+        });
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        const refreshedActor = await resolveBffActor({ forceRefresh: true });
+        if (!refreshedActor?.idToken) throw error;
+        result = await fetchCashflowLaborRiskViaBff({
+          tenantId: orgId,
+          actor: refreshedActor,
+          projectId,
+        });
+      }
+      setLaborRisk(result);
+    } catch (error) {
+      console.warn('[CashflowProjectSheet] manual labor risk fetch failed', {
+        projectId,
+        status: (error as { status?: number }).status,
+        code: (error as { body?: { code?: string; error?: string } }).body?.code
+          || (error as { body?: { error?: string } }).body?.error,
+        requestId: (error as { requestId?: string }).requestId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      setLaborRisk(null);
+      setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
+    } finally {
+      setLaborRiskLoading(false);
+    }
+  }, [orgId, projectId, resolveBffActor, user?.uid]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -1228,9 +1063,8 @@ export function CashflowProjectSheet({
         shortageWeekLabel: laborRisk?.shortage.week?.label || null,
         shortageAmount: laborRisk?.shortage.shortageAmount || 0,
       },
-      lastEditedLabel,
     });
-  }, [annualWeeks, byYearMonthWeek, laborRisk, lastEditedLabel, projectionActualYearDiff.changedCellCount, todayIso]);
+  }, [annualWeeks, byYearMonthWeek, laborRisk, projectionActualYearDiff.changedCellCount, todayIso]);
 
   const flushWeek = useCallback(async (input: {
     yearMonth?: string;
@@ -1771,14 +1605,6 @@ export function CashflowProjectSheet({
       void saveBoardDrafts()
         .then(() => {
           toast.success('저장했습니다.');
-          if (dirtyProjectionWeeks.length > 0 && typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('mysc:cashflow-projection-saved', {
-              detail: {
-                projectId,
-                changedWeekCount: dirtyProjectionWeeks.length,
-              },
-            }));
-          }
         })
         .catch(() => toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.'));
     };
@@ -1870,14 +1696,6 @@ export function CashflowProjectSheet({
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
                 <span>기준 범위 {cashflowTotalPeriodLabel} · 항목별 Projection 입력 / Actual 확인</span>
-                {lastEditedLabel && (
-                  <span className="text-slate-700">· 마지막 수정: {lastEditedLabel}</span>
-                )}
-                {activeEditLock?.editorName && (
-                  <span className={isEditLockMine ? 'font-semibold text-blue-700' : 'font-semibold text-rose-700'}>
-                    · {activeEditLock.editorName}이 수정 중입니다
-                  </span>
-                )}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
                 <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><Pencil className="h-3 w-3" />전체 수정</span>
@@ -1887,36 +1705,17 @@ export function CashflowProjectSheet({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 rounded-full bg-white px-2 py-1.5 shadow-[0_4px_14px_rgba(15,23,42,0.07)]" title="현재 이 화면을 보고 있는 사용자">
-                <Users className="h-3 w-3 text-slate-500" />
-                <div className="flex -space-x-1">
-                  {presenceUsers.slice(0, 4).map((item) => (
-                    <span
-                      key={item.uid}
-                      className={`inline-flex h-5 w-5 items-center justify-center rounded-full border border-white text-[7px] font-semibold ${item.uid === currentUserUid ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}
-                      title={`${item.name || item.email || item.uid} 접속 중`}
-                    >
-                      {getInitials(item.name || item.email || item.uid)}
-                    </span>
-                  ))}
-                  {presenceUsers.length > 4 && (
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-slate-100 text-[7px] font-semibold text-slate-600">
-                      +{presenceUsers.length - 4}
-                    </span>
-                  )}
-                </div>
-              </div>
               <Button
                 type="button"
                 size="sm"
                 variant={boardIsEditing ? 'default' : 'outline'}
                 className="h-8 rounded-full px-3 text-[11px] shadow-sm"
                 onClick={startBoardEditing}
-                disabled={!canEdit || boardIsEditing || editLockBusy || isEditLockedByOther}
-                title={isEditLockedByOther && activeEditLock?.editorName ? `${activeEditLock.editorName}이 수정 중입니다` : '수정'}
+                disabled={!canEdit || boardIsEditing || editLockBusy}
+                title="수정"
               >
                 {editLockBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
-                {isEditLockedByOther ? '수정중' : '수정'}
+                수정
               </Button>
               <Button
                 type="button"
@@ -2848,7 +2647,7 @@ export function CashflowProjectSheet({
     if (laborRiskError) {
       return <div className="text-[11px] font-semibold text-amber-700">인건비/잔액 체크 실패: {laborRiskError}</div>;
     }
-    if (!laborRisk) return <div className="text-[11px] text-slate-500">인건비/잔액 체크 결과가 아직 없습니다.</div>;
+    if (!laborRisk) return <div className="text-[11px] text-slate-500">수동 체크를 누르면 인건비/잔액 체크 결과를 불러옵니다.</div>;
 
     const missingMonths = laborRisk.labor.missingProjectionMonths;
     const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
@@ -2980,7 +2779,20 @@ export function CashflowProjectSheet({
                 인건비/잔액 체크
               </HoverExplain>
               </div>
-              <span className={`text-[10px] font-semibold ${opsTextClass(opsSummary.status.tone)}`}>{opsSummary.status.label}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className={`text-[10px] font-semibold ${opsTextClass(opsSummary.status.tone)}`}>{opsSummary.status.label}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-full px-2.5 text-[10px]"
+                  disabled={laborRiskLoading || !projectId}
+                  onClick={() => void handleManualLaborRiskCheck()}
+                >
+                  {laborRiskLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
+                  수동 체크
+                </Button>
+              </div>
             </div>
             {renderLaborRiskCopy()}
           </div>

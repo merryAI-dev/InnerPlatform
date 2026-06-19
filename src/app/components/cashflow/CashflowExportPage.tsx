@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import {
   BarChart3,
   CalendarRange,
@@ -202,17 +202,23 @@ export function CashflowExportPage() {
       limit(2500),
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list = snap.docs.map((docItem) => {
-        const data = docItem.data() as WeeklySubmissionStatus;
-        return { ...data, id: data.id || docItem.id };
+    let cancelled = false;
+    getDocs(q)
+      .then((snap) => {
+        if (cancelled) return;
+        const list = snap.docs.map((docItem) => {
+          const data = docItem.data() as WeeklySubmissionStatus;
+          return { ...data, id: data.id || docItem.id };
+        });
+        setWeeklySubmissionStatuses(list);
+      })
+      .catch(() => {
+        if (!cancelled) setWeeklySubmissionStatuses([]);
       });
-      setWeeklySubmissionStatuses(list);
-    }, () => {
-      setWeeklySubmissionStatuses([]);
-    });
 
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+    };
   }, [db, orgId, todayIso, yearMonths]);
 
   async function handleDownload() {

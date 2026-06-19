@@ -64,10 +64,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('google_sheet_service_account_forbidden');
     expect(pageSource).toContain('시트를 시스템 계정');
     expect(pageSource).toContain('systemAccountEmail');
-    expect(pageSource).toContain('mysc:cashflow-sheet-lab-action');
-    expect(pageSource).toContain("action === 'connect'");
+    expect(pageSource).not.toContain('mysc:cashflow-sheet-lab-action');
+    expect(pageSource).toContain('useImperativeHandle');
+    expect(portalCashflowSource).toContain('sheetLabRef.current?.connect()');
+    expect(portalCashflowSource).toContain('sheetLabRef.current?.preview()');
     expect(pageSource).toContain('handleConnectSheet');
     expect(pageSource).toContain('config.load.ok');
+    expect(pageSource).toContain('저장된 설정 불러오기');
     expect(pageSource).toContain('config.save.ok');
     expect(pageSource).toContain('toolbar.action');
     expect(pageSource).toContain('config.editor.open');
@@ -99,6 +102,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('exportCashflowWorkbookViaBff');
     expect(pageSource).not.toContain('saveExpenseSheetRows');
     expect(pageSource).not.toContain('markSheetSourceApplied');
+    expect(pageSource).not.toContain("addEventListener('mysc:cashflow-projection-saved'");
   });
 
   it('recovers BFF auth failures with a popup retry instead of redirecting', () => {

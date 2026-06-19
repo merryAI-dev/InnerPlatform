@@ -159,6 +159,10 @@
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: cashflow/actual/projection/expense 주차 계산을 stage/live 공통 core로 모으고, 2026년 8월처럼 raw 6주차가 생기는 달은 financeWeek 5에 강제 산입되도록 저장/API/export 경로를 맞췄다.
 
+## [2026-06-19] patch-note | portal-cashflow | static manual cashflow flows
+- pages: [portal-cashflow](./pages/portal-cashflow.md), [portal-dashboard](./pages/portal-dashboard.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: `/portal/cashflow`에서 presence heartbeat, realtime/listen 경로, sheet lab 전역 custom event, labor-risk 자동 요청, actual 자동 sync/retry를 제거하고 시트 연동/검토/반영과 인건비/잔액 체크를 명시적 버튼 액션으로 고정했다.
+
 ## [2026-04-14] patch-note | portal-dashboard | 0건 운영 정보 축소와 주간 상태 전면 배치
 - pages: [portal-dashboard](./pages/portal-dashboard.md)
 - summary: 0건 운영 알림과 설정성 바로가기를 걷어내고, 이번 주 Projection 작성 여부·최근 Projection 수정일·사업비 입력 상태를 홈 첫 화면에서 바로 보이도록 압축했다.

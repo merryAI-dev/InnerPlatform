@@ -57,10 +57,11 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toMatch(/\{weeklySetupPanel \? \(\s*<Card data-testid="weekly-expense-setup-panel" className=\{weeklySetupPanel\.toneClass\}>/);
   });
 
-  it('keeps cashflow actual sync tied to the full project expense-sheet source, not only the active tab save button', () => {
+  it('keeps cashflow actual sync available without running realtime auto-sync', () => {
     expect(weeklyExpenseSource).toContain('buildProjectExpenseRowsForActualSync');
     expect(weeklyExpenseSource).toContain('projectActualSyncPayload');
     expect(weeklyExpenseSource).toContain('applyProjectActualSyncResultLocally({ projectId, result })');
-    expect(weeklyExpenseSource).toContain('actual_realtime_sync');
+    expect(weeklyExpenseSource).not.toContain('actual_realtime_sync');
+    expect(weeklyExpenseSource).not.toContain('useEffect(() => {\n    if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;');
   });
 });

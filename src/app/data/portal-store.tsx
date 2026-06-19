@@ -115,7 +115,7 @@ import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
 } from '../platform/portal-project-selection';
-import { listenMembers } from '../lib/firestore-service';
+import { buildMemberDirectoryList, listenMembers } from '../lib/firestore-service';
 
 export interface PortalUser {
   id: string;
@@ -791,8 +791,39 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setMembers([]);
       return;
     }
+    if (!livePortalMode) {
+      let cancelled = false;
+      getDocs(collection(db, getOrgCollectionPath(orgId, 'members')))
+        .then((snap) => {
+          if (cancelled) return;
+          setMembers(buildMemberDirectoryList(
+            snap.docs.map((docItem) => ({ id: docItem.id, data: docItem.data() as Record<string, unknown> })),
+          ));
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          reportError(err, {
+            message: '[PortalStore] members fetch error:',
+            options: {
+              level: 'error',
+              tags: {
+                surface: 'portal_store',
+                action: 'members_fetch',
+              },
+              extra: {
+                orgId,
+                actorId: authUser.uid,
+              },
+            },
+          });
+          setMembers([]);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     return listenMembers(db, orgId, setMembers);
-  }, [authUser?.uid, db, firestoreEnabled, isAuthenticated, orgId]);
+  }, [authUser?.uid, db, firestoreEnabled, isAuthenticated, livePortalMode, orgId]);
 
   useEffect(() => {
     const uid = authUser?.uid;
