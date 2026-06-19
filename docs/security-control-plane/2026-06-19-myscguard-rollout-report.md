@@ -39,9 +39,8 @@ Legacy hostname:
   - `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
 - Removed the stale Vercel alias:
   - `soc.myscguard.app`
-- Added and published Vercel project-level direct-origin redirects for current generated hosts:
+- Added and published Vercel project-level direct-origin redirects for current production generated hosts. The stage alias is no longer part of this redirect set because internal/stage deploys must stay on the stage route:
   - `inner-platform.vercel.app`
-  - `inner-platform-stage-merryai-devs-projects.vercel.app`
   - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app`
   - `inner-platform-h799435np-merryai-devs-projects.vercel.app`
   - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`

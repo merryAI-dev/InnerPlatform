@@ -87,15 +87,15 @@ describe('stage release workflow safety', () => {
     );
   });
 
-  it('accepts the protected stage alias redirect to the Cloudflare security domain', () => {
+  it('keeps the stage alias on the internal Vercel route instead of the production security domain', () => {
     expect(stageWorkflowText).toContain('root_status="$(curl -sS -o /tmp/stage-root-response.txt -w');
     expect(stageWorkflowText).toContain('200|401|403) ;;');
     expect(stageWorkflowText).toContain('200|403) ;;');
-    expect(stageWorkflowText).toContain('307)');
-    expect(stageWorkflowText).toContain('https://myscube.myscguard.app/)');
-    expect(stageWorkflowText).toContain('https://myscube.myscguard.app/*');
-    expect(stageWorkflowText).toContain('Unexpected stage root redirect location');
-    expect(stageWorkflowText).toContain('Unexpected stage redirect location');
+    expect(stageWorkflowText).not.toContain('307)');
+    expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/)');
+    expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/*');
+    expect(stageWorkflowText).not.toContain('Unexpected stage root redirect location');
+    expect(stageWorkflowText).not.toContain('Unexpected stage redirect location');
   });
 
   it('does not hang indefinitely when Vercel returns a blocked preview deployment', () => {

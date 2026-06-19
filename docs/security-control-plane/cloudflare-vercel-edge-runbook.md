@@ -143,7 +143,7 @@ CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run
 검증 기준:
 
 - `inner-platform.vercel.app` -> `307 https://myscube.myscguard.app/...`
-- `inner-platform-stage-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-stage-merryai-devs-projects.vercel.app` -> internal stage surface, not redirected through `myscube.myscguard.app`
 - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
