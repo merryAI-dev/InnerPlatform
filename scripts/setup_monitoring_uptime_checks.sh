@@ -5,14 +5,14 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PROJECT_ID="${MONITORING_PROJECT_ID:-${FIREBASE_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-inner-platform-live-20260316}}}"
-WEB_HOST="${MONITORING_WEB_HOST:-inner-platform.vercel.app}"
+WEB_HOST="${MONITORING_WEB_HOST:-myscube.myscguard.app}"
 WEB_PATH="${MONITORING_WEB_PATH:-/login}"
 HEALTH_PATH="${MONITORING_HEALTH_PATH:-/api/v1/health}"
 PERIOD_MINUTES="${MONITORING_UPTIME_PERIOD_MINUTES:-5}"
 TIMEOUT_SECONDS="${MONITORING_UPTIME_TIMEOUT_SECONDS:-10}"
 
-WEB_DISPLAY_NAME="${MONITORING_WEB_DISPLAY_NAME:-inner-platform production login}"
-HEALTH_DISPLAY_NAME="${MONITORING_HEALTH_DISPLAY_NAME:-inner-platform bff health}"
+WEB_DISPLAY_NAME="${MONITORING_WEB_DISPLAY_NAME:-myscube production login}"
+HEALTH_DISPLAY_NAME="${MONITORING_HEALTH_DISPLAY_NAME:-myscube bff health}"
 
 find_existing_check() {
   local display_name="$1"

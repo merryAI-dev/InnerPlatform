@@ -77,13 +77,13 @@ exit 1`,
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
       VERCEL_CANONICAL_CHECK_ATTEMPTS: '1',
-      VERCEL_SKIP_PWA_LIVE_VERIFY: 'true',
       VERCEL_CLI_PACKAGE: '',
       VERCEL_TOKEN: '',
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('canonical production URL confirmed');
+    expect(result.stdout).toContain('skipping live PWA verification');
     expect(readFileSync(logPath, 'utf8')).not.toContain('deploy --prod');
   });
 

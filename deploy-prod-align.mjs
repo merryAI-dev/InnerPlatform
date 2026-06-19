@@ -7,7 +7,8 @@ const CANONICAL_PRODUCTION_HOST =
 const CANONICAL_PRODUCTION_URL = `https://${CANONICAL_PRODUCTION_HOST}`;
 const MAX_ALIAS_CHECK_ATTEMPTS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_ATTEMPTS ?? '10', 10);
 const ALIAS_CHECK_DELAY_MS = Number.parseInt(process.env.VERCEL_CANONICAL_CHECK_DELAY_MS ?? '2000', 10);
-const SKIP_PWA_LIVE_VERIFY = process.env.VERCEL_SKIP_PWA_LIVE_VERIFY === 'true';
+const RUN_PWA_LIVE_VERIFY = process.env.VERCEL_RUN_PWA_LIVE_VERIFY === 'true'
+  && process.env.VERCEL_SKIP_PWA_LIVE_VERIFY !== 'true';
 const VERCEL_CLI_PACKAGE = process.env.VERCEL_CLI_PACKAGE?.trim() || null;
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN?.trim() || null;
 
@@ -127,8 +128,8 @@ async function verifyCanonicalAlias(deploymentHost) {
 }
 
 function verifyLivePwaPackage() {
-  if (SKIP_PWA_LIVE_VERIFY) {
-    console.log('[deploy-align] skipping live PWA verification because VERCEL_SKIP_PWA_LIVE_VERIFY=true');
+  if (!RUN_PWA_LIVE_VERIFY) {
+    console.log('[deploy-align] skipping live PWA verification; run npm run pwa:verify:live separately for smoke checks');
     return;
   }
 

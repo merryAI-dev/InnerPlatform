@@ -38,17 +38,17 @@ node deploy-prod-align.mjs
 
 The second command intentionally fails closed.
 
-### Fixed Policy Enforcement
+### Production Deploy Scope
 
-Production deployments must now pass a local workflow policy guard:
+The production workflow should stay deploy-focused:
 
-- `scripts/assert-safe-live-deploy.mjs`
-- Workflow assertion currently requires:
-  - GitHub Actions execution context
-  - `main` ref (`GITHUB_REF`)
-  - `GITHUB_SHA`
-  - canonical host `myscube.myscguard.app`
-  - VERCEL token presence in production workflow scope
+- checkout `main`
+- verify Vercel credentials
+- deploy to Vercel production
+- promote `myscube.myscguard.app`
+- verify the canonical alias points at the new deployment
+
+Do not add CI polling, unit tests, RBAC checks, production builds, Cloudflare smoke, or PWA live verification as blocking production deploy steps. Those checks belong before merge or after deploy as separate smoke checks.
 
 ## Rollback Policy
 
@@ -74,13 +74,14 @@ Required target state:
 - direct push to `main` is disabled.
 - required checks include CI `test-and-build`.
 - production workflow uses `environment: Production`.
-- production workflow verifies that the `CI` workflow succeeded for the exact `main` commit being deployed.
+- production workflow does not rerun or poll CI. CI belongs to PR/main protection before the deploy starts.
 - production environment secrets are scoped to `Production`.
 - production deployment is manual and records the deployment URL and git SHA.
 
 Applied on 2026-05-26 in this branch:
 
-- `.github/workflows/production-deploy.yml` checks that the exact `main` commit has a successful `CI` workflow before Vercel deploy starts.
+- `.github/workflows/production-deploy.yml` deploys from `main`, verifies credentials, promotes the canonical alias, and verifies that alias.
+- Production deploy does not run `npm ci`, unit tests, RBAC verification, production build, CI polling, or PWA live smoke.
 - local production deploy commands fail closed; local verification is still available.
 - BFF boot validates runtime safety before Firestore is initialized.
 - stage/live BFF runtimes reject wildcard origins, Vercel preview origins in live, missing Firebase project IDs, live/non-live Firebase project mismatch, and live emulator usage.

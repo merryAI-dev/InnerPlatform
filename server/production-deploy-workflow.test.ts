@@ -51,12 +51,6 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
   });
 
-  it('runs the production deploy policy guard before deploy', () => {
-    expect(workflowText).toContain('node scripts/assert-safe-live-deploy.mjs');
-    expect(workflowText.indexOf('Verify production deploy policy'))
-      .toBeLessThan(workflowText.indexOf('Deploy to Vercel production'));
-  });
-
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
@@ -122,7 +116,11 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).not.toContain('RBAC policy verify');
     expect(stageWorkflowText).not.toContain('Stage build');
 
-    expect(workflowText).toContain('Verify CI succeeded for this commit');
+    expect(workflowText).not.toContain('Verify CI succeeded for this commit');
+    expect(workflowText).not.toContain('gh run list');
+    expect(workflowText).not.toContain('CI must be green before production deploy');
+    expect(workflowText).not.toContain('node scripts/assert-safe-live-deploy.mjs');
+    expect(workflowText).not.toContain('Verify production deploy policy');
     expect(workflowText).not.toContain('run: npm ci');
     expect(workflowText).not.toContain('Unit tests');
     expect(workflowText).not.toContain('RBAC policy verify');

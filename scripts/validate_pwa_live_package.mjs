@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const DEFAULT_BASE_URL = 'https://inner-platform.vercel.app';
+const DEFAULT_BASE_URL = 'https://myscube.myscguard.app';
 const failures = [];
 const MAX_FETCH_RETRIES = Number.parseInt(process.env.PWA_LIVE_VERIFY_FETCH_RETRIES ?? '4', 10);
 const RETRY_DELAY_MS = Number.parseInt(process.env.PWA_LIVE_VERIFY_RETRY_DELAY_MS ?? '1000', 10);

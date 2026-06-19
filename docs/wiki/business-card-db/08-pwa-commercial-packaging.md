@@ -97,10 +97,10 @@ npm run pwa:verify
 Live package check after deployment/alias:
 
 ```bash
-npm run pwa:verify:live -- https://inner-platform.vercel.app
+npm run pwa:verify:live -- https://myscube.myscguard.app
 ```
 
-`deploy:prod:safe` runs this live check automatically after confirming the canonical Vercel alias. Set `VERCEL_SKIP_PWA_LIVE_VERIFY=true` only for emergency rollback or non-PWA infrastructure deploys.
+`deploy:prod:safe` confirms the canonical Vercel alias only. Run `pwa:verify:live` separately after deploy when the release needs PWA smoke coverage. Set `VERCEL_RUN_PWA_LIVE_VERIFY=true` only when you intentionally want the deploy alignment script to block on this live smoke check.
 
 `pwa:verify:live` checks:
 
@@ -136,7 +136,7 @@ Do not publish a placeholder `assetlinks.json`.
 ## Go/No-Go Checklist
 
 - `npm run pwa:qa` passes.
-- `npm run pwa:verify:live -- https://inner-platform.vercel.app` passes after alias confirmation.
+- `npm run pwa:verify:live -- https://myscube.myscguard.app` passes after alias confirmation.
 - `npm test` passes.
 - `npm run policy:verify` passes.
 - Firebase rules dry run passes.
