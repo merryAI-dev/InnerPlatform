@@ -1416,7 +1416,6 @@ export function createBffApp(options = {}) {
   mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService,
-    enabled: runtimeSafetyConfig.deployEnv !== 'live',
   });
   mountCashflowLaborRiskRoutes(app, {
     db,

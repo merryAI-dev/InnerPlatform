@@ -29,6 +29,67 @@ export interface PlatformRequestOptions {
   retryOnStatuses?: number[];
 }
 
+interface JwtClaimsSummary {
+  aud?: string;
+  iss?: string;
+  sub?: string;
+  email?: string;
+  exp?: number;
+}
+
+function normalizeTokenClaimString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeTokenClaimString(item)).filter(Boolean).join(',');
+  }
+  return undefined;
+}
+
+function decodeBase64Url(base64Url: string): string {
+  const missingPadding = (4 - (base64Url.length % 4)) % 4;
+  const normalized = base64Url
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .concat('='.repeat(missingPadding));
+
+  if (typeof atob === 'function') return atob(normalized);
+  throw new Error('Base64 decode unavailable');
+}
+
+function parseJwtClaims(token: string): JwtClaimsSummary | undefined {
+  const parts = token.split('.');
+  if (parts.length < 2) return undefined;
+  try {
+    const payloadText = decodeBase64Url(parts[1]);
+    const payload = JSON.parse(payloadText) as Record<string, unknown>;
+    return {
+      aud: normalizeTokenClaimString(payload.aud),
+      iss: normalizeTokenClaimString(payload.iss),
+      sub: normalizeTokenClaimString(payload.sub),
+      email: normalizeTokenClaimString(payload.email),
+      exp: typeof payload.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function readErrorCode(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const value = (body as { code?: unknown; error?: unknown }).code || (body as { error?: unknown }).error;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readErrorMessage(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const value = (body as { message?: unknown }).message;
+  return typeof value === 'string' ? value : undefined;
+}
+
 function isBinaryBody(value: unknown): value is Blob | ArrayBuffer | Uint8Array {
   return (
     (typeof Blob !== 'undefined' && value instanceof Blob)
@@ -242,6 +303,9 @@ export class PlatformApiClient {
     };
 
     const headers = buildStandardHeaders(headerInput);
+    const actorIdToken = options.actor.idToken;
+    const hasAuthorizationHeader = headers.has('authorization');
+    const tokenClaims = actorIdToken ? parseJwtClaims(actorIdToken) : undefined;
     let body: BodyInit | undefined;
 
     if (options.body !== undefined && options.body !== null) {
@@ -260,6 +324,18 @@ export class PlatformApiClient {
     const retryOnStatuses = new Set(options.retryOnStatuses || Array.from(this.retryOnStatuses));
     const clientRequestId = headers.get('x-request-id') || '';
 
+    if (!hasAuthorizationHeader) {
+      console.warn('[PlatformApiClient] Missing Authorization header for BFF request', {
+        method,
+        path,
+        requestUrl,
+        actorId: options.actor.id,
+        actorEmail: options.actor.email,
+        tenantId: options.tenantId,
+        hasBody: options.body !== undefined && options.body !== null,
+      });
+    }
+
     recordDevtoolsLog({
       kind: 'bff_request',
       phase: 'start',
@@ -272,6 +348,19 @@ export class PlatformApiClient {
       maxRetries,
       summary: {
         hasBody: options.body !== undefined && options.body !== null,
+        hasAuthorizationHeader,
+        actorHasIdToken: Boolean(actorIdToken && actorIdToken.trim()),
+        apiBaseUrl: this.baseUrl,
+        requestUrl,
+        tokenClaims: tokenClaims
+          ? {
+            aud: tokenClaims.aud,
+            iss: tokenClaims.iss,
+            sub: tokenClaims.sub,
+            email: tokenClaims.email,
+            exp: tokenClaims.exp,
+          }
+          : undefined,
         bodyKind: options.body === undefined || options.body === null
           ? 'none'
           : options.body instanceof FormData
@@ -298,8 +387,25 @@ export class PlatformApiClient {
 
         const requestId = response.headers.get('x-request-id') || headers.get('x-request-id') || '';
         const responseBody = await readResponseBody(response);
+        const responseCode = readErrorCode(responseBody);
+        const responseMessage = readErrorMessage(responseBody);
 
         if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            console.warn('[PlatformApiClient] BFF auth rejected', {
+              method,
+              path,
+              requestUrl,
+              status: response.status,
+              code: responseCode,
+              message: responseMessage,
+              requestId,
+              actorId: options.actor.id,
+              actorHasIdToken: Boolean(actorIdToken && actorIdToken.trim()),
+              hasAuthorizationHeader,
+              tokenAudience: tokenClaims?.aud,
+            });
+          }
           throw new PlatformApiError(
             `API request failed with status ${response.status}`,
             response.status,
@@ -320,6 +426,10 @@ export class PlatformApiClient {
           durationMs: Date.now() - startedAt,
           attempt,
           maxRetries,
+          summary: {
+            responseCode,
+            responseMessage,
+          },
           tenantId: options.tenantId,
           actorId: options.actor.id,
         });
@@ -354,6 +464,10 @@ export class PlatformApiClient {
             durationMs: Date.now() - startedAt,
             attempt,
             maxRetries,
+            summary: {
+              responseCode: error instanceof PlatformApiError && error.body ? readErrorCode(error.body) : undefined,
+              responseMessage: error instanceof PlatformApiError && error.body ? readErrorMessage(error.body) : undefined,
+            },
             tenantId: options.tenantId,
             actorId: options.actor.id,
             error: toDevtoolsError(error),
@@ -390,6 +504,10 @@ export class PlatformApiClient {
           durationMs: Date.now() - startedAt,
           attempt,
           maxRetries,
+          summary: {
+            responseCode: error instanceof PlatformApiError && error.body ? readErrorCode(error.body) : undefined,
+            responseMessage: error instanceof PlatformApiError && error.body ? readErrorMessage(error.body) : undefined,
+          },
           tenantId: options.tenantId,
           actorId: options.actor.id,
           error: toDevtoolsError(error),

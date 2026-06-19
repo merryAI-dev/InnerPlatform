@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowUpToLine, Loader2, Pencil, Search, Settings } from 'lucide-react';
 import Lottie from 'lottie-react';
-import { useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
+import { getAuthInstance } from '../../lib/firebase';
 import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
   applyCashflowProjectionWritebackViaBff,
@@ -127,6 +128,17 @@ function SheetWritebackIllustration() {
   );
 }
 
+function isBffAuthError(error: unknown): boolean {
+  const apiError = error as { status?: number; body?: { code?: unknown; error?: unknown } };
+  const status = apiError?.status;
+  const code = typeof apiError?.body?.code === 'string'
+    ? apiError.body.code
+    : typeof apiError?.body?.error === 'string'
+      ? apiError.body.error
+      : '';
+  return status === 401 || status === 403 || code === 'missing_bearer_token' || code === 'invalid_token';
+}
+
 function ReconciliationSummary({
   table,
 }: {
@@ -221,6 +233,8 @@ export function CashflowSheetLabPage({
 } = {}) {
   const { user: authUser, ensureGoogleWorkspaceAccess } = useAuth();
   const { orgId } = useFirebase();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const initialProjectId = useMemo(() => (
     projectIdOverride?.trim()
@@ -262,7 +276,40 @@ export function CashflowSheetLabPage({
     authUser?.role,
     authUser?.idToken,
   ]);
-  const bffAuthReady = Boolean(actor.email && actor.idToken);
+  const requestLoginFlow = useCallback(() => {
+    logCashflowLab('auth.required', {
+      projectId,
+      actorEmail: actor.email,
+      hasIdToken: Boolean(actor.idToken),
+    }, 'warn');
+    navigate('/login', { state: { from: location.pathname } });
+  }, [actor.email, actor.idToken, location.pathname, navigate, projectId]);
+
+  const resolveBffActor = useCallback(async () => {
+    const firebaseToken = await getAuthInstance()?.currentUser?.getIdToken().catch(() => undefined);
+    const resolvedToken = actor.idToken || firebaseToken;
+    if (!resolvedToken) return null;
+    if (!actor.idToken) {
+      logCashflowLab('auth.refresh', {
+        projectId,
+        actorEmail: actor.email,
+        tokenSource: 'firebase',
+      });
+    }
+    return {
+      ...actor,
+      idToken: resolvedToken,
+    };
+  }, [actor, projectId]);
+
+  const requireBffActor = useCallback(async () => {
+    const resolved = await resolveBffActor();
+    if (!resolved?.idToken) {
+      requestLoginFlow();
+      return null;
+    }
+    return resolved;
+  }, [requestLoginFlow, resolveBffActor]);
 
   async function resolveGoogleAccessToken(action: string, options: { forceRefresh?: boolean } = {}) {
     if (authUser?.googleAccessToken && !options.forceRefresh) {
@@ -316,35 +363,61 @@ export function CashflowSheetLabPage({
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId || !bffAuthReady) return;
+    if (!projectId) return;
     let cancelled = false;
     setConfigLoading(true);
     setErrorMessage('');
-    getCashflowSheetLabConfigViaBff({
-      tenantId: orgId,
-      actor,
-      projectId,
-    }).then((result) => {
-      if (cancelled) return;
-      const nextConfig = result.config || null;
-      setConfig(nextConfig);
-      setEditingConfig(!nextConfig);
-      setSheetLink(nextConfig?.value || MYSC_CASHFLOW_SPREADSHEET_ID);
-      setSheetName(nextConfig?.sheetName || '');
-      setStartWeek(nextConfig?.startWeek || '');
-      setEndWeek(nextConfig?.endWeek || '');
-    }).catch((error) => {
-      if (!cancelled) setErrorMessage(formatError(error));
-    }).finally(() => {
-      if (!cancelled) setConfigLoading(false);
-    });
+    void (async () => {
+      const resolvedActor = await resolveBffActor();
+      if (!resolvedActor?.idToken) {
+        logCashflowLab('config.load.auth_missing', {
+          projectId,
+          actorEmail: actor.email,
+          hasStoredToken: Boolean(actor.idToken),
+        }, 'warn');
+        if (!cancelled) {
+          setConfig(null);
+          setEditingConfig(true);
+          setErrorMessage('BFF 인증 토큰이 없어 동기화 API 호출이 보류됩니다. 저장/검토를 하면 로그인 화면이 열립니다.');
+          setConfigLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const result = await getCashflowSheetLabConfigViaBff({
+          tenantId: orgId,
+          actor: resolvedActor,
+          projectId,
+        });
+        if (cancelled) return;
+        const nextConfig = result.config || null;
+        setConfig(nextConfig);
+        setEditingConfig(!nextConfig);
+        setSheetLink(nextConfig?.value || MYSC_CASHFLOW_SPREADSHEET_ID);
+        setSheetName(nextConfig?.sheetName || '');
+        setStartWeek(nextConfig?.startWeek || '');
+        setEndWeek(nextConfig?.endWeek || '');
+      } catch (error) {
+        if (isBffAuthError(error)) {
+          requestLoginFlow();
+        }
+        if (!cancelled) setErrorMessage(formatError(error));
+      } finally {
+        if (!cancelled) setConfigLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [actor, bffAuthReady, orgId, projectId]);
+  }, [actor, orgId, projectId, requestLoginFlow, resolveBffActor]);
 
   async function handleSaveConfig() {
-    if (!projectId || !spreadsheetId || savingConfig || !bffAuthReady) return null;
+    if (!projectId || !spreadsheetId || savingConfig) return null;
+    const requestActor = await requireBffActor();
+    if (!requestActor) {
+      return null;
+    }
     setSavingConfig(true);
     setErrorMessage('');
     try {
@@ -354,7 +427,7 @@ export function CashflowSheetLabPage({
         usedGoogleAccessToken = googleAccessToken;
         return saveCashflowSheetLabConfigViaBff({
         tenantId: orgId,
-        actor,
+        actor: requestActor,
         projectId,
         value: sheetLink,
         sheetName: sheetName || undefined,
@@ -379,6 +452,9 @@ export function CashflowSheetLabPage({
       return nextConfig;
     } catch (error) {
       logCashflowLab('config.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      if (isBffAuthError(error)) {
+        requestLoginFlow();
+      }
       setErrorMessage(formatError(error));
       return null;
     } finally {
@@ -387,7 +463,11 @@ export function CashflowSheetLabPage({
   }
 
   async function handlePreview() {
-    if (!projectId || loading || editingConfig || !config || !bffAuthReady) return;
+    if (!projectId || loading || editingConfig || !config) return;
+    const requestActor = await requireBffActor();
+    if (!requestActor) {
+      return;
+    }
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setLoading(true);
@@ -399,7 +479,7 @@ export function CashflowSheetLabPage({
         usedGoogleAccessToken = googleAccessToken;
         return previewCashflowSheetLabViaBff({
         tenantId: orgId,
-        actor,
+        actor: requestActor,
         projectId,
         includeValues: false,
         googleAccessToken,
@@ -418,7 +498,7 @@ export function CashflowSheetLabPage({
       if (!sheetName && layoutResult.selectedSheetName) setSheetName(layoutResult.selectedSheetName);
       void previewCashflowSheetLabViaBff({
         tenantId: orgId,
-        actor,
+        actor: requestActor,
         projectId,
         includeValues: true,
         googleAccessToken: usedGoogleAccessToken,
@@ -436,11 +516,17 @@ export function CashflowSheetLabPage({
       }).catch((error) => {
         if (previewRequestRef.current === requestId) {
           logCashflowLab('preview.values.error', { projectId, ...errorDiagnostics(error) }, 'warn');
+          if (isBffAuthError(error)) {
+            requestLoginFlow();
+          }
           setErrorMessage(formatError(error));
         }
       });
     } catch (error) {
       logCashflowLab('preview.error', { projectId, spreadsheetId: config?.spreadsheetId || spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      if (isBffAuthError(error)) {
+        requestLoginFlow();
+      }
       setPreview(null);
       setErrorMessage(formatError(error));
     } finally {
@@ -455,7 +541,11 @@ export function CashflowSheetLabPage({
   }
 
   async function handleWritebackPreview() {
-    if (!projectId || writebackLoading || editingConfig || !config || !bffAuthReady) return null;
+    if (!projectId || writebackLoading || editingConfig || !config) return null;
+    const requestActor = await requireBffActor();
+    if (!requestActor) {
+      return null;
+    }
     const startedAt = Date.now();
     setWritebackLoading(true);
     setWritebackMessage('');
@@ -466,7 +556,7 @@ export function CashflowSheetLabPage({
         usedGoogleAccessToken = googleAccessToken;
         return previewCashflowProjectionWritebackViaBff({
           tenantId: orgId,
-          actor,
+          actor: requestActor,
           projectId,
           googleAccessToken,
         });
@@ -485,6 +575,9 @@ export function CashflowSheetLabPage({
       return result;
     } catch (error) {
       logCashflowLab('writeback.preview.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      if (isBffAuthError(error)) {
+        requestLoginFlow();
+      }
       setErrorMessage(formatError(error));
       return null;
     } finally {
@@ -493,7 +586,11 @@ export function CashflowSheetLabPage({
   }
 
   async function handleWritebackApply(overwrite = false) {
-    if (!projectId || writebackApplying || editingConfig || !config || !bffAuthReady) return false;
+    if (!projectId || writebackApplying || editingConfig || !config) return false;
+    const requestActor = await requireBffActor();
+    if (!requestActor) {
+      return false;
+    }
     const startedAt = Date.now();
     const baselineHash = writebackPreview?.plan.baselineHash;
     setWritebackApplying(true);
@@ -506,7 +603,7 @@ export function CashflowSheetLabPage({
         usedGoogleAccessToken = googleAccessToken;
         return applyCashflowProjectionWritebackViaBff({
           tenantId: orgId,
-          actor,
+          actor: requestActor,
           projectId,
           baselineHash,
           conflictResolution: overwrite ? 'overwrite' : 'abort',
@@ -533,6 +630,9 @@ export function CashflowSheetLabPage({
         setErrorMessage(formatError(error));
       }
       logCashflowLab('writeback.apply.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      if (isBffAuthError(error)) {
+        requestLoginFlow();
+      }
       return false;
     } finally {
       setWritebackApplying(false);
@@ -633,7 +733,7 @@ export function CashflowSheetLabPage({
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={!projectId || !spreadsheetId || savingConfig || !bffAuthReady}
+                disabled={!projectId || !spreadsheetId || savingConfig}
                 onClick={handleSaveConfig}
               >
                 {savingConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
@@ -667,7 +767,7 @@ export function CashflowSheetLabPage({
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={writebackLoading || !config || !bffAuthReady}
+                disabled={writebackLoading || !config}
                 onClick={() => {
                   openSyncWizard();
                   void handleWritebackPreview();
@@ -680,7 +780,7 @@ export function CashflowSheetLabPage({
                 type="button"
                 variant="outline"
                 className="h-10 gap-1.5 rounded-none text-[12px]"
-                disabled={!projectId || loading || configLoading || !bffAuthReady}
+                disabled={!projectId || loading || configLoading}
                 onClick={handlePreview}
               >
                 {loading || configLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}

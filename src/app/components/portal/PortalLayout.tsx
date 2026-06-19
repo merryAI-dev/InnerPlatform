@@ -75,7 +75,6 @@ import { rememberRecentPortalProject } from '../../platform/portal-recent-projec
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
 import { resolvePortalProjectCandidates } from '../../platform/portal-project-selection';
-import { shouldShowStageOnlyCashflowSheetLab } from '../../platform/deployment-surface';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -339,20 +338,18 @@ function PortalContent() {
   const portalDisplayName = portalUser?.name || authUser?.name || '사용자';
   const portalDisplayRole = portalUser?.role || authUser?.role || 'pm';
   const currentFundInputMode = normalizeProjectFundInputMode(currentProject?.fundInputMode);
-  const showSheetLab = shouldShowStageOnlyCashflowSheetLab();
   const navSections = useMemo(() => (
     NAV_SECTIONS.map((section) => ({
       ...section,
       items: section.items.filter((item) => {
         if ('hidden' in item && item.hidden) return false;
-        if (item.to === '/portal/cashflow/sheets-lab' && !showSheetLab) return false;
         return shouldShowShellRoute(item.to, 'portal', 'nav', {
           fundInputMode: currentFundInputMode,
           labEnabled,
         });
       }),
     }))
-  ), [currentFundInputMode, labEnabled, showSheetLab]);
+  ), [currentFundInputMode, labEnabled]);
   const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
   const currentSectionLabel = useMemo(() => {
     const current = topNavItems.find((item) => isActive(item.to, item.exact));

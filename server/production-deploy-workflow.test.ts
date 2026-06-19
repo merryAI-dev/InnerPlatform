@@ -51,6 +51,12 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"');
   });
 
+  it('runs the production deploy policy guard before deploy', () => {
+    expect(workflowText).toContain('node scripts/assert-safe-live-deploy.mjs');
+    expect(workflowText.indexOf('Verify production deploy policy'))
+      .toBeLessThan(workflowText.indexOf('Deploy to Vercel production'));
+  });
+
   it('promotes the canonical production alias before verifying it', () => {
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
@@ -90,14 +96,17 @@ describe('stage release workflow safety', () => {
   });
 
   it('keeps the stage alias on the internal Vercel route instead of the production security domain', () => {
-    expect(stageWorkflowText).toContain('root_status="$(curl -sS -o /tmp/stage-root-response.txt -w');
-    expect(stageWorkflowText).toContain('200|401|403) ;;');
-    expect(stageWorkflowText).toContain('200|403) ;;');
+    expect(stageWorkflowText).toContain('root_status="$(curl -sS -D /tmp/stage-root-headers.txt');
+    expect(stageWorkflowText).toContain('200|401) ;;');
+    expect(stageWorkflowText).toContain('Stage must stay on the internal Vercel route and must not traverse Cloudflare.');
+    expect(stageWorkflowText).toContain('Stage must not receive security-domain CSP report-only headers.');
     expect(stageWorkflowText).not.toContain('307)');
     expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/)');
     expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/*');
     expect(stageWorkflowText).not.toContain('Unexpected stage root redirect location');
     expect(stageWorkflowText).not.toContain('Unexpected stage redirect location');
+    expect(stageWorkflowText).not.toContain('200|401|403) ;;');
+    expect(stageWorkflowText).not.toContain('200|403) ;;');
   });
 
   it('does not hang indefinitely when Vercel returns a blocked preview deployment', () => {

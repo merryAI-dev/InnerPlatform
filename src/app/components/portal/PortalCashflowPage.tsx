@@ -5,7 +5,6 @@ import { CashflowSheetLabPage } from '../../features/cashflow-sheet-compare/Cash
 import { usePortalStore } from '../../data/portal-store';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { shouldShowStageOnlyCashflowSheetLab } from '../../platform/deployment-surface';
 
 export function PortalCashflowPage() {
   const {
@@ -24,7 +23,6 @@ export function PortalCashflowPage() {
   });
 
   const ready = useMemo(() => Boolean(projectId), [projectId]);
-  const showSheetLab = shouldShowStageOnlyCashflowSheetLab();
   const sheetRangeLabel = sheetHeader.startWeek || sheetHeader.endWeek
     ? `합계 기준 ${sheetHeader.startWeek || '시작 미지정'} ~ ${sheetHeader.endWeek || '종료 미지정'}`
     : '합계 기준 미지정';
@@ -44,62 +42,58 @@ export function PortalCashflowPage() {
 
   return (
     <div className="space-y-3">
-      {showSheetLab && (
-        <section className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 bg-white px-3 py-2 shadow-sm">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="truncate text-[12px] font-semibold text-slate-950">
-                {sheetHeader.spreadsheetTitle || myProject?.name || '저장된 시트'}
-              </div>
-              <Badge variant="outline" className="h-5 rounded-full px-2 text-[9px] text-blue-700">
-                시트 연동
-              </Badge>
+      <section className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="truncate text-[12px] font-semibold text-slate-950">
+              {sheetHeader.spreadsheetTitle || myProject?.name || '저장된 시트'}
             </div>
-            <div className="mt-0.5 truncate text-[10px] text-slate-500">
-              {sheetHeader.sheetName || 'cashflow(사용내역 연동)'} · {sheetRangeLabel}
-            </div>
+            <Badge variant="outline" className="h-5 rounded-full px-2 text-[9px] text-blue-700">
+              시트 연동
+            </Badge>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 gap-1 rounded-none px-2 text-[10px]"
-              onClick={() => dispatchSheetAction('apply')}
-            >
-              <Settings className="h-3 w-3" />
-              시트와 연동하기
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 rounded-none px-2 text-[10px]"
-              onClick={() => dispatchSheetAction('preview')}
-            >
-              <Search className="h-3 w-3" />
-              검토
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 rounded-none px-2 text-[10px]"
-              onClick={() => dispatchSheetAction('edit')}
-            >
-              <Pencil className="h-3 w-3" />
-              수정
-            </Button>
+          <div className="mt-0.5 truncate text-[10px] text-slate-500">
+            {sheetHeader.sheetName || 'cashflow(사용내역 연동)'} · {sheetRangeLabel}
           </div>
-        </section>
-      )}
-      {showSheetLab && (
-        <CashflowSheetLabPage
-          projectIdOverride={projectId}
-          embedded
-          hideConfigChrome
-          onHeaderSummaryChange={setSheetHeader}
-        />
-      )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('apply')}
+          >
+            <Settings className="h-3 w-3" />
+            시트와 연동하기
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('preview')}
+          >
+            <Search className="h-3 w-3" />
+            검토
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 rounded-none px-2 text-[10px]"
+            onClick={() => dispatchSheetAction('edit')}
+          >
+            <Pencil className="h-3 w-3" />
+            수정
+          </Button>
+        </div>
+      </section>
+      <CashflowSheetLabPage
+        projectIdOverride={projectId}
+        embedded
+        hideConfigChrome
+        onHeaderSummaryChange={setSheetHeader}
+      />
       <CashflowProjectSheet
         projectId={projectId}
         roleOverride={portalUser?.role}
