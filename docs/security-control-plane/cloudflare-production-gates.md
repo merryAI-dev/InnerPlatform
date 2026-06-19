@@ -64,8 +64,8 @@ Budget decision: first POC is Cloudflare Pro plus a dedicated security/DevOps co
 |---|---|---|
 | Project owner | `mwbyun1220@mysc.co.kr` / MYSC security and platform owner | Approved for POC ownership |
 | Vercel project | `inner-platform` | Verified MYSCube production project |
-| Vercel target URL | `inner-platform-h799435np-merryai-devs-projects.vercel.app` | Previous production deployment; update after the next production release |
-| Primary hostname | `myscube.myscguard.app` | Canonical host selected; Cloudflare DNS/proxy apply and strict edge smoke still required |
+| Vercel target URL | `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app` | Current production deployment for the security-domain aliases |
+| Primary hostname | `myscube.myscguard.app` | Canonical host selected; Cloudflare DNS/proxy apply completed; strict edge smoke passed |
 | Drive monitoring hostname | `drive.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
 | GitHub monitoring hostname | `github.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
 | Firestore monitoring hostname | `firestore.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
@@ -91,15 +91,15 @@ CLOUDFLARE_API_TOKEN=... npm run security:cloudflare:zone
 - Existing Cloudflare rulesets, if any, need import/ownership planning before Terraform manages the zone entry-point rulesets.
 - Direct Vercel generated deployment URLs use POC compensating controls only. Protecting all production URLs is out of scope for the USD 20/month POC and would require Vercel Advanced Deployment Protection or Enterprise.
 - Actual Cloudflare zone id is configured locally in git-ignored `infra/cloudflare/production.tfvars`.
-- Vercel custom domains were initially registered to the wrong `observability-devops` project, then reassigned on 2026-06-19 to the verified `inner-platform` production deployment `inner-platform-h799435np-merryai-devs-projects.vercel.app`.
-- DNS-only bootstrap was used for Vercel certificate issuance. Final Cloudflare proxy re-enable still requires one Cloudflare token-backed Terraform apply after the `myscube.myscguard.app` hostname change.
-- Previous Cloudflare proxy apply completed on 2026-06-19 for the earlier hostname set; rerun Terraform and edge smoke after the `myscube.myscguard.app` DNS record exists.
+- Vercel custom domains were initially registered to the wrong `observability-devops` project, then reassigned on 2026-06-19 to the verified `inner-platform` production deployment. Current security-domain aliases point to `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`.
+- DNS-only bootstrap was used for Vercel certificate issuance. Final Cloudflare proxy apply for the `myscube.myscguard.app` hostname set completed on 2026-06-19.
+- `soc.myscguard.app` is retired as an app alias and now redirects at Cloudflare edge to `https://myscube.myscguard.app`.
 - Managed WAF and Terraform-managed rate limits are intentionally disabled for the USD 20/month Cloudflare Pro POC because the account/zone did not accept the managed ruleset execution and already had/limited the rate-limit phase entrypoint. The active POC control is custom WAF plus Cloudflare DDoS/TLS/proxying.
-- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 npm run security:edge-smoke` must be rerun after `myscube.myscguard.app` resolves through Cloudflare.
+- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke` passed after Cloudflare apply and Vercel route cleanup.
 - Public DNS verification through `1.1.1.1` and `8.8.8.8` returns Cloudflare edge IPs for all 7 hostnames. The local ISP resolver `164.124.101.2` still returned stale `76.76.21.21` immediately after cutover, so smoke uses public resolver evidence instead of local resolver cache.
 - WAF custom block evidence: `https://edge.myscguard.app/.env` and `https://edge.myscguard.app/?q=../` both return `403` when resolved through Cloudflare edge.
-- Vercel project-level routes redirect these direct hosts to `https://myscube.myscguard.app`: `inner-platform.vercel.app`, `inner-platform-stage-merryai-devs-projects.vercel.app`, and `inner-platform-h799435np-merryai-devs-projects.vercel.app`.
-- Vercel creates a route-version alias, currently `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`, whenever project-level routes are published. Project routes do not protect that alias. The alias must be removed after route publication and verified as `404 DEPLOYMENT_NOT_FOUND`.
+- Vercel project-level routes redirect these direct hosts to `https://myscube.myscguard.app`: `inner-platform.vercel.app`, `inner-platform-stage-merryai-devs-projects.vercel.app`, `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app`, `inner-platform-h799435np-merryai-devs-projects.vercel.app`, and `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`.
+- Vercel creates a route-version alias whenever project-level routes are published. The latest route-version alias `inner-platform-f52434-routes-merryai-devs-projects.vercel.app` was removed after route publication and verified as `404` in strict edge smoke.
 - GitHub Actions stage and production release workflows currently fail during the Vercel release step because the environment secret token is invalid. Local Vercel CLI authentication is valid, but its token is a short-lived session token and must not be copied into CI. Rotate `VERCEL_DEPLOY_TOKEN_PRODUCTION` and the stage release token with a long-lived Vercel API token before declaring CI deployment fully healthy.
 
 ## Production Apply Rule

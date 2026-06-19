@@ -3,7 +3,7 @@
 - route: `/portal/bank-statements`
 - primary users: PM, 운영 입력 담당자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-06-19
 
 ## Purpose
 
@@ -26,10 +26,12 @@
 - [x] 환수행, 선사용금, 특이건 보조 액션 없이 기본 표 편집 흐름만 유지
 - [x] `cashflow항목` label과 내부 enum은 공용 policy 기준으로 해석됨
 - [x] PM 포털 safe fetch 모드에서도 통장내역 화면 진입과 direct handoff 부팅 가능
+- [x] XLSX 업로드는 취약 `xlsx` 패키지 없이 `exceljs` 기반 파서로 처리됨
 - [ ] 마지막 행 드롭다운 잘림 이슈 완전 해소 확인 필요
 
 ## Recent Changes
 
+- [2026-06-19] 보안 취약점이 있는 `xlsx` 직접 의존성을 제거하고 XLSX 파싱을 `exceljs` 기반 공통 파서로 전환했다. 일반 binary `.xls` 업로드는 CSV/XLSX 변환을 안내하고, HTML로 위장된 은행 내보내기는 기존 HTML 파서로만 처리한다.
 - [2026-04-15] `cashflow항목` line label/alias/category 해석이 공용 policy 레이어를 통하도록 정리했다.
 - [2026-04-15] 통장내역 저장 시 업로드한 은행 행을 현재 주간 사업비 탭 행으로 바로 merge하도록 바꿨다. Queue 없이 `통장내역 -> 사업비 입력(주간)` direct handoff가 이어진다.
 - [2026-04-15] PM 역할에서는 portal store가 realtime listen 대신 safe fetch로 초기 데이터를 불러오도록 바꿔, 포털 부팅 시 반복 Listen 400이 통장내역 화면까지 전파되는 위험을 줄였다.

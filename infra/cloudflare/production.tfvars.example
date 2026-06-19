@@ -62,4 +62,17 @@ vercel_apps = [
   }
 ]
 
-extra_web_records = []
+extra_web_records = [
+  {
+    name    = "soc.myscguard.app"
+    type    = "A"
+    content = "76.76.21.21"
+  }
+]
+
+legacy_redirects = [
+  {
+    hostname = "soc.myscguard.app"
+    target   = "https://myscube.myscguard.app"
+  }
+]

@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-06-19] patch-note | portal-bank-statement | secure XLSX parser
+- pages: [portal-bank-statement](./pages/portal-bank-statement.md)
+- summary: 통장내역 업로드의 XLSX 파싱을 취약 `xlsx` 직접 의존성에서 `exceljs` 기반 공통 파서로 전환하고, 일반 binary `.xls`는 CSV/XLSX 변환 안내로 제한했다. HTML로 위장된 은행 내보내기는 기존 HTML 파서 경로만 유지한다.
+
 ## [2026-06-02] patch-note | portal-weekly-expense, shared-portal-architecture | portal edit stability and document uploads
 - pages: [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 주간 사업비 입력의 빠른 추가 액션을 단일 `행 추가`로 통합하고 Actual 동기화 결과가 현재 화면에 즉시 반영되도록 보강했다. 프로젝트 등록/수정은 프로젝트명과 그룹웨어 등록명을 같은 값으로 저장하며, 계약서 외 견적서/제안서 첨부와 1GB Firebase Storage direct upload 경로를 추가했다.

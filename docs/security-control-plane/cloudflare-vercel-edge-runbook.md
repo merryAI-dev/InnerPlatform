@@ -127,7 +127,7 @@ npm run security:edge-gate
 - `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`: pass with real zone id before final apply
 - `terraform -chdir=infra/cloudflare apply -var-file=production.tfvars`: final proxy apply completed for the 7 `myscguard.app` hostnames
 - `CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate`: pass with accepted POC warnings
-- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`: required after Cloudflare DNS/proxy apply and route-version alias cleanup
+- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`: required after Cloudflare DNS/proxy apply, direct-route updates, and route-version alias cleanup
 
 ## Vercel direct-origin 보상통제
 
@@ -144,7 +144,10 @@ CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run
 
 - `inner-platform.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-stage-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
 - `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app` -> `307 https://myscube.myscguard.app/...`
+- `inner-platform-f52434-routes-merryai-devs-projects.vercel.app` -> `404` after route-version alias cleanup
 - route-version alias -> `404 DEPLOYMENT_NOT_FOUND`
 
 route-version alias는 Vercel routes publish 때 다시 생길 수 있다. route를 publish한 작업자는 alias removal과 smoke evidence 갱신까지 같은 change window 안에서 끝내야 한다.

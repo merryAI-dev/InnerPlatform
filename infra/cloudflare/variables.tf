@@ -72,3 +72,13 @@ variable "api_path_expression" {
   type        = string
   default     = "(starts_with(http.request.uri.path, \"/api\") or http.request.uri.path contains \"/cashflow-sheet-lab\")"
 }
+
+variable "legacy_redirects" {
+  description = "Legacy public hostnames that must redirect to the canonical Cloudflare hostname."
+  type = list(object({
+    hostname = string
+    target   = string
+    enabled  = optional(bool, true)
+  }))
+  default = []
+}

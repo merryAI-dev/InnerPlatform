@@ -1,5 +1,4 @@
 let excelJsPromise: Promise<typeof import('exceljs')> | null = null;
-let xlsxPromise: Promise<typeof import('xlsx')> | null = null;
 let pdfJsPromise: Promise<typeof import('pdfjs-dist')> | null = null;
 let pdfWorkerConfigured = false;
 
@@ -10,15 +9,6 @@ export function loadExcelJs(): Promise<typeof import('exceljs')> {
 
 export function warmExcelJs(): void {
   void loadExcelJs();
-}
-
-export function loadXlsx(): Promise<typeof import('xlsx')> {
-  xlsxPromise ??= import('xlsx');
-  return xlsxPromise;
-}
-
-export function warmXlsx(): void {
-  void loadXlsx();
 }
 
 export async function loadPdfJs(): Promise<typeof import('pdfjs-dist')> {

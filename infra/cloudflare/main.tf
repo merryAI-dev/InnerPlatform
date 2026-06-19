@@ -87,6 +87,10 @@ resource "cloudflare_ruleset" "custom_waf" {
   kind    = "zone"
   phase   = "http_request_firewall_custom"
 
+  lifecycle {
+    ignore_changes = [name]
+  }
+
   rules = [
     {
       action      = "managed_challenge"
@@ -141,5 +145,32 @@ resource "cloudflare_ruleset" "rate_limits" {
         mitigation_timeout  = 300
       }
     }
+  ]
+}
+
+resource "cloudflare_ruleset" "legacy_redirects" {
+  count   = length([for redirect in var.legacy_redirects : redirect if redirect.enabled]) > 0 ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "MYSC legacy host redirects (${var.config_status})"
+  kind    = "zone"
+  phase   = "http_request_dynamic_redirect"
+
+  rules = [
+    for redirect in var.legacy_redirects : {
+      action      = "redirect"
+      expression  = "(http.host eq \"${redirect.hostname}\")"
+      description = "Redirect ${redirect.hostname} to ${redirect.target}"
+      ref         = "mysc_legacy_redirect_${replace(replace(redirect.hostname, ".", "_"), "-", "_")}"
+      enabled     = redirect.enabled
+      action_parameters = {
+        from_value = {
+          preserve_query_string = true
+          status_code           = 301
+          target_url = {
+            expression = "concat(\"${redirect.target}\", http.request.uri.path)"
+          }
+        }
+      }
+    } if redirect.enabled
   ]
 }

@@ -2,132 +2,118 @@
 
 ## Summary
 
-Today we advanced the `myscguard.app` security-domain rollout for MYSCube from draft configuration toward a verified Cloudflare/Vercel control-plane setup.
+`myscguard.app` security-domain POC was moved from draft/candidate state to an applied and verified Cloudflare/Vercel control-plane rollout.
 
-The canonical security console host was changed from:
-
-- `https://soc.myscguard.app`
-
-to:
+Canonical security console:
 
 - `https://myscube.myscguard.app`
 
-The repo was updated, tested, committed, pushed to `main`, deployed to Vercel, and the failing stage verification was stabilized by updating Vercel project-level routes.
+Legacy hostname:
+
+- `https://soc.myscguard.app` now redirects at Cloudflare edge to `https://myscube.myscguard.app`.
+- The stale Vercel custom alias for `soc.myscguard.app` was removed, leaving Cloudflare redirect as the intended public behavior.
 
 ## Completed Work
 
-### Repository and runtime configuration
+### Cloudflare edge
 
-- Updated canonical live host references from `soc.myscguard.app` to `myscube.myscguard.app`.
-- Updated `server/bff/runtime-safety.mjs` default live allowed origin to `https://myscube.myscguard.app`.
-- Updated BFF/runtime tests, deploy alignment tests, stage/production workflow tests, Vercel redirect config, Cloudflare examples, and security-domain docs.
-- Added a local-only credential template:
-  - `.env.security.local`
-  - This file is ignored by git through `.env*.local`.
-- Confirmed gitignored local infra files remain untracked:
-  - `.env.security.local`
-  - `infra/cloudflare/production.tfvars`
+- Imported existing `myscguard.app` Cloudflare DNS records, zone settings, and custom WAF ruleset into local Terraform state before apply.
+- Applied Terraform with a plan limited to one addition:
+  - `cloudflare_ruleset.legacy_redirects[0]`
+  - `soc.myscguard.app` -> `https://myscube.myscguard.app`
+- Confirmed no Terraform-managed resource was changed or destroyed during that apply.
+- Verified Cloudflare-proxied DNS and HTTPS for:
+  - `myscube.myscguard.app`
+  - `devops.myscguard.app`
+  - `drive.myscguard.app`
+  - `github.myscguard.app`
+  - `firestore.myscguard.app`
+  - `audit.myscguard.app`
+  - `edge.myscguard.app`
 
-### Vercel production configuration
+### Vercel
 
-- Updated Vercel Production env:
+- Updated production BFF origin earlier in the rollout:
   - `BFF_ALLOWED_ORIGINS=https://myscube.myscguard.app`
-- Created a new production deployment:
-  - `inner-platform-m5g1l1ucp-merryai-devs-projects.vercel.app`
-- Verified the deployment artifact returns `200` on the direct deployment URL.
-- Attempted to assign `myscube.myscguard.app` as the Vercel canonical alias. The first attempt failed during certificate issuance before the Cloudflare DNS state was corrected.
+- Set all security-domain Vercel aliases to the current production deployment:
+  - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`
+- Removed the stale Vercel alias:
+  - `soc.myscguard.app`
+- Added and published Vercel project-level direct-origin redirects for current generated hosts:
+  - `inner-platform.vercel.app`
+  - `inner-platform-stage-merryai-devs-projects.vercel.app`
+  - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app`
+  - `inner-platform-h799435np-merryai-devs-projects.vercel.app`
+  - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`
+- Removed the temporary Vercel route-version alias after route publish:
+  - `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`
 
-### Vercel project-level routes
+### Repository hardening
 
-Stage failed once because project-level Vercel routes still redirected direct Vercel hosts to `https://soc.myscguard.app`.
-
-Resolved by updating and publishing the three project-level routes:
-
-- `inner-platform.vercel.app` -> `https://myscube.myscguard.app/$1`
-- `inner-platform-stage-merryai-devs-projects.vercel.app` -> `https://myscube.myscguard.app/$1`
-- `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `https://myscube.myscguard.app/$1`
-
-After publishing, the route-version alias created by Vercel was removed:
-
-- `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`
-
-### GitHub / CI / stage status
-
-- Commit pushed to `main`:
-  - `1fa2109 chore(edge): rename guard console host to myscube`
-- CI run passed:
-  - `https://github.com/merryAI-dev/MYSCube/actions/runs/27809537585`
-- Stage Deploy initially failed at `Verify stage surface` due to stale project-level route destination.
-- After route publish, the failed Stage job was rerun and passed:
-  - `https://github.com/merryAI-dev/MYSCube/actions/runs/27809537572`
+- Added Terraform-managed legacy redirect support for retired hostnames.
+- Extended strict edge smoke to verify:
+  - Cloudflare-proxied hosts
+  - scanner path/query blocking
+  - `soc.myscguard.app` legacy redirect
+  - Vercel direct-origin redirects/removal
+- Updated production gate verification to accept either:
+  - `CLOUDFLARE_API_TOKEN`, or
+  - `CLOUDFLARE_API_KEY` plus `CLOUDFLARE_EMAIL`
+- Removed vulnerable direct dependency `xlsx@0.18.5`.
+- Replaced client-side XLSX parsing with the existing `exceljs` path.
+- Restricted binary `.xls` upload support:
+  - HTML-masked bank exports can still be parsed through the HTML parser.
+  - General binary `.xls` is rejected and users should convert to CSV or XLSX.
 
 ## Verification Evidence
 
-Local checks completed before push:
+Passed:
 
+- `terraform fmt -recursive infra/cloudflare`
+- `terraform -chdir=infra/cloudflare validate`
+- `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`
+- `terraform -chdir=infra/cloudflare apply /tmp/myscguard.tfplan`
+  - result: 1 added, 0 changed, 0 destroyed
+- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`
+  - 16/16 checks passed
+  - evidence: `tmp/edge-smoke/cloudflare-edge-smoke.json`
+- Approved production gate:
+  - `CLOUDFLARE_EDGE_APPLY_APPROVED=1 CLOUDFLARE_EDGE_REQUIRE_SMOKE=1 CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate`
+- `npm run policy:verify`
+- `npm run build`
 - `npm test`
   - 250 test files passed
   - 1562 tests passed
-  - 5 files / 59 tests skipped by existing test policy
-- `npm run policy:verify`
-  - passed
-- `npm run build`
-  - passed
-  - existing large chunk and `lottie-web` eval warnings remain
-- `terraform fmt -check -recursive infra/cloudflare`
-  - passed
-- `terraform -chdir=infra/cloudflare validate`
-  - passed
+  - 5 files / 59 tests skipped by existing policy
+- `npm audit --audit-level=high`
+  - passed after removing `xlsx`
 
-Runtime checks observed:
+Observed runtime checks:
 
-- `inner-platform-m5g1l1ucp-merryai-devs-projects.vercel.app` returned `200`.
-- `inner-platform-stage-merryai-devs-projects.vercel.app` redirects to `https://myscube.myscguard.app/...` after project-level route publish.
-- `inner-platform.vercel.app` redirects to `https://myscube.myscguard.app/...` after project-level route publish.
-- `inner-platform-h799435np-merryai-devs-projects.vercel.app` redirects to `https://myscube.myscguard.app/...` after project-level route publish.
-- DNS lookup later showed both `myscube.myscguard.app` and `soc.myscguard.app` resolving to Cloudflare edge IPs.
+- `https://myscube.myscguard.app/` returns `200` through Cloudflare.
+- `https://soc.myscguard.app/some/path?x=1` returns `301` to `https://myscube.myscguard.app/some/path?x=1`.
+- `https://edge.myscguard.app/.env` returns `403`.
+- `https://edge.myscguard.app/?q=../` returns `403`.
+- Current Vercel generated production/stage hosts return `307` to `https://myscube.myscguard.app/`.
+- Removed route-version alias returns `404` in strict edge smoke.
 
-## Current Known State
+## Remaining Security Backlog
 
-- `myscube.myscguard.app` is now the intended canonical security console host.
-- `soc.myscguard.app` still resolves through Cloudflare and was observed returning `200` earlier in the work. It should be explicitly retired, redirected, or kept as a temporary rollback host by decision.
-- Vercel project-level direct-origin redirects now point to `myscube`.
-- The latest production deployment exists and is healthy on its generated Vercel URL.
-- The Vercel custom alias/certificate status for `myscube.myscguard.app` still needs a fresh verification after Cloudflare DNS is confirmed stable.
-- Cloudflare Terraform apply for the final `myscube` state was not completed in this work session.
+- Rotate the Cloudflare Global API Key that was pasted during rollout and replace it with a least-privilege API token.
+- `npm audit` still reports moderate vulnerabilities through transitive dependencies:
+  - `firebase-tools` / `@opentelemetry/core`
+  - `firebase-admin` / Google client transitive `uuid`
+  - `exceljs` transitive `uuid`
+- Build still reports existing warnings:
+  - `lottie-web` uses `eval`
+  - several chunks exceed 500 kB
+- Cloudflare Pro POC direct-origin bypass is controlled by Vercel project redirects, not Vercel Advanced Deployment Protection. This is accepted for the POC only and should be revisited before treating the setup as Enterprise-grade origin isolation.
+- Product-app inventory still has owner/origin fields outside the security-domain POC scope. These should be closed before expanding the same pattern across all MYSC apps.
 
 ## Security Notes
 
-- A Cloudflare Global API Key was provided during the session. It was not committed to the repo.
-- Because a Global API Key is broad and was pasted into the chat, rotate it after the rollout or replace it with a least-privilege Cloudflare API Token.
-- Preferred Cloudflare token scope for this rollout:
-  - Zone / Zone / Read
-  - Zone / DNS / Edit
-  - Zone / Rulesets / Edit if Terraform manages WAF/rulesets
-- GitHub reported remaining Dependabot vulnerabilities on push:
-  - 2 high
-  - 2 moderate
-  - These are separate from the hostname rollout and remain security backlog.
-
-## Remaining Work To Reach 100-Point Verified State
-
-1. Store Cloudflare credentials only in local ignored env or a secure secret manager.
-2. Run Terraform plan with the real Cloudflare zone credentials.
-3. Apply Cloudflare DNS/proxy state for `myscube.myscguard.app`.
-4. Re-run Vercel alias assignment or verification for `myscube.myscguard.app`.
-5. Verify HTTPS:
-   - `https://myscube.myscguard.app/`
-   - selected app paths
-   - BFF/API unauthenticated behavior
-   - Firebase auth helper paths
-6. Run strict edge smoke:
-   - `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1`
-   - `CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1`
-7. Confirm Cloudflare response headers and WAF behavior.
-8. Decide and implement `soc.myscguard.app` retirement behavior:
-   - redirect to `myscube`, or
-   - remove alias/DNS, or
-   - document as rollback-only with expiry.
-9. Update the security control-plane docs with final evidence paths and timestamps.
-10. Address the remaining GitHub Dependabot vulnerabilities as a separate security-hardening task.
-
+- No Cloudflare or Vercel secret was committed to the repository.
+- Local sensitive files remain gitignored:
+  - `.env.security.local`
+  - `infra/cloudflare/production.tfvars`
+- The rollout intentionally avoids `mysc.co.kr`; `myscguard.app` is a dedicated security/DevOps control-plane domain.

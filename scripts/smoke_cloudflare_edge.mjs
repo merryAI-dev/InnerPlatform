@@ -25,13 +25,27 @@ const expectedTitle = "MYSCube InnerPlatform";
 const defaultDirectHosts = [
   "inner-platform.vercel.app",
   "inner-platform-stage-merryai-devs-projects.vercel.app",
+  "inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app",
   "inner-platform-h799435np-merryai-devs-projects.vercel.app",
+  "inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app",
   "inner-platform-f52434-routes-merryai-devs-projects.vercel.app",
 ];
 const directHosts = (process.env.CLOUDFLARE_EDGE_DIRECT_HOSTS || defaultDirectHosts.join(","))
   .split(",")
   .map((host) => host.trim())
   .filter(Boolean);
+const defaultLegacyRedirects = [
+  { host: "soc.myscguard.app", target: "https://myscube.myscguard.app/" },
+];
+const legacyRedirects = (process.env.CLOUDFLARE_EDGE_LEGACY_REDIRECTS || defaultLegacyRedirects.map((item) => `${item.host}->${item.target}`).join(","))
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean)
+  .map((item) => {
+    const [host, target] = item.split("->").map((part) => part.trim());
+    return { host, target };
+  })
+  .filter((item) => item.host && item.target);
 
 function result(name, ok, details = {}) {
   return { name, ok, ...details };
@@ -171,6 +185,23 @@ async function checkDirectOrigin(host) {
   }
 }
 
+async function checkLegacyRedirect({ host, target }) {
+  try {
+    const response = await fetch(`https://${host}/`, {
+      redirect: "manual",
+      headers: { "user-agent": "MYSCube-edge-smoke/1.0" },
+    });
+    const location = response.headers.get("location") || "";
+    return result(`https://${host}/ legacy-redirect`, response.status >= 300 && response.status < 400 && location === target, {
+      status: response.status,
+      location,
+      expected: target,
+    });
+  } catch (error) {
+    return result(`https://${host}/ legacy-redirect`, false, { error: error.message });
+  }
+}
+
 const checks = [];
 for (const host of hosts) {
   checks.push(await checkHost(host));
@@ -182,6 +213,9 @@ if (requireCloudflare) {
 }
 
 if (requireRedirects) {
+  for (const redirect of legacyRedirects) {
+    checks.push(await checkLegacyRedirect(redirect));
+  }
   for (const host of directHosts) {
     checks.push(await checkDirectOrigin(host));
   }

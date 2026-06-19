@@ -16,7 +16,8 @@ import {
   type BankStatementRow,
 } from '../../platform/bank-statement';
 import { normalizeKey, parseCsv } from '../../platform/csv-utils';
-import { loadXlsx, warmXlsx } from '../../platform/lazy-heavy-modules';
+import { warmExcelJs } from '../../platform/lazy-heavy-modules';
+import { parseXlsxWorkbook } from '../../platform/local-workbook';
 import { readTextFile } from '../../platform/text-file-decoder';
 import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../../platform/cashflow-weeks';
@@ -400,20 +401,13 @@ export function PortalBankStatementPage() {
       // fallback to XLSX if HTML parse yields nothing
     }
 
-    const XLSX = await loadXlsx();
-    const buffer = new Uint8Array(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, raw: false });
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      throw new Error('보안 정책상 XLS 바이너리는 지원하지 않습니다. CSV 또는 XLSX로 변환해 업로드해 주세요.');
+    }
 
-    const sheetMatrices = workbook.SheetNames.map((sheetName) => {
-      const ws = workbook.Sheets[sheetName];
-      const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) as unknown[][];
-      const matrix = rawRows.map((row) =>
-        (Array.isArray(row) ? row : []).map((cell) => {
-          if (cell == null) return '';
-          if (cell instanceof Date) return cell.toISOString().slice(0, 10);
-          return String(cell);
-        }),
-      );
+    const sheets = await parseXlsxWorkbook(await file.arrayBuffer());
+    const sheetMatrices = sheets.map((sheet) => {
+      const matrix = sheet.matrix;
       const nonEmpty = matrix.reduce((sum, row) => {
         return sum + row.filter((cell) => String(cell || '').trim().length > 0).length;
       }, 0);
@@ -440,7 +434,7 @@ export function PortalBankStatementPage() {
         const text = await readTextFile(file);
         matrix = parseCsv(text);
       } else {
-        toast.error('CSV, XLSX 또는 XLS 파일만 업로드할 수 있습니다.');
+        toast.error('CSV 또는 XLSX 파일만 업로드할 수 있습니다.');
         return;
       }
       const result = normalizeBankStatementMatrix(matrix);
@@ -454,14 +448,14 @@ export function PortalBankStatementPage() {
       setDirty(true);
     } catch (err) {
       console.error('[BankStatement] upload parse failed:', err);
-      toast.error('파일을 읽지 못했습니다. `.xls`/`.xlsx`/`.csv` 파일인지 확인해 주세요.');
+      toast.error('파일을 읽지 못했습니다. `.xlsx` 또는 `.csv` 파일인지 확인해 주세요.');
     } finally {
       setUploadPreparing(false);
     }
   }, [parseExcelToMatrix]);
 
   const openFilePicker = useCallback(() => {
-    warmXlsx();
+    warmExcelJs();
     fileInputRef.current?.click();
   }, []);
 
@@ -993,10 +987,10 @@ export function PortalBankStatementPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv,.xlsx,.xls"
+        accept=".csv,.xlsx"
         className="hidden"
-        onClick={() => warmXlsx()}
-        onFocus={() => warmXlsx()}
+        onClick={() => warmExcelJs()}
+        onFocus={() => warmExcelJs()}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void handleFileUpload(file);
@@ -1042,7 +1036,7 @@ export function PortalBankStatementPage() {
                     {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
                     {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
                   </Button>
-                  <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xls`, `.xlsx`</span>
+                  <span className="text-[11px] text-muted-foreground">지원 형식: `.csv`, `.xlsx`</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">{uploadExperienceHint}</p>
               </div>

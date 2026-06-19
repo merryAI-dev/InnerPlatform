@@ -25,7 +25,8 @@ const allowProPocCompensatingControls = process.env.CLOUDFLARE_PRO_POC_COMPENSAT
 const securityDomainPoc = process.env.CLOUDFLARE_SECURITY_DOMAIN_POC === "1";
 const applyApproved = process.env.CLOUDFLARE_EDGE_APPLY_APPROVED === "1";
 const requireSmoke = process.env.CLOUDFLARE_EDGE_REQUIRE_SMOKE === "1" || applyApproved;
-const hasCloudflareToken = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim());
+const hasCloudflareCredential = Boolean(process.env.CLOUDFLARE_API_TOKEN?.trim())
+  || (Boolean(process.env.CLOUDFLARE_API_KEY?.trim()) && Boolean(process.env.CLOUDFLARE_EMAIL?.trim()));
 const hasPlaceholderZoneId = /replace-with-cloudflare-zone-id|00000000000000000000000000000000/.test(tfvars);
 const productionGateDoc = fs.existsSync("docs/security-control-plane/cloudflare-production-gates.md")
   ? fs.readFileSync("docs/security-control-plane/cloudflare-production-gates.md", "utf8")
@@ -75,10 +76,10 @@ if (terraform.status !== 0) {
     : "production.tfvars.example";
   if (hasPlaceholderZoneId) {
     warnings.push(`Skipping terraform plan in gate guard because ${tfvarsPath} still has a placeholder Cloudflare zone id.`);
-  } else if (!hasCloudflareToken && !applyApproved) {
-    warnings.push("Skipping terraform plan because CLOUDFLARE_API_TOKEN is not set. Final apply gate requires the token.");
-  } else if (!hasCloudflareToken && applyApproved) {
-    fail("CLOUDFLARE_API_TOKEN is required for approved production apply gate.");
+  } else if (!hasCloudflareCredential && !applyApproved) {
+    warnings.push("Skipping terraform plan because Cloudflare credentials are not set. Final apply gate requires CLOUDFLARE_API_TOKEN, or CLOUDFLARE_API_KEY plus CLOUDFLARE_EMAIL.");
+  } else if (!hasCloudflareCredential && applyApproved) {
+    fail("Cloudflare credentials are required for approved production apply gate. Set CLOUDFLARE_API_TOKEN, or CLOUDFLARE_API_KEY plus CLOUDFLARE_EMAIL.");
   } else {
     const plan = run("terraform", ["-chdir=infra/cloudflare", "plan", `-var-file=${planFile}`]);
     if (plan.status !== 0) fail(`terraform plan -var-file=${planFile} failed.`);
