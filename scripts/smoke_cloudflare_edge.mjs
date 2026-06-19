@@ -22,10 +22,16 @@ const requireCloudflare = process.env.CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE === "1"
 const requireRedirects = process.env.CLOUDFLARE_EDGE_REQUIRE_REDIRECTS === "1";
 const outputPath = process.env.CLOUDFLARE_EDGE_SMOKE_OUTPUT || "tmp/edge-smoke/cloudflare-edge-smoke.json";
 const expectedTitle = "MYSCube InnerPlatform";
-const directHosts = [
+const defaultDirectHosts = [
   "inner-platform.vercel.app",
   "inner-platform-stage-merryai-devs-projects.vercel.app",
+  "inner-platform-h799435np-merryai-devs-projects.vercel.app",
+  "inner-platform-f52434-routes-merryai-devs-projects.vercel.app",
 ];
+const directHosts = (process.env.CLOUDFLARE_EDGE_DIRECT_HOSTS || defaultDirectHosts.join(","))
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
 
 function result(name, ok, details = {}) {
   return { name, ok, ...details };
@@ -145,19 +151,23 @@ async function checkPathBlocked(host, path) {
   }
 }
 
-async function checkDirectRedirect(host) {
+async function checkDirectOrigin(host) {
   try {
     const response = await fetch(`https://${host}/`, {
       redirect: "manual",
       headers: { "user-agent": "MYSCube-edge-smoke/1.0" },
     });
     const location = response.headers.get("location") || "";
-    return result(`https://${host}/ redirect`, response.status >= 300 && response.status < 400 && location.startsWith("https://soc.myscguard.app/"), {
+    const canonicalRedirect = response.status >= 300 && response.status < 400 && location.startsWith("https://soc.myscguard.app/");
+    const removedAlias = response.status === 404;
+    return result(`https://${host}/ direct-origin`, canonicalRedirect || removedAlias, {
       status: response.status,
       location,
+      canonicalRedirect,
+      removedAlias,
     });
   } catch (error) {
-    return result(`https://${host}/ redirect`, false, { error: error.message });
+    return result(`https://${host}/ direct-origin`, false, { error: error.message });
   }
 }
 
@@ -173,7 +183,7 @@ if (requireCloudflare) {
 
 if (requireRedirects) {
   for (const host of directHosts) {
-    checks.push(await checkDirectRedirect(host));
+    checks.push(await checkDirectOrigin(host));
   }
 }
 

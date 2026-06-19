@@ -64,11 +64,11 @@ Budget decision: first POC is Cloudflare Pro plus a dedicated security/DevOps co
 |---|---|---|
 | Project owner | `mwbyun1220@mysc.co.kr` / MYSC security and platform owner | Approved for POC ownership |
 | Vercel project | `inner-platform` | Verified MYSCube production project |
-| Vercel deployment target | `inner-platform-h799435np-merryai-devs-projects.vercel.app` | `MYSCube InnerPlatform` HTML verified on all POC hostnames |
-| Primary hostname | `soc.myscguard.app` | Vercel custom domain registered; Cloudflare DNS bootstrap complete; final proxy apply pending |
-| Drive monitoring hostname | `drive.myscguard.app` | Vercel custom domain registered; Cloudflare DNS bootstrap complete; final proxy apply pending |
-| GitHub monitoring hostname | `github.myscguard.app` | Vercel custom domain registered; Cloudflare DNS bootstrap complete; final proxy apply pending |
-| Firestore monitoring hostname | `firestore.myscguard.app` | Vercel custom domain registered; Cloudflare DNS bootstrap complete; final proxy apply pending |
+| Vercel target URL | `inner-platform-h799435np-merryai-devs-projects.vercel.app` | `MYSCube InnerPlatform` HTML verified on all POC hostnames |
+| Primary hostname | `soc.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
+| Drive monitoring hostname | `drive.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
+| GitHub monitoring hostname | `github.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
+| Firestore monitoring hostname | `firestore.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
 | BFF live allowed origin | `https://soc.myscguard.app` | Code default updated |
 
 Earlier `cube.mysc.co.kr` changes are not the selected POC route. Do not update production env to `cube.mysc.co.kr`.
@@ -98,6 +98,9 @@ CLOUDFLARE_API_TOKEN=... npm run security:cloudflare:zone
 - `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 npm run security:edge-smoke` passes against all 7 `myscguard.app` hostnames. Evidence file: `tmp/edge-smoke/cloudflare-edge-smoke.json`.
 - Public DNS verification through `1.1.1.1` and `8.8.8.8` returns Cloudflare edge IPs for all 7 hostnames. The local ISP resolver `164.124.101.2` still returned stale `76.76.21.21` immediately after cutover, so smoke uses public resolver evidence instead of local resolver cache.
 - WAF custom block evidence: `https://edge.myscguard.app/.env` and `https://edge.myscguard.app/?q=../` both return `403` when resolved through Cloudflare edge.
+- Vercel project-level routes redirect these direct hosts to `https://soc.myscguard.app`: `inner-platform.vercel.app`, `inner-platform-stage-merryai-devs-projects.vercel.app`, and `inner-platform-h799435np-merryai-devs-projects.vercel.app`.
+- Vercel creates a route-version alias, currently `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`, whenever project-level routes are published. Project routes do not protect that alias. The alias must be removed after route publication and verified as `404 DEPLOYMENT_NOT_FOUND`.
+- GitHub Actions stage and production release workflows currently fail during the Vercel release step because the environment secret token is invalid. Local Vercel CLI authentication is valid, but its token is a short-lived session token and must not be copied into CI. Rotate `VERCEL_DEPLOY_TOKEN_PRODUCTION` and the stage release token with a long-lived Vercel API token before declaring CI deployment fully healthy.
 
 ## Production Apply Rule
 
@@ -122,10 +125,10 @@ Run the local guard before asking for approval:
 npm run security:edge-gate
 ```
 
-After explicit human approval for apply, run the guard with:
+After explicit human approval for apply and after removing any Vercel route-version alias, run the guard with:
 
 ```bash
-CLOUDFLARE_EDGE_APPLY_APPROVED=1 CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate
+CLOUDFLARE_EDGE_APPLY_APPROVED=1 CLOUDFLARE_EDGE_REQUIRE_SMOKE=1 CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate
 ```
 
 For the Cloudflare Pro-only POC, direct Vercel routes can be assessed with compensating controls instead of hard failing the local guard:

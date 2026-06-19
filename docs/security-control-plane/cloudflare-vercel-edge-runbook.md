@@ -47,6 +47,7 @@ User
 8. Vercel allowed origin/auth redirect URI를 커스텀 도메인으로 갱신
 9. `*.vercel.app` 링크를 운영 문서/Slack/앱 설정에서 제거
 10. MYSCube 보안 관제에 Cloudflare 로그/방화벽 이벤트 ingestion 추가. 이 항목은 cutover 이후가 아니라 pre-prod gate다.
+11. Vercel project-level routes를 publish한 경우 Vercel이 생성한 `*-routes-merryai-devs-projects.vercel.app` alias를 제거하고 `404 DEPLOYMENT_NOT_FOUND`를 확인한다.
 
 ## 기본 POC: 보안/DevOps 전용 도메인
 
@@ -70,6 +71,9 @@ User
 - `mysc.co.kr` DNS/메일/Google Workspace는 건드리지 않는다.
 - `myscguard.app`은 Cloudflare Registrar에서 등록 완료된 도메인이다. Zone id는 Cloudflare dashboard에서 확인해 로컬 `infra/cloudflare/production.tfvars`에 반영했다.
 - Vercel custom domain은 `inner-platform` production deployment에 alias로 연결했다. Vercel CLI는 각 hostname에 `A 76.76.21.21` DNS 레코드를 요구했다.
+- Cloudflare final proxy apply는 완료됐다. 7개 `myscguard.app` host가 Cloudflare edge를 통과하고, scanner path/query smoke는 `403`을 반환한다.
+- Vercel direct host 보상통제는 project-level routes를 사용한다. `inner-platform.vercel.app`, stage alias, current generated production URL은 `307`로 `https://soc.myscguard.app`에 보낸다.
+- Vercel routes publish 후 생성되는 route-version alias는 project-level route가 적용되지 않으므로 publish 직후 제거해야 한다.
 - Google Drive/GitHub/Firestore 관제 기능은 MYSCube `inner-platform` control plane에서 제공한다.
 
 ## 코드 위치
@@ -120,8 +124,30 @@ npm run security:edge-gate
 - Cloudflare provider `v5.20.0`
 - `terraform fmt -check -recursive infra/cloudflare`: pass
 - `terraform -chdir=infra/cloudflare validate`: pass
-- `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`: pass with real zone id, apply still forbidden until explicit approval
+- `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`: pass with real zone id before final apply
+- `terraform -chdir=infra/cloudflare apply -var-file=production.tfvars`: final proxy apply completed for the 7 `myscguard.app` hostnames
 - `CLOUDFLARE_SECURITY_DOMAIN_POC=1 CLOUDFLARE_PRO_POC_COMPENSATING_CONTROLS=1 npm run security:edge-gate`: pass with accepted POC warnings
+- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`: pass after direct-origin redirect and removed route-version alias verification
+
+## Vercel direct-origin 보상통제
+
+현재 POC 예산에서는 Vercel Advanced Deployment Protection을 사용하지 않는다. 따라서 다음 보상통제를 같이 유지한다.
+
+```bash
+vercel routes export --scope merryai-devs-projects
+vercel alias ls --scope merryai-devs-projects
+vercel alias remove inner-platform-f52434-routes-merryai-devs-projects.vercel.app --yes --scope merryai-devs-projects
+CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke
+```
+
+검증 기준:
+
+- `inner-platform.vercel.app` -> `307 https://soc.myscguard.app/...`
+- `inner-platform-stage-merryai-devs-projects.vercel.app` -> `307 https://soc.myscguard.app/...`
+- `inner-platform-h799435np-merryai-devs-projects.vercel.app` -> `307 https://soc.myscguard.app/...`
+- route-version alias -> `404 DEPLOYMENT_NOT_FOUND`
+
+route-version alias는 Vercel routes publish 때 다시 생길 수 있다. route를 publish한 작업자는 alias removal과 smoke evidence 갱신까지 같은 change window 안에서 끝내야 한다.
 
 ## WAF 기본 정책 초안
 
