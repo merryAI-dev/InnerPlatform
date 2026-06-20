@@ -546,138 +546,189 @@ export function CashflowSheetLabPage({
     : '전체';
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
+  const primaryCta = !preview ? {
+    label: '시트 검토하기',
+    disabled: !canPreview,
+    action: () => void handlePreview(),
+  } : {
+    label: '시트 값 반영하기',
+    disabled: !canApply,
+    action: () => void handleApplySheetValues(),
+  };
 
   return (
-    <div className="bg-slate-100/60 p-4 sm:p-6">
-      <section className="mx-auto grid max-w-6xl gap-3 border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-          <div className="min-w-0">
-            <h1 className="text-[15px] font-semibold text-slate-950">시트 연동 검토</h1>
-            <div className="mt-0.5 truncate text-[11px] text-slate-500">현재 사업 {projectId || '-'}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-8 gap-1.5 rounded-none px-2 text-[11px]"
-              disabled={!projectId || accountLoading}
-              onClick={() => void handleLoadShareAccount()}
-            >
-              {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-              공유 계정 확인
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-8 gap-1.5 rounded-none px-2 text-[11px]"
-              disabled={!systemAccountEmail}
-              onClick={handleCopyShareAccount}
-            >
-              <Copy className="h-3.5 w-3.5" />
-              공유 계정 복사
-            </Button>
-          </div>
-        </div>
-        <ol className="grid gap-2 text-[12px] text-slate-700 md:grid-cols-4">
-          {['공유 계정 확인', '시트 링크 입력', '검토', '시트 값 반영'].map((label, index) => (
-            <li key={label} className="border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="mr-2 font-mono text-[11px] text-slate-400">{index + 1}</span>
-              <span className="font-medium">{label}</span>
-            </li>
-          ))}
+    <div className="bg-white px-5 pb-28 pt-6 sm:bg-slate-100 sm:px-6">
+      <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
+        <header>
+          <div className="text-[12px] font-semibold text-slate-500">시트 연동 검토</div>
+          <h1 className="mt-5 whitespace-pre-line text-[30px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[34px]">
+            {`Google Sheet 값을\n캐시플로우에 반영하기`}
+          </h1>
+          <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
+        </header>
+
+        <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">1</span>
+            <div className="min-w-0 space-y-3 pb-1">
+              <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  disabled={!projectId || accountLoading}
+                  onClick={() => void handleLoadShareAccount()}
+                >
+                  {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                  공유 계정 확인
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  disabled={!systemAccountEmail}
+                  onClick={handleCopyShareAccount}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  공유 계정 복사
+                </Button>
+              </div>
+              {systemAccountEmail && (
+                <div className="break-all border border-blue-100 bg-blue-50 px-3 py-2 font-mono text-[12px] text-blue-900">
+                  {systemAccountEmail}
+                </div>
+              )}
+              <label className="flex items-start gap-2 text-[13px] font-medium text-slate-800">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={shareConfirmed}
+                  onChange={(event) => setShareConfirmed(event.target.checked)}
+                />
+                <span>Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.</span>
+              </label>
+            </div>
+          </li>
+
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">2</span>
+            <div className="min-w-0 space-y-2 pb-1">
+              <h2 className="text-[19px] font-bold text-slate-950">시트 링크 입력</h2>
+              <Input
+                value={sheetLink}
+                onChange={(event) => setSheetLink(event.target.value)}
+                placeholder="Google Sheet 링크"
+                aria-label="Google Sheet 링크"
+                className="h-11 rounded-none text-[13px]"
+              />
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  value={sheetName}
+                  onChange={(event) => setSheetName(event.target.value)}
+                  placeholder="시트 탭 이름"
+                  aria-label="시트 탭 이름"
+                  className="h-10 rounded-none text-[12px]"
+                />
+                <Input
+                  value={startWeek}
+                  onChange={(event) => setStartWeek(event.target.value)}
+                  placeholder="시작 주차"
+                  aria-label="시작 주차"
+                  className="h-10 rounded-none text-[12px]"
+                />
+                <Input
+                  value={endWeek}
+                  onChange={(event) => setEndWeek(event.target.value)}
+                  placeholder="종료 주차"
+                  aria-label="종료 주차"
+                  className="h-10 rounded-none text-[12px]"
+                />
+              </div>
+            </div>
+          </li>
+
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">3</span>
+            <div className="min-w-0 space-y-3 pb-1">
+              <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                disabled={!canPreview}
+                onClick={() => void handlePreview()}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                검토
+              </Button>
+            </div>
+          </li>
+
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">4</span>
+            <div className="min-w-0 space-y-3 pb-1">
+              <h2 className="text-[19px] font-bold text-slate-950">시트 값 반영</h2>
+              <Button
+                type="button"
+                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                disabled={!canApply}
+                onClick={() => void handleApplySheetValues()}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
+                시트 값 반영하기
+              </Button>
+            </div>
+          </li>
+
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+            <span className={`z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold ${applyResult ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500'}`}>5</span>
+            <div className="min-w-0 space-y-3 pb-1">
+              <h2 className="text-[19px] font-bold text-slate-950">끝</h2>
+              {applyResult ? (
+                <div className="space-y-3">
+                  <div className="text-[13px] font-semibold text-emerald-800">
+                    반영 {applyResult.appliedLineCount.toLocaleString()}건
+                    {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
+                    {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
+                    {applyResult.skippedInvalidWeekCount ? ` · 건너뜀 ${applyResult.skippedInvalidWeekCount.toLocaleString()}건` : ''}
+                  </div>
+                  <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
+                    <Link to="/portal/cashflow">캐시플로우로 이동</Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-[13px] text-slate-400">반영이 끝나면 결과가 표시됩니다.</div>
+              )}
+            </div>
+          </li>
         </ol>
-        {systemAccountEmail && (
-          <div className="flex flex-wrap items-center gap-2 border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-900">
-            <span className="font-semibold">Google Sheet 공유 대상</span>
-            <span className="min-w-0 truncate font-mono">{systemAccountEmail}</span>
-          </div>
-        )}
-        <label className="flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800">
-          <input
-            type="checkbox"
-            className="h-4 w-4"
-            checked={shareConfirmed}
-            onChange={(event) => setShareConfirmed(event.target.checked)}
-          />
-          <span>Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.</span>
-        </label>
-        <div className="grid gap-2">
-          <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px_140px_140px_auto_auto]">
-            <Input
-              value={sheetLink}
-              onChange={(event) => setSheetLink(event.target.value)}
-              placeholder="Google Sheet 링크"
-              aria-label="Google Sheet 링크"
-              className="h-10 rounded-none text-[12px]"
-            />
-            <Input
-              value={sheetName}
-              onChange={(event) => setSheetName(event.target.value)}
-              placeholder="시트 탭 이름"
-              aria-label="시트 탭 이름"
-              className="h-10 rounded-none text-[12px]"
-            />
-            <Input
-              value={startWeek}
-              onChange={(event) => setStartWeek(event.target.value)}
-              placeholder="시작 주차"
-              aria-label="시작 주차"
-              className="h-10 rounded-none text-[12px]"
-            />
-            <Input
-              value={endWeek}
-              onChange={(event) => setEndWeek(event.target.value)}
-              placeholder="종료 주차"
-              aria-label="종료 주차"
-              className="h-10 rounded-none text-[12px]"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 gap-1.5 rounded-none text-[12px]"
-              disabled={!canPreview}
-              onClick={() => void handlePreview()}
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              검토
-            </Button>
-            <Button
-              type="button"
-              className="h-10 gap-1.5 rounded-none text-[12px]"
-              disabled={!canApply}
-              onClick={() => void handleApplySheetValues()}
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
-              시트 값 반영하기
-            </Button>
-          </div>
-        </div>
+
         {errorMessage && (
-          <div className="flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
+          <div className="mt-6 flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
             <AlertCircle className="h-4 w-4" />
             <span>{errorMessage}</span>
           </div>
         )}
         {statusMessage && (
-          <div className="flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+          <div className="mt-3 flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
             <CheckCircle2 className="h-4 w-4" />
             <span>{statusMessage}</span>
           </div>
         )}
-        {applyResult && (
-          <div className="grid gap-2 border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900 sm:grid-cols-[1fr_auto]">
-            <div>
-              반영 {applyResult.appliedLineCount.toLocaleString()}건
-              {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
-              {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
-              {applyResult.skippedInvalidWeekCount ? ` · 건너뜀 ${applyResult.skippedInvalidWeekCount.toLocaleString()}건` : ''}
-            </div>
-            <Button asChild variant="outline" className="h-8 rounded-none bg-white px-2 text-[11px]">
-              <Link to="/portal/cashflow">캐시플로우로 이동</Link>
-            </Button>
-          </div>
-        )}
       </section>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur sm:hidden">
+        <Button
+          type="button"
+          className="h-14 w-full rounded-[14px] bg-blue-600 text-[16px] font-bold text-white hover:bg-blue-700"
+          disabled={primaryCta.disabled}
+          onClick={primaryCta.action}
+        >
+          {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+          {primaryCta.label}
+        </Button>
+      </div>
 
       {preview && (
         <section className="mx-auto mt-4 max-w-6xl space-y-4">
