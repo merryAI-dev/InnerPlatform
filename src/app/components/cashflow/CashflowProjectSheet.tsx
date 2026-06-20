@@ -2674,9 +2674,14 @@ export function CashflowProjectSheet({
       .replace(' 항목이 있습니다.', ' 항목');
     const visibleInbox = opsSummary.inbox.slice(0, 4);
     const hiddenInboxCount = Math.max(0, opsSummary.inbox.length - visibleInbox.length);
+    const primaryReason = visibleInbox.find((item) => item.id === 'projection-actual-diff') || visibleInbox[0];
+    const remainingReasonCount = Math.max(0, opsSummary.inbox.length - 1);
     const statusBadgeLabel = opsSummary.status.kind === 'ready'
       ? opsSummary.status.label
       : `확인 항목 ${opsSummary.inbox.length}건`;
+    const statusReason = opsSummary.status.kind === 'ready'
+      ? '확인할 항목이 없습니다.'
+      : `${primaryReason?.title || '확인 항목'}입니다. 확인해 주세요.${remainingReasonCount > 0 ? ` 외 ${remainingReasonCount}건` : ''}`;
 
     return (
       <Card className="overflow-hidden rounded-[24px] border-0 bg-slate-50/80 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -2723,7 +2728,10 @@ export function CashflowProjectSheet({
                   <div className={`mt-1 truncate text-[13px] font-bold leading-4 ${opsTextClass(opsSummary.status.tone)}`}>
                     {statusBadgeLabel}
                   </div>
-                  <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">{compactStatusDetail}</div>
+                  <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">
+                    {statusReason}
+                  </div>
+                  <div className="mt-1 text-[9px] leading-3 text-slate-400">{compactStatusDetail} · 결산 전 확인</div>
                 </div>
               </div>
               {renderRateTile('Projection', opsSummary.rates.projection)}
