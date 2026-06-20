@@ -546,6 +546,13 @@ export function CashflowSheetLabPage({
     : '전체';
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
+  const activeStep = applyResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
+  const stepNumberClass = (step: number) =>
+    `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-colors ${
+      step <= activeStep
+        ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
+        : 'bg-slate-100 text-slate-500'
+    }`;
   const primaryCta = !preview ? {
     label: '시트 검토하기',
     disabled: !canPreview,
@@ -569,7 +576,7 @@ export function CashflowSheetLabPage({
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">1</span>
+            <span className={stepNumberClass(1)}>1</span>
             <div className="min-w-0 space-y-3 pb-1">
               <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
               <div className="flex flex-wrap gap-2">
@@ -612,7 +619,7 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">2</span>
+            <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
               <h2 className="text-[19px] font-bold text-slate-950">시트 링크 입력</h2>
               <Input
@@ -649,7 +656,7 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">3</span>
+            <span className={stepNumberClass(3)}>3</span>
             <div className="min-w-0 space-y-3 pb-1">
               <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
               <Button
@@ -666,7 +673,7 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-[13px] font-bold text-slate-500">4</span>
+            <span className={stepNumberClass(4)}>4</span>
             <div className="min-w-0 space-y-3 pb-1">
               <h2 className="text-[19px] font-bold text-slate-950">시트 값 반영</h2>
               <Button
@@ -682,7 +689,7 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={`z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold ${applyResult ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500'}`}>5</span>
+            <span className={stepNumberClass(5)}>5</span>
             <div className="min-w-0 space-y-3 pb-1">
               <h2 className="text-[19px] font-bold text-slate-950">끝</h2>
               {applyResult ? (
