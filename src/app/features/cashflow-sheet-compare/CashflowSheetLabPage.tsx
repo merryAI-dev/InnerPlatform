@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, Loader2, Search } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, Loader2, Search, UserPlus } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
+import { usePortalStore } from '../../data/portal-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
@@ -27,7 +29,7 @@ function formatAmount(value: number | null) {
 
 function formatError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
-  const code = apiError?.body?.code || apiError?.body?.error;
+  const code = getErrorCode(error);
   if (code === 'google_sheets_not_configured') {
     return '서버의 Google Sheets 서비스 계정이 설정되지 않았습니다. 관리자에게 환경 변수 설정을 요청하세요.';
   }
@@ -44,6 +46,11 @@ function formatError(error: unknown) {
   }
   if (error instanceof Error) return error.message;
   return '시트 구조를 확인하지 못했습니다.';
+}
+
+function getErrorCode(error: unknown) {
+  const apiError = error as { body?: { code?: string; error?: string } };
+  return apiError?.body?.code || apiError?.body?.error || '';
 }
 
 function logCashflowLab(event: string, details: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
@@ -84,6 +91,28 @@ function isBffAuthError(error: unknown): boolean {
       : '';
   if (code === 'google_sheets_api_error') return false;
   return status === 401 || status === 403 || code === 'missing_bearer_token' || code === 'invalid_token';
+}
+
+function buildSourceKey({
+  projectId,
+  value,
+  sheetName,
+  startWeek,
+  endWeek,
+}: {
+  projectId: string;
+  value: string;
+  sheetName: string;
+  startWeek: string;
+  endWeek: string;
+}) {
+  return JSON.stringify({
+    projectId: projectId.trim(),
+    value: value.trim(),
+    sheetName: sheetName.trim(),
+    startWeek: startWeek.trim(),
+    endWeek: endWeek.trim(),
+  });
 }
 
 function ReconciliationSummary({
@@ -168,28 +197,42 @@ export function CashflowSheetLabPage({
   projectIdOverride?: string;
 } = {}) {
   const { user: authUser, loginWithGoogle } = useAuth();
+  const { activeProjectId, myProject } = usePortalStore();
   const { orgId } = useFirebase();
   const [searchParams] = useSearchParams();
+  const portalProjectId = activeProjectId || myProject?.id || '';
   const initialProjectId = useMemo(() => (
     projectIdOverride?.trim()
     || searchParams.get('projectId')?.trim()
+    || portalProjectId
     || authUser?.projectId
     || authUser?.projectIds?.[0]
     || readRecentPortalProjectIds()[0]
     || ''
-  ), [authUser?.projectId, authUser?.projectIds, projectIdOverride, searchParams]);
+  ), [authUser?.projectId, authUser?.projectIds, portalProjectId, projectIdOverride, searchParams]);
   const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
   const [startWeek, setStartWeek] = useState('');
   const [endWeek, setEndWeek] = useState('');
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
+  const [reviewedSourceKey, setReviewedSourceKey] = useState('');
+  const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(false);
   const previewRequestRef = useRef(0);
 
   const projectId = projectIdInput.trim();
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
+  const sourceKey = useMemo(() => buildSourceKey({
+    projectId,
+    value: sheetLink,
+    sheetName,
+    startWeek,
+    endWeek,
+  }), [endWeek, projectId, sheetLink, sheetName, startWeek]);
   const actor = useMemo(() => ({
     uid: authUser?.uid || 'workspace-user',
     email: authUser?.email || '',
@@ -312,9 +355,53 @@ export function CashflowSheetLabPage({
   }, [projectIdInput, projectIdOverride]);
 
   useEffect(() => {
+    if (projectIdInput || !portalProjectId) return;
+    setProjectIdInput(portalProjectId);
+  }, [portalProjectId, projectIdInput]);
+
+  useEffect(() => {
     if (!projectId) return;
     rememberRecentPortalProject(projectId);
   }, [projectId]);
+
+  async function handleLoadShareAccount() {
+    if (!projectId || accountLoading) return;
+    setAccountLoading(true);
+    setStatusMessage('');
+    try {
+      const result = await runWithBffAuthRetry('share_account.load', (requestActor) => (
+        getCashflowSheetLabShareAccountViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+        })
+      ));
+      if (!result) return;
+      const email = result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '';
+      if (!email) {
+        setErrorMessage('서버의 Google Sheets 서비스 계정 이메일을 확인하지 못했습니다.');
+        return;
+      }
+      setSystemAccountEmail(email);
+      setStatusMessage('공유 계정을 확인했습니다.');
+      logCashflowLab('share_account.load.ok', {
+        projectId,
+        hasSystemAccountEmail: true,
+      });
+    } catch (error) {
+      logCashflowLab('share_account.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
+      setErrorMessage(formatError(error));
+    } finally {
+      setAccountLoading(false);
+    }
+  }
+
+  function handleCopyShareAccount() {
+    if (!systemAccountEmail) return;
+    void navigator.clipboard?.writeText(systemAccountEmail).catch(() => undefined);
+    setStatusMessage('공유 계정을 복사했습니다.');
+    logCashflowLab('share_account.copy', { projectId, hasSystemAccountEmail: true });
+  }
 
   async function handlePreview() {
     if (!projectId || loading || !spreadsheetId) return;
@@ -322,6 +409,8 @@ export function CashflowSheetLabPage({
     previewRequestRef.current = requestId;
     setLoading(true);
     setErrorMessage('');
+    setStatusMessage('');
+    setReviewedSourceKey('');
     try {
       const previewSource = {
         value: sheetLink,
@@ -334,66 +423,56 @@ export function CashflowSheetLabPage({
         spreadsheetId,
         sheetName: previewSource.sheetName || null,
       });
-      const layoutResult = await runWithBffAuthRetry('preview.layout', (requestActor) => (
+      const result = await runWithBffAuthRetry('preview.values', (requestActor) => (
         previewCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
           ...previewSource,
-          includeValues: false,
+          includeValues: true,
         })
       ));
-      if (!layoutResult) return;
+      if (!result) return;
       if (previewRequestRef.current !== requestId) return;
-      setPreview(layoutResult);
-      logCashflowLab('preview.layout.ok', {
+      const nextSheetName = sheetName || result.selectedSheetName || '';
+      setPreview(result);
+      setReviewedSourceKey(buildSourceKey({
         projectId,
-        spreadsheetId: layoutResult.spreadsheetId,
-        sheetName: layoutResult.selectedSheetName,
-        authMode: layoutResult.accessPolicy.googleAuth,
-        templateSupported: layoutResult.template.supported,
-        mappingCount: layoutResult.template.stats.mappingCount,
+        value: sheetLink,
+        sheetName: nextSheetName,
+        startWeek,
+        endWeek,
+      }));
+      setStatusMessage('검토가 완료되었습니다.');
+      logCashflowLab('preview.values.ok', {
+        projectId,
+        spreadsheetId: result.spreadsheetId,
+        sheetName: result.selectedSheetName,
+        authMode: result.accessPolicy.googleAuth,
+        templateSupported: result.template.supported,
+        mappingCount: result.template.stats.mappingCount,
+        previewValueCount: result.previewValues.length,
       });
-      if (!sheetName && layoutResult.selectedSheetName) setSheetName(layoutResult.selectedSheetName);
-      void runWithBffAuthRetry('preview.values', (requestActor) => previewCashflowSheetLabViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          ...previewSource,
-          includeValues: true,
-        })).then((valueResult) => {
-        if (!valueResult) return;
-        if (previewRequestRef.current === requestId) {
-          setPreview(valueResult);
-          logCashflowLab('preview.values.ok', {
-            projectId,
-            spreadsheetId: valueResult.spreadsheetId,
-            sheetName: valueResult.selectedSheetName,
-            authMode: valueResult.accessPolicy.googleAuth,
-            previewValueCount: valueResult.previewValues.length,
-          });
-        }
-      }).catch(async (error) => {
-        if (previewRequestRef.current === requestId) {
-          logCashflowLab('preview.values.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-          setErrorMessage(formatError(error));
-        }
-      });
+      if (!sheetName && result.selectedSheetName) setSheetName(result.selectedSheetName);
     } catch (error) {
       logCashflowLab('preview.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setPreview(null);
       setErrorMessage(formatError(error));
+      if (getErrorCode(error) === 'google_sheet_service_account_forbidden') {
+        void handleLoadShareAccount();
+      }
     } finally {
       setLoading(false);
     }
   }
 
   async function handleApplySheetValues() {
-    if (!projectId || loading || !spreadsheetId) return;
+    if (!projectId || loading || !spreadsheetId || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
+    setStatusMessage('');
     logCashflowLab('apply.sheet_values.start', {
       projectId,
       spreadsheetId,
@@ -428,6 +507,8 @@ export function CashflowSheetLabPage({
           cashflowSnapshotError: result.cashflowSnapshotError,
         });
       }
+      setReviewedSourceKey(sourceKey);
+      setStatusMessage('시트 값을 반영했습니다.');
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -449,10 +530,47 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
+  const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
       <section className="grid gap-3 border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold text-slate-950">시트 연동 검토</div>
+            <div className="mt-0.5 truncate text-[11px] text-slate-500">
+              현재 사업 {projectId || '-'}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-none px-2 text-[11px]"
+              disabled={!projectId || accountLoading}
+              onClick={() => void handleLoadShareAccount()}
+            >
+              {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              공유 계정 확인
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-none px-2 text-[11px]"
+              disabled={!systemAccountEmail}
+              onClick={handleCopyShareAccount}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              공유 계정 복사
+            </Button>
+          </div>
+        </div>
+        {systemAccountEmail && (
+          <div className="flex flex-wrap items-center gap-2 border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-900">
+            <span className="font-semibold">Google Sheet 공유 대상</span>
+            <span className="min-w-0 truncate font-mono">{systemAccountEmail}</span>
+          </div>
+        )}
         <div className="grid gap-2">
           <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px_140px_140px_auto_auto]">
             <Input
@@ -496,7 +614,7 @@ export function CashflowSheetLabPage({
             <Button
               type="button"
               className="h-10 gap-1.5 rounded-none text-[12px]"
-              disabled={!projectId || loading || !spreadsheetId}
+              disabled={!canApply}
               onClick={() => void handleApplySheetValues()}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
@@ -508,6 +626,12 @@ export function CashflowSheetLabPage({
           <div className="flex items-center gap-2 border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
             <AlertCircle className="h-4 w-4" />
             <span>{errorMessage}</span>
+          </div>
+        )}
+        {statusMessage && (
+          <div className="flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{statusMessage}</span>
           </div>
         )}
       </section>

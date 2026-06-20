@@ -38,13 +38,14 @@ describe('CashflowSheetLabPage shell', () => {
     expect(portalCashflowSource).not.toContain('shouldShowCashflowSheetLab');
     expect(portalCashflowSource).not.toContain('deployment-surface');
     expect(portalCashflowSource).not.toMatch(/show[A-Za-z0-9]*Sheet[A-Za-z0-9]*Lab\s*&&/);
-    expect(pageSource).not.toContain('usePortalStore');
-    expect(pageSource).not.toContain('../../data/portal-store');
+    expect(pageSource).toContain('usePortalStore');
+    expect(pageSource).toContain('../../data/portal-store');
   });
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
+    expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
     expect(pageSource).toContain('requestLoginFlow');
@@ -63,6 +64,12 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('google_sheet_service_account_forbidden');
     expect(pageSource).toContain('시트를 시스템 계정');
     expect(pageSource).toContain('handleApplySheetValues');
+    expect(pageSource).toContain('handleLoadShareAccount');
+    expect(pageSource).toContain('buildSourceKey');
+    expect(pageSource).toContain('reviewedSourceKey === sourceKey');
+    expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
+    expect(pageSource).toContain('공유 계정 확인');
+    expect(pageSource).toContain('공유 계정 복사');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).toContain('시트 값 반영하기');
     expect(pageSource).toContain('입금 합계');
@@ -73,7 +80,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).not.toContain('previewCashflowProjectionWritebackViaBff');
     expect(pageSource).not.toContain('applyCashflowProjectionWritebackViaBff');
-    expect(pageSource).not.toContain('systemAccountEmail');
+    expect(pageSource).toContain('systemAccountEmail');
     expect(pageSource).not.toContain('mysc:cashflow-sheet-lab-action');
     expect(pageSource).not.toContain("action === 'apply'");
     expect(pageSource).not.toContain('config.load');

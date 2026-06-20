@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
 
@@ -151,6 +152,51 @@ describe('sheets cashflow readonly client', () => {
         idempotencyKey: 'apply-001',
       }),
     );
+  });
+
+  it('loads the service account share target manually through same-origin BFF', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          configured: false,
+          config: null,
+          systemAccountEmail: 'cashflow-service@mysc.iam.gserviceaccount.com',
+          accessPolicy: {
+            googleAuth: 'service_account',
+            serviceAccountEmail: 'cashflow-service@mysc.iam.gserviceaccount.com',
+            sheetPermission: 'shared_with_mysc_system_account',
+          },
+        },
+      })),
+    });
+
+    const result = await getCashflowSheetLabShareAccountViaBff({
+      tenantId: 'mysc',
+      actor: {
+        uid: 'user-1',
+        role: 'workspace_user',
+        email: 'user@mysc.co.kr',
+        idToken: 'firebase-token',
+      },
+      projectId: 'p001',
+      client,
+    });
+
+    expect(result.systemAccountEmail).toBe('cashflow-service@mysc.iam.gserviceaccount.com');
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/config',
+      expect.objectContaining({
+        tenantId: 'mysc',
+        actor: expect.objectContaining({
+          id: 'user-1',
+          email: 'user@mysc.co.kr',
+          role: 'workspace_user',
+          idToken: 'firebase-token',
+        }),
+      }),
+    );
+    expect(client.get.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('uses same-origin BFF instead of the global Java API base URL', async () => {

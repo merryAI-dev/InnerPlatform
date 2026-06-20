@@ -175,6 +175,16 @@ export interface CashflowSheetLabApplyResult {
   };
 }
 
+export interface CashflowSheetLabShareAccountResult {
+  projectId: string;
+  systemAccountEmail?: string;
+  accessPolicy?: {
+    googleAuth: 'service_account';
+    serviceAccountEmail?: string;
+    sheetPermission: 'shared_with_mysc_system_account';
+  };
+}
+
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
 function createSameOriginBffClient(): PlatformApiClient {
@@ -243,6 +253,25 @@ export async function applyCashflowSheetLabViaBff(params: {
       },
       idempotencyKey: params.idempotencyKey,
       timeoutMs: 30000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function getCashflowSheetLabShareAccountViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabShareAccountResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.get<CashflowSheetLabShareAccountResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
       retries: 0,
     },
   );
