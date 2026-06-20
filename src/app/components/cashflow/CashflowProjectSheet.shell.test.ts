@@ -87,6 +87,14 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('renderProjectionActualDiffTable');
   });
 
+  it('replaces the empty-row toggle with an explicit sheet refresh action', () => {
+    expect(cashflowProjectSheetSource).toContain('applyCashflowSheetLabViaBff');
+    expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
+    expect(cashflowProjectSheetSource).toContain('시트 값을 새로고침했습니다.');
+    expect(cashflowProjectSheetSource).toContain('새로고침');
+    expect(cashflowProjectSheetSource).not.toContain('0원 포함');
+  });
+
   it('hydrates visible sheet weeks with canonical week dates before rendering labels', () => {
     expect(cashflowProjectSheetSource).toContain('function hydrateWeekDates');
     expect(cashflowProjectSheetSource).toContain('getMonthMondayWeeks(week.yearMonth)');

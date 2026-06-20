@@ -43,6 +43,7 @@ import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-c
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTimelineItem, type CashflowOpsTone } from './cashflow-ops-summary';
 import { RollingAmount } from '../ui/rolling-amount';
+import { applyCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -333,6 +334,7 @@ export function CashflowProjectSheet({
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
+  const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
   const [editLockBusy, setEditLockBusy] = useState(false);
   const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
   const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
@@ -596,12 +598,11 @@ export function CashflowProjectSheet({
     };
   }, [db, orgId, projectId]);
 
-  useEffect(() => {
+  const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
     if (!db || !cashflowSheetRange) {
       setRangeLoadedWeeks([]);
-      return undefined;
+      return;
     }
-    let cancelled = false;
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const q = query(
       base,
@@ -609,23 +610,23 @@ export function CashflowProjectSheet({
       where('yearMonth', '<=', cashflowSheetRange.endYearMonth),
       limit(5000),
     );
-    getDocs(q)
-      .then((snap) => {
-        if (cancelled) return;
-        setRangeLoadedWeeks(
-          snap.docs
-            .map((d) => d.data() as CashflowWeekSheet)
-            .filter((week) => week.projectId === projectId),
-        );
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRangeLoadedWeeks([]);
-      });
+    const snap = await getDocs(q);
+    setRangeLoadedWeeks(
+      snap.docs
+        .map((d) => d.data() as CashflowWeekSheet)
+        .filter((week) => week.projectId === projectId),
+    );
+  }, [cashflowSheetRange, db, orgId, projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCashflowSheetRangeWeeks().catch(() => {
+      if (!cancelled) setRangeLoadedWeeks([]);
+    });
     return () => {
       cancelled = true;
     };
-  }, [cashflowSheetRange, db, orgId, projectId]);
+  }, [loadCashflowSheetRangeWeeks]);
 
   useEffect(() => {
     setLaborRisk(null);
@@ -674,6 +675,61 @@ export function CashflowProjectSheet({
       setLaborRiskLoading(false);
     }
   }, [orgId, projectId, resolveBffActor, user?.uid]);
+
+  const handleRefreshSheetValues = useCallback(async (): Promise<void> => {
+    if (!cashflowSheetConfig?.value) {
+      toast.error('연결된 Google Sheet가 없습니다.');
+      return;
+    }
+    const actor = await resolveBffActor();
+    if (!actor?.idToken) {
+      toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+      return;
+    }
+    setSheetRefreshLoading(true);
+    try {
+      const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+      await applyCashflowSheetLabViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        value: cashflowSheetConfig.value,
+        sheetName: cashflowSheetConfig.sheetName || undefined,
+        startWeek: cashflowSheetConfig.startWeek || undefined,
+        endWeek: cashflowSheetConfig.endWeek || undefined,
+        idempotencyKey,
+      });
+      await loadCashflowSheetRangeWeeks();
+      toast.success('시트 값을 새로고침했습니다.');
+    } catch (error) {
+      if (isBffAuthRejection(error)) {
+        try {
+          const actor = await resolveBffActor({ forceRefresh: true });
+          if (!actor?.idToken) throw error;
+          const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+          await applyCashflowSheetLabViaBff({
+            tenantId: orgId,
+            actor,
+            projectId,
+            value: cashflowSheetConfig.value,
+            sheetName: cashflowSheetConfig.sheetName || undefined,
+            startWeek: cashflowSheetConfig.startWeek || undefined,
+            endWeek: cashflowSheetConfig.endWeek || undefined,
+            idempotencyKey,
+          });
+          await loadCashflowSheetRangeWeeks();
+          toast.success('시트 값을 새로고침했습니다.');
+          return;
+        } catch (retryError) {
+          toast.error(resolveApiErrorMessage(retryError, '시트 값을 새로고침하지 못했습니다.'));
+          return;
+        }
+      }
+      toast.error(resolveApiErrorMessage(error, '시트 값을 새로고침하지 못했습니다.'));
+    } finally {
+      setSheetRefreshLoading(false);
+    }
+  }, [cashflowSheetConfig, loadCashflowSheetRangeWeeks, orgId, projectId, resolveBffActor]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -1707,11 +1763,14 @@ export function CashflowProjectSheet({
               <Button
                 type="button"
                 size="sm"
-                variant={showEmptyCashflowRows ? 'default' : 'outline'}
-                className="h-8 rounded-full border-0 px-3 text-[11px] shadow-sm"
-                onClick={() => setShowEmptyCashflowRows((prev) => !prev)}
+                variant="outline"
+                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
+                onClick={() => void handleRefreshSheetValues()}
+                disabled={sheetRefreshLoading || !cashflowSheetConfig?.value}
+                title="Google Sheet 값을 캐시플로우에 수동 반영"
               >
-                0원 포함
+                {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                새로고침
               </Button>
               <Badge variant="outline" className="rounded-full border-0 bg-white px-2.5 py-1 text-[10px] text-slate-600 shadow-sm">
                 {weekCount.toLocaleString()}주
