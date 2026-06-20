@@ -166,6 +166,12 @@ function formatShortWeekRange(week: Pick<MonthMondayWeek, 'weekStart' | 'weekEnd
   return `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}`;
 }
 
+function hydrateWeekDates(week: MonthMondayWeek): MonthMondayWeek {
+  if (week.weekStart && week.weekEnd) return week;
+  const canonical = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
+  return canonical ? { ...canonical, ...week, weekStart: canonical.weekStart, weekEnd: canonical.weekEnd } : week;
+}
+
 function renderCashflowLineLabel(label: string): ReactNode {
   const parenIndex = label.indexOf('(');
   if (parenIndex < 0) return label;
@@ -347,7 +353,7 @@ export function CashflowProjectSheet({
     const rangeStart = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.startWeek) : null;
     const rangeEnd = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.endWeek) : null;
     for (const week of baseWeeks) {
-      byKey.set(`${week.yearMonth}:${week.weekNo}`, week);
+      byKey.set(`${week.yearMonth}:${week.weekNo}`, hydrateWeekDates(week));
     }
     for (const week of allProjectCashflowWeeks) {
       if (week.projectId !== projectId) continue;
@@ -361,13 +367,13 @@ export function CashflowProjectSheet({
       }
       const key = `${week.yearMonth}:${weekNo}`;
       if (byKey.has(key)) continue;
-      byKey.set(key, {
+      byKey.set(key, hydrateWeekDates({
         yearMonth: week.yearMonth,
         weekNo,
         weekStart: week.weekStart || '',
         weekEnd: week.weekEnd || '',
         label: formatSheetWeekLabel(week.yearMonth, weekNo),
-      });
+      }));
     }
     return Array.from(byKey.values())
       .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);

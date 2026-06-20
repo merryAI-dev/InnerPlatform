@@ -76,6 +76,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('renderProjectionActualDiffTable');
   });
 
+  it('hydrates visible sheet weeks with canonical week dates before rendering labels', () => {
+    expect(cashflowProjectSheetSource).toContain('function hydrateWeekDates');
+    expect(cashflowProjectSheetSource).toContain('getMonthMondayWeeks(week.yearMonth)');
+    expect(cashflowProjectSheetSource).toContain('hydrateWeekDates(week)');
+  });
+
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");
