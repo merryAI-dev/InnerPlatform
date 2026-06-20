@@ -75,7 +75,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('공유 계정 복사');
     expect(pageSource).toContain('이미 시트 값이 연결되어 있습니다.');
     expect(pageSource).toContain('이미 연결된 시트 설정을 불러왔습니다.');
-    expect(pageSource).toContain('Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.');
+    expect(pageSource).toContain('공유 완료 확인하기');
+    expect(pageSource).toContain('공유 완료 확인됨');
+    expect(pageSource).toContain('Google Sheet를 위 공유 계정에 보기 권한으로 공유한 뒤 아래 버튼을 누르세요.');
+    expect(pageSource).not.toContain('type="checkbox"');
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).toContain('시트 값 반영하기');

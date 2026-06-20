@@ -628,15 +628,19 @@ export function CashflowSheetLabPage({
                   {systemAccountEmail}
                 </div>
               )}
-              <label className="flex items-start gap-2 text-[13px] font-medium text-slate-800">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4"
-                  checked={shareConfirmed}
-                  onChange={(event) => setShareConfirmed(event.target.checked)}
-                />
-                <span>Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.</span>
-              </label>
+              <div className="space-y-2">
+                <div className="text-[12px] text-slate-500">Google Sheet를 위 공유 계정에 보기 권한으로 공유한 뒤 아래 버튼을 누르세요.</div>
+                <Button
+                  type="button"
+                  variant={shareConfirmed ? 'default' : 'outline'}
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  disabled={!systemAccountEmail}
+                  onClick={() => setShareConfirmed(true)}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {shareConfirmed ? '공유 완료 확인됨' : '공유 완료 확인하기'}
+                </Button>
+              </div>
             </div>
           </li>
 

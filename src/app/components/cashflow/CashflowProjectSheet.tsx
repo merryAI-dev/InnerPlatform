@@ -2674,6 +2674,9 @@ export function CashflowProjectSheet({
       .replace(' 항목이 있습니다.', ' 항목');
     const visibleInbox = opsSummary.inbox.slice(0, 4);
     const hiddenInboxCount = Math.max(0, opsSummary.inbox.length - visibleInbox.length);
+    const statusBadgeLabel = opsSummary.status.kind === 'ready'
+      ? opsSummary.status.label
+      : `확인 항목 ${opsSummary.inbox.length}건`;
 
     return (
       <Card className="overflow-hidden rounded-[24px] border-0 bg-slate-50/80 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -2686,7 +2689,7 @@ export function CashflowProjectSheet({
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[10px] text-slate-400 sm:inline">기준일 {todayIso}</span>
               <Badge className={`rounded-full border-0 px-2.5 py-1 text-[10px] shadow-sm ${opsToneClass(opsSummary.status.tone)}`}>
-                {opsSummary.status.label}
+                {statusBadgeLabel}
               </Badge>
             </div>
           </div>
@@ -2718,7 +2721,7 @@ export function CashflowProjectSheet({
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold leading-3 text-slate-500">이번 주 기준</div>
                   <div className={`mt-1 truncate text-[13px] font-bold leading-4 ${opsTextClass(opsSummary.status.tone)}`}>
-                    {opsSummary.status.label}
+                    {statusBadgeLabel}
                   </div>
                   <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">{compactStatusDetail}</div>
                 </div>
