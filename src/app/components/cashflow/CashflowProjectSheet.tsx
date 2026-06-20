@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where } from 'firebase/firestore';
-import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, Save } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -284,30 +284,14 @@ export function CashflowProjectSheet({
   const resolveBffActor = useCallback(async (options: { forceRefresh?: boolean } = {}) => {
     const currentActor = latestBffActorRef.current;
     const firebaseAuthUser = getAuthInstance()?.currentUser;
-    const firebaseToken = await firebaseAuthUser?.getIdToken(Boolean(options.forceRefresh)).catch((error) => {
-      console.warn('[CashflowProjectSheet] BFF token resolve failed', {
-        projectId,
-        actorEmail: currentActor.email,
-        forceRefresh: Boolean(options.forceRefresh),
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return undefined;
-    });
+    const firebaseToken = await firebaseAuthUser?.getIdToken(Boolean(options.forceRefresh)).catch(() => undefined);
     const nextToken = firebaseToken || currentActor.idToken;
     if (!nextToken) return null;
-    if (options.forceRefresh) {
-      console.info('[CashflowProjectSheet] refreshed BFF token from Firebase', {
-        projectId,
-        actorEmail: currentActor.email,
-        tokenSource: firebaseToken ? 'firebase' : 'store',
-        forceRefresh: Boolean(options.forceRefresh),
-      });
-    }
     return {
       ...currentActor,
       idToken: nextToken,
     };
-  }, [projectId]);
+  }, []);
 
   const {
     yearMonth,
@@ -423,9 +407,6 @@ export function CashflowProjectSheet({
     });
   }, [allProjectCashflowWeeks, cashflowSheetRange?.startYearMonth, projectId, selectedYear]);
 
-
-  // ── Actual: Firestore cashflow_weeks actual 값 사용 ──
-
   const [differenceViewMode, setDifferenceViewMode] = useState<'diff' | 'all'>('diff');
   const [showEmptyCashflowRows, setShowEmptyCashflowRows] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -464,7 +445,6 @@ export function CashflowProjectSheet({
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (!hasDirty) return;
-      // Modern browsers ignore custom messages. Setting returnValue triggers the confirmation dialog.
       e.preventDefault();
       e.returnValue = '';
     };
@@ -474,14 +454,12 @@ export function CashflowProjectSheet({
   }, [hasDirty]);
 
   useEffect(() => {
-    // If autosave clears the dirty state while we're blocked, let the navigation proceed.
     if (blocker.state === 'blocked' && !hasDirty) {
       blocker.proceed();
     }
   }, [blocker, hasDirty]);
 
   useEffect(() => {
-    // Clear drafts when switching month to avoid writing into wrong docs.
     setDrafts({});
     setEditingWeekModes({});
     setWeekSaveState({});
@@ -609,9 +587,8 @@ export function CashflowProjectSheet({
             .filter((week) => week.projectId === projectId),
         );
       })
-      .catch((error) => {
+      .catch(() => {
         if (cancelled) return;
-        console.warn('[CashflowProjectSheet] sheet range fetch failed:', error);
         setRangeLoadedWeeks([]);
       });
     return () => {
@@ -625,7 +602,7 @@ export function CashflowProjectSheet({
     setLaborRiskLoading(false);
   }, [projectId]);
 
-  const handleManualLaborRiskCheck = useCallback(async (): Promise<void> => {
+  const handleRefreshLaborRisk = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
       setLaborRisk(null);
       setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
@@ -650,13 +627,6 @@ export function CashflowProjectSheet({
         });
       } catch (error) {
         if (!isBffAuthRejection(error)) throw error;
-        console.warn('[CashflowProjectSheet] labor risk BFF auth rejected, retrying with refreshed token', {
-          projectId,
-          status: (error as { status?: number }).status,
-          code: (error as { body?: { code?: string; error?: string } }).body?.code
-            || (error as { body?: { error?: string } }).body?.error,
-          requestId: (error as { requestId?: string }).requestId,
-        });
         const refreshedActor = await resolveBffActor({ forceRefresh: true });
         if (!refreshedActor?.idToken) throw error;
         result = await fetchCashflowLaborRiskViaBff({
@@ -667,14 +637,6 @@ export function CashflowProjectSheet({
       }
       setLaborRisk(result);
     } catch (error) {
-      console.warn('[CashflowProjectSheet] manual labor risk fetch failed', {
-        projectId,
-        status: (error as { status?: number }).status,
-        code: (error as { body?: { code?: string; error?: string } }).body?.code
-          || (error as { body?: { error?: string } }).body?.error,
-        requestId: (error as { requestId?: string }).requestId,
-        message: error instanceof Error ? error.message : String(error),
-      });
       setLaborRisk(null);
       setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
     } finally {
@@ -876,7 +838,6 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    // Actual/Projection → Firestore 캐시플로 시트 값 사용
     const doc = byWeekNo.get(params.weekNo);
     const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
     const key = resolveCellKey(params);
@@ -1087,7 +1048,6 @@ export function CashflowProjectSheet({
       }
     }
 
-    // Even if nothing changed (user typed and reverted), clear redundant drafts.
     const hasAnyDrafts = Object.keys(rawByLine).length > 0;
     if (!hasAnyDrafts) return;
 
@@ -1318,8 +1278,7 @@ export function CashflowProjectSheet({
         return next;
       });
       toast.success('주차 Projection을 작성완료 처리했습니다.');
-    })().catch((error) => {
-      console.error('[Cashflow] projection complete failed:', error);
+    })().catch(() => {
       toast.error('작성완료 처리에 실패했습니다. 네트워크/권한을 확인해 주세요.');
     }).finally(() => {
       setProjectionCompleteWeek((prev) => (prev === weekNo ? null : prev));
@@ -1377,8 +1336,7 @@ export function CashflowProjectSheet({
         expenseStatusLabel: accountingState.expenseStatusLabel,
         expenseStatusDescription: accountingState.expenseStatusDescription,
       });
-    } catch (error) {
-      console.error('[Cashflow] weekly submission status read failed:', error);
+    } catch {
       toast.error('결산 전 제출현황을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     }
   }, [db, orgId, projectId, yearMonth]);
@@ -2635,7 +2593,7 @@ export function CashflowProjectSheet({
     if (laborRiskError) {
       return <div className="text-[11px] font-semibold text-amber-700">인건비/잔액 체크 실패: {laborRiskError}</div>;
     }
-    if (!laborRisk) return <div className="text-[11px] text-slate-500">수동 체크를 누르면 인건비/잔액 체크 결과를 불러옵니다.</div>;
+    if (!laborRisk) return <div className="text-[11px] text-slate-500">새로 고침을 누르면 인건비/잔액 체크 결과를 불러옵니다.</div>;
 
     const missingMonths = laborRisk.labor.missingProjectionMonths;
     const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
@@ -2693,9 +2651,7 @@ export function CashflowProjectSheet({
 
   function renderOperationsPanel() {
     const compactStatusDetail = opsSummary.status.detail
-      .replace(' 항목이 있습니다.', ' 항목')
-      .replace('차단 항목', '차단 항목')
-      .replace('확인 항목', '확인 항목');
+      .replace(' 항목이 있습니다.', ' 항목');
     const visibleInbox = opsSummary.inbox.slice(0, 4);
     const hiddenInboxCount = Math.max(0, opsSummary.inbox.length - visibleInbox.length);
 
@@ -2763,22 +2719,21 @@ export function CashflowProjectSheet({
           <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <div className="text-[11px] font-bold text-slate-900">
-              <HoverExplain message="BFF가 Firebase cashflow_weeks를 읽어 계산합니다. 프론트는 결과를 표시만 합니다.">
+              <HoverExplain message="저장된 주차 값을 읽어 현재 잔액과 다음 인건비를 계산합니다.">
                 인건비/잔액 체크
               </HoverExplain>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className={`text-[10px] font-semibold ${opsTextClass(opsSummary.status.tone)}`}>{opsSummary.status.label}</span>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
                   className="h-7 rounded-full px-2.5 text-[10px]"
-                  onClick={() => void handleManualLaborRiskCheck()}
+                  onClick={() => void handleRefreshLaborRisk()}
                   disabled={laborRiskLoading || !projectId}
                 >
-                  {laborRiskLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
-                  수동 체크
+                  {laborRiskLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                  새로 고침
                 </Button>
               </div>
             </div>
@@ -2802,7 +2757,7 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">운영 로그</div>
-              <div className="text-[10px] text-slate-500">저장 필드와 계산 신호를 구분해 표시합니다.</div>
+              <div className="text-[10px] text-slate-500">최근 저장과 확인 기록입니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
@@ -2831,9 +2786,6 @@ export function CashflowProjectSheet({
                         </span>
                         <span className="truncate text-[11px] font-bold text-slate-900">{item.title}</span>
                       </div>
-                      {item.fieldLabel && (
-                        <div className="mt-0.5 truncate font-mono text-[9px] leading-3 text-slate-400">{item.fieldLabel}</div>
-                      )}
                     </div>
                     {item.timeLabel && <div className="shrink-0 text-[9px] tabular-nums text-slate-400">{item.timeLabel}</div>}
                   </div>
@@ -2842,142 +2794,6 @@ export function CashflowProjectSheet({
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  function renderLaborRiskPanel() {
-    if (laborRiskLoading) {
-      return (
-        <Card className="border-slate-200">
-          <CardContent className="flex items-center gap-2 p-3 text-[12px] text-slate-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            인건비/잔액 체크를 불러오는 중입니다.
-          </CardContent>
-        </Card>
-      );
-    }
-
-    if (laborRiskError) {
-      return (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="space-y-1 p-3">
-            <div className="text-[12px] font-semibold text-amber-900">인건비/잔액 체크 실패</div>
-            <div className="text-[11px] text-amber-800">{laborRiskError}</div>
-          </CardContent>
-        </Card>
-      );
-    }
-
-    if (!laborRisk) return null;
-
-    const missingMonths = laborRisk.labor.missingProjectionMonths;
-    const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
-    const nextLaborAmount = laborRisk.labor.nextProjection?.amount
-      ?? laborRisk.labor.nextMonthProjection.projectionAmount
-      ?? laborRisk.labor.referenceActualAmount
-      ?? 0;
-    const laborChanged = laborRisk.labor.lastMonth.actualAmount !== nextLaborAmount;
-    const needsReview = laborChanged || nextMonthProjectionMissing || missingMonths.length > 0 || laborRisk.shortage.status !== 'ok';
-    const statusLabel = laborRisk.shortage.status === 'danger'
-      ? '부족 예상'
-      : needsReview
-        ? '확인 필요'
-        : '확인 필요 없음';
-
-    return (
-      <Card className="overflow-hidden border-slate-200">
-        <CardContent className="space-y-2 p-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <div className="text-[12px] font-semibold text-slate-950">
-                <HoverExplain
-                  message="BFF가 Firebase cashflow_weeks를 읽어 계산합니다. 프론트는 결과를 표시만 합니다."
-                >
-                  인건비/잔액 체크
-                </HoverExplain>
-              </div>
-              <div className="text-[10px] text-slate-500">
-                기준일 {laborRisk.asOfDate} · 범위 {laborRisk.range.startYearMonth} ~ {laborRisk.range.endYearMonth}
-              </div>
-            </div>
-            <div className={needsReview ? 'text-[11px] font-semibold text-rose-700' : 'text-[11px] font-semibold text-blue-700'}>
-              {statusLabel}
-            </div>
-          </div>
-
-          <div className="text-[12px] leading-6 text-slate-700">
-            {nextMonthProjectionMissing ? (
-              <>
-                지난달 Actual 인건비는{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
-                오늘 기준 Actual 잔액은{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>
-                입니다.{' '}
-                <span className="font-semibold text-rose-700">다음 달 Projection 인건비가 미작성이라 잔액 부족 여부를 확정할 수 없습니다.</span>{' '}
-                지난달 인건비 기준으로 Projection 작성 여부를 먼저 확인해 주세요.
-              </>
-            ) : (
-              <>
-                지난달 Actual 인건비는{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
-                오늘 기준 Actual 잔액은{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>
-                입니다. 다음 인건비{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(nextLaborAmount)}원</span>
-                이 나가도 예상 잔액은{' '}
-                <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.balanceAfterNextLabor)}원</span>
-                이므로{' '}
-                <span className={laborRisk.labor.balanceAfterNextLabor < 0 ? 'font-semibold text-rose-700' : 'font-semibold text-blue-700'}>
-                  {laborRisk.labor.balanceAfterNextLabor < 0 ? '인건비 부족 가능성이 있습니다.' : '인건비 부족은 없습니다.'}
-                </span>
-                {laborChanged && (
-                  <span className="ml-1 font-semibold text-amber-700">
-                    지난달 인건비는 {fmt(laborRisk.labor.lastMonth.actualAmount)}원인데 이번달 인건비는 {fmt(nextLaborAmount)}원이라서 확인 필요합니다.
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
-            <div>지난달: {laborRisk.labor.lastMonth.label}</div>
-            <div>현재 주차: {laborRisk.current.week?.label || '없음'}</div>
-            <div>다음 인건비 주차: {laborRisk.labor.nextProjection?.label || '없음'}</div>
-            <div>
-              다음 달 Projection: {laborRisk.labor.nextMonthProjection.label} ·{' '}
-              <span className={laborRisk.labor.nextMonthProjection.isWritten ? 'text-slate-600' : 'font-semibold text-rose-700'}>
-                {laborRisk.labor.nextMonthProjection.isWritten ? '작성됨' : '미작성'}
-              </span>
-            </div>
-          </div>
-
-          {missingMonths.length > 0 && (
-            <div className="text-[11px] leading-relaxed text-slate-700">
-              <span className="font-semibold text-amber-700">확인 필요:</span>{' '}
-              MYSC 인건비 Projection 미산입 월은{' '}
-              <span className="font-semibold text-blue-700">
-                {missingMonths.slice(0, 6).map((month) => month.label).join(', ')}
-                {missingMonths.length > 6 ? ` 외 ${missingMonths.length - 6}개월` : ''}
-              </span>
-              입니다. 지난 실제 인건비{' '}
-              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.referenceActualAmount)}원</span>
-              을 기준으로 확인했습니다.
-            </div>
-          )}
-
-          {laborRisk.shortage.week && (
-            <div className="text-[11px] leading-relaxed text-slate-700">
-              <span className="font-semibold text-rose-700">부족 예상:</span>{' '}
-              <span className="font-semibold text-blue-700">
-                {laborRisk.shortage.week.label} ({laborRisk.shortage.week.weekRange})
-              </span>
-              기준 예상 잔액은{' '}
-              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.shortage.projectedBalance || 0)}원</span>
-              입니다. 선입금 또는 지출 조정 필요 여부를 확인해 주세요.
-            </div>
-          )}
         </CardContent>
       </Card>
     );

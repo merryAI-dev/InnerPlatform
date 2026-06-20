@@ -26,7 +26,7 @@ describe('cashflow ops summary', () => {
     });
 
     expect(summary.status.kind).toBe('blocked');
-    expect(summary.status.label).toBe('결산 불가');
+    expect(summary.status.label).toBe('확인 필요');
     expect(summary.status.detail).toBe('이번 주 기준 3개 확인 항목이 있습니다.');
     expect(summary.rates.projection).toMatchObject({ done: 2, total: 3 });
     expect(summary.rates.actual).toMatchObject({ done: 1, total: 3 });
@@ -46,14 +46,13 @@ describe('cashflow ops summary', () => {
       tone: 'info',
       source: 'record',
       sourceLabel: '기록',
-      fieldLabel: 'cashflowEditLocks.lastEditedAt',
     }));
     expect(summary.timeline).toContainEqual(expect.objectContaining({
       title: '차이 확인 필요',
       source: 'computed',
       sourceLabel: '계산',
-      fieldLabel: 'Actual - Projection',
     }));
+    expect(summary.timeline.some((item) => 'fieldLabel' in item)).toBe(false);
   });
 
   it('marks settlement as available when due weeks are written, no diffs exist, and labor risk is clear', () => {
@@ -78,14 +77,13 @@ describe('cashflow ops summary', () => {
 
     expect(summary.status.kind).toBe('ready');
     expect(summary.status.label).toBe('결산 가능');
-    expect(summary.status.detail).toBe('이번 주 기준 결산 불가 항목이 없습니다.');
+    expect(summary.status.detail).toBe('이번 주 기준 확인 항목이 없습니다.');
     expect(summary.inbox[0].title).toBe('확인할 항목이 없습니다');
     expect(summary.timelineCounts).toEqual({ record: 0, computed: 0, system: 1 });
     expect(summary.timeline[0]).toMatchObject({
       title: '운영 로그 대기',
       source: 'system',
       sourceLabel: '시스템',
-      fieldLabel: 'empty-state',
     });
   });
 
@@ -109,7 +107,7 @@ describe('cashflow ops summary', () => {
     expect(summary.timeline).toContainEqual(expect.objectContaining({
       title: '잔액 부족 예상',
       source: 'computed',
-      fieldLabel: 'labor-risk BFF',
     }));
+    expect(summary.timeline.some((item) => 'fieldLabel' in item)).toBe(false);
   });
 });

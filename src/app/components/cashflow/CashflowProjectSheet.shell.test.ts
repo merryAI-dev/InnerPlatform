@@ -82,16 +82,20 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('firebaseToken || currentActor.idToken');
     expect(cashflowProjectSheetSource).toContain('getIdToken(Boolean(options.forceRefresh))');
     expect(cashflowProjectSheetSource).toContain('latestBffActorRef.current = bffActor');
-    expect(cashflowProjectSheetSource).toContain('if (options.forceRefresh)');
     expect(cashflowProjectSheetSource).not.toContain('if (firebaseToken || options.forceRefresh)');
     expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
+    expect(cashflowProjectSheetSource).not.toContain('console.info');
+    expect(cashflowProjectSheetSource).not.toContain('console.warn');
   });
 
-  it('keeps labor risk checks behind a manual action', () => {
-    expect(cashflowProjectSheetSource).toContain('handleManualLaborRiskCheck');
-    expect(cashflowProjectSheetSource).toContain('수동 체크');
+  it('keeps labor risk checks behind an explicit refresh action', () => {
+    expect(cashflowProjectSheetSource).toContain('handleRefreshLaborRisk');
+    expect(cashflowProjectSheetSource).toContain('새로 고침');
+    expect(cashflowProjectSheetSource).toContain('RefreshCw');
     expect(cashflowProjectSheetSource).toContain('fetchCashflowLaborRiskViaBff({');
     expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
+    expect(cashflowProjectSheetSource).not.toContain('수동 체크');
+    expect(cashflowProjectSheetSource).not.toContain('handleManualLaborRiskCheck');
     expect(cashflowProjectSheetSource).not.toContain('laborRiskRequestKeyRef');
     expect(cashflowProjectSheetSource).not.toContain('requesting labor risk');
   });

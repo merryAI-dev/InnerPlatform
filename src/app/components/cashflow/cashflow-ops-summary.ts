@@ -29,7 +29,6 @@ export type CashflowOpsTimelineItem = CashflowOpsItem & {
   timeLabel?: string;
   source: 'record' | 'computed' | 'system';
   sourceLabel: string;
-  fieldLabel?: string;
 };
 
 export type CashflowOpsSummary = {
@@ -180,7 +179,7 @@ export function buildCashflowOpsSummary(input: {
       id: 'all-clear',
       tone: 'success',
       title: '확인할 항목이 없습니다',
-      detail: '현재 기준 결산 차단 항목이 없습니다.',
+      detail: '현재 기준 확인 항목이 없습니다.',
     });
   }
 
@@ -193,7 +192,6 @@ export function buildCashflowOpsSummary(input: {
       detail: input.lastEditedLabel,
       source: 'record',
       sourceLabel: '기록',
-      fieldLabel: 'cashflowEditLocks.lastEditedAt',
     });
   }
   for (const week of weeks) {
@@ -206,7 +204,6 @@ export function buildCashflowOpsSummary(input: {
         timeLabel: formatTimeLabel(week.adminClosedAt),
         source: 'record',
         sourceLabel: '기록',
-        fieldLabel: 'cashflow_weeks.adminClosedAt',
       });
     } else if (week.pmSubmittedAt) {
       timeline.push({
@@ -217,7 +214,6 @@ export function buildCashflowOpsSummary(input: {
         timeLabel: formatTimeLabel(week.pmSubmittedAt),
         source: 'record',
         sourceLabel: '기록',
-        fieldLabel: 'cashflow_weeks.pmSubmittedAt',
       });
     } else if (week.projectionUpdatedAt) {
       timeline.push({
@@ -228,7 +224,6 @@ export function buildCashflowOpsSummary(input: {
         timeLabel: formatTimeLabel(week.projectionUpdatedAt),
         source: 'record',
         sourceLabel: '기록',
-        fieldLabel: 'cashflow_weeks.projectionUpdatedAt',
       });
     } else if (week.updatedAt) {
       timeline.push({
@@ -239,7 +234,6 @@ export function buildCashflowOpsSummary(input: {
         timeLabel: formatTimeLabel(week.updatedAt),
         source: 'record',
         sourceLabel: '기록',
-        fieldLabel: 'cashflow_weeks.updatedAt',
       });
     }
   }
@@ -251,7 +245,6 @@ export function buildCashflowOpsSummary(input: {
       detail: `Projection/Actual 차이 셀 ${input.diffCellCount}건`,
       source: 'computed',
       sourceLabel: '계산',
-      fieldLabel: 'Actual - Projection',
     });
   }
   if (input.labor.shortageStatus !== 'ok') {
@@ -262,7 +255,6 @@ export function buildCashflowOpsSummary(input: {
       detail: `${input.labor.shortageWeekLabel || '예상 주차 없음'} · ${fmt(input.labor.shortageAmount)}원 확인`,
       source: 'computed',
       sourceLabel: '계산',
-      fieldLabel: 'labor-risk BFF',
     });
   }
   if (timeline.length === 0) {
@@ -273,7 +265,6 @@ export function buildCashflowOpsSummary(input: {
       detail: '저장, 결산, 연동 기록이 생기면 여기에 표시됩니다.',
       source: 'system',
       sourceLabel: '시스템',
-      fieldLabel: 'empty-state',
     });
   }
 
@@ -282,7 +273,7 @@ export function buildCashflowOpsSummary(input: {
   const status = blockerCount > 0
     ? {
         kind: 'blocked' as const,
-        label: '결산 불가',
+        label: '확인 필요',
         detail: `이번 주 기준 ${blockerCount.toLocaleString('ko-KR')}개 확인 항목이 있습니다.`,
         tone: 'danger' as const,
       }
@@ -296,7 +287,7 @@ export function buildCashflowOpsSummary(input: {
       : {
           kind: 'ready' as const,
           label: '결산 가능',
-          detail: '이번 주 기준 결산 불가 항목이 없습니다.',
+          detail: '이번 주 기준 확인 항목이 없습니다.',
           tone: 'success' as const,
         };
 
