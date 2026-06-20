@@ -564,14 +564,6 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     applyProjectActualSyncResultLocally({ projectId, result });
 
-    console.groupCollapsed(`[CashflowActualSync] project=${projectId}`);
-    console.log('response', result);
-    console.table(result.weeks.map((week) => ({
-      week: `${week.yearMonth}:w${week.weekNo}`,
-      nonZero: Object.fromEntries(Object.entries(week.amounts || {}).filter(([, amount]) => Number(amount) !== 0)),
-    })));
-    console.groupEnd();
-
     return result;
   }, [applyProjectActualSyncResultLocally, orgId, user]);
 

@@ -154,6 +154,11 @@ function formatAmountInput(raw: string): string {
   return Math.trunc(n).toLocaleString('ko-KR');
 }
 
+function hasWrittenSheetValues(values: Partial<Record<CashflowSheetLineId, unknown>> | undefined): boolean {
+  if (!values) return false;
+  return CASHFLOW_ALL_LINES.some((lineId) => Object.prototype.hasOwnProperty.call(values, lineId));
+}
+
 function formatSheetWeekLabel(yearMonth: string, weekNo: number): string {
   const year = Number.parseInt(yearMonth.slice(2, 4), 10);
   const month = Number.parseInt(yearMonth.slice(5, 7), 10);
@@ -687,8 +692,7 @@ export function CashflowProjectSheet({
     const map: Record<number, boolean> = {};
     for (const def of monthWeeks) {
       const doc = byWeekNo.get(def.weekNo);
-      const actual = doc?.actual || {};
-      map[def.weekNo] = Object.values(actual).some((v) => Number(v) !== 0);
+      map[def.weekNo] = hasWrittenSheetValues(doc?.actual);
     }
     return map;
   }, [byWeekNo, monthWeeks]);
@@ -1015,8 +1019,8 @@ export function CashflowProjectSheet({
       asOfDate: todayIso,
       weeks: annualWeeks.map((week) => {
         const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
-        const projectionHasValue = Object.values(doc?.projection || {}).some((value) => Number(value) !== 0);
-        const actualHasValue = Object.values(doc?.actual || {}).some((value) => Number(value) !== 0);
+        const projectionHasValue = hasWrittenSheetValues(doc?.projection);
+        const actualHasValue = hasWrittenSheetValues(doc?.actual);
         return {
           key: `${week.yearMonth}:${week.weekNo}`,
           label: week.label,
@@ -1782,7 +1786,7 @@ export function CashflowProjectSheet({
                             ) : (
                               <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Prj 미작성</Badge>
                             )}
-                            {doc?.pmSubmitted || Object.values(doc?.actual || {}).some((value) => Number(value) !== 0) ? (
+                            {doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? (
                               <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-white px-1 text-[7px] text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">Act 작성</Badge>
                             ) : (
                               <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Act 미작성</Badge>

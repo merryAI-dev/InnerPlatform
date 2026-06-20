@@ -91,7 +91,7 @@ export interface WeeklyAccountingState {
 
 function hasWeekAmounts(values: Record<string, unknown> | undefined): boolean {
   if (!values) return false;
-  return Object.values(values).some((value) => typeof value === 'number' && Number.isFinite(value) && value !== 0);
+  return Object.keys(values).length > 0;
 }
 
 function formatReviewCountLabel(count: number): string {

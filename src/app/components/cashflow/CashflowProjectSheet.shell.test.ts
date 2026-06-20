@@ -29,6 +29,9 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
     expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
     expect(cashflowWeeksStoreSource).toContain('applyProjectActualSyncResultLocally');
+    expect(cashflowWeeksStoreSource).not.toContain('console.groupCollapsed');
+    expect(cashflowWeeksStoreSource).not.toContain('console.table');
+    expect(cashflowWeeksStoreSource).not.toContain('nonZero');
     expect(cashflowProjectSheetSource).toContain('handleSubmitWeek');
     expect(cashflowProjectSheetSource).toContain('작성완료');
   });
@@ -52,6 +55,14 @@ describe('CashflowProjectSheet actual sync flow', () => {
   it('formats persisted input values for display without changing numeric save parsing', () => {
     expect(cashflowProjectSheetSource).toContain('formatAmountInput(String(persisted.amount))');
     expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
+  });
+
+  it('treats a persisted zero amount as a written sheet value', () => {
+    expect(cashflowProjectSheetSource).toContain('function hasWrittenSheetValues');
+    expect(cashflowProjectSheetSource).toContain('Object.prototype.hasOwnProperty.call(values, lineId)');
+    expect(cashflowProjectSheetSource).toContain('hasWrittenSheetValues(doc?.actual)');
+    expect(cashflowProjectSheetSource).not.toContain('Object.values(actual).some((v) => Number(v) !== 0)');
+    expect(cashflowProjectSheetSource).not.toContain('Object.values(doc?.actual || {}).some((value) => Number(value) !== 0)');
   });
 
   it('shows projection 작성 from projectionUpdated on the project sheet header', () => {

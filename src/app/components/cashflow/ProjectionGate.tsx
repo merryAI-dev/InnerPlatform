@@ -58,7 +58,7 @@ function getCurrentWeek(): { yearMonth: string; weekNo: number; week: MonthMonda
 
 function hasProjectionData(sheet: CashflowWeekSheet | undefined): boolean {
   if (!sheet?.projection) return false;
-  return Object.values(sheet.projection).some((v) => typeof v === 'number' && v !== 0);
+  return Object.keys(sheet.projection).length > 0;
 }
 
 // ── Component ──

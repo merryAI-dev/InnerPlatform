@@ -176,6 +176,29 @@ describe('weekly-accounting-state', () => {
     expect(snapshot.expenseSyncState).toBe('pending');
   });
 
+  it('treats persisted zero cashflow cells as edited sheet data', () => {
+    const snapshot = resolveWeeklyAccountingSnapshot(undefined, {
+      id: 'w1',
+      projectId: 'p1',
+      yearMonth: '2026-03',
+      weekNo: 1,
+      weekStart: '2026-03-02',
+      weekEnd: '2026-03-08',
+      projection: { SALES_IN: 0 },
+      actual: { DIRECT_COST_OUT: 0 },
+      pmSubmitted: false,
+      adminClosed: false,
+      createdAt: '2026-03-02T00:00:00Z',
+      updatedAt: '2026-03-02T00:00:00Z',
+    });
+
+    expect(snapshot.projectionEdited).toBe(true);
+    expect(snapshot.projectionDone).toBe(true);
+    expect(snapshot.expenseEdited).toBe(true);
+    expect(snapshot.expenseDone).toBe(true);
+    expect(snapshot.expenseSyncState).toBe('pending');
+  });
+
   it('keeps pending sync state stable across a persistence echo with only row identity changes', () => {
     const currentRows = [{
       tempId: 'local-1',
