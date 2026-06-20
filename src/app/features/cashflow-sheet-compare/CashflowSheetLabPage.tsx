@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, Loader2, Search, UserPlus } from 'lucide-react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { useFirebase } from '../../lib/firebase-context';
@@ -218,6 +218,13 @@ export function CashflowSheetLabPage({
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
+  const [shareConfirmed, setShareConfirmed] = useState(false);
+  const [applyResult, setApplyResult] = useState<{
+    appliedLineCount: number;
+    projectionLineCount: number;
+    actualLineCount: number;
+    skippedInvalidWeekCount?: number;
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -411,6 +418,7 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
+    setApplyResult(null);
     try {
       const previewSource = {
         value: sheetLink,
@@ -467,7 +475,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleApplySheetValues() {
-    if (!projectId || loading || !spreadsheetId || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || !shareConfirmed || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
@@ -507,6 +515,12 @@ export function CashflowSheetLabPage({
           cashflowSnapshotError: result.cashflowSnapshotError,
         });
       }
+      setApplyResult({
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        skippedInvalidWeekCount: result.skippedInvalidWeekCount,
+      });
       setReviewedSourceKey(sourceKey);
       setStatusMessage('시트 값을 반영했습니다.');
       logCashflowLab('apply.sheet_values.ok', {
@@ -530,17 +544,16 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
-  const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
+  const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
+  const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
 
   return (
-    <div className="space-y-4 p-4 sm:p-6">
-      <section className="grid gap-3 border border-slate-200 bg-white p-4">
+    <div className="bg-slate-100/60 p-4 sm:p-6">
+      <section className="mx-auto grid max-w-6xl gap-3 border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div className="min-w-0">
-            <div className="text-[12px] font-semibold text-slate-950">시트 연동 검토</div>
-            <div className="mt-0.5 truncate text-[11px] text-slate-500">
-              현재 사업 {projectId || '-'}
-            </div>
+            <h1 className="text-[15px] font-semibold text-slate-950">시트 연동 검토</h1>
+            <div className="mt-0.5 truncate text-[11px] text-slate-500">현재 사업 {projectId || '-'}</div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
@@ -565,12 +578,29 @@ export function CashflowSheetLabPage({
             </Button>
           </div>
         </div>
+        <ol className="grid gap-2 text-[12px] text-slate-700 md:grid-cols-4">
+          {['공유 계정 확인', '시트 링크 입력', '검토', '시트 값 반영'].map((label, index) => (
+            <li key={label} className="border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="mr-2 font-mono text-[11px] text-slate-400">{index + 1}</span>
+              <span className="font-medium">{label}</span>
+            </li>
+          ))}
+        </ol>
         {systemAccountEmail && (
           <div className="flex flex-wrap items-center gap-2 border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-900">
             <span className="font-semibold">Google Sheet 공유 대상</span>
             <span className="min-w-0 truncate font-mono">{systemAccountEmail}</span>
           </div>
         )}
+        <label className="flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-800">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={shareConfirmed}
+            onChange={(event) => setShareConfirmed(event.target.checked)}
+          />
+          <span>Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.</span>
+        </label>
         <div className="grid gap-2">
           <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px_140px_140px_auto_auto]">
             <Input
@@ -605,7 +635,7 @@ export function CashflowSheetLabPage({
               type="button"
               variant="outline"
               className="h-10 gap-1.5 rounded-none text-[12px]"
-              disabled={!projectId || loading || !spreadsheetId}
+              disabled={!canPreview}
               onClick={() => void handlePreview()}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -634,10 +664,23 @@ export function CashflowSheetLabPage({
             <span>{statusMessage}</span>
           </div>
         )}
+        {applyResult && (
+          <div className="grid gap-2 border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900 sm:grid-cols-[1fr_auto]">
+            <div>
+              반영 {applyResult.appliedLineCount.toLocaleString()}건
+              {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
+              {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
+              {applyResult.skippedInvalidWeekCount ? ` · 건너뜀 ${applyResult.skippedInvalidWeekCount.toLocaleString()}건` : ''}
+            </div>
+            <Button asChild variant="outline" className="h-8 rounded-none bg-white px-2 text-[11px]">
+              <Link to="/portal/cashflow">캐시플로우로 이동</Link>
+            </Button>
+          </div>
+        )}
       </section>
 
       {preview && (
-        <section className="space-y-4">
+        <section className="mx-auto mt-4 max-w-6xl space-y-4">
           <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[12px] font-medium text-slate-950">

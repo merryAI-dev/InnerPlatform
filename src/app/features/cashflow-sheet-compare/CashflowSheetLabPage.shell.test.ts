@@ -65,11 +65,16 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트를 시스템 계정');
     expect(pageSource).toContain('handleApplySheetValues');
     expect(pageSource).toContain('handleLoadShareAccount');
+    expect(pageSource).toContain('shareConfirmed');
+    expect(pageSource).toContain('canPreview');
+    expect(pageSource).toContain('applyResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');
+    expect(pageSource).toContain('Google Sheet를 위 공유 계정에 보기 권한으로 공유했습니다.');
+    expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).toContain('시트 값 반영하기');
     expect(pageSource).toContain('입금 합계');
