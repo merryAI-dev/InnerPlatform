@@ -11,6 +11,7 @@ import {
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
@@ -217,6 +218,7 @@ export function CashflowSheetLabPage({
   const [endWeek, setEndWeek] = useState('');
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
+  const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [shareConfirmed, setShareConfirmed] = useState(false);
   const [applyResult, setApplyResult] = useState<{
@@ -390,7 +392,14 @@ export function CashflowSheetLabPage({
         return;
       }
       setSystemAccountEmail(email);
-      setStatusMessage('공유 계정을 확인했습니다.');
+      setSavedConfig(result.config || null);
+      if (result.config?.value) {
+        setSheetLink(result.config.value);
+        setSheetName(result.config.sheetName || '');
+        setStartWeek(result.config.startWeek || '');
+        setEndWeek(result.config.endWeek || '');
+      }
+      setStatusMessage(result.config?.value ? '이미 연결된 시트 설정을 불러왔습니다.' : '공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
         projectId,
         hasSystemAccountEmail: true,
@@ -546,6 +555,7 @@ export function CashflowSheetLabPage({
     : '전체';
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
+  const hasSavedConfig = Boolean(savedConfig?.value);
   const activeStep = applyResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-colors ${
@@ -573,6 +583,18 @@ export function CashflowSheetLabPage({
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
+
+        {hasSavedConfig && (
+          <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
+            <div className="font-bold">이미 시트 값이 연결되어 있습니다.</div>
+            <div className="mt-1 text-[12px] text-blue-900">
+              {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
+            </div>
+            <div className="mt-1 break-all text-[11px] text-blue-800">
+              {savedConfig?.spreadsheetTitle || savedConfig?.spreadsheetId || savedConfig?.value}
+            </div>
+          </div>
+        )}
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">

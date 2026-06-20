@@ -310,6 +310,14 @@ export function CashflowProjectSheet({
     label: string;
     activeWeeks: MonthMondayWeek[];
   } | null>(null);
+  const [cashflowSheetConfig, setCashflowSheetConfig] = useState<{
+    value?: string;
+    sheetName?: string;
+    spreadsheetId?: string;
+    spreadsheetTitle?: string;
+    startWeek?: string;
+    endWeek?: string;
+  } | null>(null);
   const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
@@ -532,6 +540,7 @@ export function CashflowProjectSheet({
   useEffect(() => {
     if (!db || !projectId) {
       setCashflowSheetRange(null);
+      setCashflowSheetConfig(null);
       return;
     }
     let cancelled = false;
@@ -539,8 +548,16 @@ export function CashflowProjectSheet({
       .then((snap) => {
         if (cancelled) return;
         const config = snap.exists()
-          ? (snap.data() as { cashflowSheetLab?: { startWeek?: string; endWeek?: string; activeWeeks?: unknown } }).cashflowSheetLab
+          ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown } }).cashflowSheetLab
           : null;
+        setCashflowSheetConfig(config?.value ? {
+          value: config.value,
+          sheetName: config.sheetName,
+          spreadsheetId: config.spreadsheetId,
+          spreadsheetTitle: config.spreadsheetTitle,
+          startWeek: config.startWeek,
+          endWeek: config.endWeek,
+        } : null);
         const start = parseCashflowSheetWeekLabel(config?.startWeek);
         const end = parseCashflowSheetWeekLabel(config?.endWeek);
         const activeWeeks = normalizeActiveSheetWeeks(config?.activeWeeks);
@@ -558,7 +575,10 @@ export function CashflowProjectSheet({
         });
       })
       .catch(() => {
-        if (!cancelled) setCashflowSheetRange(null);
+        if (!cancelled) {
+          setCashflowSheetRange(null);
+          setCashflowSheetConfig(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -2670,6 +2690,26 @@ export function CashflowProjectSheet({
               </Badge>
             </div>
           </div>
+
+          {cashflowSheetConfig && (
+            <div className="flex flex-col gap-2 rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-950 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="font-bold">시트 값 연결됨</div>
+                <div className="mt-0.5 truncate text-blue-800">
+                  {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 rounded-full bg-white px-2.5 text-[10px]"
+                onClick={() => navigate('/portal/cashflow/sheets-lab')}
+              >
+                시트 연동 검토
+              </Button>
+            </div>
+          )}
 
           <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
             <div className="grid gap-2 md:grid-cols-[210px_repeat(3,minmax(158px,1fr))]">

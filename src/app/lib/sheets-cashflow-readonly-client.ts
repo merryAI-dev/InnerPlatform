@@ -177,6 +177,16 @@ export interface CashflowSheetLabApplyResult {
 
 export interface CashflowSheetLabShareAccountResult {
   projectId: string;
+  configured?: boolean;
+  config?: {
+    value?: string;
+    sheetName?: string;
+    spreadsheetId?: string;
+    spreadsheetTitle?: string;
+    startWeek?: string;
+    endWeek?: string;
+    updatedAt?: string;
+  } | null;
   systemAccountEmail?: string;
   accessPolicy?: {
     googleAuth: 'service_account';

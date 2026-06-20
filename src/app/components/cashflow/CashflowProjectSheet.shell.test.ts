@@ -16,6 +16,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('renderOperationsPanel');
     expect(cashflowProjectSheetSource).toContain('운영 대시보드');
     expect(cashflowProjectSheetSource).toContain('opsSummary');
+    expect(cashflowProjectSheetSource).toContain('시트 값 연결됨');
+    expect(cashflowProjectSheetSource).toContain('/portal/cashflow/sheets-lab');
   });
 
   it('keeps actual audit and sync store helpers separate from manual actual completion', () => {
