@@ -225,7 +225,6 @@ export function CashflowSheetLabPage({
     appliedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
-    skippedInvalidWeekCount?: number;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -528,7 +527,6 @@ export function CashflowSheetLabPage({
         appliedLineCount: result.appliedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
-        skippedInvalidWeekCount: result.skippedInvalidWeekCount,
       });
       setReviewedSourceKey(sourceKey);
       setStatusMessage('시트 값을 반영했습니다.');
@@ -586,7 +584,10 @@ export function CashflowSheetLabPage({
 
         {hasSavedConfig && (
           <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
-            <div className="font-bold">이미 시트 값이 연결되어 있습니다.</div>
+            <div className="font-bold">이미 연결된 시트 설정이 있습니다.</div>
+            <div className="mt-1 text-[12px] text-blue-900">
+              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 직접 반영할 수 있습니다.
+            </div>
             <div className="mt-1 text-[12px] text-blue-900">
               {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
             </div>
@@ -724,7 +725,6 @@ export function CashflowSheetLabPage({
                     반영 {applyResult.appliedLineCount.toLocaleString()}건
                     {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
                     {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
-                    {applyResult.skippedInvalidWeekCount ? ` · 건너뜀 ${applyResult.skippedInvalidWeekCount.toLocaleString()}건` : ''}
                   </div>
                   <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
                     <Link to="/portal/cashflow">캐시플로우로 이동</Link>

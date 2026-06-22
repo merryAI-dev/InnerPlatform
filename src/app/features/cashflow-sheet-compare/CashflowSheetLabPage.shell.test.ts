@@ -25,7 +25,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(routesSource).toContain("path: 'cashflow/sheets-lab'");
     expect(routesSource).toContain('CashflowSheetLabPage');
     expect(routesSource).not.toContain('StageOnlyCashflowSheetLabRoute');
-    expect(portalLayoutSource).toContain('/portal/cashflow/sheets-lab');
+    expect(portalLayoutSource).toContain("to: '/portal/cashflow/sheets-lab'");
+    expect(portalLayoutSource).toContain("hidden: true");
     expect(portalCashflowSource).not.toContain('CashflowSheetLabPage');
     expect(portalCashflowSource).not.toContain('projectIdOverride={projectId}');
     expect(portalCashflowSource).not.toContain('embedded');
@@ -73,7 +74,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');
-    expect(pageSource).toContain('이미 시트 값이 연결되어 있습니다.');
+    expect(pageSource).toContain('이미 연결된 시트 설정이 있습니다.');
+    expect(pageSource).toContain('기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 직접 반영할 수 있습니다.');
     expect(pageSource).toContain('이미 연결된 시트 설정을 불러왔습니다.');
     expect(pageSource).toContain('공유 완료 확인하기');
     expect(pageSource).toContain('공유 완료 확인됨');

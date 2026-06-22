@@ -153,6 +153,12 @@ export interface CashflowSheetLabApplyResult {
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
   verifiedLineCount?: number;
+  lastAppliedAt?: string;
+  lastAppliedBy?: {
+    uid?: string;
+    email?: string;
+    role?: string;
+  } | null;
   firebaseResult: {
     ok: boolean;
     commandName: string;
@@ -186,6 +192,15 @@ export interface CashflowSheetLabShareAccountResult {
     startWeek?: string;
     endWeek?: string;
     updatedAt?: string;
+    lastAppliedAt?: string;
+    lastAppliedBy?: {
+      uid?: string;
+      email?: string;
+      role?: string;
+    } | null;
+    lastAppliedLineCount?: number;
+    lastProjectionLineCount?: number;
+    lastActualLineCount?: number;
   } | null;
   systemAccountEmail?: string;
   accessPolicy?: {

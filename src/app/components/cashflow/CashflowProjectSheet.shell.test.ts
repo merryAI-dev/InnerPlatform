@@ -20,8 +20,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain("item.id === 'projection-actual-diff'");
     expect(cashflowProjectSheetSource).toContain('입니다. 확인해 주세요.');
     expect(cashflowProjectSheetSource).toContain('결산 전 확인');
-    expect(cashflowProjectSheetSource).toContain('시트 값 연결됨');
-    expect(cashflowProjectSheetSource).toContain('/portal/cashflow/sheets-lab');
+    expect(cashflowProjectSheetSource).toContain('시트 값 가져오기 설정됨');
+    expect(cashflowProjectSheetSource).not.toContain('시트 연동 검토');
   });
 
   it('keeps actual audit and sync store helpers separate from manual actual completion', () => {
@@ -91,6 +91,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('applyCashflowSheetLabViaBff');
     expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
     expect(cashflowProjectSheetSource).toContain('시트 값을 새로고침했습니다.');
+    expect(cashflowProjectSheetSource).toContain('시트 값 반영 완료');
+    expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
     expect(cashflowProjectSheetSource).toContain('새로고침');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');
   });

@@ -137,6 +137,15 @@ function readCashflowSheetLabConfig(project = {}) {
       email: readOptionalText(config.updatedBy.email),
       role: readOptionalText(config.updatedBy.role),
     } : null,
+    lastAppliedAt: readOptionalText(config.lastAppliedAt),
+    lastAppliedBy: config.lastAppliedBy && typeof config.lastAppliedBy === 'object' ? {
+      uid: readOptionalText(config.lastAppliedBy.uid),
+      email: readOptionalText(config.lastAppliedBy.email),
+      role: readOptionalText(config.lastAppliedBy.role),
+    } : null,
+    lastAppliedLineCount: Number.isFinite(Number(config.lastAppliedLineCount)) ? Number(config.lastAppliedLineCount) : undefined,
+    lastProjectionLineCount: Number.isFinite(Number(config.lastProjectionLineCount)) ? Number(config.lastProjectionLineCount) : undefined,
+    lastActualLineCount: Number.isFinite(Number(config.lastActualLineCount)) ? Number(config.lastActualLineCount) : undefined,
   };
 }
 
@@ -325,6 +334,24 @@ async function saveCashflowSheetLabActiveWeeks({ db, tenantId, projectId, active
       activeWeeks,
       weekBasis: CASHFLOW_WEEK_BASIS,
       totalBasis: CASHFLOW_WEEK_BASIS,
+    },
+    updatedAt: now,
+  }), { merge: true });
+}
+
+async function saveCashflowSheetLabApplyMetadata({ db, tenantId, projectId, context, now, result }) {
+  if (!db) return;
+  await db.doc(projectDocPath(tenantId, projectId)).set(stripUndefinedDeep({
+    cashflowSheetLab: {
+      lastAppliedAt: now,
+      lastAppliedBy: {
+        uid: readOptionalText(context?.actorId),
+        email: readOptionalText(context?.actorEmail),
+        role: readOptionalText(context?.actorRole) || 'workspace_user',
+      },
+      lastAppliedLineCount: result.appliedLineCount,
+      lastProjectionLineCount: result.projectionLineCount,
+      lastActualLineCount: result.actualLineCount,
     },
     updatedAt: now,
   }), { merge: true });
@@ -793,6 +820,19 @@ async function applyConfiguredCashflowSheetLab({
     updatedWeekCount: updatedWeeks.length,
   });
 
+  await saveCashflowSheetLabApplyMetadata({
+    db,
+    tenantId,
+    projectId,
+    context,
+    now,
+    result: {
+      appliedLineCount: lines.length,
+      projectionLineCount,
+      actualLineCount,
+    },
+  });
+
   return {
     projectId,
     spreadsheetId: preview.spreadsheetId,
@@ -828,6 +868,12 @@ async function applyConfiguredCashflowSheetLab({
     appliedLineCount: lines.length,
     projectionLineCount,
     actualLineCount,
+    lastAppliedAt: now,
+    lastAppliedBy: {
+      uid: readOptionalText(context?.actorId),
+      email: readOptionalText(context?.actorEmail),
+      role: readOptionalText(context?.actorRole) || 'workspace_user',
+    },
     skippedInvalidWeekCount: skippedInvalidWeekKeys.length,
     skippedInvalidWeeks: skippedInvalidWeekKeys,
     verifiedLineCount: verification.verifiedLineCount,

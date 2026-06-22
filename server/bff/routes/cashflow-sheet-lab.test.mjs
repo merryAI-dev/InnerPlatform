@@ -333,6 +333,17 @@ describe('cashflow sheet lab route', () => {
       projection: { MYSC_PREPAY_IN: 999 },
       actual: { MYSC_PREPAY_IN: 999 },
     });
+    expect(db.__getDocument().cashflowSheetLab).toMatchObject({
+      lastAppliedAt: expect.any(String),
+      lastAppliedBy: {
+        uid: 'actor-a',
+        email: 'user@mysc.co.kr',
+        role: 'workspace_user',
+      },
+      lastAppliedLineCount: 48,
+      lastProjectionLineCount: 24,
+      lastActualLineCount: 24,
+    });
   });
 
   it('runs the daily cashflow sheet sync worker through the same apply path', async () => {

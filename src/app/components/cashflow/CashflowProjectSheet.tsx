@@ -54,6 +54,16 @@ function fmtSigned(n: number): string {
   return `${n > 0 ? '+' : '-'}${Math.abs(n).toLocaleString('ko-KR')}`;
 }
 
+function formatSheetAppliedAt(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 const CASHFLOW_EDIT_LOCK_TTL_MS = 2 * 60 * 1000;
 
 type CashflowEditLock = {
@@ -329,12 +339,22 @@ export function CashflowProjectSheet({
     spreadsheetTitle?: string;
     startWeek?: string;
     endWeek?: string;
+    lastAppliedAt?: string;
+    lastAppliedBy?: { uid?: string; email?: string; role?: string } | null;
+    lastAppliedLineCount?: number;
+    lastProjectionLineCount?: number;
+    lastActualLineCount?: number;
   } | null>(null);
   const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
+  const [sheetRefreshResult, setSheetRefreshResult] = useState<{
+    appliedLineCount: number;
+    projectionLineCount: number;
+    actualLineCount: number;
+  } | null>(null);
   const [editLockBusy, setEditLockBusy] = useState(false);
   const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
   const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
@@ -561,7 +581,7 @@ export function CashflowProjectSheet({
       .then((snap) => {
         if (cancelled) return;
         const config = snap.exists()
-          ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown } }).cashflowSheetLab
+          ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
           : null;
         setCashflowSheetConfig(config?.value ? {
           value: config.value,
@@ -570,6 +590,11 @@ export function CashflowProjectSheet({
           spreadsheetTitle: config.spreadsheetTitle,
           startWeek: config.startWeek,
           endWeek: config.endWeek,
+          lastAppliedAt: config.lastAppliedAt,
+          lastAppliedBy: config.lastAppliedBy,
+          lastAppliedLineCount: config.lastAppliedLineCount,
+          lastProjectionLineCount: config.lastProjectionLineCount,
+          lastActualLineCount: config.lastActualLineCount,
         } : null);
         const start = parseCashflowSheetWeekLabel(config?.startWeek);
         const end = parseCashflowSheetWeekLabel(config?.endWeek);
@@ -681,15 +706,9 @@ export function CashflowProjectSheet({
       toast.error('연결된 Google Sheet가 없습니다.');
       return;
     }
-    const actor = await resolveBffActor();
-    if (!actor?.idToken) {
-      toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
-      return;
-    }
-    setSheetRefreshLoading(true);
-    try {
+    const apply = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
       const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-      await applyCashflowSheetLabViaBff({
+      return applyCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
         projectId,
@@ -699,25 +718,42 @@ export function CashflowProjectSheet({
         endWeek: cashflowSheetConfig.endWeek || undefined,
         idempotencyKey,
       });
+    };
+    const rememberResult = (result: Awaited<ReturnType<typeof apply>>) => {
+      setSheetRefreshResult({
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+      });
+      setCashflowSheetConfig((current) => current ? ({
+        ...current,
+        lastAppliedAt: result.lastAppliedAt,
+        lastAppliedBy: result.lastAppliedBy,
+        lastAppliedLineCount: result.appliedLineCount,
+        lastProjectionLineCount: result.projectionLineCount,
+        lastActualLineCount: result.actualLineCount,
+      }) : current);
+    };
+    setSheetRefreshLoading(true);
+    setSheetRefreshResult(null);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) {
+        toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+        return;
+      }
+      const result = await apply(actor);
       await loadCashflowSheetRangeWeeks();
+      rememberResult(result);
       toast.success('시트 값을 새로고침했습니다.');
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
           const actor = await resolveBffActor({ forceRefresh: true });
           if (!actor?.idToken) throw error;
-          const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-          await applyCashflowSheetLabViaBff({
-            tenantId: orgId,
-            actor,
-            projectId,
-            value: cashflowSheetConfig.value,
-            sheetName: cashflowSheetConfig.sheetName || undefined,
-            startWeek: cashflowSheetConfig.startWeek || undefined,
-            endWeek: cashflowSheetConfig.endWeek || undefined,
-            idempotencyKey,
-          });
+          const result = await apply(actor);
           await loadCashflowSheetRangeWeeks();
+          rememberResult(result);
           toast.success('시트 값을 새로고침했습니다.');
           return;
         } catch (retryError) {
@@ -2769,22 +2805,29 @@ export function CashflowProjectSheet({
           </div>
 
           {cashflowSheetConfig && (
-            <div className="flex flex-col gap-2 rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-950 sm:flex-row sm:items-center sm:justify-between">
+            <div className="rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-950">
               <div className="min-w-0">
-                <div className="font-bold">시트 값 연결됨</div>
+                <div className="font-bold">시트 값 가져오기 설정됨</div>
                 <div className="mt-0.5 truncate text-blue-800">
-                  {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
+                  {cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'} · {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
                 </div>
+                {sheetRefreshResult ? (
+                  <div className="mt-1 font-semibold text-emerald-800">
+                    시트 값 반영 완료 · 반영 {sheetRefreshResult.appliedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                  </div>
+                ) : null}
+                {cashflowSheetConfig.lastAppliedAt ? (
+                  <div className="mt-1 text-blue-800">
+                    마지막 반영 {formatSheetAppliedAt(cashflowSheetConfig.lastAppliedAt) || cashflowSheetConfig.lastAppliedAt}
+                    {cashflowSheetConfig.lastAppliedBy?.email || cashflowSheetConfig.lastAppliedBy?.uid ? ` · 실행자 ${cashflowSheetConfig.lastAppliedBy.email || cashflowSheetConfig.lastAppliedBy.uid}` : ''}
+                    {typeof cashflowSheetConfig.lastAppliedLineCount === 'number' ? ` · 반영 ${cashflowSheetConfig.lastAppliedLineCount.toLocaleString()}건` : ''}
+                    {typeof cashflowSheetConfig.lastProjectionLineCount === 'number' ? ` · Projection ${cashflowSheetConfig.lastProjectionLineCount.toLocaleString()}건` : ''}
+                    {typeof cashflowSheetConfig.lastActualLineCount === 'number' ? ` · Actual ${cashflowSheetConfig.lastActualLineCount.toLocaleString()}건` : ''}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 새로고침을 누르면 캐시플로우에 반영됩니다.</div>
+                )}
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 shrink-0 rounded-full bg-white px-2.5 text-[10px]"
-                onClick={() => navigate('/portal/cashflow/sheets-lab')}
-              >
-                시트 연동 검토
-              </Button>
             </div>
           )}
 
