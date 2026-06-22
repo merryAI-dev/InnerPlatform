@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, runTransaction, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where, writeBatch } from 'firebase/firestore';
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Database, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
@@ -626,9 +626,10 @@ export function CashflowProjectSheet({
       return;
     }
     const documentPath = getOrgDocumentPath(orgId, 'projects', projectId);
-    const unsubscribe = onSnapshot(
-      doc(db, documentPath),
-      (snap) => {
+    let cancelled = false;
+    getDoc(doc(db, documentPath))
+      .then((snap) => {
+        if (cancelled) return;
         const config = snap.exists()
           ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
           : null;
@@ -682,8 +683,9 @@ export function CashflowProjectSheet({
           label: `${config?.startWeek} ~ ${config?.endWeek}`,
           activeWeeks,
         });
-      },
-      () => {
+      })
+      .catch(() => {
+        if (cancelled) return;
         recordDevtoolsLog({
           kind: 'cashflow_transaction',
           phase: 'error',
@@ -697,9 +699,10 @@ export function CashflowProjectSheet({
         });
         setCashflowSheetRange(null);
         setCashflowSheetConfig(null);
-      },
-    );
-    return unsubscribe;
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [db, orgId, projectId]);
 
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
