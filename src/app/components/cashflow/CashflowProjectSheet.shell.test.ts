@@ -94,6 +94,9 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
     expect(cashflowProjectSheetSource).toContain('시트 변경 후보를 만들었습니다.');
     expect(cashflowProjectSheetSource).toContain('검토 후보 생성 완료');
+    expect(cashflowProjectSheetSource).toContain('sheetStageDialog');
+    expect(cashflowProjectSheetSource).toContain('원장은 아직 변경되지 않았습니다.');
+    expect(cashflowProjectSheetSource).toContain('기존 Actual 변경');
     expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
     expect(cashflowProjectSheetSource).toContain('시트 업데이트 검토');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');

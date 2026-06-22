@@ -42,7 +42,7 @@ import {
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
-import { stageCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
+import { stageCashflowSheetLabViaBff, type CashflowSheetLabChangeCandidate } from '../../lib/sheets-cashflow-readonly-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -389,6 +389,14 @@ export function CashflowProjectSheet({
     projectionLineCount: number;
     actualLineCount: number;
     riskLineCount: number;
+  } | null>(null);
+  const [sheetStageDialog, setSheetStageDialog] = useState<{
+    stagedLineCount: number;
+    projectionLineCount: number;
+    actualLineCount: number;
+    riskLineCount: number;
+    candidates: CashflowSheetLabChangeCandidate[];
+    omittedCandidateCount: number;
   } | null>(null);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
@@ -816,6 +824,14 @@ export function CashflowProjectSheet({
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
         riskLineCount: result.riskLineCount,
+      });
+      setSheetStageDialog({
+        stagedLineCount: result.stagedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        riskLineCount: result.riskLineCount,
+        candidates: result.candidates || [],
+        omittedCandidateCount: result.omittedCandidateCount || 0,
       });
     };
     setSheetRefreshLoading(true);
@@ -3135,6 +3151,22 @@ export function CashflowProjectSheet({
     return 'bg-slate-100 text-slate-700';
   }
 
+  function cashflowCandidateLineLabel(candidate: CashflowSheetLabChangeCandidate): string {
+    return CASHFLOW_SHEET_LINE_LABELS[candidate.lineId as CashflowSheetLineId] || candidate.sourceLabel || candidate.lineId;
+  }
+
+  function cashflowCandidateRiskLabel(flag: string): string {
+    if (flag === 'actual_overwrites_existing') return '기존 Actual 변경';
+    if (flag === 'closed_week_change') return '결산 주차';
+    return flag;
+  }
+
+  function cashflowCandidateAmountLabel(candidate: CashflowSheetLabChangeCandidate): string {
+    const before = candidate.beforeHadValue ? `${fmt(Number(candidate.beforeAmount || 0))}원` : '원장 미작성';
+    const proposed = candidate.proposedHadValue ? `${fmt(Number(candidate.proposedAmount || 0))}원` : '미작성';
+    return `${before} -> ${proposed}`;
+  }
+
   function renderOpsTimeline() {
     const countBadges = [
       { key: 'sheet', label: '시트 반영', value: cashflowEvents.filter((event) => event.type === 'sheet_apply').length },
@@ -3247,6 +3279,90 @@ export function CashflowProjectSheet({
         </div>
         {renderProjectionActualDiffTable()}
       </section>
+
+      <AlertDialog
+        open={!!sheetStageDialog}
+        onOpenChange={(open) => {
+          if (!open) setSheetStageDialog(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-[720px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>시트 변경 후보 {sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건</AlertDialogTitle>
+            <AlertDialogDescription>
+              원장은 아직 변경되지 않았습니다. 시트에서 읽은 값은 검토 후보로 저장되었고, 다음 단계에서 승인해야 캐시플로우 값에 반영됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {sheetStageDialog && (
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="text-[10px] font-semibold text-slate-500">Projection 후보</div>
+                  <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.projectionLineCount.toLocaleString()}건</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="text-[10px] font-semibold text-slate-500">Actual 후보</div>
+                  <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.actualLineCount.toLocaleString()}건</div>
+                </div>
+                <div className="rounded-lg bg-amber-50 px-3 py-2">
+                  <div className="text-[10px] font-semibold text-amber-700">확인 필요</div>
+                  <div className="mt-1 text-[16px] font-bold text-amber-900">{sheetStageDialog.riskLineCount.toLocaleString()}건</div>
+                </div>
+              </div>
+              <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full text-[12px]">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">주차</th>
+                      <th className="px-3 py-2 text-left font-semibold">구분</th>
+                      <th className="px-3 py-2 text-left font-semibold">항목</th>
+                      <th className="px-3 py-2 text-left font-semibold">변경</th>
+                      <th className="px-3 py-2 text-left font-semibold">확인</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sheetStageDialog.candidates.slice(0, 20).map((candidate, index) => (
+                      <tr key={candidate.id || `${candidate.runId}:${candidate.mode}:${candidate.yearMonth}:${candidate.weekNo}:${candidate.lineId}:${index}`} className="border-t border-slate-100">
+                        <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{formatSheetWeekLabel(candidate.yearMonth, candidate.weekNo)}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-600">{candidate.mode === 'projection' ? 'Projection' : 'Actual'}</td>
+                        <td className="px-3 py-2 text-slate-700">
+                          <div className="font-medium">{cashflowCandidateLineLabel(candidate)}</div>
+                          <div className="text-[10px] text-slate-400">{candidate.lineDirection === 'in' ? '입금' : '출금'} · {candidate.sourceCell || '시트 셀'}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-900">{cashflowCandidateAmountLabel(candidate)}</td>
+                        <td className="px-3 py-2">
+                          {candidate.riskFlags?.length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {candidate.riskFlags.map((flag) => (
+                                <span key={flag} className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                  {cashflowCandidateRiskLabel(flag)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">일반 후보</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {sheetStageDialog.candidates.length === 0 && (
+                  <div className="px-3 py-6 text-center text-[12px] text-slate-500">새로 표시할 후보가 없습니다.</div>
+                )}
+                {sheetStageDialog.candidates.length > 20 || sheetStageDialog.omittedCandidateCount > 0 ? (
+                  <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500">
+                    외 {(Math.max(0, sheetStageDialog.candidates.length - 20) + sheetStageDialog.omittedCandidateCount).toLocaleString()}건
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setSheetStageDialog(null)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!auditDialog}
