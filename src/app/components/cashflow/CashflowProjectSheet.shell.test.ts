@@ -95,8 +95,15 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('시트 값을 새로고침했습니다.');
     expect(cashflowProjectSheetSource).toContain('시트 값 반영 완료');
     expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
-    expect(cashflowProjectSheetSource).toContain('새로고침');
+    expect(cashflowProjectSheetSource).toContain('시트 업데이트 반영');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');
+  });
+
+  it('shows cashflow event load failures instead of silently rendering an empty history', () => {
+    expect(cashflowProjectSheetSource).toContain('cashflowEventsError');
+    expect(cashflowProjectSheetSource).toContain('readCashflowEventsSnapshot');
+    expect(cashflowProjectSheetSource).toContain('변경 이력을 불러오지 못했습니다.');
+    expect(cashflowProjectSheetSource).toContain('아직 표시할 변경 기록이 없습니다.');
   });
 
   it('hydrates visible sheet weeks with canonical week dates before rendering labels', () => {

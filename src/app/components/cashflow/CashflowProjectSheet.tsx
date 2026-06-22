@@ -390,6 +390,7 @@ export function CashflowProjectSheet({
     actualLineCount: number;
   } | null>(null);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
+  const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
   const [editLockBusy, setEditLockBusy] = useState(false);
   const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
@@ -692,21 +693,46 @@ export function CashflowProjectSheet({
   const loadCashflowEvents = useCallback(async (): Promise<void> => {
     if (!db || !projectId) {
       setCashflowEvents([]);
+      setCashflowEventsError(null);
       return;
     }
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowEvents'));
-    const snap = await getDocs(query(base, where('projectId', '==', projectId), limit(200)));
-    setCashflowEvents(
-      snap.docs
+    const targetProjectId = String(projectId || '').trim();
+    const readCashflowEventsSnapshot = async (filterByProject: boolean): Promise<CashflowEvent[]> => {
+      const snap = await getDocs(filterByProject
+        ? query(base, where('projectId', '==', projectId), limit(200))
+        : query(base, limit(500)));
+      return snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as Omit<CashflowEvent, 'id'>) }))
-        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
-    );
+        .filter((event) => String(event.projectId || '').trim() === targetProjectId)
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+        .slice(0, 200);
+    };
+
+    try {
+      let events = await readCashflowEventsSnapshot(true);
+      if (events.length === 0) events = await readCashflowEventsSnapshot(false);
+      setCashflowEvents(events);
+      setCashflowEventsError(null);
+    } catch (error) {
+      try {
+        const events = await readCashflowEventsSnapshot(false);
+        setCashflowEvents(events);
+        setCashflowEventsError(null);
+      } catch {
+        setCashflowEvents([]);
+        setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
+      }
+    }
   }, [db, orgId, projectId]);
 
   useEffect(() => {
     let cancelled = false;
-    loadCashflowEvents().catch(() => {
-      if (!cancelled) setCashflowEvents([]);
+    loadCashflowEvents().catch((error) => {
+      if (!cancelled) {
+        setCashflowEvents([]);
+        setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
+      }
     });
     return () => {
       cancelled = true;
@@ -2987,15 +3013,31 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 새로고침을 누르면 캐시플로우에 반영됩니다.</div>
                 ) : null}
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className={`h-7 shrink-0 rounded-full px-2.5 text-[10px] ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
-              >
-                {cashflowSheetConfig ? '설정 변경' : '시트 연동 설정'}
-              </Button>
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                {cashflowSheetConfig?.value ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-full border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-blue-700"
+                    onClick={() => void handleRefreshSheetValues()}
+                    disabled={sheetRefreshLoading}
+                    title="Google Sheet에서 수정한 값을 캐시플로우에 반영"
+                  >
+                    {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                    시트 업데이트 반영
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className={`h-7 rounded-full px-2.5 text-[10px] ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
+                  onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
+                >
+                  {cashflowSheetConfig ? '설정 변경' : '시트 연동 설정'}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -3027,18 +3069,6 @@ export function CashflowProjectSheet({
                     {opsSummary.inbox.length}건
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 shrink-0 rounded-full px-2.5 text-[10px]"
-                  onClick={() => void handleRefreshSheetValues()}
-                  disabled={sheetRefreshLoading || !cashflowSheetConfig?.value}
-                  title="Google Sheet 값을 캐시플로우에 반영"
-                >
-                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  새로고침
-                </Button>
               </div>
               <div className="divide-y divide-slate-50">
                 {visibleInbox.map((item) => (
@@ -3137,9 +3167,17 @@ export function CashflowProjectSheet({
             </div>
           </div>
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-[18px] bg-slate-50/70 px-2 py-2 pr-1">
-            {cashflowEvents.length === 0 ? (
+            {cashflowEventsError ? (
+              <div className="px-2 py-8 text-center text-[10px] leading-4 text-rose-600">
+                변경 이력을 불러오지 못했습니다.
+                <br />
+                {cashflowEventsError}
+              </div>
+            ) : cashflowEvents.length === 0 ? (
               <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
-                배포 이후 새 변경 기록이 생기면 여기에 표시됩니다.
+                아직 표시할 변경 기록이 없습니다.
+                <br />
+                시트 업데이트 반영, 저장, 작성완료, 결산을 실행하면 여기에 기록됩니다.
               </div>
             ) : cashflowEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'
