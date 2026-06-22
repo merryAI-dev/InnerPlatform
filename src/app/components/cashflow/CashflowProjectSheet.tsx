@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where, writeBatch } from 'firebase/firestore';
-import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Database, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -2976,6 +2976,12 @@ export function CashflowProjectSheet({
     const statusReason = opsSummary.status.kind === 'ready'
       ? '확인할 항목이 없습니다.'
       : `${primaryReason?.title || '확인 항목'}입니다. 확인해 주세요.${remainingReasonCount > 0 ? ` 외 ${remainingReasonCount}건` : ''}`;
+    const sheetRangeLabel = cashflowSheetConfig
+      ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
+      : '연결된 Google Sheet가 없습니다.';
+    const sheetIdentityLabel = cashflowSheetConfig
+      ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
+      : '시트 연결 필요';
 
     return (
       <Card className="overflow-hidden rounded-[24px] border-0 bg-slate-50/80 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -2993,61 +2999,157 @@ export function CashflowProjectSheet({
             </div>
           </div>
 
-          <div className={`rounded-[18px] border px-3 py-2 text-[11px] ${cashflowSheetConfig ? 'border-blue-100 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white text-[11px] shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
+            <div className="flex flex-col gap-2 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <div className="font-bold">{cashflowSheetConfig ? '시트 값 가져오기 연결됨' : '시트 값 가져오기 미연결'}</div>
-                {cashflowSheetConfig ? (
-                  <div className="mt-0.5 truncate text-blue-800">
-                    {cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'} · {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
-                  </div>
-                ) : (
-                  <div className="mt-0.5 text-amber-800">
-                    Google Sheet를 연결하면 시트에서 수정한 Projection/Actual 값을 새로고침으로 가져올 수 있습니다.
-                  </div>
-                )}
-                {sheetRefreshResult ? (
-                  <div className="mt-1 font-semibold text-emerald-800">
-                    검토 후보 생성 완료 · 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
-                    {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
-                  </div>
-                ) : null}
-                {cashflowSheetConfig?.lastAppliedAt ? (
-                  <div className="mt-1 text-blue-800">
-                    마지막 반영 {formatSheetAppliedAt(cashflowSheetConfig.lastAppliedAt) || cashflowSheetConfig.lastAppliedAt}
-                    {cashflowSheetConfig.lastAppliedBy?.email || cashflowSheetConfig.lastAppliedBy?.uid ? ` · 실행자 ${cashflowSheetConfig.lastAppliedBy.email || cashflowSheetConfig.lastAppliedBy.uid}` : ''}
-                    {typeof cashflowSheetConfig.lastAppliedLineCount === 'number' ? ` · 반영 ${cashflowSheetConfig.lastAppliedLineCount.toLocaleString()}건` : ''}
-                    {typeof cashflowSheetConfig.lastProjectionLineCount === 'number' ? ` · Projection ${cashflowSheetConfig.lastProjectionLineCount.toLocaleString()}건` : ''}
-                    {typeof cashflowSheetConfig.lastActualLineCount === 'number' ? ` · Actual ${cashflowSheetConfig.lastActualLineCount.toLocaleString()}건` : ''}
-                  </div>
-                ) : cashflowSheetConfig ? (
-                  <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 시트 업데이트 검토를 누르면 변경 후보로 저장됩니다.</div>
-                ) : null}
+                <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">시트 반영 작업</div>
+                <div className="mt-0.5 text-slate-500">방향을 먼저 고르고, 검토 후보를 만든 뒤 승인합니다.</div>
               </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
-                {cashflowSheetConfig?.value ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 rounded-full border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-blue-700"
-                    onClick={() => void handleRefreshSheetValues()}
-                    disabled={sheetRefreshLoading}
-                    title="Google Sheet에서 수정한 값을 검토 후보로 가져오기"
-                  >
-                    {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                    시트 업데이트 검토
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className={`h-7 rounded-full px-2.5 text-[10px] ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
-                >
-                  {cashflowSheetConfig ? '설정 변경' : '시트 연동 설정'}
-                </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={`h-8 rounded-full px-3 text-[11px] ${cashflowSheetConfig ? 'border-slate-200 bg-white text-slate-700' : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+                onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
+              >
+                {cashflowSheetConfig ? '설정 변경' : '시트 연동 설정'}
+              </Button>
+            </div>
+
+            <div className="space-y-3 p-4">
+              <div className={`flex min-h-12 items-center gap-3 rounded-[12px] border px-3 py-2 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                <FileSpreadsheet className={`h-4 w-4 shrink-0 ${cashflowSheetConfig ? 'text-blue-600' : 'text-amber-700'}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
+                    <span>{cashflowSheetConfig ? '시트 값 가져오기 연결됨' : '시트 값 가져오기 미연결'}</span>
+                    <span className="text-slate-400">|</span>
+                    <span className="truncate">{sheetIdentityLabel}</span>
+                  </div>
+                  <div className={`mt-0.5 truncate ${cashflowSheetConfig ? 'text-slate-500' : 'text-amber-800'}`}>{sheetRangeLabel}</div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className={`rounded-[16px] border ${cashflowSheetConfig ? 'border-blue-300 bg-blue-50/60' : 'border-amber-200 bg-amber-50/70'}`}>
+                  <div className={`flex items-center justify-between border-b px-3 py-3 ${cashflowSheetConfig ? 'border-blue-200' : 'border-amber-200'}`}>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${cashflowSheetConfig ? 'bg-blue-600 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                        <ArrowDownToLine className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-950">시트에서 플랫폼으로</div>
+                        <div className="truncate text-[10px] text-slate-500">Google Sheet 값을 읽어 변경 후보로 저장</div>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-blue-700">
+                      <FileSpreadsheet className="h-3.5 w-3.5" />
+                      <span>시트</span>
+                      <span className="text-slate-400">→</span>
+                      <Database className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="space-y-3 px-3 py-3">
+                    <div className="grid gap-2 text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <span className="h-4 w-4 rounded-full border-[5px] border-blue-600 bg-white" />
+                        <span>Projection 변경 후보 생성</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-4 w-4 rounded-full border-[5px] border-blue-600 bg-white" />
+                        <span>Actual 변경 후보 생성</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-4 w-4 rounded border border-slate-300 bg-white" />
+                        <span>승인 전 원장 변경 없음</span>
+                      </div>
+                    </div>
+                    {sheetRefreshResult ? (
+                      <div className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-3 py-2 font-semibold text-emerald-800">
+                        검토 후보 생성 완료 · 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                        {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
+                      </div>
+                    ) : cashflowSheetConfig ? (
+                      <div className="rounded-[12px] border border-blue-100 bg-white px-3 py-2 text-blue-800">
+                        시트에서 값을 수정한 뒤 시트 업데이트 검토를 누르면 변경 후보가 만들어집니다.
+                      </div>
+                    ) : (
+                      <div className="rounded-[12px] border border-amber-200 bg-white px-3 py-2 text-amber-800">
+                        먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.
+                      </div>
+                    )}
+                    {cashflowSheetConfig?.lastAppliedAt ? (
+                      <div className="text-[10px] leading-5 text-slate-500">
+                        마지막 반영 {formatSheetAppliedAt(cashflowSheetConfig.lastAppliedAt) || cashflowSheetConfig.lastAppliedAt}
+                        {cashflowSheetConfig.lastAppliedBy?.email || cashflowSheetConfig.lastAppliedBy?.uid ? ` · 실행자 ${cashflowSheetConfig.lastAppliedBy.email || cashflowSheetConfig.lastAppliedBy.uid}` : ''}
+                        {typeof cashflowSheetConfig.lastAppliedLineCount === 'number' ? ` · 반영 ${cashflowSheetConfig.lastAppliedLineCount.toLocaleString()}건` : ''}
+                        {typeof cashflowSheetConfig.lastProjectionLineCount === 'number' ? ` · Projection ${cashflowSheetConfig.lastProjectionLineCount.toLocaleString()}건` : ''}
+                        {typeof cashflowSheetConfig.lastActualLineCount === 'number' ? ` · Actual ${cashflowSheetConfig.lastActualLineCount.toLocaleString()}건` : ''}
+                      </div>
+                    ) : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-9 w-full rounded-[10px] bg-blue-600 text-[12px] font-bold text-white hover:bg-blue-700 disabled:bg-slate-300"
+                      onClick={() => void handleRefreshSheetValues()}
+                      disabled={!cashflowSheetConfig?.value || sheetRefreshLoading}
+                      title="Google Sheet에서 수정한 값을 검토 후보로 가져오기"
+                    >
+                      {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                      시트 업데이트 검토
+                    </Button>
+                  </div>
+                </div>
+
+                <div className={`rounded-[16px] border ${cashflowSheetConfig ? 'border-slate-300 bg-slate-50' : 'border-amber-200 bg-amber-50/70'}`}>
+                  <div className={`flex items-center justify-between border-b px-3 py-3 ${cashflowSheetConfig ? 'border-slate-200' : 'border-amber-200'}`}>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ${cashflowSheetConfig ? 'bg-slate-800 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                        <ArrowUpFromLine className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-950">플랫폼에서 시트로</div>
+                        <div className="truncate text-[10px] text-slate-500">현재 플랫폼 Projection을 시트에 쓰기 전 검토</div>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-slate-700">
+                      <Database className="h-3.5 w-3.5" />
+                      <span>플랫폼</span>
+                      <span className="text-slate-400">→</span>
+                      <FileSpreadsheet className="h-3.5 w-3.5" />
+                    </div>
+                  </div>
+                  <div className="space-y-3 px-3 py-3">
+                    <div className="grid gap-2 text-slate-700">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-4 w-4 items-center justify-center rounded border border-slate-700 bg-slate-800 text-white">
+                          <CheckCircle2 className="h-3 w-3" />
+                        </span>
+                        <span>Projection 내보내기 검토</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-4 w-4 rounded border border-slate-300 bg-white" />
+                        <span>Actual은 시트에서만 입력</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="h-4 w-4 rounded border border-slate-300 bg-white" />
+                        <span>승인 전 시트 쓰기 없음</span>
+                      </div>
+                    </div>
+                    <div className="rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-slate-600">
+                      플랫폼 값을 Google Sheet에 덮어쓰기 전에 셀 단위 차이를 검토합니다.
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-9 w-full rounded-[10px] border-slate-300 bg-white text-[12px] font-bold text-slate-800 hover:bg-slate-100"
+                      onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}&direction=platform-to-sheet`)}
+                    >
+                      <ArrowUpFromLine className="mr-1.5 h-3.5 w-3.5" />
+                      플랫폼 값을 시트로 내보내기
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

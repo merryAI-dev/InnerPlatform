@@ -99,6 +99,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('기존 Actual 변경');
     expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
     expect(cashflowProjectSheetSource).toContain('시트 업데이트 검토');
+    expect(cashflowProjectSheetSource).toContain('시트 반영 작업');
+    expect(cashflowProjectSheetSource).toContain('시트에서 플랫폼으로');
+    expect(cashflowProjectSheetSource).toContain('플랫폼에서 시트로');
+    expect(cashflowProjectSheetSource).toContain('방향을 먼저 고르고, 검토 후보를 만든 뒤 승인합니다.');
+    expect(cashflowProjectSheetSource).toContain('플랫폼 값을 시트로 내보내기');
+    expect(cashflowProjectSheetSource).toContain('direction=platform-to-sheet');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');
   });
 
