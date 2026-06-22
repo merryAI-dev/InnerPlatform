@@ -64,7 +64,7 @@ Budget decision: first POC is Cloudflare Pro plus a dedicated security/DevOps co
 |---|---|---|
 | Project owner | `mwbyun1220@mysc.co.kr` / MYSC security and platform owner | Approved for POC ownership |
 | Vercel project | `inner-platform` | Verified MYSCube production project |
-| Vercel target URL | `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app` | Current production deployment for the security-domain aliases |
+| Vercel target URL | `inner-platform-k2x121b33-merryai-devs-projects.vercel.app` | Current production deployment for the primary security-domain alias |
 | Primary hostname | `myscube.myscguard.app` | Canonical host selected; Cloudflare DNS/proxy apply completed; strict edge smoke passed |
 | Drive monitoring hostname | `drive.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
 | GitHub monitoring hostname | `github.myscguard.app` | Vercel custom domain registered; Cloudflare DNS proxied; strict edge smoke passed |
@@ -91,7 +91,7 @@ CLOUDFLARE_API_TOKEN=... npm run security:cloudflare:zone
 - Existing Cloudflare rulesets, if any, need import/ownership planning before Terraform manages the zone entry-point rulesets.
 - Direct Vercel generated deployment URLs use POC compensating controls only. Protecting all production URLs is out of scope for the USD 20/month POC and would require Vercel Advanced Deployment Protection or Enterprise.
 - Actual Cloudflare zone id is configured locally in git-ignored `infra/cloudflare/production.tfvars`.
-- Vercel custom domains were initially registered to the wrong `observability-devops` project, then reassigned on 2026-06-19 to the verified `inner-platform` production deployment. Current security-domain aliases point to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`.
+- Vercel custom domains were initially registered to the wrong `observability-devops` project, then reassigned on 2026-06-19 to the verified `inner-platform` production deployment. The primary `myscube.myscguard.app` alias now points to `inner-platform-k2x121b33-merryai-devs-projects.vercel.app`; secondary security-domain aliases still point to `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app` until the next coordinated alias promotion.
 - DNS-only bootstrap was used for Vercel certificate issuance. Final Cloudflare proxy apply for the `myscube.myscguard.app` hostname set completed on 2026-06-19.
 - `soc.myscguard.app` is retired as an app alias and now redirects at Cloudflare edge to `https://myscube.myscguard.app`.
 - Managed WAF and Terraform-managed rate limits are intentionally disabled for the USD 20/month Cloudflare Pro POC because the account/zone did not accept the managed ruleset execution and already had/limited the rate-limit phase entrypoint. The active POC control is custom WAF plus Cloudflare DDoS/TLS/proxying.

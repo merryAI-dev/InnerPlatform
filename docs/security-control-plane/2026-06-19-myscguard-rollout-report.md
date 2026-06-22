@@ -36,15 +36,16 @@ Legacy hostname:
 - Updated production BFF origin earlier in the rollout:
   - `BFF_ALLOWED_ORIGINS=https://myscube.myscguard.app`
 - Set all security-domain Vercel aliases to the current production deployment:
-  - `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
+  - primary `myscube.myscguard.app`: `inner-platform-k2x121b33-merryai-devs-projects.vercel.app`
+  - secondary security subdomains: `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
 - Removed the stale Vercel alias:
   - `soc.myscguard.app`
 - Added and published Vercel project-level direct-origin redirects for current production generated hosts. The stage alias is no longer part of this redirect set because internal/stage deploys must stay on the stage route:
   - `inner-platform.vercel.app`
-  - `inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app`
   - `inner-platform-h799435np-merryai-devs-projects.vercel.app`
   - `inner-platform-dsk6wdc3e-merryai-devs-projects.vercel.app`
   - `inner-platform-gq6813nqh-merryai-devs-projects.vercel.app`
+  - `inner-platform-k2x121b33-merryai-devs-projects.vercel.app`
 - Removed the temporary Vercel route-version alias after route publish:
   - `inner-platform-f52434-routes-merryai-devs-projects.vercel.app`
 
@@ -94,7 +95,7 @@ Observed runtime checks:
 - `https://soc.myscguard.app/some/path?x=1` returns `301` to `https://myscube.myscguard.app/some/path?x=1`.
 - `https://edge.myscguard.app/.env` returns `403`.
 - `https://edge.myscguard.app/?q=../` returns `403`.
-- Current Vercel generated production/stage hosts return `307` to `https://myscube.myscguard.app/`.
+- Current Vercel generated production hosts return `307` to `https://myscube.myscguard.app/`; internal stage hosts stay directly reachable for stage verification and must not be included in the production redirect set.
 - Removed route-version alias returns `404` in strict edge smoke.
 
 ## Remaining Security Backlog
