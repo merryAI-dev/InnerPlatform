@@ -68,6 +68,8 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Strict Cloudflare edge smoke
+        env:
+          CLOUDFLARE_EDGE_ALLOW_CHALLENGE: '1'
         run: npm run security:edge-smoke:strict
 
       - name: Upload edge smoke evidence

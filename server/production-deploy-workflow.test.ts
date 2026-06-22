@@ -138,6 +138,7 @@ describe('CI security evidence gates', () => {
   it('captures strict Cloudflare edge smoke evidence only for main pushes', () => {
     expect(ciWorkflowText).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
     expect(ciWorkflowText).toContain('Strict Cloudflare edge smoke');
+    expect(ciWorkflowText).toContain("CLOUDFLARE_EDGE_ALLOW_CHALLENGE: '1'");
     expect(ciWorkflowText).toContain('npm run security:edge-smoke:strict');
     expect(ciWorkflowText).toContain('Upload edge smoke evidence');
     expect(ciWorkflowText).toContain('tmp/edge-smoke/cloudflare-edge-smoke.json');

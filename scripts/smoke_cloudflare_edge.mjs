@@ -20,6 +20,7 @@ const hosts = (process.env.CLOUDFLARE_EDGE_HOSTS || defaultHosts.join(","))
 
 const requireCloudflare = process.env.CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE === "1";
 const requireRedirects = process.env.CLOUDFLARE_EDGE_REQUIRE_REDIRECTS === "1";
+const allowCloudflareChallenge = process.env.CLOUDFLARE_EDGE_ALLOW_CHALLENGE === "1";
 const outputPath = process.env.CLOUDFLARE_EDGE_SMOKE_OUTPUT || "tmp/edge-smoke/cloudflare-edge-smoke.json";
 const expectedTitle = "MYSCube InnerPlatform";
 const defaultDirectHosts = [
@@ -111,10 +112,13 @@ async function checkHost(host) {
       const server = response.headers.server || "";
       const cfRay = response.headers["cf-ray"] || "";
       const cloudflareOk = server.toLowerCase().includes("cloudflare") || Boolean(cfRay);
-      return result(`https://${host}/`, response.status >= 200 && response.status < 400 && cloudflareOk, {
+      const statusOk = (response.status >= 200 && response.status < 400)
+        || (allowCloudflareChallenge && response.status === 403 && cloudflareOk);
+      return result(`https://${host}/`, statusOk && cloudflareOk, {
         status: response.status,
         titleOk: true,
         cloudflareOk,
+        allowCloudflareChallenge,
         server,
         cfRay: cfRay ? "present" : "missing",
         resolver: resolved.resolver,
@@ -226,6 +230,7 @@ const payload = {
   generatedAt: new Date().toISOString(),
   requireCloudflare,
   requireRedirects,
+  allowCloudflareChallenge,
   expectedTitle,
   checks,
 };

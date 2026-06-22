@@ -159,6 +159,7 @@ route-version alias는 Vercel routes publish 때 다시 생길 수 있다. route
 - The route policy blocks any stage hostname in the production direct-origin redirect set.
 - The same policy keeps `vercel.json` production redirects aligned with `scripts/smoke_cloudflare_edge.mjs` strict direct-host checks.
 - GitHub Actions CI runs strict Cloudflare edge smoke only on `main` pushes and uploads `tmp/edge-smoke/cloudflare-edge-smoke.json` as the `cloudflare-edge-smoke` artifact.
+- CI sets `CLOUDFLARE_EDGE_ALLOW_CHALLENGE=1` because Cloudflare may correctly return `403` to GitHub-hosted runner root-page requests. Scanner-path/query `403`, legacy redirect, and Vercel direct-origin redirect checks are still enforced.
 
 ## WAF 기본 정책 초안
 
