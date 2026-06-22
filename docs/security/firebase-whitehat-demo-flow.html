@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Firebase 화이트해킹 시연 Flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --surface: #ffffff;
+      --surface-2: #eef3f8;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #cbd5e1;
+      --blue: #1d4ed8;
+      --blue-soft: #dbeafe;
+      --green: #047857;
+      --green-soft: #d1fae5;
+      --red: #b42318;
+      --red-soft: #fee4e2;
+      --amber: #b54708;
+      --amber-soft: #fef0c7;
+      --shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1440px, 100vw);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 28px;
+      display: grid;
+      grid-template-rows: auto auto auto auto;
+      gap: 20px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 3vw, 44px);
+      line-height: 1.08;
+      font-weight: 780;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .scoreboard {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(90px, 1fr));
+      gap: 10px;
+      min-width: 330px;
+    }
+
+    .metric {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 26px;
+      line-height: 1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 1.05fr 1.25fr 1fr 0.9fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .lane {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-height: 600px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .lane-title {
+      margin: 0 0 14px;
+      font-size: 15px;
+      font-weight: 760;
+      color: #344054;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .lane-title::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--blue);
+      display: inline-block;
+      flex: 0 0 auto;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .node {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-height: 82px;
+      overflow: hidden;
+    }
+
+    .node h2,
+    .node h3 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.3;
+      font-weight: 760;
+    }
+
+    .node p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .node small {
+      display: block;
+      margin-top: 7px;
+      color: #475467;
+      font-size: 11px;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .attacker {
+      border-color: #fecaca;
+      background: #fff7f7;
+    }
+
+    .api {
+      border-color: #bfdbfe;
+      background: #f8fbff;
+    }
+
+    .control {
+      border-color: #bbf7d0;
+      background: #f7fef9;
+    }
+
+    .blocked {
+      border-color: #fecaca;
+      background: #fff7f7;
+    }
+
+    .pass {
+      border-color: #a7f3d0;
+      background: var(--green-soft);
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: #344054;
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .pill.danger {
+      background: var(--red-soft);
+      border-color: #fecdca;
+      color: var(--red);
+    }
+
+    .pill.ok {
+      background: var(--green-soft);
+      border-color: #a7f3d0;
+      color: var(--green);
+    }
+
+    .firewall {
+      position: relative;
+      flex: 1;
+      display: grid;
+      grid-template-rows: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .flow-row {
+      position: relative;
+      min-height: 116px;
+      display: grid;
+      grid-template-columns: 1fr 44px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .wire {
+      position: absolute;
+      left: 6px;
+      right: 42px;
+      top: 50%;
+      height: 3px;
+      background: repeating-linear-gradient(90deg, var(--line), var(--line) 12px, transparent 12px, transparent 20px);
+      transform: translateY(-50%);
+    }
+
+    .packet {
+      position: absolute;
+      top: calc(50% - 8px);
+      left: 6px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 6px rgba(29, 78, 216, 0.12);
+      animation: packet 5.2s cubic-bezier(.65, 0, .35, 1) infinite;
+    }
+
+    .flow-row:nth-child(2) .packet {
+      animation-delay: .8s;
+    }
+
+    .flow-row:nth-child(3) .packet {
+      animation-delay: 1.6s;
+    }
+
+    .flow-row:nth-child(4) .packet {
+      animation-delay: 2.4s;
+    }
+
+    .barrier {
+      position: relative;
+      width: 44px;
+      height: 92px;
+      border-radius: 8px;
+      background: repeating-linear-gradient(
+        135deg,
+        #991b1b,
+        #991b1b 9px,
+        #fee2e2 9px,
+        #fee2e2 18px
+      );
+      border: 1px solid #fecaca;
+      display: grid;
+      place-items: center;
+      color: #7f1d1d;
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    @keyframes packet {
+      0% {
+        transform: translateX(0) scale(1);
+        opacity: 0;
+      }
+      8% {
+        opacity: 1;
+      }
+      64% {
+        transform: translateX(calc(100% - 64px)) scale(1);
+        opacity: 1;
+      }
+      74% {
+        transform: translateX(calc(100% - 64px)) scale(.72);
+        background: var(--red);
+      }
+      100% {
+        transform: translateX(calc(100% - 64px)) scale(.72);
+        opacity: 0;
+        background: var(--red);
+      }
+    }
+
+    .result-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .result-item {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 8px;
+      align-items: center;
+      min-height: 44px;
+      border: 1px solid #d1fadf;
+      border-radius: 8px;
+      background: #f6fef9;
+      padding: 8px;
+    }
+
+    .status {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      height: 28px;
+      border-radius: 6px;
+      background: #dcfae6;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .result-item p {
+      margin: 0;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .callout {
+      margin-top: auto;
+      border-radius: 8px;
+      border: 1px solid #fedf89;
+      background: var(--amber-soft);
+      padding: 12px;
+    }
+
+    .callout strong {
+      display: block;
+      color: #7a2e0e;
+      font-size: 13px;
+    }
+
+    .callout p {
+      margin: 6px 0 0;
+      color: #7a2e0e;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .deep-dive {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 14px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .panel-note {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .rule-table {
+      display: grid;
+      gap: 8px;
+    }
+
+    .rule-row {
+      display: grid;
+      grid-template-columns: .9fr 1.2fr 1fr;
+      gap: 8px;
+      align-items: stretch;
+      border: 1px solid #e4e7ec;
+      border-radius: 8px;
+      background: #fcfcfd;
+      padding: 8px;
+    }
+
+    .rule-row.header {
+      background: #eef2f7;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .rule-row div {
+      min-width: 0;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .rule-row strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    .code-window {
+      border: 1px solid #d0d5dd;
+      border-radius: 8px;
+      background: #111827;
+      overflow: hidden;
+    }
+
+    .code-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, .12);
+      color: #cbd5e1;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #f87171;
+      display: inline-block;
+    }
+
+    .dot:nth-child(2) {
+      background: #fbbf24;
+    }
+
+    .dot:nth-child(3) {
+      background: #34d399;
+      margin-right: 6px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      color: #e5e7eb;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre;
+      tab-size: 2;
+    }
+
+    .warning-strip {
+      margin-top: 12px;
+      border: 1px solid #fedf89;
+      background: #fffbeb;
+      color: #7a2e0e;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    footer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    code {
+      display: inline-block;
+      max-width: 100%;
+      color: #344054;
+      background: #eef2f7;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      padding: 3px 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        padding: 18px;
+      }
+
+      header,
+      footer {
+        grid-template-columns: 1fr;
+      }
+
+      .scoreboard,
+      .stage,
+      .deep-dive {
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+
+      .rule-row,
+      .rule-row.header {
+        grid-template-columns: 1fr;
+      }
+
+      .lane {
+        min-height: auto;
+      }
+
+      .firewall {
+        min-height: 420px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .packet {
+        animation: none;
+        left: auto;
+        right: 54px;
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Firebase 화이트해킹 시연 Flow</h1>
+        <p class="subtitle">운영 Firebase 공개 API를 대상으로 한 비파괴 프로브. 실제 데이터 본문은 출력하지 않고, 차단 상태만 증거화합니다.</p>
+      </div>
+      <section class="scoreboard" aria-label="검증 결과 요약">
+        <div class="metric">
+          <strong>8/8</strong>
+          <span>프로브 차단</span>
+        </div>
+        <div class="metric">
+          <strong>0</strong>
+          <span>FAIL_OPEN</span>
+        </div>
+        <div class="metric">
+          <strong>401/403</strong>
+          <span>차단 응답</span>
+        </div>
+      </section>
+    </header>
+
+    <section class="stage" aria-label="Firebase 화이트해킹 시연 흐름도">
+      <article class="lane">
+        <h2 class="lane-title">1. 공격 시나리오</h2>
+        <div class="stack">
+          <div class="node attacker">
+            <h3>익명 외부자</h3>
+            <p>로그인 없이 Firestore 공개 API에 직접 접근합니다.</p>
+            <div class="pill-row">
+              <span class="pill danger">No Auth</span>
+              <span class="pill danger">REST API</span>
+            </div>
+          </div>
+          <div class="node attacker">
+            <h3>가짜 토큰</h3>
+            <p>형식만 있는 Bearer token으로 인증 우회를 시도합니다.</p>
+            <small>Authorization: Bearer not-a-real-firebase-id-token</small>
+          </div>
+          <div class="node attacker">
+            <h3>민감 경로 직접 접근</h3>
+            <p>BFF 전용 연락처, 감사 로그, Storage 원본 이미지 경로를 직접 호출합니다.</p>
+            <div class="pill-row">
+              <span class="pill danger">contacts</span>
+              <span class="pill danger">audit_logs</span>
+              <span class="pill danger">business-cards</span>
+            </div>
+          </div>
+          <div class="node attacker">
+            <h3>비인가 쓰기</h3>
+            <p>canary 문서에 쓰기 요청을 보내 데이터 변조 가능성을 확인합니다.</p>
+            <small>orgs/mysc/whitehat_canary/whitehat-canary-deny-probe</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="lane">
+        <h2 class="lane-title">2. 요청 흐름</h2>
+        <div class="firewall" aria-label="요청 패킷이 Firebase로 이동한 뒤 차단되는 애니메이션">
+          <div class="flow-row">
+            <div class="wire"></div>
+            <div class="packet" aria-hidden="true"></div>
+            <div class="node api">
+              <h3>Firestore 문서/컬렉션 조회</h3>
+              <p>members, projects, contacts, audit_logs, tenants</p>
+            </div>
+            <div class="barrier" aria-label="차단">403</div>
+          </div>
+          <div class="flow-row">
+            <div class="wire"></div>
+            <div class="packet" aria-hidden="true"></div>
+            <div class="node api">
+              <h3>Firebase Auth 토큰 검증</h3>
+              <p>가짜 idToken과 가짜 Bearer token을 검증합니다.</p>
+            </div>
+            <div class="barrier" aria-label="차단">401</div>
+          </div>
+          <div class="flow-row">
+            <div class="wire"></div>
+            <div class="packet" aria-hidden="true"></div>
+            <div class="node api">
+              <h3>Storage 원본 파일 직접 조회</h3>
+              <p>business-cards 원본 이미지 경로 직접 접근</p>
+            </div>
+            <div class="barrier" aria-label="차단">403</div>
+          </div>
+          <div class="flow-row">
+            <div class="wire"></div>
+            <div class="packet" aria-hidden="true"></div>
+            <div class="node api">
+              <h3>Firestore canary 쓰기</h3>
+              <p>비인가 PATCH 요청으로 데이터 변조 여부 확인</p>
+            </div>
+            <div class="barrier" aria-label="차단">403</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="lane">
+        <h2 class="lane-title">3. 방어 지점</h2>
+        <div class="stack">
+          <div class="node control">
+            <h3>Firebase Auth</h3>
+            <p>정상 Firebase ID token이 없으면 인증 단계에서 차단합니다.</p>
+            <div class="pill-row">
+              <span class="pill ok">401</span>
+              <span class="pill">Token validation</span>
+            </div>
+          </div>
+          <div class="node control">
+            <h3>Firestore Rules</h3>
+            <p>@mysc.co.kr 이메일과 org membership 문서를 기준으로 읽기/쓰기 권한을 판단합니다.</p>
+            <small>request.auth + orgs/{orgId}/members/{uid}</small>
+          </div>
+          <div class="node control">
+            <h3>BFF 전용 컬렉션</h3>
+            <p>contacts, business_card_imports, contact_events는 client SDK 직접 접근을 금지합니다.</p>
+            <div class="pill-row">
+              <span class="pill ok">allow false</span>
+              <span class="pill">BFF only</span>
+            </div>
+          </div>
+          <div class="node control">
+            <h3>Storage Rules</h3>
+            <p>명함 원본 이미지는 broad allow에서 제외하고 직접 read/write를 막습니다.</p>
+            <small>orgs/{orgId}/business-cards/{allPaths=**}</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="lane">
+        <h2 class="lane-title">4. 시연 결과</h2>
+        <div class="result-list">
+          <div class="result-item"><span class="status">403</span><p>비인증 members 읽기 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>비인증 projects 목록 조회 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>BFF 전용 contacts 직접 접근 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>audit_logs 직접 접근 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>top-level tenants 탐색 차단</p></div>
+          <div class="result-item"><span class="status">401</span><p>가짜 토큰 인증 우회 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>Storage business-cards 직접 읽기 차단</p></div>
+          <div class="result-item"><span class="status">403</span><p>비인가 canary 쓰기 차단</p></div>
+        </div>
+        <div class="callout">
+          <strong>발표용 결론</strong>
+          <p>공개 Firebase API를 직접 두드려도 보호 경로에서 200 응답은 없었습니다. 현재 외부 비인가자는 Firestore Rules/Auth/Storage Rules에서 차단됩니다.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="deep-dive" aria-label="Rule 매핑과 데이터베이스 덤프 구조">
+      <article class="panel">
+        <h2>각 시도는 어떤 Rule에서 막혔나</h2>
+        <p class="panel-note">아래 매핑은 현재 <code>firebase/firestore.rules</code>와 <code>firebase/storage.rules</code> 기준입니다.</p>
+        <div class="rule-table">
+          <div class="rule-row header">
+            <div>공격 시도</div>
+            <div>적용 Rule</div>
+            <div>차단 이유</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>members 직접 읽기</strong>orgs/mysc/members/{uid}</div>
+            <div><strong>canRead(orgId)</strong>isMember(orgId) → isSignedIn() + members/{request.auth.uid} 존재 확인</div>
+            <div>익명 요청은 request.auth가 없어 isSignedIn() 실패 → 403</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>projects 목록 조회</strong>orgs/mysc/projects?pageSize=1</div>
+            <div><strong>catch-all read</strong>allow read: if !isCatchallExcludedPath(...) && canRead(orgId)</div>
+            <div>프로젝트도 org 멤버만 읽을 수 있음. 비로그인/비멤버는 403</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>contacts 직접 읽기</strong>orgs/mysc/contacts/{id}</div>
+            <div><strong>BFF-only explicit deny</strong>match /contacts/{contactId} allow read, write: if false</div>
+            <div>명함/연락처 PII는 클라이언트 SDK와 REST 직접 접근을 전면 차단</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>audit_logs 직접 읽기</strong>orgs/mysc/audit_logs/{id}</div>
+            <div><strong>canReadAuditLogs(orgId)</strong>role in ['admin', 'finance']; allow write: if false</div>
+            <div>익명 사용자는 role 확인 전 isMember 실패. 클라이언트 쓰기는 항상 차단</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>tenants 탐색</strong>tenants/{tenantId}</div>
+            <div><strong>top-level deny</strong>match /tenants/{tenantId} allow read, write: if false</div>
+            <div>테넌트 목록 쿼리는 클라이언트에서 안정 검증이 어려워 전면 금지</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>가짜 토큰</strong>Bearer not-a-real-firebase-id-token</div>
+            <div><strong>Firebase Auth token validation</strong>Firestore Rules 평가 전 ID token 검증</div>
+            <div>토큰 서명/형식 검증 실패로 401</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>business-cards 파일 읽기</strong>Storage orgs/mysc/business-cards/*</div>
+            <div><strong>Storage explicit deny</strong>match /business-cards/{allPaths=**} allow read, write: if false</div>
+            <div>명함 원본 이미지는 BFF API 전용. 직접 다운로드는 403</div>
+          </div>
+          <div class="rule-row">
+            <div><strong>canary 쓰기</strong>orgs/mysc/whitehat_canary/{id}</div>
+            <div><strong>catch-all write</strong>canWrite(orgId) → role in ['admin', 'finance', 'pm']</div>
+            <div>비로그인 요청은 role 확인 전 isMember 실패 → 403</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <h2>DB를 실제로 내려받으면 어떤 구조인가</h2>
+        <p class="panel-note">아래는 실제 값을 넣지 않은 구조 예시입니다. 시연 도구는 데이터를 덤프하지 않고 상태 코드만 기록합니다.</p>
+        <div class="code-window" aria-label="Firestore 덤프 구조 예시">
+          <div class="code-title"><span class="dot"></span><span class="dot"></span><span class="dot"></span>Firestore export shape</div>
+          <pre>{
+  "orgs/mysc/members/{uid}": {
+    "uid": "...",
+    "email": "...@mysc.co.kr",
+    "role": "admin | finance | pm | viewer",
+    "projectIds": ["p..."]
+  },
+  "orgs/mysc/projects/{projectId}": {
+    "projectName": "...",
+    "managerId": "...",
+    "budget": 0,
+    "status": "..."
+  },
+  "orgs/mysc/contacts/{contactId}": {
+    "policy": "BFF_ONLY",
+    "clientRead": false,
+    "clientWrite": false
+  },
+  "orgs/mysc/audit_logs/{logId}": {
+    "actor": "...",
+    "action": "...",
+    "createdAt": "..."
+  },
+  "storage/orgs/mysc/business-cards/*": {
+    "policy": "BFF_ONLY_SOURCE_IMAGE",
+    "directDownload": false
+  }
+}</pre>
+        </div>
+        <div class="warning-strip">
+          Firestore Rules는 외부 REST/Client SDK 접근 방어선입니다. 관리 권한, Admin SDK, GCS export 권한이 탈취되면 Rules를 우회할 수 있으므로 DB export 유출 방어는 IAM 최소권한, 서비스계정 키 금지, 감사 로그, 민감 필드 암호화가 별도 방어선입니다.
+        </div>
+      </article>
+    </section>
+
+    <footer>
+      <div>
+        대상: <code>inner-platform-live-20260316</code>
+        실행: <code>npm run security:firebase:whitehat -- --allow-prod --allow-write-probes</code>
+      </div>
+      <div>MYSC Guard · Firebase White-Hat Demo · 2026-06-22</div>
+    </footer>
+  </main>
+</body>
+</html>
