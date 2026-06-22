@@ -56,10 +56,11 @@
     "security:test": "bash scripts/security_control_plane/test.sh",
     "security:edge-gate": "node scripts/check_cloudflare_production_gates.mjs",
     "security:edge-smoke": "node scripts/smoke_cloudflare_edge.mjs",
+    "security:edge-smoke:strict": "CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 node scripts/smoke_cloudflare_edge.mjs",
     "security:cloudflare:zone": "node scripts/cloudflare_zone_lookup.mjs myscguard.app",
     "pii:rotate": "node scripts/pii_rotate_fields.mjs",
     "pii:setup:vercel": "bash scripts/pii_setup_vercel_local.sh",
-    "policy:verify": "node scripts/verify_rbac_policy.mjs",
+    "policy:verify": "node scripts/verify_rbac_policy.mjs && node scripts/assert_vercel_edge_route_policy.mjs",
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
     "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
     "prepare": "husky"

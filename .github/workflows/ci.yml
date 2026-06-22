@@ -54,3 +54,26 @@ jobs:
 
       - name: Settlement emulator-backed integration
         run: npm run test:settlement:integration
+
+  edge-security-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: Strict Cloudflare edge smoke
+        run: npm run security:edge-smoke:strict
+
+      - name: Upload edge smoke evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloudflare-edge-smoke
+          path: tmp/edge-smoke/cloudflare-edge-smoke.json
+          if-no-files-found: warn

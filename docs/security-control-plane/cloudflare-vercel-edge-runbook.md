@@ -137,7 +137,7 @@ npm run security:edge-gate
 vercel routes export --scope merryai-devs-projects
 vercel alias ls --scope merryai-devs-projects
 vercel alias remove inner-platform-f52434-routes-merryai-devs-projects.vercel.app --yes --scope merryai-devs-projects
-CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke
+npm run security:edge-smoke:strict
 ```
 
 검증 기준:
@@ -152,6 +152,13 @@ CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run
 - route-version alias -> `404 DEPLOYMENT_NOT_FOUND`
 
 route-version alias는 Vercel routes publish 때 다시 생길 수 있다. route를 publish한 작업자는 alias removal과 smoke evidence 갱신까지 같은 change window 안에서 끝내야 한다.
+
+## CI enforcement
+
+- `npm run policy:verify` runs `scripts/assert_vercel_edge_route_policy.mjs`.
+- The route policy blocks any stage hostname in the production direct-origin redirect set.
+- The same policy keeps `vercel.json` production redirects aligned with `scripts/smoke_cloudflare_edge.mjs` strict direct-host checks.
+- GitHub Actions CI runs strict Cloudflare edge smoke only on `main` pushes and uploads `tmp/edge-smoke/cloudflare-edge-smoke.json` as the `cloudflare-edge-smoke` artifact.
 
 ## WAF 기본 정책 초안
 

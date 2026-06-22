@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = resolve(__dirname, '..');
 const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/production-deploy.yml'), 'utf8');
 const stageWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/stage-deploy.yml'), 'utf8');
+const ciWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8');
 
 function extractRunBlocks(text: string) {
   const lines = text.split('\n');
@@ -125,5 +126,20 @@ describe('stage release workflow safety', () => {
     expect(workflowText).not.toContain('Unit tests');
     expect(workflowText).not.toContain('RBAC policy verify');
     expect(workflowText).not.toContain('Production build');
+  });
+});
+
+describe('CI security evidence gates', () => {
+  it('runs static route policy on every CI pass through policy verification', () => {
+    expect(ciWorkflowText).toContain('RBAC policy verify');
+    expect(ciWorkflowText).toContain('npm run policy:verify');
+  });
+
+  it('captures strict Cloudflare edge smoke evidence only for main pushes', () => {
+    expect(ciWorkflowText).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect(ciWorkflowText).toContain('Strict Cloudflare edge smoke');
+    expect(ciWorkflowText).toContain('npm run security:edge-smoke:strict');
+    expect(ciWorkflowText).toContain('Upload edge smoke evidence');
+    expect(ciWorkflowText).toContain('tmp/edge-smoke/cloudflare-edge-smoke.json');
   });
 });

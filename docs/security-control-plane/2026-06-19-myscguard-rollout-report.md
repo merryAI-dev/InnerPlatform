@@ -75,7 +75,7 @@ Passed:
 - `terraform -chdir=infra/cloudflare plan -var-file=production.tfvars`
 - `terraform -chdir=infra/cloudflare apply /tmp/myscguard.tfplan`
   - result: 1 added, 0 changed, 0 destroyed
-- `CLOUDFLARE_EDGE_REQUIRE_CLOUDFLARE=1 CLOUDFLARE_EDGE_REQUIRE_REDIRECTS=1 npm run security:edge-smoke`
+- `npm run security:edge-smoke:strict`
   - 16/16 checks passed
   - evidence: `tmp/edge-smoke/cloudflare-edge-smoke.json`
 - Approved production gate:
