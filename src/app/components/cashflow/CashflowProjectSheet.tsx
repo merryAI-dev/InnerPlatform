@@ -42,7 +42,6 @@ import {
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
-import { RollingAmount } from '../ui/rolling-amount';
 import { applyCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
 
 function fmt(n: number): string {
@@ -1704,7 +1703,7 @@ export function CashflowProjectSheet({
           />
         ) : (
           <div className={`h-5 rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
-            <RollingAmount value={projection} />
+            {fmt(projection)}
           </div>
         )}
       </td>
@@ -1731,7 +1730,7 @@ export function CashflowProjectSheet({
           <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
         ) : (
           <div className="h-5 px-1 text-right text-[8px] leading-5 tabular-nums text-slate-700">
-            <RollingAmount value={actual} />
+            {fmt(actual)}
           </div>
         )}
       </td>
@@ -1763,7 +1762,7 @@ export function CashflowProjectSheet({
       <td key={input.keyName} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${input.stickyRight ? 'sticky right-0 z-20 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]' : ''} ${bgClass}`}>
         <div className="flex items-center justify-end gap-1 text-[8px] leading-4">
           <span className={`font-semibold tabular-nums ${input.mode === 'actual' ? 'text-slate-700' : valueClass}`}>
-            <RollingAmount value={input.value} />
+            {fmt(input.value)}
           </span>
         </div>
       </td>
@@ -2513,12 +2512,12 @@ export function CashflowProjectSheet({
                           key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
                           className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
                         >
-                          <RollingAmount value={amount} />
+                          {fmt(amount)}
                         </td>
                       );
                     })}
                     <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
-                      <RollingAmount value={derived.rowTotals[lineId] || 0} />
+                      {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
@@ -2526,11 +2525,11 @@ export function CashflowProjectSheet({
                   <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-emerald-50 px-3 py-2">입금 합계</td>
                   {derived.weekTotals.map((week, index) => (
                     <td key={`${tableMode}-year-total-in-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
-                      <RollingAmount value={week.totalIn} />
+                      {fmt(week.totalIn)}
                     </td>
                   ))}
                   <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
-                    <RollingAmount value={derived.monthTotals.totalIn} />
+                    {fmt(derived.monthTotals.totalIn)}
                   </td>
                 </tr>
                 <tr className="bg-rose-50 text-rose-900">
@@ -2548,12 +2547,12 @@ export function CashflowProjectSheet({
                           key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
                           className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
                         >
-                          <RollingAmount value={amount} />
+                          {fmt(amount)}
                         </td>
                       );
                     })}
                     <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
-                      <RollingAmount value={derived.rowTotals[lineId] || 0} />
+                      {fmt(derived.rowTotals[lineId] || 0)}
                     </td>
                   </tr>
                 ))}
@@ -2561,11 +2560,11 @@ export function CashflowProjectSheet({
                   <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-rose-50 px-3 py-2">출금 합계</td>
                   {derived.weekTotals.map((week, index) => (
                     <td key={`${tableMode}-year-total-out-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
-                      <RollingAmount value={week.totalOut} />
+                      {fmt(week.totalOut)}
                     </td>
                   ))}
                   <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
-                    <RollingAmount value={derived.monthTotals.totalOut} />
+                    {fmt(derived.monthTotals.totalOut)}
                   </td>
                 </tr>
                 <tr className="border-t border-slate-300 bg-slate-100 font-semibold text-slate-950">
@@ -2575,11 +2574,11 @@ export function CashflowProjectSheet({
                       key={`${tableMode}-year-balance-${index}`}
                       className={`min-w-[96px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${week.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}
                     >
-                      <RollingAmount value={week.net} />
+                      {fmt(week.net)}
                     </td>
                   ))}
                   <td className={`min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${derived.monthTotals.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    <RollingAmount value={derived.monthTotals.net} />
+                    {fmt(derived.monthTotals.net)}
                   </td>
                 </tr>
               </tbody>
@@ -2823,7 +2822,7 @@ export function CashflowProjectSheet({
         <div className="relative h-[78px] w-[78px] rounded-full" style={{ background: gradient }}>
           <div className="absolute inset-[15px] flex flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
             <div className={`text-[15px] font-bold leading-4 tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-              {blockedCount > 0 ? <RollingAmount value={`${blockedCount}건`} /> : opsSummary.status.label}
+              {blockedCount > 0 ? `${blockedCount}건` : opsSummary.status.label}
             </div>
             <div className="mt-0.5 text-[9px] leading-3 text-slate-500">
               {blockedCount > 0 ? '확인 필요' : '상태'}
@@ -2847,15 +2846,15 @@ export function CashflowProjectSheet({
         <div className="flex items-center justify-between gap-2">
           <div className="text-[11px] font-semibold leading-4 text-slate-600">{label}</div>
           <div className="text-[10px] tabular-nums text-slate-500">
-            <RollingAmount value={`${rate.done}/${rate.total}`} />
+            {rate.done}/{rate.total}
           </div>
         </div>
         <div className="mt-1 flex items-end justify-between gap-2">
           <span className="text-[22px] font-bold leading-6 tabular-nums text-blue-700">
-            <RollingAmount value={`${rate.percent}%`} />
+            {rate.percent}%
           </span>
           <span className={`truncate text-right text-[9px] font-semibold leading-3 ${rate.missingLabels.length > 0 ? 'text-rose-700' : 'text-blue-700'}`}>
-            {rate.missingLabels.length > 0 ? <RollingAmount value={`${rate.missingLabels.length}건`} /> : 'OK'}
+            {rate.missingLabels.length > 0 ? `${rate.missingLabels.length}건` : 'OK'}
           </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
@@ -2966,19 +2965,25 @@ export function CashflowProjectSheet({
             </div>
           </div>
 
-          {cashflowSheetConfig && (
-            <div className="rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-950">
+          <div className={`rounded-[18px] border px-3 py-2 text-[11px] ${cashflowSheetConfig ? 'border-blue-100 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <div className="font-bold">시트 값 가져오기 설정됨</div>
-                <div className="mt-0.5 truncate text-blue-800">
-                  {cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'} · {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
-                </div>
+                <div className="font-bold">{cashflowSheetConfig ? '시트 값 가져오기 연결됨' : '시트 값 가져오기 미연결'}</div>
+                {cashflowSheetConfig ? (
+                  <div className="mt-0.5 truncate text-blue-800">
+                    {cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'} · {cashflowSheetConfig.sheetName || '시트 탭'} · {cashflowSheetConfig.startWeek || '전체'} ~ {cashflowSheetConfig.endWeek || '전체'}
+                  </div>
+                ) : (
+                  <div className="mt-0.5 text-amber-800">
+                    Google Sheet를 연결하면 시트에서 수정한 Projection/Actual 값을 새로고침으로 가져올 수 있습니다.
+                  </div>
+                )}
                 {sheetRefreshResult ? (
                   <div className="mt-1 font-semibold text-emerald-800">
                     시트 값 반영 완료 · 반영 {sheetRefreshResult.appliedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
                   </div>
                 ) : null}
-                {cashflowSheetConfig.lastAppliedAt ? (
+                {cashflowSheetConfig?.lastAppliedAt ? (
                   <div className="mt-1 text-blue-800">
                     마지막 반영 {formatSheetAppliedAt(cashflowSheetConfig.lastAppliedAt) || cashflowSheetConfig.lastAppliedAt}
                     {cashflowSheetConfig.lastAppliedBy?.email || cashflowSheetConfig.lastAppliedBy?.uid ? ` · 실행자 ${cashflowSheetConfig.lastAppliedBy.email || cashflowSheetConfig.lastAppliedBy.uid}` : ''}
@@ -2986,12 +2991,21 @@ export function CashflowProjectSheet({
                     {typeof cashflowSheetConfig.lastProjectionLineCount === 'number' ? ` · Projection ${cashflowSheetConfig.lastProjectionLineCount.toLocaleString()}건` : ''}
                     {typeof cashflowSheetConfig.lastActualLineCount === 'number' ? ` · Actual ${cashflowSheetConfig.lastActualLineCount.toLocaleString()}건` : ''}
                   </div>
-                ) : (
+                ) : cashflowSheetConfig ? (
                   <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 새로고침을 누르면 캐시플로우에 반영됩니다.</div>
-                )}
+                ) : null}
               </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={`h-7 shrink-0 rounded-full px-2.5 text-[10px] ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
+                onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
+              >
+                {cashflowSheetConfig ? '설정 변경' : '시트 연동 설정'}
+              </Button>
             </div>
-          )}
+          </div>
 
           <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
             <div className="grid gap-2 md:grid-cols-[210px_repeat(3,minmax(158px,1fr))]">
@@ -3017,7 +3031,7 @@ export function CashflowProjectSheet({
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
                 <div className={`text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-                  <RollingAmount value={`${opsSummary.inbox.length}건`} />
+                  {opsSummary.inbox.length}건
                 </div>
               </div>
               <div className="divide-y divide-slate-50">
@@ -3034,7 +3048,7 @@ export function CashflowProjectSheet({
                 ))}
                 {hiddenInboxCount > 0 && (
                   <div className="px-2 py-1 text-[9px] font-semibold text-slate-500">
-                    외 <RollingAmount value={`${hiddenInboxCount}건`} />
+                    외 {hiddenInboxCount}건
                   </div>
                 )}
               </div>

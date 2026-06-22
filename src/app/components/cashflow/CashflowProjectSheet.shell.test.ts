@@ -20,7 +20,9 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain("item.id === 'projection-actual-diff'");
     expect(cashflowProjectSheetSource).toContain('입니다. 확인해 주세요.');
     expect(cashflowProjectSheetSource).toContain('결산 전 확인');
-    expect(cashflowProjectSheetSource).toContain('시트 값 가져오기 설정됨');
+    expect(cashflowProjectSheetSource).toContain('시트 값 가져오기 연결됨');
+    expect(cashflowProjectSheetSource).toContain('시트 값 가져오기 미연결');
+    expect(cashflowProjectSheetSource).toContain('시트 연동 설정');
     expect(cashflowProjectSheetSource).not.toContain('시트 연동 검토');
   });
 
