@@ -43,6 +43,7 @@ import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-c
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
 import { stageCashflowSheetLabViaBff, type CashflowSheetLabChangeCandidate } from '../../lib/sheets-cashflow-readonly-client';
+import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -631,6 +632,29 @@ export function CashflowProjectSheet({
         const config = snap.exists()
           ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
           : null;
+        const activeWeeks = normalizeActiveSheetWeeks(config?.activeWeeks);
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'info',
+          operation: 'cashflow.sheet_config.dashboard.read',
+          transport: 'firestore',
+          projectId,
+          summary: {
+            orgId,
+            documentPath: getOrgDocumentPath(orgId, 'projects', projectId),
+            projectExists: snap.exists(),
+            hasCashflowSheetLab: Boolean(config),
+            hasValue: Boolean(config?.value),
+            spreadsheetId: config?.spreadsheetId || null,
+            spreadsheetTitle: config?.spreadsheetTitle || null,
+            sheetName: config?.sheetName || null,
+            startWeek: config?.startWeek || null,
+            endWeek: config?.endWeek || null,
+            activeWeekCount: activeWeeks.length,
+            updatedAt: (config as { updatedAt?: string } | null)?.updatedAt || null,
+            lastAppliedAt: config?.lastAppliedAt || null,
+          },
+        });
         setCashflowSheetConfig(config?.value ? {
           value: config.value,
           sheetName: config.sheetName,
@@ -646,7 +670,6 @@ export function CashflowProjectSheet({
         } : null);
         const start = parseCashflowSheetWeekLabel(config?.startWeek);
         const end = parseCashflowSheetWeekLabel(config?.endWeek);
-        const activeWeeks = normalizeActiveSheetWeeks(config?.activeWeeks);
         if (!start || !end || start.sortKey > end.sortKey || activeWeeks.length === 0) {
           setCashflowSheetRange(null);
           return;
@@ -662,6 +685,17 @@ export function CashflowProjectSheet({
       })
       .catch(() => {
         if (!cancelled) {
+          recordDevtoolsLog({
+            kind: 'cashflow_transaction',
+            phase: 'error',
+            operation: 'cashflow.sheet_config.dashboard.read.error',
+            transport: 'firestore',
+            projectId,
+            summary: {
+              orgId,
+              documentPath: getOrgDocumentPath(orgId, 'projects', projectId),
+            },
+          });
           setCashflowSheetRange(null);
           setCashflowSheetConfig(null);
         }

@@ -472,6 +472,11 @@ export function CashflowSheetLabPage({
         projectId,
         spreadsheetId: result.config?.spreadsheetId || spreadsheetId,
         sheetName: result.config?.sheetName || sheetName || null,
+        hasConfigValue: Boolean(result.config?.value),
+        configValueSpreadsheetId: result.config?.spreadsheetId || null,
+        configStartWeek: result.config?.startWeek || null,
+        configEndWeek: result.config?.endWeek || null,
+        configured: Boolean(result.configured),
       });
     } catch (error) {
       logCashflowLab('settings.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
