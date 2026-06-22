@@ -23,6 +23,7 @@ const DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS = 15_000;
 const CASHFLOW_USAGE_SHEET_NAME_PARTS = ['cashflow', '사용내역', '연동'];
 const CASHFLOW_WEEK_BASIS = 'sheet_range';
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
+const CASHFLOW_EVENTS_COLLECTION_ID = 'cashflow_events';
 const CASHFLOW_PROJECTION_SYNC_JOBS_COLLECTION_ID = 'cashflow_projection_sync_jobs';
 
 function normalizeRole(value) {
@@ -355,6 +356,16 @@ async function saveCashflowSheetLabApplyMetadata({ db, tenantId, projectId, cont
     },
     updatedAt: now,
   }), { merge: true });
+}
+
+async function saveCashflowEvents({ db, tenantId, events }) {
+  if (!db || events.length === 0) return;
+  for (let offset = 0; offset < events.length; offset += 450) {
+    await Promise.all(events.slice(offset, offset + 450).map((event) => {
+      const id = `evt_${stableHash(event).slice(0, 32)}`;
+      return db.doc(`orgs/${tenantId}/${CASHFLOW_EVENTS_COLLECTION_ID}/${id}`).set(stripUndefinedDeep({ ...event, id }));
+    }));
+  }
 }
 
 async function readCashflowWeeksSnapshot(db, tenantId, projectId) {
@@ -773,6 +784,7 @@ async function applyConfiguredCashflowSheetLab({
   const groups = groupApplyLines(lines);
   const updatedWeeks = [];
   const now = new Date().toISOString();
+  const runId = `cashflow-sheet-apply:${projectId}:${now}`;
   await saveCashflowSheetLabActiveWeeks({ db, tenantId, projectId, activeWeeks, now });
   for (const group of groups) {
     updatedWeeks.push(await upsertCashflowWeekAmounts({
@@ -789,6 +801,48 @@ async function applyConfiguredCashflowSheetLab({
       allowSheetWeek: true,
     }));
   }
+  const actorUid = readOptionalText(context?.actorId);
+  const actorEmail = readOptionalText(context?.actorEmail);
+  const actorName = actorEmail || actorUid;
+  await saveCashflowEvents({
+    db,
+    tenantId,
+    events: [
+      {
+        tenantId,
+        projectId,
+        runId,
+        type: 'sheet_apply',
+        source: 'google_sheet_apply',
+        appliedLineCount: lines.length,
+        projectionLineCount: lines.filter((line) => line.mode === 'projection').length,
+        actualLineCount: lines.filter((line) => line.mode === 'actual').length,
+        actorUid,
+        actorName,
+        actorEmail,
+        createdAt: now,
+      },
+      ...updatedWeeks.flatMap((week) => (week.amountChanges || []).map((change) => ({
+        tenantId,
+        projectId,
+        runId,
+        type: change.mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
+        source: 'google_sheet_apply',
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        mode: change.mode,
+        lineId: change.lineId,
+        beforeAmount: change.beforeAmount,
+        afterAmount: change.afterAmount,
+        beforeHadValue: change.beforeHadValue,
+        afterHadValue: change.afterHadValue,
+        actorUid,
+        actorName,
+        actorEmail,
+        createdAt: now,
+      }))),
+    ],
+  });
   const postApplySnapshot = await readCashflowWeeksSnapshotByKeys(db, tenantId, projectId, updatedWeeks);
   const postApplyPreviewValues = buildPreviewValues(template, postApplySnapshot, preview.matrix)
     .filter((value) => isInWeekRange(value, weekRange));
@@ -869,6 +923,7 @@ async function applyConfiguredCashflowSheetLab({
     projectionLineCount,
     actualLineCount,
     lastAppliedAt: now,
+    runId,
     lastAppliedBy: {
       uid: readOptionalText(context?.actorId),
       email: readOptionalText(context?.actorEmail),

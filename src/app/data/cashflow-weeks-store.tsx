@@ -55,6 +55,7 @@ interface CashflowWeekActions {
     weekNo: number;
     mode: 'projection' | 'actual';
     amounts: Partial<Record<CashflowSheetLineId, number>>;
+    markCompleted?: boolean;
   }) => Promise<void>;
   upsertLineAmount: (input: {
     projectId: string;
@@ -84,6 +85,88 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
   _g.__MYSC_CASHFLOW_WEEKS_CTX__ = createContext<(CashflowWeekState & CashflowWeekActions) | null>(null);
 }
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
+
+type CashflowEventType =
+  | 'projection_amount_change'
+  | 'actual_amount_change'
+  | 'projection_completed'
+  | 'actual_completed'
+  | 'admin_closed';
+
+type CashflowEvent = {
+  id?: string;
+  tenantId: string;
+  projectId: string;
+  runId: string;
+  type: CashflowEventType;
+  source: 'manual';
+  yearMonth: string;
+  weekNo: number;
+  mode?: 'projection' | 'actual';
+  lineId?: CashflowSheetLineId;
+  beforeAmount?: number;
+  afterAmount?: number;
+  beforeHadValue?: boolean;
+  afterHadValue?: boolean;
+  actorUid: string;
+  actorName: string;
+  actorEmail?: string;
+  createdAt: string;
+};
+
+function safeCashflowEventDocId(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 140);
+}
+
+async function writeCashflowEvents(db: NonNullable<ReturnType<typeof useFirebase>['db']>, orgId: string, events: CashflowEvent[]): Promise<void> {
+  await Promise.all(events.map((event, index) => {
+    const id = safeCashflowEventDocId(`${event.runId}:${event.type}:${event.mode || 'status'}:${event.yearMonth}:w${event.weekNo}:${event.lineId || index}`);
+    return setDoc(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', id)), { ...event, id }, { merge: false });
+  }));
+}
+
+function buildAmountChangeEvents(input: {
+  tenantId: string;
+  projectId: string;
+  runId: string;
+  mode: 'projection' | 'actual';
+  yearMonth: string;
+  weekNo: number;
+  amounts: Partial<Record<CashflowSheetLineId, number>>;
+  existing?: CashflowWeekSheet;
+  actorUid: string;
+  actorName: string;
+  actorEmail?: string;
+  now: string;
+}): CashflowEvent[] {
+  const src = input.mode === 'projection' ? input.existing?.projection : input.existing?.actual;
+  return Object.entries(input.amounts || {}).flatMap(([lineId, rawAmount]) => {
+    const typedLineId = lineId as CashflowSheetLineId;
+    const beforeHadValue = !!src && Object.prototype.hasOwnProperty.call(src, typedLineId);
+    const beforeAmount = Number(src?.[typedLineId] ?? 0);
+    const afterAmount = Number(rawAmount) || 0;
+    if (beforeHadValue && beforeAmount === afterAmount) return [];
+    return [{
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      runId: input.runId,
+      type: input.mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
+      source: 'manual',
+      yearMonth: input.yearMonth,
+      weekNo: input.weekNo,
+      mode: input.mode,
+      lineId: typedLineId,
+      beforeAmount,
+      afterAmount,
+      beforeHadValue,
+      afterHadValue: true,
+      actorUid: input.actorUid,
+      actorName: input.actorName,
+      actorEmail: input.actorEmail,
+      createdAt: input.now,
+    }];
+  });
+}
 
 function patchCashflowWeekLocally(
   rows: CashflowWeekSheet[],
@@ -226,6 +309,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     weekNo: number;
     mode: 'projection' | 'actual';
     amounts: Partial<Record<CashflowSheetLineId, number>>;
+    markCompleted?: boolean;
   }): Promise<void> => {
     const actor = user;
     if (!actor) return;
@@ -378,6 +462,37 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     try {
       const existingSnap = await getDoc(ref).catch(() => null);
       const existingData = existingSnap?.exists() ? (existingSnap.data() as CashflowWeekSheet) : undefined;
+      const runId = `cashflow-manual:${projectId}:${ym}:w${weekNo}:${input.mode}:${now}`;
+      const events = [
+        ...buildAmountChangeEvents({
+          tenantId: orgId,
+          projectId,
+          runId,
+          mode: input.mode,
+          yearMonth: ym,
+          weekNo,
+          amounts: input.amounts || {},
+          existing: existingData,
+          actorUid: actor.uid,
+          actorName: actor.name,
+          actorEmail: actor.email,
+          now,
+        }),
+        ...(input.markCompleted && input.mode === 'projection' ? [{
+          tenantId: orgId,
+          projectId,
+          runId,
+          type: 'projection_completed' as const,
+          source: 'manual' as const,
+          yearMonth: ym,
+          weekNo,
+          mode: 'projection' as const,
+          actorUid: actor.uid,
+          actorName: actor.name,
+          actorEmail: actor.email,
+          createdAt: now,
+        }] : []),
+      ];
       const patch = buildCashflowWeekUpdatePatch({
         orgId,
         actorUid: actor.uid,
@@ -392,6 +507,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
       if (existingSnap?.exists()) {
         await updateDoc(ref, patch as any);
+        await writeCashflowEvents(db, orgId, events);
         recordDevtoolsLog({
           kind: 'cashflow_transaction',
           phase: 'success',
@@ -436,6 +552,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         now,
       });
       await setDoc(ref, initial, { merge: false });
+      await writeCashflowEvents(db, orgId, events);
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
@@ -587,6 +704,20 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const id = resolveWeekDocId(projectId, ym, weekNo);
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
+    const event: CashflowEvent = {
+      tenantId: orgId,
+      projectId,
+      runId: `cashflow-status:${projectId}:${ym}:w${weekNo}:actual-completed:${now}`,
+      type: 'actual_completed',
+      source: 'manual',
+      yearMonth: ym,
+      weekNo,
+      mode: 'actual',
+      actorUid: actor.uid,
+      actorName: actor.name,
+      actorEmail: actor.email,
+      createdAt: now,
+    };
 
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
@@ -616,6 +747,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       await updateDoc(ref, {
         ...patch,
       } as Partial<CashflowWeekSheet> as any);
+      await writeCashflowEvents(db, orgId, [event]);
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
@@ -672,6 +804,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedByName: actor.name,
     };
     await setDoc(ref, initial, { merge: false });
+    await writeCashflowEvents(db, orgId, [event]);
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'success',
@@ -708,6 +841,19 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     const id = resolveWeekDocId(projectId, ym, weekNo);
     const now = new Date().toISOString();
     const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
+    const event: CashflowEvent = {
+      tenantId: orgId,
+      projectId,
+      runId: `cashflow-status:${projectId}:${ym}:w${weekNo}:admin-closed:${now}`,
+      type: 'admin_closed',
+      source: 'manual',
+      yearMonth: ym,
+      weekNo,
+      actorUid: actor.uid,
+      actorName: actor.name,
+      actorEmail: actor.email,
+      createdAt: now,
+    };
 
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
@@ -736,6 +882,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       await updateDoc(ref, {
         ...patch,
       } as Partial<CashflowWeekSheet> as any);
+      await writeCashflowEvents(db, orgId, [event]);
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
@@ -790,6 +937,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       updatedByName: actor.name,
     };
     await setDoc(ref, initial, { merge: false });
+    await writeCashflowEvents(db, orgId, [event]);
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'success',

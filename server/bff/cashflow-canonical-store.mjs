@@ -31,6 +31,25 @@ const PROJECTION_CHANGE_ALERT_THRESHOLD_AMOUNT = 10_000_000;
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const WEEKLY_SUBMISSION_STATUS_COLLECTION_ID = 'weekly_submission_status';
 
+function buildAmountChanges({ mode, amounts, existingData }) {
+  const normalizedAmounts = normalizeAmounts(amounts);
+  const existingModeAmounts = normalizeAmounts(existingData?.[mode] || {});
+  return Object.entries(normalizedAmounts)
+    .map(([lineId, afterAmount]) => {
+      const beforeHadValue = Object.prototype.hasOwnProperty.call(existingData?.[mode] || {}, lineId);
+      const beforeAmount = Number(existingModeAmounts[lineId] || 0);
+      return {
+        mode,
+        lineId,
+        beforeAmount,
+        afterAmount,
+        beforeHadValue,
+        afterHadValue: true,
+      };
+    })
+    .filter((change) => !change.beforeHadValue || change.beforeAmount !== change.afterAmount);
+}
+
 function normalizePolicyLabel(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -439,9 +458,12 @@ export async function upsertCashflowWeekAmounts({
   const statusPatch = canonicalWeek
     ? buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now })
     : null;
+  let amountChanges = [];
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(weekRef);
+    const existingData = snap.exists ? snap.data() : undefined;
+    amountChanges = buildAmountChanges({ mode, amounts, existingData });
     const patch = buildWeekPatch({
       tenantId,
       actorId,
@@ -451,7 +473,7 @@ export async function upsertCashflowWeekAmounts({
       week: targetWeek,
       amounts,
       now,
-      existingData: snap.exists ? snap.data() : undefined,
+      existingData,
     });
     tx.set(weekRef, {
       ...(snap.exists ? {} : { createdAt: now, pmSubmitted: false, adminClosed: false }),
@@ -468,6 +490,7 @@ export async function upsertCashflowWeekAmounts({
     weekStart: targetWeek.weekStart,
     weekEnd: targetWeek.weekEnd,
     mode,
+    amountChanges,
     updatedAt: now,
   };
 }

@@ -120,7 +120,7 @@ describe('cashflow canonical BFF helpers', () => {
       },
     };
 
-    await upsertCashflowWeekAmounts({
+    const result = await upsertCashflowWeekAmounts({
       db,
       tenantId: 'mysc',
       actorId: 'u1',
@@ -142,6 +142,14 @@ describe('cashflow canonical BFF helpers', () => {
     expect(weekWrite.data.pmSubmitted).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(weekWrite.data, 'actual.DIRECT_COST_OUT')).toBe(false);
     expect(weekWrite.options).toEqual({ merge: true });
+    expect(result.amountChanges).toEqual([{
+      mode: 'actual',
+      lineId: 'DIRECT_COST_OUT',
+      beforeAmount: 0,
+      afterAmount: 3620183,
+      beforeHadValue: false,
+      afterHadValue: true,
+    }]);
   });
 
   it('flags large projection changes made within a week of the target week', async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where, writeBatch } from 'firebase/firestore';
 import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
@@ -27,7 +27,7 @@ import {
   type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeCashflowTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
@@ -41,7 +41,7 @@ import {
 } from '../../lib/platform-bff-client';
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
-import { buildCashflowOpsSummary, type CashflowOpsTimelineItem, type CashflowOpsTone } from './cashflow-ops-summary';
+import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
 import { RollingAmount } from '../ui/rolling-amount';
 import { applyCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
 
@@ -82,6 +82,41 @@ type CashflowEditLock = {
   lastEditedByUid?: string | null;
   lastEditedByName?: string | null;
   lastEditedByEmail?: string | null;
+};
+
+type CashflowEventType =
+  | 'sheet_apply'
+  | 'projection_amount_change'
+  | 'actual_amount_change'
+  | 'projection_completed'
+  | 'actual_completed'
+  | 'admin_closed'
+  | 'sheet_apply_reverted';
+
+type CashflowEvent = {
+  id?: string;
+  tenantId?: string;
+  projectId: string;
+  runId: string;
+  type: CashflowEventType;
+  source?: 'manual' | 'google_sheet_apply' | 'revert';
+  yearMonth?: string;
+  weekNo?: number;
+  mode?: 'projection' | 'actual';
+  lineId?: CashflowSheetLineId;
+  beforeAmount?: number;
+  afterAmount?: number;
+  beforeHadValue?: boolean;
+  afterHadValue?: boolean;
+  appliedLineCount?: number;
+  projectionLineCount?: number;
+  actualLineCount?: number;
+  revertedRunId?: string;
+  actorUid?: string;
+  actorName?: string;
+  actorEmail?: string;
+  createdAt: string;
+  revertedAt?: string;
 };
 
 function safeDocId(value: string): string {
@@ -355,6 +390,8 @@ export function CashflowProjectSheet({
     projectionLineCount: number;
     actualLineCount: number;
   } | null>(null);
+  const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
+  const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
   const [editLockBusy, setEditLockBusy] = useState(false);
   const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
   const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
@@ -653,6 +690,30 @@ export function CashflowProjectSheet({
     };
   }, [loadCashflowSheetRangeWeeks]);
 
+  const loadCashflowEvents = useCallback(async (): Promise<void> => {
+    if (!db || !projectId) {
+      setCashflowEvents([]);
+      return;
+    }
+    const base = collection(db, getOrgCollectionPath(orgId, 'cashflowEvents'));
+    const snap = await getDocs(query(base, where('projectId', '==', projectId), limit(200)));
+    setCashflowEvents(
+      snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<CashflowEvent, 'id'>) }))
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
+    );
+  }, [db, orgId, projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCashflowEvents().catch(() => {
+      if (!cancelled) setCashflowEvents([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCashflowEvents]);
+
   useEffect(() => {
     setLaborRisk(null);
     setLaborRiskError(null);
@@ -744,6 +805,7 @@ export function CashflowProjectSheet({
       }
       const result = await apply(actor);
       await loadCashflowSheetRangeWeeks();
+      await loadCashflowEvents();
       rememberResult(result);
       toast.success('시트 값을 새로고침했습니다.');
     } catch (error) {
@@ -753,6 +815,7 @@ export function CashflowProjectSheet({
           if (!actor?.idToken) throw error;
           const result = await apply(actor);
           await loadCashflowSheetRangeWeeks();
+          await loadCashflowEvents();
           rememberResult(result);
           toast.success('시트 값을 새로고침했습니다.');
           return;
@@ -765,7 +828,104 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetConfig, loadCashflowSheetRangeWeeks, orgId, projectId, resolveBffActor]);
+  }, [cashflowSheetConfig, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, projectId, resolveBffActor]);
+
+  const handleRevertCashflowRun = useCallback(async (runId: string): Promise<void> => {
+    if (!db || !user?.uid) {
+      toast.error('로그인 세션이 만료되었습니다.');
+      return;
+    }
+    const runEvents = cashflowEvents.filter((event) => event.runId === runId);
+    const amountEvents = runEvents.filter((event) => (
+      event.source === 'google_sheet_apply'
+      && !event.revertedAt
+      && (event.type === 'projection_amount_change' || event.type === 'actual_amount_change')
+      && event.yearMonth
+      && event.weekNo
+      && event.mode
+      && event.lineId
+    ));
+    if (amountEvents.length === 0) {
+      toast.info('되돌릴 금액 변경이 없습니다.');
+      return;
+    }
+    if (!window.confirm(`이 시트 반영의 금액 변경 ${amountEvents.length}건을 이전 값으로 되돌릴까요?`)) return;
+
+    setRevertingRunId(runId);
+    try {
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      const byWeek = new Map<string, CashflowEvent[]>();
+      for (const event of amountEvents) {
+        const key = `${event.yearMonth}:w${event.weekNo}`;
+        byWeek.set(key, [...(byWeek.get(key) || []), event]);
+      }
+
+      for (const [key, events] of byWeek) {
+        const [targetYearMonth, rawWeekNo] = key.split(':w');
+        const weekNo = Number(rawWeekNo);
+        const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', `${projectId}-${targetYearMonth}-w${weekNo}`));
+        const snap = await getDoc(ref);
+        const current = snap.exists() ? (snap.data() as CashflowWeekSheet) : undefined;
+        const nextProjection = { ...(current?.projection || {}) };
+        const nextActual = { ...(current?.actual || {}) };
+        let touchedProjection = false;
+        let touchedActual = false;
+
+        for (const event of events) {
+          const target = event.mode === 'projection' ? nextProjection : nextActual;
+          if (!event.beforeHadValue) {
+            delete target[event.lineId as CashflowSheetLineId];
+          } else {
+            target[event.lineId as CashflowSheetLineId] = Number(event.beforeAmount || 0);
+          }
+          touchedProjection = touchedProjection || event.mode === 'projection';
+          touchedActual = touchedActual || event.mode === 'actual';
+        }
+
+        batch.set(ref, {
+          ...(touchedProjection ? { projection: nextProjection, projectionTotals: computeCashflowTotals(nextProjection) } : {}),
+          ...(touchedActual ? { actual: nextActual, actualTotals: computeCashflowTotals(nextActual) } : {}),
+          updatedAt: now,
+          updatedByUid: user.uid,
+          updatedByName: getUserDisplayName(user),
+          tenantId: orgId,
+        } as Partial<CashflowWeekSheet> as any, { merge: true });
+      }
+
+      for (const event of runEvents) {
+        if (!event.id) continue;
+        batch.set(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', event.id)), {
+          revertedAt: now,
+          revertedByUid: user.uid,
+          revertedByName: getUserDisplayName(user),
+        }, { merge: true });
+      }
+      const revertId = safeDocId(`cashflow-revert:${runId}:${now}`);
+      batch.set(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', revertId)), {
+        id: revertId,
+        tenantId: orgId,
+        projectId,
+        runId: `cashflow-revert:${runId}:${now}`,
+        revertedRunId: runId,
+        type: 'sheet_apply_reverted',
+        source: 'revert',
+        actorUid: user.uid,
+        actorName: getUserDisplayName(user),
+        actorEmail: user.email || '',
+        createdAt: now,
+      } as CashflowEvent);
+
+      await batch.commit();
+      await loadCashflowSheetRangeWeeks();
+      await loadCashflowEvents();
+      toast.success('시트 반영 이전 값으로 되돌렸습니다.');
+    } catch (error) {
+      toast.error('되돌리기에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+    } finally {
+      setRevertingRunId(null);
+    }
+  }, [cashflowEvents, db, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, projectId, user]);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -1205,6 +1365,7 @@ export function CashflowProjectSheet({
             : { expenseEdited: true, expenseUpdated: true }),
         });
       }
+      await loadCashflowEvents();
 
       setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
       setDrafts((prev) => {
@@ -1222,7 +1383,7 @@ export function CashflowProjectSheet({
       }
       throw error;
     }
-  }, [byYearMonthWeek, canEdit, drafts, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
+  }, [byYearMonthWeek, canEdit, drafts, loadCashflowEvents, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
 
   const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
@@ -1275,6 +1436,7 @@ export function CashflowProjectSheet({
             : { expenseEdited: true, expenseUpdated: true }),
         });
       }
+      await loadCashflowEvents();
       setDrafts((prev) => {
         const next = { ...prev };
         for (const lineId of CASHFLOW_ALL_LINES) {
@@ -1291,6 +1453,7 @@ export function CashflowProjectSheet({
     byYearMonthWeek,
     canEdit,
     drafts,
+    loadCashflowEvents,
     onUpdateWeeklySubmissionStatus,
     projectId,
     resolveCellKey,
@@ -1343,6 +1506,7 @@ export function CashflowProjectSheet({
     setSubmitBusy(true);
     try {
       await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
+      await loadCashflowEvents();
       toast.success('작성완료 처리했습니다.');
     } catch (e) {
       toast.error('작성완료 처리에 실패했습니다.');
@@ -1350,7 +1514,7 @@ export function CashflowProjectSheet({
       setSubmitBusy(false);
       setSubmitConfirm(null);
     }
-  }, [projectId, submitWeekAsPm]);
+  }, [loadCashflowEvents, projectId, submitWeekAsPm]);
 
   const handleCompleteProjectionWeek = useCallback((weekNo: number, targetYearMonth = yearMonth) => {
     if (!canEdit) return;
@@ -1375,6 +1539,7 @@ export function CashflowProjectSheet({
         weekNo,
         mode: 'projection',
         amounts,
+        markCompleted: true,
       });
 
       if (onUpdateWeeklySubmissionStatus) {
@@ -1386,6 +1551,7 @@ export function CashflowProjectSheet({
           projectionUpdated: true,
         });
       }
+      await loadCashflowEvents();
 
       setDrafts((prev) => {
         const next = { ...prev };
@@ -1409,6 +1575,7 @@ export function CashflowProjectSheet({
     canEdit,
     getEffectiveAmount,
     onUpdateWeeklySubmissionStatus,
+    loadCashflowEvents,
     projectId,
     resolveCellKey,
     resolveWeekKey,
@@ -1421,6 +1588,7 @@ export function CashflowProjectSheet({
     try {
       await persistWeekValues({ yearMonth: targetYearMonth, weekNo, mode: 'projection' });
       await closeWeekAsAdmin({ projectId, yearMonth: targetYearMonth, weekNo });
+      await loadCashflowEvents();
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
       toast.error('결산완료 처리에 실패했습니다.');
@@ -1428,7 +1596,7 @@ export function CashflowProjectSheet({
       setCloseBusy(false);
       setCloseDialog(null);
     }
-  }, [closeWeekAsAdmin, persistWeekValues, projectId, yearMonth]);
+  }, [closeWeekAsAdmin, loadCashflowEvents, persistWeekValues, projectId, yearMonth]);
 
   const handleStartCloseWeek = useCallback(async (weekNo: number) => {
     if (!db) {
@@ -2638,12 +2806,6 @@ export function CashflowProjectSheet({
     return 'text-slate-700';
   }
 
-  function opsTimelineSourceClass(source: CashflowOpsTimelineItem['source']): string {
-    if (source === 'record') return 'border-blue-200 bg-blue-50 text-blue-700';
-    if (source === 'computed') return 'border-amber-200 bg-amber-50 text-amber-700';
-    return 'border-slate-200 bg-slate-50 text-slate-600';
-  }
-
   function renderOpsStatusDonut() {
     const blockedMatch = opsSummary.status.detail.match(/(\d+)/);
     const blockedCount = blockedMatch ? Number(blockedMatch[1]) : 0;
@@ -2907,11 +3069,44 @@ export function CashflowProjectSheet({
     );
   }
 
+  function cashflowEventLabel(event: CashflowEvent): string {
+    if (event.type === 'sheet_apply') return '시트 값 반영';
+    if (event.type === 'projection_amount_change') return 'Projection 값 변경';
+    if (event.type === 'actual_amount_change') return 'Actual 값 변경';
+    if (event.type === 'projection_completed') return 'Projection 작성완료';
+    if (event.type === 'actual_completed') return 'Actual 작성완료';
+    if (event.type === 'admin_closed') return '결산완료';
+    if (event.type === 'sheet_apply_reverted') return '시트 반영 되돌림';
+    return '변경';
+  }
+
+  function cashflowEventDetail(event: CashflowEvent): string {
+    if (event.type === 'sheet_apply') {
+      return `Google Sheet 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
+    }
+    if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
+      const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
+      const lineLabel = event.lineId ? CASHFLOW_SHEET_LINE_LABELS[event.lineId] || event.lineId : '';
+      const before = event.beforeHadValue ? `${fmt(Number(event.beforeAmount || 0))}원` : '미작성';
+      const after = `${fmt(Number(event.afterAmount || 0))}원`;
+      return `${weekLabel} ${lineLabel} ${before} → ${after}`;
+    }
+    if (event.type === 'sheet_apply_reverted') return '선택한 시트 반영 run의 금액 변경을 이전 값으로 되돌렸습니다.';
+    const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
+    return [weekLabel, event.actorName || event.actorEmail || '사용자'].filter(Boolean).join(' · ');
+  }
+
+  function cashflowEventSourceClass(source: CashflowEvent['source']): string {
+    if (source === 'google_sheet_apply') return 'bg-blue-50 text-blue-700';
+    if (source === 'revert') return 'bg-amber-50 text-amber-700';
+    return 'bg-slate-100 text-slate-700';
+  }
+
   function renderOpsTimeline() {
     const countBadges = [
-      { key: 'record' as const, label: '기록', value: opsSummary.timelineCounts.record },
-      { key: 'computed' as const, label: '계산', value: opsSummary.timelineCounts.computed },
-      { key: 'system' as const, label: '시스템', value: opsSummary.timelineCounts.system },
+      { key: 'sheet', label: '시트 반영', value: cashflowEvents.filter((event) => event.type === 'sheet_apply').length },
+      { key: 'amount', label: '금액 변경', value: cashflowEvents.filter((event) => event.type === 'projection_amount_change' || event.type === 'actual_amount_change').length },
+      { key: 'status', label: '완료', value: cashflowEvents.filter((event) => ['projection_completed', 'actual_completed', 'admin_closed'].includes(event.type)).length },
     ].filter((item) => item.value > 0);
 
     return (
@@ -2919,14 +3114,14 @@ export function CashflowProjectSheet({
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">운영 로그</div>
-              <div className="text-[10px] text-slate-500">최근 저장과 확인 기록입니다.</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
+              <div className="text-[10px] text-slate-500">시트 반영, 저장, 작성완료, 결산 기록입니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
                 <span
                   key={badge.key}
-                  className={`rounded-full border-0 px-2 py-1 text-[9px] font-semibold leading-3 ${opsTimelineSourceClass(badge.key)}`}
+                  className="rounded-full border-0 bg-slate-100 px-2 py-1 text-[9px] font-semibold leading-3 text-slate-700"
                 >
                   {badge.label} {badge.value}
                 </span>
@@ -2934,28 +3129,56 @@ export function CashflowProjectSheet({
             </div>
           </div>
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-[18px] bg-slate-50/70 px-2 py-2 pr-1">
-            {opsSummary.timeline.map((item, index) => (
-              <div key={item.id} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-3">
-                {index < opsSummary.timeline.length - 1 && (
+            {cashflowEvents.length === 0 ? (
+              <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
+                배포 이후 새 변경 기록이 생기면 여기에 표시됩니다.
+              </div>
+            ) : cashflowEvents.map((event, index) => {
+              const canRevert = event.type === 'sheet_apply'
+                && event.source === 'google_sheet_apply'
+                && !event.revertedAt
+                && cashflowEvents.some((candidate) => (
+                  candidate.runId === event.runId
+                  && !candidate.revertedAt
+                  && (candidate.type === 'projection_amount_change' || candidate.type === 'actual_amount_change')
+                ));
+              return (
+              <div key={event.id || `${event.runId}:${index}`} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-3">
+                {index < cashflowEvents.length - 1 && (
                   <div className="absolute left-[6px] top-3 h-full w-px bg-slate-200/80" />
                 )}
-                <div className={`relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white ${opsDotClass(item.tone)}`} />
+                <div className={`relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white ${opsDotClass(event.type === 'sheet_apply_reverted' ? 'warning' : 'info')}`} />
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[9px] font-semibold leading-3 ${opsTimelineSourceClass(item.source)}`}>
-                          {item.sourceLabel}
+                        <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[9px] font-semibold leading-3 ${cashflowEventSourceClass(event.source)}`}>
+                          {event.source === 'google_sheet_apply' ? '시트' : event.source === 'revert' ? '되돌림' : '기록'}
                         </span>
-                        <span className="truncate text-[11px] font-bold text-slate-900">{item.title}</span>
+                        <span className="truncate text-[11px] font-bold text-slate-900">{cashflowEventLabel(event)}</span>
                       </div>
                     </div>
-                    {item.timeLabel && <div className="shrink-0 text-[9px] tabular-nums text-slate-400">{item.timeLabel}</div>}
+                    <div className="shrink-0 text-[9px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
                   </div>
-                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</div>
+                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
+                  {canRevert && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-1 h-6 rounded-full px-2 text-[9px]"
+                      onClick={() => void handleRevertCashflowRun(event.runId)}
+                      disabled={revertingRunId === event.runId}
+                    >
+                      {revertingRunId === event.runId ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                      이 반영 되돌리기
+                    </Button>
+                  )}
+                  {event.revertedAt && <div className="mt-1 text-[9px] font-semibold text-amber-700">되돌림 완료</div>}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </CardContent>
       </Card>

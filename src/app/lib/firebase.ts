@@ -298,6 +298,7 @@ export const ORG_COLLECTIONS = {
   boardVotes: 'board_votes',
   // App-facing alias is camelCase, Firestore wire collection remains snake_case.
   cashflowWeeks: 'cashflow_weeks',
+  cashflowEvents: 'cashflow_events',
   cashflowEditLocks: 'cashflow_edit_locks',
   cashflowPresence: 'cashflow_presence',
   payrollSchedules: 'payroll_schedules',
