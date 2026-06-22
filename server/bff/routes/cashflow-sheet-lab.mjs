@@ -379,6 +379,31 @@ async function saveCashflowChangeCandidates({ db, tenantId, candidates }) {
   }
 }
 
+async function readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runId }) {
+  if (!db) return [];
+  const snap = await db.collection(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}`).get();
+  return snap.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((candidate) => (
+      readOptionalText(candidate.projectId) === readOptionalText(projectId)
+      && readOptionalText(candidate.runId) === readOptionalText(runId)
+      && readOptionalText(candidate.status || 'pending_review') === 'pending_review'
+    ));
+}
+
+async function markCashflowChangeCandidatesStatus({ db, tenantId, candidates, status, now }) {
+  if (!db || candidates.length === 0) return;
+  for (let offset = 0; offset < candidates.length; offset += 450) {
+    await Promise.all(candidates.slice(offset, offset + 450).map((candidate) => db
+      .doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${candidate.id}`)
+      .set(stripUndefinedDeep({
+        status,
+        updatedAt: now,
+        appliedAt: status === 'applied' ? now : undefined,
+      }), { merge: true })));
+  }
+}
+
 async function readCashflowWeeksSnapshot(db, tenantId, projectId) {
   const snap = await db.collection(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}`)
     .where('projectId', '==', projectId)
@@ -511,6 +536,19 @@ function groupApplyLines(lines) {
     groups.set(key, group);
   }
   return [...groups.values()];
+}
+
+function candidateToApplyLine(candidate) {
+  return {
+    mode: candidate.mode,
+    yearMonth: candidate.yearMonth,
+    weekNo: candidate.weekNo,
+    cashflowLine: candidate.lineId,
+    direction: candidate.lineDirection === 'in' ? 'IN' : 'OUT',
+    amount: normalizeAppliedAmount(candidate.proposedAmount),
+    sourceCell: candidate.sourceCell,
+    sourceLabel: candidate.sourceLabel || candidate.lineId,
+  };
 }
 
 function buildSheetChangeCandidates({ tenantId, projectId, runId, lines, cashflowSnapshot, context, now }) {
@@ -782,6 +820,210 @@ function verifyPostApplyReadback(lines, previewValues) {
   }
 
   return { verifiedLineCount: lines.length };
+}
+
+function verifyPostApplySnapshot(lines, cashflowSnapshot) {
+  const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
+  const mismatches = [];
+  for (const line of lines) {
+    const expected = normalizeAppliedAmount(line.amount);
+    const actual = readIndexedSnapshotAmount(amountIndex, {
+      mode: line.mode,
+      yearMonth: line.yearMonth,
+      weekNo: line.weekNo,
+      lineId: line.cashflowLine,
+    });
+    if (actual !== expected) {
+      mismatches.push({
+        mode: line.mode,
+        yearMonth: line.yearMonth,
+        weekNo: line.weekNo,
+        cashflowLine: line.cashflowLine,
+        expected,
+        actual: actual ?? null,
+      });
+    }
+  }
+
+  if (mismatches.length > 0) {
+    const error = createHttpError(
+      500,
+      `Cashflow staged apply verification failed for ${mismatches.length} cells.`,
+      'cashflow_sheet_stage_apply_verify_failed',
+    );
+    error.details = { mismatches: mismatches.slice(0, 20) };
+    throw error;
+  }
+
+  return { verifiedLineCount: lines.length };
+}
+
+async function applyStagedCashflowSheetLab({
+  db,
+  tenantId,
+  projectId,
+  parsed = {},
+  context = {},
+  logger = () => {},
+} = {}) {
+  const stagedRunId = readOptionalText(parsed.stageRunId);
+  const now = new Date().toISOString();
+  logger('staged.start', {
+    projectId,
+    stagedRunId,
+    applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
+  });
+  if (!stagedRunId) {
+    throw createHttpError(400, '검토 후보 runId가 필요합니다.', 'cashflow_sheet_stage_run_required');
+  }
+
+  const candidates = await readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runId: stagedRunId });
+  if (candidates.length === 0) {
+    throw createHttpError(400, '저장할 검토 후보가 없습니다.', 'cashflow_sheet_stage_candidates_empty');
+  }
+
+  const riskCandidates = candidates.filter((candidate) => Array.isArray(candidate.riskFlags) && candidate.riskFlags.length > 0);
+  const selectedCandidates = parsed.applyRiskCandidates
+    ? candidates
+    : candidates.filter((candidate) => !Array.isArray(candidate.riskFlags) || candidate.riskFlags.length === 0);
+  if (selectedCandidates.length === 0) {
+    throw createHttpError(
+      409,
+      '확인 필요 후보만 있습니다. 전체 검토 후 저장해 주세요.',
+      'cashflow_sheet_stage_only_risk_candidates',
+    );
+  }
+
+  const lines = selectedCandidates.map(candidateToApplyLine);
+  const groups = groupApplyLines(lines);
+  const updatedWeeks = [];
+  const runId = `cashflow-sheet-apply:${projectId}:${now}`;
+  for (const group of groups) {
+    updatedWeeks.push(await upsertCashflowWeekAmounts({
+      db,
+      tenantId,
+      actorId: readOptionalText(context?.actorId),
+      actorName: readOptionalText(context?.actorEmail) || readOptionalText(context?.actorId),
+      projectId,
+      mode: group.mode,
+      yearMonth: group.yearMonth,
+      weekNo: group.weekNo,
+      amounts: group.amounts,
+      now,
+      allowSheetWeek: true,
+    }));
+  }
+
+  const actorUid = readOptionalText(context?.actorId);
+  const actorEmail = readOptionalText(context?.actorEmail);
+  const actorName = actorEmail || actorUid;
+  const projectionLineCount = lines.filter((line) => line.mode === 'projection').length;
+  const actualLineCount = lines.filter((line) => line.mode === 'actual').length;
+  await saveCashflowEvents({
+    db,
+    tenantId,
+    events: [
+      {
+        tenantId,
+        projectId,
+        runId,
+        stagedRunId,
+        type: 'sheet_apply',
+        source: 'google_sheet_apply',
+        appliedLineCount: lines.length,
+        projectionLineCount,
+        actualLineCount,
+        skippedRiskLineCount: riskCandidates.length,
+        actorUid,
+        actorName,
+        actorEmail,
+        createdAt: now,
+      },
+      ...updatedWeeks.flatMap((week) => (week.amountChanges || []).map((change) => ({
+        tenantId,
+        projectId,
+        runId,
+        stagedRunId,
+        type: change.mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
+        source: 'google_sheet_apply',
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        mode: change.mode,
+        lineId: change.lineId,
+        beforeAmount: change.beforeAmount,
+        afterAmount: change.afterAmount,
+        beforeHadValue: change.beforeHadValue,
+        afterHadValue: change.afterHadValue,
+        actorUid,
+        actorName,
+        actorEmail,
+        createdAt: now,
+      }))),
+    ],
+  });
+
+  const postApplySnapshot = await readCashflowWeeksSnapshotByKeys(db, tenantId, projectId, updatedWeeks);
+  const verification = verifyPostApplySnapshot(lines, postApplySnapshot);
+  await saveCashflowSheetLabApplyMetadata({
+    db,
+    tenantId,
+    projectId,
+    context,
+    now,
+    result: {
+      appliedLineCount: lines.length,
+      projectionLineCount,
+      actualLineCount,
+    },
+  });
+  await markCashflowChangeCandidatesStatus({
+    db,
+    tenantId,
+    candidates: selectedCandidates,
+    status: 'applied',
+    now,
+  });
+
+  logger('staged.ok', {
+    projectId,
+    stagedRunId,
+    appliedLineCount: lines.length,
+    riskLineCount: riskCandidates.length,
+    verifiedLineCount: verification.verifiedLineCount,
+  });
+
+  return {
+    ok: true,
+    commandName: 'cashflowSheetLab.apply.firebase',
+    projectId,
+    sourceSheetKey: 'cashflow-sheet-lab',
+    weekBasis: CASHFLOW_WEEK_BASIS,
+    totalBasis: CASHFLOW_WEEK_BASIS,
+    appliedLineCount: lines.length,
+    projectionLineCount,
+    actualLineCount,
+    skippedRiskLineCount: riskCandidates.length,
+    lastAppliedAt: now,
+    runId,
+    stagedRunId,
+    lastAppliedBy: {
+      uid: actorUid,
+      email: actorEmail,
+      role: readOptionalText(context?.actorRole) || 'workspace_user',
+    },
+    firebaseResult: {
+      ok: true,
+      commandName: 'cashflowSheetLab.apply.firebase',
+      projectId,
+      sourceSheetKey: 'cashflow-sheet-lab',
+      weekBasis: CASHFLOW_WEEK_BASIS,
+      totalBasis: CASHFLOW_WEEK_BASIS,
+      savedProjectionLineCount: projectionLineCount,
+      savedActualLineCount: actualLineCount,
+      verifiedLineCount: verification.verifiedLineCount,
+      updatedWeeks,
+    },
+  };
 }
 
 async function applyConfiguredCashflowSheetLab({
@@ -1604,7 +1846,17 @@ export function mountCashflowSheetLabRoutes(app, {
     const deprecatedGoogleAccessTokenIgnored = Boolean(readOptionalText(req.header('x-google-access-token')));
 
     try {
-      const result = await applyConfiguredCashflowSheetLab({
+      const stagedRunId = readOptionalText(parsed.stageRunId);
+      const result = stagedRunId ? await applyStagedCashflowSheetLab({
+        db,
+        tenantId,
+        projectId,
+        parsed,
+        context: req.context,
+        logger: (event, details = {}, level = 'info') => {
+          logCashflowSheetLab(`apply.${event}`, req, details, level);
+        },
+      }) : await applyConfiguredCashflowSheetLab({
         db,
         tenantId,
         projectId,

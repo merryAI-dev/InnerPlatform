@@ -108,6 +108,8 @@ export const cashflowSheetLabApplySchema = z.object({
   sheetName: NON_EMPTY_STRING.optional(),
   startWeek: NON_EMPTY_STRING.optional(),
   endWeek: NON_EMPTY_STRING.optional(),
+  stageRunId: NON_EMPTY_STRING.optional(),
+  applyRiskCandidates: z.boolean().optional(),
   idempotencyKey: NON_EMPTY_STRING.optional(),
 }).strict();
 

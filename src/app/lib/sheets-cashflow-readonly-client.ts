@@ -152,8 +152,11 @@ export interface CashflowSheetLabApplyResult {
   actualLineCount: number;
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
+  skippedRiskLineCount?: number;
   verifiedLineCount?: number;
   lastAppliedAt?: string;
+  runId?: string;
+  stagedRunId?: string;
   lastAppliedBy?: {
     uid?: string;
     email?: string;
@@ -340,6 +343,8 @@ export async function applyCashflowSheetLabViaBff(params: {
   sheetName?: string;
   startWeek?: string;
   endWeek?: string;
+  stageRunId?: string;
+  applyRiskCandidates?: boolean;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabApplyResult> {
@@ -354,6 +359,8 @@ export async function applyCashflowSheetLabViaBff(params: {
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
+        ...(params.stageRunId ? { stageRunId: params.stageRunId } : {}),
+        ...(typeof params.applyRiskCandidates === 'boolean' ? { applyRiskCandidates: params.applyRiskCandidates } : {}),
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,

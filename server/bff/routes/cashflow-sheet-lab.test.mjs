@@ -402,6 +402,66 @@ describe('cashflow sheet lab route', () => {
     expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toContain('actual_overwrites_existing');
   });
 
+  it('applies a staged candidate run without rereading the Google Sheet and skips risk candidates', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        projection: { MYSC_PREPAY_IN: 100 },
+        actual: { MYSC_PREPAY_IN: 200 },
+      }],
+    });
+    let previewCalls = 0;
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => {
+        previewCalls += 1;
+        if (previewCalls > 1) throw new Error('apply must use staged candidates');
+        return {
+          spreadsheetId: 'spreadsheet-a',
+          spreadsheetTitle: 'Cashflow workbook',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrix(),
+        };
+      }),
+    };
+    const app = createApp({ db, googleSheetsService });
+
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ idempotencyKey: 'stage-apply-001' })
+      .expect(200);
+
+    const apply = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-stage-001' })
+      .expect(200);
+
+    expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(apply.body).toMatchObject({
+      appliedLineCount: 23,
+      projectionLineCount: 12,
+      actualLineCount: 11,
+      skippedRiskLineCount: 1,
+      stagedRunId: stage.body.runId,
+    });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
+      projection: { MYSC_PREPAY_IN: 999 },
+      actual: { MYSC_PREPAY_IN: 200 },
+    });
+  });
+
   it('runs the daily cashflow sheet sync worker through the same apply path', async () => {
     const db = createDb({
       project: {

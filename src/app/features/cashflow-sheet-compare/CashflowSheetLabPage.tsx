@@ -224,6 +224,7 @@ export function CashflowSheetLabPage({
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [shareConfirmed, setShareConfirmed] = useState(false);
   const [stageResult, setStageResult] = useState<{
+    runId: string;
     stagedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
@@ -233,6 +234,7 @@ export function CashflowSheetLabPage({
     appliedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
+    skippedRiskLineCount?: number;
     lastAppliedAt?: string;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -577,6 +579,7 @@ export function CashflowSheetLabPage({
       ));
       if (!result) return;
       setStageResult({
+        runId: result.runId,
         stagedLineCount: result.stagedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
@@ -584,7 +587,7 @@ export function CashflowSheetLabPage({
       });
       setReflectResult(null);
       setReviewedSourceKey(sourceKey);
-      setStatusMessage('시트 변경 후보를 만들었습니다.');
+      setStatusMessage('저장 전 검토 후보를 만들었습니다. 안전 후보만 캐시플로우에 저장할 수 있습니다.');
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -610,20 +613,21 @@ export function CashflowSheetLabPage({
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
-    logCashflowLab('apply.sheet_values.start', {
-      projectId,
-      spreadsheetId,
-    });
+      logCashflowLab('apply.sheet_values.start', {
+        projectId,
+        spreadsheetId,
+        stageRunId: stageResult.runId,
+        safeStageLineCount,
+        riskLineCount: stageResult.riskLineCount,
+      });
     try {
       const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
         applyCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          value: sheetLink,
-          sheetName: sheetName || undefined,
-          startWeek: startWeek || undefined,
-          endWeek: endWeek || undefined,
+          stageRunId: stageResult.runId,
+          applyRiskCandidates: false,
           idempotencyKey,
         })
       ));
@@ -632,9 +636,10 @@ export function CashflowSheetLabPage({
         appliedLineCount: result.appliedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
+        skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
-      setStatusMessage(`캐시플로우에 ${result.appliedLineCount.toLocaleString()}건을 저장했습니다.`);
+      setStatusMessage(`검토한 안전 후보 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -659,7 +664,8 @@ export function CashflowSheetLabPage({
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
-  const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && reviewedSourceKey === sourceKey && !reflectResult && !loading);
+  const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
+  const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
@@ -688,7 +694,7 @@ export function CashflowSheetLabPage({
           action: () => void handleStageSheetValues(),
         }
       : {
-          label: reflectResult ? '값 저장 완료' : '캐시플로우에 값 저장',
+          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '안전 후보 저장' : '저장할 안전 후보 없음',
           disabled: !canReflect,
           action: () => void handleReflectSheetValues(),
         };
@@ -699,7 +705,7 @@ export function CashflowSheetLabPage({
         <header>
           <div className="text-[12px] font-semibold text-slate-500">시트 연동 검토</div>
           <h1 className="mt-5 whitespace-pre-line text-[30px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[34px]">
-            {`Google Sheet 값을\n검토 후보로 가져오기`}
+            {`시트에서 바뀐 값\n확인하고 저장하기`}
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
@@ -839,7 +845,7 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(4)}>4</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">검토 후보 생성</h2>
+              <h2 className="text-[19px] font-bold text-slate-950">저장 전 후보 만들기</h2>
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
@@ -847,7 +853,7 @@ export function CashflowSheetLabPage({
                 onClick={() => void handleStageSheetValues()}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
-                검토 후보 만들기
+                저장 전 후보 만들기
               </Button>
             </div>
           </li>
@@ -855,21 +861,23 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(5)}>5</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">캐시플로우 값 저장</h2>
+              <h2 className="text-[19px] font-bold text-slate-950">검토한 값 저장</h2>
               {stageResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
-                    후보 {stageResult.stagedLineCount.toLocaleString()}건
-                    {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
-                    {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
-                    {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
+                      후보 {stageResult.stagedLineCount.toLocaleString()}건
+                      {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
+                      {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
+                      {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
+                      {' · '}안전 후보 {safeStageLineCount.toLocaleString()}건
                   </div>
                   {reflectResult ? (
                     <div className="space-y-3">
                       <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
-                        반영 완료 · 실제 저장 {reflectResult.appliedLineCount.toLocaleString()}건
-                        {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
-                        {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
+                          저장 완료 · 실제 저장 {reflectResult.appliedLineCount.toLocaleString()}건
+                          {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
+                          {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
+                          {reflectResult.skippedRiskLineCount ? ` · 확인 필요 ${reflectResult.skippedRiskLineCount.toLocaleString()}건 남김` : ''}
                       </div>
                       <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
                         <Link to="/portal/cashflow">캐시플로우로 이동</Link>
@@ -878,7 +886,7 @@ export function CashflowSheetLabPage({
                   ) : (
                     <div className="space-y-2">
                       <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                        아래 버튼을 누르면 현재 Google Sheet 값을 캐시플로우에 저장하고 실제 값이 바뀝니다.
+                          아래 버튼을 누르면 방금 만든 안전 후보만 캐시플로우 원장에 저장됩니다. 확인 필요 항목은 저장하지 않습니다.
                       </div>
                       <Button
                         type="button"
@@ -887,7 +895,7 @@ export function CashflowSheetLabPage({
                         onClick={() => void handleReflectSheetValues()}
                       >
                         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        캐시플로우에 값 저장
+                          {safeStageLineCount > 0 ? `안전 후보 ${safeStageLineCount.toLocaleString()}건 저장` : '저장할 안전 후보 없음'}
                       </Button>
                     </div>
                   )}
