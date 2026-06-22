@@ -1,5 +1,27 @@
 import { asyncHandler, assertActorRoleAllowed, ROUTE_ROLES, parseLimit, parseCursor, buildListResponse } from '../bff-utils.mjs';
 
+function extractProtectedKeyRef(value) {
+  if (typeof value !== 'string') return null;
+  const local = value.match(/^enc:v1:([^:]+):/);
+  if (local) return local[1];
+  const kms = value.match(/^enc:kms:([^:]+):/);
+  if (kms) {
+    try { return decodeURIComponent(kms[1]); } catch { return kms[1]; }
+  }
+  return null;
+}
+
+export function sanitizeAuditLogItem(raw) {
+  const item = { ...(raw || {}) };
+  const protectedEmail = typeof item.userEmailEnc === 'string' && item.userEmailEnc.trim();
+  if (protectedEmail) {
+    item.userEmailProtected = true;
+    item.userEmailKeyRef = extractProtectedKeyRef(item.userEmailEnc);
+  }
+  delete item.userEmailEnc;
+  return item;
+}
+
 export function mountAuditRoutes(app, { db, auditChainService }) {
   app.get('/api/v1/audit-logs', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
@@ -11,7 +33,7 @@ export function mountAuditRoutes(app, { db, auditChainService }) {
     if (cursor) query = query.startAfter(cursor);
 
     const snap = await query.get();
-    const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const items = snap.docs.map((doc) => sanitizeAuditLogItem({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
   }));
 

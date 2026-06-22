@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "status": "approved",
+  "sourceModel": {
+    "name": "osquery",
+    "repository": "https://github.com/osquery/osquery",
+    "docs": [
+      "https://osquery.readthedocs.io/en/stable/deployment/configuration/",
+      "https://osquery.readthedocs.io/en/stable/deployment/logging/"
+    ],
+    "appliedPatterns": [
+      "query_packs",
+      "scheduled_intervals",
+      "differential_results",
+      "snapshot_only_when_justified",
+      "pack_discovery"
+    ]
+  },
+  "principles": [
+    "purpose_limitation",
+    "data_minimization",
+    "default_private",
+    "least_privilege",
+    "pseudonymization",
+    "retention_limit",
+    "auditability"
+  ],
+  "piiClasses": {
+    "direct_identifier": ["email", "phone", "name", "uid", "authUid"],
+    "contact": ["address", "officePhone", "birthDate"],
+    "content": ["rawText", "memo", "documentText", "fileName"],
+    "credential": ["token", "secret", "private_key", "apiKey"]
+  },
+  "controls": {
+    "auditLogs": {
+      "rawPiiAllowed": false,
+      "encryptedPiiResponseAllowed": false,
+      "allowedActorFields": ["userId", "userName", "userRole", "userEmailProtected", "userEmailKeyRef"]
+    },
+    "observabilityPacks": {
+      "maxIntervalSeconds": 604800,
+      "defaultCollectionMode": "differential",
+      "snapshotRequiresJustification": true,
+      "rawPiiAllowed": false,
+      "maxRetentionDays": 365
+    }
+  }
+}

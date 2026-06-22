@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "model": "osquery-pack-inspired",
+  "packs": {
+    "github_security": {
+      "purpose": "Detect repository, branch-protection, dependency, secret-scanning, and Actions drift without storing raw contributor content.",
+      "discovery": ["github_app_connected", "enterprise_or_org_scope_available"],
+      "queries": {
+        "repository_visibility_drift": {
+          "source": "github",
+          "intervalSeconds": 21600,
+          "collectionMode": "differential",
+          "piiHandling": "none",
+          "rawPiiAllowed": false,
+          "retentionDays": 365,
+          "fields": ["repo", "visibility", "archived", "defaultBranch", "ownerTeam"]
+        },
+        "branch_protection_drift": {
+          "source": "github",
+          "intervalSeconds": 21600,
+          "collectionMode": "differential",
+          "piiHandling": "none",
+          "rawPiiAllowed": false,
+          "retentionDays": 365,
+          "fields": ["repo", "branch", "requiredChecks", "adminEnforced", "forcePushBlocked"]
+        },
+        "dependabot_alert_summary": {
+          "source": "github",
+          "intervalSeconds": 14400,
+          "collectionMode": "snapshot",
+          "snapshotJustification": "Executive security dashboard needs current aggregate counts by severity; raw vulnerability details remain in GitHub.",
+          "piiHandling": "none",
+          "rawPiiAllowed": false,
+          "retentionDays": 180,
+          "fields": ["repo", "critical", "high", "moderate", "low", "oldestOpenDays"]
+        }
+      }
+    },
+    "google_drive_privacy": {
+      "purpose": "Detect public/external sharing and ownership drift while avoiding raw document content collection.",
+      "discovery": ["workspace_audit_log_available", "drive_readonly_scope_available"],
+      "queries": {
+        "external_share_drift": {
+          "source": "google_drive",
+          "intervalSeconds": 14400,
+          "collectionMode": "differential",
+          "piiHandling": "hash",
+          "rawPiiAllowed": false,
+          "retentionDays": 365,
+          "fields": ["fileIdHash", "ownerEmailHash", "externalDomain", "permissionRole", "linkVisibility"]
+        },
+        "sensitive_folder_permission_snapshot": {
+          "source": "google_drive",
+          "intervalSeconds": 86400,
+          "collectionMode": "snapshot",
+          "snapshotJustification": "Daily permission baseline is needed for rollback and executive evidence; file names and document contents are excluded.",
+          "piiHandling": "hash",
+          "rawPiiAllowed": false,
+          "retentionDays": 365,
+          "fields": ["folderIdHash", "permissionPrincipalHash", "role", "inherited", "sharedDriveIdHash"]
+        }
+      }
+    },
+    "firestore_privacy": {
+      "purpose": "Detect Firestore rule drift, privileged collection access, and direct-client access attempts without storing document payloads.",
+      "discovery": ["firebase_project_connected", "audit_log_export_available"],
+      "queries": {
+        "rules_drift": {
+          "source": "firestore",
+          "intervalSeconds": 21600,
+          "collectionMode": "differential",
+          "piiHandling": "none",
+          "rawPiiAllowed": false,
+          "retentionDays": 365,
+          "fields": ["projectId", "rulesetHash", "clientWriteAuditLogsBlocked", "bffOnlyCollections"]
+        },
+        "bff_only_collection_access": {
+          "source": "firestore",
+          "intervalSeconds": 3600,
+          "collectionMode": "differential",
+          "piiHandling": "hash",
+          "rawPiiAllowed": false,
+          "retentionDays": 180,
+          "fields": ["collection", "actorHash", "method", "decision", "requestId"]
+        }
+      }
+    }
+  }
+}
