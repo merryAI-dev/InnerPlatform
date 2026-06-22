@@ -106,6 +106,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('시트에 쓸 값 미리보기');
     expect(cashflowProjectSheetSource).toContain('Actual은 이 방향에서 수정하지 않습니다.');
     expect(cashflowProjectSheetSource).toContain('direction=platform-to-sheet');
+    expect(cashflowProjectSheetSource.indexOf('const sheetRangeLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
+    expect(cashflowProjectSheetSource.indexOf('const sheetIdentityLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
     expect(cashflowProjectSheetSource).not.toContain('시트에서 플랫폼으로');
     expect(cashflowProjectSheetSource).not.toContain('플랫폼에서 시트로');
     expect(cashflowProjectSheetSource).not.toContain('플랫폼 값을 시트로 내보내기');
