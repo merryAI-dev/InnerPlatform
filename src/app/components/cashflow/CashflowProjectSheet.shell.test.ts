@@ -159,9 +159,11 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('requesting labor risk');
   });
 
-  it('does not start cashflow realtime streams from the project sheet shell', () => {
+  it('does not start cashflow week realtime streams from the project sheet shell', () => {
     expect(cashflowProjectSheetSource).toContain('getDocs(q)');
-    expect(cashflowProjectSheetSource).not.toContain('onSnapshot');
+    expect(cashflowProjectSheetSource).toContain('onSnapshot');
+    expect(cashflowProjectSheetSource).toContain("doc(db, documentPath)");
+    expect(cashflowProjectSheetSource).not.toContain('onSnapshot(query');
     expect(cashflowProjectSheetSource).not.toContain('setInterval');
     expect(cashflowProjectSheetSource).not.toContain('cashflowPresence');
     expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey');

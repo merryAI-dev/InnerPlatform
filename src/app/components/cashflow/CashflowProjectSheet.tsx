@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, runTransaction, where, writeBatch } from 'firebase/firestore';
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Database, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
@@ -625,10 +625,10 @@ export function CashflowProjectSheet({
       setCashflowSheetConfig(null);
       return;
     }
-    let cancelled = false;
-    getDoc(doc(db, getOrgDocumentPath(orgId, 'projects', projectId)))
-      .then((snap) => {
-        if (cancelled) return;
+    const documentPath = getOrgDocumentPath(orgId, 'projects', projectId);
+    const unsubscribe = onSnapshot(
+      doc(db, documentPath),
+      (snap) => {
         const config = snap.exists()
           ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
           : null;
@@ -641,7 +641,7 @@ export function CashflowProjectSheet({
           projectId,
           summary: {
             orgId,
-            documentPath: getOrgDocumentPath(orgId, 'projects', projectId),
+            documentPath,
             projectExists: snap.exists(),
             hasCashflowSheetLab: Boolean(config),
             hasValue: Boolean(config?.value),
@@ -682,27 +682,24 @@ export function CashflowProjectSheet({
           label: `${config?.startWeek} ~ ${config?.endWeek}`,
           activeWeeks,
         });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          recordDevtoolsLog({
-            kind: 'cashflow_transaction',
-            phase: 'error',
-            operation: 'cashflow.sheet_config.dashboard.read.error',
-            transport: 'firestore',
-            projectId,
-            summary: {
-              orgId,
-              documentPath: getOrgDocumentPath(orgId, 'projects', projectId),
-            },
-          });
-          setCashflowSheetRange(null);
-          setCashflowSheetConfig(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+      },
+      () => {
+        recordDevtoolsLog({
+          kind: 'cashflow_transaction',
+          phase: 'error',
+          operation: 'cashflow.sheet_config.dashboard.read.error',
+          transport: 'firestore',
+          projectId,
+          summary: {
+            orgId,
+            documentPath,
+          },
+        });
+        setCashflowSheetRange(null);
+        setCashflowSheetConfig(null);
+      },
+    );
+    return unsubscribe;
   }, [db, orgId, projectId]);
 
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
