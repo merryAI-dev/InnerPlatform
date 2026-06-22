@@ -23,11 +23,11 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
   }
 
   beforeEach(async () => {
-    await clearCollection(`orgs/${tenantId}/cashflowWeeks`);
+    await clearCollection(`orgs/${tenantId}/cashflow_weeks`);
   });
 
   afterAll(async () => {
-    await clearCollection(`orgs/${tenantId}/cashflowWeeks`);
+    await clearCollection(`orgs/${tenantId}/cashflow_weeks`);
   });
 
   it('creates the initial actual week document with normalized amounts', async () => {
@@ -51,9 +51,9 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
     });
 
     const id = resolveWeekDocId(projectId, '2026-03', firstWeek.weekNo);
-    await db.doc(`orgs/${tenantId}/cashflowWeeks/${id}`).set(docData, { merge: false });
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/${id}`).set(docData, { merge: false });
 
-    const stored = await db.doc(`orgs/${tenantId}/cashflowWeeks/${id}`).get();
+    const stored = await db.doc(`orgs/${tenantId}/cashflow_weeks/${id}`).get();
     expect(stored.exists).toBe(true);
     expect(stored.data()).toMatchObject({
       tenantId,
@@ -73,7 +73,7 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
   it('updates only the targeted nested actual fields during retry sync', async () => {
     const [firstWeek] = getMonthMondayWeeks('2026-03');
     const id = resolveWeekDocId(projectId, '2026-03', firstWeek.weekNo);
-    await db.doc(`orgs/${tenantId}/cashflowWeeks/${id}`).set(buildInitialCashflowWeekDoc({
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/${id}`).set(buildInitialCashflowWeekDoc({
       orgId: tenantId,
       actorUid: 'u-pm-001',
       actorName: 'PM 보람',
@@ -89,7 +89,7 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
       now: '2026-04-05T10:00:00.000Z',
     }), { merge: false });
 
-    await db.doc(`orgs/${tenantId}/cashflowWeeks/${id}`).update(buildCashflowWeekUpdatePatch({
+    await db.doc(`orgs/${tenantId}/cashflow_weeks/${id}`).update(buildCashflowWeekUpdatePatch({
       orgId: tenantId,
       actorUid: 'u-pm-001',
       actorName: 'PM 보람',
@@ -101,7 +101,7 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
       now: '2026-04-05T10:05:00.000Z',
     }));
 
-    const stored = await db.doc(`orgs/${tenantId}/cashflowWeeks/${id}`).get();
+    const stored = await db.doc(`orgs/${tenantId}/cashflow_weeks/${id}`).get();
     expect(stored.data()).toMatchObject({
       actual: {
         DIRECT_COST_OUT: 45000,

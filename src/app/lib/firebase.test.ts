@@ -28,6 +28,7 @@ describe('firebase org path builders', () => {
     expect(getOrgCollectionPath('org001', 'transactions')).toBe('orgs/org001/transactions');
     expect(getOrgCollectionPath('mysc', 'payrollSchedules')).toBe('orgs/mysc/payroll_schedules');
     expect(getOrgCollectionPath('mysc', 'payrollRuns')).toBe('orgs/mysc/payroll_runs');
+    expect(getOrgCollectionPath('mysc', 'cashflowWeeks')).toBe('orgs/mysc/cashflow_weeks');
     expect(getOrgCollectionPath('mysc', 'careerProfiles')).toBe('orgs/mysc/careerProfiles');
     expect(getOrgCollectionPath('mysc', 'trainingCourses')).toBe('orgs/mysc/trainingCourses');
     expect(getOrgCollectionPath('mysc', 'trainingEnrollments')).toBe('orgs/mysc/trainingEnrollments');
@@ -37,6 +38,7 @@ describe('firebase org path builders', () => {
     expect(getOrgDocumentPath('mysc', 'projects', 'p001')).toBe('orgs/mysc/projects/p001');
     expect(getOrgDocumentPath('mysc', 'payrollSchedules', 'p002')).toBe('orgs/mysc/payroll_schedules/p002');
     expect(getOrgDocumentPath('mysc', 'payrollRuns', 'p002-2026-04')).toBe('orgs/mysc/payroll_runs/p002-2026-04');
+    expect(getOrgDocumentPath('mysc', 'cashflowWeeks', 'p002-2026-04-w1')).toBe('orgs/mysc/cashflow_weeks/p002-2026-04-w1');
   });
 });
 
