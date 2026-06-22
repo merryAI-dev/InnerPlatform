@@ -106,9 +106,15 @@ resource "cloudflare_ruleset" "custom_waf" {
     },
     {
       action      = "block"
-      expression  = "(http.request.uri.path contains \"/.env\" or http.request.uri.path contains \"/wp-admin\" or http.request.uri.path contains \"/phpmyadmin\" or http.request.uri.path contains \"/server-status\")"
+      expression  = "(lower(http.request.uri.path) contains \"/.env\" or lower(http.request.uri.path) contains \"%2eenv\" or lower(http.request.uri.path) contains \"/wp-admin\" or lower(http.request.uri.path) contains \"/phpmyadmin\" or lower(http.request.uri.path) contains \"/server-status\" or lower(http.request.uri.path) contains \"/.git\" or lower(http.request.uri.path) contains \"/.docker/\" or lower(http.request.uri.path) contains \"/.terraform\" or lower(http.request.uri.path) contains \"terraform.tfstate\" or lower(http.request.uri.path) contains \"/dockerfile\" or lower(http.request.uri.path) contains \"docker-compose\" or lower(http.request.uri.path) contains \"stripe.env\" or lower(http.request.uri.path) contains \"aws.json\" or lower(http.request.uri.path) contains \"aws.env\" or lower(http.request.uri.path) contains \"aws-ses.json\" or lower(http.request.uri.path) contains \"s3.yaml\" or lower(http.request.uri.path) contains \"s3.yml\" or lower(http.request.uri.path) contains \"s3.properties\" or lower(http.request.uri.path) contains \"/.boto\" or lower(http.request.uri.path) contains \"team-provider-info.json\" or lower(http.request.uri.path) contains \"constants.yml\" or lower(http.request.uri.path) contains \"serverless.yaml\" or lower(http.request.uri.path) contains \"serverless.yml\" or lower(http.request.uri.path) contains \"phpinfo\" or lower(http.request.uri.path) contains \"/settings.py\" or lower(http.request.uri.path) contains \"/credentials.go\" or lower(http.request.uri.path) contains \"/config/parameters.yml\" or lower(http.request.uri.path) contains \"/config/parameters.yaml\" or lower(http.request.uri.path) contains \"/backend/env.js\" or lower(http.request.uri.path) contains \"/webhooks/\" or lower(http.request.uri.path) contains \"/webhook\" or lower(http.request.uri.path) contains \"%5c\")"
       description = "Block common scanner paths"
       ref         = "mysc_common_scanner_path_block"
+    },
+    {
+      action      = "block"
+      expression  = "(http.user_agent eq \"\" or lower(http.user_agent) contains \"playwright\" or lower(http.user_agent) contains \"puppeteer\" or lower(http.user_agent) contains \"headlesschrome\" or lower(http.user_agent) contains \"selenium\" or lower(http.user_agent) contains \"webdriver\" or lower(http.user_agent) contains \"phantomjs\" or lower(http.user_agent) contains \"slimerjs\" or lower(http.user_agent) contains \"cypress\" or lower(http.user_agent) contains \"mcp-client\" or lower(http.user_agent) contains \"modelcontextprotocol\" or lower(http.user_agent) contains \"python-requests\" or lower(http.user_agent) contains \"aiohttp\" or lower(http.user_agent) contains \"httpx\" or lower(http.user_agent) contains \"curl/\" or lower(http.user_agent) contains \"wget/\" or lower(http.user_agent) contains \"go-http-client\")"
+      description = "Block explicit automation clients and CLI scrapers"
+      ref         = "mysc_explicit_automation_client_block"
     }
   ]
 }
