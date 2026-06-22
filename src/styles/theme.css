@@ -3,7 +3,7 @@
 :root {
   --font-size: 15px;
   /* ── MYSCube Professional Operations System ── */
-  --background: #f6f8fb;
+  --background: #f4f7fb;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
@@ -25,14 +25,14 @@
   --destructive: #e11d48;
   --destructive-foreground: #ffffff;
   /* Border & Input */
-  --border: #e2e8f0;
-  --input: #cbd5e1;
+  --border: #d9e2ee;
+  --input: #c3cedd;
   --input-background: #ffffff;
   --switch-background: #cbd5e1;
   /* Font Weight */
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #5bbfdf;
+  --ring: #2aa9ce;
   /* Charts — MYSC palette */
   --chart-1: #001e46;
   --chart-2: #5bbfdf;
@@ -59,19 +59,19 @@
   --mysc-surface-elevated: #ffffff;
   --mysc-surface-sunken: #eef3f8;
   /* ── Glass Tokens ── */
-  --glass-bg: rgba(255, 255, 255, 0.92);
+  --glass-bg: rgba(255, 255, 255, 0.94);
   --glass-bg-heavy: #ffffff;
   --glass-bg-light: rgba(255, 255, 255, 0.78);
-  --glass-border: #dbe3ec;
-  --glass-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-  --glass-shadow-sm: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --glass-border: #d8e1ec;
+  --glass-shadow: 0 18px 42px rgba(15, 23, 42, 0.09);
+  --glass-shadow-sm: 0 8px 24px rgba(15, 23, 42, 0.06);
   --glass-blur: 10px;
   --glass-blur-heavy: 14px;
   --mesh-gradient: linear-gradient(
     135deg,
-    #f6f8fb 0%,
-    #eef3f8 48%,
-    #f8fafc 100%
+    #f8fafc 0%,
+    #f3f7fb 48%,
+    #eef4fa 100%
   );
 }
 
@@ -188,6 +188,7 @@
     @apply text-foreground;
     background: var(--background);
     position: relative;
+    min-height: 100dvh;
   }
 
   body::before {
@@ -195,7 +196,7 @@
     position: fixed;
     inset: 0;
     z-index: -1;
-    background: linear-gradient(180deg, #f8fafc 0%, #f3f7fb 54%, #eef3f8 100%);
+    background: linear-gradient(180deg, #fbfdff 0%, #f4f7fb 48%, #eef4fa 100%);
     background-color: var(--background);
   }
 
@@ -247,13 +248,14 @@
     font-family: 'Pretendard Variable', 'Inter', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
   }
 
   h1 {
     font-size: var(--text-2xl);
     font-weight: 700;
     line-height: 1.3;
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
     color: var(--foreground);
   }
 
@@ -261,7 +263,7 @@
     font-size: var(--text-xl);
     font-weight: 600;
     line-height: 1.35;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   }
 
   h3 {
@@ -292,6 +294,86 @@
     font-size: var(--text-sm);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+  }
+}
+
+[data-slot='card'] {
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+[data-slot='button'] {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+[data-slot='button']:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+[data-slot='input'],
+[data-slot='textarea'],
+[data-slot='select-trigger'] {
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+[data-slot='input']:focus-visible,
+[data-slot='textarea']:focus-visible,
+[data-slot='select-trigger']:focus-visible {
+  box-shadow: 0 0 0 3px rgba(42, 169, 206, 0.16);
+}
+
+[data-slot='badge'] {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+[data-slot='table-container'] {
+  border-radius: 0.75rem;
+}
+
+[data-slot='table-head'] {
+  color: #334155;
+  font-weight: 650;
+}
+
+[data-slot='dialog-content'],
+[data-slot='dropdown-menu-content'],
+[data-slot='select-content'],
+[data-slot='popover-content'],
+[data-slot='tooltip-content'] {
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+button,
+a,
+[role='button'],
+[data-slot='button'],
+[data-slot='dropdown-menu-item'],
+[data-slot='select-item'],
+[data-slot='command-item'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline-color: var(--ring);
+  outline-offset: 2px;
+}
+
+[class*='tracking-[-'] {
+  letter-spacing: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .mesh-bg {
+    animation: none;
   }
 }
 
