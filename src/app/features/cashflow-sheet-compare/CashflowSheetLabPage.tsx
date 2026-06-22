@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, Loader2, Save, Search, UserPlus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, UserPlus } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -18,6 +18,7 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 
@@ -116,6 +117,25 @@ function buildSourceKey({
     startWeek: startWeek.trim(),
     endWeek: endWeek.trim(),
   });
+}
+
+function HelpMemo({ children }: { children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label="도움말"
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[260px] bg-slate-950 text-[11px] leading-relaxed text-white">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function ReconciliationSummary({
@@ -669,12 +689,13 @@ export function CashflowSheetLabPage({
   const hasSavedConfig = Boolean(savedConfig?.value);
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
+  const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : 1;
   const stepNumberClass = (step: number) =>
-    `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-colors ${
+    `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-all duration-300 ${
       step <= activeStep
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
-    }`;
+    } ${step === currentStep && !reflectResult ? 'ring-4 ring-blue-100 motion-safe:animate-pulse' : ''}`;
   const primaryCta = !preview && !isCurrentSheetConfigSaved && spreadsheetId
     ? {
         label: '시트 설정 우선 저장',
@@ -710,6 +731,21 @@ export function CashflowSheetLabPage({
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
 
+        <div className="mt-6 grid gap-2 text-[12px] sm:grid-cols-3">
+          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="font-bold text-slate-900">설정 저장</div>
+            <div className="mt-1 leading-5 text-slate-500">링크와 범위만 기억합니다. 금액은 바뀌지 않습니다.</div>
+          </div>
+          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="font-bold text-slate-900">후보 만들기</div>
+            <div className="mt-1 leading-5 text-slate-500">시트와 원장의 차이만 임시 후보로 모읍니다.</div>
+          </div>
+          <div className="border border-blue-200 bg-blue-50 px-3 py-2">
+            <div className="font-bold text-blue-950">안전 후보 저장</div>
+            <div className="mt-1 leading-5 text-blue-800">이 버튼을 눌러야 캐시플로우 원장에 반영됩니다.</div>
+          </div>
+        </div>
+
         {hasSavedConfig && (
           <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
             <div className="font-bold">이미 연결된 시트 설정이 있습니다.</div>
@@ -729,12 +765,15 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(1)}>1</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
+                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 검토 후보를 만들 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
                   disabled={!projectId || accountLoading}
                   onClick={() => void handleLoadShareAccount()}
                 >
@@ -744,7 +783,7 @@ export function CashflowSheetLabPage({
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
                   disabled={!systemAccountEmail}
                   onClick={handleCopyShareAccount}
                 >
@@ -762,7 +801,7 @@ export function CashflowSheetLabPage({
                 <Button
                   type="button"
                   variant={shareConfirmed ? 'default' : 'outline'}
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
                   disabled={!systemAccountEmail}
                   onClick={() => setShareConfirmed(true)}
                 >
@@ -776,7 +815,10 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">시트 링크 입력</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[19px] font-bold text-slate-950">시트 링크 입력</h2>
+                <HelpMemo>다음 방문 때 다시 입력하지 않도록 링크, 탭 이름, 주차 범위를 먼저 저장합니다. 이 단계는 금액 저장이 아닙니다.</HelpMemo>
+              </div>
               <Input
                 value={sheetLink}
                 onChange={(event) => setSheetLink(event.target.value)}
@@ -811,7 +853,7 @@ export function CashflowSheetLabPage({
                 <Button
                   type="button"
                   variant={isCurrentSheetConfigSaved ? 'outline' : 'default'}
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
                   disabled={!canSaveConfig || isCurrentSheetConfigSaved}
                   onClick={() => void handleSaveSheetConfig()}
                 >
@@ -828,11 +870,14 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(3)}>3</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
+                <HelpMemo>Google Sheet 값을 읽어 화면 아래 표로만 보여줍니다. 아직 원장에는 아무 값도 쓰지 않습니다.</HelpMemo>
+              </div>
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
                 disabled={!canPreview}
                 onClick={() => void handlePreview()}
               >
@@ -845,10 +890,13 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(4)}>4</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">저장 전 후보 만들기</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[19px] font-bold text-slate-950">저장 전 후보 만들기</h2>
+                <HelpMemo>원장과 다른 셀만 임시 후보로 저장합니다. 후보가 만들어져도 캐시플로우 금액은 아직 바뀌지 않습니다.</HelpMemo>
+              </div>
               <Button
                 type="button"
-                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
                 disabled={!canApply}
                 onClick={() => void handleStageSheetValues()}
               >
@@ -861,7 +909,10 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(5)}>5</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">검토한 값 저장</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[19px] font-bold text-slate-950">검토한 값 저장</h2>
+                <HelpMemo>안전 후보만 실제 캐시플로우 원장에 저장합니다. 확인 필요 후보는 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
+              </div>
               {stageResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
@@ -890,7 +941,7 @@ export function CashflowSheetLabPage({
                       </div>
                       <Button
                         type="button"
-                        className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                        className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
                         disabled={!canReflect}
                         onClick={() => void handleReflectSheetValues()}
                       >

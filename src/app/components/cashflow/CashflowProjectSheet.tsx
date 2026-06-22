@@ -3128,10 +3128,15 @@ export function CashflowProjectSheet({
                   <div className={`mt-0.5 truncate ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
                     {cashflowSheetConfig ? `${sheetIdentityLabel} · ${sheetRangeLabel}` : 'Google Sheet 연결 후 변경 후보를 검토할 수 있습니다.'}
                   </div>
+                  <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
+                    {cashflowSheetConfig
+                      ? '시트에서 수정한 값은 먼저 저장 전 후보로 확인한 뒤 안전 후보만 저장합니다.'
+                      : '처음 설정하면 이후에는 이 영역에서 시트 변경 후보를 바로 만들 수 있습니다.'}
+                  </div>
                   {sheetRefreshResult ? (
                     <div className="mt-1 font-semibold text-emerald-800">
-                        저장 전 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
-                        {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
+                      저장 전 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                      {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
                     </div>
                   ) : cashflowSheetConfig?.lastAppliedAt ? (
                     <div className="mt-1 text-blue-800">
@@ -3143,24 +3148,32 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 rounded-full px-2.5 text-[10px] font-semibold transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
+                      onClick={handleOpenSheetReviewDialog}
+                    >
+                      <span className="mr-1 h-1.5 w-1.5 rounded-full bg-blue-500 motion-safe:animate-pulse" aria-hidden="true" />
+                      <ClipboardCheck className="mr-1 h-3 w-3" />
+                      시트 업데이트 반영
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[280px] bg-slate-950 text-[11px] leading-relaxed text-white">
+                    시트 값을 바로 덮어쓰지 않습니다. 먼저 변경 후보를 만들고, 안전 후보 저장 버튼을 누를 때만 원장에 반영됩니다.
+                  </TooltipContent>
+                </Tooltip>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className={`h-7 rounded-full px-2.5 text-[10px] font-semibold ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={handleOpenSheetReviewDialog}
-                >
-                  <ClipboardCheck className="mr-1 h-3 w-3" />
-                    시트 업데이트 반영
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className={`h-7 rounded-full px-2.5 text-[10px] ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
+                  className={`h-7 rounded-full px-2.5 text-[10px] transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
                   onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
                 >
-                    {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
+                  {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
                 </Button>
               </div>
             </div>
@@ -3412,7 +3425,8 @@ export function CashflowProjectSheet({
                 type="button"
                 role="tab"
                 aria-selected={sheetReviewDirection === 'sheet-to-cashflow'}
-                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                title="Google Sheet에서 바뀐 값을 읽고 저장 전 후보로 만듭니다."
+                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 onClick={() => setSheetReviewDirection('sheet-to-cashflow')}
               >
                 <ArrowDownToLine className="h-4 w-4" />
@@ -3422,7 +3436,8 @@ export function CashflowProjectSheet({
                 type="button"
                 role="tab"
                 aria-selected={sheetReviewDirection === 'cashflow-to-sheet'}
-                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition ${sheetReviewDirection === 'cashflow-to-sheet' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                title="캐시플로우 Projection을 Google Sheet에 쓰기 전 차이를 미리 봅니다."
+                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'cashflow-to-sheet' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 onClick={() => setSheetReviewDirection('cashflow-to-sheet')}
               >
                 <ArrowUpFromLine className="h-4 w-4" />
@@ -3430,31 +3445,40 @@ export function CashflowProjectSheet({
               </button>
             </div>
 
-            <div className="rounded-[16px] border border-slate-200 bg-white p-4">
+            <div className="rounded-[16px] border border-slate-200 bg-white p-4 transition-all duration-300">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-[13px] font-bold text-slate-950">
                     {sheetReviewDirection === 'sheet-to-cashflow' ? (
                       <>
                         <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-                          시트에서 바뀐 값을 확인합니다
+                        시트에서 바뀐 값을 확인합니다
                       </>
                     ) : (
                       <>
                         <Database className="h-4 w-4 text-slate-700" />
-                          캐시플로우 Projection을 시트에 쓰기 전 확인합니다
+                        캐시플로우 Projection을 시트에 쓰기 전 확인합니다
                       </>
                     )}
                   </div>
                   <div className="mt-1 text-[11px] leading-5 text-slate-600">
                     {sheetReviewDirection === 'sheet-to-cashflow'
-                        ? 'Google Sheet에서 바뀐 Projection/Actual 값을 저장 전 후보로 가져옵니다. 안전 후보만 명시적으로 저장합니다.'
+                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 저장 전 후보로 가져옵니다. 안전 후보만 명시적으로 저장합니다.'
                       : '캐시플로우 화면의 Projection 값을 Google Sheet에 쓰기 전 셀 단위 차이를 확인합니다. Actual은 이 방향에서 수정하지 않습니다.'}
                   </div>
                 </div>
                 <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${cashflowSheetConfig ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
                   {cashflowSheetConfig ? 'Google Sheet 연결됨' : '연결 필요'}
                 </Badge>
+              </div>
+
+              <div className={`mt-3 flex items-start gap-2 rounded-[12px] border px-3 py-2 text-[11px] leading-5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'border-blue-100 bg-blue-50 text-blue-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-blue-500 motion-safe:animate-pulse' : 'bg-slate-500'}`} aria-hidden="true" />
+                <div>
+                  {sheetReviewDirection === 'sheet-to-cashflow'
+                    ? '현재 선택: 시트 값을 읽어 후보만 만듭니다. 원장 저장은 다음 팝업의 안전 후보 저장 버튼에서 결정합니다.'
+                    : '현재 선택: 캐시플로우 Projection을 시트에 쓸 값으로 비교합니다. Actual은 이 방향에서 쓰지 않습니다.'}
+                </div>
               </div>
 
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
@@ -3469,7 +3493,7 @@ export function CashflowProjectSheet({
                       ['2', '쓰기 후보 확인', '시트에 쓸 셀만 검토합니다.'],
                       ['3', 'Actual 제외', 'Actual 값은 Google Sheet 입력만 기준으로 둡니다.'],
                     ]).map(([step, title, detail]) => (
-                  <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5 hover:bg-white">
                     <div className="flex items-center gap-2">
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{step}</span>
                       <span className="text-[11px] font-bold text-slate-900">{title}</span>
@@ -3494,12 +3518,12 @@ export function CashflowProjectSheet({
                 시트 연동 설정
               </AlertDialogAction>
             ) : sheetReviewDirection === 'sheet-to-cashflow' ? (
-              <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading}>
+              <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading} className="transition-transform hover:-translate-y-0.5">
                 {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-                  저장 전 후보 만들기
+                저장 전 후보 만들기
               </AlertDialogAction>
             ) : (
-              <AlertDialogAction onClick={handleStartProjectionSheetWrite}>
+              <AlertDialogAction onClick={handleStartProjectionSheetWrite} className="transition-transform hover:-translate-y-0.5">
                 시트에 쓸 값 미리보기
               </AlertDialogAction>
             )}
@@ -3523,22 +3547,41 @@ export function CashflowProjectSheet({
           {sheetStageDialog && (
             <div className="space-y-3">
               <div className="grid gap-2 sm:grid-cols-4">
-                <div className="rounded-lg bg-emerald-50 px-3 py-2">
-                  <div className="text-[10px] font-semibold text-emerald-700">안전 후보</div>
+                <div className="rounded-lg bg-emerald-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                  <div className="text-[10px] font-semibold text-emerald-700">
+                    <HoverExplain message="결산 잠금이나 충돌 위험 없이 바로 저장 가능한 후보입니다. 저장 버튼은 이 후보만 반영합니다.">
+                      안전 후보
+                    </HoverExplain>
+                  </div>
                   <div className="mt-1 text-[16px] font-bold text-emerald-900">{Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건</div>
                 </div>
-                <div className="rounded-lg bg-slate-50 px-3 py-2">
-                  <div className="text-[10px] font-semibold text-slate-500">Projection 후보</div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                  <div className="text-[10px] font-semibold text-slate-500">
+                    <HoverExplain message="시트의 Projection 셀과 현재 캐시플로우 원장이 다른 항목입니다.">
+                      Projection 후보
+                    </HoverExplain>
+                  </div>
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.projectionLineCount.toLocaleString()}건</div>
                 </div>
-                <div className="rounded-lg bg-slate-50 px-3 py-2">
-                  <div className="text-[10px] font-semibold text-slate-500">Actual 후보</div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                  <div className="text-[10px] font-semibold text-slate-500">
+                    <HoverExplain message="시트의 Actual 셀과 현재 캐시플로우 원장이 다른 항목입니다. Actual은 시트에서만 입력한다고 보고 반영합니다.">
+                      Actual 후보
+                    </HoverExplain>
+                  </div>
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.actualLineCount.toLocaleString()}건</div>
                 </div>
-                <div className="rounded-lg bg-amber-50 px-3 py-2">
-                  <div className="text-[10px] font-semibold text-amber-700">확인 필요</div>
+                <div className="rounded-lg bg-amber-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
+                  <div className="text-[10px] font-semibold text-amber-700">
+                    <HoverExplain message="바로 저장하지 않고 사람이 검토해야 하는 후보입니다. 안전 후보 저장 버튼을 눌러도 이 항목은 남겨둡니다.">
+                      확인 필요
+                    </HoverExplain>
+                  </div>
                   <div className="mt-1 text-[16px] font-bold text-amber-900">{sheetStageDialog.riskLineCount.toLocaleString()}건</div>
                 </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
+                저장하면 안전 후보만 원장에 반영됩니다. 확인 필요 후보는 목록에 남겨 다시 검토할 수 있습니다.
               </div>
               <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
                 <table className="w-full text-[12px]">
@@ -3589,22 +3632,23 @@ export function CashflowProjectSheet({
               </div>
             </div>
           )}
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={sheetStageApplyLoading}>나중에 검토</AlertDialogCancel>
-              <Button
-                type="button"
-                disabled={sheetStageApplyLoading || !sheetStageDialog || Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) <= 0}
-                onClick={() => void handleApplyStagedSheetValues()}
-              >
-                {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-                {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
-                  ? `안전 후보 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 저장`
-                  : '저장할 안전 후보 없음'}
-              </Button>
-              <AlertDialogAction onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}>
-                전체 검토 화면
-              </AlertDialogAction>
-            </AlertDialogFooter>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={sheetStageApplyLoading}>나중에 검토</AlertDialogCancel>
+            <Button
+              type="button"
+              className="transition-transform hover:-translate-y-0.5"
+              disabled={sheetStageApplyLoading || !sheetStageDialog || Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) <= 0}
+              onClick={() => void handleApplyStagedSheetValues()}
+            >
+              {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+              {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
+                ? `안전 후보 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 저장`
+                : '저장할 안전 후보 없음'}
+            </Button>
+            <AlertDialogAction onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}>
+              전체 검토 화면
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
