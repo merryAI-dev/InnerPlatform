@@ -1,0 +1,28 @@
+{
+  "display_information": {
+    "name": "MYSC Guard Security Reports",
+    "description": "Daily Cloudflare security monitoring reports for MYSC Guard.",
+    "background_color": "#0f172a"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "MYSC Guard",
+      "always_online": false
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "incoming-webhook"
+      ]
+    }
+  },
+  "settings": {
+    "incoming_webhooks": {
+      "incoming_webhooks_enabled": true
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
