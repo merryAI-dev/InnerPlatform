@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, Loader2, Search, UserPlus } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, Loader2, Save, Search, UserPlus } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -8,6 +8,7 @@ import { getAuthInstance } from '../../lib/firebase';
 import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
   extractSpreadsheetIdFromSheetInput,
+  applyCashflowSheetLabViaBff,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
   stageCashflowSheetLabViaBff,
@@ -221,11 +222,17 @@ export function CashflowSheetLabPage({
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [shareConfirmed, setShareConfirmed] = useState(false);
-  const [applyResult, setApplyResult] = useState<{
+  const [stageResult, setStageResult] = useState<{
     stagedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
     riskLineCount: number;
+  } | null>(null);
+  const [reflectResult, setReflectResult] = useState<{
+    appliedLineCount: number;
+    projectionLineCount: number;
+    actualLineCount: number;
+    lastAppliedAt?: string;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -427,7 +434,8 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
-    setApplyResult(null);
+    setStageResult(null);
+    setReflectResult(null);
     try {
       const previewSource = {
         value: sheetLink,
@@ -483,7 +491,7 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handleApplySheetValues() {
+  async function handleStageSheetValues() {
     if (!projectId || loading || !spreadsheetId || !shareConfirmed || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -508,12 +516,13 @@ export function CashflowSheetLabPage({
         })
       ));
       if (!result) return;
-      setApplyResult({
+      setStageResult({
         stagedLineCount: result.stagedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
         riskLineCount: result.riskLineCount,
       });
+      setReflectResult(null);
       setReviewedSourceKey(sourceKey);
       setStatusMessage('시트 변경 후보를 만들었습니다.');
       logCashflowLab('stage.sheet_values.ok', {
@@ -534,29 +543,87 @@ export function CashflowSheetLabPage({
     }
   }
 
+  async function handleReflectSheetValues() {
+    if (!projectId || loading || !spreadsheetId || !shareConfirmed || !stageResult || reviewedSourceKey !== sourceKey) return;
+    const startedAt = Date.now();
+    const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    setLoading(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    logCashflowLab('apply.sheet_values.start', {
+      projectId,
+      spreadsheetId,
+    });
+    try {
+      const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
+        applyCashflowSheetLabViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          value: sheetLink,
+          sheetName: sheetName || undefined,
+          startWeek: startWeek || undefined,
+          endWeek: endWeek || undefined,
+          idempotencyKey,
+        })
+      ));
+      if (!result) return;
+      setReflectResult({
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        lastAppliedAt: result.lastAppliedAt,
+      });
+      setStatusMessage(`캐시플로우에 ${result.appliedLineCount.toLocaleString()}건을 저장했습니다.`);
+      logCashflowLab('apply.sheet_values.ok', {
+        projectId,
+        spreadsheetId: result.spreadsheetId,
+        sheetName: result.selectedSheetName,
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      logCashflowLab('apply.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      setErrorMessage(formatError(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const cashflowPreviewTables = useMemo(() => buildCashflowPreviewTables(preview), [preview]);
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
+  const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
-  const activeStep = applyResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
+  const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-colors ${
       step <= activeStep
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
     }`;
-  const primaryCta = !preview ? {
-    label: '시트 검토하기',
-    disabled: !canPreview,
-    action: () => void handlePreview(),
-  } : {
-    label: '검토 후보 만들기',
-    disabled: !canApply,
-    action: () => void handleApplySheetValues(),
-  };
+  const primaryCta = !preview
+    ? {
+        label: '시트 검토하기',
+        disabled: !canPreview,
+        action: () => void handlePreview(),
+      }
+    : !stageResult
+      ? {
+          label: '검토 후보 만들기',
+          disabled: !canApply,
+          action: () => void handleStageSheetValues(),
+        }
+      : {
+          label: reflectResult ? '값 저장 완료' : '캐시플로우에 값 저장',
+          disabled: !canReflect,
+          action: () => void handleReflectSheetValues(),
+        };
 
   return (
     <div className="bg-white px-5 pb-28 pt-6 sm:bg-slate-100 sm:px-6">
@@ -694,7 +761,7 @@ export function CashflowSheetLabPage({
                 type="button"
                 className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
                 disabled={!canApply}
-                onClick={() => void handleApplySheetValues()}
+                onClick={() => void handleStageSheetValues()}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
                 검토 후보 만들기
@@ -705,21 +772,45 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(5)}>5</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">끝</h2>
-              {applyResult ? (
+              <h2 className="text-[19px] font-bold text-slate-950">캐시플로우 값 저장</h2>
+              {stageResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
-                    후보 {applyResult.stagedLineCount.toLocaleString()}건
-                    {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
-                    {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
-                    {applyResult.riskLineCount > 0 ? ` · 확인 필요 ${applyResult.riskLineCount.toLocaleString()}건` : ''}
+                    후보 {stageResult.stagedLineCount.toLocaleString()}건
+                    {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
+                    {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
+                    {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
                   </div>
-                  <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
-                    <Link to="/portal/cashflow">캐시플로우로 이동</Link>
-                  </Button>
+                  {reflectResult ? (
+                    <div className="space-y-3">
+                      <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
+                        반영 완료 · 실제 저장 {reflectResult.appliedLineCount.toLocaleString()}건
+                        {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
+                        {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
+                      </div>
+                      <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
+                        <Link to="/portal/cashflow">캐시플로우로 이동</Link>
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                        아래 버튼을 누르면 현재 Google Sheet 값을 캐시플로우에 저장하고 실제 값이 바뀝니다.
+                      </div>
+                      <Button
+                        type="button"
+                        className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                        disabled={!canReflect}
+                        onClick={() => void handleReflectSheetValues()}
+                      >
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        캐시플로우에 값 저장
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-[13px] text-slate-400">검토 후보를 만들면 결과가 표시됩니다.</div>
+                <div className="text-[13px] text-slate-400">검토 후보를 만든 뒤 캐시플로우에 값을 저장할 수 있습니다.</div>
               )}
             </div>
           </li>

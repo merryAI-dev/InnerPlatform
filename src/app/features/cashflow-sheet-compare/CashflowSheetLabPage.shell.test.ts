@@ -46,6 +46,7 @@ describe('CashflowSheetLabPage shell', () => {
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
+    expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
@@ -64,11 +65,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('isGoogleSheetsTokenExpiredError');
     expect(pageSource).toContain('google_sheet_service_account_forbidden');
     expect(pageSource).toContain('시트를 시스템 계정');
-    expect(pageSource).toContain('handleApplySheetValues');
+    expect(pageSource).toContain('handleStageSheetValues');
+    expect(pageSource).toContain('handleReflectSheetValues');
     expect(pageSource).toContain('handleLoadShareAccount');
     expect(pageSource).toContain('shareConfirmed');
     expect(pageSource).toContain('canPreview');
-    expect(pageSource).toContain('applyResult');
+    expect(pageSource).toContain('stageResult');
+    expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
@@ -84,6 +87,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).toContain('검토 후보 만들기');
+    expect(pageSource).toContain('캐시플로우에 값 저장');
+    expect(pageSource).toContain('실제 값이 바뀝니다');
+    expect(pageSource).toContain('반영 완료');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');
     expect(pageSource).toContain('잔액');
