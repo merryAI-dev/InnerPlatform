@@ -713,12 +713,6 @@ export function CashflowProjectSheet({
     };
   }, [loadCashflowEvents]);
 
-  useEffect(() => {
-    setLaborRisk(null);
-    setLaborRiskError(null);
-    setLaborRiskLoading(false);
-  }, [projectId]);
-
   const handleRefreshLaborRisk = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
       setLaborRisk(null);
@@ -760,6 +754,16 @@ export function CashflowProjectSheet({
       setLaborRiskLoading(false);
     }
   }, [orgId, projectId, resolveBffActor, user?.uid]);
+
+  useEffect(() => {
+    setLaborRisk(null);
+    setLaborRiskError(null);
+    if (!projectId || !orgId || !user?.uid) {
+      setLaborRiskLoading(false);
+      return;
+    }
+    void handleRefreshLaborRisk();
+  }, [handleRefreshLaborRisk, orgId, projectId, user?.uid]);
 
   const handleRefreshSheetValues = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
@@ -1963,18 +1967,6 @@ export function CashflowProjectSheet({
                 <Save className="mr-1 h-3 w-3" />
                 저장
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
-                onClick={() => void handleRefreshSheetValues()}
-                disabled={sheetRefreshLoading || !cashflowSheetConfig?.value}
-                title="Google Sheet 값을 캐시플로우에 수동 반영"
-              >
-                {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                새로고침
-              </Button>
               <Badge variant="outline" className="rounded-full border-0 bg-white px-2.5 py-1 text-[10px] text-slate-600 shadow-sm">
                 {weekCount.toLocaleString()}주
               </Badge>
@@ -2879,7 +2871,7 @@ export function CashflowProjectSheet({
     if (laborRiskError) {
       return <div className="text-[11px] font-semibold text-amber-700">인건비/잔액 체크 실패: {laborRiskError}</div>;
     }
-    if (!laborRisk) return <div className="text-[11px] text-slate-500">새로 고침을 누르면 인건비/잔액 체크 결과를 불러옵니다.</div>;
+    if (!laborRisk) return <div className="text-[11px] text-slate-500">페이지를 열면 인건비/잔액 체크 결과를 자동으로 계산합니다.</div>;
 
     const missingMonths = laborRisk.labor.missingProjectionMonths;
     const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
@@ -3029,10 +3021,24 @@ export function CashflowProjectSheet({
 
             <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
               <div className="flex items-center justify-between gap-2 px-3 py-2">
-                <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
-                <div className={`text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-                  {opsSummary.inbox.length}건
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
+                  <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
+                    {opsSummary.inbox.length}건
+                  </div>
                 </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 rounded-full px-2.5 text-[10px]"
+                  onClick={() => void handleRefreshSheetValues()}
+                  disabled={sheetRefreshLoading || !cashflowSheetConfig?.value}
+                  title="Google Sheet 값을 캐시플로우에 반영"
+                >
+                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                  새로고침
+                </Button>
               </div>
               <div className="divide-y divide-slate-50">
                 {visibleInbox.map((item) => (
@@ -3062,19 +3068,7 @@ export function CashflowProjectSheet({
                 인건비/잔액 체크
               </HoverExplain>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-full px-2.5 text-[10px]"
-                  onClick={() => void handleRefreshLaborRisk()}
-                  disabled={laborRiskLoading || !projectId}
-                >
-                  {laborRiskLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  새로 고침
-                </Button>
-              </div>
+              <div className="shrink-0 text-[10px] font-medium text-slate-400">페이지 새로고침 시 자동 계산</div>
             </div>
             {renderLaborRiskCopy()}
           </div>

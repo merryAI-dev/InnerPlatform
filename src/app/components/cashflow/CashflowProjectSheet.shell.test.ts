@@ -123,12 +123,14 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('console.warn');
   });
 
-  it('keeps labor risk checks behind an explicit refresh action', () => {
+  it('loads labor risk checks on page entry without a separate manual button', () => {
     expect(cashflowProjectSheetSource).toContain('handleRefreshLaborRisk');
-    expect(cashflowProjectSheetSource).toContain('새로 고침');
+    expect(cashflowProjectSheetSource).toContain('void handleRefreshLaborRisk();');
+    expect(cashflowProjectSheetSource).toContain('페이지 새로고침 시 자동 계산');
     expect(cashflowProjectSheetSource).toContain('RefreshCw');
     expect(cashflowProjectSheetSource).toContain('fetchCashflowLaborRiskViaBff({');
     expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
+    expect(cashflowProjectSheetSource).not.toContain('onClick={() => void handleRefreshLaborRisk()}');
     expect(cashflowProjectSheetSource).not.toContain('수동 체크');
     expect(cashflowProjectSheetSource).not.toContain('handleManualLaborRiskCheck');
     expect(cashflowProjectSheetSource).not.toContain('laborRiskRequestKeyRef');
