@@ -11,6 +11,7 @@ import {
   applyCashflowSheetLabViaBff,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabPreviewResult,
@@ -249,6 +250,17 @@ export function CashflowSheetLabPage({
     startWeek,
     endWeek,
   }), [endWeek, projectId, sheetLink, sheetName, startWeek]);
+  const savedConfigSourceKey = useMemo(() => (
+    savedConfig?.value
+      ? buildSourceKey({
+          projectId,
+          value: savedConfig.value,
+          sheetName: savedConfig.sheetName || '',
+          startWeek: savedConfig.startWeek || '',
+          endWeek: savedConfig.endWeek || '',
+        })
+      : ''
+  ), [projectId, savedConfig]);
   const actor = useMemo(() => ({
     uid: authUser?.uid || 'workspace-user',
     email: authUser?.email || '',
@@ -426,6 +438,49 @@ export function CashflowSheetLabPage({
     logCashflowLab('share_account.copy', { projectId, hasSystemAccountEmail: true });
   }
 
+  async function handleSaveSheetConfig() {
+    if (!projectId || loading || !spreadsheetId) return;
+    setLoading(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    setReviewedSourceKey('');
+    setStageResult(null);
+    setReflectResult(null);
+    logCashflowLab('settings.save.start', {
+      projectId,
+      spreadsheetId,
+      sheetName: sheetName || null,
+    });
+    try {
+      const result = await runWithBffAuthRetry('settings.save', (requestActor) => (
+        saveCashflowSheetLabConfigViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          value: sheetLink,
+          sheetName: sheetName || undefined,
+          startWeek: startWeek || undefined,
+          endWeek: endWeek || undefined,
+        })
+      ));
+      if (!result) return;
+      setSavedConfig(result.config || null);
+      const email = result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || systemAccountEmail;
+      if (email) setSystemAccountEmail(email);
+      setStatusMessage('시트 설정을 저장했습니다. 다음부터 이 값이 자동으로 불러와집니다.');
+      logCashflowLab('settings.save.ok', {
+        projectId,
+        spreadsheetId: result.config?.spreadsheetId || spreadsheetId,
+        sheetName: result.config?.sheetName || sheetName || null,
+      });
+    } catch (error) {
+      logCashflowLab('settings.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      setErrorMessage(formatError(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handlePreview() {
     if (!projectId || loading || !spreadsheetId) return;
     const requestId = previewRequestRef.current + 1;
@@ -597,9 +652,11 @@ export function CashflowSheetLabPage({
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
   const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
+  const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
   const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
+  const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-colors ${
@@ -607,7 +664,13 @@ export function CashflowSheetLabPage({
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
     }`;
-  const primaryCta = !preview
+  const primaryCta = !preview && !isCurrentSheetConfigSaved && spreadsheetId
+    ? {
+        label: '시트 설정 우선 저장',
+        disabled: !canSaveConfig,
+        action: () => void handleSaveSheetConfig(),
+      }
+    : !preview
     ? {
         label: '시트 검토하기',
         disabled: !canPreview,
@@ -732,6 +795,21 @@ export function CashflowSheetLabPage({
                   aria-label="종료 주차"
                   className="h-10 rounded-none text-[12px]"
                 />
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant={isCurrentSheetConfigSaved ? 'outline' : 'default'}
+                  className="h-9 gap-1.5 rounded-none px-3 text-[12px]"
+                  disabled={!canSaveConfig || isCurrentSheetConfigSaved}
+                  onClick={() => void handleSaveSheetConfig()}
+                >
+                  {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {isCurrentSheetConfigSaved ? '시트 설정 저장됨' : '시트 설정 우선 저장'}
+                </Button>
+                <div className="text-[12px] text-slate-500">
+                  링크, 탭 이름, 주차 범위만 저장합니다. 캐시플로우 값은 바뀌지 않습니다.
+                </div>
               </div>
             </div>
           </li>

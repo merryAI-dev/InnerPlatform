@@ -45,6 +45,7 @@ describe('CashflowSheetLabPage shell', () => {
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
+    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
@@ -67,6 +68,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트를 시스템 계정');
     expect(pageSource).toContain('handleStageSheetValues');
     expect(pageSource).toContain('handleReflectSheetValues');
+    expect(pageSource).toContain('handleSaveSheetConfig');
     expect(pageSource).toContain('handleLoadShareAccount');
     expect(pageSource).toContain('shareConfirmed');
     expect(pageSource).toContain('canPreview');
@@ -87,6 +89,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).toContain('검토 후보 만들기');
+    expect(pageSource).toContain('시트 설정 우선 저장');
+    expect(pageSource).toContain('캐시플로우 값은 바뀌지 않습니다.');
     expect(pageSource).toContain('캐시플로우에 값 저장');
     expect(pageSource).toContain('실제 값이 바뀝니다');
     expect(pageSource).toContain('반영 완료');
@@ -95,14 +99,12 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('잔액');
     expect(pageSource).toContain('합계 기준');
     expect(pageSource).not.toContain('getCashflowSheetLabConfigViaBff');
-    expect(pageSource).not.toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).not.toContain('previewCashflowProjectionWritebackViaBff');
     expect(pageSource).not.toContain('applyCashflowProjectionWritebackViaBff');
     expect(pageSource).toContain('systemAccountEmail');
     expect(pageSource).not.toContain('mysc:cashflow-sheet-lab-action');
     expect(pageSource).not.toContain("action === 'apply'");
     expect(pageSource).not.toContain('config.load');
-    expect(pageSource).not.toContain('config.save');
     expect(pageSource).not.toContain('toolbar.action');
     expect(pageSource).not.toContain('config.editor');
     expect(pageSource).not.toContain('writeback');

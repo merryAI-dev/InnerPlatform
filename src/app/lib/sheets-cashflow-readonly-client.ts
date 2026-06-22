@@ -302,6 +302,36 @@ export async function previewCashflowSheetLabViaBff(params: {
   return response.data;
 }
 
+export async function saveCashflowSheetLabConfigViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value: string;
+  sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabShareAccountResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.request<CashflowSheetLabShareAccountResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
+    {
+      method: 'PUT',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        value: params.value,
+        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
+        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
+      },
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
 export async function applyCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;

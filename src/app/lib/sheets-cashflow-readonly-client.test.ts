@@ -4,6 +4,7 @@ import {
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
 
@@ -101,6 +102,56 @@ describe('sheets cashflow readonly client', () => {
       }),
     );
     expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
+  });
+
+  it('saves sheet lab config through same-origin BFF', async () => {
+    const client = asMockClient({
+      request: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          configured: true,
+          config: {
+            value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+            sheetName: 'cashflow(사용내역 연동)',
+            spreadsheetId: 'sheet-001',
+            startWeek: '26-1-1',
+            endWeek: '26-12-5',
+          },
+          systemAccountEmail: 'cashflow-service@mysc.iam.gserviceaccount.com',
+        },
+      })),
+    });
+
+    await saveCashflowSheetLabConfigViaBff({
+      tenantId: 'mysc',
+      actor: {
+        uid: 'user-1',
+        role: 'workspace_user',
+        email: 'user@mysc.co.kr',
+        idToken: 'firebase-token',
+      },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-12-5',
+      client,
+    });
+
+    expect(client.request).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/config',
+      expect.objectContaining({
+        method: 'PUT',
+        tenantId: 'mysc',
+        body: {
+          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-12-5',
+        },
+      }),
+    );
+    expect(client.request.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('applies explicitly provided sheet values through same-origin BFF', async () => {
