@@ -24,6 +24,7 @@ const CASHFLOW_USAGE_SHEET_NAME_PARTS = ['cashflow', '사용내역', '연동'];
 const CASHFLOW_WEEK_BASIS = 'sheet_range';
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_EVENTS_COLLECTION_ID = 'cashflow_events';
+const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_PROJECTION_SYNC_JOBS_COLLECTION_ID = 'cashflow_projection_sync_jobs';
 
 function normalizeRole(value) {
@@ -368,6 +369,16 @@ async function saveCashflowEvents({ db, tenantId, events }) {
   }
 }
 
+async function saveCashflowChangeCandidates({ db, tenantId, candidates }) {
+  if (!db || candidates.length === 0) return;
+  for (let offset = 0; offset < candidates.length; offset += 450) {
+    await Promise.all(candidates.slice(offset, offset + 450).map((candidate) => {
+      const id = `cfc_${stableHash(candidate).slice(0, 32)}`;
+      return db.doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${id}`).set(stripUndefinedDeep({ ...candidate, id }));
+    }));
+  }
+}
+
 async function readCashflowWeeksSnapshot(db, tenantId, projectId) {
   const snap = await db.collection(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}`)
     .where('projectId', '==', projectId)
@@ -429,6 +440,10 @@ function readIndexedSnapshotAmount(index, mapping) {
   return typeof amount === 'number' && Number.isFinite(amount) ? amount : null;
 }
 
+function hasIndexedSnapshotAmount(index, mapping) {
+  return Boolean(index?.has(cashflowMappingKey(mapping)));
+}
+
 function readSheetCell(matrix, mapping) {
   return readOptionalText(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
 }
@@ -470,6 +485,7 @@ function buildApplyPlan(template, matrix = [], weekRange) {
       yearMonth: mapping.yearMonth,
       weekNo: mapping.weekNo,
       cashflowLine: mapping.lineId,
+      direction: mapping.direction,
       amount: parseCashflowSheetAmount(readSheetCell(matrix, mapping)),
       sourceCell: mapping.a1,
       sourceLabel: mapping.label || mapping.canonicalLabel || mapping.lineId,
@@ -495,6 +511,56 @@ function groupApplyLines(lines) {
     groups.set(key, group);
   }
   return [...groups.values()];
+}
+
+function buildSheetChangeCandidates({ tenantId, projectId, runId, lines, cashflowSnapshot, context, now }) {
+  const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
+  const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
+  return lines
+    .filter((line) => Number.isFinite(Number(line.amount)))
+    .map((line) => {
+      const mapping = {
+        mode: line.mode,
+        yearMonth: line.yearMonth,
+        weekNo: line.weekNo,
+        lineId: line.cashflowLine,
+      };
+      const beforeHadValue = hasIndexedSnapshotAmount(amountIndex, mapping);
+      const beforeAmount = beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null;
+      const proposedAmount = normalizeAppliedAmount(line.amount);
+      const week = weekIndex.get(`${line.yearMonth}:${line.weekNo}`);
+      const riskFlags = [];
+      if (line.mode === 'actual' && beforeHadValue && beforeAmount !== proposedAmount) {
+        riskFlags.push('actual_overwrites_existing');
+      }
+      if (week?.adminClosed) riskFlags.push('closed_week_change');
+      if (beforeHadValue && beforeAmount === proposedAmount) return null;
+      return {
+        tenantId,
+        projectId,
+        runId,
+        source: 'google_sheet',
+        status: 'pending_review',
+        mode: line.mode,
+        yearMonth: line.yearMonth,
+        weekNo: line.weekNo,
+        lineId: line.cashflowLine,
+        lineDirection: line.direction === 'IN' ? 'in' : 'out',
+        beforeAmount,
+        beforeHadValue,
+        proposedAmount,
+        proposedHadValue: true,
+        sourceCell: line.sourceCell,
+        sourceLabel: line.sourceLabel,
+        riskFlags,
+        actorUid: readOptionalText(context?.actorId),
+        actorName: readOptionalText(context?.actorEmail) || readOptionalText(context?.actorId),
+        actorEmail: readOptionalText(context?.actorEmail),
+        createdAt: now,
+        updatedAt: now,
+      };
+    })
+    .filter(Boolean);
 }
 
 function appliedLineKey(line) {
@@ -933,6 +999,109 @@ async function applyConfiguredCashflowSheetLab({
     skippedInvalidWeeks: skippedInvalidWeekKeys,
     verifiedLineCount: verification.verifiedLineCount,
     firebaseResult: applyResult,
+  };
+}
+
+async function stageConfiguredCashflowSheetLab({
+  db,
+  tenantId,
+  projectId,
+  project,
+  parsed = {},
+  loadSheetPreview,
+  context = {},
+  logger = () => {},
+} = {}) {
+  const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
+  const weekRange = normalizeWeekRange(source);
+  logger('start', {
+    projectId,
+    authMode: 'service_account',
+    source: source.source,
+    sheetName: source.sheetName || null,
+    valueProvided: Boolean(source.value),
+    startWeek: weekRange.startWeek || null,
+    endWeek: weekRange.endWeek || null,
+  });
+
+  const preview = await loadSheetPreview({
+    value: source.value,
+    sheetName: source.sheetName,
+  });
+  const authMode = resolveGoogleSheetAuthMode(preview);
+  assertCashflowUsageLinkedSheet(preview);
+  const template = analyzeCashflowSheetTemplate(preview.matrix);
+  assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
+  if (!template.supported) {
+    throw createHttpError(
+      400,
+      '지원하지 않는 cashflow 시트 구조라 검토 후보를 만들 수 없습니다.',
+      'cashflow_sheet_template_unsupported',
+    );
+  }
+
+  const applyPlan = buildApplyPlan(template, preview.matrix, weekRange);
+  const activeWeeks = buildActiveWeeksFromTemplate(template, weekRange);
+  const { lines, skippedInvalidWeekKeys } = applyPlan;
+  if (lines.length === 0) {
+    throw createHttpError(400, '검토할 cashflow 값이 없습니다.', 'cashflow_sheet_stage_empty');
+  }
+
+  const now = new Date().toISOString();
+  const runId = `cashflow-sheet-stage:${projectId}:${now}`;
+  const cashflowSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
+  const candidates = buildSheetChangeCandidates({
+    tenantId,
+    projectId,
+    runId,
+    lines,
+    cashflowSnapshot,
+    context,
+    now,
+  });
+  await saveCashflowSheetLabActiveWeeks({ db, tenantId, projectId, activeWeeks, now });
+  await saveCashflowChangeCandidates({ db, tenantId, candidates });
+
+  const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
+  const actualLineCount = candidates.filter((candidate) => candidate.mode === 'actual').length;
+  logger('ok', {
+    projectId,
+    authMode,
+    stagedLineCount: candidates.length,
+    projectionLineCount,
+    actualLineCount,
+    riskCount: candidates.filter((candidate) => candidate.riskFlags?.length > 0).length,
+  });
+
+  return {
+    ok: true,
+    commandName: 'cashflowSheetLab.stage.firebase',
+    projectId,
+    spreadsheetId: preview.spreadsheetId,
+    spreadsheetTitle: preview.spreadsheetTitle,
+    selectedSheetName: preview.selectedSheetName,
+    activeWeekRange: {
+      startWeek: weekRange.startWeek,
+      endWeek: weekRange.endWeek,
+      weekBasis: CASHFLOW_WEEK_BASIS,
+      totalBasis: CASHFLOW_WEEK_BASIS,
+      activeWeeks,
+    },
+    runId,
+    stagedLineCount: candidates.length,
+    projectionLineCount,
+    actualLineCount,
+    riskLineCount: candidates.filter((candidate) => candidate.riskFlags?.length > 0).length,
+    skippedInvalidWeekCount: skippedInvalidWeekKeys.length,
+    skippedInvalidWeeks: skippedInvalidWeekKeys,
+    candidates: candidates.slice(0, 200),
+    omittedCandidateCount: Math.max(0, candidates.length - 200),
+    lastStagedAt: now,
+    lastStagedBy: {
+      uid: readOptionalText(context?.actorId),
+      email: readOptionalText(context?.actorEmail),
+      role: readOptionalText(context?.actorRole) || 'workspace_user',
+    },
   };
 }
 
@@ -1453,6 +1622,37 @@ export function mountCashflowSheetLabRoutes(app, {
         projectId,
         authMode: 'service_account',
         deprecatedGoogleAccessTokenIgnored,
+        ...routeErrorDetails(normalizeRouteError(error)),
+      }, 'warn');
+      throw normalizeRouteError(error);
+    }
+  }));
+
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/stage', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab stage payload');
+    const project = await readProjectDocument(db, tenantId, projectId);
+
+    try {
+      const result = await stageConfiguredCashflowSheetLab({
+        db,
+        tenantId,
+        projectId,
+        project,
+        parsed,
+        loadSheetPreview,
+        context: req.context,
+        logger: (event, details = {}, level = 'info') => {
+          logCashflowSheetLab(`stage.${event}`, req, details, level);
+        },
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      logCashflowSheetLab('stage.error', req, {
+        projectId,
+        authMode: 'service_account',
         ...routeErrorDetails(normalizeRouteError(error)),
       }, 'warn');
       throw normalizeRouteError(error);

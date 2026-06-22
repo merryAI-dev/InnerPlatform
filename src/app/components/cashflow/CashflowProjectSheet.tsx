@@ -42,7 +42,7 @@ import {
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
-import { applyCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
+import { stageCashflowSheetLabViaBff } from '../../lib/sheets-cashflow-readonly-client';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -385,9 +385,10 @@ export function CashflowProjectSheet({
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
   const [sheetRefreshResult, setSheetRefreshResult] = useState<{
-    appliedLineCount: number;
+    stagedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
+    riskLineCount: number;
   } | null>(null);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
@@ -798,7 +799,7 @@ export function CashflowProjectSheet({
     }
     const apply = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
       const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-      return applyCashflowSheetLabViaBff({
+      return stageCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
         projectId,
@@ -811,18 +812,11 @@ export function CashflowProjectSheet({
     };
     const rememberResult = (result: Awaited<ReturnType<typeof apply>>) => {
       setSheetRefreshResult({
-        appliedLineCount: result.appliedLineCount,
+        stagedLineCount: result.stagedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
+        riskLineCount: result.riskLineCount,
       });
-      setCashflowSheetConfig((current) => current ? ({
-        ...current,
-        lastAppliedAt: result.lastAppliedAt,
-        lastAppliedBy: result.lastAppliedBy,
-        lastAppliedLineCount: result.appliedLineCount,
-        lastProjectionLineCount: result.projectionLineCount,
-        lastActualLineCount: result.actualLineCount,
-      }) : current);
     };
     setSheetRefreshLoading(true);
     setSheetRefreshResult(null);
@@ -836,7 +830,7 @@ export function CashflowProjectSheet({
       await loadCashflowSheetRangeWeeks();
       await loadCashflowEvents();
       rememberResult(result);
-      toast.success('시트 값을 새로고침했습니다.');
+      toast.success('시트 변경 후보를 만들었습니다.');
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -846,14 +840,14 @@ export function CashflowProjectSheet({
           await loadCashflowSheetRangeWeeks();
           await loadCashflowEvents();
           rememberResult(result);
-          toast.success('시트 값을 새로고침했습니다.');
+          toast.success('시트 변경 후보를 만들었습니다.');
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '시트 값을 새로고침하지 못했습니다.'));
+          toast.error(resolveApiErrorMessage(retryError, '시트 변경 후보를 만들지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '시트 값을 새로고침하지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(error, '시트 변경 후보를 만들지 못했습니다.'));
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -2998,7 +2992,8 @@ export function CashflowProjectSheet({
                 )}
                 {sheetRefreshResult ? (
                   <div className="mt-1 font-semibold text-emerald-800">
-                    시트 값 반영 완료 · 반영 {sheetRefreshResult.appliedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                    검토 후보 생성 완료 · 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                    {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
                   </div>
                 ) : null}
                 {cashflowSheetConfig?.lastAppliedAt ? (
@@ -3010,7 +3005,7 @@ export function CashflowProjectSheet({
                     {typeof cashflowSheetConfig.lastActualLineCount === 'number' ? ` · Actual ${cashflowSheetConfig.lastActualLineCount.toLocaleString()}건` : ''}
                   </div>
                 ) : cashflowSheetConfig ? (
-                  <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 새로고침을 누르면 캐시플로우에 반영됩니다.</div>
+                  <div className="mt-1 text-blue-800">시트에서 값을 수정한 뒤 시트 업데이트 검토를 누르면 변경 후보로 저장됩니다.</div>
                 ) : null}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
@@ -3022,10 +3017,10 @@ export function CashflowProjectSheet({
                     className="h-7 rounded-full border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-blue-700"
                     onClick={() => void handleRefreshSheetValues()}
                     disabled={sheetRefreshLoading}
-                    title="Google Sheet에서 수정한 값을 캐시플로우에 반영"
+                    title="Google Sheet에서 수정한 값을 검토 후보로 가져오기"
                   >
                     {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                    시트 업데이트 반영
+                    시트 업데이트 검토
                   </Button>
                 ) : null}
                 <Button
@@ -3177,7 +3172,7 @@ export function CashflowProjectSheet({
               <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
-                시트 업데이트 반영, 저장, 작성완료, 결산을 실행하면 여기에 기록됩니다.
+                시트 업데이트 검토, 저장, 작성완료, 결산을 실행하면 여기에 기록됩니다.
               </div>
             ) : cashflowEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'

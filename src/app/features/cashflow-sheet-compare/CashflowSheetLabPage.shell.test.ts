@@ -45,7 +45,7 @@ describe('CashflowSheetLabPage shell', () => {
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
-    expect(pageSource).toContain('applyCashflowSheetLabViaBff');
+    expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
@@ -75,7 +75,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');
     expect(pageSource).toContain('이미 연결된 시트 설정이 있습니다.');
-    expect(pageSource).toContain('기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 직접 반영할 수 있습니다.');
+    expect(pageSource).toContain('기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 검토 후보를 만들 수 있습니다.');
     expect(pageSource).toContain('이미 연결된 시트 설정을 불러왔습니다.');
     expect(pageSource).toContain('공유 완료 확인하기');
     expect(pageSource).toContain('공유 완료 확인됨');
@@ -83,7 +83,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('type="checkbox"');
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
-    expect(pageSource).toContain('시트 값 반영하기');
+    expect(pageSource).toContain('검토 후보 만들기');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');
     expect(pageSource).toContain('잔액');

@@ -4,6 +4,7 @@ import {
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  stageCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
 
 function asMockClient(client: {
@@ -150,6 +151,52 @@ describe('sheets cashflow readonly client', () => {
           idempotencyKey: 'apply-001',
         },
         idempotencyKey: 'apply-001',
+      }),
+    );
+  });
+
+  it('stages explicitly provided sheet values through the review endpoint', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          commandName: 'cashflowSheetLab.stage.firebase',
+          projectId: 'p001',
+          runId: 'stage-run-1',
+          stagedLineCount: 4,
+          projectionLineCount: 2,
+          actualLineCount: 2,
+          riskLineCount: 1,
+          candidates: [],
+        },
+      })),
+    });
+
+    const result = await stageCashflowSheetLabViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-6-5',
+      idempotencyKey: 'stage-001',
+      client,
+    });
+
+    expect(result.stagedLineCount).toBe(4);
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/stage',
+      expect.objectContaining({
+        tenantId: 'mysc',
+        body: {
+          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-6-5',
+          idempotencyKey: 'stage-001',
+        },
+        idempotencyKey: 'stage-001',
       }),
     );
   });

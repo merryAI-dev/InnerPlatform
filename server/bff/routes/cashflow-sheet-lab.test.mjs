@@ -100,6 +100,9 @@ function createDb({ project = { id: 'project-a' }, weeks = [] } = {}) {
       set: (docRef, patch, options) => docRef.set(patch, options),
     })),
     __getDocument: (path = 'orgs/tenant-a/projects/project-a') => documents.get(path),
+    __getDocumentsByPrefix: (prefix) => [...documents.entries()]
+      .filter(([path]) => path.startsWith(prefix))
+      .map(([path, data]) => ({ path, data })),
   };
 }
 
@@ -344,6 +347,59 @@ describe('cashflow sheet lab route', () => {
       lastProjectionLineCount: 24,
       lastActualLineCount: 24,
     });
+  });
+
+  it('stages sheet values as cell-level review candidates without updating cashflow weeks', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        projection: { MYSC_PREPAY_IN: 100 },
+        actual: { MYSC_PREPAY_IN: 200 },
+      }],
+    });
+
+    const response = await request(createApp({ db }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ idempotencyKey: 'stage-001' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      ok: true,
+      commandName: 'cashflowSheetLab.stage.firebase',
+      stagedLineCount: 24,
+      projectionLineCount: 12,
+      actualLineCount: 12,
+    });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
+      projection: { MYSC_PREPAY_IN: 100 },
+      actual: { MYSC_PREPAY_IN: 200 },
+    });
+    const candidates = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/');
+    expect(candidates).toHaveLength(24);
+    expect(candidates.find((candidate) => candidate.data.mode === 'projection' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data).toMatchObject({
+      projectId: 'project-a',
+      status: 'pending_review',
+      source: 'google_sheet',
+      lineDirection: 'in',
+      beforeAmount: 100,
+      beforeHadValue: true,
+      proposedAmount: 999,
+      proposedHadValue: true,
+      sourceCell: expect.any(String),
+    });
+    expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toContain('actual_overwrites_existing');
   });
 
   it('runs the daily cashflow sheet sync worker through the same apply path', async () => {

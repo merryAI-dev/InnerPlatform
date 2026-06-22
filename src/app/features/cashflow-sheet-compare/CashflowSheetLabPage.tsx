@@ -7,10 +7,10 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
-  applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabPreviewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
@@ -222,9 +222,10 @@ export function CashflowSheetLabPage({
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [shareConfirmed, setShareConfirmed] = useState(false);
   const [applyResult, setApplyResult] = useState<{
-    appliedLineCount: number;
+    stagedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
+    riskLineCount: number;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -485,17 +486,17 @@ export function CashflowSheetLabPage({
   async function handleApplySheetValues() {
     if (!projectId || loading || !spreadsheetId || !shareConfirmed || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
-    const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const idempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
-    logCashflowLab('apply.sheet_values.start', {
+    logCashflowLab('stage.sheet_values.start', {
       projectId,
       spreadsheetId,
     });
     try {
-      const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
-        applyCashflowSheetLabViaBff({
+      const result = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
+        stageCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
@@ -507,40 +508,26 @@ export function CashflowSheetLabPage({
         })
       ));
       if (!result) return;
-      if (result.accessPolicy && result.template && result.availableSheets && result.matrix && result.previewValues && result.cashflowSnapshotStatus) {
-        setPreview({
-          projectId: result.projectId,
-          spreadsheetId: result.spreadsheetId,
-          spreadsheetTitle: result.spreadsheetTitle,
-          selectedSheetName: result.selectedSheetName,
-          availableSheets: result.availableSheets,
-          matrix: result.matrix,
-          accessPolicy: result.accessPolicy,
-          activeWeekRange: result.activeWeekRange,
-          template: result.template,
-          previewValues: result.previewValues,
-          cashflowSnapshotStatus: result.cashflowSnapshotStatus,
-          cashflowSnapshotError: result.cashflowSnapshotError,
-        });
-      }
       setApplyResult({
-        appliedLineCount: result.appliedLineCount,
+        stagedLineCount: result.stagedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
+        riskLineCount: result.riskLineCount,
       });
       setReviewedSourceKey(sourceKey);
-      setStatusMessage('시트 값을 반영했습니다.');
-      logCashflowLab('apply.sheet_values.ok', {
+      setStatusMessage('시트 변경 후보를 만들었습니다.');
+      logCashflowLab('stage.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
         sheetName: result.selectedSheetName,
-        appliedLineCount: result.appliedLineCount,
+        stagedLineCount: result.stagedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
+        riskLineCount: result.riskLineCount,
         durationMs: Date.now() - startedAt,
       });
     } catch (error) {
-      logCashflowLab('apply.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      logCashflowLab('stage.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);
@@ -566,7 +553,7 @@ export function CashflowSheetLabPage({
     disabled: !canPreview,
     action: () => void handlePreview(),
   } : {
-    label: '시트 값 반영하기',
+    label: '검토 후보 만들기',
     disabled: !canApply,
     action: () => void handleApplySheetValues(),
   };
@@ -577,7 +564,7 @@ export function CashflowSheetLabPage({
         <header>
           <div className="text-[12px] font-semibold text-slate-500">시트 연동 검토</div>
           <h1 className="mt-5 whitespace-pre-line text-[30px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[34px]">
-            {`Google Sheet 값을\n캐시플로우에 반영하기`}
+            {`Google Sheet 값을\n검토 후보로 가져오기`}
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
@@ -586,7 +573,7 @@ export function CashflowSheetLabPage({
           <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
             <div className="font-bold">이미 연결된 시트 설정이 있습니다.</div>
             <div className="mt-1 text-[12px] text-blue-900">
-              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 직접 반영할 수 있습니다.
+              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 검토 후보를 만들 수 있습니다.
             </div>
             <div className="mt-1 text-[12px] text-blue-900">
               {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
@@ -702,7 +689,7 @@ export function CashflowSheetLabPage({
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(4)}>4</span>
             <div className="min-w-0 space-y-3 pb-1">
-              <h2 className="text-[19px] font-bold text-slate-950">시트 값 반영</h2>
+              <h2 className="text-[19px] font-bold text-slate-950">검토 후보 생성</h2>
               <Button
                 type="button"
                 className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
@@ -710,7 +697,7 @@ export function CashflowSheetLabPage({
                 onClick={() => void handleApplySheetValues()}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
-                시트 값 반영하기
+                검토 후보 만들기
               </Button>
             </div>
           </li>
@@ -722,16 +709,17 @@ export function CashflowSheetLabPage({
               {applyResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
-                    반영 {applyResult.appliedLineCount.toLocaleString()}건
+                    후보 {applyResult.stagedLineCount.toLocaleString()}건
                     {' · '}Projection {applyResult.projectionLineCount.toLocaleString()}건
                     {' · '}Actual {applyResult.actualLineCount.toLocaleString()}건
+                    {applyResult.riskLineCount > 0 ? ` · 확인 필요 ${applyResult.riskLineCount.toLocaleString()}건` : ''}
                   </div>
                   <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
                     <Link to="/portal/cashflow">캐시플로우로 이동</Link>
                   </Button>
                 </div>
               ) : (
-                <div className="text-[13px] text-slate-400">반영이 끝나면 결과가 표시됩니다.</div>
+                <div className="text-[13px] text-slate-400">검토 후보를 만들면 결과가 표시됩니다.</div>
               )}
             </div>
           </li>

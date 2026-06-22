@@ -181,6 +181,56 @@ export interface CashflowSheetLabApplyResult {
   };
 }
 
+export interface CashflowSheetLabChangeCandidate {
+  id?: string;
+  projectId: string;
+  runId: string;
+  source: 'google_sheet' | 'portal';
+  status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'applied' | 'superseded' | 'failed';
+  mode: 'projection' | 'actual';
+  yearMonth: string;
+  weekNo: number;
+  lineId: string;
+  lineDirection: 'in' | 'out';
+  beforeAmount: number | null;
+  beforeHadValue: boolean;
+  proposedAmount: number;
+  proposedHadValue: boolean;
+  sourceCell?: string;
+  sourceLabel?: string;
+  riskFlags?: string[];
+  actorUid?: string;
+  actorName?: string;
+  actorEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CashflowSheetLabStageResult {
+  ok: boolean;
+  commandName: 'cashflowSheetLab.stage.firebase';
+  projectId: string;
+  spreadsheetId?: string;
+  spreadsheetTitle?: string;
+  selectedSheetName?: string;
+  activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'];
+  runId: string;
+  stagedLineCount: number;
+  projectionLineCount: number;
+  actualLineCount: number;
+  riskLineCount: number;
+  skippedInvalidWeekCount?: number;
+  skippedInvalidWeeks?: string[];
+  candidates?: CashflowSheetLabChangeCandidate[];
+  omittedCandidateCount?: number;
+  lastStagedAt?: string;
+  lastStagedBy?: {
+    uid?: string;
+    email?: string;
+    role?: string;
+  } | null;
+}
+
 export interface CashflowSheetLabShareAccountResult {
   projectId: string;
   configured?: boolean;
@@ -266,6 +316,38 @@ export async function applyCashflowSheetLabViaBff(params: {
   const apiClient = params.client || createSameOriginBffClient();
   const response = await apiClient.post<CashflowSheetLabApplyResult>(
     `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/apply`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        ...(params.value ? { value: params.value } : {}),
+        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
+        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
+        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
+        idempotencyKey: params.idempotencyKey,
+      },
+      idempotencyKey: params.idempotencyKey,
+      timeoutMs: 30000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function stageCashflowSheetLabViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value?: string;
+  sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabStageResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.post<CashflowSheetLabStageResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/stage`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

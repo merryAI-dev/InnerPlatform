@@ -90,12 +90,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
   });
 
   it('replaces the empty-row toggle with an explicit sheet refresh action', () => {
-    expect(cashflowProjectSheetSource).toContain('applyCashflowSheetLabViaBff');
+    expect(cashflowProjectSheetSource).toContain('stageCashflowSheetLabViaBff');
     expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
-    expect(cashflowProjectSheetSource).toContain('시트 값을 새로고침했습니다.');
-    expect(cashflowProjectSheetSource).toContain('시트 값 반영 완료');
+    expect(cashflowProjectSheetSource).toContain('시트 변경 후보를 만들었습니다.');
+    expect(cashflowProjectSheetSource).toContain('검토 후보 생성 완료');
     expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
-    expect(cashflowProjectSheetSource).toContain('시트 업데이트 반영');
+    expect(cashflowProjectSheetSource).toContain('시트 업데이트 검토');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');
   });
 
