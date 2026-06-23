@@ -944,7 +944,7 @@ export function CashflowProjectSheet({
       } : current);
       setSheetStageDialog(null);
       setSheetRefreshResult(null);
-      toast.success(`안전 후보 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.`);
+      toast.success(`확인 필요 제외 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.`);
     };
 
     setSheetStageApplyLoading(true);
@@ -965,11 +965,11 @@ export function CashflowProjectSheet({
           await rememberApplyResult(result);
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '안전 후보를 저장하지 못했습니다.'));
+          toast.error(resolveApiErrorMessage(retryError, '변경 항목을 저장하지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '안전 후보를 저장하지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(error, '변경 항목을 저장하지 못했습니다.'));
     } finally {
       setSheetStageApplyLoading(false);
     }
@@ -3130,7 +3130,7 @@ export function CashflowProjectSheet({
                   </div>
                   <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
                     {cashflowSheetConfig
-                      ? '시트에서 수정한 값은 먼저 저장 전 후보로 확인한 뒤 안전 후보만 저장합니다.'
+                      ? '시트에서 수정한 값은 먼저 저장 전 후보로 확인한 뒤 확인 필요 항목을 제외하고 저장합니다.'
                       : '처음 설정하면 이후에는 이 영역에서 시트 변경 후보를 바로 만들 수 있습니다.'}
                   </div>
                   {sheetRefreshResult ? (
@@ -3163,7 +3163,7 @@ export function CashflowProjectSheet({
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[280px] bg-slate-950 text-[11px] leading-relaxed text-white">
-                    시트 값을 바로 덮어쓰지 않습니다. 먼저 변경 후보를 만들고, 안전 후보 저장 버튼을 누를 때만 원장에 반영됩니다.
+                    시트 값을 바로 덮어쓰지 않습니다. 먼저 변경 후보를 만들고, 확인 필요 제외하고 저장 버튼을 누를 때만 원장에 반영됩니다.
                   </TooltipContent>
                 </Tooltip>
                 <Button
@@ -3463,7 +3463,7 @@ export function CashflowProjectSheet({
                   </div>
                   <div className="mt-1 text-[11px] leading-5 text-slate-600">
                     {sheetReviewDirection === 'sheet-to-cashflow'
-                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 저장 전 후보로 가져옵니다. 안전 후보만 명시적으로 저장합니다.'
+                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 저장 전 후보로 가져옵니다. 확인 필요 항목은 제외하고 저장합니다.'
                       : '캐시플로우 화면의 Projection 값을 Google Sheet에 쓰기 전 셀 단위 차이를 확인합니다. Actual은 이 방향에서 수정하지 않습니다.'}
                   </div>
                 </div>
@@ -3476,7 +3476,7 @@ export function CashflowProjectSheet({
                 <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-blue-500 motion-safe:animate-pulse' : 'bg-slate-500'}`} aria-hidden="true" />
                 <div>
                   {sheetReviewDirection === 'sheet-to-cashflow'
-                    ? '현재 선택: 시트 값을 읽어 후보만 만듭니다. 원장 저장은 다음 팝업의 안전 후보 저장 버튼에서 결정합니다.'
+                    ? '현재 선택: 시트 값을 읽어 후보만 만듭니다. 원장 저장은 다음 팝업의 확인 필요 제외하고 저장 버튼에서 결정합니다.'
                     : '현재 선택: 캐시플로우 Projection을 시트에 쓸 값으로 비교합니다. Actual은 이 방향에서 쓰지 않습니다.'}
                 </div>
               </div>
@@ -3486,7 +3486,7 @@ export function CashflowProjectSheet({
                   ? [
                         ['1', '시트 값 읽기', '공유된 Google Sheet 값을 읽습니다.'],
                         ['2', '저장 전 후보', '원장과 다른 셀만 후보로 만듭니다.'],
-                        ['3', '안전 후보 저장', '확인 필요 항목은 저장하지 않습니다.'],
+                        ['3', '확인 후 저장', '확인 필요 항목은 저장하지 않습니다.'],
                     ]
                   : [
                       ['1', 'Projection 비교', '현재 시트 값과 캐시플로우 값을 비교합니다.'],
@@ -3541,7 +3541,7 @@ export function CashflowProjectSheet({
           <AlertDialogHeader>
             <AlertDialogTitle>저장 전 확인 {sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건</AlertDialogTitle>
             <AlertDialogDescription>
-              원장은 아직 변경되지 않았습니다. 아래에서 안전 후보만 캐시플로우에 저장할 수 있고, 확인 필요 항목은 저장하지 않습니다.
+              원장은 아직 변경되지 않았습니다. 아래에서 확인 필요 항목을 제외한 변경만 캐시플로우에 저장할 수 있습니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {sheetStageDialog && (
@@ -3549,8 +3549,8 @@ export function CashflowProjectSheet({
               <div className="grid gap-2 sm:grid-cols-4">
                 <div className="rounded-lg bg-emerald-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
                   <div className="text-[10px] font-semibold text-emerald-700">
-                    <HoverExplain message="결산 잠금이나 충돌 위험 없이 바로 저장 가능한 후보입니다. 저장 버튼은 이 후보만 반영합니다.">
-                      안전 후보
+                    <HoverExplain message="확인 필요 표시가 없어 바로 저장 가능한 변경입니다. 저장 버튼은 이 항목만 반영합니다.">
+                      바로 저장 가능
                     </HoverExplain>
                   </div>
                   <div className="mt-1 text-[16px] font-bold text-emerald-900">{Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건</div>
@@ -3573,7 +3573,7 @@ export function CashflowProjectSheet({
                 </div>
                 <div className="rounded-lg bg-amber-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
                   <div className="text-[10px] font-semibold text-amber-700">
-                    <HoverExplain message="바로 저장하지 않고 사람이 검토해야 하는 후보입니다. 안전 후보 저장 버튼을 눌러도 이 항목은 남겨둡니다.">
+                    <HoverExplain message="바로 저장하지 않고 사람이 검토해야 하는 후보입니다. 확인 필요 제외하고 저장 버튼을 눌러도 이 항목은 남겨둡니다.">
                       확인 필요
                     </HoverExplain>
                   </div>
@@ -3581,7 +3581,7 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
-                저장하면 안전 후보만 원장에 반영됩니다. 확인 필요 후보는 목록에 남겨 다시 검토할 수 있습니다.
+                저장하면 확인 필요 항목을 제외한 변경만 원장에 반영됩니다. 확인 필요 후보는 목록에 남겨 다시 검토할 수 있습니다.
               </div>
               <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
                 <table className="w-full text-[12px]">
@@ -3642,8 +3642,8 @@ export function CashflowProjectSheet({
             >
               {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
               {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
-                ? `안전 후보 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 저장`
-                : '저장할 안전 후보 없음'}
+                ? `확인 필요 제외하고 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 저장`
+                : '저장할 변경 없음'}
             </Button>
             <AlertDialogAction onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}>
               전체 검토 화면

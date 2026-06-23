@@ -607,7 +607,7 @@ export function CashflowSheetLabPage({
       });
       setReflectResult(null);
       setReviewedSourceKey(sourceKey);
-      setStatusMessage('저장 전 검토 후보를 만들었습니다. 안전 후보만 캐시플로우에 저장할 수 있습니다.');
+      setStatusMessage('저장 전 변경 후보를 만들었습니다. 확인 필요 항목을 제외한 변경만 캐시플로우에 저장할 수 있습니다.');
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -659,7 +659,7 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
-      setStatusMessage(`검토한 안전 후보 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
+      setStatusMessage(`확인 필요 제외 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -715,7 +715,7 @@ export function CashflowSheetLabPage({
           action: () => void handleStageSheetValues(),
         }
       : {
-          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '안전 후보 저장' : '저장할 안전 후보 없음',
+          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '확인 필요 제외하고 저장' : '저장할 변경 없음',
           disabled: !canReflect,
           action: () => void handleReflectSheetValues(),
         };
@@ -741,8 +741,8 @@ export function CashflowSheetLabPage({
             <div className="mt-1 leading-5 text-slate-500">시트와 원장의 차이만 임시 후보로 모읍니다.</div>
           </div>
           <div className="border border-blue-200 bg-blue-50 px-3 py-2">
-            <div className="font-bold text-blue-950">안전 후보 저장</div>
-            <div className="mt-1 leading-5 text-blue-800">이 버튼을 눌러야 캐시플로우 원장에 반영됩니다.</div>
+            <div className="font-bold text-blue-950">확인 후 저장</div>
+            <div className="mt-1 leading-5 text-blue-800">확인 필요 항목을 제외한 변경만 원장에 반영합니다.</div>
           </div>
         </div>
 
@@ -911,7 +911,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">검토한 값 저장</h2>
-                <HelpMemo>안전 후보만 실제 캐시플로우 원장에 저장합니다. 확인 필요 후보는 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
+                <HelpMemo>확인 필요 표시가 없는 변경만 실제 캐시플로우 원장에 저장합니다. 확인 필요 항목은 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
               </div>
               {stageResult ? (
                 <div className="space-y-3">
@@ -920,7 +920,7 @@ export function CashflowSheetLabPage({
                       {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
                       {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
                       {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
-                      {' · '}안전 후보 {safeStageLineCount.toLocaleString()}건
+                      {' · '}바로 저장 가능 {safeStageLineCount.toLocaleString()}건
                   </div>
                   {reflectResult ? (
                     <div className="space-y-3">
@@ -937,7 +937,7 @@ export function CashflowSheetLabPage({
                   ) : (
                     <div className="space-y-2">
                       <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                          아래 버튼을 누르면 방금 만든 안전 후보만 캐시플로우 원장에 저장됩니다. 확인 필요 항목은 저장하지 않습니다.
+                          아래 버튼을 누르면 확인 필요 항목을 제외한 변경만 캐시플로우 원장에 저장됩니다.
                       </div>
                       <Button
                         type="button"
@@ -946,7 +946,7 @@ export function CashflowSheetLabPage({
                         onClick={() => void handleReflectSheetValues()}
                       >
                         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {safeStageLineCount > 0 ? `안전 후보 ${safeStageLineCount.toLocaleString()}건 저장` : '저장할 안전 후보 없음'}
+                          {safeStageLineCount > 0 ? `확인 필요 제외하고 ${safeStageLineCount.toLocaleString()}건 저장` : '저장할 변경 없음'}
                       </Button>
                     </div>
                   )}
