@@ -91,9 +91,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('검토 후보 만들기');
     expect(pageSource).toContain('시트 설정 우선 저장');
     expect(pageSource).toContain('캐시플로우 값은 바뀌지 않습니다.');
-    expect(pageSource).toContain('캐시플로우에 값 저장');
-    expect(pageSource).toContain('실제 값이 바뀝니다');
-    expect(pageSource).toContain('반영 완료');
+    expect(pageSource).toContain('검토한 값 저장');
+    expect(pageSource).toContain('안전 후보만 실제 캐시플로우 원장에 저장합니다.');
+    expect(pageSource).toContain('저장 완료');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');
     expect(pageSource).toContain('잔액');
