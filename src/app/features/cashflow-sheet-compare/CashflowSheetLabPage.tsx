@@ -726,7 +726,7 @@ export function CashflowSheetLabPage({
         <header>
           <div className="text-[12px] font-semibold text-slate-500">시트 연동 검토</div>
           <h1 className="mt-5 whitespace-pre-line text-[30px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[34px]">
-            {`시트에서 바뀐 값\n확인하고 저장하기`}
+            Cashflow탭 연동
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
