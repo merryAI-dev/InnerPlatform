@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MYSCGuard 공유드라이브 보안 관제 개선안</title>
+    <style>
+      :root {
+        --navy: #12213a;
+        --blue: #2563eb;
+        --green: #15803d;
+        --amber: #d97706;
+        --red: #dc2626;
+        --slate: #475569;
+        --line: #d7dee8;
+        --bg: #f8fafc;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--navy);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      main {
+        width: min(1440px, 100vw);
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 44px 54px 36px;
+        background: #fff;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 28px;
+        align-items: flex-start;
+        border-bottom: 3px solid var(--navy);
+        padding-bottom: 22px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 38px;
+        line-height: 1.14;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 10px 0 0;
+        color: var(--slate);
+        font-size: 18px;
+        font-weight: 650;
+      }
+
+      .badge {
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px 16px;
+        background: #f8fbff;
+        color: #1e3a8a;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .columns {
+        display: grid;
+        grid-template-columns: 1fr 130px 1fr;
+        gap: 24px;
+        align-items: stretch;
+        margin-top: 30px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+      }
+
+      .panel h2 {
+        margin: 0;
+        padding: 18px 22px;
+        color: #fff;
+        font-size: 25px;
+        letter-spacing: 0;
+      }
+
+      .as-is h2 {
+        background: var(--amber);
+      }
+
+      .to-be h2 {
+        background: var(--green);
+      }
+
+      .items {
+        display: grid;
+        gap: 13px;
+        padding: 20px;
+      }
+
+      .item {
+        display: grid;
+        grid-template-columns: 32px 1fr;
+        gap: 12px;
+        min-height: 78px;
+        border: 1px solid #e5eaf2;
+        border-radius: 8px;
+        padding: 13px;
+        background: #fbfdff;
+      }
+
+      .icon {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        color: #fff;
+        font-weight: 900;
+      }
+
+      .as-is .icon {
+        background: var(--amber);
+      }
+
+      .to-be .icon {
+        background: var(--green);
+      }
+
+      .item strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 18px;
+      }
+
+      .item span {
+        color: var(--slate);
+        font-size: 15px;
+        line-height: 1.45;
+      }
+
+      .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .arrow-box {
+        display: grid;
+        place-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 210px;
+        color: var(--blue);
+        font-weight: 900;
+        text-align: center;
+        line-height: 1.35;
+      }
+
+      .arrow-symbol {
+        font-size: 54px;
+      }
+
+      .bottom {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr;
+        gap: 24px;
+        margin-top: 28px;
+      }
+
+      .section {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+        background: #fff;
+      }
+
+      .section h3 {
+        margin: 0 0 14px;
+        font-size: 22px;
+      }
+
+      .scope-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+
+      .scope {
+        min-height: 116px;
+        border: 1px solid #dbe5f4;
+        border-radius: 8px;
+        padding: 14px;
+        background: #f8fbff;
+      }
+
+      .scope b {
+        display: block;
+        margin-bottom: 8px;
+        color: #1d4ed8;
+        font-size: 17px;
+      }
+
+      .scope p {
+        margin: 0;
+        color: var(--slate);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .principles ul {
+        margin: 0;
+        padding-left: 20px;
+        color: var(--slate);
+        font-size: 15px;
+        line-height: 1.68;
+      }
+
+      .legend {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .legend span {
+        border-radius: 8px;
+        padding: 10px;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .critical {
+        background: var(--red);
+      }
+
+      .high {
+        background: #ea580c;
+      }
+
+      .medium {
+        background: #ca8a04;
+      }
+
+      .low {
+        background: var(--green);
+      }
+
+      footer {
+        margin-top: 18px;
+        color: #64748b;
+        font-size: 13px;
+        text-align: right;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>MYSCGuard 공유드라이브 보안 관제 개선안</h1>
+          <p class="subtitle">권한·공유 범위·민감자료 보호를 매일 확인하는 체계</p>
+        </div>
+        <div class="badge">임원 보고용 · AS-IS / TO-BE</div>
+      </header>
+
+      <section class="columns" aria-label="현재와 개선 후 비교">
+        <article class="panel as-is">
+          <h2>AS-IS 현재</h2>
+          <div class="items">
+            <div class="item"><div class="icon">!</div><div><strong>공유 현황이 흩어져 있음</strong><span>누가 외부에 공유했는지 전사 단위로 한 번에 확인하기 어렵습니다.</span></div></div>
+            <div class="item"><div class="icon">!</div><div><strong>공개 링크 위험</strong><span>링크를 아는 사람 누구나 볼 수 있는 문서가 남아 있을 수 있습니다.</span></div></div>
+            <div class="item"><div class="icon">!</div><div><strong>개인 메일 공유 위험</strong><span>Gmail, Naver 등 개인 계정 권한이 업무 종료 후에도 남을 수 있습니다.</span></div></div>
+            <div class="item"><div class="icon">!</div><div><strong>퇴사자·외부 협력자 권한 잔존</strong><span>만료일 없이 남은 권한을 정기적으로 확인하기 어렵습니다.</span></div></div>
+            <div class="item"><div class="icon">!</div><div><strong>민감자료 분류 부족</strong><span>투자, 인사, 개인정보, 계약 자료 구분이 수동적으로 관리됩니다.</span></div></div>
+            <div class="item"><div class="icon">!</div><div><strong>보고가 수동적</strong><span>임원 보고와 조치 이력이 자동으로 축적되지 않습니다.</span></div></div>
+          </div>
+        </article>
+
+        <div class="arrow" aria-hidden="true">
+          <div class="arrow-box">
+            <div class="arrow-symbol">→</div>
+            <div>관제·승인·자동 리포트 체계로 전환</div>
+          </div>
+        </div>
+
+        <article class="panel to-be">
+          <h2>TO-BE 개선 후</h2>
+          <div class="items">
+            <div class="item"><div class="icon">✓</div><div><strong>전사 공유드라이브 매일 점검</strong><span>외부 공유, 공개 링크, 권한 변동을 자동으로 확인합니다.</span></div></div>
+            <div class="item"><div class="icon">✓</div><div><strong>위험 등급 자동 분류</strong><span>즉시 조치가 필요한 항목부터 우선순위를 표시합니다.</span></div></div>
+            <div class="item"><div class="icon">✓</div><div><strong>민감자료 보호 강화</strong><span>중요 폴더는 라벨, 유출 방지 정책, 필요 시 추가 암호화를 적용합니다.</span></div></div>
+            <div class="item"><div class="icon">✓</div><div><strong>권한 만료와 승인 절차</strong><span>외부 공유는 사유, 담당자, 만료일, 재승인 기록을 남깁니다.</span></div></div>
+            <div class="item"><div class="icon">✓</div><div><strong>조치 이력과 증적 보관</strong><span>누가 확인했고 어떤 조치를 했는지 감사 기록으로 남깁니다.</span></div></div>
+            <div class="item"><div class="icon">✓</div><div><strong>일일·주간 보고 자동화</strong><span>매일 알림을 받고, 임원 주간 리포트를 빠르게 생성합니다.</span></div></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="bottom">
+        <div class="section">
+          <h3>운영 범위</h3>
+          <div class="scope-grid">
+            <div class="scope"><b>Google Drive</b><p>공유, 권한, 공개 링크, 민감 폴더 현황</p></div>
+            <div class="scope"><b>계정·퇴사자</b><p>내부 계정, 외부 협력자, 권한 잔존 여부</p></div>
+            <div class="scope"><b>보안 관제 화면</b><p>drive.myscguard.app<br />myscube.myscguard.app</p></div>
+            <div class="scope"><b>보고·승인</b><p>일일 알림, 임원 리포트, 조치 이력</p></div>
+          </div>
+          <div class="legend">
+            <span class="critical">Critical · 즉시 조치</span>
+            <span class="high">High · 당일 확인</span>
+            <span class="medium">Medium · 정기 점검</span>
+            <span class="low">Low · 모니터링</span>
+          </div>
+        </div>
+
+        <div class="section principles">
+          <h3>개인정보보호 중심 원칙</h3>
+          <ul>
+            <li>문서 본문은 기본 수집하지 않습니다.</li>
+            <li>파일명과 이메일은 원문으로 저장하지 않습니다.</li>
+            <li>필요한 식별값은 해시로 보관합니다.</li>
+            <li>예외 열람은 승인과 감사 기록을 남깁니다.</li>
+            <li>보관 기간과 접근 권한을 명확히 제한합니다.</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer>MYSCGuard · 공유드라이브 보안 관제 개선안 · 2026-06-23</footer>
+    </main>
+  </body>
+</html>
