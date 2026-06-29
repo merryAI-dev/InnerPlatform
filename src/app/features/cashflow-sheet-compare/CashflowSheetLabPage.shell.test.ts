@@ -76,7 +76,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
-    expect(pageSource).toContain('1분만에 사업비 관리시트를 MYSCube에 연동하기');
+    expect(pageSource).toContain('CashflowSheetHeroAnimation');
+    expect(pageSource).toContain('cashflow-tile-float');
+    expect(pageSource).not.toContain('motion/react');
+    expect(pageSource).toContain('연동·동기화');
+    expect(pageSource).not.toContain('1분만에 사업비 관리시트를 MYSCube에 연동하기');
     expect(pageSource).toContain('현재 연동된 시트 이름');
     expect(pageSource).toContain('linkedSheetName');
     expect(pageSource).toContain('아래 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요');

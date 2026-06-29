@@ -122,6 +122,51 @@ function readyCtaClass(active: boolean) {
   return active ? 'motion-safe:animate-[cashflow-ready-bob_1.15s_ease-in-out_infinite]' : '';
 }
 
+function CashflowSheetHeroAnimation() {
+  const tiles = [
+    { label: 'XLS', x: '-86px', y: '-76px', rotate: -14, className: 'bg-[#1D6F42] text-white', delay: 0 },
+    { label: 'Cashflow', x: '68px', y: '-86px', rotate: 12, className: 'bg-white text-blue-700', delay: 0.25 },
+    { label: 'MYSCube', x: '96px', y: '14px', rotate: 12, className: 'bg-white text-[#001e46]', delay: 0.45 },
+    { label: '+ 입금', x: '-92px', y: '62px', rotate: -16, className: 'bg-white text-blue-700', delay: 0.15 },
+    { label: '- 출금', x: '48px', y: '82px', rotate: 10, className: 'bg-white text-emerald-700', delay: 0.35 },
+  ];
+
+  return (
+    <div className="select-none text-center">
+      <div className="motion-safe:animate-[cashflow-hero-enter_0.45s_ease-out_both] text-[28px] font-black leading-tight text-slate-950 sm:text-[34px]">
+        연동·동기화
+      </div>
+      <div className="mt-2 motion-safe:animate-[cashflow-hero-fade_0.45s_ease-out_0.12s_both] text-[14px] leading-relaxed text-slate-500">
+        사업비 관리시트를<br />MYSCube 대시보드에 실시간 반영
+      </div>
+      <div className="relative mx-auto mt-8 h-[240px] w-[240px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
+        <div className="absolute left-1/2 top-1/2 flex h-[132px] w-[132px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-emerald-500 shadow-[0_22px_54px_rgba(37,99,235,0.32)] motion-safe:animate-[spin_6s_linear_infinite]">
+          <svg width="58" height="58" viewBox="0 0 72 72" fill="none" aria-hidden="true">
+            <path d="M14 36C14 23.85 23.85 14 36 14C44.5 14 51.9 18.7 55.6 25.6" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
+            <path d="M55 20L56.5 26.5L50 26" stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M58 36C58 48.15 48.15 58 36 58C27.5 58 20.1 53.3 16.4 46.4" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
+            <path d="M17 52L15.5 45.5L22 46" stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        {tiles.map((tile) => (
+          <div
+            key={tile.label}
+            className={`absolute flex h-[68px] w-[68px] items-center justify-center rounded-[18px] text-[12px] font-extrabold shadow-[6px_14px_36px_rgba(15,23,42,0.18)] motion-safe:animate-[cashflow-tile-float_3.2s_ease-in-out_infinite] ${tile.className}`}
+            style={{
+              left: `calc(50% + ${tile.x})`,
+              top: `calc(50% + ${tile.y})`,
+              transform: `rotate(${tile.rotate}deg)`,
+              animationDelay: `${tile.delay}s`,
+            }}
+          >
+            {tile.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function isBffAuthError(error: unknown): boolean {
   const apiError = error as { status?: number; body?: { code?: unknown; error?: unknown } };
   const status = apiError?.status;
@@ -701,9 +746,7 @@ export function CashflowSheetLabPage({
     <div className="bg-white px-5 pb-28 pt-6 sm:bg-slate-100 sm:px-6">
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
-          <h1 className="whitespace-pre-line text-[28px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[32px]">
-            1분만에 사업비 관리시트를 MYSCube에 연동하기
-          </h1>
+          <CashflowSheetHeroAnimation />
           <div className="mt-3 text-[13px] text-slate-500">
             현재 연동된 시트 이름 {linkedSheetName || '없음'}
           </div>
