@@ -698,7 +698,7 @@ export function CashflowSheetLabPage({
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <h1 className="whitespace-pre-line text-[28px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[32px]">
-            아래 과정 대로 따라하면 1분만에 사업비 관리시트를 MYSCube에 연동할 수 있어요
+            1분만에 사업비 관리시트를 MYSCube에 연동하기
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">
             현재 연동된 시트 이름 {linkedSheetName || '없음'}
