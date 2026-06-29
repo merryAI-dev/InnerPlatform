@@ -92,17 +92,20 @@ describe('CashflowProjectSheet actual sync flow', () => {
   it('replaces the empty-row toggle with an explicit sheet refresh action', () => {
     expect(cashflowProjectSheetSource).toContain('stageCashflowSheetLabViaBff');
     expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
-    expect(cashflowProjectSheetSource).toContain('시트 변경 후보를 만들었습니다.');
-    expect(cashflowProjectSheetSource).toContain('저장 전 후보');
+    expect(cashflowProjectSheetSource).toContain('시트 변경 값을 불러왔습니다.');
+    expect(cashflowProjectSheetSource).toContain('비교 결과');
     expect(cashflowProjectSheetSource).toContain('sheetStageDialog');
     expect(cashflowProjectSheetSource).toContain('원장은 아직 변경되지 않았습니다.');
     expect(cashflowProjectSheetSource).toContain('기존 Actual 변경');
     expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
     expect(cashflowProjectSheetSource).toContain('시트 업데이트 반영');
-    expect(cashflowProjectSheetSource).toContain('저장 전 확인');
+    expect(cashflowProjectSheetSource).toContain('시트 값 비교');
+    expect(cashflowProjectSheetSource).toContain('renderSheetStageReviewGrid');
+    expect(cashflowProjectSheetSource).toContain('renderSheetStageCandidateCell');
+    expect(cashflowProjectSheetSource).toContain('검토한 값');
     expect(cashflowProjectSheetSource).toContain('시트에서 가져오기');
     expect(cashflowProjectSheetSource).toContain('시트로 내보내기');
-    expect(cashflowProjectSheetSource).toContain('저장 전 후보 만들기');
+    expect(cashflowProjectSheetSource).toContain('시트 값 비교하기');
     expect(cashflowProjectSheetSource).toContain('시트에 쓸 값 미리보기');
     expect(cashflowProjectSheetSource).toContain('Actual은 이 방향에서 수정하지 않습니다.');
     expect(cashflowProjectSheetSource).toContain('direction=platform-to-sheet');

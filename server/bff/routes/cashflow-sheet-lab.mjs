@@ -1333,8 +1333,8 @@ async function stageConfiguredCashflowSheetLab({
     riskLineCount: candidates.filter((candidate) => candidate.riskFlags?.length > 0).length,
     skippedInvalidWeekCount: skippedInvalidWeekKeys.length,
     skippedInvalidWeeks: skippedInvalidWeekKeys,
-    candidates: candidates.slice(0, 200),
-    omittedCandidateCount: Math.max(0, candidates.length - 200),
+    candidates,
+    omittedCandidateCount: 0,
     lastStagedAt: now,
     lastStagedBy: {
       uid: readOptionalText(context?.actorId),

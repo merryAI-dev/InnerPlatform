@@ -887,7 +887,7 @@ export function CashflowProjectSheet({
       await loadCashflowSheetRangeWeeks();
       await loadCashflowEvents();
       rememberResult(result);
-      toast.success('시트 변경 후보를 만들었습니다.');
+      toast.success('시트 변경 값을 불러왔습니다.');
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
@@ -897,14 +897,14 @@ export function CashflowProjectSheet({
           await loadCashflowSheetRangeWeeks();
           await loadCashflowEvents();
           rememberResult(result);
-          toast.success('시트 변경 후보를 만들었습니다.');
+          toast.success('시트 변경 값을 불러왔습니다.');
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '시트 변경 후보를 만들지 못했습니다.'));
+          toast.error(resolveApiErrorMessage(retryError, '시트 변경 값을 불러오지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '시트 변경 후보를 만들지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(error, '시트 변경 값을 불러오지 못했습니다.'));
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -912,12 +912,12 @@ export function CashflowProjectSheet({
 
   const handleApplyStagedSheetValues = useCallback(async (): Promise<void> => {
     if (!sheetStageDialog?.runId) {
-      toast.error('저장할 검토 후보가 없습니다.');
+      toast.error('저장할 검토 값이 없습니다.');
       return;
     }
     const safeLineCount = Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount);
     if (safeLineCount <= 0) {
-      toast.error('확인 필요 후보만 있습니다. 전체 검토 화면에서 먼저 확인해 주세요.');
+      toast.error('바로 저장할 수 있는 값이 없습니다. 확인 필요 항목을 먼저 검토해 주세요.');
       return;
     }
     const apply = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
@@ -944,7 +944,7 @@ export function CashflowProjectSheet({
       } : current);
       setSheetStageDialog(null);
       setSheetRefreshResult(null);
-      toast.success(`확인 필요 제외 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.`);
+      toast.success(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.`);
     };
 
     setSheetStageApplyLoading(true);
@@ -3130,12 +3130,12 @@ export function CashflowProjectSheet({
                   </div>
                   <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
                     {cashflowSheetConfig
-                      ? '시트에서 수정한 값은 먼저 저장 전 후보로 확인한 뒤 확인 필요 항목을 제외하고 저장합니다.'
-                      : '처음 설정하면 이후에는 이 영역에서 시트 변경 후보를 바로 만들 수 있습니다.'}
+                      ? '시트에서 수정한 값을 팝업에서 비교한 뒤 검토한 값만 원장에 저장합니다.'
+                      : '처음 설정하면 이후에는 이 영역에서 시트 변경 값을 바로 불러올 수 있습니다.'}
                   </div>
                   {sheetRefreshResult ? (
                     <div className="mt-1 font-semibold text-emerald-800">
-                      저장 전 후보 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
+                      비교 결과 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
                       {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
                     </div>
                   ) : cashflowSheetConfig?.lastAppliedAt ? (
@@ -3163,7 +3163,7 @@ export function CashflowProjectSheet({
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[280px] bg-slate-950 text-[11px] leading-relaxed text-white">
-                    시트 값을 바로 덮어쓰지 않습니다. 먼저 변경 후보를 만들고, 확인 필요 제외하고 저장 버튼을 누를 때만 원장에 반영됩니다.
+                    시트 값을 바로 덮어쓰지 않습니다. 팝업에서 변경 범위를 확인한 뒤 저장 버튼을 누를 때만 원장에 반영됩니다.
                   </TooltipContent>
                 </Tooltip>
                 <Button
@@ -3278,20 +3278,110 @@ export function CashflowProjectSheet({
     return 'bg-slate-100 text-slate-700';
   }
 
-  function cashflowCandidateLineLabel(candidate: CashflowSheetLabChangeCandidate): string {
-    return CASHFLOW_SHEET_LINE_LABELS[candidate.lineId as CashflowSheetLineId] || candidate.sourceLabel || candidate.lineId;
-  }
-
   function cashflowCandidateRiskLabel(flag: string): string {
     if (flag === 'actual_overwrites_existing') return '기존 Actual 변경';
     if (flag === 'closed_week_change') return '결산 주차';
     return flag;
   }
 
-  function cashflowCandidateAmountLabel(candidate: CashflowSheetLabChangeCandidate): string {
-    const before = candidate.beforeHadValue ? `${fmt(Number(candidate.beforeAmount || 0))}원` : '원장 미작성';
-    const proposed = candidate.proposedHadValue ? `${fmt(Number(candidate.proposedAmount || 0))}원` : '미작성';
-    return `${before} -> ${proposed}`;
+  function cashflowCandidateBeforeLabel(candidate: CashflowSheetLabChangeCandidate): string {
+    return candidate.beforeHadValue ? `${fmt(Number(candidate.beforeAmount || 0))}원` : '원장 미작성';
+  }
+
+  function cashflowCandidateProposedLabel(candidate: CashflowSheetLabChangeCandidate): string {
+    return candidate.proposedHadValue ? `${fmt(Number(candidate.proposedAmount || 0))}원` : '미작성';
+  }
+
+  function renderSheetStageCandidateCell(key: string, candidate?: CashflowSheetLabChangeCandidate) {
+    if (!candidate) {
+      return (
+        <td key={key} className="min-w-[108px] border-l-[6px] border-l-white bg-white px-1.5 py-1 text-right text-[9px] text-slate-300">
+          -
+        </td>
+      );
+    }
+    const hasRisk = Boolean(candidate.riskFlags?.length);
+    return (
+      <td key={key} className={`min-w-[108px] border-l-[6px] border-l-white px-1.5 py-1 text-right align-top ${hasRisk ? 'bg-amber-50' : 'bg-emerald-50/70'}`}>
+        <div className="text-[8px] leading-3 text-slate-400">{cashflowCandidateBeforeLabel(candidate)}</div>
+        <div className={`text-[10px] font-bold leading-4 ${hasRisk ? 'text-amber-900' : 'text-slate-950'}`}>{cashflowCandidateProposedLabel(candidate)}</div>
+        <div className="mt-0.5 flex justify-end">
+          {hasRisk ? (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[7px] font-semibold text-amber-800">
+              {candidate.riskFlags?.map(cashflowCandidateRiskLabel).join(', ')}
+            </span>
+          ) : (
+            <span className="rounded-full bg-white px-1.5 py-0.5 text-[7px] font-semibold text-emerald-700">저장 대상</span>
+          )}
+        </div>
+      </td>
+    );
+  }
+
+  function renderSheetStageReviewGrid(dialog: NonNullable<typeof sheetStageDialog>) {
+    const weeks = Array.from(
+      new Map(dialog.candidates.map((candidate) => [
+        `${candidate.yearMonth}:${candidate.weekNo}`,
+        { yearMonth: candidate.yearMonth, weekNo: candidate.weekNo },
+      ])).values(),
+    ).sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
+    const byCell = new Map(dialog.candidates.map((candidate) => [
+      `${candidate.mode}:${candidate.yearMonth}:${candidate.weekNo}:${candidate.lineId}`,
+      candidate,
+    ]));
+    const renderRows = (lineIds: CashflowSheetLineId[], tone: 'income' | 'expense') => lineIds.flatMap((lineId) => {
+      const labelClass = tone === 'income'
+        ? 'bg-emerald-50/80 border-l-[3px] border-l-emerald-400'
+        : 'bg-rose-50/80 border-l-[3px] border-l-rose-400';
+      const projectionRow = (
+        <tr key={`${lineId}-projection`} className="border-t border-white">
+          <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[8px] font-semibold leading-4 text-slate-900 ${labelClass}`}>
+            {renderCashflowLineLabel(CASHFLOW_SHEET_LINE_LABELS[lineId])}
+          </td>
+          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">Projection</td>
+          {weeks.map((week) => renderSheetStageCandidateCell(
+            `projection:${week.yearMonth}:${week.weekNo}:${lineId}`,
+            byCell.get(`projection:${week.yearMonth}:${week.weekNo}:${lineId}`),
+          ))}
+        </tr>
+      );
+      const actualRow = (
+        <tr key={`${lineId}-actual`} className="border-t border-white">
+          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-slate-100/80 px-1 py-1 text-[8px] font-semibold text-slate-500">Actual</td>
+          {weeks.map((week) => renderSheetStageCandidateCell(
+            `actual:${week.yearMonth}:${week.weekNo}:${lineId}`,
+            byCell.get(`actual:${week.yearMonth}:${week.weekNo}:${lineId}`),
+          ))}
+        </tr>
+      );
+      return [projectionRow, actualRow];
+    });
+
+    if (weeks.length === 0) {
+      return <div className="px-3 py-6 text-center text-[12px] text-slate-500">새로 표시할 변경 값이 없습니다.</div>;
+    }
+
+    return (
+      <div className="max-h-[520px] overflow-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${202 + weeks.length * 108}px` }}>
+          <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_8px_18px_rgba(15,23,42,0.06)]">
+            <tr>
+              <th className="sticky left-0 z-50 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-white px-2 py-2 text-left text-[11px] font-bold text-slate-800">항목</th>
+              <th className="sticky left-[132px] z-50 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800">구분</th>
+              {weeks.map((week) => (
+                <th key={`${week.yearMonth}:${week.weekNo}`} className="min-w-[108px] border-l-[6px] border-l-white bg-slate-50/80 px-1.5 py-2 text-center text-[10px] font-bold text-slate-800">
+                  {formatSheetWeekLabel(week.yearMonth, week.weekNo)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {renderRows(CASHFLOW_IN_LINES, 'income')}
+            {renderRows(CASHFLOW_OUT_LINES, 'expense')}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
   function renderOpsTimeline() {
@@ -3425,7 +3515,7 @@ export function CashflowProjectSheet({
                 type="button"
                 role="tab"
                 aria-selected={sheetReviewDirection === 'sheet-to-cashflow'}
-                title="Google Sheet에서 바뀐 값을 읽고 저장 전 후보로 만듭니다."
+                title="Google Sheet에서 바뀐 값을 읽고 팝업에서 비교합니다."
                 className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 onClick={() => setSheetReviewDirection('sheet-to-cashflow')}
               >
@@ -3463,7 +3553,7 @@ export function CashflowProjectSheet({
                   </div>
                   <div className="mt-1 text-[11px] leading-5 text-slate-600">
                     {sheetReviewDirection === 'sheet-to-cashflow'
-                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 저장 전 후보로 가져옵니다. 확인 필요 항목은 제외하고 저장합니다.'
+                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 불러와 팝업에서 원장 값과 비교합니다.'
                       : '캐시플로우 화면의 Projection 값을 Google Sheet에 쓰기 전 셀 단위 차이를 확인합니다. Actual은 이 방향에서 수정하지 않습니다.'}
                   </div>
                 </div>
@@ -3476,7 +3566,7 @@ export function CashflowProjectSheet({
                 <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-blue-500 motion-safe:animate-pulse' : 'bg-slate-500'}`} aria-hidden="true" />
                 <div>
                   {sheetReviewDirection === 'sheet-to-cashflow'
-                    ? '현재 선택: 시트 값을 읽어 후보만 만듭니다. 원장 저장은 다음 팝업의 확인 필요 제외하고 저장 버튼에서 결정합니다.'
+                    ? '현재 선택: 시트 값을 읽어 다음 팝업에서 원장 값과 나란히 확인합니다.'
                     : '현재 선택: 캐시플로우 Projection을 시트에 쓸 값으로 비교합니다. Actual은 이 방향에서 쓰지 않습니다.'}
                 </div>
               </div>
@@ -3485,8 +3575,8 @@ export function CashflowProjectSheet({
                 {(sheetReviewDirection === 'sheet-to-cashflow'
                   ? [
                         ['1', '시트 값 읽기', '공유된 Google Sheet 값을 읽습니다.'],
-                        ['2', '저장 전 후보', '원장과 다른 셀만 후보로 만듭니다.'],
-                        ['3', '확인 후 저장', '확인 필요 항목은 저장하지 않습니다.'],
+                        ['2', '값 비교', '원장과 다른 셀을 모두 보여줍니다.'],
+                        ['3', '검토 후 저장', '팝업에서 확정하면 원장에 저장합니다.'],
                     ]
                   : [
                       ['1', 'Projection 비교', '현재 시트 값과 캐시플로우 값을 비교합니다.'],
@@ -3520,7 +3610,7 @@ export function CashflowProjectSheet({
             ) : sheetReviewDirection === 'sheet-to-cashflow' ? (
               <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading} className="transition-transform hover:-translate-y-0.5">
                 {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-                저장 전 후보 만들기
+                시트 값 비교하기
               </AlertDialogAction>
             ) : (
               <AlertDialogAction onClick={handleStartProjectionSheetWrite} className="transition-transform hover:-translate-y-0.5">
@@ -3537,11 +3627,11 @@ export function CashflowProjectSheet({
           if (!open) setSheetStageDialog(null);
         }}
       >
-        <AlertDialogContent className="max-w-[720px]">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[1100px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>저장 전 확인 {sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건</AlertDialogTitle>
+            <AlertDialogTitle>시트 값 비교 {sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건</AlertDialogTitle>
             <AlertDialogDescription>
-              원장은 아직 변경되지 않았습니다. 아래에서 확인 필요 항목을 제외한 변경만 캐시플로우에 저장할 수 있습니다.
+              원장은 아직 변경되지 않았습니다. 아래 변경 범위를 확인한 뒤 이 팝업에서 바로 저장합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {sheetStageDialog && (
@@ -3558,7 +3648,7 @@ export function CashflowProjectSheet({
                 <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
                   <div className="text-[10px] font-semibold text-slate-500">
                     <HoverExplain message="시트의 Projection 셀과 현재 캐시플로우 원장이 다른 항목입니다.">
-                      Projection 후보
+                      Projection
                     </HoverExplain>
                   </div>
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.projectionLineCount.toLocaleString()}건</div>
@@ -3566,14 +3656,14 @@ export function CashflowProjectSheet({
                 <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
                   <div className="text-[10px] font-semibold text-slate-500">
                     <HoverExplain message="시트의 Actual 셀과 현재 캐시플로우 원장이 다른 항목입니다. Actual은 시트에서만 입력한다고 보고 반영합니다.">
-                      Actual 후보
+                      Actual
                     </HoverExplain>
                   </div>
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.actualLineCount.toLocaleString()}건</div>
                 </div>
                 <div className="rounded-lg bg-amber-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
                   <div className="text-[10px] font-semibold text-amber-700">
-                    <HoverExplain message="바로 저장하지 않고 사람이 검토해야 하는 후보입니다. 확인 필요 제외하고 저장 버튼을 눌러도 이 항목은 남겨둡니다.">
+                    <HoverExplain message="닫힌 주차처럼 바로 저장하지 않고 별도 검토가 필요한 항목입니다. 저장 버튼은 검토 완료 항목만 반영합니다.">
                       확인 필요
                     </HoverExplain>
                   </div>
@@ -3581,59 +3671,18 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
-                저장하면 확인 필요 항목을 제외한 변경만 원장에 반영됩니다. 확인 필요 후보는 목록에 남겨 다시 검토할 수 있습니다.
+                Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다. 확인 필요 표시가 있는 행은 원장에 저장되지 않으니 별도로 확인해 주세요.
               </div>
-              <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
-                <table className="w-full text-[12px]">
-                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold">주차</th>
-                      <th className="px-3 py-2 text-left font-semibold">구분</th>
-                      <th className="px-3 py-2 text-left font-semibold">항목</th>
-                      <th className="px-3 py-2 text-left font-semibold">변경</th>
-                      <th className="px-3 py-2 text-left font-semibold">확인</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sheetStageDialog.candidates.slice(0, 20).map((candidate, index) => (
-                      <tr key={candidate.id || `${candidate.runId}:${candidate.mode}:${candidate.yearMonth}:${candidate.weekNo}:${candidate.lineId}:${index}`} className="border-t border-slate-100">
-                        <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{formatSheetWeekLabel(candidate.yearMonth, candidate.weekNo)}</td>
-                        <td className="whitespace-nowrap px-3 py-2 text-slate-600">{candidate.mode === 'projection' ? 'Projection' : 'Actual'}</td>
-                        <td className="px-3 py-2 text-slate-700">
-                          <div className="font-medium">{cashflowCandidateLineLabel(candidate)}</div>
-                          <div className="text-[10px] text-slate-400">{candidate.lineDirection === 'in' ? '입금' : '출금'} · {candidate.sourceCell || '시트 셀'}</div>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-900">{cashflowCandidateAmountLabel(candidate)}</td>
-                        <td className="px-3 py-2">
-                          {candidate.riskFlags?.length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {candidate.riskFlags.map((flag) => (
-                                <span key={flag} className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                                  {cashflowCandidateRiskLabel(flag)}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-slate-400">일반 후보</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {sheetStageDialog.candidates.length === 0 && (
-                  <div className="px-3 py-6 text-center text-[12px] text-slate-500">새로 표시할 후보가 없습니다.</div>
-                )}
-                {sheetStageDialog.candidates.length > 20 || sheetStageDialog.omittedCandidateCount > 0 ? (
-                  <div className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500">
-                    외 {(Math.max(0, sheetStageDialog.candidates.length - 20) + sheetStageDialog.omittedCandidateCount).toLocaleString()}건
-                  </div>
-                ) : null}
-              </div>
+              {renderSheetStageReviewGrid(sheetStageDialog)}
+              {sheetStageDialog.omittedCandidateCount > 0 ? (
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                  표시되지 않은 변경 값 {sheetStageDialog.omittedCandidateCount.toLocaleString()}건
+                </div>
+              ) : null}
             </div>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={sheetStageApplyLoading}>나중에 검토</AlertDialogCancel>
+            <AlertDialogCancel disabled={sheetStageApplyLoading}>닫기</AlertDialogCancel>
             <Button
               type="button"
               className="transition-transform hover:-translate-y-0.5"
@@ -3642,12 +3691,9 @@ export function CashflowProjectSheet({
             >
               {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
               {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
-                ? `확인 필요 제외하고 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 저장`
+                ? `검토한 값 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 원장에 저장`
                 : '저장할 변경 없음'}
             </Button>
-            <AlertDialogAction onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}>
-              전체 검토 화면
-            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
