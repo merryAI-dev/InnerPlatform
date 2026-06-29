@@ -43,6 +43,7 @@ The second command intentionally fails closed.
 The production workflow should stay deploy-focused:
 
 - checkout `main`
+- fail fast if the HEAD commit author is not approved for Vercel team deployments
 - verify Vercel credentials
 - deploy to Vercel production
 - promote `myscube.myscguard.app`
@@ -75,12 +76,14 @@ Required target state:
 - required checks include CI `test-and-build`.
 - production workflow uses `environment: Production`.
 - production workflow does not rerun or poll CI. CI belongs to PR/main protection before the deploy starts.
+- production workflow checks the deploy commit author before calling Vercel, because Vercel blocks artifacts whose git author lacks team access.
 - production environment secrets are scoped to `Production`.
 - production deployment is manual and records the deployment URL and git SHA.
 
 Applied on 2026-05-26 in this branch:
 
 - `.github/workflows/production-deploy.yml` deploys from `main`, verifies credentials, promotes the canonical alias, and verifies that alias.
+- `.github/workflows/production-deploy.yml` now fails fast unless the HEAD author email is in `VERCEL_DEPLOY_ALLOWED_AUTHOR_EMAILS` (`ai@mysc.co.kr`).
 - Production deploy does not run `npm ci`, unit tests, RBAC verification, production build, CI polling, or PWA live smoke.
 - local production deploy commands fail closed; local verification is still available.
 - BFF boot validates runtime safety before Firestore is initialized.

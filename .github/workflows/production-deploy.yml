@@ -29,6 +29,7 @@ jobs:
       VERCEL_CLI_PACKAGE: vercel@50.14.0
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_DEPLOY_ALLOWED_AUTHOR_EMAILS: ai@mysc.co.kr
       # Use a production-scoped secret name so a stale repository-level
       # VERCEL_TOKEN cannot be confused with the Production environment token.
       VERCEL_TOKEN: ${{ secrets.VERCEL_DEPLOY_TOKEN_PRODUCTION }}
@@ -45,6 +46,19 @@ jobs:
         with:
           ref: main
           fetch-depth: 1
+
+      - name: Verify Vercel deploy author policy
+        run: |
+          set -euo pipefail
+          author_email="$(git show -s --format=%ae HEAD)"
+          case ",${VERCEL_DEPLOY_ALLOWED_AUTHOR_EMAILS}," in
+            *",${author_email},"*) ;;
+            *)
+              echo "Commit author ${author_email} is not allowed for Vercel production deploys." >&2
+              echo "Create a no-op release commit authored by one of: ${VERCEL_DEPLOY_ALLOWED_AUTHOR_EMAILS}" >&2
+              exit 1
+              ;;
+          esac
 
       - uses: actions/setup-node@v5
         with:
