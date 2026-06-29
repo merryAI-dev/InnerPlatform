@@ -26,7 +26,7 @@
         "entityType": "transaction",
         "changedFields": "*"
       },
-      "affects": ["project_financials", "approval_inbox", "member_workload", "alerts"]
+      "affects": ["project_financials", "approval_inbox", "member_workload", "cashflow_weeks", "alerts"]
     },
     {
       "id": "expense-set-default",
