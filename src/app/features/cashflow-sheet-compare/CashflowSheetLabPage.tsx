@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, ArrowDownToLine, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, UserPlus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, UserPlus } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -19,6 +19,16 @@ import {
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 
@@ -261,6 +271,7 @@ export function CashflowSheetLabPage({
   const [statusMessage, setStatusMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
   const previewRequestRef = useRef(0);
 
   const projectId = projectIdInput.trim();
@@ -440,7 +451,7 @@ export function CashflowSheetLabPage({
         setStartWeek(result.config.startWeek || '');
         setEndWeek(result.config.endWeek || '');
       }
-      setStatusMessage(result.config?.value ? '이미 연결된 시트 설정을 불러왔습니다.' : '공유 계정을 확인했습니다.');
+      if (!result.config?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
         projectId,
         hasSystemAccountEmail: true,
@@ -607,7 +618,7 @@ export function CashflowSheetLabPage({
       });
       setReflectResult(null);
       setReviewedSourceKey(sourceKey);
-      setStatusMessage('저장 전 변경 후보를 만들었습니다. 확인 필요 항목을 제외한 변경만 캐시플로우에 저장할 수 있습니다.');
+      setApplyDialogOpen(true);
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -659,6 +670,7 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
+      setApplyDialogOpen(false);
       setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
@@ -687,6 +699,7 @@ export function CashflowSheetLabPage({
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
   const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
+  const showSetupSteps = !hasSavedConfig;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
   const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : 1;
@@ -710,48 +723,29 @@ export function CashflowSheetLabPage({
       }
     : !stageResult
       ? {
-          label: '변경값 비교표 만들기',
+          label: '원장에 저장하기',
           disabled: !canApply,
           action: () => void handleStageSheetValues(),
         }
       : {
-          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 원장에 저장` : '저장할 변경 없음',
-          disabled: !canReflect,
-          action: () => void handleReflectSheetValues(),
+          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '저장 확인 열기' : '저장할 변경 없음',
+          disabled: !stageResult || !safeStageLineCount || Boolean(reflectResult) || loading,
+          action: () => setApplyDialogOpen(true),
         };
 
   return (
     <div className="bg-white px-5 pb-28 pt-6 sm:bg-slate-100 sm:px-6">
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
-          <div className="text-[12px] font-semibold text-slate-500">시트 연동 검토</div>
-          <h1 className="mt-5 whitespace-pre-line text-[30px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[34px]">
-            Cashflow탭 연동
+          <h1 className="whitespace-pre-line text-[28px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[32px]">
+            Cashflow 시트 반영
           </h1>
           <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
         </header>
 
-        <div className="mt-6 grid gap-2 text-[12px] sm:grid-cols-3">
-          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="font-bold text-slate-900">설정 저장</div>
-            <div className="mt-1 leading-5 text-slate-500">링크와 범위만 기억합니다. 금액은 바뀌지 않습니다.</div>
-          </div>
-          <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="font-bold text-slate-900">비교표 만들기</div>
-            <div className="mt-1 leading-5 text-slate-500">시트 값과 현재 원장 값을 나란히 확인합니다.</div>
-          </div>
-          <div className="border border-blue-200 bg-blue-50 px-3 py-2">
-            <div className="font-bold text-blue-950">검토 후 저장</div>
-            <div className="mt-1 leading-5 text-blue-800">이 화면에서 확정하면 원장에 바로 저장합니다.</div>
-          </div>
-        </div>
-
         {hasSavedConfig && (
-          <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
-            <div className="font-bold">이미 연결된 시트 설정이 있습니다.</div>
-            <div className="mt-1 text-[12px] text-blue-900">
-              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 변경값 비교표를 만들 수 있습니다.
-            </div>
+          <div className="mt-5 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
+            <div className="font-bold">연결된 시트</div>
             <div className="mt-1 text-[12px] text-blue-900">
               {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
             </div>
@@ -762,7 +756,7 @@ export function CashflowSheetLabPage({
         )}
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
-          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+          {showSetupSteps && <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(1)}>1</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
@@ -810,9 +804,9 @@ export function CashflowSheetLabPage({
                 </Button>
               </div>
             </div>
-          </li>
+          </li>}
 
-          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+          {showSetupSteps && <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
               <div className="flex items-center gap-1.5">
@@ -865,10 +859,10 @@ export function CashflowSheetLabPage({
                 </div>
               </div>
             </div>
-          </li>
+          </li>}
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(3)}>3</span>
+            <span className={stepNumberClass(3)}>{showSetupSteps ? 3 : 1}</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
@@ -888,39 +882,24 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(4)}>4</span>
+            <span className={stepNumberClass(4)}>{showSetupSteps ? 4 : 2}</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">변경값 비교표 만들기</h2>
-                <HelpMemo>원장과 다른 셀을 저장 전에 비교표로 만듭니다. 이 단계에서는 캐시플로우 금액이 아직 바뀌지 않습니다.</HelpMemo>
-              </div>
-              <Button
-                type="button"
-                className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
-                disabled={!canApply}
-                onClick={() => void handleStageSheetValues()}
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
-                변경값 비교표 만들기
-              </Button>
-            </div>
-          </li>
-
-          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(5)}>5</span>
-            <div className="min-w-0 space-y-3 pb-1">
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">이 화면에서 원장에 저장</h2>
-                <HelpMemo>Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다. 확인 필요 표시가 있는 항목만 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">원장에 저장</h2>
+                <HelpMemo>버튼을 누르면 시트와 원장 차이를 확인한 뒤 팝업에서 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
                       비교 결과 {stageResult.stagedLineCount.toLocaleString()}건
+                      {stageResult.stagedLineCount > 0 ? (
+                        <>
                       {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
                       {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
                       {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
                       {' · '}바로 저장 가능 {safeStageLineCount.toLocaleString()}건
+                        </>
+                      ) : null}
                   </div>
                   {reflectResult ? (
                     <div className="space-y-3">
@@ -937,22 +916,30 @@ export function CashflowSheetLabPage({
                   ) : (
                     <div className="space-y-2">
                       <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                          위 비교 결과를 확인했다면 아래 버튼으로 바로 캐시플로우 원장에 저장합니다.
+                          저장 팝업에서 최종 확인 후 캐시플로우 원장에 저장합니다.
                       </div>
                       <Button
                         type="button"
                         className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
                         disabled={!canReflect}
-                        onClick={() => void handleReflectSheetValues()}
+                        onClick={() => setApplyDialogOpen(true)}
                       >
                         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 원장에 저장` : '저장할 변경 없음'}
+                          {safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 저장 확인` : '저장할 변경 없음'}
                       </Button>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-[13px] text-slate-400">변경값 비교표를 만든 뒤 이 화면에서 바로 원장에 저장할 수 있습니다.</div>
+                <Button
+                  type="button"
+                  className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
+                  disabled={!canApply}
+                  onClick={() => void handleStageSheetValues()}
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  원장에 저장하기
+                </Button>
               )}
             </div>
           </li>
@@ -1025,6 +1012,42 @@ export function CashflowSheetLabPage({
           </div>
         </section>
       )}
+      <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
+        <AlertDialogContent className="max-w-[520px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>캐시플로우 원장에 저장할까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {stageResult && (
+            <div className="space-y-2 text-[13px] text-slate-700">
+              <div className="font-semibold text-slate-950">
+                저장 대상 {safeStageLineCount.toLocaleString()}건
+              </div>
+              <div>Projection {stageResult.projectionLineCount.toLocaleString()}건 · Actual {stageResult.actualLineCount.toLocaleString()}건</div>
+              {stageResult.riskLineCount > 0 && (
+                <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                  확인 필요 {stageResult.riskLineCount.toLocaleString()}건은 저장하지 않고 남깁니다.
+                </div>
+              )}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!canReflect}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleReflectSheetValues();
+              }}
+            >
+              {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+              원장에 저장
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
