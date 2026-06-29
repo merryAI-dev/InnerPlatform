@@ -252,7 +252,6 @@ export function CashflowSheetLabPage({
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
-  const [shareConfirmed, setShareConfirmed] = useState(false);
   const [stageResult, setStageResult] = useState<{
     runId: string;
     stagedLineCount: number;
@@ -585,7 +584,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleStageSheetValues() {
-    if (!projectId || loading || !spreadsheetId || !shareConfirmed || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
@@ -638,7 +637,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleReflectSheetValues() {
-    if (!projectId || loading || !spreadsheetId || !shareConfirmed || !stageResult || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || !stageResult || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
@@ -693,16 +692,16 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
-  const canPreview = Boolean(projectId && spreadsheetId && shareConfirmed && !loading);
+  const canPreview = Boolean(projectId && spreadsheetId && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
-  const canApply = Boolean(projectId && spreadsheetId && shareConfirmed && preview && reviewedSourceKey === sourceKey && !loading);
+  const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
-  const canReflect = Boolean(projectId && spreadsheetId && shareConfirmed && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
+  const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = !hasSavedConfig;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
-  const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : systemAccountEmail ? 1 : 0;
-  const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : shareConfirmed ? 2 : 1;
+  const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
+  const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-all duration-300 ${
       step <= activeStep
@@ -790,19 +789,7 @@ export function CashflowSheetLabPage({
                   {systemAccountEmail}
                 </div>
               )}
-              <div className="space-y-2">
-                <div className="text-[12px] text-slate-500">Google Sheet를 위 공유 계정에 보기 권한으로 공유한 뒤 아래 버튼을 누르세요.</div>
-                <Button
-                  type="button"
-                  variant={shareConfirmed ? 'default' : 'outline'}
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
-                  disabled={!systemAccountEmail}
-                  onClick={() => setShareConfirmed(true)}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {shareConfirmed ? '공유 완료 확인됨' : '공유 완료 확인하기'}
-                </Button>
-              </div>
+              <div className="text-[12px] text-slate-500">Google Sheet를 위 공유 계정에 보기 권한으로 공유한 뒤 바로 검토하세요.</div>
             </div>
           </li>}
 
