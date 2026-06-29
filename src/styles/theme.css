@@ -2,6 +2,7 @@
 
 :root {
   --font-size: 15px;
+  --font-sans: 'Pretendard Variable', Pretendard, 'Noto Sans KR', system-ui, -apple-system, sans-serif;
   /* ── MYSCube Professional Operations System ── */
   --background: #f4f7fb;
   --foreground: #0f172a;
@@ -261,10 +262,18 @@
 
   html {
     font-size: var(--font-size);
-    font-family: 'Pretendard Variable', 'Inter', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: geometricPrecision;
+  }
+
+  body,
+  button,
+  input,
+  textarea,
+  select {
+    font-family: var(--font-sans);
   }
 
   h1 {
