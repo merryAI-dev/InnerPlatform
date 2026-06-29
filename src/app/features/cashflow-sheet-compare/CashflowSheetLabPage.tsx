@@ -668,7 +668,7 @@ export function CashflowSheetLabPage({
       step <= activeStep
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
-    } ${step === currentStep && !reflectResult ? 'ring-4 ring-blue-100 motion-safe:animate-pulse' : ''}`;
+    } ${step === currentStep && !reflectResult ? 'ring-[6px] ring-blue-300 shadow-[0_0_0_8px_rgba(37,99,235,0.18)] motion-safe:animate-pulse' : ''}`;
   const primaryCta = !preview && !isCurrentSheetConfigSaved && spreadsheetId
     ? {
         label: '임시 저장',
