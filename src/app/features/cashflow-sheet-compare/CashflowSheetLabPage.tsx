@@ -124,24 +124,24 @@ function readyCtaClass(active: boolean) {
 
 function CashflowSheetHeroAnimation() {
   const tiles = [
-    { label: 'XLS', x: '-86px', y: '-76px', rotate: -14, className: 'bg-[#1D6F42] text-white', delay: 0 },
-    { label: 'Cashflow', x: '68px', y: '-86px', rotate: 12, className: 'bg-white text-blue-700', delay: 0.25 },
-    { label: 'MYSCube', x: '96px', y: '14px', rotate: 12, className: 'bg-white text-[#001e46]', delay: 0.45 },
-    { label: '+ 입금', x: '-92px', y: '62px', rotate: -16, className: 'bg-white text-blue-700', delay: 0.15 },
-    { label: '- 출금', x: '48px', y: '82px', rotate: 10, className: 'bg-white text-emerald-700', delay: 0.35 },
+    { kind: 'excel', label: 'XLS', x: -112, y: -104, rotate: -16, size: 82, delay: 0 },
+    { kind: 'cashflow', label: 'Cashflow', x: 80, y: -114, rotate: 14, size: 72, delay: 0.7 },
+    { kind: 'mysc', label: 'MYSC', x: 120, y: -4, rotate: 16, size: 90, delay: 1.2 },
+    { kind: 'plus', label: '입금', x: -120, y: 72, rotate: -20, size: 76, delay: 0.4 },
+    { kind: 'minus', label: '출금', x: 78, y: 100, rotate: 11, size: 68, delay: 1.0 },
   ];
 
   return (
     <div className="select-none text-center">
       <div className="motion-safe:animate-[cashflow-hero-enter_0.45s_ease-out_both] text-[28px] font-black leading-tight text-slate-950 sm:text-[34px]">
-        연동·동기화
+        사업비 관리시트 연동
       </div>
       <div className="mt-2 motion-safe:animate-[cashflow-hero-fade_0.45s_ease-out_0.12s_both] text-[14px] leading-relaxed text-slate-500">
         사업비 관리시트를<br />MYSCube 대시보드에 실시간 반영
       </div>
-      <div className="relative mx-auto mt-8 h-[240px] w-[240px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
-        <div className="absolute left-1/2 top-1/2 flex h-[132px] w-[132px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-emerald-500 shadow-[0_22px_54px_rgba(37,99,235,0.32)] motion-safe:animate-[spin_6s_linear_infinite]">
-          <svg width="58" height="58" viewBox="0 0 72 72" fill="none" aria-hidden="true">
+      <div className="relative mx-auto mt-12 h-[330px] w-[330px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
+        <div className="absolute left-1/2 top-1/2 flex h-[188px] w-[188px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-[#4f7cff] to-[#00c4a0] shadow-[0_24px_64px_rgba(79,124,255,0.42),0_6px_20px_rgba(15,23,42,0.16)] motion-safe:animate-[spin_6s_linear_infinite]">
+          <svg width="76" height="76" viewBox="0 0 72 72" fill="none" aria-hidden="true">
             <path d="M14 36C14 23.85 23.85 14 36 14C44.5 14 51.9 18.7 55.6 25.6" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
             <path d="M55 20L56.5 26.5L50 26" stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M58 36C58 48.15 48.15 58 36 58C27.5 58 20.1 53.3 16.4 46.4" stroke="white" strokeWidth="5.5" strokeLinecap="round" />
@@ -151,15 +151,47 @@ function CashflowSheetHeroAnimation() {
         {tiles.map((tile) => (
           <div
             key={tile.label}
-            className={`absolute flex h-[68px] w-[68px] items-center justify-center rounded-[18px] text-[12px] font-extrabold shadow-[6px_14px_36px_rgba(15,23,42,0.18)] motion-safe:animate-[cashflow-tile-float_3.2s_ease-in-out_infinite] ${tile.className}`}
+            className="absolute flex items-center justify-center overflow-hidden bg-gradient-to-br from-white to-slate-100 shadow-[0_1px_0_rgba(255,255,255,1)_inset,0_-1px_0_rgba(0,0,0,0.06)_inset,6px_14px_36px_rgba(15,23,42,0.18),0_2px_6px_rgba(15,23,42,0.10)] motion-safe:animate-[cashflow-tile-float_3.2s_ease-in-out_infinite]"
             style={{
-              left: `calc(50% + ${tile.x})`,
-              top: `calc(50% + ${tile.y})`,
-              transform: `rotate(${tile.rotate}deg)`,
+              left: `calc(50% + ${tile.x}px)`,
+              top: `calc(50% + ${tile.y}px)`,
+              width: tile.size,
+              height: tile.size,
+              borderRadius: tile.size * 0.27,
+              transform: `translate(-50%, -50%) rotate(${tile.rotate}deg)`,
               animationDelay: `${tile.delay}s`,
             }}
           >
-            {tile.label}
+            {tile.kind === 'excel' && (
+              <svg width="52" height="52" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+                <rect width="52" height="52" rx="10" fill="#1D6F42" />
+                <text x="10" y="38" fill="white" fontSize="28" fontWeight="800" fontFamily="Arial, sans-serif">X</text>
+              </svg>
+            )}
+            {tile.kind === 'cashflow' && (
+              <div className="flex flex-col items-center gap-1">
+                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" aria-hidden="true">
+                  <path d="M7 15L7 5M7 5L3 9M7 5L11 9" stroke="#4f7cff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M21 5L21 15M21 15L17 11M21 15L25 11" stroke="#00c4a0" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="bg-gradient-to-r from-[#4f7cff] to-[#00c4a0] bg-clip-text text-[10px] font-extrabold text-transparent">Cashflow</span>
+              </div>
+            )}
+            {tile.kind === 'mysc' && (
+              <span className="text-[18px] font-black lowercase tracking-[-0.02em] text-[#001e46]">mysc</span>
+            )}
+            {tile.kind === 'plus' && (
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[42px] font-black leading-none text-[#4f7cff]">+</span>
+                <span className="text-[9px] font-bold text-[#4f7cff]">입금</span>
+              </div>
+            )}
+            {tile.kind === 'minus' && (
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[42px] font-black leading-none text-[#00c4a0]">-</span>
+                <span className="text-[9px] font-bold text-[#00c4a0]">출금</span>
+              </div>
+            )}
           </div>
         ))}
       </div>
