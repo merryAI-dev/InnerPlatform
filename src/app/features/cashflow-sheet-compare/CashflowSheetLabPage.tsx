@@ -660,6 +660,7 @@ export function CashflowSheetLabPage({
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = !hasSavedConfig;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
+  const linkedSheetName = savedConfig?.sheetName || preview?.selectedSheetName || sheetName || savedConfig?.spreadsheetTitle || '';
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
   const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
   const stepNumberClass = (step: number) =>
@@ -670,7 +671,7 @@ export function CashflowSheetLabPage({
     } ${step === currentStep && !reflectResult ? 'ring-4 ring-blue-100 motion-safe:animate-pulse' : ''}`;
   const primaryCta = !preview && !isCurrentSheetConfigSaved && spreadsheetId
     ? {
-        label: '시트 설정 우선 저장',
+        label: '임시 저장',
         disabled: !canSaveConfig,
         action: () => void handleSaveSheetConfig(),
       }
@@ -697,9 +698,11 @@ export function CashflowSheetLabPage({
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <h1 className="whitespace-pre-line text-[28px] font-bold leading-[1.25] tracking-normal text-slate-950 sm:text-[32px]">
-            Cashflow 시트 반영
+            아래 과정 대로 따라하면 1분만에 사업비 관리시트를 MYSCube에 연동할 수 있어요
           </h1>
-          <div className="mt-3 text-[13px] text-slate-500">현재 사업 {projectId || '-'}</div>
+          <div className="mt-3 text-[13px] text-slate-500">
+            현재 연동된 시트 이름 {linkedSheetName || '없음'}
+          </div>
         </header>
 
         {hasSavedConfig && (
@@ -719,7 +722,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(1)}>1</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">아래 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요</h2>
                 <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 MYSCube값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -757,7 +760,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트 링크 입력</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요</h2>
                 <HelpMemo>다음 방문 때 다시 입력하지 않도록 링크, 탭 이름, 주차 범위를 먼저 저장합니다. 이 단계는 금액 저장이 아닙니다.</HelpMemo>
               </div>
               <Input
@@ -799,7 +802,7 @@ export function CashflowSheetLabPage({
                   onClick={() => void handleSaveSheetConfig()}
                 >
                   {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {isCurrentSheetConfigSaved ? '시트 설정 저장됨' : '시트 설정 우선 저장'}
+                  {isCurrentSheetConfigSaved ? '임시 저장됨' : '임시 저장'}
                 </Button>
                 <div className="text-[12px] text-slate-500">
                   링크, 탭 이름, 주차 범위만 저장합니다. 캐시플로우 값은 바뀌지 않습니다.
@@ -812,7 +815,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(3)}>{showSetupSteps ? 3 : 1}</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">시트에서 플랫폼에 저장할 값을 검토해주세요.</h2>
                 <HelpMemo>Google Sheet 값을 읽고 저장 전에 MYSCube값과 비교할 준비를 합니다. 아직 MYSCube에는 아무 값도 쓰지 않습니다.</HelpMemo>
               </div>
               <Button
@@ -832,7 +835,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(4)}>{showSetupSteps ? 4 : 2}</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">MYSCube에 저장</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">MYSCube에 값 저장</h2>
                 <HelpMemo>버튼을 누르면 시트와 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (

@@ -76,6 +76,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
+    expect(pageSource).toContain('아래 과정 대로 따라하면 1분만에 사업비 관리시트를 MYSCube에 연동할 수 있어요');
+    expect(pageSource).toContain('현재 연동된 시트 이름');
+    expect(pageSource).toContain('linkedSheetName');
+    expect(pageSource).toContain('아래 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요');
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');
     expect(pageSource).toContain('연결된 시트');
@@ -91,8 +95,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
     expect(pageSource).not.toContain('변경값 비교표 만들기');
-    expect(pageSource).toContain('시트 설정 우선 저장');
+    expect(pageSource).toContain('시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요');
+    expect(pageSource).toContain('임시 저장');
     expect(pageSource).toContain('캐시플로우 값은 바뀌지 않습니다.');
+    expect(pageSource).toContain('시트에서 플랫폼에 저장할 값을 검토해주세요.');
+    expect(pageSource).toContain('MYSCube에 값 저장');
     expect(pageSource).toContain('전체 MYSCube에 저장하기');
     expect(pageSource).toContain('전체 MYSCube에 저장할까요?');
     expect(pageSource).toContain('applyDialogOpen');
