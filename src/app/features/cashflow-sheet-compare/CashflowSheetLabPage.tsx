@@ -3,9 +3,9 @@ import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, Use
 import { Link, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
+import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
-import { buildCashflowPreviewTables } from './cashflow-sheet-preview-tables';
 import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
@@ -15,6 +15,7 @@ import {
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabPreviewResult,
+  type CashflowSheetLabChangeCandidate,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -31,10 +32,6 @@ import {
 } from '../../components/ui/alert-dialog';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
-
-function formatMode(mode: string) {
-  return mode === 'projection' ? 'Projection' : 'Actual';
-}
 
 function formatAmount(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -95,6 +92,32 @@ function formatDiffAmount(value: number) {
   return `${value > 0 ? '+' : '-'}${Math.abs(value).toLocaleString('ko-KR')}원`;
 }
 
+function formatCandidateAmount(value: number | null, hadValue: boolean) {
+  return hadValue ? formatAmount(value) : '미작성';
+}
+
+function formatCandidateWeek(candidate: CashflowSheetLabChangeCandidate) {
+  const match = /^(\d{4})-(\d{1,2})$/.exec(candidate.yearMonth || '');
+  if (!match) return `${candidate.yearMonth} W${candidate.weekNo}`;
+  return `${match[1].slice(2)}-${Number(match[2])}-${candidate.weekNo}`;
+}
+
+function getCandidateLineLabel(candidate: CashflowSheetLabChangeCandidate) {
+  return CASHFLOW_SHEET_LINE_LABELS[candidate.lineId as CashflowSheetLineId] || candidate.sourceLabel || candidate.lineId;
+}
+
+function getCandidateDiff(candidate: CashflowSheetLabChangeCandidate) {
+  const before = candidate.beforeHadValue ? Number(candidate.beforeAmount || 0) : 0;
+  const proposed = candidate.proposedHadValue ? Number(candidate.proposedAmount || 0) : 0;
+  return proposed - before;
+}
+
+function formatRiskFlag(flag: string) {
+  if (flag === 'closed_week_change') return '결산 주차';
+  if (flag === 'existing_actual_value') return '기존 Actual';
+  return flag;
+}
+
 function isBffAuthError(error: unknown): boolean {
   const apiError = error as { status?: number; body?: { code?: unknown; error?: unknown } };
   const status = apiError?.status;
@@ -148,82 +171,6 @@ function HelpMemo({ children }: { children: ReactNode }) {
   );
 }
 
-function ReconciliationSummary({
-  table,
-}: {
-  table: ReturnType<typeof buildCashflowPreviewTables>[number];
-}) {
-  const rows = [
-    ...table.inRows.map((row) => ({ ...row, section: '입금', label: row.canonicalLabel || row.label })),
-    { section: '입금', label: '입금 합계', sheetTotal: table.sheetIncomeTotal, reflectedTotal: table.reflectedIncomeTotal, diffTotal: table.reflectedIncomeTotal - table.sheetIncomeTotal },
-    ...table.outRows.map((row) => ({ ...row, section: '출금', label: row.canonicalLabel || row.label })),
-    { section: '출금', label: '출금 합계', sheetTotal: table.sheetExpenseTotal, reflectedTotal: table.reflectedExpenseTotal, diffTotal: table.reflectedExpenseTotal - table.sheetExpenseTotal },
-    {
-      section: '잔액',
-      label: '잔액',
-      sheetTotal: table.sheetIncomeTotal - table.sheetExpenseTotal,
-      reflectedTotal: table.reflectedIncomeTotal - table.reflectedExpenseTotal,
-      diffTotal: (table.reflectedIncomeTotal - table.reflectedExpenseTotal) - (table.sheetIncomeTotal - table.sheetExpenseTotal),
-    },
-  ];
-
-  return (
-    <div className="border-b border-slate-200 bg-slate-50/60">
-      <div className="grid gap-2 border-b border-slate-200 px-3 py-2 sm:grid-cols-4">
-        <div>
-          <div className="text-[10px] text-slate-500">시트 입금</div>
-          <div className="text-[13px] font-semibold text-emerald-700">{formatAmount(table.sheetIncomeTotal)}</div>
-        </div>
-        <div>
-          <div className="text-[10px] text-slate-500">시트 출금</div>
-          <div className="text-[13px] font-semibold text-rose-700">{formatAmount(table.sheetExpenseTotal)}</div>
-        </div>
-        <div>
-          <div className="text-[10px] text-slate-500">순차이</div>
-          <div className="text-[13px] font-semibold text-slate-950">
-            {formatDiffAmount((table.reflectedIncomeTotal - table.reflectedExpenseTotal) - (table.sheetIncomeTotal - table.sheetExpenseTotal))}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] text-slate-500">시트 기준 추가 주차</div>
-          <div className="text-[12px] font-medium text-slate-700">
-            {table.invalidWeeks.length ? table.invalidWeeks.join(', ') : '-'}
-          </div>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-[11px]">
-          <thead className="bg-white text-slate-500">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">구분</th>
-              <th className="px-3 py-2 text-left font-medium">항목</th>
-              <th className="px-3 py-2 text-right font-medium">시트 원본</th>
-              <th className="px-3 py-2 text-right font-medium">현재 저장값</th>
-              <th className="px-3 py-2 text-right font-medium">차이</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const diff = row.diffTotal || 0;
-              return (
-                <tr key={`${table.mode}-${row.section}-${row.label}`} className="border-t border-slate-100">
-                  <td className="px-3 py-2 text-slate-500">{row.section}</td>
-                  <td className="px-3 py-2 font-medium text-slate-900">{row.label}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.sheetTotal)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.reflectedTotal)}</td>
-                  <td className={`px-3 py-2 text-right font-semibold tabular-nums ${diff === 0 ? 'text-slate-400' : 'text-red-700'}`}>
-                    {formatDiffAmount(diff)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 export function CashflowSheetLabPage({
   projectIdOverride,
 }: {
@@ -258,6 +205,8 @@ export function CashflowSheetLabPage({
     projectionLineCount: number;
     actualLineCount: number;
     riskLineCount: number;
+    candidates: CashflowSheetLabChangeCandidate[];
+    omittedCandidateCount: number;
   } | null>(null);
   const [reflectResult, setReflectResult] = useState<{
     appliedLineCount: number;
@@ -614,6 +563,8 @@ export function CashflowSheetLabPage({
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
         riskLineCount: result.riskLineCount,
+        candidates: result.candidates || [],
+        omittedCandidateCount: result.omittedCandidateCount || 0,
       });
       setReflectResult(null);
       setReviewedSourceKey(sourceKey);
@@ -688,7 +639,6 @@ export function CashflowSheetLabPage({
     }
   }
 
-  const cashflowPreviewTables = useMemo(() => buildCashflowPreviewTables(preview), [preview]);
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
@@ -696,6 +646,16 @@ export function CashflowSheetLabPage({
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
+  const stageCandidates = useMemo(() => {
+    if (!stageResult) return [];
+    return [...stageResult.candidates].sort((a, b) => (
+      a.yearMonth.localeCompare(b.yearMonth)
+      || a.weekNo - b.weekNo
+      || a.mode.localeCompare(b.mode)
+      || a.lineDirection.localeCompare(b.lineDirection)
+      || a.lineId.localeCompare(b.lineId)
+    ));
+  }, [stageResult]);
   const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = !hasSavedConfig;
@@ -853,7 +813,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
-                <HelpMemo>Google Sheet 값을 읽어 화면 아래 표로만 보여줍니다. 아직 원장에는 아무 값도 쓰지 않습니다.</HelpMemo>
+                <HelpMemo>Google Sheet 값을 읽고 저장 전에 원장과 비교할 준비를 합니다. 아직 원장에는 아무 값도 쓰지 않습니다.</HelpMemo>
               </div>
               <Button
                 type="button"
@@ -959,14 +919,15 @@ export function CashflowSheetLabPage({
       </div>
 
       {preview && (
-        <section className="mx-auto mt-4 max-w-6xl space-y-4">
+        <section className="mx-auto mt-4 max-w-[560px] space-y-3 border border-slate-200 bg-white px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-bold text-emerald-800">시트 검토 완료</div>
               <div className="truncate text-[12px] font-medium text-slate-950">
                 {preview.selectedSheetName}
               </div>
               <div className="text-[11px] text-slate-500">
-                합계 기준 {totalBasisLabel}
+                검토 범위 {totalBasisLabel}
               </div>
             </div>
           </div>
@@ -980,44 +941,91 @@ export function CashflowSheetLabPage({
               ))}
             </div>
           )}
-
-          <div className="space-y-4">
-            {cashflowPreviewTables.map((table) => (
-              <div key={table.mode} className="border border-slate-200 bg-white">
-                <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                  <h3 className="text-[13px] font-semibold text-slate-950">{formatMode(table.mode)}</h3>
-                  <span className="text-[11px] text-slate-500">{table.weeks.length.toLocaleString()}주</span>
-                </div>
-                <ReconciliationSummary table={table} />
-              </div>
-            ))}
-            {cashflowPreviewTables.every((table) => table.weeks.length === 0) && (
-              <div className="border border-slate-200 bg-white px-3 py-10 text-center text-[12px] text-slate-500">
-                표시할 주차가 없습니다.
-              </div>
-            )}
-          </div>
         </section>
       )}
       <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
-        <AlertDialogContent className="max-w-[520px]">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[1000px]">
           <AlertDialogHeader>
             <AlertDialogTitle>캐시플로우 원장에 저장할까요?</AlertDialogTitle>
             <AlertDialogDescription>
-              Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.
+              아래 주차별 차이를 확인한 뒤 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {stageResult && (
-            <div className="space-y-2 text-[13px] text-slate-700">
-              <div className="font-semibold text-slate-950">
-                저장 대상 {safeStageLineCount.toLocaleString()}건
+            <div className="space-y-3 text-[13px] text-slate-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-semibold text-slate-950">
+                  저장 대상 {safeStageLineCount.toLocaleString()}건
+                </div>
+                <div className="text-slate-500">Projection {stageResult.projectionLineCount.toLocaleString()}건 · Actual {stageResult.actualLineCount.toLocaleString()}건</div>
               </div>
-              <div>Projection {stageResult.projectionLineCount.toLocaleString()}건 · Actual {stageResult.actualLineCount.toLocaleString()}건</div>
               {stageResult.riskLineCount > 0 && (
                 <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
                   확인 필요 {stageResult.riskLineCount.toLocaleString()}건은 저장하지 않고 남깁니다.
                 </div>
               )}
+              {stageResult.omittedCandidateCount > 0 && (
+                <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+                  화면에는 일부만 표시했습니다. 추가 {stageResult.omittedCandidateCount.toLocaleString()}건도 같은 기준으로 저장됩니다.
+                </div>
+              )}
+              <div className="max-h-[520px] overflow-auto border border-slate-200">
+                <table className="w-full min-w-[860px] text-[12px]">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">주차</th>
+                      <th className="px-3 py-2 text-left font-medium">구분</th>
+                      <th className="px-3 py-2 text-left font-medium">항목</th>
+                      <th className="px-3 py-2 text-right font-medium">현재 원장</th>
+                      <th className="px-3 py-2 text-right font-medium">시트 값</th>
+                      <th className="px-3 py-2 text-right font-medium">차이</th>
+                      <th className="px-3 py-2 text-left font-medium">상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stageCandidates.map((candidate) => {
+                      const diff = getCandidateDiff(candidate);
+                      const riskFlags = candidate.riskFlags || [];
+                      return (
+                        <tr key={candidate.id || `${candidate.mode}-${candidate.yearMonth}-${candidate.weekNo}-${candidate.lineId}`} className="border-t border-slate-100">
+                          <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{formatCandidateWeek(candidate)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                            {candidate.mode === 'projection' ? 'Projection' : 'Actual'} · {candidate.lineDirection === 'in' ? '입금' : '출금'}
+                          </td>
+                          <td className="px-3 py-2 font-medium text-slate-900">{getCandidateLineLabel(candidate)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                            {formatCandidateAmount(candidate.beforeAmount, candidate.beforeHadValue)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-950">
+                            {formatCandidateAmount(candidate.proposedAmount, candidate.proposedHadValue)}
+                          </td>
+                          <td className={`px-3 py-2 text-right font-semibold tabular-nums ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {formatDiffAmount(diff)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {riskFlags.length ? (
+                              <span className="inline-flex bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900">
+                                확인 필요 · {riskFlags.map(formatRiskFlag).join(', ')}
+                              </span>
+                            ) : (
+                              <span className="inline-flex bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
+                                저장 대상
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {stageCandidates.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-10 text-center text-slate-500">
+                          원장과 다른 값이 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           <AlertDialogFooter>
