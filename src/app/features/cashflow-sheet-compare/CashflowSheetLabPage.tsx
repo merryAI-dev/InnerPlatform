@@ -659,7 +659,7 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
-      setStatusMessage(`확인 필요 제외 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
+      setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -710,12 +710,12 @@ export function CashflowSheetLabPage({
       }
     : !stageResult
       ? {
-          label: '검토 후보 만들기',
+          label: '변경값 비교표 만들기',
           disabled: !canApply,
           action: () => void handleStageSheetValues(),
         }
       : {
-          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '확인 필요 제외하고 저장' : '저장할 변경 없음',
+          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 원장에 저장` : '저장할 변경 없음',
           disabled: !canReflect,
           action: () => void handleReflectSheetValues(),
         };
@@ -737,12 +737,12 @@ export function CashflowSheetLabPage({
             <div className="mt-1 leading-5 text-slate-500">링크와 범위만 기억합니다. 금액은 바뀌지 않습니다.</div>
           </div>
           <div className="border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="font-bold text-slate-900">후보 만들기</div>
-            <div className="mt-1 leading-5 text-slate-500">시트와 원장의 차이만 임시 후보로 모읍니다.</div>
+            <div className="font-bold text-slate-900">비교표 만들기</div>
+            <div className="mt-1 leading-5 text-slate-500">시트 값과 현재 원장 값을 나란히 확인합니다.</div>
           </div>
           <div className="border border-blue-200 bg-blue-50 px-3 py-2">
-            <div className="font-bold text-blue-950">확인 후 저장</div>
-            <div className="mt-1 leading-5 text-blue-800">확인 필요 항목을 제외한 변경만 원장에 반영합니다.</div>
+            <div className="font-bold text-blue-950">검토 후 저장</div>
+            <div className="mt-1 leading-5 text-blue-800">이 화면에서 확정하면 원장에 바로 저장합니다.</div>
           </div>
         </div>
 
@@ -750,7 +750,7 @@ export function CashflowSheetLabPage({
           <div className="mt-6 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
             <div className="font-bold">이미 연결된 시트 설정이 있습니다.</div>
             <div className="mt-1 text-[12px] text-blue-900">
-              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 검토 후보를 만들 수 있습니다.
+              기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 변경값 비교표를 만들 수 있습니다.
             </div>
             <div className="mt-1 text-[12px] text-blue-900">
               {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
@@ -767,7 +767,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
-                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 검토 후보를 만들 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
+                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 원장 값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -891,8 +891,8 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(4)}>4</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">저장 전 후보 만들기</h2>
-                <HelpMemo>원장과 다른 셀만 임시 후보로 저장합니다. 후보가 만들어져도 캐시플로우 금액은 아직 바뀌지 않습니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">변경값 비교표 만들기</h2>
+                <HelpMemo>원장과 다른 셀을 저장 전에 비교표로 만듭니다. 이 단계에서는 캐시플로우 금액이 아직 바뀌지 않습니다.</HelpMemo>
               </div>
               <Button
                 type="button"
@@ -901,7 +901,7 @@ export function CashflowSheetLabPage({
                 onClick={() => void handleStageSheetValues()}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />}
-                저장 전 후보 만들기
+                변경값 비교표 만들기
               </Button>
             </div>
           </li>
@@ -910,13 +910,13 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(5)}>5</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">검토한 값 저장</h2>
-                <HelpMemo>확인 필요 표시가 없는 변경만 실제 캐시플로우 원장에 저장합니다. 확인 필요 항목은 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">이 화면에서 원장에 저장</h2>
+                <HelpMemo>Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다. 확인 필요 표시가 있는 항목만 사람이 다시 검토하도록 남겨둡니다.</HelpMemo>
               </div>
               {stageResult ? (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-emerald-800">
-                      후보 {stageResult.stagedLineCount.toLocaleString()}건
+                      비교 결과 {stageResult.stagedLineCount.toLocaleString()}건
                       {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
                       {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
                       {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
@@ -937,7 +937,7 @@ export function CashflowSheetLabPage({
                   ) : (
                     <div className="space-y-2">
                       <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                          아래 버튼을 누르면 확인 필요 항목을 제외한 변경만 캐시플로우 원장에 저장됩니다.
+                          위 비교 결과를 확인했다면 아래 버튼으로 바로 캐시플로우 원장에 저장합니다.
                       </div>
                       <Button
                         type="button"
@@ -946,13 +946,13 @@ export function CashflowSheetLabPage({
                         onClick={() => void handleReflectSheetValues()}
                       >
                         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {safeStageLineCount > 0 ? `확인 필요 제외하고 ${safeStageLineCount.toLocaleString()}건 저장` : '저장할 변경 없음'}
+                          {safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 원장에 저장` : '저장할 변경 없음'}
                       </Button>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-[13px] text-slate-400">검토 후보를 만든 뒤 캐시플로우에 값을 저장할 수 있습니다.</div>
+                <div className="text-[13px] text-slate-400">변경값 비교표를 만든 뒤 이 화면에서 바로 원장에 저장할 수 있습니다.</div>
               )}
             </div>
           </li>

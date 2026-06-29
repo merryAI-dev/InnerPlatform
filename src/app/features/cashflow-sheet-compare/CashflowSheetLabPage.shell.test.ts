@@ -80,7 +80,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');
     expect(pageSource).toContain('이미 연결된 시트 설정이 있습니다.');
-    expect(pageSource).toContain('기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 검토 후보를 만들 수 있습니다.');
+    expect(pageSource).toContain('기존 설정으로 다시 검토하거나, 값을 바꾼 뒤 변경값 비교표를 만들 수 있습니다.');
     expect(pageSource).toContain('이미 연결된 시트 설정을 불러왔습니다.');
     expect(pageSource).toContain('공유 완료 확인하기');
     expect(pageSource).toContain('공유 완료 확인됨');
@@ -88,11 +88,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('type="checkbox"');
     expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('value: sheetLink');
-    expect(pageSource).toContain('검토 후보 만들기');
+    expect(pageSource).toContain('변경값 비교표 만들기');
     expect(pageSource).toContain('시트 설정 우선 저장');
     expect(pageSource).toContain('캐시플로우 값은 바뀌지 않습니다.');
-    expect(pageSource).toContain('검토한 값 저장');
-    expect(pageSource).toContain('확인 필요 표시가 없는 변경만 실제 캐시플로우 원장에 저장합니다.');
+    expect(pageSource).toContain('이 화면에서 원장에 저장');
+    expect(pageSource).toContain('Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.');
     expect(pageSource).toContain('저장 완료');
     expect(pageSource).toContain('입금 합계');
     expect(pageSource).toContain('출금 합계');
