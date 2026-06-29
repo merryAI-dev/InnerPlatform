@@ -399,10 +399,10 @@ describe('cashflow sheet lab route', () => {
       proposedHadValue: true,
       sourceCell: expect.any(String),
     });
-    expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toContain('actual_overwrites_existing');
+    expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toEqual([]);
   });
 
-  it('applies a staged candidate run without rereading the Google Sheet and skips risk candidates', async () => {
+  it('applies a staged candidate run without rereading the Google Sheet and overwrites existing Actual values', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -450,15 +450,15 @@ describe('cashflow sheet lab route', () => {
 
     expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(apply.body).toMatchObject({
-      appliedLineCount: 23,
+      appliedLineCount: 24,
       projectionLineCount: 12,
-      actualLineCount: 11,
-      skippedRiskLineCount: 1,
+      actualLineCount: 12,
+      skippedRiskLineCount: 0,
       stagedRunId: stage.body.runId,
     });
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 200 },
+      actual: { MYSC_PREPAY_IN: 999 },
     });
   });
 

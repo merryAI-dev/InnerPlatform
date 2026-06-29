@@ -568,9 +568,6 @@ function buildSheetChangeCandidates({ tenantId, projectId, runId, lines, cashflo
       const proposedAmount = normalizeAppliedAmount(line.amount);
       const week = weekIndex.get(`${line.yearMonth}:${line.weekNo}`);
       const riskFlags = [];
-      if (line.mode === 'actual' && beforeHadValue && beforeAmount !== proposedAmount) {
-        riskFlags.push('actual_overwrites_existing');
-      }
       if (week?.adminClosed) riskFlags.push('closed_week_change');
       if (beforeHadValue && beforeAmount === proposedAmount) return null;
       return {
