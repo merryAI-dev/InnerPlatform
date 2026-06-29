@@ -118,6 +118,10 @@ function formatRiskFlag(flag: string) {
   return flag;
 }
 
+function readyCtaClass(active: boolean) {
+  return active ? 'motion-safe:animate-[cashflow-ready-bob_1.15s_ease-in-out_infinite]' : '';
+}
+
 function isBffAuthError(error: unknown): boolean {
   const apiError = error as { status?: number; body?: { code?: unknown; error?: unknown } };
   const status = apiError?.status;
@@ -821,7 +825,7 @@ export function CashflowSheetLabPage({
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
+                className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canPreview)}`}
                 disabled={!canPreview}
                 onClick={() => void handlePreview()}
               >
@@ -870,7 +874,7 @@ export function CashflowSheetLabPage({
                       </div>
                       <Button
                         type="button"
-                        className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
+                        className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canReflect)}`}
                         disabled={!canReflect}
                         onClick={() => setApplyDialogOpen(true)}
                       >
@@ -883,7 +887,7 @@ export function CashflowSheetLabPage({
               ) : (
                 <Button
                   type="button"
-                  className="h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5"
+                  className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canApply)}`}
                   disabled={!canApply}
                   onClick={() => void handleStageSheetValues()}
                 >
@@ -912,7 +916,7 @@ export function CashflowSheetLabPage({
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur sm:hidden">
         <Button
           type="button"
-          className="h-14 w-full rounded-[14px] bg-blue-600 text-[16px] font-bold text-white hover:bg-blue-700"
+          className={`h-14 w-full rounded-[14px] bg-blue-600 text-[16px] font-bold text-white hover:bg-blue-700 ${readyCtaClass(!primaryCta.disabled)}`}
           disabled={primaryCta.disabled}
           onClick={primaryCta.action}
         >

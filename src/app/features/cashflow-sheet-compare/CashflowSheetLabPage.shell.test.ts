@@ -106,6 +106,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('아래 주차별 차이를 확인한 뒤 저장합니다.');
     expect(pageSource).toContain('Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.');
     expect(pageSource).toContain('stageCandidates');
+    expect(pageSource).toContain('readyCtaClass');
+    expect(pageSource).toContain('cashflow-ready-bob');
     expect(pageSource).toContain('MYSCube값');
     expect(pageSource).toContain('시트 값');
     expect(pageSource).toContain('저장 여부');
