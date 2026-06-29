@@ -93,14 +93,15 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('변경값 비교표 만들기');
     expect(pageSource).toContain('시트 설정 우선 저장');
     expect(pageSource).toContain('캐시플로우 값은 바뀌지 않습니다.');
-    expect(pageSource).toContain('원장에 저장하기');
-    expect(pageSource).toContain('캐시플로우 원장에 저장할까요?');
+    expect(pageSource).toContain('전체 MYSCube에 저장하기');
+    expect(pageSource).toContain('전체 MYSCube에 저장할까요?');
     expect(pageSource).toContain('applyDialogOpen');
     expect(pageSource).toContain('아래 주차별 차이를 확인한 뒤 저장합니다.');
     expect(pageSource).toContain('Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.');
     expect(pageSource).toContain('stageCandidates');
-    expect(pageSource).toContain('현재 원장');
+    expect(pageSource).toContain('MYSCube값');
     expect(pageSource).toContain('시트 값');
+    expect(pageSource).toContain('저장 여부');
     expect(pageSource).toContain('저장 대상');
     expect(pageSource).toContain('저장 완료');
     expect(pageSource).toContain('시트 검토 완료');

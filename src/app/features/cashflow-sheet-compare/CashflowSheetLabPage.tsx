@@ -621,7 +621,7 @@ export function CashflowSheetLabPage({
         lastAppliedAt: result.lastAppliedAt,
       });
       setApplyDialogOpen(false);
-      setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
+      setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 MYSCube에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -682,7 +682,7 @@ export function CashflowSheetLabPage({
       }
     : !stageResult
       ? {
-          label: '원장에 저장하기',
+        label: '전체 MYSCube에 저장하기',
           disabled: !canApply,
           action: () => void handleStageSheetValues(),
         }
@@ -720,7 +720,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">공유 계정 확인</h2>
-                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 원장 값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
+                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 MYSCube값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -813,7 +813,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">시트 값 검토</h2>
-                <HelpMemo>Google Sheet 값을 읽고 저장 전에 원장과 비교할 준비를 합니다. 아직 원장에는 아무 값도 쓰지 않습니다.</HelpMemo>
+                <HelpMemo>Google Sheet 값을 읽고 저장 전에 MYSCube값과 비교할 준비를 합니다. 아직 MYSCube에는 아무 값도 쓰지 않습니다.</HelpMemo>
               </div>
               <Button
                 type="button"
@@ -832,8 +832,8 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(4)}>{showSetupSteps ? 4 : 2}</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">원장에 저장</h2>
-                <HelpMemo>버튼을 누르면 시트와 원장 차이를 확인한 뒤 팝업에서 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">MYSCube에 저장</h2>
+                <HelpMemo>버튼을 누르면 시트와 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (
                 <div className="space-y-3">
@@ -863,7 +863,7 @@ export function CashflowSheetLabPage({
                   ) : (
                     <div className="space-y-2">
                       <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                          저장 팝업에서 최종 확인 후 캐시플로우 원장에 저장합니다.
+                          저장 팝업에서 최종 확인 후 MYSCube에 저장합니다.
                       </div>
                       <Button
                         type="button"
@@ -885,7 +885,7 @@ export function CashflowSheetLabPage({
                   onClick={() => void handleStageSheetValues()}
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  원장에 저장하기
+                  전체 MYSCube에 저장하기
                 </Button>
               )}
             </div>
@@ -944,15 +944,15 @@ export function CashflowSheetLabPage({
         </section>
       )}
       <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[1000px]">
+        <AlertDialogContent className="flex h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[1280px] flex-col">
           <AlertDialogHeader>
-            <AlertDialogTitle>캐시플로우 원장에 저장할까요?</AlertDialogTitle>
+            <AlertDialogTitle>전체 MYSCube에 저장할까요?</AlertDialogTitle>
             <AlertDialogDescription>
               아래 주차별 차이를 확인한 뒤 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {stageResult && (
-            <div className="space-y-3 text-[13px] text-slate-700">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 text-[13px] text-slate-700">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="font-semibold text-slate-950">
                   저장 대상 {safeStageLineCount.toLocaleString()}건
@@ -969,17 +969,17 @@ export function CashflowSheetLabPage({
                   화면에는 일부만 표시했습니다. 추가 {stageResult.omittedCandidateCount.toLocaleString()}건도 같은 기준으로 저장됩니다.
                 </div>
               )}
-              <div className="max-h-[520px] overflow-auto border border-slate-200">
+              <div className="min-h-0 flex-1 overflow-auto border border-slate-200">
                 <table className="w-full min-w-[860px] text-[12px]">
                   <thead className="sticky top-0 bg-slate-50 text-slate-500">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">주차</th>
                       <th className="px-3 py-2 text-left font-medium">구분</th>
                       <th className="px-3 py-2 text-left font-medium">항목</th>
-                      <th className="px-3 py-2 text-right font-medium">현재 원장</th>
+                      <th className="px-3 py-2 text-left font-medium">저장 여부</th>
+                      <th className="px-3 py-2 text-right font-medium">MYSCube값</th>
                       <th className="px-3 py-2 text-right font-medium">시트 값</th>
                       <th className="px-3 py-2 text-right font-medium">차이</th>
-                      <th className="px-3 py-2 text-left font-medium">상태</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -993,15 +993,6 @@ export function CashflowSheetLabPage({
                             {candidate.mode === 'projection' ? 'Projection' : 'Actual'} · {candidate.lineDirection === 'in' ? '입금' : '출금'}
                           </td>
                           <td className="px-3 py-2 font-medium text-slate-900">{getCandidateLineLabel(candidate)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                            {formatCandidateAmount(candidate.beforeAmount, candidate.beforeHadValue)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-950">
-                            {formatCandidateAmount(candidate.proposedAmount, candidate.proposedHadValue)}
-                          </td>
-                          <td className={`px-3 py-2 text-right font-semibold tabular-nums ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                            {formatDiffAmount(diff)}
-                          </td>
                           <td className="px-3 py-2">
                             {riskFlags.length ? (
                               <span className="inline-flex bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900">
@@ -1013,13 +1004,22 @@ export function CashflowSheetLabPage({
                               </span>
                             )}
                           </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                            {formatCandidateAmount(candidate.beforeAmount, candidate.beforeHadValue)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-950">
+                            {formatCandidateAmount(candidate.proposedAmount, candidate.proposedHadValue)}
+                          </td>
+                          <td className={`px-3 py-2 text-right font-semibold tabular-nums ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {formatDiffAmount(diff)}
+                          </td>
                         </tr>
                       );
                     })}
                     {stageCandidates.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-3 py-10 text-center text-slate-500">
-                          원장과 다른 값이 없습니다.
+                          MYSCube값과 다른 값이 없습니다.
                         </td>
                       </tr>
                     )}
@@ -1038,7 +1038,7 @@ export function CashflowSheetLabPage({
               }}
             >
               {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-              원장에 저장
+              전체 MYSCube에 저장
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
