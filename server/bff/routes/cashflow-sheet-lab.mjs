@@ -198,6 +198,19 @@ function buildConfigResponse(projectId, config, systemAccountEmail = '') {
   };
 }
 
+async function hydrateCashflowSheetLabConfigTitle(config, googleSheetsService) {
+  if (!config || readOptionalText(config.spreadsheetTitle)) return config;
+  const spreadsheetId = readOptionalText(config.spreadsheetId) || extractSpreadsheetId(config.value);
+  if (!spreadsheetId || typeof googleSheetsService?.getSpreadsheetMeta !== 'function') return config;
+  try {
+    const meta = await googleSheetsService.getSpreadsheetMeta(spreadsheetId);
+    const spreadsheetTitle = readOptionalText(meta?.spreadsheetTitle);
+    return spreadsheetTitle ? { ...config, spreadsheetTitle } : config;
+  } catch {
+    return config;
+  }
+}
+
 function resolvePreviewSource(parsed, savedConfig) {
   const value = readOptionalText(parsed.value);
   if (value) {
@@ -1434,7 +1447,8 @@ export function mountCashflowSheetLabRoutes(app, {
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const project = await readProjectDocument(db, tenantId, projectId);
-    res.status(200).json(buildConfigResponse(projectId, readCashflowSheetLabConfig(project), systemAccountEmail));
+    const config = await hydrateCashflowSheetLabConfigTitle(readCashflowSheetLabConfig(project), googleSheetsService);
+    res.status(200).json(buildConfigResponse(projectId, config, systemAccountEmail));
   }));
 
   app.put('/api/v1/projects/:projectId/cashflow-sheet-lab/config', asyncHandler(async (req, res) => {

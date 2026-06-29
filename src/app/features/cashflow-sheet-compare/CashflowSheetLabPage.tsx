@@ -801,7 +801,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(1)}>1</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">아래 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 권한 추가하기</h2>
                 <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 MYSCube값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -831,7 +831,7 @@ export function CashflowSheetLabPage({
                   {systemAccountEmail}
                 </div>
               )}
-              <div className="text-[12px] text-slate-500">Google Sheet를 위 공유 계정에 보기 권한으로 공유한 뒤 바로 검토하세요.</div>
+              <div className="text-[12px] text-slate-500">위 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요.</div>
             </div>
           </li>}
 
@@ -839,7 +839,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 정보 저장</h2>
                 <HelpMemo>다음 방문 때 다시 입력하지 않도록 링크, 탭 이름, 주차 범위를 먼저 저장합니다. 이 단계는 금액 저장이 아닙니다.</HelpMemo>
               </div>
               <Input
@@ -884,7 +884,7 @@ export function CashflowSheetLabPage({
                   {isCurrentSheetConfigSaved ? '임시 저장됨' : '임시 저장'}
                 </Button>
                 <div className="text-[12px] text-slate-500">
-                  링크, 탭 이름, 주차 범위만 저장합니다. 캐시플로우 값은 바뀌지 않습니다.
+                  시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요.
                 </div>
               </div>
             </div>

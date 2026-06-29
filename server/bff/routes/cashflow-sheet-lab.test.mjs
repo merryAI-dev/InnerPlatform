@@ -124,6 +124,11 @@ function createApp({ context = {}, db = createDb(), googleSheetsService } = {}) 
     db,
     googleSheetsService: googleSheetsService || {
       getServiceAccountEmail: () => 'cashflow-service@mysc.iam.gserviceaccount.com',
+      getSpreadsheetMeta: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      })),
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
         spreadsheetTitle: 'Cashflow workbook',
@@ -202,6 +207,41 @@ describe('cashflow sheet lab route', () => {
       serviceAccountEmail: 'cashflow-service@mysc.iam.gserviceaccount.com',
       sheetPermission: 'shared_with_mysc_system_account',
     });
+  });
+
+  it('hydrates missing saved config spreadsheet title from Google Sheets metadata', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit#gid=1',
+          sheetName: 'cashflow(사용내역 연동)',
+          spreadsheetId: 'spreadsheet-a',
+          spreadsheetTitle: '',
+          startWeek: '26-1-1',
+          endWeek: '26-1-3',
+        },
+      },
+    });
+    const getSpreadsheetMeta = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: '[AXR]사업비 관리 시트',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+    }));
+
+    const response = await request(createApp({
+      db,
+      googleSheetsService: {
+        getServiceAccountEmail: () => 'cashflow-service@mysc.iam.gserviceaccount.com',
+        getSpreadsheetMeta,
+        previewSpreadsheet: vi.fn(),
+      },
+    }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+      .expect(200);
+
+    expect(response.body.config.spreadsheetTitle).toBe('[AXR]사업비 관리 시트');
+    expect(getSpreadsheetMeta).toHaveBeenCalledWith('spreadsheet-a');
   });
 
   it('allows saving ranges before sheet headers are verified', async () => {
