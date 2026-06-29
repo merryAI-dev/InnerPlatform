@@ -82,7 +82,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('연동·동기화');
     expect(pageSource).not.toContain('1분만에 사업비 관리시트를 MYSCube에 연동하기');
     expect(pageSource).toContain('현재 연동된 시트 이름');
-    expect(pageSource).toContain('linkedSheetName');
+    expect(pageSource).toContain('linkedSpreadsheetTitle');
+    expect(pageSource).toContain('파일 이름 확인 전');
+    expect(pageSource).not.toContain('savedConfig?.spreadsheetId || savedConfig?.value');
     expect(pageSource).toContain('아래 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요');
     expect(pageSource).toContain('공유 계정 확인');
     expect(pageSource).toContain('공유 계정 복사');

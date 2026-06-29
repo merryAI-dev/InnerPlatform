@@ -709,7 +709,7 @@ export function CashflowSheetLabPage({
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = !hasSavedConfig;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
-  const linkedSheetName = savedConfig?.sheetName || preview?.selectedSheetName || sheetName || savedConfig?.spreadsheetTitle || '';
+  const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || preview?.spreadsheetTitle || '';
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
   const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
   const stepNumberClass = (step: number) =>
@@ -748,18 +748,18 @@ export function CashflowSheetLabPage({
         <header>
           <CashflowSheetHeroAnimation />
           <div className="mt-3 text-[13px] text-slate-500">
-            현재 연동된 시트 이름 {linkedSheetName || '없음'}
+            현재 연동된 시트 이름 {linkedSpreadsheetTitle || '파일 이름 확인 전'}
           </div>
         </header>
 
         {hasSavedConfig && (
           <div className="mt-5 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
             <div className="font-bold">연결된 시트</div>
-            <div className="mt-1 text-[12px] text-blue-900">
-              {savedConfig?.sheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
+            <div className="mt-1 text-[13px] font-semibold text-blue-950">
+              {linkedSpreadsheetTitle || '파일 이름 확인 전'}
             </div>
-            <div className="mt-1 break-all text-[11px] text-blue-800">
-              {savedConfig?.spreadsheetTitle || savedConfig?.spreadsheetId || savedConfig?.value}
+            <div className="mt-1 text-[12px] text-blue-900">
+              {savedConfig?.sheetName || preview?.selectedSheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
             </div>
           </div>
         )}
