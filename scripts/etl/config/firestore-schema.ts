@@ -70,7 +70,7 @@ export const FIRESTORE_SCHEMAS: CollectionSchema[] = [
     ],
   },
   {
-    collection: 'cashflowWeekSheets',
+    collection: 'cashflow_weeks',
     docIdPattern: '{projectId}-{yearMonth}-w{weekNo}',
     description: '주간 캐시플로 시트. cashflow 탭에서 추출. 행=항목, 열=주차.',
     fields: [

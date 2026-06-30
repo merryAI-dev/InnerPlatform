@@ -64,6 +64,7 @@
     "pii:setup:vercel": "bash scripts/pii_setup_vercel_local.sh",
     "policy:verify": "node scripts/verify_rbac_policy.mjs && node scripts/assert_vercel_edge_route_policy.mjs && node scripts/verify_privacy_by_design_policy.mjs",
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
+    "etl:verify:query-readmodel-schema": "npx tsx scripts/etl/verify-query-readmodel-schema.ts",
     "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
     "prepare": "husky"
   },

@@ -101,6 +101,7 @@ import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
+import { mountQueryApiRoutes } from './routes/query-api.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -1418,6 +1419,10 @@ export function createBffApp(options = {}) {
     googleSheetsService,
   });
   mountCashflowLaborRiskRoutes(app, {
+    db,
+    now,
+  });
+  mountQueryApiRoutes(app, {
     db,
     now,
   });

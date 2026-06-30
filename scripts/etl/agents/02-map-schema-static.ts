@@ -241,6 +241,6 @@ function matchHeaders(headers: string[], rules: MappingRule[], sheetName: string
   return mappings;
 }
 
-// ── cashflowWeekSheets 전용 매핑은 별도 처리 필요 ──
+// ── cashflow_weeks 전용 매핑은 별도 처리 필요 ──
 // cashflow는 행=항목, 열=주차 구조여서 일반 column mapping이 안 맞음
 // → extract 단계에서 피벗 변환 필요
