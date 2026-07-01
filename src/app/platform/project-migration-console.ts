@@ -59,6 +59,12 @@ export function deriveMigrationAuditStatus(
   project: Project,
   request?: ProjectRequest | null,
 ): MigrationAuditConsoleStatus {
+  if (
+    project.executiveReviewStatus === 'REVISION_REJECTED'
+    || project.executiveReviewStatus === 'DUPLICATE_DISCARDED'
+  ) {
+    return project.executiveReviewStatus;
+  }
   if (request?.status === 'PENDING') return 'PENDING';
   if (project.executiveReviewStatus) return project.executiveReviewStatus;
   if (request?.status === 'REJECTED') return 'REVISION_REJECTED';

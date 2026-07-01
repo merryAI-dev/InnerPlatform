@@ -1,17 +1,12 @@
 import { getDownloadURL, ref, uploadBytesResumable, type UploadTaskSnapshot } from 'firebase/storage';
-import { getAuthInstance, getStorageInstance } from '../lib/firebase';
+import { getStorageInstance } from '../lib/firebase';
 import type { FileAttachment } from '../data/types';
-import {
-  isPlatformApiEnabled,
-  processProjectRequestContractViaBff,
-  type ActorLike,
-} from '../lib/platform-bff-client';
+import type { ActorLike } from '../lib/platform-bff-client';
 
 export type ProjectRequestDocumentKind = 'contract' | 'quote' | 'proposal';
 
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES = 1024 * 1024 * 1024;
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL = '1GB';
-const BFF_CONTRACT_PROCESS_MAX_SIZE_BYTES = 25 * 1024 * 1024;
 
 function readText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -86,34 +81,15 @@ export async function uploadProjectRequestContractFile(params: {
   assertProjectDocumentUploadAllowed({ actor: params.actor, file: params.file });
   if (!params.actor) throw new Error('로그인 정보를 확인할 수 없습니다.');
 
-  if (!isPlatformApiEnabled() || params.file.size > BFF_CONTRACT_PROCESS_MAX_SIZE_BYTES) {
-    const contractDocument = await uploadProjectRequestDocumentDirectly({
-      tenantId: params.tenantId,
-      actor: params.actor,
-      file: params.file,
-      kind: 'contract',
-    });
-    return {
-      contractDocument,
-      contractAnalysis: null,
-    };
-  }
-
-  const idToken = params.actor.idToken
-    || await getAuthInstance()?.currentUser?.getIdToken()
-    || undefined;
-  const processed = await processProjectRequestContractViaBff({
+  const contractDocument = await uploadProjectRequestDocumentDirectly({
     tenantId: params.tenantId,
-    actor: {
-      ...params.actor,
-      idToken,
-    },
+    actor: params.actor,
     file: params.file,
+    kind: 'contract',
   });
-
   return {
-    contractDocument: processed.contractDocument,
-    contractAnalysis: processed.analysis,
+    contractDocument,
+    contractAnalysis: null,
   };
 }
 

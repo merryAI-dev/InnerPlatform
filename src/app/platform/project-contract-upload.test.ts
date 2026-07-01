@@ -9,8 +9,6 @@ const mocks = vi.hoisted(() => ({
   getAuthInstance: vi.fn(),
   getStorageInstance: vi.fn(),
   getDownloadURL: vi.fn(),
-  isPlatformApiEnabled: vi.fn(),
-  processProjectRequestContractViaBff: vi.fn(),
   ref: vi.fn(),
   uploadBytesResumable: vi.fn(),
 }));
@@ -26,11 +24,6 @@ vi.mock('firebase/storage', () => ({
   uploadBytesResumable: mocks.uploadBytesResumable,
 }));
 
-vi.mock('../lib/platform-bff-client', () => ({
-  isPlatformApiEnabled: mocks.isPlatformApiEnabled,
-  processProjectRequestContractViaBff: mocks.processProjectRequestContractViaBff,
-}));
-
 const file = new File(['pdf'], 'contract.pdf', { type: 'application/pdf' });
 
 function fileWithSize(size: number, name = 'contract.pdf') {
@@ -42,7 +35,6 @@ function fileWithSize(size: number, name = 'contract.pdf') {
 describe('project-contract-upload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isPlatformApiEnabled.mockReturnValue(true);
     mocks.getStorageInstance.mockReturnValue({ app: 'storage' });
     mocks.ref.mockImplementation((_storage, path) => ({ fullPath: path }));
     mocks.getDownloadURL.mockResolvedValue('https://example.com/direct.pdf');
@@ -55,32 +47,19 @@ describe('project-contract-upload', () => {
         getIdToken: vi.fn(async () => 'fresh-token'),
       },
     });
-    mocks.processProjectRequestContractViaBff.mockResolvedValue({
-      contractDocument: {
-        path: 'contracts/contract.pdf',
-        name: 'contract.pdf',
-        downloadURL: 'https://example.com/contract.pdf',
-        size: 3,
-        contentType: 'application/pdf',
-        uploadedAt: '2026-05-27T00:00:00.000Z',
-      },
-      analysis: { provider: 'heuristic', summary: '요약' },
-    });
   });
 
-  it('fails before touching BFF when login context is missing', async () => {
+  it('fails before touching storage when login context is missing', async () => {
     await expect(uploadProjectRequestContractFile({
       tenantId: 'mysc',
       actor: null,
       file,
     })).rejects.toThrow('로그인 정보를 확인할 수 없습니다.');
 
-    expect(mocks.processProjectRequestContractViaBff).not.toHaveBeenCalled();
+    expect(mocks.uploadBytesResumable).not.toHaveBeenCalled();
   });
 
-  it('uses direct Firebase Storage upload when platform API is disabled', async () => {
-    mocks.isPlatformApiEnabled.mockReturnValue(false);
-
+  it('uploads contract files directly to Firebase Storage without live analysis', async () => {
     const result = await uploadProjectRequestContractFile({
       tenantId: 'mysc',
       actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm' },
@@ -89,11 +68,11 @@ describe('project-contract-upload', () => {
 
     expect(result.contractDocument.path).toContain('project-request-documents/u-1/');
     expect(result.contractAnalysis).toBeNull();
-    expect(mocks.processProjectRequestContractViaBff).not.toHaveBeenCalled();
     expect(mocks.uploadBytesResumable).toHaveBeenCalled();
+    expect(mocks.getAuthInstance).not.toHaveBeenCalled();
   });
 
-  it('normalizes the upload call and reuses an existing actor id token', async () => {
+  it('normalizes the direct contract upload path and ignores actor id tokens', async () => {
     const result = await uploadProjectRequestContractFile({
       tenantId: 'mysc',
       actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm', idToken: 'existing-token' },
@@ -102,28 +81,10 @@ describe('project-contract-upload', () => {
 
     expect(result.contractDocument.name).toBe('contract.pdf');
     expect(mocks.getAuthInstance).not.toHaveBeenCalled();
-    expect(mocks.processProjectRequestContractViaBff).toHaveBeenCalledWith({
-      tenantId: 'mysc',
-      actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm', idToken: 'existing-token' },
-      file,
-    });
+    expect(mocks.ref).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('contract-contract.pdf'));
   });
 
-  it('refreshes the Firebase id token when the actor does not carry one', async () => {
-    await uploadProjectRequestContractFile({
-      tenantId: 'mysc',
-      actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm' },
-      file,
-    });
-
-    expect(mocks.processProjectRequestContractViaBff).toHaveBeenCalledWith({
-      tenantId: 'mysc',
-      actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm', idToken: 'fresh-token' },
-      file,
-    });
-  });
-
-  it('uses direct Firebase Storage upload for contract files above the BFF raw upload limit', async () => {
+  it('uploads large contract files directly to Firebase Storage', async () => {
     const largeFile = fileWithSize(26 * 1024 * 1024);
 
     const result = await uploadProjectRequestContractFile({
@@ -133,7 +94,6 @@ describe('project-contract-upload', () => {
     });
 
     expect(result.contractAnalysis).toBeNull();
-    expect(mocks.processProjectRequestContractViaBff).not.toHaveBeenCalled();
     expect(mocks.uploadBytesResumable).toHaveBeenCalled();
   });
 

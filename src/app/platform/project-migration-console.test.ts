@@ -139,6 +139,36 @@ describe('project-migration-console', () => {
     expect(isMigrationAuditPmRegistration(records[0])).toBe(true);
   });
 
+  it('keeps rejected projects rejected until the project is explicitly resubmitted', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [
+        makeProject({
+          id: 'p-rejected',
+          executiveReviewStatus: 'REVISION_REJECTED',
+        }),
+        makeProject({
+          id: 'p-resubmitted',
+          executiveReviewStatus: 'PENDING',
+        }),
+      ],
+      [
+        makeRequest({
+          id: 'pr-rejected-edit',
+          status: 'PENDING',
+          approvedProjectId: 'p-rejected',
+        }),
+        makeRequest({
+          id: 'pr-resubmitted-edit',
+          status: 'PENDING',
+          approvedProjectId: 'p-resubmitted',
+        }),
+      ],
+    );
+
+    expect(records.find((record) => record.id === 'p-rejected')?.status).toBe('REVISION_REJECTED');
+    expect(records.find((record) => record.id === 'p-resubmitted')?.status).toBe('PENDING');
+  });
+
   it('filters by cic and review status', () => {
     const records = buildMigrationAuditConsoleRecords(
       [

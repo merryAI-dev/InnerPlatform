@@ -12,6 +12,12 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).not.toContain('upsertProjectViaBff');
   });
 
+  it('uses the executive review resubmit endpoint only for explicit resubmission', () => {
+    expect(source).toContain('resubmitProjectExecutiveReviewViaBff');
+    expect(source).toContain("const forcePendingReview = actionId === 'resubmit'");
+    expect(source).toContain('if (forcePendingReview && changeRequest)');
+  });
+
   it('keeps the project edit draft key stable across request listener updates', () => {
     expect(source).toContain("const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`");
     expect(source).toContain('draftKey={autosaveKey}');

@@ -7,8 +7,12 @@ import { useAuth } from '../../data/auth-store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import { usePortalStore } from '../../data/portal-store';
 import type { Project, ProjectRequest, ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
+import {
+  isPlatformApiEnabled,
+  resubmitProjectExecutiveReviewViaBff,
+} from '../../lib/platform-bff-client';
 import {
   uploadProjectRequestContractFile,
   uploadProjectRequestSupplementalDocumentFile,
@@ -208,16 +212,76 @@ export function PortalProjectEdit() {
     return changeRequest;
   };
 
+  const markProjectPendingReview = async (request: ProjectRequest, reviewComment: string | null) => {
+    if (!orgId || !myProject || !authUser?.uid) return;
+    const now = new Date().toISOString();
+    const reviewerName = authUser.name || authUser.email || 'PM';
+    if (isPlatformApiEnabled()) {
+      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+      await resubmitProjectExecutiveReviewViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken,
+        },
+        projectId: myProject.id,
+        payload: {
+          requestId: request.id,
+          reviewComment,
+          reviewerName,
+        },
+      });
+      return;
+    }
+
+    const previousStatus = myProject.executiveReviewStatus || 'PENDING';
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', myProject.id)), {
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: now,
+      executiveReviewedById: authUser.uid,
+      executiveReviewedByName: reviewerName,
+      executiveReviewComment: reviewComment,
+      executiveReviewHistory: [
+        ...(Array.isArray(myProject.executiveReviewHistory) ? myProject.executiveReviewHistory : []),
+        {
+          status: 'PENDING',
+          previousStatus,
+          reviewedAt: now,
+          reviewedById: authUser.uid,
+          reviewedByName: reviewerName,
+          reviewComment,
+        },
+      ],
+      updatedAt: now,
+    }, { merge: true });
+    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', request.id)), {
+      status: 'PENDING',
+      reviewOutcome: null,
+      reviewedBy: null,
+      reviewedByName: null,
+      reviewedAt: null,
+      reviewComment: null,
+      rejectedReason: null,
+      updatedAt: now,
+    }, { merge: true });
+  };
+
   const handleSubmit = async (draft: ProjectEditorDraft, actionId: string) => {
     if (!myProject || busyActionId) return;
 
     setBusyActionId(actionId);
     try {
       const forcePendingReview = actionId === 'resubmit';
-      await persistProject(draft, {
+      const reviewComment = forcePendingReview ? resubmitComment.trim() || null : null;
+      const changeRequest = await persistProject(draft, {
         forcePendingReview,
-        reviewComment: forcePendingReview ? resubmitComment.trim() || null : null,
+        reviewComment,
       });
+      if (forcePendingReview && changeRequest) {
+        await markProjectPendingReview(changeRequest, reviewComment);
+      }
       try {
         await persistDraft(draft, 4, 'SUBMITTED');
       } catch (draftError) {
