@@ -180,7 +180,9 @@ export function MigrationAuditDetailPanel({
     fallbackActorName: record.managerName,
     fallbackRequestedAt: record.requestedAt,
   });
-  const contractDocument = record.project.contractDocument || record.request?.payload.contractDocument || null;
+  const contractDocument = isChangeRequest
+    ? record.request?.payload.contractDocument || record.project.contractDocument || null
+    : record.project.contractDocument || record.request?.payload.contractDocument || null;
 
   return (
     <Card

@@ -173,6 +173,28 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');
   });
 
+  it('shows the pending change request contract instead of the approved project contract', () => {
+    const dossier = buildMigrationReviewDossier(project, {
+      ...request,
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      payload: {
+        ...request.payload,
+        contractDocument: {
+          path: 'orgs/mysc/project-request-documents/u-1/revised.pdf',
+          name: '수정_계약서.pdf',
+          downloadURL: 'https://example.com/revised.pdf',
+          size: 5678,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-07-01T09:00:00Z',
+        },
+      },
+    });
+
+    expect(dossier.contractDocument.name).toBe('수정_계약서.pdf');
+    expect(dossier.contractDocument.downloadURL).toContain('revised.pdf');
+  });
+
   it('normalizes legacy dropdown values before approval display formatting', () => {
     const dossier = buildMigrationReviewDossier({
       ...project,

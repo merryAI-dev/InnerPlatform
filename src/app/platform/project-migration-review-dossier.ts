@@ -207,8 +207,8 @@ export function buildMigrationReviewDossier(
 ): MigrationReviewDossier {
   const payload = request?.payload;
   const usePayloadAsCurrent = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
-  const contractDocument = project.contractDocument || payload?.contractDocument || null;
-  const contractAnalysis = project.contractAnalysis || payload?.contractAnalysis || null;
+  const contractDocument = preferRequestPayloadForChange(request, project.contractDocument, payload?.contractDocument) || null;
+  const contractAnalysis = preferRequestPayloadForChange(request, project.contractAnalysis, payload?.contractAnalysis) || null;
   const currentName = preferRequestPayloadForChange(request, project.name, payload?.name);
   const currentOfficialContractName = preferRequestPayloadForChange(request, project.officialContractName, payload?.officialContractName);
   const currentClientOrg = preferRequestPayloadForChange(request, project.clientOrg, payload?.clientOrg);
