@@ -29,7 +29,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
     expect(compositeSource).toContain('CIC 대표 검토 대기열');
     expect(compositeSource).toContain('CIC 대표 검토 결정');
-    expect(compositeSource).toContain('이번 수정에서 바뀐 값');
+    expect(compositeSource).toContain('PM 재제출 시 변경 사항');
     expect(compositeSource).toContain('describeProjectRequestVersion');
     expect(compositeSource).toContain('수정 중');
     expect(compositeSource).toContain('PM 수정 요청');
@@ -83,6 +83,8 @@ describe('ProjectMigrationAuditPage shell contract', () => {
   it('highlights attachment changes and previews the pending request document', () => {
     expect(detailSource).toContain('ATTACHMENT_CHANGE_KEYS');
     expect(detailSource).toContain('첨부파일 변경');
+    expect(detailSource).toContain('수정사항');
+    expect(detailSource).toContain('border border-amber-200 bg-amber-50');
     expect(detailSource).toContain('useRequestPayloadAsCurrent');
     expect(detailSource).toContain("record.request?.payload.contractDocument || record.project.contractDocument || null");
   });

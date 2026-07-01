@@ -149,20 +149,18 @@ function ChangeRow({
   const isAttachmentChange = isAttachmentChangeKey(changeKey);
   return (
     <div
-      className={`grid gap-3 border-b px-4 py-3 last:border-b-0 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)] ${
-        isAttachmentChange ? 'border-amber-200 bg-amber-50/80' : 'border-slate-100'
-      }`}
+      className="grid gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)]"
     >
       <div>
         <p className={`text-[12px] font-semibold ${isAttachmentChange ? 'text-amber-900' : 'text-slate-700'}`}>{label}</p>
         {isAttachmentChange ? <Badge className="mt-2 bg-amber-100 text-amber-900 hover:bg-amber-100">첨부파일 변경</Badge> : null}
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">이전</p>
         <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 text-slate-600">{before}</p>
       </div>
-      <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-teal-600">현재</p>
+      <div className="min-w-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">수정사항</p>
         <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 font-semibold text-slate-950">{after}</p>
       </div>
     </div>
@@ -262,8 +260,8 @@ export function MigrationAuditDetailPanel({
 
           {dossier.changes.length > 0 ? (
             <ReviewSection
-              eyebrow="이번 수정에서 바뀐 값"
-              title="PM 재제출 변경 diff"
+              eyebrow="PM 재제출 시 변경 사항"
+              title="이전 | 수정사항"
               description="PM이 다시 제출하면서 바꾼 항목을 이전 값과 나란히 봅니다."
             >
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
