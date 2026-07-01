@@ -88,6 +88,7 @@ const request: ProjectRequest = {
   reviewedByName: '임원A',
   reviewedAt: '2026-04-20T10:00:00Z',
   reviewComment: '승인',
+  updatedAt: '2026-04-20T08:30:00Z',
   approvedProjectId: 'p-1',
   payload: {
     name: '2026 다자간협력',
@@ -149,6 +150,7 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.notes.projectPurpose).toContain('성과 확산');
     expect(dossier.notes.participantCondition).toContain('공동참여');
     expect(dossier.audit.requestedByName).toBe('변민욱');
+    expect(dossier.audit.requestUpdatedAt).toBe('2026. 04. 20. 17:30');
     expect(dossier.audit.reviewedByName).toBe('임원A');
     expect(dossier.analysis.summary).toContain('계약 기간과 계약금액');
     expect(dossier.contractDocument.name).toBe('네팔_계약서.pdf');

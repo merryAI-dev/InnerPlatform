@@ -405,6 +405,7 @@ export function MigrationAuditDetailPanel({
                 { label: '요청 버전', value: dossier.audit.requestVersion },
                 { label: '요청자', value: dossier.audit.requestedByName },
                 { label: '접수일', value: dossier.audit.requestedAt },
+                { label: '수정일시', value: dossier.audit.requestUpdatedAt },
               ]}
             />
             {dossier.audit.history.length > 0 ? (

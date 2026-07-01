@@ -67,6 +67,7 @@ export interface MigrationReviewDossier {
     requestVersion: string;
     requestedByName: string;
     requestedAt: string;
+    requestUpdatedAt: string;
     reviewedByName: string;
     reviewedAt: string;
     reviewComment: string;
@@ -115,6 +116,24 @@ function formatDate(value: string | null | undefined): string {
   const normalized = readable(value, '');
   if (!normalized) return '-';
   return normalized.slice(0, 10).replace(/-/g, '.');
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  const normalized = readable(value, '');
+  if (!normalized) return '-';
+  try {
+    return new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(normalized));
+  } catch {
+    return normalized;
+  }
 }
 
 function formatPaymentPlanSplit(
@@ -282,6 +301,7 @@ export function buildMigrationReviewDossier(
       requestVersion: request?.requestVersion ? `v${request.requestVersion}` : '-',
       requestedByName: readable(request?.requestedByName),
       requestedAt: formatDate(request?.requestedAt),
+      requestUpdatedAt: formatDateTime(request?.updatedAt || request?.requestedAt),
       reviewedByName: readable(project.executiveReviewedByName || request?.reviewedByName),
       reviewedAt: formatDate(project.executiveReviewedAt || request?.reviewedAt),
       reviewComment: readable(project.executiveReviewComment || request?.reviewComment || request?.rejectedReason),
