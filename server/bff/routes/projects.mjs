@@ -518,6 +518,13 @@ function isProjectChangeRequest(request) {
   return readOptionalText(request?.requestKind) === 'CHANGE';
 }
 
+function resolveProjectRequestPayloadForReview(request) {
+  if (isProjectChangeRequest(request) && request?.proposedSnapshot && typeof request.proposedSnapshot === 'object') {
+    return request.proposedSnapshot;
+  }
+  return request?.payload || {};
+}
+
 function normalizeParticipationRate(value) {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -1257,8 +1264,9 @@ export function mountProjectRoutes(app, {
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
         const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request);
         const requestChanges = Array.isArray(request?.changedFields) ? request.changedFields : [];
+        const requestPayload = resolveProjectRequestPayloadForReview(request);
         const payloadPatch = isApprovedChangeRequest
-          ? buildProjectPatchFromChangeRequestPayload(request?.payload, currentProject)
+          ? buildProjectPatchFromChangeRequestPayload(requestPayload, currentProject)
           : {};
         return {
           ...payloadPatch,
@@ -1292,7 +1300,7 @@ export function mountProjectRoutes(app, {
         approvedProjectId: projectId,
         targetProjectId: projectId,
         ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request) ? {
-          approvedSnapshot: request?.payload || null,
+          approvedSnapshot: resolveProjectRequestPayloadForReview(request),
         } : {}),
         updatedAt: now,
       }) : null,
@@ -1382,18 +1390,24 @@ export function mountProjectRoutes(app, {
           ],
         };
       },
-      buildRequestPatch: (currentProject) => resolvedRequestId ? ({
-        status: 'PENDING',
-        reviewOutcome: null,
-        reviewedBy: null,
-        reviewedByName: null,
-        reviewedAt: null,
-        reviewComment: null,
-        rejectedReason: null,
-        approvedProjectId: projectId,
-        payload: buildProjectRequestPayloadFromProject(currentProject, request?.payload || {}),
-        updatedAt: now,
-      }) : null,
+      buildRequestPatch: () => {
+        if (!resolvedRequestId) return null;
+        const requestPayload = resolveProjectRequestPayloadForReview(request);
+        return {
+          status: 'PENDING',
+          reviewOutcome: null,
+          reviewedBy: null,
+          reviewedByName: null,
+          reviewedAt: null,
+          reviewComment: null,
+          rejectedReason: null,
+          approvedProjectId: projectId,
+          targetProjectId: projectId,
+          payload: requestPayload,
+          ...(isProjectChangeRequest(request) ? { proposedSnapshot: requestPayload } : {}),
+          updatedAt: now,
+        };
+      },
       requestRefs: resolvedRequestId ? refs : [],
       tenantId,
       actorId,

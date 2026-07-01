@@ -377,6 +377,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       status: 'REJECTED',
       reviewOutcome: 'REVISION_REJECTED',
       approvedProjectId: 'p_exec_review_003',
+      requestKind: 'CHANGE',
       rejectedReason: '계약서 다시 올려 주세요',
       payload: {
         name: '재제출 테스트 사업',
@@ -403,6 +404,22 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
           fields: {},
         },
       },
+      proposedSnapshot: {
+        name: '재제출 테스트 사업',
+        officialContractName: '재제출 테스트 사업',
+        clientOrg: 'KOICA',
+        department: 'CIC1',
+        managerName: '변민욱',
+        teamName: 'AXR팀',
+        contractDocument: {
+          path: 'orgs/mysc/project-request-documents/u-new/contract.pdf',
+          name: '보완_계약서.pdf',
+          downloadURL: 'https://example.com/new-contract.pdf',
+          size: 3456,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-04-21T08:00:00.000Z',
+        },
+      },
       createdAt: '2026-04-20T08:00:00.000Z',
       updatedAt: '2026-04-20T09:00:00.000Z',
     }, { merge: true });
@@ -422,6 +439,15 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       projectId: 'p_exec_review_003',
       requestId: 'pr_exec_review_003',
       reviewStatus: 'PENDING',
+    });
+    const requestSnap = await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_003`).get();
+    expect(requestSnap.data()?.payload?.contractDocument).toMatchObject({
+      name: '보완_계약서.pdf',
+      path: 'orgs/mysc/project-request-documents/u-new/contract.pdf',
+    });
+    expect(requestSnap.data()?.proposedSnapshot?.contractDocument).toMatchObject({
+      name: '보완_계약서.pdf',
+      path: 'orgs/mysc/project-request-documents/u-new/contract.pdf',
     });
   });
 

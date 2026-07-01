@@ -21,7 +21,7 @@ import {
   normalizeProjectTeamMembers,
 } from './project-team-members';
 import { getMigrationAuditStatusLabel } from './project-migration-console';
-import { resolveProjectRequestKind } from './project-change-request';
+import { resolveProjectRequestKind, resolveProjectRequestPayload } from './project-change-request';
 
 export interface MigrationReviewDossier {
   headerTitle: string;
@@ -224,7 +224,7 @@ export function buildMigrationReviewDossier(
   project: Project,
   request: ProjectRequest | null,
 ): MigrationReviewDossier {
-  const payload = request?.payload;
+  const payload = resolveProjectRequestPayload(request);
   const usePayloadAsCurrent = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
   const contractDocument = usePayloadAsCurrent
     ? (payload?.contractDocument || project.contractDocument || null)

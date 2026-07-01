@@ -86,7 +86,8 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('수정사항');
     expect(detailSource).toContain('border border-amber-200 bg-amber-50');
     expect(detailSource).toContain('useRequestPayloadAsCurrent');
-    expect(detailSource).toContain("record.request?.payload.contractDocument || record.project.contractDocument || null");
+    expect(detailSource).toContain('resolveProjectRequestPayload');
+    expect(detailSource).toContain('requestPayload?.contractDocument || record.project.contractDocument || null');
   });
 
   it('keeps CIC registration review read-only while improving scan hierarchy', () => {

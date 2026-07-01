@@ -25,6 +25,7 @@ import {
 } from '../../platform/project-editor';
 import {
   buildProjectChangeRequest,
+  resolveProjectRequestPayload,
   resolveProjectRequestKind,
 } from '../../platform/project-change-request';
 import { buildProjectRequestDraft } from '../../platform/project-request-draft';
@@ -120,12 +121,13 @@ export function PortalProjectEdit() {
       if (!myProject) return createProjectEditorDraft();
       const shouldReadPendingChange = requestDoc?.status === 'PENDING'
         && resolveProjectRequestKind(requestDoc) === 'CHANGE';
+      const requestPayload = resolveProjectRequestPayload(requestDoc);
       if (!shouldReadPendingChange) {
-        return buildProjectEditorDraftFromProject(myProject, requestDoc?.payload);
+        return buildProjectEditorDraftFromProject(myProject, requestPayload);
       }
       return buildProjectEditorDraftFromProject({
         ...myProject,
-        ...requestDoc.payload,
+        ...requestPayload,
         id: myProject.id,
         slug: myProject.slug,
         orgId: myProject.orgId,
@@ -137,7 +139,7 @@ export function PortalProjectEdit() {
         cashflowDiffNote: myProject.cashflowDiffNote,
       } as Project);
     },
-    [myProject, requestDoc?.payload],
+    [myProject, requestDoc?.payload, requestDoc?.proposedSnapshot],
   );
 
   const executiveBanner = useMemo(

@@ -3,6 +3,7 @@ import type {
   ProjectExecutiveReviewStatus,
   ProjectRequest,
 } from '../data/types';
+import { resolveProjectRequestPayload } from './project-change-request';
 
 export type MigrationAuditConsoleStatus = ProjectExecutiveReviewStatus;
 
@@ -100,6 +101,7 @@ function collectSearchValues(value: unknown, output: string[]) {
 }
 
 function buildMigrationAuditSearchText(record: MigrationAuditConsoleRecord): string {
+  const requestPayload = resolveProjectRequestPayload(record.request);
   const values: string[] = [
     record.title,
     record.clientOrg,
@@ -112,14 +114,14 @@ function buildMigrationAuditSearchText(record: MigrationAuditConsoleRecord): str
     record.project.registeredByName,
     record.request?.requestedByName,
     record.request?.requestedByEmail,
-    record.request?.payload?.name,
-    record.request?.payload?.officialContractName,
-    record.request?.payload?.clientOrg,
-    record.request?.payload?.managerName,
-    record.request?.payload?.teamName,
+    requestPayload?.name,
+    requestPayload?.officialContractName,
+    requestPayload?.clientOrg,
+    requestPayload?.managerName,
+    requestPayload?.teamName,
   ].map((value) => normalizeText(value)).filter(Boolean);
 
-  collectSearchValues(record.request?.payload, values);
+  collectSearchValues(requestPayload, values);
   return values.join(' ').toLowerCase();
 }
 

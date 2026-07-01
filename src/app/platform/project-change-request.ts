@@ -84,6 +84,14 @@ export function resolveProjectRequestKind(request: ProjectRequest | null | undef
   return request?.requestKind === 'CHANGE' ? 'CHANGE' : 'REGISTRATION';
 }
 
+export function resolveProjectRequestPayload(request: ProjectRequest | null | undefined): ProjectRequestPayload | undefined {
+  if (!request) return undefined;
+  if (resolveProjectRequestKind(request) === 'CHANGE' && request.proposedSnapshot) {
+    return request.proposedSnapshot;
+  }
+  return request.payload;
+}
+
 export function describeProjectRequestVersion(input: {
   request?: ProjectRequest | null;
   project?: Project | null;

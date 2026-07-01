@@ -16,6 +16,7 @@ import {
 } from '../../../platform/project-migration-console';
 import {
   describeProjectRequestVersion,
+  resolveProjectRequestPayload,
   resolveProjectRequestKind,
 } from '../../../platform/project-change-request';
 import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
@@ -195,9 +196,10 @@ export function MigrationAuditDetailPanel({
     fallbackRequestedAt: record.requestedAt,
   });
   const useRequestPayloadAsCurrent = isChangeRequest && record.request?.status === 'PENDING';
+  const requestPayload = resolveProjectRequestPayload(record.request);
   const contractDocument = useRequestPayloadAsCurrent
-    ? (record.request?.payload.contractDocument || record.project.contractDocument || null)
-    : (record.project.contractDocument || record.request?.payload.contractDocument || null);
+    ? (requestPayload?.contractDocument || record.project.contractDocument || null)
+    : (record.project.contractDocument || requestPayload?.contractDocument || null);
 
   return (
     <Card

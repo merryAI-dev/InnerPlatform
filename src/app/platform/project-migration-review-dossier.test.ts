@@ -298,12 +298,27 @@ describe('buildMigrationReviewDossier', () => {
             summary: '새 계약서 분석',
           },
         },
+        proposedSnapshot: {
+          ...request.payload,
+          contractDocument: {
+            path: 'orgs/mysc/project-request-documents/u-1/proposed-contract.pdf',
+            name: '제안_계약서.pdf',
+            downloadURL: 'https://example.com/proposed-contract.pdf',
+            size: 5432,
+            contentType: 'application/pdf',
+            uploadedAt: '2026-04-22T10:00:00Z',
+          },
+          contractAnalysis: {
+            ...project.contractAnalysis!,
+            summary: '제안 계약서 분석',
+          },
+        },
       },
     );
 
-    expect(dossier.contractDocument.name).toBe('수정_계약서.pdf');
-    expect(dossier.contractDocument.downloadURL).toContain('new-contract.pdf');
-    expect(dossier.analysis.summary).toBe('새 계약서 분석');
+    expect(dossier.contractDocument.name).toBe('제안_계약서.pdf');
+    expect(dossier.contractDocument.downloadURL).toContain('proposed-contract.pdf');
+    expect(dossier.analysis.summary).toBe('제안 계약서 분석');
   });
 
   it('prefers current project team members over stale request payload values', () => {

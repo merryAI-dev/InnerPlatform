@@ -6,6 +6,7 @@ import {
   buildProjectPatchFromRequestPayload,
   describeProjectRequestVersion,
   resolveProjectRequestKind,
+  resolveProjectRequestPayload,
 } from './project-change-request';
 
 const baseProject = {
@@ -63,6 +64,17 @@ describe('project change request helpers', () => {
   it('keeps legacy requests as registration requests', () => {
     expect(resolveProjectRequestKind(null)).toBe('REGISTRATION');
     expect(resolveProjectRequestKind({ requestKind: 'CHANGE' } as any)).toBe('CHANGE');
+  });
+
+  it('uses proposed snapshot as the current payload for change requests', () => {
+    expect(resolveProjectRequestPayload({
+      requestKind: 'CHANGE',
+      payload: { name: '옛 payload' },
+      proposedSnapshot: { name: '최신 수정본' },
+    } as any)?.name).toBe('최신 수정본');
+    expect(resolveProjectRequestPayload({
+      payload: { name: '등록 요청 payload' },
+    } as any)?.name).toBe('등록 요청 payload');
   });
 
   it('stores before/proposed snapshots, changed fields, and request version', () => {
