@@ -128,8 +128,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('keeps portal edit drafts stable when async listener data refreshes', () => {
     expect(source).toContain('const lastResetKeyRef = useRef<string | null>(null)');
+    expect(source).toContain("const lastInitialDraftFingerprintRef = useRef('')");
     expect(source).toContain("const resetKey = `${draftKey}::${autosave?.key || ''}`");
-    expect(source).toContain('if (lastResetKeyRef.current === resetKey) return;');
+    expect(source).toContain('currentDraftFingerprint !== lastInitialDraftFingerprintRef.current');
+    expect(source).not.toContain('if (lastResetKeyRef.current === resetKey) return;');
   });
 
   it('labels project name as the groupware registration name without touching the team step', () => {

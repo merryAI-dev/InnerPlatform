@@ -40,6 +40,12 @@ interface ReviewFact {
   wide?: boolean;
 }
 
+const ATTACHMENT_CHANGE_KEYS = new Set(['contractDocument', 'quoteDocument', 'proposalDocument']);
+
+function isAttachmentChangeKey(key: string) {
+  return ATTACHMENT_CHANGE_KEYS.has(key);
+}
+
 function statusStripClass(tone: ReviewTone) {
   if (tone === 'success') return 'border-emerald-200 bg-emerald-50/90 text-emerald-900';
   if (tone === 'danger') return 'border-rose-200 bg-rose-50/90 text-rose-900';
@@ -130,17 +136,27 @@ function AnalysisList({
 }
 
 function ChangeRow({
+  changeKey,
   label,
   before,
   after,
 }: {
+  changeKey: string;
   label: string;
   before: string;
   after: string;
 }) {
+  const isAttachmentChange = isAttachmentChangeKey(changeKey);
   return (
-    <div className="grid gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)]">
-      <p className="text-[12px] font-semibold text-slate-700">{label}</p>
+    <div
+      className={`grid gap-3 border-b px-4 py-3 last:border-b-0 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)] ${
+        isAttachmentChange ? 'border-amber-200 bg-amber-50/80' : 'border-slate-100'
+      }`}
+    >
+      <div>
+        <p className={`text-[12px] font-semibold ${isAttachmentChange ? 'text-amber-900' : 'text-slate-700'}`}>{label}</p>
+        {isAttachmentChange ? <Badge className="mt-2 bg-amber-100 text-amber-900 hover:bg-amber-100">첨부파일 변경</Badge> : null}
+      </div>
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">이전</p>
         <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 text-slate-600">{before}</p>
@@ -180,7 +196,10 @@ export function MigrationAuditDetailPanel({
     fallbackActorName: record.managerName,
     fallbackRequestedAt: record.requestedAt,
   });
-  const contractDocument = record.project.contractDocument || record.request?.payload.contractDocument || null;
+  const useRequestPayloadAsCurrent = isChangeRequest && record.request?.status === 'PENDING';
+  const contractDocument = useRequestPayloadAsCurrent
+    ? (record.request?.payload.contractDocument || record.project.contractDocument || null)
+    : (record.project.contractDocument || record.request?.payload.contractDocument || null);
 
   return (
     <Card
@@ -251,6 +270,7 @@ export function MigrationAuditDetailPanel({
                 {dossier.changes.map((change) => (
                   <ChangeRow
                     key={`${change.key}-${change.before}-${change.after}`}
+                    changeKey={change.key}
                     label={change.label}
                     before={change.before}
                     after={change.after}

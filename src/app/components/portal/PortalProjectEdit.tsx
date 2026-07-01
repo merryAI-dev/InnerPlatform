@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { AlertTriangle, Loader2, Save, SendHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Save, SendHorizontal } from 'lucide-react';
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
@@ -32,6 +32,15 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
 
 function resolveExecutiveBanner(project: Project) {
@@ -81,6 +90,7 @@ export function PortalProjectEdit() {
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
+  const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [resubmitComment, setResubmitComment] = useState('');
   const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
   const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`;
@@ -229,7 +239,7 @@ export function PortalProjectEdit() {
         projectId: myProject.id,
         payload: {
           requestId: request.id,
-          reviewComment,
+          ...(reviewComment ? { reviewComment } : {}),
           reviewerName,
         },
       });
@@ -289,12 +299,8 @@ export function PortalProjectEdit() {
       }
       if (forcePendingReview) {
         setResubmitComment('');
-        toast.success('프로젝트 변경 요청을 다시 제출했습니다.');
-      } else {
-        toast.success('프로젝트 변경 요청을 저장했습니다.', {
-          description: '관리자 승인 전까지 프로젝트 원장은 바뀌지 않습니다.',
-        });
       }
+      setSaveSuccessDialogOpen(true);
     } catch (error) {
       console.error('[PortalProjectEdit] save failed:', error);
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
@@ -338,51 +344,69 @@ export function PortalProjectEdit() {
   }
 
   return (
-    <ProjectEditorWizard
-      mode="portal-edit"
-      title="프로젝트 수정"
-      description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
-      embeddedInShell
-      initialDraft={initialDraft}
-      draftKey={autosaveKey}
-      members={members}
-      departmentOptions={departmentOptions}
-      autosave={autosaveConfig}
-      actions={[
-        { id: 'save', label: '저장', icon: Save },
-        ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
-      ]}
-      busyActionId={busyActionId}
-      onContractFileUpload={handleContractFileUpload}
-      onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
-      onCancel={() => navigate('/portal/project-select')}
-      onSubmit={(draft, actionId) => handleSubmit(draft, actionId)}
-      topSlot={executiveBanner ? (
-        <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-                {canResubmit ? '반려 사유' : '검토 상태'}
-              </p>
-              <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
-              {canResubmit ? (
-                <div className="mt-4">
-                  <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
-                  <Textarea
-                    value={resubmitComment}
-                    onChange={(event) => setResubmitComment(event.target.value)}
-                    placeholder="보완한 내용을 짧게 남길 수 있습니다."
-                    className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
-                  />
-                </div>
-              ) : null}
+    <>
+      <ProjectEditorWizard
+        mode="portal-edit"
+        title="프로젝트 수정"
+        description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
+        embeddedInShell
+        initialDraft={initialDraft}
+        draftKey={autosaveKey}
+        members={members}
+        departmentOptions={departmentOptions}
+        autosave={autosaveConfig}
+        actions={[
+          { id: 'save', label: '저장', icon: Save },
+          ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
+        ]}
+        busyActionId={busyActionId}
+        onContractFileUpload={handleContractFileUpload}
+        onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
+        onCancel={() => navigate('/portal/project-select')}
+        onSubmit={(draft, actionId) => handleSubmit(draft, actionId)}
+        topSlot={executiveBanner ? (
+          <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+                  {canResubmit ? '반려 사유' : '검토 상태'}
+                </p>
+                <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
+                {canResubmit ? (
+                  <div className="mt-4">
+                    <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
+                    <Textarea
+                      value={resubmitComment}
+                      onChange={(event) => setResubmitComment(event.target.value)}
+                      placeholder="보완한 내용을 짧게 남길 수 있습니다."
+                      className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
+                    />
+                  </div>
+                ) : null}
+              </div>
+              {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             </div>
-            {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           </div>
-        </div>
-      ) : null}
-    />
+        ) : null}
+      />
+      <AlertDialog open={saveSuccessDialogOpen} onOpenChange={setSaveSuccessDialogOpen}>
+        <AlertDialogContent className="max-w-md border border-slate-200 bg-white">
+          <AlertDialogHeader className="items-center text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-xl text-slate-950">프로젝트 수정 요청이 등록되었습니다</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-slate-600">
+              관리자 승인 전까지 프로젝트 원장은 바뀌지 않으며, 승인 대기열에서 최신 수정 요청으로 검토됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-center">
+            <AlertDialogAction onClick={() => setSaveSuccessDialogOpen(false)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

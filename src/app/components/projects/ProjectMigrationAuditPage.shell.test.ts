@@ -80,6 +80,13 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(previewSource).toContain('PDF 미리보기');
   });
 
+  it('highlights attachment changes and previews the pending request document', () => {
+    expect(detailSource).toContain('ATTACHMENT_CHANGE_KEYS');
+    expect(detailSource).toContain('첨부파일 변경');
+    expect(detailSource).toContain('useRequestPayloadAsCurrent');
+    expect(detailSource).toContain("record.request?.payload.contractDocument || record.project.contractDocument || null");
+  });
+
   it('keeps CIC registration review read-only while improving scan hierarchy', () => {
     expect(detailSource).toContain('ReviewSection');
     expect(detailSource).toContain('ReviewFactGrid');

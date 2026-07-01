@@ -565,6 +565,42 @@ describe('platform-bff-client', () => {
     expect(result.slackDelivered).toBe(true);
   });
 
+  it('omits blank optional text fields from project executive review requests', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-123',
+          requestId: null,
+          reviewStatus: 'APPROVED',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await reviewProjectExecutiveStatusViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-abc' },
+      projectId: 'p-123',
+      review: {
+        requestId: '   ',
+        reviewStatus: 'APPROVED',
+        reviewComment: null,
+        reviewerName: '  임원A  ',
+      } as any,
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/executive-review', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        reviewStatus: 'APPROVED',
+        reviewerName: '임원A',
+      },
+    }));
+  });
+
   it('calls project executive review resubmission endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
@@ -601,6 +637,42 @@ describe('platform-bff-client', () => {
       },
     }));
     expect(result.reviewStatus).toBe('PENDING');
+  });
+
+  it('omits blank optional text fields from project executive review resubmission requests', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-123',
+          requestId: 'pr-123',
+          reviewStatus: 'PENDING',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const { resubmitProjectExecutiveReviewViaBff } = await import('./platform-bff-client');
+    await resubmitProjectExecutiveReviewViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-abc' },
+      projectId: 'p-123',
+      payload: {
+        requestId: '  pr-123  ',
+        reviewComment: null,
+        reviewerName: '  변민욱  ',
+      } as any,
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/executive-review/resubmit', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        requestId: 'pr-123',
+        reviewerName: '변민욱',
+      },
+    }));
   });
 
   it('calls evidence drive provision/sync endpoints', async () => {

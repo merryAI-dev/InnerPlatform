@@ -340,6 +340,39 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeOptionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeProjectExecutiveReviewPayload(
+  payload: ProjectExecutiveReviewPayload,
+): ProjectExecutiveReviewPayload {
+  const requestId = normalizeOptionalText(payload.requestId);
+  const reviewComment = normalizeOptionalText(payload.reviewComment);
+  const reviewerName = normalizeOptionalText(payload.reviewerName);
+  return {
+    ...(requestId ? { requestId } : {}),
+    reviewStatus: payload.reviewStatus,
+    ...(reviewComment ? { reviewComment } : {}),
+    ...(reviewerName ? { reviewerName } : {}),
+  };
+}
+
+function normalizeProjectExecutiveReviewResubmitPayload(
+  payload: ProjectExecutiveReviewResubmitPayload,
+): ProjectExecutiveReviewResubmitPayload {
+  const requestId = normalizeOptionalText(payload.requestId);
+  const reviewComment = normalizeOptionalText(payload.reviewComment);
+  const reviewerName = normalizeOptionalText(payload.reviewerName);
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(reviewComment ? { reviewComment } : {}),
+    ...(reviewerName ? { reviewerName } : {}),
+  };
+}
+
 function normalizeSuggestedMappings(value: unknown): GoogleSheetMigrationAnalysisSuggestion[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -1276,7 +1309,7 @@ export async function reviewProjectExecutiveStatusViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.review,
+      body: normalizeProjectExecutiveReviewPayload(params.review),
       timeoutMs: 10000,
       retries: 0,
     },
@@ -1297,7 +1330,7 @@ export async function resubmitProjectExecutiveReviewViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: normalizeProjectExecutiveReviewResubmitPayload(params.payload),
       timeoutMs: 10000,
       retries: 0,
     },

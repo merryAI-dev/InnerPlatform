@@ -23,4 +23,12 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).toContain('draftKey={autosaveKey}');
     expect(source).not.toContain("draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}");
   });
+
+  it('shows a centered confirmation dialog instead of a corner toast after saving', () => {
+    expect(source).toContain('saveSuccessDialogOpen');
+    expect(source).toContain('<AlertDialog open={saveSuccessDialogOpen}');
+    expect(source).toContain('프로젝트 수정 요청이 등록되었습니다');
+    expect(source).not.toContain("toast.success('프로젝트 변경 요청을 저장했습니다.");
+    expect(source).not.toContain("toast.success('프로젝트 변경 요청을 다시 제출했습니다.");
+  });
 });

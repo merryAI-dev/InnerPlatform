@@ -475,7 +475,9 @@ export function ProjectEditorWizard({
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
   const quoteUploadInputRef = useRef<HTMLInputElement | null>(null);
   const proposalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const draftRef = useRef(draft);
   const lastResetKeyRef = useRef<string | null>(null);
+  const lastInitialDraftFingerprintRef = useRef('');
   const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
@@ -494,10 +496,25 @@ export function ProjectEditorWizard({
   });
 
   useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
     const resetKey = `${draftKey}::${autosave?.key || ''}`;
-    if (lastResetKeyRef.current === resetKey) return;
+    const currentDraftFingerprint = JSON.stringify(createProjectEditorDraft(draftRef.current));
+    if (
+      lastResetKeyRef.current === resetKey
+      && lastInitialDraftFingerprintRef.current
+      && currentDraftFingerprint !== lastInitialDraftFingerprintRef.current
+    ) {
+      lastInitialDraftFingerprintRef.current = initialDraftFingerprint;
+      return;
+    }
     lastResetKeyRef.current = resetKey;
-    setDraft(createProjectEditorWizardDraft(initialDraft));
+    lastInitialDraftFingerprintRef.current = initialDraftFingerprint;
+    const nextDraft = createProjectEditorWizardDraft(initialDraft);
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
     setStepIndex(0);
     setDocumentUploadState({ contract: 'idle', quote: 'idle', proposal: 'idle' });
     setDocumentUploadError({ contract: '', quote: '', proposal: '' });

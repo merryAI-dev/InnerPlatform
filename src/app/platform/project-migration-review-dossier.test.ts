@@ -273,6 +273,37 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.audit.history[0].changes).toHaveLength(2);
   });
 
+  it('shows the pending change request contract document instead of the current project document', () => {
+    const dossier = buildMigrationReviewDossier(
+      project,
+      {
+        ...request,
+        requestKind: 'CHANGE',
+        status: 'PENDING',
+        targetProjectId: project.id,
+        payload: {
+          ...request.payload,
+          contractDocument: {
+            path: 'orgs/mysc/project-request-documents/u-1/new-contract.pdf',
+            name: '수정_계약서.pdf',
+            downloadURL: 'https://example.com/new-contract.pdf',
+            size: 4321,
+            contentType: 'application/pdf',
+            uploadedAt: '2026-04-22T09:00:00Z',
+          },
+          contractAnalysis: {
+            ...project.contractAnalysis!,
+            summary: '새 계약서 분석',
+          },
+        },
+      },
+    );
+
+    expect(dossier.contractDocument.name).toBe('수정_계약서.pdf');
+    expect(dossier.contractDocument.downloadURL).toContain('new-contract.pdf');
+    expect(dossier.analysis.summary).toBe('새 계약서 분석');
+  });
+
   it('prefers current project team members over stale request payload values', () => {
     const dossier = buildMigrationReviewDossier(
       {
