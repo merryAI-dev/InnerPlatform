@@ -305,6 +305,7 @@ export function CashflowSheetLabPage({
 
   const projectId = projectIdInput.trim();
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
+  const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim() || startWeek.trim() || endWeek.trim());
   const sourceKey = useMemo(() => buildSourceKey({
     projectId,
     value: sheetLink,
@@ -474,7 +475,7 @@ export function CashflowSheetLabPage({
       }
       setSystemAccountEmail(email);
       setSavedConfig(result.config || null);
-      if (result.config?.value) {
+      if (result.config?.value && !hasSheetDraft) {
         setSheetLink(result.config.value);
         setSheetName(result.config.sheetName || '');
         setStartWeek(result.config.startWeek || '');
@@ -739,7 +740,7 @@ export function CashflowSheetLabPage({
   }, [stageResult]);
   const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
-  const showSetupSteps = !hasSavedConfig;
+  const showSetupSteps = true;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || preview?.spreadsheetTitle || '';
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;

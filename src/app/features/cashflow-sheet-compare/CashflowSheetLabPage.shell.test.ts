@@ -107,6 +107,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트 정보 저장');
     expect(pageSource).toContain('시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요.');
     expect(pageSource).toContain('임시 저장');
+    expect(pageSource).toContain('const showSetupSteps = true');
+    expect(pageSource).toContain('result.config?.value && !hasSheetDraft');
     expect(pageSource).not.toContain('캐시플로우 값은 바뀌지 않습니다.');
     expect(pageSource).toContain('시트에서 플랫폼에 저장할 값을 검토해주세요.');
     expect(pageSource).toContain('MYSCube에 값 저장');
