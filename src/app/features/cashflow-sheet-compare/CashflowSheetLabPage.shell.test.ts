@@ -49,4 +49,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('동기화');
     expect(pageSource).not.toContain('내보내기');
   });
+
+  it('does not overwrite active sheet config edits during background reloads', () => {
+    expect(pageSource).toContain('editingConfigRef.current = editingConfig');
+    expect(pageSource).toContain("loadedConfigProjectIdRef.current !== projectId");
+    expect(pageSource).toContain('if (projectChanged || !editingConfigRef.current || !nextConfig)');
+  });
 });

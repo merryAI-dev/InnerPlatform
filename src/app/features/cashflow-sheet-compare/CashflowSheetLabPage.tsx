@@ -212,6 +212,8 @@ export function CashflowSheetLabPage() {
   const [applyMessage, setApplyMessage] = useState('');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const previewRequestRef = useRef(0);
+  const editingConfigRef = useRef(editingConfig);
+  const loadedConfigProjectIdRef = useRef('');
 
   const projectId = projectIdInput.trim();
   const projectName = projectId || '프로젝트';
@@ -234,6 +236,10 @@ export function CashflowSheetLabPage() {
   }, [initialProjectId, projectIdInput]);
 
   useEffect(() => {
+    editingConfigRef.current = editingConfig;
+  }, [editingConfig]);
+
+  useEffect(() => {
     if (!projectId) return;
     rememberRecentPortalProject(projectId);
   }, [projectId]);
@@ -250,12 +256,16 @@ export function CashflowSheetLabPage() {
     }).then((result) => {
       if (cancelled) return;
       const nextConfig = result.config || null;
+      const projectChanged = loadedConfigProjectIdRef.current !== projectId;
+      loadedConfigProjectIdRef.current = projectId;
       setConfig(nextConfig);
-      setEditingConfig(!nextConfig);
-      setSheetLink(nextConfig?.value || '');
-      setSheetName(nextConfig?.sheetName || '');
-      setStartWeek(nextConfig?.startWeek || '');
-      setEndWeek(nextConfig?.endWeek || '');
+      if (projectChanged || !editingConfigRef.current || !nextConfig) {
+        setEditingConfig(!nextConfig);
+        setSheetLink(nextConfig?.value || '');
+        setSheetName(nextConfig?.sheetName || '');
+        setStartWeek(nextConfig?.startWeek || '');
+        setEndWeek(nextConfig?.endWeek || '');
+      }
     }).catch((error) => {
       if (!cancelled) setErrorMessage(formatError(error));
     }).finally(() => {
