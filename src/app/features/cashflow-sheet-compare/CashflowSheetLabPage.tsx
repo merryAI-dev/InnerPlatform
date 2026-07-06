@@ -122,6 +122,17 @@ function readyCtaClass(active: boolean) {
   return active ? 'motion-safe:animate-[cashflow-ready-bob_1.15s_ease-in-out_infinite]' : '';
 }
 
+const CASHFLOW_SHEET_YEAR_OPTIONS = [2025, 2026, 2027, 2028];
+const DEFAULT_START_WEEK = '26-1-1';
+const DEFAULT_END_WEEK = '26-12-5';
+
+function yearRangeToWeeks(startYear: number, endYear: number) {
+  return {
+    startWeek: `${String(startYear).slice(2)}-1-1`,
+    endWeek: `${String(endYear).slice(2)}-12-5`,
+  };
+}
+
 function CashflowSheetHeroAnimation() {
   const tiles = [
     { kind: 'excel', label: 'XLS', x: -112, y: -104, rotate: -16, size: 82, delay: 0 },
@@ -274,8 +285,11 @@ export function CashflowSheetLabPage({
   const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
-  const [startWeek, setStartWeek] = useState('');
-  const [endWeek, setEndWeek] = useState('');
+  const [startWeek, setStartWeek] = useState(DEFAULT_START_WEEK);
+  const [endWeek, setEndWeek] = useState(DEFAULT_END_WEEK);
+  const [showYearRangePicker, setShowYearRangePicker] = useState(false);
+  const [rangeStartYear, setRangeStartYear] = useState('2026');
+  const [rangeEndYear, setRangeEndYear] = useState('2026');
   const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
@@ -305,6 +319,7 @@ export function CashflowSheetLabPage({
 
   const projectId = projectIdInput.trim();
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
+  const hasWeekRange = Boolean(startWeek.trim() && endWeek.trim());
   const sourceKey = useMemo(() => buildSourceKey({
     projectId,
     value: sheetLink,
@@ -477,8 +492,8 @@ export function CashflowSheetLabPage({
       if (result.config?.value) {
         setSheetLink(result.config.value);
         setSheetName(result.config.sheetName || '');
-        setStartWeek(result.config.startWeek || '');
-        setEndWeek(result.config.endWeek || '');
+        setStartWeek(result.config.startWeek || DEFAULT_START_WEEK);
+        setEndWeek(result.config.endWeek || DEFAULT_END_WEEK);
       }
       if (!result.config?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
@@ -501,7 +516,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleSaveSheetConfig() {
-    if (!projectId || loading || !spreadsheetId) return;
+    if (!projectId || loading || !spreadsheetId || !hasWeekRange) return;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
@@ -549,7 +564,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handlePreview() {
-    if (!projectId || loading || !spreadsheetId) return;
+    if (!projectId || loading || !spreadsheetId || !hasWeekRange) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setLoading(true);
@@ -614,7 +629,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleStageSheetValues() {
-    if (!projectId || loading || !spreadsheetId || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || !hasWeekRange || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
@@ -669,7 +684,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleReflectSheetValues() {
-    if (!projectId || loading || !spreadsheetId || !stageResult || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || !hasWeekRange || !stageResult || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
@@ -723,9 +738,9 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
     ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
     : '전체';
-  const canPreview = Boolean(projectId && spreadsheetId && !loading);
-  const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
-  const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
+  const canPreview = Boolean(projectId && spreadsheetId && hasWeekRange && !loading);
+  const canSaveConfig = Boolean(projectId && spreadsheetId && hasWeekRange && !loading);
+  const canApply = Boolean(projectId && spreadsheetId && hasWeekRange && preview && reviewedSourceKey === sourceKey && !loading);
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
   const stageCandidates = useMemo(() => {
     if (!stageResult) return [];
@@ -737,13 +752,22 @@ export function CashflowSheetLabPage({
       || a.lineId.localeCompare(b.lineId)
     ));
   }, [stageResult]);
-  const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
+  const canReflect = Boolean(projectId && spreadsheetId && hasWeekRange && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = !hasSavedConfig;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || preview?.spreadsheetTitle || '';
   const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
   const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
+  const applyYearRange = (startYearValue: string, endYearValue: string) => {
+    const startYear = Number(startYearValue);
+    const endYear = Math.max(startYear, Number(endYearValue));
+    const range = yearRangeToWeeks(startYear, endYear);
+    setRangeStartYear(String(startYear));
+    setRangeEndYear(String(endYear));
+    setStartWeek(range.startWeek);
+    setEndWeek(range.endWeek);
+  };
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-all duration-300 ${
       step <= activeStep
@@ -871,6 +895,40 @@ export function CashflowSheetLabPage({
                   aria-label="종료 주차"
                   className="h-10 rounded-none text-[12px]"
                 />
+              </div>
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 rounded-none px-3 text-[12px]"
+                  onClick={() => setShowYearRangePicker((value) => !value)}
+                >
+                  다년도 사업
+                </Button>
+                {showYearRangePicker && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <select
+                      value={rangeStartYear}
+                      onChange={(event) => applyYearRange(event.target.value, rangeEndYear)}
+                      aria-label="시작 연도"
+                      className="h-10 rounded-none border border-slate-200 bg-white px-3 text-[12px]"
+                    >
+                      {CASHFLOW_SHEET_YEAR_OPTIONS.map((year) => (
+                        <option key={year} value={year}>{year}년 시작</option>
+                      ))}
+                    </select>
+                    <select
+                      value={rangeEndYear}
+                      onChange={(event) => applyYearRange(rangeStartYear, event.target.value)}
+                      aria-label="종료 연도"
+                      className="h-10 rounded-none border border-slate-200 bg-white px-3 text-[12px]"
+                    >
+                      {CASHFLOW_SHEET_YEAR_OPTIONS.map((year) => (
+                        <option key={year} value={year}>{year}년 종료</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Button

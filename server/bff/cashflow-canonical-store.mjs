@@ -436,6 +436,7 @@ export async function upsertCashflowWeekAmounts({
   amounts,
   now,
   allowSheetWeek = false,
+  writeSubmissionStatus = true,
 }) {
   const parsed = parseYearMonth(yearMonth);
   if (!parsed) {
@@ -452,10 +453,10 @@ export async function upsertCashflowWeekAmounts({
   }
 
   const weekRef = db.doc(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`);
-  const statusRef = canonicalWeek
+  const statusRef = canonicalWeek && writeSubmissionStatus
     ? db.doc(`orgs/${tenantId}/${WEEKLY_SUBMISSION_STATUS_COLLECTION_ID}/${resolveWeekDocId(projectId, targetWeek.yearMonth, targetWeek.weekNo)}`)
     : null;
-  const statusPatch = canonicalWeek
+  const statusPatch = canonicalWeek && writeSubmissionStatus
     ? buildStatusPatch({ tenantId, actorId, actorName, projectId, week: targetWeek, mode, now })
     : null;
   let amountChanges = [];

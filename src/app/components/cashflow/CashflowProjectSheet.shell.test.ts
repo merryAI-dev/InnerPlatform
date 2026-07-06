@@ -130,6 +130,16 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('hydrateWeekDates(week)');
   });
 
+  it('gates cashflow range rendering while sheet config and range weeks are loading', () => {
+    expect(cashflowProjectSheetSource).toContain('cashflowSheetConfigLoading');
+    expect(cashflowProjectSheetSource).toContain('rangeWeeksLoading');
+    expect(cashflowProjectSheetSource).toContain('cashflowRangeLoading');
+    expect(cashflowProjectSheetSource).toContain('캐시플로 범위를 불러오는 중입니다.');
+    expect(cashflowProjectSheetSource).toContain('rangeLoadSeqRef.current');
+    expect(cashflowProjectSheetSource).toContain('if (cashflowRangeLoading) return []');
+    expect(cashflowProjectSheetSource).toContain('{!cashflowRangeLoading && (');
+  });
+
   it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
     expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");

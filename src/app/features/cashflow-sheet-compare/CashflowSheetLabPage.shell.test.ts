@@ -74,6 +74,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('stageResult');
     expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
+    expect(pageSource).toContain("DEFAULT_START_WEEK = '26-1-1'");
+    expect(pageSource).toContain("DEFAULT_END_WEEK = '26-12-5'");
+    expect(pageSource).toContain('CASHFLOW_SHEET_YEAR_OPTIONS = [2025, 2026, 2027, 2028]');
+    expect(pageSource).toContain('다년도 사업');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
     expect(pageSource).toContain('CashflowSheetHeroAnimation');

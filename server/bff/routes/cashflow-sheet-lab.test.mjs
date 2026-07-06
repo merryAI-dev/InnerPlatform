@@ -170,9 +170,15 @@ describe('cashflow sheet lab route', () => {
       });
   });
 
-  it('saves the cashflow sheet config without reading Google Sheets', async () => {
+  it('saves the cashflow sheet config with active weeks from the sheet range', async () => {
     const db = createDb();
-    const previewSpreadsheet = vi.fn();
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
 
     const response = await request(createApp({ db, googleSheetsService: { previewSpreadsheet } }))
       .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
@@ -190,9 +196,14 @@ describe('cashflow sheet lab route', () => {
       spreadsheetId: 'spreadsheet-a',
       weekBasis: 'sheet_range',
       totalBasis: 'sheet_range',
+      activeWeeks: [
+        expect.objectContaining({ label: '26-1-1', yearMonth: '2026-01', weekNo: 1 }),
+        expect.objectContaining({ label: '26-1-2', yearMonth: '2026-01', weekNo: 2 }),
+        expect.objectContaining({ label: '26-1-3', yearMonth: '2026-01', weekNo: 3 }),
+      ],
       updatedBy: { email: 'user@mysc.co.kr', role: 'workspace_user' },
     });
-    expect(previewSpreadsheet).not.toHaveBeenCalled();
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab).toMatchObject(response.body.config);
   });
 
@@ -244,7 +255,7 @@ describe('cashflow sheet lab route', () => {
     expect(getSpreadsheetMeta).toHaveBeenCalledWith('spreadsheet-a');
   });
 
-  it('allows saving ranges before sheet headers are verified', async () => {
+  it('rejects config ranges that are not present in the sheet headers', async () => {
     await request(createApp())
       .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
       .send({
@@ -253,7 +264,20 @@ describe('cashflow sheet lab route', () => {
         startWeek: '26-1-1',
         endWeek: '26-1-4',
       })
-      .expect(200);
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_week_range_not_in_sheet');
+      });
+  });
+
+  it('requires an explicit cashflow sheet week range', async () => {
+    await request(createApp())
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
+      .send({ value: 'spreadsheet-a' })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_week_range_required');
+      });
   });
 
   it('rejects preview ranges that are not present in the sheet headers', async () => {
@@ -285,7 +309,7 @@ describe('cashflow sheet lab route', () => {
 
     const response = await request(createApp({ db }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
-      .send({ value: 'spreadsheet-a' })
+      .send({ value: 'spreadsheet-a', startWeek: '26-1-1', endWeek: '26-1-3' })
       .expect(200);
 
     expect(response.body.accessPolicy.valueSource).toBe('firebase_cashflow_weeks');
@@ -307,7 +331,7 @@ describe('cashflow sheet lab route', () => {
     const response = await request(createApp({ googleSheetsService: { previewSpreadsheet } }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
       .set('x-google-access-token', 'google-token')
-      .send({ value: 'spreadsheet-a' })
+      .send({ value: 'spreadsheet-a', startWeek: '26-1-1', endWeek: '26-1-3' })
       .expect(200);
 
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
@@ -326,7 +350,7 @@ describe('cashflow sheet lab route', () => {
     await request(createApp({ googleSheetsService: { previewSpreadsheet } }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
       .set('x-google-access-token', 'expired-or-forbidden-token')
-      .send({ value: 'spreadsheet-a' })
+      .send({ value: 'spreadsheet-a', startWeek: '26-1-1', endWeek: '26-1-3' })
       .expect(403)
       .expect((response) => {
         expect(response.body.code).toBe('google_sheet_service_account_forbidden');
@@ -376,6 +400,7 @@ describe('cashflow sheet lab route', () => {
       projection: { MYSC_PREPAY_IN: 999 },
       actual: { MYSC_PREPAY_IN: 999 },
     });
+    expect(db.__getDocument('orgs/tenant-a/weekly_submission_status/project-a-2026-01-w1')).toBeUndefined();
     expect(db.__getDocument().cashflowSheetLab).toMatchObject({
       lastAppliedAt: expect.any(String),
       lastAppliedBy: {
@@ -588,6 +613,49 @@ describe('cashflow sheet lab route', () => {
       actual: { MYSC_PREPAY_IN: 999 },
     });
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w5')).toMatchObject({
+      projection: { MYSC_PREPAY_IN: 999 },
+      actual: { MYSC_PREPAY_IN: 999 },
+    });
+  });
+
+  it('applies a saved multi-year sheet range from 2025 into 2026', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '25-12-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrixWithWeekLabels(['25-12-1', '25-12-2', '25-12-3', '25-12-4', '25-12-5', '26-1-1', '26-1-2']),
+      })),
+    };
+
+    const response = await request(createApp({ db, googleSheetsService }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'apply-2025-2026' })
+      .expect(200);
+
+    expect(response.body.appliedLineCount).toBe(168);
+    expect(response.body.activeWeekRange.activeWeeks).toHaveLength(7);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2025-12-w1')).toMatchObject({
+      yearMonth: '2025-12',
+      weekNo: 1,
+      projection: { MYSC_PREPAY_IN: 999 },
+      actual: { MYSC_PREPAY_IN: 999 },
+    });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w2')).toMatchObject({
+      yearMonth: '2026-01',
+      weekNo: 2,
       projection: { MYSC_PREPAY_IN: 999 },
       actual: { MYSC_PREPAY_IN: 999 },
     });

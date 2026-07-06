@@ -246,6 +246,9 @@ function weekSortKey(week) {
 function normalizeWeekRange({ startWeek, endWeek }) {
   const start = readOptionalText(startWeek);
   const end = readOptionalText(endWeek);
+  if (!start || !end) {
+    throw createHttpError(400, 'startWeek and endWeek are required.', 'cashflow_week_range_required');
+  }
   const parsedStart = start ? parseCashflowWeekLabel(start) : null;
   const parsedEnd = end ? parseCashflowWeekLabel(end) : null;
   if (start && !parsedStart) {
@@ -308,7 +311,7 @@ function resolveGoogleSheetPermission() {
   return 'shared_with_mysc_system_account';
 }
 
-async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, context, existingConfig = null }) {
+async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, context, existingConfig = null, activeWeeks = [], spreadsheetTitle = '' }) {
   if (!db) {
     throw createHttpError(503, 'Firestore is required to save cashflow sheet config.', 'firestore_unconfigured');
   }
@@ -323,9 +326,10 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, con
     value: parsed.value,
     sheetName: readOptionalText(parsed.sheetName),
     spreadsheetId,
-    spreadsheetTitle: shouldKeepVerifiedMetadata ? readOptionalText(existingConfig?.spreadsheetTitle) : '',
+    spreadsheetTitle: readOptionalText(spreadsheetTitle) || (shouldKeepVerifiedMetadata ? readOptionalText(existingConfig?.spreadsheetTitle) : ''),
     startWeek: readOptionalText(parsed.startWeek),
     endWeek: readOptionalText(parsed.endWeek),
+    activeWeeks,
     weekBasis: CASHFLOW_WEEK_BASIS,
     totalBasis: CASHFLOW_WEEK_BASIS,
     updatedAt: now,
@@ -921,6 +925,7 @@ async function applyStagedCashflowSheetLab({
       amounts: group.amounts,
       now,
       allowSheetWeek: true,
+      writeSubmissionStatus: false,
     }));
   }
 
@@ -1117,6 +1122,7 @@ async function applyConfiguredCashflowSheetLab({
       amounts: group.amounts,
       now,
       allowSheetWeek: true,
+      writeSubmissionStatus: false,
     }));
   }
   const actorUid = readOptionalText(context?.actorId);
@@ -1457,7 +1463,7 @@ export function mountCashflowSheetLabRoutes(app, {
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabConfigSchema, req.body, 'Invalid cashflow sheet lab config payload');
-    normalizeWeekRange(parsed);
+    const weekRange = normalizeWeekRange(parsed);
     logCashflowSheetLab('config.save.start', req, {
       projectId,
       authMode: 'bff_config_only',
@@ -1470,13 +1476,32 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
 
     try {
+      const preview = await loadSheetPreview({
+        value: parsed.value,
+        sheetName: parsed.sheetName,
+      });
+      assertCashflowUsageLinkedSheet(preview);
+      const template = analyzeCashflowSheetTemplate(preview.matrix);
+      assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
+      if (!template.supported) {
+        throw createHttpError(
+          400,
+          '지원하지 않는 cashflow 시트 구조라 설정할 수 없습니다.',
+          'cashflow_sheet_template_unsupported',
+        );
+      }
       const config = await saveCashflowSheetLabConfig({
         db,
         tenantId,
         projectId,
-        parsed,
+        parsed: {
+          ...parsed,
+          sheetName: readOptionalText(parsed.sheetName) || preview.selectedSheetName,
+        },
         context: req.context,
         existingConfig: readCashflowSheetLabConfig(project),
+        activeWeeks: buildActiveWeeksFromTemplate(template, weekRange),
+        spreadsheetTitle: preview.spreadsheetTitle,
       });
       logCashflowSheetLab('config.save.ok', req, {
         projectId,

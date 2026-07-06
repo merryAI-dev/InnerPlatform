@@ -201,6 +201,42 @@ describe('cashflow canonical BFF helpers', () => {
     });
   });
 
+  it('can skip weekly submission status writes for sheet imports', async () => {
+    const writes = [];
+    const db = {
+      doc(path) {
+        return { path };
+      },
+      async runTransaction(callback) {
+        await callback({
+          async get() {
+            return { exists: false, data: () => ({}) };
+          },
+          set(ref, data, options) {
+            writes.push({ ref, data, options });
+          },
+        });
+      },
+    };
+
+    await upsertCashflowWeekAmounts({
+      db,
+      tenantId: 'mysc',
+      actorId: 'u1',
+      actorName: 'PM',
+      projectId: 'p1',
+      mode: 'projection',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      amounts: { DIRECT_COST_OUT: 1000 },
+      now: '2026-06-01T09:40:00.000Z',
+      writeSubmissionStatus: false,
+    });
+
+    expect(writes.some((write) => write.ref.path.includes('/cashflow_weeks/'))).toBe(true);
+    expect(writes.some((write) => write.ref.path.includes('/weekly_submission_status/'))).toBe(false);
+  });
+
   it('treats bank-imported expense rows on inflow lines as negative adjustments', () => {
     const plan = buildCashflowActualSyncPlan({
       anchorYear: 2026,

@@ -119,6 +119,13 @@ describe('cashflow sheet template mapping', () => {
       yearMonth: '2026-01',
       weekNo: 1,
     });
+    expect(parseCashflowWeekLabel('25-12-1')).toEqual({
+      raw: '25-12-1',
+      year: 2025,
+      month: 12,
+      yearMonth: '2025-12',
+      weekNo: 1,
+    });
     expect(parseCashflowWeekLabel('2026-1-1')).toBeNull();
     expect(parseCashflowWeekLabel('26-13-1')).toBeNull();
     expect(parseCashflowWeekLabel('26-1-7')).toBeNull();

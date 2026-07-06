@@ -381,6 +381,9 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
+  const [cashflowSheetConfigLoading, setCashflowSheetConfigLoading] = useState(true);
+  const [rangeWeeksLoading, setRangeWeeksLoading] = useState(false);
+  const rangeLoadSeqRef = useRef(0);
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
@@ -418,6 +421,7 @@ export function CashflowProjectSheet({
   }, [yearMonth]);
   const yearWeeks = useMemo(() => getYearMondayWeeks(selectedYear), [selectedYear]);
   const sheetRangeWeeks = cashflowSheetRange?.activeWeeks || [];
+  const cashflowRangeLoading = cashflowSheetConfigLoading || rangeWeeksLoading;
   const allProjectCashflowWeeks = useMemo(() => {
     const byKey = new Map<string, CashflowWeekSheet>();
     for (const week of [...weeks, ...rangeLoadedWeeks]) {
@@ -428,6 +432,7 @@ export function CashflowProjectSheet({
   }, [projectId, rangeLoadedWeeks, weeks]);
   const annualWeeks = useMemo<MonthMondayWeek[]>(() => {
     const byKey = new Map<string, MonthMondayWeek>();
+    if (cashflowRangeLoading) return [];
     const baseWeeks = sheetRangeWeeks.length > 0 ? sheetRangeWeeks : yearWeeks;
     const rangeStart = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.startWeek) : null;
     const rangeEnd = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.endWeek) : null;
@@ -456,7 +461,7 @@ export function CashflowProjectSheet({
     }
     return Array.from(byKey.values())
       .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
-  }, [allProjectCashflowWeeks, cashflowSheetRange, projectId, selectedYear, sheetRangeWeeks, yearWeeks]);
+  }, [allProjectCashflowWeeks, cashflowRangeLoading, cashflowSheetRange, projectId, selectedYear, sheetRangeWeeks, yearWeeks]);
   const normalizedYearMonth = useMemo(() => {
     const [y, m] = yearMonth.split('-');
     if (!y || !m) return yearMonth;
@@ -626,10 +631,19 @@ export function CashflowProjectSheet({
     if (!db || !projectId) {
       setCashflowSheetRange(null);
       setCashflowSheetConfig(null);
+      setRangeLoadedWeeks([]);
+      setCashflowSheetConfigLoading(false);
+      setRangeWeeksLoading(false);
       return;
     }
     const documentPath = getOrgDocumentPath(orgId, 'projects', projectId);
     let cancelled = false;
+    rangeLoadSeqRef.current += 1;
+    setCashflowSheetConfigLoading(true);
+    setRangeWeeksLoading(false);
+    setCashflowSheetRange(null);
+    setCashflowSheetConfig(null);
+    setRangeLoadedWeeks([]);
     getDoc(doc(db, documentPath))
       .then((snap) => {
         if (cancelled) return;
@@ -676,6 +690,7 @@ export function CashflowProjectSheet({
         const end = parseCashflowSheetWeekLabel(config?.endWeek);
         if (!start || !end || start.sortKey > end.sortKey || activeWeeks.length === 0) {
           setCashflowSheetRange(null);
+          setCashflowSheetConfigLoading(false);
           return;
         }
         setCashflowSheetRange({
@@ -686,6 +701,7 @@ export function CashflowProjectSheet({
           label: `${config?.startWeek} ~ ${config?.endWeek}`,
           activeWeeks,
         });
+        setCashflowSheetConfigLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
@@ -702,6 +718,9 @@ export function CashflowProjectSheet({
         });
         setCashflowSheetRange(null);
         setCashflowSheetConfig(null);
+        setRangeLoadedWeeks([]);
+        setCashflowSheetConfigLoading(false);
+        setRangeWeeksLoading(false);
       });
     return () => {
       cancelled = true;
@@ -709,10 +728,13 @@ export function CashflowProjectSheet({
   }, [db, orgId, projectId]);
 
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
+    const requestSeq = ++rangeLoadSeqRef.current;
     if (!db || !cashflowSheetRange) {
       setRangeLoadedWeeks([]);
+      setRangeWeeksLoading(false);
       return;
     }
+    setRangeWeeksLoading(true);
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const q = query(
       base,
@@ -720,12 +742,17 @@ export function CashflowProjectSheet({
       where('yearMonth', '<=', cashflowSheetRange.endYearMonth),
       limit(5000),
     );
-    const snap = await getDocs(q);
-    setRangeLoadedWeeks(
-      snap.docs
-        .map((d) => d.data() as CashflowWeekSheet)
-        .filter((week) => week.projectId === projectId),
-    );
+    try {
+      const snap = await getDocs(q);
+      if (requestSeq !== rangeLoadSeqRef.current) return;
+      setRangeLoadedWeeks(
+        snap.docs
+          .map((d) => d.data() as CashflowWeekSheet)
+          .filter((week) => week.projectId === projectId),
+      );
+    } finally {
+      if (requestSeq === rangeLoadSeqRef.current) setRangeWeeksLoading(false);
+    }
   }, [cashflowSheetRange, db, orgId, projectId]);
 
   useEffect(() => {
@@ -735,6 +762,7 @@ export function CashflowProjectSheet({
     });
     return () => {
       cancelled = true;
+      rangeLoadSeqRef.current += 1;
     };
   }, [loadCashflowSheetRangeWeeks]);
 
@@ -1938,6 +1966,18 @@ export function CashflowProjectSheet({
 
   function renderUnifiedMonthlyBoard() {
     const visibleWeeks = annualWeeks;
+    if (cashflowRangeLoading) {
+      return (
+        <Card className="overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+          <CardContent className="flex min-h-[260px] items-center justify-center p-6">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              캐시플로 범위를 불러오는 중입니다.
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
     function computeBoardDerived(mode: 'projection' | 'actual') {
       const openingIn = mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn;
       const openingOut = mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut;
@@ -3484,18 +3524,20 @@ export function CashflowProjectSheet({
 
       {renderUnifiedMonthlyBoard()}
 
-      <section className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
-            <Columns2 className="h-4 w-4 text-slate-600" />
-          </span>
-          <div>
-            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection / Actual 차이</div>
-            <div className="text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
+      {!cashflowRangeLoading && (
+        <section className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
+              <Columns2 className="h-4 w-4 text-slate-600" />
+            </span>
+            <div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection / Actual 차이</div>
+              <div className="text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
+            </div>
           </div>
-        </div>
-        {renderProjectionActualDiffTable()}
-      </section>
+          {renderProjectionActualDiffTable()}
+        </section>
+      )}
 
       <AlertDialog
         open={sheetReviewDialogOpen}
