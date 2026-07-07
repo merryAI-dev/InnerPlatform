@@ -77,7 +77,7 @@ async function uploadBankSheet(page: Page, rows: Parameters<typeof buildBankCsv>
   await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
 }
 
-test.skip('bank upload flows directly into weekly expenses and survives reupload with different order', async ({ page }) => {
+test('bank upload flows directly into weekly expenses and survives reupload with different order', async ({ page }) => {
   await loginAsPm(page);
 
   const originalRows = [
@@ -117,7 +117,7 @@ test.skip('bank upload flows directly into weekly expenses and survives reupload
   await expect(page.locator('input[value="카카오T"]').first()).toBeVisible();
 });
 
-test.skip('bank upload keeps direct handoff CTA and removes queue actions', async ({ page }) => {
+test('bank upload keeps direct handoff CTA and removes queue actions', async ({ page }) => {
   await loginAsPm(page);
 
   await uploadBankSheet(page, [
@@ -137,7 +137,7 @@ test.skip('bank upload keeps direct handoff CTA and removes queue actions', asyn
   await expect(page.getByText('신규 거래 처리 Queue')).toHaveCount(0);
 });
 
-test.skip('bank upload empty and saved states stay on direct handoff flow', async ({ page }) => {
+test('bank upload empty and saved states stay on direct handoff flow', async ({ page }) => {
   await loginAsPm(page);
   await openPortalPath(page, '/portal/bank-statements');
   await expect(page.getByTestId('bank-statement-empty-state')).toBeVisible();

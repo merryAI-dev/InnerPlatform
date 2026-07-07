@@ -28,8 +28,10 @@ const ADMIN_WORKSPACE_FEATURES = [
 const PM_WORKSPACE_FEATURES = [
   '프로젝트 선택',
   '예산 편집',
+  '사업비 입력',
   '캐시플로',
   '프로젝트 등록 요청',
+  '인건비/공지',
 ];
 
 export function WorkspaceSelectPage() {
@@ -202,7 +204,7 @@ export function WorkspaceSelectPage() {
                   <div>
                     <h2 className="text-[20px] font-bold text-slate-950 dark:text-slate-100">PM 포털</h2>
                     <p className="mt-2 text-[13px] leading-6 text-slate-600 dark:text-slate-300">
-                      담당 프로젝트 현황, 예산 편집, 캐시플로, 프로젝트 등록 요청으로 이동합니다.
+                      담당 프로젝트 현황, 예산 편집, 사업비 입력, 프로젝트 등록 요청으로 이동합니다.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

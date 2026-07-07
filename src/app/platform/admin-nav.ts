@@ -51,6 +51,7 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
     '/evidence',
     '/payroll',
     '/budget-summary',
+    '/expense-management',
     '/approvals',
     '/users',
     '/audit',

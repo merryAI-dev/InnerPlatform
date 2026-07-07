@@ -117,8 +117,8 @@ describe('route provider behavior', () => {
     });
     expect(resolvePortalProviderScope('/portal/payroll')).toEqual({
       hrAnnouncements: true,
-      payroll: false,
-      cashflowWeeks: false,
+      payroll: true,
+      cashflowWeeks: true,
       board: false,
       careerProfile: false,
       training: false,

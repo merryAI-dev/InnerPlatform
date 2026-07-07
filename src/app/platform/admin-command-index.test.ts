@@ -29,7 +29,11 @@ describe('admin command index', () => {
       label: '권한/사용자',
       to: '/users',
     });
-    expect(searchAdminCommandItems(items, '정산').some((item) => item.to === '/portal/weekly-expenses')).toBe(false);
+    expect(searchAdminCommandItems(items, '정산')[0]).toMatchObject({
+      label: 'PM 사업비 입력',
+      to: '/portal/weekly-expenses',
+      category: 'PM',
+    });
     expect(searchAdminCommandItems(items, '조직장')[0]).toMatchObject({
       label: '권한/사용자',
       to: '/users',
@@ -90,11 +94,16 @@ describe('admin command index', () => {
       to: '/portal/budget',
       category: 'PM',
     });
-    expect(searchAdminCommandItems(items, '증빙').some((item) => item.to === '/portal/weekly-expenses')).toBe(false);
-    expect(searchAdminCommandItems(items, '사업비 입력').some((item) => item.to === '/portal/weekly-expenses')).toBe(false);
-    expect(searchAdminCommandItems(items, '통장내역').some((item) => item.to === '/portal/bank-statements')).toBe(false);
-    expect(searchAdminCommandItems(items, '인건비 공지').some((item) => item.to === '/portal/payroll')).toBe(false);
-    expect(items.map((item) => item.to)).not.toContain('/expense-management');
+    expect(searchAdminCommandItems(items, '증빙')[0]).toMatchObject({
+      label: 'PM 사업비 입력',
+      to: '/portal/weekly-expenses',
+      category: 'PM',
+    });
+    expect(searchAdminCommandItems(items, '사업비 관리')[0]).toMatchObject({
+      label: '캐시플로 모니터링',
+      to: '/cashflow',
+      category: '관리자',
+    });
     expect(searchAdminCommandItems(items, '승인 대기열')[0]).toMatchObject({
       label: '프로젝트 등록/승인',
       to: '/projects/migration-audit',

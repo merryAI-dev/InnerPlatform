@@ -91,31 +91,6 @@ npm run phase:preflight -- --task "PM 주간 사업비 입력과 캐시플로 �
 - 완료 이슈도 회귀 후보로 본다
 - 가버넌스/정책 상태 이슈는 코드 수정 이슈와 분리해서 본다
 
-## 최근 패치 노트: Cashflow Phase 2 Deprecated Entry Cleanup
-
-이번 phase는 데이터를 지우지 않고, 더 이상 제품 방향에 맞지 않는 사용자 진입점만 닫았습니다.
-
-제거한 visible entry:
-- PM 포털 `사업비 입력(주간)` (`/portal/weekly-expenses`)
-- PM 포털 `통장내역` (`/portal/bank-statements`)
-- PM 포털 `인건비/공지` (`/portal/payroll`)
-- Admin `사업비 관리` (`/expense-management`)
-
-남긴 것:
-- Cashflow, 프로젝트 등록/수정/승인, 프로젝트 선택/onboarding
-- Admin Payroll (`/payroll`)과 Admin Bank Reconciliation (`/bank-reconciliation`)
-- Firestore 컬렉션/문서, BFF API, 시트 파싱/기존 컴포넌트 archive 코드
-
-라우트 처리:
-- deprecated 4개 direct URL은 앱이 깨지지 않도록 `NotFoundPage`로 연결
-- lazy import는 제거해서 deprecated page chunk가 다시 로드되지 않게 고정
-- navigation/search/command/quick shortcut에서는 노출 제거
-
-검증:
-- targeted Vitest cleanup suites: passed
-- `npm run build`: passed
-- `npm test`: cleanup 관련 테스트는 passed, 전체 run은 기존 stress/runtime 계열 timeout/perf 테스트 때문에 failed
-
 ## 최근 패치 노트: Phase 1 PR-1
 
 이번 phase 1 첫 슬라이스에서는 `사용내역` family를 바로 전체 재구현하지 않고,  

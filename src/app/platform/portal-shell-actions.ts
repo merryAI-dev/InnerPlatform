@@ -37,6 +37,13 @@ const PORTAL_DIRECT_COMMANDS = [
     to: '/portal/cashflow',
     keywords: ['cashflow', '캐시플로우', '현금흐름'],
   },
+  {
+    id: 'portal:weekly-expenses',
+    label: '사업비 입력',
+    description: '주간 사업비 입력 열기',
+    to: '/portal/weekly-expenses',
+    keywords: ['사업비', '입력', '주간', '정산'],
+  },
 ] as const;
 
 export function buildPortalShellCommandItems(input: {
@@ -88,6 +95,7 @@ export function buildPortalShellCommandItems(input: {
 export function buildPortalShellNotificationItems(input: {
   pendingChanges: number;
   hrAlertCount: number;
+  payrollPendingCount: number;
 }): PortalShellNotificationItem[] {
   const items: PortalShellNotificationItem[] = [];
   const changeAndNoticeCount = input.pendingChanges + input.hrAlertCount;
@@ -100,6 +108,15 @@ export function buildPortalShellNotificationItems(input: {
         ? `인력변경 요청 ${input.pendingChanges}건`
         : `미확인 공지 ${input.hrAlertCount}건`,
       to: '/portal/change-requests',
+    });
+  }
+
+  if (input.payrollPendingCount > 0) {
+    items.push({
+      id: 'payroll',
+      label: '인건비 확인',
+      description: `확인 필요한 지급/월마감 ${input.payrollPendingCount}건`,
+      to: '/portal/payroll',
     });
   }
 

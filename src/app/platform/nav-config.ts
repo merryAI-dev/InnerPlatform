@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, FolderKanban, BarChart3,
   FileCheck, Building2, Shield, ClipboardList, ClipboardCheck,
-  Calculator, UserCog,
+  Calculator, Wallet, UserCog,
   ListChecks, MessagesSquare, UserRoundCheck,
   CircleDollarSign, ArrowLeftRight,
 } from 'lucide-react';
@@ -37,6 +37,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/bank-reconciliation', icon: ArrowLeftRight, label: '은행 대조' },
       { to: '/payroll', icon: CircleDollarSign, label: '인건비/월간정산', accent: true },
       { to: '/budget-summary', icon: Calculator, label: '예산총괄' },
+      { to: '/expense-management', icon: Wallet, label: '사업비 관리' },
     ],
   },
   {

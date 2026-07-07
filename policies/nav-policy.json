@@ -12,6 +12,7 @@
       "/evidence",
       "/payroll",
       "/budget-summary",
+      "/expense-management",
       "/approvals",
       "/claude-sdk-help",
       "/portal"
@@ -24,6 +25,7 @@
       "/board",
       "/business-cards",
       "/evidence",
+      "/expense-management",
       "/claude-sdk-help",
       "/portal"
     ],

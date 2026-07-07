@@ -90,6 +90,11 @@ const STOPWORDS = new Set([
 
 const FEATURE_AREA_DEFINITIONS = [
   {
+    tag: 'weekly_expense',
+    label: '사업비 입력(주간)',
+    aliases: ['사업비 입력', '사업비관리', '사용내역', '정산대장', '주간 사업비', '정산 시트'],
+  },
+  {
     tag: 'budget_structure',
     label: '예산/비목/세목',
     aliases: ['예산', '비목', '세목', '세세목', '예산총괄', '예산 편집'],
@@ -97,7 +102,12 @@ const FEATURE_AREA_DEFINITIONS = [
   {
     tag: 'cashflow',
     label: '캐시플로',
-    aliases: ['캐시플로', 'cashflow', '프로젝션', '월 저장', '사용내역', '정산대장', '정산 시트', '입출금', '거래내역'],
+    aliases: ['캐시플로', 'cashflow', '프로젝션', '월 저장'],
+  },
+  {
+    tag: 'bank_statement',
+    label: '통장내역',
+    aliases: ['통장내역', '법인 통장', '입출금', '거래내역'],
   },
   {
     tag: 'evidence',
