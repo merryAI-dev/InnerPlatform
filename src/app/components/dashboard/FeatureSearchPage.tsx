@@ -15,7 +15,7 @@ const ADMIN_ENTRY_POINTS = [
 const PM_ENTRY_POINTS = [
   { label: '프로젝트 선택', to: '/portal/project-select' },
   { label: '예산 편집', to: '/portal/budget' },
-  { label: '사업비 입력', to: '/portal/weekly-expenses' },
+  { label: '캐시플로', to: '/portal/cashflow' },
   { label: '프로젝트 등록 요청', to: '/portal/register-project' },
 ];
 

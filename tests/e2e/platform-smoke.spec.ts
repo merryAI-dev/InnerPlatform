@@ -52,31 +52,20 @@ test('5. Admin can navigate to cashflow page', async ({ page }) => {
   await expect(page.locator('body')).toBeVisible({ timeout: 15_000 });
 });
 
-// ── 6. Portal weekly expenses ──
-test('6. PM can access weekly expense page', async ({ page }) => {
+// ── 6. Deprecated portal weekly expenses ──
+test('6. PM weekly expense direct route shows 404 safely', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/weekly-expenses');
-  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
-  await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '페이지를 찾을 수 없습니다' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toHaveCount(0);
 });
 
-// ── 7. Portal bank statement -> other pages ──
-test('7. PM can navigate away from bank statement page', async ({ page }) => {
+// ── 7. Deprecated portal bank statements ──
+test('7. PM bank statement direct route shows 404 safely', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/bank-statements');
-  await expect(page.getByRole('heading', { name: '통장내역' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
-  await expect(page.getByTestId('bank-statement-trust-surface')).toBeVisible();
-  await expect(page.getByRole('button', { name: '사업비 입력(주간)으로 이어가기' })).toBeVisible();
-
-  await page.getByRole('link', { name: '예산 편집' }).click();
-  await expect(page).toHaveURL(/\/portal\/budget$/);
-  await expect(page.getByRole('heading', { name: '예산 편집' })).toBeVisible({ timeout: 15_000 });
-
-  await page.getByRole('link', { name: '캐시플로' }).click();
-  await expect(page).toHaveURL(/\/portal\/cashflow$/);
-  await expect(page.getByRole('heading', { name: '프로젝트 캐시플로(주간)' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '페이지를 찾을 수 없습니다' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: '통장내역' })).toHaveCount(0);
 });
 
 // ── 8. Portal budget ──

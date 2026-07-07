@@ -10,17 +10,17 @@ import { TrainingProvider } from './training-store';
 
 export function resolvePortalProviderScope(pathname = typeof window !== 'undefined' ? window.location.pathname : '') {
   const path = pathname.replace(/\/+$/, '') || '/portal';
-  if (path === '/portal/cashflow' || path === '/portal/cashflow/sheets-lab') {
+  if (path === '/portal/weekly-expenses' || path === '/portal/bank-statements' || path === '/portal/payroll') {
     return {
       hrAnnouncements: true,
-      payroll: true,
-      cashflowWeeks: true,
+      payroll: false,
+      cashflowWeeks: false,
       board: false,
       careerProfile: false,
       training: false,
     };
   }
-  if (path === '/portal/payroll') {
+  if (path === '/portal/cashflow' || path === '/portal/cashflow/sheets-lab') {
     return {
       hrAnnouncements: true,
       payroll: true,

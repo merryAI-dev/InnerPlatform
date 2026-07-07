@@ -113,13 +113,12 @@ test('release gate: PM dashboard shows unified project and submission surface', 
   await expect(page.getByRole('heading', { name: '내 제출 현황' })).toBeVisible();
 });
 
-test('release gate: PM weekly expense keeps compact setup and status surfaces visible', async ({ page }) => {
+test('release gate: deprecated PM weekly expense route shows 404 safely', async ({ page }) => {
   await loginAsPm(page);
   await page.goto('/portal/weekly-expenses');
 
-  await expect(page.getByTestId('portal-mission-guide')).toHaveCount(0);
-  await expect(page.getByTestId('weekly-expense-setup-panel')).toBeVisible();
-  await expect(page.locator('[data-testid^="weekly-accounting-product-status-"]').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '페이지를 찾을 수 없습니다' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '사업비 입력(주간)' })).toHaveCount(0);
 });
 
 test('release gate: admin can move a project to trash and restore it', async ({ page }) => {

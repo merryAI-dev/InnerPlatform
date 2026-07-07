@@ -13,28 +13,6 @@ afterEach(() => {
 });
 
 describe('shell LAB visibility', () => {
-  it('hides direct bank statement surfaces for direct-entry portal projects', () => {
-    expect(shouldShowShellRoute('/portal/bank-statements', 'portal', 'nav', {
-      fundInputMode: 'DIRECT_ENTRY',
-      labEnabled: false,
-    })).toBe(false);
-    expect(shouldShowShellRoute('/portal/bank-statements', 'portal', 'command', {
-      fundInputMode: 'DIRECT_ENTRY',
-      labEnabled: false,
-    })).toBe(false);
-    expect(shouldShowShellRoute('/portal/weekly-expenses', 'portal', 'nav', {
-      fundInputMode: 'DIRECT_ENTRY',
-      labEnabled: false,
-    })).toBe(true);
-  });
-
-  it('keeps direct bank statements visible for non-direct portal projects', () => {
-    expect(shouldShowShellRoute('/portal/bank-statements', 'portal', 'nav', {
-      fundInputMode: 'BANK_STATEMENT',
-      labEnabled: false,
-    })).toBe(true);
-  });
-
   it('hides admin LAB routes by default and reveals them when LAB is enabled', () => {
     expect(ADMIN_LAB_ROUTES).toEqual([
       '/business-cards',
@@ -43,7 +21,6 @@ describe('shell LAB visibility', () => {
       '/bank-reconciliation',
       '/payroll',
       '/budget-summary',
-      '/expense-management',
       '/participation',
       '/koica-personnel',
       '/personnel-changes',
