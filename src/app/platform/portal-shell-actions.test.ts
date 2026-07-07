@@ -21,12 +21,7 @@ describe('portal shell actions', () => {
       category: '업무',
       kind: 'portal',
     });
-    expect(items.find((item) => item.id === 'portal:weekly-expenses')).toMatchObject({
-      label: '사업비 입력',
-      to: '/portal/weekly-expenses',
-      category: '업무',
-      kind: 'portal',
-    });
+    expect(items.some((item) => item.id === 'portal:weekly-expenses')).toBe(false);
     expect(items.some((item) => item.id === 'project:project-1')).toBe(true);
     expect(items.find((item) => item.id === 'project:project-2')?.to).toBe('/portal/budget');
     expect(items.some((item) => item.id === 'admin:home')).toBe(true);
@@ -43,14 +38,13 @@ describe('portal shell actions', () => {
     });
 
     expect(items.some((item) => item.to === '/portal/bank-statements')).toBe(false);
-    expect(items.some((item) => item.id === 'portal:weekly-expenses')).toBe(true);
+    expect(items.some((item) => item.id === 'portal:weekly-expenses')).toBe(false);
   });
 
   it('only surfaces non-zero notifications and keeps links actionable', () => {
     const items = buildPortalShellNotificationItems({
       pendingChanges: 2,
       hrAlertCount: 0,
-      payrollPendingCount: 1,
     });
 
     expect(items).toEqual([
@@ -59,12 +53,6 @@ describe('portal shell actions', () => {
         label: '인력변경/공지 확인',
         description: '인력변경 요청 2건',
         to: '/portal/change-requests',
-      },
-      {
-        id: 'payroll',
-        label: '인건비 확인',
-        description: '확인 필요한 지급/월마감 1건',
-        to: '/portal/payroll',
       },
     ]);
   });

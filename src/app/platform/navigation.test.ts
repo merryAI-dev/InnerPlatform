@@ -140,9 +140,15 @@ describe('resolveHomePath', () => {
 describe('resolvePostLoginPath', () => {
   // ── portal paths ──
   it('pm can access portal paths', () => {
-    expect(resolvePostLoginPath('pm', undefined, '/portal/weekly-expenses')).toBe('/portal/weekly-expenses');
     expect(resolvePostLoginPath('pm', undefined, '/portal/budget')).toBe('/portal/budget');
     expect(resolvePostLoginPath('pm', undefined, '/portal')).toBe('/portal');
+  });
+
+  it('does not restore deprecated portal entry points after login', () => {
+    expect(resolvePostLoginPath('admin', 'admin', '/expense-management')).toBe('/');
+    expect(resolvePostLoginPath('pm', undefined, '/portal/weekly-expenses')).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('pm', undefined, '/portal/bank-statements')).toBe('/portal/project-select');
+    expect(resolvePostLoginPath('pm', undefined, '/portal/payroll')).toBe('/portal/project-select');
   });
 
   it('admin can access portal paths', () => {
@@ -150,7 +156,7 @@ describe('resolvePostLoginPath', () => {
   });
 
   it('finance can access portal paths', () => {
-    expect(resolvePostLoginPath('finance', undefined, '/portal/weekly-expenses')).toBe('/portal/weekly-expenses');
+    expect(resolvePostLoginPath('finance', undefined, '/portal/budget')).toBe('/portal/budget');
   });
 
   // ── admin paths ──
@@ -289,7 +295,7 @@ describe('portal standalone entry paths', () => {
     expect(isPortalStandaloneEntryPath('/portal/onboarding')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal/project-select')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal/project-settings')).toBe(false);
-    expect(isPortalStandaloneEntryPath('/portal/weekly-expenses')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/weekly-expenses')).toBe(false);
     expect(isPortalStandaloneEntryPath('/portal/register-project')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal')).toBe(false);
     expect(isPortalStandaloneEntryPath('/portal/budget')).toBe(false);

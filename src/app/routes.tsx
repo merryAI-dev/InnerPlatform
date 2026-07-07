@@ -4,7 +4,6 @@ import { AppLayout } from './components/layout/AppLayout';
 import { PortalLayout } from './components/portal/PortalLayout';
 import { AdminRouteProviders } from './data/admin-route-providers';
 import { PortalRouteProviders } from './data/portal-route-providers';
-import { loadLazyRouteModule } from './platform/lazy-route';
 import { shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
 
 // Lazy-loaded pages — each becomes a separate chunk
@@ -34,7 +33,6 @@ const ParticipationPage = lazy(() => import('./components/participation/Particip
 const KoicaPersonnelPage = lazy(() => import('./components/koica/KoicaPersonnelPage').then(m => ({ default: m.KoicaPersonnelPage })));
 const PersonnelChangePage = lazy(() => import('./components/koica/PersonnelChangePage').then(m => ({ default: m.PersonnelChangePage })));
 const BudgetSummaryPage = lazy(() => import('./components/budget/BudgetSummaryPage').then(m => ({ default: m.BudgetSummaryPage })));
-const ExpenseManagementPage = lazy(() => import('./components/expense/ExpenseManagementPage').then(m => ({ default: m.ExpenseManagementPage })));
 const AdminApprovalPage = lazy(() => import('./components/approval/AdminApprovalPage').then(m => ({ default: m.AdminApprovalPage })));
 const UserManagementPage = lazy(() => import('./components/users/UserManagementPage').then(m => ({ default: m.UserManagementPage })));
 const AdminHrAnnouncementPage = lazy(() => import('./components/hr/AdminHrAnnouncementPage').then(m => ({ default: m.AdminHrAnnouncementPage })));
@@ -51,26 +49,10 @@ const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel')
 const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
 const PortalProjectRegister = lazy(() => import('./components/portal/PortalProjectRegister').then(m => ({ default: m.PortalProjectRegister })));
 const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
-const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
 const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
 const CashflowSheetLabPage = lazy(() => import('./features/cashflow-sheet-compare/CashflowSheetLabPage').then(m => ({ default: m.CashflowSheetLabPage })));
 const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
 const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
-function RouteChunkFallback() {
-  return (
-    <div className="flex min-h-[240px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
-      페이지를 다시 불러오고 있습니다. 새로고침하거나 홈으로 이동한 뒤 다시 시도해 주세요.
-    </div>
-  );
-}
-
-const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
-  () => import('./components/portal/PortalWeeklyExpensePage'),
-  'PortalWeeklyExpensePage',
-  RouteChunkFallback,
-  '[routes] failed to load PortalWeeklyExpensePage:',
-));
-const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
 const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
 const BusinessCardLabPage = lazy(() => import('./components/business-cards/BusinessCardLabPage').then(m => ({ default: m.BusinessCardLabPage })));
 
@@ -145,7 +127,7 @@ export const router = createBrowserRouter([
       { path: 'koica-personnel', element: <S C={KoicaPersonnelPage} /> },
       { path: 'personnel-changes', element: <S C={PersonnelChangePage} /> },
       { path: 'budget-summary', element: <S C={BudgetSummaryPage} /> },
-      { path: 'expense-management', element: <S C={ExpenseManagementPage} /> },
+      { path: 'expense-management', element: <S C={NotFoundPage} /> },
       { path: 'payroll', element: <S C={AdminPayrollPage} /> },
       { path: 'approvals', element: <S C={AdminApprovalPage} /> },
       { path: 'users', element: <S C={UserManagementPage} /> },
@@ -174,12 +156,12 @@ export const router = createBrowserRouter([
       { path: 'project-select', element: <S C={PortalProjectSelectPage} /> },
       { path: 'project-settings', element: <S C={PortalProjectSelectPage} /> },
       { path: 'submissions', element: <S C={PortalProjectSelectPage} /> },
-      { path: 'payroll', element: <S C={PortalPayrollPage} /> },
+      { path: 'payroll', element: <S C={NotFoundPage} /> },
       { path: 'cashflow', element: <S C={PortalCashflowPage} /> },
       { path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> },
       { path: 'budget', element: <S C={PortalBudget} /> },
-      { path: 'weekly-expenses', element: <S C={PortalWeeklyExpensePage} /> },
-      { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
+      { path: 'weekly-expenses', element: <S C={NotFoundPage} /> },
+      { path: 'bank-statements', element: <S C={NotFoundPage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },

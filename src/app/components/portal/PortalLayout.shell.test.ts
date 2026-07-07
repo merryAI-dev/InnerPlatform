@@ -8,15 +8,18 @@ const portalLayoutSource = readFileSync(
 );
 
 describe('PortalLayout shell actions', () => {
-  it('keeps payroll entry visible in the primary portal navigation', () => {
-    expect(portalLayoutSource).toContain("to: '/portal/payroll'");
-    expect(portalLayoutSource).toContain("label: '인건비/공지'");
-    expect(portalLayoutSource).not.toContain("label: '인건비/공지', accent: true, hidden: true");
+  it('removes deprecated PM portal entries from the primary navigation', () => {
+    expect(portalLayoutSource).not.toContain("to: '/portal/payroll'");
+    expect(portalLayoutSource).not.toContain("label: '인건비/공지'");
+    expect(portalLayoutSource).not.toContain("to: '/portal/weekly-expenses'");
+    expect(portalLayoutSource).not.toContain("label: '사업비 입력(주간)'");
+    expect(portalLayoutSource).not.toContain("to: '/portal/bank-statements'");
+    expect(portalLayoutSource).not.toContain("label: '통장내역'");
   });
 
   it('puts budget first and pushes business cards behind operating work', () => {
     expect(portalLayoutSource.indexOf("label: '예산 편집'")).toBeLessThan(
-      portalLayoutSource.indexOf("label: '인건비/공지'"),
+      portalLayoutSource.indexOf("label: '캐시플로(주간)'"),
     );
     expect(portalLayoutSource.indexOf("label: '명함 DB'")).toBeGreaterThan(
       portalLayoutSource.indexOf("label: '프로젝트 등록 요청'"),
@@ -72,8 +75,8 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
     expect(portalLayoutSource).toContain('blockedPortalAccess');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
-    expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
+    expect(portalLayoutSource).not.toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
     expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');
@@ -86,10 +89,10 @@ describe('PortalLayout shell actions', () => {
   });
 
   it('uses reduced content padding for workbook-style work surfaces', () => {
-    expect(portalLayoutSource).toContain("location.pathname === '/portal/weekly-expenses' ||");
     expect(portalLayoutSource).toContain("location.pathname.startsWith('/portal/cashflow')");
     expect(portalLayoutSource).toContain("w-full max-w-none px-5 py-2.5");
     expect(portalLayoutSource).toContain("mx-auto w-full max-w-[1480px] px-5 py-2.5");
+    expect(portalLayoutSource).not.toContain("location.pathname === '/portal/weekly-expenses' ||");
     expect(portalLayoutSource).not.toContain("p-4 md:p-6");
   });
 

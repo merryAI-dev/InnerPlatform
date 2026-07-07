@@ -2,14 +2,11 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowRight,
-  Banknote,
   BarChart3,
   Calculator,
-  CircleDollarSign,
   FolderKanban,
   LayoutDashboard,
   ListChecks,
-  Pencil,
   Search,
   SlidersHorizontal,
   UserCog,
@@ -24,18 +21,15 @@ import {
 
 const ICONS: Record<AdminCommandIcon, LucideIcon> = {
   approval: ListChecks,
-  bank: Banknote,
   budget: Calculator,
   cashflow: BarChart3,
   dashboard: LayoutDashboard,
-  expense: Pencil,
-  payroll: CircleDollarSign,
   project: FolderKanban,
   settings: SlidersHorizontal,
   users: UserCog,
 };
 
-const SUGGESTIONS = ['프로젝트 등록', '계약서', '사업비 입력', '권한'];
+const SUGGESTIONS = ['프로젝트 등록', '계약서', '캐시플로', '권한'];
 
 const SCOPE_STYLE = {
   admin: {
@@ -113,7 +107,7 @@ export function AdminCommandSearch({
               }
             }}
             aria-label="기능 검색"
-            placeholder="담당 프로젝트, 기능, 계약서, 사업비 입력, 권한 검색"
+            placeholder="담당 프로젝트, 기능, 계약서, 캐시플로, 권한 검색"
             className="h-12 min-w-0 flex-1 bg-transparent text-[15px] text-slate-950 outline-none placeholder:text-slate-500 dark:text-slate-50 dark:placeholder:text-slate-400"
           />
           <kbd className="hidden rounded-md border border-white/70 bg-white/70 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm backdrop-blur-md sm:inline-flex dark:border-white/10 dark:bg-slate-900/70">

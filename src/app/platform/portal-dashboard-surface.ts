@@ -36,7 +36,6 @@ export function buildPortalDashboardSurface(input: {
   weeklySubmissionStatuses: WeeklySubmissionStatus[];
   todayIso: string;
   hrAlertCount: number;
-  payrollRiskCount: number;
 }): PortalDashboardSurface {
   const projectStatuses = input.weeklySubmissionStatuses.filter((status) => status.projectId === input.projectId);
   const currentWeek = resolveCurrentCashflowWeek(input.todayIso);
@@ -64,12 +63,6 @@ export function buildPortalDashboardSurface(input: {
       count: input.hrAlertCount,
       tone: 'warn',
       to: '/portal/change-requests',
-    },
-    {
-      label: '인건비 Queue',
-      count: input.payrollRiskCount,
-      tone: 'danger',
-      to: '/portal/payroll',
     },
   ].filter((item): item is PortalDashboardIssue => item.count > 0);
 

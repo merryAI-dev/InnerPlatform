@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { normalizeProjectFundInputMode } from '../data/types';
-
 export type ShellSpace = 'portal' | 'admin';
 export type ShellSurface = 'card' | 'nav' | 'command' | 'quick-action' | 'welcome' | 'shortcut';
 
@@ -20,7 +18,6 @@ export const ADMIN_LAB_ROUTES = [
   '/bank-reconciliation',
   '/payroll',
   '/budget-summary',
-  '/expense-management',
   '/participation',
   '/koica-personnel',
   '/personnel-changes',
@@ -72,14 +69,6 @@ export function shouldShowShellRoute(
 ): boolean {
   const normalizedRoute = normalizeRoute(route);
   const labEnabled = context.labEnabled === true;
-
-  if (
-    space === 'portal'
-    && normalizedRoute === '/portal/bank-statements'
-    && normalizeProjectFundInputMode(context.fundInputMode) === 'DIRECT_ENTRY'
-  ) {
-    return false;
-  }
 
   if (space === 'admin' && isAlwaysVisibleAdminSettingsRoute(route)) {
     return true;

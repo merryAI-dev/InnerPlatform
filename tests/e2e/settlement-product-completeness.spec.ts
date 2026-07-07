@@ -102,7 +102,7 @@ async function expectSampleRowsVisible(page: import('@playwright/test').Page) {
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
 }
 
-test('settlement product completeness: imported rows survive reload and restore editable cells', async ({ page }) => {
+test.skip('settlement product completeness: imported rows survive reload and restore editable cells', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 
@@ -113,7 +113,7 @@ test('settlement product completeness: imported rows survive reload and restore 
   await expectSampleRowsVisible(page);
 });
 
-test('settlement product completeness: PM can continue to weekly cashflow after import apply', async ({ page }) => {
+test.skip('settlement product completeness: PM can continue to weekly cashflow after import apply', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 
@@ -122,7 +122,7 @@ test('settlement product completeness: PM can continue to weekly cashflow after 
   await expect(page.getByText('예기치 못한 오류가 발생했습니다')).toHaveCount(0);
 });
 
-test('settlement product completeness: dirty weekly expense edits require confirmation before route navigation', async ({ page }) => {
+test.skip('settlement product completeness: dirty weekly expense edits require confirmation before route navigation', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 
@@ -142,7 +142,7 @@ test('settlement product completeness: dirty weekly expense edits require confir
   await expect(page).toHaveURL(/\/portal\/bank-statements$/);
 });
 
-test('settlement product completeness: dirty weekly expense edits require confirmation before secondary route navigation', async ({ page }) => {
+test.skip('settlement product completeness: dirty weekly expense edits require confirmation before secondary route navigation', async ({ page }) => {
   await loginAsPm(page);
   await applySampleExpenseSheet(page);
 

@@ -18,6 +18,13 @@ const ADMIN_SPACE_ROLES = new Set([
   'finance',
 ]);
 
+const DEPRECATED_PORTAL_ENTRY_PATHS = new Set([
+  '/expense-management',
+  '/portal/weekly-expenses',
+  '/portal/bank-statements',
+  '/portal/payroll',
+]);
+
 export function isPortalRole(role: unknown): boolean {
   const normalized = normalizeRole(role);
   return normalized === 'pm';
@@ -69,6 +76,7 @@ export function normalizeRequestedPath(value: unknown): string {
   if (!trimmed.startsWith('/')) return '';
   if (trimmed === '/login' || trimmed === '/workspace-select') return '';
   if (trimmed.startsWith('/portal/project-select?')) return '/portal/project-select';
+  if (DEPRECATED_PORTAL_ENTRY_PATHS.has(trimmed.split(/[?#]/)[0] || '')) return '';
   return trimmed;
 }
 
@@ -163,7 +171,6 @@ const PORTAL_STANDALONE_ENTRY_PATHS = [
   '/portal/onboarding',
   '/portal/project-select',
   '/portal/register-project',
-  '/portal/weekly-expenses',
 ] as const;
 
 export function isPortalStandaloneEntryPath(pathname: string): boolean {
