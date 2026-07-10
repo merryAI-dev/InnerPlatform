@@ -329,7 +329,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(response.body?.error || response.text).toMatch(/reviewComment/i);
+    expect(response.body.error).toBe('request_error');
+    expect(response.body.message).toMatch(/reviewComment/i);
   });
 
   it('resubmits an executive-rejected pm portal project back to pending', async () => {
@@ -1773,7 +1774,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({ role: 'finance', reason: 'quarter close' });
 
     expect(changed.status).toBe(200);
-    expect(changed.body.previousRole).toBe('viewer');
+    expect(changed.body.previousRole).toBe('pm');
     expect(changed.body.role).toBe('finance');
 
     const memberSnap = await db.doc(`orgs/${tenantId}/members/u-target`).get();
@@ -1989,7 +1990,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(ok.status).toBe(200);
     expect(ok.body.previousRole).toBe('admin');
-    expect(ok.body.role).toBe('viewer');
+    expect(ok.body.role).toBe('pm');
   });
 
   it('enforces permission-level RBAC for transaction state changes (submit vs approve)', async () => {
@@ -2033,7 +2034,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(approved.body.state).toBe('APPROVED');
   });
 
-  it('enforces route-level RBAC for audit reads and write APIs', async () => {
+  it('enforces audit-read RBAC while normalizing legacy viewer to pm for writes', async () => {
     const deniedAudit = await api
       .get('/api/v1/audit-logs')
       .set({ ...defaultHeaders, 'x-actor-role': 'pm' });
@@ -2041,13 +2042,13 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(deniedAudit.status).toBe(403);
     expect(deniedAudit.body.error).toBe('forbidden');
 
-    const deniedWrite = await api
+    const viewerWrite = await api
       .post('/api/v1/projects')
-      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-deny-write' })
-      .send({ id: 'p-rbac-denied', name: 'Denied Project' });
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-viewer-write' })
+      .send({ id: 'p-rbac-viewer-write', name: 'Viewer Project' });
 
-    expect(deniedWrite.status).toBe(403);
-    expect(deniedWrite.body.error).toBe('forbidden');
+    expect(viewerWrite.status).toBe(201);
+    expect(viewerWrite.body.id).toBe('p-rbac-viewer-write');
   });
 
   it('writes through generic pipeline and synchronizes projection views', async () => {
