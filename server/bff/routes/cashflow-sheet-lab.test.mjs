@@ -106,7 +106,7 @@ function createDb({ project = { id: 'project-a' }, weeks = [] } = {}) {
   };
 }
 
-function createApp({ context = {}, db = createDb(), googleSheetsService } = {}) {
+function createApp({ context = {}, db = createDb(), googleSheetsService, routeOptions = {} } = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -137,6 +137,7 @@ function createApp({ context = {}, db = createDb(), googleSheetsService } = {}) 
         matrix: buildMatrix(),
       })),
     },
+    ...routeOptions,
   });
   app.use((error, _req, res, _next) => {
     res.status(error.statusCode || 500).json({
@@ -337,7 +338,7 @@ describe('cashflow sheet lab route', () => {
     expect(previewSpreadsheet).toHaveBeenCalledWith(expect.not.objectContaining({ accessToken: expect.any(String) }));
   });
 
-  it('applies saved sheet values directly to Firebase cashflow_weeks', async () => {
+  it('fails closed instead of using the legacy Node multi-transaction apply path', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -350,43 +351,60 @@ describe('cashflow sheet lab route', () => {
       },
     });
 
-    const response = await request(createApp({ db }))
+    await request(createApp({ db }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ idempotencyKey: 'apply-001' })
+      .expect(503)
+      .expect((response) => expect(response.body.code).toBe('cashflow_edit_leases_disabled'));
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
+  });
+
+  it('routes Stage final apply through JVM with the edit lease and performs no Node canonical write', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async ({ projectId, lines }) => ({
+        ok: true,
+        projectId,
+        sourceSheetKey: 'cashflow-sheet-lab',
+        savedProjectionLineCount: lines.filter((line) => line.mode === 'projection').length,
+        savedActualLineCount: lines.filter((line) => line.mode === 'actual').length,
+      })),
+    };
+
+    const response = await request(createApp({
+      db,
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .set({
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
+      .send({ idempotencyKey: 'apply-jvm-001' })
       .expect(200);
 
-    expect(response.body).toMatchObject({
-      appliedLineCount: 48,
-      projectionLineCount: 24,
-      actualLineCount: 24,
-      firebaseResult: {
-        ok: true,
-        commandName: 'cashflowSheetLab.apply.firebase',
-        verifiedLineCount: 48,
-      },
-    });
-    const appliedPreviewValue = response.body.previewValues.find((value) => (
-      value.mode === 'projection'
-      && value.yearMonth === '2026-01'
-      && value.weekNo === 1
-      && value.lineId === 'MYSC_PREPAY_IN'
-    ));
-    expect(appliedPreviewValue).toMatchObject({ amount: 999, sheetValue: '999' });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
-      projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 999 },
-    });
-    expect(db.__getDocument().cashflowSheetLab).toMatchObject({
-      lastAppliedAt: expect.any(String),
-      lastAppliedBy: {
-        uid: 'actor-a',
-        email: 'user@mysc.co.kr',
-        role: 'workspace_user',
-      },
-      lastAppliedLineCount: 48,
-      lastProjectionLineCount: 24,
-      lastActualLineCount: 24,
-    });
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      idempotencyKey: 'apply-jvm-001',
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      lines: expect.arrayContaining([
+        expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),
+        expect.objectContaining({ mode: 'actual', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),
+      ]),
+    }));
+    expect(response.body.firebaseResult.commandName).toBe('weeklyExpense.cashflowSheetLab.apply');
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
   it('stages sheet values as cell-level review candidates without updating cashflow weeks', async () => {
@@ -442,7 +460,7 @@ describe('cashflow sheet lab route', () => {
     expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toEqual([]);
   });
 
-  it('applies a staged candidate run without rereading the Google Sheet and overwrites existing Actual values', async () => {
+  it('applies a staged candidate run through JVM without rereading the Google Sheet', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -476,7 +494,20 @@ describe('cashflow sheet lab route', () => {
         };
       }),
     };
-    const app = createApp({ db, googleSheetsService });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async ({ projectId, lines }) => ({
+        ok: true,
+        projectId,
+        commandName: 'weeklyExpense.cashflowSheetLab.apply',
+        savedProjectionLineCount: lines.filter((line) => line.mode === 'projection').length,
+        savedActualLineCount: lines.filter((line) => line.mode === 'actual').length,
+      })),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService,
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+    });
 
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
@@ -485,6 +516,11 @@ describe('cashflow sheet lab route', () => {
 
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .set({
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-stage-001' })
       .expect(200);
 
@@ -496,13 +532,14 @@ describe('cashflow sheet lab route', () => {
       skippedRiskLineCount: 0,
       stagedRunId: stage.body.runId,
     });
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
-      projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 999 },
+      projection: { MYSC_PREPAY_IN: 100 },
+      actual: { MYSC_PREPAY_IN: 200 },
     });
   });
 
-  it('runs the daily cashflow sheet sync worker through the same apply path', async () => {
+  it('disables the automatic sync worker because it has no interactive edit lease', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -515,7 +552,7 @@ describe('cashflow sheet lab route', () => {
       },
     });
 
-    const result = await runCashflowSheetLabSyncWorker({
+    await expect(runCashflowSheetLabSyncWorker({
       db,
       googleSheetsService: {
         previewSpreadsheet: vi.fn(async () => ({
@@ -529,26 +566,9 @@ describe('cashflow sheet lab route', () => {
       tenantIds: ['tenant-a'],
       limit: 10,
       nowIso: '2026-06-16T09:00:00.000Z',
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      worker: 'cashflow_sheet_sync',
-      schedule: 'daily_18_00_kst',
-      scanned: 1,
-      attempted: 1,
-      applied: 1,
-      failed: 0,
-    });
-    expect(result.results[0]).toMatchObject({
-      tenantId: 'tenant-a',
-      projectId: 'project-a',
-      verifiedLineCount: 24,
-    });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
-      projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 999 },
-    });
+      editLeasesEnabled: true,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'cashflow_sync_requires_edit_lease' });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
   it('applies fixed-sheet week labels through canonical finance weeks', async () => {
@@ -572,9 +592,26 @@ describe('cashflow sheet lab route', () => {
         matrix: buildMatrixWithWeekLabels(['26-2-4', '26-2-5']),
       })),
     };
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async ({ projectId, lines }) => ({
+        ok: true,
+        projectId,
+        savedProjectionLineCount: lines.filter((line) => line.mode === 'projection').length,
+        savedActualLineCount: lines.filter((line) => line.mode === 'actual').length,
+      })),
+    };
 
-    const response = await request(createApp({ db, googleSheetsService }))
+    const response = await request(createApp({
+      db,
+      googleSheetsService,
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+    }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .set({
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
       .send({ idempotencyKey: 'apply-002' })
       .expect(200);
 
@@ -583,14 +620,13 @@ describe('cashflow sheet lab route', () => {
       skippedInvalidWeekCount: 0,
       skippedInvalidWeeks: [],
     });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w4')).toMatchObject({
-      projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 999 },
-    });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w5')).toMatchObject({
-      projection: { MYSC_PREPAY_IN: 999 },
-      actual: { MYSC_PREPAY_IN: 999 },
-    });
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
+      lines: expect.arrayContaining([
+        expect.objectContaining({ yearMonth: '2026-02', weekNo: 4 }),
+        expect.objectContaining({ yearMonth: '2026-02', weekNo: 5 }),
+      ]),
+    }));
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w4')).toBeUndefined();
   });
 
   it('previews Projection to Google Sheet write-back without including Actual writes', async () => {

@@ -33,10 +33,82 @@ function createApp(fetchImpl, idempotencyService = createIdempotencyService(), c
     jvmWeeklyApiServiceToken: 'test-service-token',
     ...routeOptions,
   });
+  app.use((error, _req, res, _next) => {
+    res.status(error.statusCode || 500).json({
+      code: error.code || 'error',
+      message: error.message,
+    });
+  });
   return { app, idempotencyService };
 }
 
 describe('JVM weekly API BFF proxy', () => {
+  it('forwards Stage cashflow projection lease headers and rejects caller source context', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1',
+      actorRole: 'finance',
+    }, {
+      env: {
+        BFF_DEPLOY_ENV: 'stage',
+        BFF_EDIT_LEASES_ENABLED: 'true',
+        FIREBASE_PROJECT_ID: 'stage-data-project',
+        JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
+      },
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({
+        'idempotency-key': 'projection-stage-1',
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
+      .send({
+        sourceSheetKey: 'caller-controlled',
+        actor: { id: 'spoofed', role: 'admin' },
+        tenantId: 'spoofed',
+        lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+      })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({
+      'x-data-project-id': 'stage-data-project',
+      'x-edit-session-id': 'session-a',
+      'x-edit-lease-id': 'lease-a',
+      'x-edit-fence': '7',
+    });
+    expect(JSON.parse(calls[0].init.body)).toEqual({
+      idempotencyKey: 'projection-stage-1',
+      lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+    });
+  });
+
+  it('fails closed before JVM cashflow projection when edit leases are disabled', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1',
+      actorRole: 'finance',
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set('idempotency-key', 'projection-disabled-1')
+      .send({ lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }] })
+      .expect(503);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('forwards only trusted context headers and strips client actor/tenant body fields', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {

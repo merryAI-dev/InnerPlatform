@@ -7,6 +7,7 @@ test-results/
 .playwright-cli/
 tmp/
 rust/**/target/
+server/jvm-weekly-api/target/
 *.log
 
 .vercel/

@@ -9,10 +9,13 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseBankImportLineRe
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseIdempotencyRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
+import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -25,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -61,6 +66,15 @@ class WeeklyExpenseControllerTest {
 
     @Autowired
     private WeeklyExpenseBankImportLineRepository bankImportLineRepository;
+
+    @SpyBean
+    private JpaWeeklyExpensePersistence weeklyExpensePersistence;
+
+    @BeforeEach
+    void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
+        doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
+            .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
+    }
 
     private static MockHttpServletRequestBuilder asActor(
         MockHttpServletRequestBuilder request,
@@ -683,11 +697,10 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowSheetLabApplyRequiresCanonicalProjectHook() throws Exception {
+    void cashflowSheetLabApplyFailsClosedWithoutFirestoreAtomicPlanner() throws Exception {
         String body = """
             {
               "idempotencyKey": "sheet-lab-apply-001",
-              "sourceSheetKey": "cashflow-sheet-lab",
               "lines": [
                 {"mode": "projection", "yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "매출액(입금)", "amount": 5000000, "sourceCell": "D15", "sourceLabel": "매출액(입금)"},
                 {"mode": "projection", "yearMonth": "2026-06", "weekNo": 2, "cashflowLine": "매출부가세(입금)", "amount": 500000, "sourceCell": "E16", "sourceLabel": "매출부가세(입금)"},
@@ -699,9 +712,8 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"))
-            .andExpect(jsonPath("$.message").value("Project does not exist in this workspace."));
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("cashflow_atomic_plan_backend_unavailable"));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
@@ -1312,6 +1324,52 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void projectionWriteRejectsMalformedEditFenceWithStableJsonError() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "projection-invalid-fence",
+              "lines": [
+                {"yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "SALES_IN", "amount": 1000}
+              ]
+            }
+            """;
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-fence/projection"), "tenant-projection-fence", "finance-1", "finance")
+                .header("x-edit-fence", "not-an-integer")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"))
+            .andExpect(jsonPath("$.message").value("x-edit-fence must be a positive integer."));
+    }
+
+    @Test
+    void projectionWriteRejectsCommandsThatCanExceedFirestoreAtomicWriteBudget() throws Exception {
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int index = 0; index < 499; index += 1) {
+            lines.add(Map.of(
+                "yearMonth", "2026-06",
+                "weekNo", 1,
+                "cashflowLine", "SALES_IN",
+                "amount", index + 1
+            ));
+        }
+        String body = objectMapper.writeValueAsString(Map.of(
+            "idempotencyKey", "projection-over-atomic-budget",
+            "lines", lines
+        ));
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-budget/projection"), "tenant-projection-budget", "finance-1", "finance")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"));
+
+        assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-projection-budget", "project-projection-budget"))
+            .isEmpty();
+    }
+
+    @Test
     void submitAndCloseRejectMalformedYearMonthBeforePersistence() throws Exception {
         String submitBody = """
             {
@@ -1777,11 +1835,12 @@ class WeeklyExpenseControllerTest {
             {
               "idempotencyKey": "formula-projection-001",
               "lines": [
-                {"yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "=HYPERLINK(\\"https://example.com\\")", "amount": 1000}
+                {"yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "SALES_IN", "amount": 1000}
               ]
             }
             """;
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-formula-export/projection"), "tenant-formula-export", "finance-formula", "finance")
+                .header("x-actor-name", "=HYPERLINK(\"https://example.com\")")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(projection))
             .andExpect(status().isOk());

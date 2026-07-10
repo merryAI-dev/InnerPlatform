@@ -39,6 +39,13 @@ export function resolveJavaWeeklyFirestoreProjectId(options = {}, env = process.
     || readOptionalText(env.WEEKLY_FIRESTORE_PROJECT_ID);
 }
 
+export function resolveBffDataProjectId(options = {}, env = process.env) {
+  return readOptionalText(options.bffDataProjectId)
+    || readOptionalText(env.FIREBASE_PROJECT_ID)
+    || readOptionalText(env.GCLOUD_PROJECT)
+    || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
+}
+
 export function isWorkspaceAuthMode(authMode) {
   const normalized = readOptionalText(authMode).toLowerCase();
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
@@ -71,6 +78,8 @@ export async function buildJavaWeeklyTrustedHeaders({
   idTokenAudience,
   authMode,
   workspaceEmailDomain,
+  editSession,
+  dataProjectId,
 }) {
   if (!serviceToken) {
     throw createHttpError(503, 'JVM weekly API service token is not configured.', 'jvm_weekly_api_token_unconfigured');
@@ -90,6 +99,12 @@ export async function buildJavaWeeklyTrustedHeaders({
   }
   if (context.actorName) {
     headers['x-actor-name'] = encodeURIComponent(context.actorName);
+  }
+  if (dataProjectId) headers['x-data-project-id'] = dataProjectId;
+  if (editSession) {
+    headers['x-edit-session-id'] = readOptionalText(editSession.sessionId);
+    headers['x-edit-lease-id'] = readOptionalText(editSession.leaseId);
+    headers['x-edit-fence'] = String(editSession.fence);
   }
   const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience);
   if (identityToken) {
@@ -130,8 +145,9 @@ export function createJavaWeeklyClient({
   const authMode = resolveJavaWeeklyAuthMode({ jvmWeeklyAuthMode }, env);
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
   const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
+  const bffDataProjectId = resolveBffDataProjectId({}, env);
 
-  async function requestJson({ context, method = 'GET', path, body }) {
+  async function requestJson({ context, method = 'GET', path, body, editSession, dataProjectId }) {
     if (!baseUrl) {
       throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
     }
@@ -144,6 +160,8 @@ export function createJavaWeeklyClient({
         idTokenAudience,
         authMode,
         workspaceEmailDomain,
+        editSession,
+        dataProjectId,
       }),
       body: method === 'GET' ? undefined : JSON.stringify(body || {}),
     });
@@ -165,21 +183,45 @@ export function createJavaWeeklyClient({
     });
   }
 
-  async function applyCashflowSheetLab({ context, projectId, idempotencyKey, sourceSheetKey, lines }) {
+  async function applyCashflowSheetLab({ context, projectId, idempotencyKey, editSession, lines }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
-    return requestJson({
+    if (readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() !== 'true') {
+      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+    }
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+    }
+    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
+      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+    }
+    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+    if (bffDataProjectId === liveProjectId) {
+      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+    }
+    const sessionId = readOptionalText(editSession?.sessionId);
+    const leaseId = readOptionalText(editSession?.leaseId);
+    const fence = Number(editSession?.fence);
+    if (!sessionId || !leaseId || !Number.isSafeInteger(fence) || fence < 1) {
+      throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
+    }
+    const result = await requestJson({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/apply`,
+      editSession: { sessionId, leaseId, fence },
+      dataProjectId: bffDataProjectId,
       body: {
         idempotencyKey,
-        sourceSheetKey,
         lines,
       },
     });
+    if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
+      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+    }
+    return result;
   }
 
   return {
@@ -189,5 +231,6 @@ export function createJavaWeeklyClient({
     authMode,
     workspaceEmailDomain,
     firestoreProjectId,
+    bffDataProjectId,
   };
 }

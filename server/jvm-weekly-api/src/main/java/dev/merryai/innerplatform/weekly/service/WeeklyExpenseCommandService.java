@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CellCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CellPatchCommandRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
@@ -31,6 +32,7 @@ import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseRequestLimits;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetsResponse;
@@ -60,6 +62,7 @@ import dev.merryai.innerplatform.weekly.domain.SpreadsheetSelection;
 import dev.merryai.innerplatform.weekly.domain.SpreadsheetValueType;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -102,20 +105,28 @@ public class WeeklyExpenseCommandService {
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
     private static final Pattern SHORT_WEEK_LABEL_PATTERN = Pattern.compile("^(\\d{2})-(\\d{1,2})-([1-6])$");
     private static final int ROW_REINDEX_TEMPORARY_OFFSET = 1_000_000;
+    private static final String CASHFLOW_SHEET_LAB_ACTUAL_SOURCE = "cashflow-sheet-lab";
 
     private final WeeklyExpensePersistence persistence;
     private final WeeklyExpenseAuthorizationService authorizationService;
     private final WeeklyExpenseSpreadsheetService spreadsheetService;
     private final ObjectMapper objectMapper;
+    private final boolean cashflowEditLeasesEnabled;
 
     public WeeklyExpenseCommandService(
         WeeklyExpensePersistence persistence,
         WeeklyExpenseAuthorizationService authorizationService,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        @Value("${weekly.cashflow-edit-leases-enabled:false}") boolean cashflowEditLeasesEnabled,
+        @Value("${weekly.deploy-env:local}") String deployEnv
     ) {
+        if (cashflowEditLeasesEnabled && !"stage".equalsIgnoreCase(deployEnv == null ? "" : deployEnv.trim())) {
+            throw new IllegalStateException("Cashflow edit leases can only be enabled in the Stage JVM runtime.");
+        }
         this.persistence = persistence;
         this.authorizationService = authorizationService;
         this.objectMapper = objectMapper;
+        this.cashflowEditLeasesEnabled = cashflowEditLeasesEnabled;
         this.spreadsheetService = new WeeklyExpenseSpreadsheetService(new dev.merryai.innerplatform.weekly.domain.WeeklyExpenseCellValidator());
     }
 
@@ -334,6 +345,7 @@ public class WeeklyExpenseCommandService {
         ImportBankStatementBatchRequest request
     ) {
         authorizationService.requireProjectAllowed(BANK_IMPORT_BATCH_COMMAND, actor, projectId);
+        assertAtomicWriteBudget(request.lines().size(), 3, "Bank statement import");
         String requestHash = hashJson(request);
         Optional<ImportBankStatementBatchResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -590,11 +602,17 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public UpsertProjectionResponse upsertProjection(TrustedActorContext actor, String projectId, UpsertProjectionRequest request) {
-        authorizationService.requireProjectAllowed(UPSERT_PROJECTION_COMMAND, actor, projectId);
+    public UpsertProjectionResponse upsertProjection(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        UpsertProjectionRequest request
+    ) {
+        assertAtomicWriteBudget(request.lines().size(), 2, "Projection command");
+        TrustedActorContext writer = requireCashflowWriteLease(UPSERT_PROJECTION_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<UpsertProjectionResponse> replay = readIdempotentResponse(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             UPSERT_PROJECTION_COMMAND,
             request.idempotencyKey(),
@@ -605,7 +623,7 @@ public class WeeklyExpenseCommandService {
 
         Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
         for (UpsertProjectionRequest.ProjectionLinePatch line : request.lines()) {
-            String cashflowLine = CashflowLineCatalog.canonicalize(line.cashflowLine());
+            String cashflowLine = requireKnownCashflowLine(line.cashflowLine());
             String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
             ProjectionLineAccumulator accumulator = projectionPatches.get(key);
             BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
@@ -620,14 +638,14 @@ public class WeeklyExpenseCommandService {
         for (ProjectionLineAccumulator line : projectionPatches.values()) {
             WeeklyExpenseProjectionEntity projectionEntity = persistence
                 .findProjectionLine(
-                    actor.tenantId(),
+                    writer.tenantId(),
                     projectId,
                     line.yearMonth,
                     line.weekNo,
                     line.cashflowLine
                 )
                 .orElseGet(() -> new WeeklyExpenseProjectionEntity(
-                    actor.tenantId(),
+                    writer.tenantId(),
                     projectId,
                     line.yearMonth,
                     line.weekNo,
@@ -649,14 +667,14 @@ public class WeeklyExpenseCommandService {
         }
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             "projection",
             UPSERT_PROJECTION_COMMAND,
-            actor.id(),
-            normalizeRole(actor.role()),
+            writer.id(),
+            normalizeRole(writer.role()),
             request.idempotencyKey(),
-            projectionMetadataJson(actor, projection.size())
+            projectionMetadataJson(writer, projection.size())
         ));
 
         UpsertProjectionResponse response = new UpsertProjectionResponse(
@@ -668,7 +686,7 @@ public class WeeklyExpenseCommandService {
             auditEvent.getId()
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             request.idempotencyKey(),
             UPSERT_PROJECTION_COMMAND,
@@ -682,12 +700,14 @@ public class WeeklyExpenseCommandService {
     public CashflowSheetLabApplyResponse applyCashflowSheetLab(
         TrustedActorContext actor,
         String projectId,
+        CashflowEditSession editSession,
         CashflowSheetLabApplyRequest request
     ) {
-        authorizationService.requireProjectAllowed(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId);
+        assertAtomicWriteBudget(request.lines().size(), 2, "Cashflow sheet apply");
+        TrustedActorContext writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CashflowSheetLabApplyResponse> replay = readIdempotentResponse(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             CASHFLOW_SHEET_LAB_APPLY_COMMAND,
             request.idempotencyKey(),
@@ -696,11 +716,11 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        String sourceSheetKey = defaultText(request.sourceSheetKey(), "cashflow-sheet-lab");
+        String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
         Map<String, ProjectionLineAccumulator> actualPatches = new LinkedHashMap<>();
         for (CashflowSheetLabApplyRequest.LinePatch line : request.lines()) {
-            String cashflowLine = CashflowLineCatalog.canonicalize(line.cashflowLine());
+            String cashflowLine = requireKnownCashflowLine(line.cashflowLine());
             String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
             BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
             Map<String, ProjectionLineAccumulator> target = "actual".equals(line.mode())
@@ -718,14 +738,14 @@ public class WeeklyExpenseCommandService {
         for (ProjectionLineAccumulator line : projectionPatches.values()) {
             WeeklyExpenseProjectionEntity projectionEntity = persistence
                 .findProjectionLine(
-                    actor.tenantId(),
+                    writer.tenantId(),
                     projectId,
                     line.yearMonth,
                     line.weekNo,
                     line.cashflowLine
                 )
                 .orElseGet(() -> new WeeklyExpenseProjectionEntity(
-                    actor.tenantId(),
+                    writer.tenantId(),
                     projectId,
                     line.yearMonth,
                     line.weekNo,
@@ -743,8 +763,22 @@ public class WeeklyExpenseCommandService {
                 line.amount
             ))
             .toList();
+        int actualWriteCount = persistence.countCashflowActualReplacementWrites(
+            writer.tenantId(),
+            projectId,
+            sourceSheetKey,
+            actualDeltas.stream()
+                .map(delta -> projectId + "-" + delta.yearMonth() + "-w" + delta.weekNo())
+                .distinct()
+                .toList()
+        );
+        assertAtomicWriteBudget(
+            sheetLabProjectionEntities.size() + actualWriteCount,
+            2,
+            "Cashflow sheet apply"
+        );
         List<WeeklyExpenseActualEntity> savedActual = persistence.replaceActualLines(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             sourceSheetKey,
             actualDeltas
@@ -771,14 +805,14 @@ public class WeeklyExpenseCommandService {
         }
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             sourceSheetKey,
             CASHFLOW_SHEET_LAB_APPLY_COMMAND,
-            actor.id(),
-            normalizeRole(actor.role()),
+            writer.id(),
+            normalizeRole(writer.role()),
             request.idempotencyKey(),
-            cashflowSheetLabMetadataJson(actor, sourceSheetKey, projection.size(), actual.size())
+            cashflowSheetLabMetadataJson(writer, sourceSheetKey, projection.size(), actual.size())
         ));
 
         CashflowSheetLabApplyResponse response = new CashflowSheetLabApplyResponse(
@@ -793,7 +827,7 @@ public class WeeklyExpenseCommandService {
             auditEvent.getId()
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
-            actor.tenantId(),
+            writer.tenantId(),
             projectId,
             request.idempotencyKey(),
             CASHFLOW_SHEET_LAB_APPLY_COMMAND,
@@ -2077,6 +2111,45 @@ public class WeeklyExpenseCommandService {
 
     private String text(String value) {
         return value == null ? "" : value;
+    }
+
+    private TrustedActorContext requireCashflowWriteLease(
+        String commandName,
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession
+    ) {
+        if (!cashflowEditLeasesEnabled) {
+            throw new WeeklyExpenseEditLeaseException(
+                503,
+                "cashflow_edit_leases_disabled",
+                "Cashflow writes require the Stage edit-lease runtime."
+            );
+        }
+        String storedRole = persistence.requireCashflowWriteLease(actor, projectId, editSession);
+        TrustedActorContext storedActor = new TrustedActorContext(
+            actor.tenantId(),
+            actor.id(),
+            actor.email(),
+            storedRole,
+            actor.name()
+        );
+        authorizationService.requireAllowed(commandName, storedActor);
+        return storedActor;
+    }
+
+    private String requireKnownCashflowLine(String value) {
+        String line = CashflowLineCatalog.canonicalize(value);
+        if (line.isBlank() || !CashflowLineCatalog.ALL_LINES.contains(line)) {
+            throw new IllegalArgumentException("Unsupported cashflow line.");
+        }
+        return line;
+    }
+
+    private void assertAtomicWriteBudget(int inputCount, int fixedWriteCount, String command) {
+        if (inputCount + fixedWriteCount > WeeklyExpenseRequestLimits.FIRESTORE_ATOMIC_WRITE_LIMIT) {
+            throw new IllegalArgumentException(command + " exceeds the Firestore atomic write budget.");
+        }
     }
 
     private String hashJson(Object request) {

@@ -17,6 +17,8 @@ spring:
 server:
   port: ${WEEKLY_API_PORT:8088}
 weekly:
+  deploy-env: ${JVM_WEEKLY_DEPLOY_ENV:local}
+  cashflow-edit-leases-enabled: ${JVM_WEEKLY_EDIT_LEASES_ENABLED:false}
   storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}

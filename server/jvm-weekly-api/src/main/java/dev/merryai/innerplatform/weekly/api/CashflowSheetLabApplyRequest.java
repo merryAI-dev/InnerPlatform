@@ -13,7 +13,6 @@ import java.util.List;
 
 public record CashflowSheetLabApplyRequest(
     @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH) String idempotencyKey,
-    @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_SHEET_NAME_LENGTH) String sourceSheetKey,
     @Valid @NotNull @Size(min = 1, max = WeeklyExpenseRequestLimits.MAX_ROW_OPERATION_COUNT) List<LinePatch> lines
 ) {
     public record LinePatch(

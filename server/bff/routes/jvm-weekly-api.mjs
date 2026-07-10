@@ -39,6 +39,18 @@ function resolveJavaWeeklyWorkspaceEmailDomain(options = {}, env = process.env) 
   return raw.replace(/^@+/, '').toLowerCase();
 }
 
+function resolveJavaWeeklyFirestoreProjectId(options = {}, env = process.env) {
+  return readOptionalText(options.jvmWeeklyFirestoreProjectId)
+    || readOptionalText(env.JVM_WEEKLY_FIRESTORE_PROJECT_ID)
+    || readOptionalText(env.WEEKLY_FIRESTORE_PROJECT_ID);
+}
+
+function resolveBffDataProjectId(env = process.env) {
+  return readOptionalText(env.FIREBASE_PROJECT_ID)
+    || readOptionalText(env.GCLOUD_PROJECT)
+    || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
+}
+
 function isWorkspaceAuthMode(authMode) {
   const normalized = readOptionalText(authMode).toLowerCase();
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
@@ -58,7 +70,16 @@ async function fetchGoogleIdentityToken(fetchImpl, audience) {
   return token.trim();
 }
 
-async function buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience, authMode, workspaceEmailDomain }) {
+async function buildTrustedHeaders({
+  fetchImpl,
+  context,
+  serviceToken,
+  idTokenAudience,
+  authMode,
+  workspaceEmailDomain,
+  editSession,
+  dataProjectId,
+}) {
   if (!serviceToken) {
     throw createHttpError(503, 'JVM weekly API service token is not configured.', 'jvm_weekly_api_token_unconfigured');
   }
@@ -75,6 +96,12 @@ async function buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAu
   }
   if (context.actorName) {
     headers['x-actor-name'] = encodeURIComponent(context.actorName);
+  }
+  if (dataProjectId) headers['x-data-project-id'] = dataProjectId;
+  if (editSession) {
+    headers['x-edit-session-id'] = editSession.sessionId;
+    headers['x-edit-lease-id'] = editSession.leaseId;
+    headers['x-edit-fence'] = String(editSession.fence);
   }
   const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience);
   if (identityToken) {
@@ -100,13 +127,24 @@ async function proxyJavaWeeklyJson({
   method,
   path,
   body,
+  editSession,
+  dataProjectId,
 }) {
   if (!baseUrl) {
     throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
   }
   const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
     method,
-    headers: await buildTrustedHeaders({ fetchImpl, context, serviceToken, idTokenAudience, authMode, workspaceEmailDomain }),
+    headers: await buildTrustedHeaders({
+      fetchImpl,
+      context,
+      serviceToken,
+      idTokenAudience,
+      authMode,
+      workspaceEmailDomain,
+      editSession,
+      dataProjectId,
+    }),
     body: method === 'GET' ? undefined : JSON.stringify(body || {}),
   });
 
@@ -125,7 +163,20 @@ function commandBody(req) {
   };
   delete body.actor;
   delete body.tenantId;
+  delete body.actorRole;
+  delete body.dataProjectId;
+  delete body.sourceSheetKey;
   return body;
+}
+
+function readCashflowEditSession(req) {
+  const sessionId = readOptionalText(req.header('x-edit-session-id'));
+  const leaseId = readOptionalText(req.header('x-edit-lease-id'));
+  const fence = Number(req.header('x-edit-fence'));
+  if (!sessionId || !leaseId || !Number.isSafeInteger(fence) || fence < 1) {
+    throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
+  }
+  return { sessionId, leaseId, fence };
 }
 
 function createJavaMutatingProxyRoute(routeHandler) {
@@ -156,14 +207,37 @@ export function mountJvmWeeklyApiRoutes(app, {
   jvmWeeklyApiIdTokenAudience,
   jvmWeeklyAuthMode,
   jvmWeeklyWorkspaceEmailDomain,
+  jvmWeeklyFirestoreProjectId,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
   const idTokenAudience = resolveJavaWeeklyApiIdTokenAudience({ jvmWeeklyApiIdTokenAudience }, env);
   const authMode = resolveJavaWeeklyAuthMode({ jvmWeeklyAuthMode }, env);
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
+  const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
+  const bffDataProjectId = resolveBffDataProjectId(env);
+  const editLeasesEnabled = readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
 
-  async function proxyMutation(req, path, body) {
+  async function proxyMutation(req, path, body, { cashflowWrite = false } = {}) {
+    let editSession;
+    let dataProjectId;
+    if (cashflowWrite) {
+      if (!editLeasesEnabled) {
+        throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+      }
+      if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+        throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+      }
+      const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+      if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
+        throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+      }
+      if (bffDataProjectId === liveProjectId) {
+        throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+      }
+      editSession = readCashflowEditSession(req);
+      dataProjectId = bffDataProjectId;
+    }
     return proxyJavaWeeklyJson({
       fetchImpl,
       baseUrl,
@@ -175,6 +249,8 @@ export function mountJvmWeeklyApiRoutes(app, {
       method: 'POST',
       path,
       body,
+      editSession,
+      dataProjectId,
     });
   }
 
@@ -288,7 +364,15 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.post('/api/v1/cashflow/:projectId/projection', createJavaMutatingProxyRoute(async (req) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'write Java weekly projection', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
-    const result = await proxyMutation(req, `/api/v1/cashflow/${projectId}/projection`, commandBody(req));
+    const result = await proxyMutation(
+      req,
+      `/api/v1/cashflow/${projectId}/projection`,
+      commandBody(req),
+      { cashflowWrite: true },
+    );
+    if (readOptionalText(result?.projectId) !== readOptionalText(req.params.projectId)) {
+      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+    }
     return { status: 200, body: result };
   }));
 

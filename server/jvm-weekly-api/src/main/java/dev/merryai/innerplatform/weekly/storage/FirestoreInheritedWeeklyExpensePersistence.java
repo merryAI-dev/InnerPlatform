@@ -1,5 +1,7 @@
 package dev.merryai.innerplatform.weekly.storage;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.Timestamp;
 import com.google.cloud.firestore.CollectionReference;
@@ -12,6 +14,9 @@ import com.google.cloud.firestore.QuerySnapshot;
 import com.google.cloud.firestore.SetOptions;
 import com.google.cloud.firestore.Transaction;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditExportEntity;
@@ -28,6 +33,7 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -35,14 +41,19 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
 @Repository
 @ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "firestore")
 public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpensePersistence {
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Set<String> CASHFLOW_WRITE_ROLES = Set.of("admin", "finance", "pm");
+    private static final Set<String> CASHFLOW_CROSS_PROJECT_ROLES = Set.of("admin", "finance");
     private static final List<String> CASHFLOW_IN_LINES = List.of(
         "MYSC_PREPAY_IN",
         "SALES_IN",
@@ -61,6 +72,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     );
 
     private final Firestore db;
+    private final String firestoreProjectId;
+    private final Clock clock;
     private final FirestoreWeeklyExpenseDocumentMapper sheetMapper = new FirestoreWeeklyExpenseDocumentMapper();
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
@@ -68,12 +81,27 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId
     ) {
+        this(createFirestore(firestoreProjectId), normalizeFirestoreProjectId(firestoreProjectId), Clock.systemUTC());
+    }
+
+    FirestoreInheritedWeeklyExpensePersistence(Firestore db, String firestoreProjectId, Clock clock) {
+        this.db = db;
+        this.firestoreProjectId = normalizeFirestoreProjectId(firestoreProjectId);
+        this.clock = clock;
+    }
+
+    private static String normalizeFirestoreProjectId(String firestoreProjectId) {
         String projectId = firestoreProjectId == null ? "" : firestoreProjectId.trim();
         if (projectId.isBlank()) {
             throw new IllegalStateException("weekly.firestore-project-id is required when weekly.storage-backend=firestore.");
         }
+        return projectId;
+    }
+
+    private static Firestore createFirestore(String firestoreProjectId) {
+        String projectId = normalizeFirestoreProjectId(firestoreProjectId);
         try {
-            this.db = FirestoreOptions.newBuilder()
+            return FirestoreOptions.newBuilder()
                 .setProjectId(projectId)
                 .setCredentials(GoogleCredentials.getApplicationDefault())
                 .build()
@@ -111,6 +139,131 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             }
             throw new IllegalStateException("Firestore weekly expense command transaction failed.", error);
         }
+    }
+
+    @Override
+    public String requireCashflowWriteLease(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession session
+    ) {
+        if (currentTransaction.get() == null) {
+            throw leaseError(503, "cashflow_edit_lease_transaction_required", "Cashflow lease validation must run inside the canonical Firestore transaction.");
+        }
+        if (session == null || !firestoreProjectId.equals(session.dataProjectId())) {
+            throw leaseError(503, "cashflow_data_project_mismatch", "BFF and JVM cashflow data projects do not match.");
+        }
+        if (session.sessionId().isBlank() || session.leaseId().isBlank() || session.fence() < 1) {
+            throw leaseError(400, "cashflow_edit_lease_request_invalid", "Cashflow edit lease headers are required.");
+        }
+
+        DocumentSnapshot projectSnap = get(db.document("orgs/" + actor.tenantId() + "/projects/" + projectId));
+        Map<String, Object> project = projectSnap.exists() ? data(projectSnap) : Map.of();
+        if (project.isEmpty()
+            || (!text(project.get("id"), "").isBlank() && !projectId.equals(text(project.get("id"), "")))
+            || (!text(project.get("tenantId"), "").isBlank() && !actor.tenantId().equals(text(project.get("tenantId"), "")))) {
+            throw leaseError(403, "cashflow_project_write_forbidden", "Canonical project access is required for cashflow writes.");
+        }
+
+        DocumentSnapshot memberSnap = get(db.document("orgs/" + actor.tenantId() + "/members/" + actor.id()));
+        Map<String, Object> member = memberSnap.exists() ? data(memberSnap) : Map.of();
+        String storedRole = requireStoredCashflowWriter(member, actor, projectId);
+
+        DocumentSnapshot leaseSnap = get(db.document(cashflowLeasePath(actor.tenantId(), projectId)));
+        if (!leaseSnap.exists()) {
+            throw leaseError(410, "edit_lease_expired", "The cashflow edit lease has expired.");
+        }
+        Map<String, Object> lease = data(leaseSnap);
+        Instant expiresAt = instant(lease.get("expiresAt"));
+        if (!"ACTIVE".equals(text(lease.get("state"), "").toUpperCase(Locale.ROOT))
+            || expiresAt == null
+            || !expiresAt.isAfter(clock.instant())) {
+            throw leaseError(410, "edit_lease_expired", "The cashflow edit lease has expired.");
+        }
+        if (!actor.tenantId().equals(text(lease.get("tenantId"), ""))
+            || !"cashflow".equals(text(lease.get("resourceType"), ""))
+            || !projectId.equals(text(lease.get("resourceId"), ""))
+            || !actor.id().equals(text(lease.get("holderUid"), ""))
+            || !session.sessionId().equals(text(lease.get("sessionId"), ""))
+            || !session.leaseId().equals(text(lease.get("leaseId"), ""))
+            || session.fence() != longValue(lease.get("fence"), 0)) {
+            throw leaseError(423, "edit_lease_held", "The cashflow edit lease is held by another session.");
+        }
+        return storedRole;
+    }
+
+    @Override
+    public int countCashflowActualReplacementWrites(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        List<String> requestedWeekDocumentIds
+    ) {
+        if (currentTransaction.get() == null) {
+            throw leaseError(503, "cashflow_atomic_plan_transaction_required", "Cashflow write planning must run inside the canonical Firestore transaction.");
+        }
+        Set<String> writeDocumentIds = new java.util.LinkedHashSet<>(requestedWeekDocumentIds == null
+            ? List.of()
+            : requestedWeekDocumentIds);
+        QuerySnapshot existing = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
+        for (DocumentSnapshot doc : existing.getDocuments()) {
+            if (data(doc).containsKey("weeklyExpenseActualBySheet")) {
+                writeDocumentIds.add(doc.getId());
+            }
+        }
+        return writeDocumentIds.size();
+    }
+
+    private String requireStoredCashflowWriter(
+        Map<String, Object> member,
+        TrustedActorContext actor,
+        String projectId
+    ) {
+        String memberUid = text(member.get("uid"), "");
+        String storedRole = text(member.get("role"), "").toLowerCase(Locale.ROOT);
+        if (member.isEmpty()
+            || !"ACTIVE".equals(text(member.get("status"), "").toUpperCase(Locale.ROOT))
+            || (!memberUid.isBlank() && !actor.id().equals(memberUid))
+            || !CASHFLOW_WRITE_ROLES.contains(storedRole)
+            || (!CASHFLOW_CROSS_PROJECT_ROLES.contains(storedRole) && !memberProjectIds(member).contains(projectId))) {
+            throw leaseError(403, "cashflow_project_write_forbidden", "Stored project assignment is required for cashflow writes.");
+        }
+        return storedRole;
+    }
+
+    private Set<String> memberProjectIds(Map<String, Object> member) {
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        addProjectId(ids, member.get("projectId"));
+        addProjectIds(ids, member.get("projectIds"));
+        Object portalProfile = member.get("portalProfile");
+        if (portalProfile instanceof Map<?, ?> profile) {
+            addProjectId(ids, profile.get("projectId"));
+            addProjectIds(ids, profile.get("projectIds"));
+        }
+        return ids;
+    }
+
+    private void addProjectId(Set<String> ids, Object value) {
+        String projectId = text(value, "");
+        if (!projectId.isBlank()) ids.add(projectId);
+    }
+
+    private void addProjectIds(Set<String> ids, Object value) {
+        if (!(value instanceof Iterable<?> iterable)) return;
+        for (Object item : iterable) addProjectId(ids, item);
+    }
+
+    private String cashflowLeasePath(String tenantId, String projectId) {
+        try {
+            String resource = JSON.writeValueAsString(List.of("cashflow", projectId));
+            return "orgs/" + tenantId + "/editLeases/v1_" + safeDocId(resource);
+        } catch (JsonProcessingException error) {
+            throw new IllegalArgumentException("Invalid cashflow project id.", error);
+        }
+    }
+
+    private WeeklyExpenseEditLeaseException leaseError(int statusCode, String code, String message) {
+        return new WeeklyExpenseEditLeaseException(statusCode, code, message);
     }
 
     @Override
@@ -950,6 +1103,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (value == null) return fallback;
         try {
             return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException error) {
+            return fallback;
+        }
+    }
+
+    private long longValue(Object value, long fallback) {
+        if (value instanceof Number number) return number.longValue();
+        if (value == null) return fallback;
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
         } catch (NumberFormatException error) {
             return fallback;
         }

@@ -22,6 +22,10 @@ public final class CashflowLineCatalog {
         "BANK_INTEREST_OUT"
     );
 
+    public static final Set<String> ALL_LINES = java.util.stream.Stream
+        .concat(IN_LINES.stream(), OUT_LINES.stream())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
     private static final Map<String, String> ALIASES = Map.ofEntries(
         Map.entry("MYSC_PREPAY_IN", "MYSC_PREPAY_IN"),
         Map.entry("MYSC 선입금(잔금 등 입금 필요 시)", "MYSC_PREPAY_IN"),
@@ -65,6 +69,6 @@ public final class CashflowLineCatalog {
         if (normalized.isBlank()) return "";
         String direct = ALIASES.get(normalized);
         if (direct != null) return direct;
-        return ALIASES.getOrDefault(normalized.replaceAll("\\s+", ""), normalized);
+        return ALIASES.getOrDefault(normalized.replaceAll("\\s+", ""), "");
     }
 }

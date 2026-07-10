@@ -244,9 +244,18 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestHeader(value = "x-data-project-id", required = false) String dataProjectId,
+        @RequestHeader(value = "x-edit-session-id", required = false) String editSessionId,
+        @RequestHeader(value = "x-edit-lease-id", required = false) String editLeaseId,
+        @RequestHeader(value = "x-edit-fence", required = false) String editFence,
         @Valid @RequestBody UpsertProjectionRequest request
     ) {
-        return commandService.upsertProjection(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.upsertProjection(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(dataProjectId, editSessionId, editLeaseId, editFence),
+            request
+        );
     }
 
     @PostMapping("/cashflow/{projectId}/sheet-lab/apply")
@@ -256,9 +265,18 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestHeader(value = "x-data-project-id", required = false) String dataProjectId,
+        @RequestHeader(value = "x-edit-session-id", required = false) String editSessionId,
+        @RequestHeader(value = "x-edit-lease-id", required = false) String editLeaseId,
+        @RequestHeader(value = "x-edit-fence", required = false) String editFence,
         @Valid @RequestBody CashflowSheetLabApplyRequest request
     ) {
-        return commandService.applyCashflowSheetLab(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.applyCashflowSheetLab(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(dataProjectId, editSessionId, editLeaseId, editFence),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/submit")
@@ -448,6 +466,23 @@ public class WeeklyExpenseController {
         return new TrustedActorContext(tenantId, actorId, actorEmail, actorRole, actorName);
     }
 
+    private CashflowEditSession editSession(
+        String dataProjectId,
+        String sessionId,
+        String leaseId,
+        String fenceValue
+    ) {
+        long fence = 0;
+        if (fenceValue != null && !fenceValue.isBlank()) {
+            try {
+                fence = Long.parseLong(fenceValue.trim());
+            } catch (NumberFormatException error) {
+                throw new IllegalArgumentException("x-edit-fence must be a positive integer.");
+            }
+        }
+        return new CashflowEditSession(dataProjectId, sessionId, leaseId, fence);
+    }
+
     private record CashflowAmountLine(
         String yearMonth,
         int weekNo,
@@ -461,6 +496,15 @@ public class WeeklyExpenseController {
         return ResponseEntity.status(409).body(Map.of(
             "ok", "false",
             "code", "weekly_expense_conflict",
+            "message", error.getMessage()
+        ));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(WeeklyExpenseEditLeaseException.class)
+    public ResponseEntity<Map<String, String>> editLease(WeeklyExpenseEditLeaseException error) {
+        return ResponseEntity.status(error.statusCode()).body(Map.of(
+            "ok", "false",
+            "code", error.code(),
             "message", error.getMessage()
         ));
     }

@@ -9,6 +9,8 @@ spring:
   flyway:
     enabled: true
 weekly:
+  deploy-env: stage
+  cashflow-edit-leases-enabled: true
   internal-api-token-enabled: true
   internal-api-token: test-weekly-api-token
   firebase-test-tokens-enabled: true

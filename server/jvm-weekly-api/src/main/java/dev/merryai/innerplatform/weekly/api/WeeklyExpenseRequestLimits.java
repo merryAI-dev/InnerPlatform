@@ -15,6 +15,9 @@ public final class WeeklyExpenseRequestLimits {
     public static final int MAX_CELL_VALIDATION_MESSAGE_LENGTH = 1000;
     public static final int MAX_CASHFLOW_LINE_LENGTH = 200;
     public static final int MAX_YEAR_MONTH_LENGTH = 7;
+    public static final int FIRESTORE_ATOMIC_WRITE_LIMIT = 500;
+    public static final int MAX_CASHFLOW_COMMAND_LINES = FIRESTORE_ATOMIC_WRITE_LIMIT - 2;
+    public static final int MAX_BANK_IMPORT_LINES = FIRESTORE_ATOMIC_WRITE_LIMIT - 3;
 
     private WeeklyExpenseRequestLimits() {
     }

@@ -9,6 +9,7 @@ import {
 import { GoogleSheetsServiceError, extractSpreadsheetId } from '../google-sheets.mjs';
 import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
 import { upsertCashflowWeekAmounts } from '../cashflow-canonical-store.mjs';
+import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import {
   cashflowSheetLabApplySchema,
   cashflowSheetLabConfigSchema,
@@ -26,6 +27,34 @@ const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_EVENTS_COLLECTION_ID = 'cashflow_events';
 const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_PROJECTION_SYNC_JOBS_COLLECTION_ID = 'cashflow_projection_sync_jobs';
+
+function readEditSession(req) {
+  const sessionId = readOptionalText(req.header('x-edit-session-id'));
+  const leaseId = readOptionalText(req.header('x-edit-lease-id'));
+  const fence = Number(req.header('x-edit-fence'));
+  if (!sessionId || !leaseId || !Number.isSafeInteger(fence) || fence < 1) {
+    throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
+  }
+  return { sessionId, leaseId, fence };
+}
+
+function javaCashflowSnapshot(result = {}) {
+  const weeks = new Map();
+  for (const [mode, lines] of [['projection', result.projection], ['actual', result.actual]]) {
+    for (const line of Array.isArray(lines) ? lines : []) {
+      const key = `${readOptionalText(line.yearMonth)}:${Number(line.weekNo)}`;
+      const week = weeks.get(key) || {
+        yearMonth: readOptionalText(line.yearMonth),
+        weekNo: Number(line.weekNo),
+        projection: {},
+        actual: {},
+      };
+      week[mode][readOptionalText(line.cashflowLine)] = Number(line.amount);
+      weeks.set(key, week);
+    }
+  }
+  return { weeks: [...weeks.values()] };
+}
 
 function normalizeRole(value) {
   const normalized = readOptionalText(value).toLowerCase();
@@ -874,6 +903,9 @@ async function applyStagedCashflowSheetLab({
   projectId,
   parsed = {},
   context = {},
+  javaWeeklyClient = null,
+  editSession = null,
+  idempotencyKey = '',
   logger = () => {},
 } = {}) {
   const stagedRunId = readOptionalText(parsed.stageRunId);
@@ -905,6 +937,59 @@ async function applyStagedCashflowSheetLab({
   }
 
   const lines = selectedCandidates.map(candidateToApplyLine);
+  if (javaWeeklyClient) {
+    const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
+      context,
+      projectId,
+      idempotencyKey,
+      editSession,
+      lines: lines.map(({ mode, yearMonth, weekNo, cashflowLine, amount, sourceCell, sourceLabel }) => ({
+        mode,
+        yearMonth,
+        weekNo,
+        cashflowLine,
+        amount,
+        sourceCell,
+        sourceLabel,
+      })),
+    });
+    await markCashflowChangeCandidatesStatus({
+      db,
+      tenantId,
+      candidates: selectedCandidates,
+      status: 'applied',
+      now,
+    });
+    const projectionLineCount = Number(javaResult.savedProjectionLineCount)
+      || lines.filter((line) => line.mode === 'projection').length;
+    const actualLineCount = Number(javaResult.savedActualLineCount)
+      || lines.filter((line) => line.mode === 'actual').length;
+    return {
+      ok: true,
+      commandName: readOptionalText(javaResult.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
+      projectId,
+      sourceSheetKey: 'cashflow-sheet-lab',
+      weekBasis: CASHFLOW_WEEK_BASIS,
+      totalBasis: CASHFLOW_WEEK_BASIS,
+      appliedLineCount: lines.length,
+      projectionLineCount,
+      actualLineCount,
+      skippedRiskLineCount: riskCandidates.length,
+      lastAppliedAt: now,
+      runId: `cashflow-sheet-apply:${projectId}:${now}`,
+      stagedRunId,
+      lastAppliedBy: {
+        uid: readOptionalText(context?.actorId),
+        email: readOptionalText(context?.actorEmail),
+        role: readOptionalText(context?.actorRole) || 'workspace_user',
+      },
+      firebaseResult: {
+        ...javaResult,
+        commandName: readOptionalText(javaResult.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
+        verifiedLineCount: lines.length,
+      },
+    };
+  }
   const groups = groupApplyLines(lines);
   const updatedWeeks = [];
   const runId = `cashflow-sheet-apply:${projectId}:${now}`;
@@ -1044,6 +1129,9 @@ async function applyConfiguredCashflowSheetLab({
   parsed = {},
   loadSheetPreview,
   context = {},
+  javaWeeklyClient = null,
+  editSession = null,
+  idempotencyKey = '',
   logger = () => {},
 } = {}) {
   const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
@@ -1098,6 +1186,77 @@ async function applyConfiguredCashflowSheetLab({
   });
   if (lines.length === 0) {
     throw createHttpError(400, '반영할 cashflow 값이 없습니다.', 'cashflow_sheet_apply_empty');
+  }
+  if (javaWeeklyClient) {
+    const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
+      context,
+      projectId,
+      idempotencyKey,
+      editSession,
+      lines: lines.map(({ mode, yearMonth, weekNo, cashflowLine, amount, sourceCell, sourceLabel }) => ({
+        mode,
+        yearMonth,
+        weekNo,
+        cashflowLine,
+        amount,
+        sourceCell,
+        sourceLabel,
+      })),
+    });
+    const now = new Date().toISOString();
+    const projectionLineCount = Number(javaResult.savedProjectionLineCount)
+      || lines.filter((line) => line.mode === 'projection').length;
+    const actualLineCount = Number(javaResult.savedActualLineCount)
+      || lines.filter((line) => line.mode === 'actual').length;
+    return {
+      projectId,
+      spreadsheetId: preview.spreadsheetId,
+      spreadsheetTitle: preview.spreadsheetTitle,
+      selectedSheetName: preview.selectedSheetName,
+      availableSheets: preview.availableSheets,
+      activeWeekRange: {
+        startWeek: weekRange.startWeek,
+        endWeek: weekRange.endWeek,
+        weekBasis: CASHFLOW_WEEK_BASIS,
+        totalBasis: CASHFLOW_WEEK_BASIS,
+        activeWeeks,
+      },
+      matrix: preview.matrix,
+      accessPolicy: {
+        googleAuth: authMode,
+        googleScope: 'spreadsheets.readonly',
+        sheetPermission: resolveGoogleSheetPermission(authMode),
+        layoutSource: 'google_sheet_formatted_values',
+        valueSource: 'jvm_cashflow_transaction',
+        sheetReadRange: CASHFLOW_SHEET_LAB_READ_RANGE,
+        sheetNamePolicy: 'cashflow_usage_linked_only',
+        weekBasis: CASHFLOW_WEEK_BASIS,
+        totalBasis: CASHFLOW_WEEK_BASIS,
+      },
+      template,
+      previewValues: buildPreviewValues(template, javaCashflowSnapshot(javaResult), preview.matrix)
+        .filter((value) => isInWeekRange(value, weekRange)),
+      cashflowSnapshotStatus: 'ready',
+      cashflowSnapshotError: null,
+      appliedLineCount: lines.length,
+      projectionLineCount,
+      actualLineCount,
+      lastAppliedAt: now,
+      runId: `cashflow-sheet-apply:${projectId}:${now}`,
+      lastAppliedBy: {
+        uid: readOptionalText(context?.actorId),
+        email: readOptionalText(context?.actorEmail),
+        role: readOptionalText(context?.actorRole) || 'workspace_user',
+      },
+      skippedInvalidWeekCount: skippedInvalidWeekKeys.length,
+      skippedInvalidWeeks: skippedInvalidWeekKeys,
+      verifiedLineCount: lines.length,
+      firebaseResult: {
+        ...javaResult,
+        commandName: readOptionalText(javaResult.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
+        verifiedLineCount: lines.length,
+      },
+    };
   }
   const groups = groupApplyLines(lines);
   const updatedWeeks = [];
@@ -1422,6 +1581,9 @@ export function mountCashflowSheetLabRoutes(app, {
   db,
   googleSheetsService,
   enabled = true,
+  env = process.env,
+  editLeasesEnabled,
+  javaWeeklyClient,
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
 } = {}) {
@@ -1439,6 +1601,12 @@ export function mountCashflowSheetLabRoutes(app, {
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
   });
+  const authoritativeWritesEnabled = typeof editLeasesEnabled === 'boolean'
+    ? editLeasesEnabled
+    : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  const authoritativeJavaClient = authoritativeWritesEnabled
+    ? (javaWeeklyClient || createJavaWeeklyClient({ env }))
+    : null;
   const systemAccountEmail = resolveSystemAccountEmail(googleSheetsService);
 
   app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/config', asyncHandler(async (req, res) => {
@@ -1850,11 +2018,19 @@ export function mountCashflowSheetLabRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/apply', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    if (!authoritativeWritesEnabled) {
+      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+    }
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab apply payload');
     const project = await readProjectDocument(db, tenantId, projectId);
     const deprecatedGoogleAccessTokenIgnored = Boolean(readOptionalText(req.header('x-google-access-token')));
+    const editSession = authoritativeWritesEnabled ? readEditSession(req) : null;
+    const idempotencyKey = readOptionalText(parsed.idempotencyKey) || readOptionalText(req.context?.idempotencyKey);
+    if (authoritativeWritesEnabled && !idempotencyKey) {
+      throw createHttpError(400, 'idempotencyKey is required for cashflow apply.', 'idempotency_key_required');
+    }
 
     try {
       const stagedRunId = readOptionalText(parsed.stageRunId);
@@ -1864,6 +2040,9 @@ export function mountCashflowSheetLabRoutes(app, {
         projectId,
         parsed,
         context: req.context,
+        javaWeeklyClient: authoritativeJavaClient,
+        editSession,
+        idempotencyKey,
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`apply.${event}`, req, details, level);
         },
@@ -1875,6 +2054,9 @@ export function mountCashflowSheetLabRoutes(app, {
         parsed,
         loadSheetPreview,
         context: req.context,
+        javaWeeklyClient: authoritativeJavaClient,
+        editSession,
+        idempotencyKey,
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`apply.${event}`, req, details, level);
         },
@@ -1955,7 +2137,15 @@ export async function runCashflowSheetLabSyncWorker({
   limit = 100,
   nowIso = new Date().toISOString(),
   sheetPreviewCacheTtlMs = 0,
+  env = process.env,
+  editLeasesEnabled,
 } = {}) {
+  const authoritativeWritesEnabled = typeof editLeasesEnabled === 'boolean'
+    ? editLeasesEnabled
+    : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  if (authoritativeWritesEnabled) {
+    throw createHttpError(503, 'Automatic cashflow writes are disabled while project edit leases are active.', 'cashflow_sync_requires_edit_lease');
+  }
   if (!db) {
     throw createHttpError(503, 'Firestore is required to sync cashflow sheets.', 'firestore_unconfigured');
   }

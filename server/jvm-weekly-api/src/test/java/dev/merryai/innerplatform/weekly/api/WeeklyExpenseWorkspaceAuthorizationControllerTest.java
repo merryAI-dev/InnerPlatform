@@ -1,10 +1,13 @@
 package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditEventRepository;
+import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -15,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -30,6 +35,15 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
 
     @Autowired
     private WeeklyExpenseAuditEventRepository auditEventRepository;
+
+    @SpyBean
+    private JpaWeeklyExpensePersistence weeklyExpensePersistence;
+
+    @BeforeEach
+    void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
+        doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
+            .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
+    }
 
     @Test
     void myscWorkspaceUserCanImportApplyProjectCashflowAndAuditWithoutRoleGate() throws Exception {

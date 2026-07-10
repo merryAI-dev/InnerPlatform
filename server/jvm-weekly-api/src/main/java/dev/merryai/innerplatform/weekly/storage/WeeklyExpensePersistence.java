@@ -1,6 +1,9 @@
 package dev.merryai.innerplatform.weekly.storage;
 
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditExportEntity;
@@ -25,6 +28,31 @@ public interface WeeklyExpensePersistence {
         } catch (Exception error) {
             throw new IllegalStateException("Weekly expense command transaction failed.", error);
         }
+    }
+
+    default String requireCashflowWriteLease(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession session
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_edit_lease_backend_unavailable",
+            "Cashflow edit leases require the Firestore transaction backend."
+        );
+    }
+
+    default int countCashflowActualReplacementWrites(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        List<String> requestedWeekDocumentIds
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_atomic_plan_backend_unavailable",
+            "Cashflow atomic write planning requires the Firestore transaction backend."
+        );
     }
 
     Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(
