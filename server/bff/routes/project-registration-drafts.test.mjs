@@ -15,6 +15,7 @@ function clone(value) {
 
 function createDb(seed = {}) {
   const documents = new Map(Object.entries(seed).map(([path, value]) => [path, clone(value)]));
+  let retryBeforeSecondAttempt = null;
 
   function snapshot(path) {
     const exists = documents.has(path);
@@ -37,30 +38,44 @@ function createDb(seed = {}) {
     };
   }
 
+  async function runAttempt(callback, commit) {
+    const writes = [];
+    const tx = {
+      get: async (ref) => snapshot(ref.path),
+      set: (ref, value, options = {}) => writes.push({ type: 'set', ref, value: clone(value), options }),
+      create: (ref, value) => writes.push({ type: 'create', ref, value: clone(value) }),
+      update: (ref, value) => writes.push({ type: 'update', ref, value: clone(value) }),
+    };
+    const result = await callback(tx);
+    if (!commit) return result;
+    for (const write of writes) {
+      const current = documents.get(write.ref.path);
+      if (write.type === 'create' && current !== undefined) throw new Error('document already exists');
+      if (write.type === 'update' && current === undefined) throw new Error('document does not exist');
+      documents.set(
+        write.ref.path,
+        (write.type === 'update' || write.options?.merge) && current
+          ? { ...current, ...write.value }
+          : write.value,
+      );
+    }
+    return result;
+  }
+
   return {
     documents,
     doc,
+    retryNextTransaction(beforeSecondAttempt) {
+      retryBeforeSecondAttempt = beforeSecondAttempt || (() => undefined);
+    },
     async runTransaction(callback) {
-      const writes = [];
-      const tx = {
-        get: async (ref) => snapshot(ref.path),
-        set: (ref, value, options = {}) => writes.push({ type: 'set', ref, value: clone(value), options }),
-        create: (ref, value) => writes.push({ type: 'create', ref, value: clone(value) }),
-        update: (ref, value) => writes.push({ type: 'update', ref, value: clone(value) }),
-      };
-      const result = await callback(tx);
-      for (const write of writes) {
-        const current = documents.get(write.ref.path);
-        if (write.type === 'create' && current !== undefined) throw new Error('document already exists');
-        if (write.type === 'update' && current === undefined) throw new Error('document does not exist');
-        documents.set(
-          write.ref.path,
-          (write.type === 'update' || write.options?.merge) && current
-            ? { ...current, ...write.value }
-            : write.value,
-        );
+      if (retryBeforeSecondAttempt) {
+        const beforeSecondAttempt = retryBeforeSecondAttempt;
+        retryBeforeSecondAttempt = null;
+        await runAttempt(callback, false);
+        await beforeSecondAttempt();
       }
-      return result;
+      return runAttempt(callback, true);
     },
   };
 }
@@ -515,11 +530,15 @@ describe('project registration draft service', () => {
     expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`)).toMatchObject({
       status: 'SUBMITTED',
       draftRevision: 1,
-      payload: validRegistrationPayload(),
-      attachmentRefs: [],
       submittedProjectId: 'project-1',
       submittedProjectRequestId: 'project-request-1',
     });
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .not.toHaveProperty('payload');
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .not.toHaveProperty('attachmentRefs');
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .not.toHaveProperty('stepIndex');
     expect(db.documents.get(`orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-registration', created.body.draft.draftId)}`))
       .toMatchObject({ state: 'RELEASED', releaseReason: 'FINAL_SUBMIT' });
     expect(db.documents.get(memberPath)).toMatchObject({
@@ -546,6 +565,62 @@ describe('project registration draft service', () => {
     expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(2);
     expect(auditChainService.appendManyInTransaction.mock.calls[1][1].map((entry) => entry.action))
       .toEqual(['PROJECT_REGISTRATION_SUBMIT', 'EDIT_LEASE_RELEASE']);
+  });
+
+  it('samples lease time again when Firestore retries final submit', async () => {
+    const { db, service, base, advance } = createHarness();
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-submit-retry-expiry-create',
+      payload: validRegistrationPayload(),
+    });
+    db.retryNextTransaction(() => advance((30 * 60 * 1000) + 1));
+
+    await expectHttpError(service.submit({
+      ...base,
+      idempotencyKey: 'idem-submit-retry-expiry',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    }), 410, 'edit_lease_expired');
+
+    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .toMatchObject({ status: 'ACTIVE', draftRevision: 0 });
+  });
+
+  it('uses the successful transaction attempt time for every final-submit record', async () => {
+    const { db, service, base, advance, auditChainService } = createHarness();
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-submit-retry-time-create',
+      payload: validRegistrationPayload(),
+    });
+    db.retryNextTransaction(() => advance(60_000));
+
+    const submitted = await service.submit({
+      ...base,
+      idempotencyKey: 'idem-submit-retry-time',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    });
+
+    const successfulAt = '2026-07-10T00:01:00.000Z';
+    expect(submitted.body.submittedAt).toBe(successfulAt);
+    expect(db.documents.get('orgs/tenant-a/projects/project-1').createdAt).toBe(successfulAt);
+    expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').requestedAt).toBe(successfulAt);
+    expect(db.documents.get('outbox/outbox-1')).toMatchObject({
+      createdAt: successfulAt,
+      updatedAt: successfulAt,
+      nextAttemptAt: successfulAt,
+    });
+    expect([...db.documents.values()].find((document) => document.idempotencyKey === 'idem-submit-retry-time'))
+      .toMatchObject({ completedAt: successfulAt });
+    expect(auditChainService.appendManyInTransaction.mock.calls.at(-1)[1]
+      .every((entry) => entry.timestamp === successfulAt)).toBe(true);
   });
 
   it.each([
@@ -685,14 +760,49 @@ describe('project registration draft service', () => {
     });
 
     const project = db.documents.get('orgs/tenant-a/projects/project-1');
-    expect(project.contractDocument).toMatchObject({
-      documentKind: 'contract',
-      name: 'latest-contract.pdf',
-      visibility: 'PRIVATE',
+    expect(project.contractDocument).toBeNull();
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .not.toHaveProperty('attachmentRefs');
+    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs).toEqual([
+      expect.objectContaining({ documentKind: 'contract', name: 'old-contract.pdf' }),
+      expect.objectContaining({ documentKind: 'contract', name: 'latest-contract.pdf' }),
+    ]);
+  });
+
+  it('rejects adopted attachment paths outside the current private draft prefix', async () => {
+    const legacyPath = 'orgs/tenant-a/projectRequestDrafts/registration-actor-a';
+    const { db, service, base } = createHarness({
+      seed: {
+        [legacyPath]: {
+          ownerUid: 'actor-a',
+          status: 'DRAFT',
+          payloadSnapshot: validRegistrationPayload(),
+          attachmentRefs: [{
+            attachmentId: 'legacy-contract',
+            documentKind: 'contract',
+            path: 'orgs/tenant-a/project-registration-drafts/another-draft/legacy-contract.pdf',
+            name: 'legacy-contract.pdf',
+          }],
+        },
+      },
     });
-    expect(project.contractDocument).not.toHaveProperty('downloadURL');
-    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`).attachmentRefs)
-      .toHaveLength(2);
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-submit-adopted-path-create',
+    });
+
+    await expectHttpError(service.submit({
+      ...base,
+      idempotencyKey: 'idem-submit-adopted-path',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    }), 422, 'draft_attachment_invalid');
+
+    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .toMatchObject({ status: 'ACTIVE', attachmentRefs: [expect.objectContaining({ attachmentId: 'legacy-contract' })] });
   });
 
   it('preserves current financial flag semantics by inferring positive stored amounts', async () => {

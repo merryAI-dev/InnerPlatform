@@ -18,12 +18,22 @@ service firebase.storage {
       allow read, write: if false;
     }
 
+    match /orgs/{orgId}/project-registration-documents/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     // ── 테넌트 스코프 스토리지 경로: orgs/{orgId}/** ──
     // Firestore와 달리 Storage에서는 Firestore 멤버십 조회 불가.
     // 최소 보안 레이어: Firebase 로그인 + @mysc.co.kr 이메일 도메인 확인.
     match /orgs/{orgId}/{collection}/{allPaths=**} {
-      allow read: if collection != 'business-cards' && collection != 'project-registration-drafts' && isMyscSignedIn();
-      allow write: if collection != 'business-cards' && collection != 'project-registration-drafts' && isMyscSignedIn();
+      allow read: if collection != 'business-cards'
+        && collection != 'project-registration-drafts'
+        && collection != 'project-registration-documents'
+        && isMyscSignedIn();
+      allow write: if collection != 'business-cards'
+        && collection != 'project-registration-drafts'
+        && collection != 'project-registration-documents'
+        && isMyscSignedIn();
     }
 
     // 그 외 경로: 모두 거부

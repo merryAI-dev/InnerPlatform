@@ -38,6 +38,19 @@ function draftAttachmentPrefix(tenantId, draftId) {
   return `orgs/${requireStoragePathSegment(tenantId, 'tenantId')}/project-registration-drafts/${requireStoragePathSegment(draftId, 'draftId')}/`;
 }
 
+function projectRegistrationAttachmentPrefix(tenantId, projectId) {
+  return `orgs/${requireStoragePathSegment(tenantId, 'tenantId')}/project-registration-documents/${requireStoragePathSegment(projectId, 'projectId')}/`;
+}
+
+function objectNameWithinPrefix(path, prefix, errorMessage) {
+  const normalized = readOptionalText(path);
+  const objectName = normalized.startsWith(prefix) ? normalized.slice(prefix.length) : '';
+  if (!objectName || objectName.includes('/') || objectName === '.' || objectName === '..') {
+    throw new Error(errorMessage);
+  }
+  return { path: normalized, objectName };
+}
+
 export function createProjectRequestContractStorageService(options = {}) {
   const bucketName = options.bucketName || resolveBucketName(options.env || process.env);
   const adminApp = options.adminApp || getOrInitAdminApp({ projectId: options.projectId });
@@ -121,12 +134,55 @@ export function createProjectRequestContractStorageService(options = {}) {
 
     async deleteDraftAttachment(input) {
       const prefix = draftAttachmentPrefix(input?.tenantId, input?.draftId);
-      const path = readOptionalText(input?.path);
-      const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
-      if (!objectName || objectName.includes('/')) {
-        throw new Error('draft attachment path is outside its draft prefix');
-      }
+      const { path } = objectNameWithinPrefix(
+        input?.path,
+        prefix,
+        'draft attachment path is outside its draft prefix',
+      );
       await bucket.file(path).delete({ ignoreNotFound: true });
+    },
+
+    async relocateDraftAttachments(input) {
+      const sourcePrefix = draftAttachmentPrefix(input?.tenantId, input?.draftId);
+      const destinationPrefix = projectRegistrationAttachmentPrefix(input?.tenantId, input?.projectId);
+      const attachments = (Array.isArray(input?.attachmentRefs) ? input.attachmentRefs : []).map((attachment) => {
+        const { path, objectName } = objectNameWithinPrefix(
+          attachment?.path,
+          sourcePrefix,
+          'draft attachment path is outside its draft prefix',
+        );
+        return { attachment: attachment || {}, sourcePath: path, destinationPath: `${destinationPrefix}${objectName}` };
+      });
+
+      return Promise.all(attachments.map(async ({ attachment, sourcePath, destinationPath }) => {
+        await bucket.file(sourcePath).copy(bucket.file(destinationPath));
+        return {
+          ...(readOptionalText(attachment.attachmentId) ? { attachmentId: readOptionalText(attachment.attachmentId) } : {}),
+          documentKind: readOptionalText(attachment.documentKind),
+          path: destinationPath,
+          name: readOptionalText(attachment.name),
+          size: Number.isSafeInteger(attachment.size) && attachment.size >= 0 ? attachment.size : 0,
+          contentType: readOptionalText(attachment.contentType) || 'application/octet-stream',
+          ...(readOptionalText(attachment.uploadedAt) ? { uploadedAt: readOptionalText(attachment.uploadedAt) } : {}),
+          visibility: 'PRIVATE',
+        };
+      }));
+    },
+
+    async downloadProjectRegistrationAttachment(input) {
+      const prefix = projectRegistrationAttachmentPrefix(input?.tenantId, input?.projectId);
+      const { path } = objectNameWithinPrefix(
+        input?.path,
+        prefix,
+        'project registration attachment path is outside its canonical prefix',
+      );
+      const file = bucket.file(path);
+      const [[buffer], [metadata]] = await Promise.all([file.download(), file.getMetadata()]);
+      return {
+        buffer,
+        contentType: readOptionalText(metadata?.contentType) || 'application/octet-stream',
+        size: Number.parseInt(String(metadata?.size || buffer.byteLength), 10) || buffer.byteLength,
+      };
     },
   };
 }

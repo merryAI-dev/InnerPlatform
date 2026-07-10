@@ -13,6 +13,7 @@ import {
   parseLimit, parseCursor, buildListResponse,
   ensureDocumentExists, upsertVersionedDoc, mergeSystemManagedDoc,
   stripServerManagedFields, stripExpectedVersion, stripUndefinedDeep, readOptionalText, decodeHeaderValue,
+  normalizeRole,
 } from '../bff-utils.mjs';
 import {
   parseWithSchema,
@@ -1006,8 +1007,35 @@ export function createProjectRegistrationSubmittedOutboxHandler({
   db,
   driveService,
   projectRegistrationSlackService,
+  projectRegistrationAttachmentStorageService,
   now = () => new Date().toISOString(),
 }) {
+  function assertCurrentClaim(outbox, event) {
+    if (
+      event?.claimToken
+      && (outbox?.status !== 'PROCESSING' || outbox?.claimToken !== event.claimToken)
+    ) {
+      throw new Error('Project registration outbox claim is no longer current');
+    }
+  }
+
+  async function mutateSideEffects(event, mutate) {
+    const ref = db.doc(`outbox/${event.id}`);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('Project registration outbox event is missing');
+      const outbox = snap.data() || {};
+      assertCurrentClaim(outbox, event);
+      const current = outbox.sideEffects && typeof outbox.sideEffects === 'object'
+        ? outbox.sideEffects
+        : {};
+      const next = mutate({ ...current });
+      if (!next) return false;
+      tx.set(ref, { sideEffects: next }, { merge: true });
+      return true;
+    });
+  }
+
   return async (event) => {
     const tenantId = readOptionalText(event?.tenantId);
     const projectId = readOptionalText(event?.payload?.projectId) || readOptionalText(event?.entityId);
@@ -1018,7 +1046,7 @@ export function createProjectRegistrationSubmittedOutboxHandler({
 
     const projectRef = db.doc(`orgs/${tenantId}/projects/${projectId}`);
     const requestRef = db.doc(`orgs/${tenantId}/project_requests/${projectRequestId}`);
-    const [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
+    let [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
     if (!projectSnap.exists || !requestSnap.exists) {
       throw new Error('Project registration canonical documents are missing');
     }
@@ -1029,9 +1057,102 @@ export function createProjectRegistrationSubmittedOutboxHandler({
     }
 
     const timestamp = new Date(now()).toISOString();
-    const sideEffects = event?.sideEffects && typeof event.sideEffects === 'object'
-      ? { ...event.sideEffects }
-      : {};
+    const attachmentRefs = Array.isArray(event?.payload?.attachmentRefs)
+      ? event.payload.attachmentRefs
+      : [];
+    if (attachmentRefs.length === 0) {
+      await mutateSideEffects(event, (sideEffects) => {
+        if (['DONE', 'SKIPPED'].includes(sideEffects.registrationAttachments)) return null;
+        return {
+          ...sideEffects,
+          registrationAttachments: 'SKIPPED',
+          registrationAttachmentsAt: timestamp,
+        };
+      });
+    } else {
+      const draftId = readOptionalText(event?.payload?.draftId);
+      if (!draftId || typeof projectRegistrationAttachmentStorageService?.relocateDraftAttachments !== 'function') {
+        throw new Error('Project registration attachment relocation is not configured');
+      }
+      const attachmentIdempotencyKey = `outbox:${event.id}:registrationAttachments`;
+      const shouldRelocate = await mutateSideEffects(event, (sideEffects) => {
+        if (sideEffects.registrationAttachments === 'DONE') return null;
+        return {
+          ...sideEffects,
+          registrationAttachments: 'PROCESSING',
+          registrationAttachmentsIdempotencyKey: attachmentIdempotencyKey,
+          registrationAttachmentsClaimToken: event.claimToken || null,
+          registrationAttachmentsProcessingAt: timestamp,
+        };
+      });
+      if (shouldRelocate) {
+        const relocated = await projectRegistrationAttachmentStorageService.relocateDraftAttachments({
+          tenantId,
+          draftId,
+          projectId,
+          attachmentRefs,
+        });
+        if (!Array.isArray(relocated) || relocated.length !== attachmentRefs.length) {
+          throw new Error('Project registration attachment relocation returned an incomplete result');
+        }
+        const canonicalPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+        for (const attachment of relocated) {
+          const path = readOptionalText(attachment?.path);
+          const objectName = path.startsWith(canonicalPrefix) ? path.slice(canonicalPrefix.length) : '';
+          if (!PRIVATE_DOCUMENT_KINDS.includes(readOptionalText(attachment?.documentKind)) || !objectName || objectName.includes('/')) {
+            throw new Error('Project registration attachment relocation returned an invalid path');
+          }
+        }
+        const documents = registrationPrivateDocuments(relocated);
+        await db.runTransaction(async (tx) => {
+          const outboxRef = db.doc(`outbox/${event.id}`);
+          const [currentProjectSnap, currentRequestSnap, outboxSnap] = await Promise.all([
+            tx.get(projectRef),
+            tx.get(requestRef),
+            tx.get(outboxRef),
+          ]);
+          if (!currentProjectSnap.exists || !currentRequestSnap.exists || !outboxSnap.exists) {
+            throw new Error('Project registration delivery records are missing');
+          }
+          const outbox = outboxSnap.data() || {};
+          assertCurrentClaim(outbox, event);
+          const sideEffects = outbox.sideEffects && typeof outbox.sideEffects === 'object'
+            ? outbox.sideEffects
+            : {};
+          if (sideEffects.registrationAttachments === 'DONE') return;
+          if (sideEffects.registrationAttachmentsIdempotencyKey !== attachmentIdempotencyKey) {
+            throw new Error('Project registration attachment delivery claim changed');
+          }
+          const currentRequest = currentRequestSnap.data() || {};
+          if (readOptionalText(currentRequest.approvedProjectId) !== projectId) {
+            throw new Error('Project registration request does not match its project');
+          }
+          tx.set(projectRef, {
+            ...documents,
+            registrationAttachmentsPublishedAt: timestamp,
+          }, { merge: true });
+          tx.set(requestRef, {
+            payload: {
+              ...(currentRequest.payload && typeof currentRequest.payload === 'object' ? currentRequest.payload : {}),
+              ...documents,
+            },
+            registrationAttachmentsPublishedAt: timestamp,
+            updatedAt: timestamp,
+          }, { merge: true });
+          tx.set(outboxRef, {
+            sideEffects: {
+              ...sideEffects,
+              registrationAttachments: 'DONE',
+              registrationAttachmentsAt: timestamp,
+              registrationAttachmentsClaimToken: null,
+            },
+          }, { merge: true });
+        });
+      }
+      [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
+      project = { id: projectId, ...(projectSnap.data() || {}) };
+    }
+
     const driveConfig = typeof driveService?.getConfig === 'function' ? driveService.getConfig() : null;
     const driveEnabled = typeof driveService?.ensureProjectRootFolder === 'function'
       && (driveConfig ? Boolean(driveConfig.enabled && driveConfig.defaultParentFolderId) : true);
@@ -1053,24 +1174,55 @@ export function createProjectRegistrationSubmittedOutboxHandler({
       await projectRef.set(drivePatch, { merge: true });
       project = { ...project, ...drivePatch };
     }
-    sideEffects.registrationDrive = readOptionalText(project.evidenceDriveRootFolderId) ? 'DONE' : 'SKIPPED';
-    sideEffects.registrationDriveAt = timestamp;
+    await mutateSideEffects(event, (sideEffects) => ({
+      ...sideEffects,
+      registrationDrive: readOptionalText(project.evidenceDriveRootFolderId) ? 'DONE' : 'SKIPPED',
+      registrationDriveAt: timestamp,
+    }));
 
     await syncProjectParticipationEntries({ db, tenantId, project, now: timestamp });
 
-    if (
-      projectRegistrationSlackService?.enabled
-      && typeof projectRegistrationSlackService.notifyMessage === 'function'
-      && event?.sideEffects?.registrationSlack !== 'DONE'
-    ) {
-      await projectRegistrationSlackService.notifyMessage(buildProjectRegistrationSlackPayload(projectRequest));
-      sideEffects.registrationSlack = 'DONE';
-      sideEffects.registrationSlackAt = timestamp;
-    } else if (!projectRegistrationSlackService?.enabled) {
-      sideEffects.registrationSlack = 'SKIPPED';
-      sideEffects.registrationSlackAt = timestamp;
+    if (!projectRegistrationSlackService?.enabled) {
+      await mutateSideEffects(event, (sideEffects) => {
+        if (['DONE', 'SKIPPED'].includes(sideEffects.registrationSlack)) return null;
+        return { ...sideEffects, registrationSlack: 'SKIPPED', registrationSlackAt: timestamp };
+      });
+      return;
     }
-    await db.doc(`outbox/${event.id}`).set({ sideEffects }, { merge: true });
+    if (typeof projectRegistrationSlackService.notifyMessage !== 'function') {
+      throw new Error('Project registration Slack delivery is not configured');
+    }
+    const slackIdempotencyKey = `outbox:${event.id}:registrationSlack`;
+    const shouldNotify = await mutateSideEffects(event, (sideEffects) => {
+      if (sideEffects.registrationSlack === 'DONE') return null;
+      return {
+        ...sideEffects,
+        registrationSlack: 'PROCESSING',
+        registrationSlackIdempotencyKey: slackIdempotencyKey,
+        registrationSlackClaimToken: event.claimToken || null,
+        registrationSlackProcessingAt: timestamp,
+      };
+    });
+    if (!shouldNotify) return;
+    const slackPayload = buildProjectRegistrationSlackPayload(projectRequest);
+    const delivery = { idempotencyKey: slackIdempotencyKey };
+    if (typeof projectRegistrationSlackService.notifyMessageWithIdempotency === 'function') {
+      await projectRegistrationSlackService.notifyMessageWithIdempotency(slackPayload, delivery);
+    } else {
+      await projectRegistrationSlackService.notifyMessage(slackPayload, delivery);
+    }
+    const markedDone = await mutateSideEffects(event, (sideEffects) => {
+      if (sideEffects.registrationSlackIdempotencyKey !== slackIdempotencyKey) {
+        throw new Error('Project registration Slack delivery claim changed');
+      }
+      return {
+        ...sideEffects,
+        registrationSlack: 'DONE',
+        registrationSlackAt: timestamp,
+        registrationSlackClaimToken: null,
+      };
+    });
+    if (!markedDone) throw new Error('Project registration Slack delivery was not recorded');
   };
 }
 
@@ -1136,6 +1288,72 @@ export function mountProjectRoutes(app, {
     const snap = await query.get();
     const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  app.get('/api/v1/projects/:projectId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const projectId = readOptionalText(req.params.projectId);
+    const documentKind = readOptionalText(req.params.documentKind);
+    const field = {
+      contract: 'contractDocument',
+      quote: 'quoteDocument',
+      proposal: 'proposalDocument',
+    }[documentKind];
+    if (!projectId || !field) {
+      throw createHttpError(400, 'Project attachment request is invalid', 'project_attachment_invalid');
+    }
+    const normalizedActorId = readOptionalText(actorId);
+    if (!normalizedActorId || normalizedActorId.includes('/')) {
+      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+    }
+    const memberSnap = await db.doc(`orgs/${tenantId}/members/${normalizedActorId}`).get();
+    const member = memberSnap.exists ? (memberSnap.data() || {}) : null;
+    const profile = member?.portalProfile && typeof member.portalProfile === 'object'
+      ? member.portalProfile
+      : {};
+    const storedRole = normalizeRole(member?.role);
+    const assignedProjectIds = new Set([
+      member?.projectId,
+      ...(Array.isArray(member?.projectIds) ? member.projectIds : []),
+      profile.projectId,
+      ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+    ].map(readOptionalText).filter(Boolean));
+    if (
+      !member
+      || readOptionalText(member.status).toUpperCase() !== 'ACTIVE'
+      || (!['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId))
+    ) {
+      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+    }
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
+    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    const attachment = projectSnap.data()?.[field];
+    const path = readOptionalText(attachment?.path);
+    const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    const objectName = path.startsWith(expectedPrefix) ? path.slice(expectedPrefix.length) : '';
+    if (!objectName || objectName.includes('/')) {
+      throw createHttpError(409, 'Project attachment is not ready', 'project_attachment_not_ready');
+    }
+    if (typeof projectRequestContractStorageService?.downloadProjectRegistrationAttachment !== 'function') {
+      throw new Error('Project registration attachment storage is not configured');
+    }
+    const downloaded = await projectRequestContractStorageService.downloadProjectRegistrationAttachment({
+      tenantId,
+      projectId,
+      path,
+    });
+    const buffer = Buffer.isBuffer(downloaded?.buffer)
+      ? downloaded.buffer
+      : Buffer.from(downloaded?.buffer || []);
+    const fileName = readOptionalText(attachment?.name) || objectName;
+    const contentType = readOptionalText(downloaded?.contentType);
+    res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
+      ? contentType
+      : 'application/octet-stream');
+    res.setHeader('content-length', String(buffer.byteLength));
+    res.setHeader('cache-control', 'private, no-store');
+    res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.status(200).send(buffer);
   }));
 
   // ── POST /api/v1/projects ────────────────────────────────────────────────────

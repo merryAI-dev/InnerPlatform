@@ -74,6 +74,37 @@ function attachmentRefs(draft = {}) {
   return Array.isArray(draft.attachmentRefs) ? draft.attachmentRefs : [];
 }
 
+function relocationAttachmentRefs(draft, current) {
+  const prefix = `orgs/${current.tenantId}/project-registration-drafts/${current.draftId}/`;
+  return attachmentRefs(draft).map((attachment) => {
+    const documentKind = readOptionalText(attachment?.documentKind);
+    const path = readOptionalText(attachment?.path);
+    const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
+    if (
+      !['contract', 'quote', 'proposal'].includes(documentKind)
+      || !objectName
+      || objectName.includes('/')
+      || objectName === '.'
+      || objectName === '..'
+    ) {
+      throw createHttpError(
+        422,
+        'Draft attachment path is outside the current private draft prefix',
+        'draft_attachment_invalid',
+      );
+    }
+    return {
+      ...(readOptionalText(attachment?.attachmentId) ? { attachmentId: readOptionalText(attachment.attachmentId) } : {}),
+      documentKind,
+      path,
+      name: readOptionalText(attachment?.name) || objectName,
+      size: Number.isSafeInteger(attachment?.size) && attachment.size >= 0 ? attachment.size : 0,
+      contentType: readOptionalText(attachment?.contentType) || 'application/octet-stream',
+      ...(readOptionalText(attachment?.uploadedAt) ? { uploadedAt: readOptionalText(attachment.uploadedAt) } : {}),
+    };
+  });
+}
+
 function draftContract(draft = {}) {
   return {
     draftId: readOptionalText(draft.resourceId),
@@ -610,10 +641,9 @@ export function createProjectRegistrationDraftService({
       if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
         throw createHttpError(400, 'expectedDraftRevision must be a non-negative integer', 'draft_request_invalid');
       }
-      const submissionDate = clockDate(now);
-      const timestamp = submissionDate.toISOString();
-      const projectId = documentId(createProjectId(submissionDate), 'projectId');
-      const projectRequestId = documentId(createProjectRequestId(submissionDate), 'projectRequestId');
+      const identityDate = clockDate(now);
+      const projectId = documentId(createProjectId(identityDate), 'projectId');
+      const projectRequestId = documentId(createProjectRequestId(identityDate), 'projectRequestId');
       const method = 'POST';
       const path = `/api/v1/project-registration-drafts/${current.draftId}/submit`;
       const requestFingerprint = buildRequestFingerprint({
@@ -627,7 +657,7 @@ export function createProjectRegistrationDraftService({
           expectedDraftRevision,
         },
       });
-      const outboxEvent = createRegistrationOutboxEvent({
+      const outboxTemplate = createRegistrationOutboxEvent({
         tenantId: current.tenantId,
         requestId: current.requestId,
         eventType: 'project.registration.submitted',
@@ -638,14 +668,17 @@ export function createProjectRegistrationDraftService({
           projectRequestId,
           draftId: current.draftId,
           actorId: current.actorId,
+          attachmentRefs: [],
         },
-        createdAt: timestamp,
+        createdAt: identityDate.toISOString(),
       });
       const projectRef = db.doc(`orgs/${current.tenantId}/projects/${projectId}`);
       const projectRequestRef = db.doc(`orgs/${current.tenantId}/project_requests/${projectRequestId}`);
-      const outboxRef = db.doc(`outbox/${documentId(outboxEvent?.id, 'outboxEvent.id')}`);
+      const outboxRef = db.doc(`outbox/${documentId(outboxTemplate?.id, 'outboxEvent.id')}`);
 
       return db.runTransaction(async (tx) => {
+        const submissionDate = clockDate(now);
+        const timestamp = submissionDate.toISOString();
         const { actorRole, member, ref, draft } = await ownedDraft(tx, current);
         const lock = await checkIdempotency(tx, current, requestFingerprint, submissionDate);
         if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
@@ -666,13 +699,24 @@ export function createProjectRegistrationDraftService({
           fence,
           serverNow: submissionDate,
         });
+        const attachments = relocationAttachmentRefs(draft, current);
+        const outboxEvent = {
+          ...outboxTemplate,
+          payload: {
+            ...(outboxTemplate.payload || {}),
+            attachmentRefs: attachments,
+          },
+          createdAt: timestamp,
+          nextAttemptAt: timestamp,
+          updatedAt: timestamp,
+        };
         const canonical = buildProjectRegistrationCanonicalDocuments({
           tenantId: current.tenantId,
           projectId,
           projectRequestId,
           sourceDraftId: current.draftId,
           payload: draft.payload,
-          attachmentRefs: attachmentRefs(draft),
+          attachmentRefs: [],
           actorId: current.actorId,
           actorName: current.actorDisplayName,
           actorEmail: current.actorEmail,
@@ -688,9 +732,14 @@ export function createProjectRegistrationDraftService({
 
         const nextRevision = expectedDraftRevision + 1;
         const submittedDraft = {
-          ...draft,
+          ownerUid: current.actorId,
+          ownerId: current.actorId,
+          tenantId: current.tenantId,
+          resourceType: RESOURCE_TYPE,
+          resourceId: current.draftId,
           draftRevision: nextRevision,
           status: 'SUBMITTED',
+          createdAt: draft.createdAt || timestamp,
           updatedAt: timestamp,
           submittedAt: timestamp,
           submittedProjectId: projectId,

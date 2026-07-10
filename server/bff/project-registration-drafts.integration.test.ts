@@ -20,6 +20,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
   let driveHook: null | ((input: Record<string, any>) => Promise<Record<string, any>>) = null;
   const uploadedPaths: string[] = [];
   const deletedPaths: string[] = [];
+  const relocatedPaths: string[] = [];
   const driveService = {
     getConfig: vi.fn(() => ({ enabled: true, defaultParentFolderId: 'stage-root' })),
     ensureProjectRootFolder: vi.fn(async (input: Record<string, any>) => {
@@ -53,6 +54,12 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     deleteDraftAttachment: vi.fn(async ({ path }: { path: string }) => {
       deletedPaths.push(path);
     }),
+    relocateDraftAttachments: vi.fn(async (input: Record<string, any>) => input.attachmentRefs.map((attachment: Record<string, any>) => {
+      const objectName = String(attachment.path).split('/').at(-1);
+      const path = `orgs/${input.tenantId}/project-registration-documents/${input.projectId}/${objectName}`;
+      relocatedPaths.push(path);
+      return { ...attachment, path, visibility: 'PRIVATE' };
+    })),
   };
 
   const api = request(createBffApp({
@@ -228,6 +235,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     driveHook = null;
     uploadedPaths.length = 0;
     deletedPaths.length = 0;
+    relocatedPaths.length = 0;
     vi.clearAllMocks();
   }
 
@@ -505,25 +513,24 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       registrationSource: 'pm_portal',
       executiveReviewStatus: 'PENDING',
       version: 1,
-      contractDocument: {
-        documentKind: 'contract',
-        path: expect.stringContaining('/project-registration-drafts/'),
-        visibility: 'PRIVATE',
-      },
+      contractDocument: null,
     });
     expect(project).not.toHaveProperty('arbitraryBrowserField');
-    expect(project?.contractDocument).not.toHaveProperty('downloadURL');
+    expect(project?.contractDocument).toBeNull();
     const requestDoc = (await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data();
     expect(requestDoc).toMatchObject({ sourceDraftId: created.body.draft.draftId });
     expect(requestDoc?.payload).not.toHaveProperty('arbitraryBrowserField');
-    expect(requestDoc?.payload?.contractDocument).not.toHaveProperty('downloadURL');
+    expect(requestDoc?.payload?.contractDocument).toBeNull();
     const draft = (await db.doc(`orgs/${tenantId}/projectRequestDrafts/${created.body.draft.draftId}`).get()).data();
     expect(draft).toMatchObject({
       status: 'SUBMITTED',
       draftRevision: 2,
-      payload: validPayload(),
-      attachmentRefs: [expect.objectContaining({ documentKind: 'contract' })],
     });
+    expect(draft).not.toHaveProperty('payload');
+    expect(draft).not.toHaveProperty('attachmentRefs');
+    expect(draft).not.toHaveProperty('stepIndex');
+    expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.payload?.attachmentRefs)
+      .toEqual([expect.objectContaining({ documentKind: 'contract', path: expect.stringContaining('/project-registration-drafts/') })]);
     const lease = (await db.doc(
       `orgs/${tenantId}/editLeases/${resolveEditLeaseDocumentId('project-registration', created.body.draft.draftId)}`,
     ).get()).data();
@@ -546,6 +553,11 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(worker.body).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
     expect(driveService.ensureProjectRootFolder).toHaveBeenCalledTimes(1);
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+    expect(relocatedPaths).toHaveLength(1);
+    expect((await db.doc(`orgs/${tenantId}/projects/${first.body.projectId}`).get()).data()?.contractDocument)
+      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
+    expect((await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data()?.payload?.contractDocument)
+      .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
     expect(await count(`orgs/${tenantId}/partEntries`)).toBe(1);
     expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.status).toBe('DONE');
     expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${first.body.outbox.id}`).get()).exists).toBe(true);

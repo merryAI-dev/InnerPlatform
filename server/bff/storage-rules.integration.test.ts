@@ -26,6 +26,7 @@ describeIfStorageEmulators('Firebase Storage rules', () => {
   const bucketName = `${projectId}.firebasestorage.app`;
   const runId = `${process.pid}-${Date.now()}`;
   const protectedPath = `orgs/tenant-a/project-registration-drafts/draft-a/${runId}-secret.pdf`;
+  const canonicalProtectedPath = `orgs/tenant-a/project-registration-documents/project-a/${runId}-secret.pdf`;
   const ordinaryPath = `orgs/tenant-a/ordinary-uploads/${runId}-allowed.txt`;
   const clientApp = initializeApp({
     apiKey: 'demo-api-key',
@@ -48,6 +49,7 @@ describeIfStorageEmulators('Firebase Storage rules', () => {
     connectStorageEmulator(storage, storageHostname, Number(storagePort));
     await createUserWithEmailAndPassword(auth, `storage-rules-${runId}@mysc.co.kr`, 'local-test-password');
     await adminBucket.file(protectedPath).save(Buffer.from('private'), { resumable: false });
+    await adminBucket.file(canonicalProtectedPath).save(Buffer.from('canonical-private'), { resumable: false });
   });
 
   afterAll(async () => {
@@ -67,5 +69,14 @@ describeIfStorageEmulators('Firebase Storage rules', () => {
     await uploadBytes(ordinaryRef, Buffer.from('allowed'));
     const ordinaryBytes = await getBytes(ordinaryRef);
     expect(new Uint8Array(ordinaryBytes)).toEqual(new Uint8Array(Buffer.from('allowed')));
+  });
+
+  it('denies direct client reads and writes on canonical private registration documents', async () => {
+    const canonicalRef = ref(storage, canonicalProtectedPath);
+
+    await expect(uploadBytes(canonicalRef, Buffer.from('blocked'))).rejects.toMatchObject({
+      code: 'storage/unauthorized',
+    });
+    await expect(getBytes(canonicalRef)).rejects.toMatchObject({ code: 'storage/unauthorized' });
   });
 });

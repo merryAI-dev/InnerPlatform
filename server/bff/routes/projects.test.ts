@@ -1,7 +1,10 @@
+import express from 'express';
+import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import {
   formatProjectTypeSlackLabel,
   mergeProjectAndRequestDocs,
+  mountProjectRoutes,
   readProjectRequestById,
   resolveProjectRequestDocuments,
   resolveProjectTeamMemberLookupKeys,
@@ -10,6 +13,138 @@ import {
 } from './projects.mjs';
 
 describe('project route helpers', () => {
+  it('serves a canonical private attachment only through the authorized BFF route', async () => {
+    const path = 'orgs/mysc/project-registration-documents/project-a/attachment-a-contract.pdf';
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('private-pdf'),
+      contentType: 'application/pdf',
+      size: 11,
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: vi.fn(async () => ({
+          exists: true,
+          data: () => documentPath.includes('/members/')
+            ? { uid: 'admin-a', role: 'admin', status: 'ACTIVE', projectIds: [] }
+            : {
+                id: 'project-a',
+                contractDocument: {
+                  path,
+                  name: '계약서"\r\nX-Test: injected.pdf',
+                  contentType: 'application/pdf',
+                },
+              },
+        })),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'admin-a', actorRole: 'admin' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+
+    const response = await request(app).get('/api/v1/projects/project-a/attachments/contract');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    expect(response.headers['content-disposition']).toContain('%22%0D%0AX-Test%3A%20injected.pdf');
+    expect(response.headers['x-test']).toBeUndefined();
+    expect(response.body).toEqual(Buffer.from('private-pdf'));
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
+      tenantId: 'mysc', projectId: 'project-a', path,
+    });
+  });
+
+  it('denies an unassigned member using persisted access before reading attachment metadata', async () => {
+    const projectGet = vi.fn(async () => ({
+      exists: true,
+      data: () => ({
+        id: 'project-a',
+        contractDocument: {
+          path: 'orgs/mysc/project-registration-documents/project-a/contract.pdf',
+          name: 'contract.pdf',
+        },
+      }),
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: documentPath.includes('/members/')
+          ? vi.fn(async () => ({
+              exists: true,
+              data: () => ({ uid: 'pm-a', role: 'pm', status: 'ACTIVE', projectIds: ['project-b'] }),
+            }))
+          : projectGet,
+      })),
+    };
+    const downloadProjectRegistrationAttachment = vi.fn();
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'pm-a', actorRole: 'admin' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).get('/api/v1/projects/project-a/attachments/contract');
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(projectGet).not.toHaveBeenCalled();
+    expect(downloadProjectRegistrationAttachment).not.toHaveBeenCalled();
+  });
+
+  it('allows an ACTIVE PM assigned through the persisted portal profile', async () => {
+    const path = 'orgs/mysc/project-registration-documents/project-a/contract.pdf';
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('assigned-private-pdf'), contentType: 'application/pdf', size: 20,
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: vi.fn(async () => ({
+          exists: true,
+          data: () => documentPath.includes('/members/')
+            ? {
+                uid: 'pm-a', role: 'pm', status: 'ACTIVE',
+                portalProfile: { projectIds: ['project-a'] },
+              }
+            : { id: 'project-a', contractDocument: { path, name: 'contract.pdf' } },
+        })),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'pm-a', actorRole: 'viewer' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+
+    const response = await request(app).get('/api/v1/projects/project-a/attachments/contract');
+
+    expect(response.status).toBe(200);
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
+      tenantId: 'mysc', projectId: 'project-a', path,
+    });
+  });
+
   it('builds safe lookup keys when only nickname is present', () => {
     expect(resolveProjectTeamMemberLookupKeys({
       memberNickname: '보람',

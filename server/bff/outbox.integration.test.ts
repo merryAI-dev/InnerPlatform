@@ -172,6 +172,120 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     expect(snap.data()?.status).toBe('DEAD');
   });
 
+  it('reclaims a crashed PROCESSING event after its claim expires', async () => {
+    const now = '2026-07-10T00:10:00.000Z';
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-outbox-crashed-claim',
+      eventType: 'transaction.upsert',
+      entityType: 'transaction',
+      entityId: 'tx-crashed-claim',
+      payload: {},
+      createdAt: '2026-07-10T00:00:00.000Z',
+    });
+    Object.assign(event, {
+      status: 'PROCESSING',
+      attempts: 1,
+      claimOwner: 'dead-worker',
+      claimToken: 'dead-token',
+      processingStartedAt: '2026-07-10T00:00:00.000Z',
+      processingLeaseExpiresAt: '2026-07-10T00:05:00.000Z',
+    });
+    await enqueueOutboxEvent(db, event);
+    const handler = vi.fn(async () => undefined);
+
+    const result = await processOutboxBatch(db, {
+      handler,
+      now: () => now,
+      workerId: 'recovery-worker',
+      processingTimeoutMs: 5 * 60 * 1000,
+    });
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toMatchObject({
+      attempts: 2,
+      claimOwner: 'recovery-worker',
+      claimToken: expect.any(String),
+    });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'DONE',
+      attempts: 2,
+      claimOwner: null,
+      claimToken: null,
+    });
+  });
+
+  it('does not reclaim a fresh PROCESSING event', async () => {
+    const now = '2026-07-10T00:10:00.000Z';
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-outbox-fresh-claim',
+      eventType: 'transaction.upsert',
+      entityType: 'transaction',
+      entityId: 'tx-fresh-claim',
+      payload: {},
+      createdAt: '2026-07-10T00:00:00.000Z',
+    });
+    Object.assign(event, {
+      status: 'PROCESSING',
+      attempts: 1,
+      claimOwner: 'active-worker',
+      claimToken: 'active-token',
+      processingStartedAt: '2026-07-10T00:09:00.000Z',
+      processingLeaseExpiresAt: '2026-07-10T00:14:00.000Z',
+    });
+    await enqueueOutboxEvent(db, event);
+    const handler = vi.fn(async () => undefined);
+
+    const result = await processOutboxBatch(db, {
+      handler,
+      now: () => now,
+      workerId: 'other-worker',
+      processingTimeoutMs: 5 * 60 * 1000,
+    });
+
+    expect(result).toMatchObject({ processed: 0, succeeded: 0, failed: 0 });
+    expect(handler).not.toHaveBeenCalled();
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'PROCESSING',
+      claimOwner: 'active-worker',
+      claimToken: 'active-token',
+    });
+  });
+
+  it('lets only one worker claim the same crashed PROCESSING event', async () => {
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-outbox-single-reclaim',
+      eventType: 'transaction.upsert',
+      entityType: 'transaction',
+      entityId: 'tx-single-reclaim',
+      payload: {},
+      createdAt: '2026-07-10T00:00:00.000Z',
+    });
+    Object.assign(event, {
+      status: 'PROCESSING',
+      attempts: 1,
+      claimOwner: 'dead-worker',
+      claimToken: 'dead-token',
+      processingStartedAt: '2026-07-10T00:00:00.000Z',
+      processingLeaseExpiresAt: '2026-07-10T00:05:00.000Z',
+    });
+    await enqueueOutboxEvent(db, event);
+    const handler = vi.fn(async () => undefined);
+
+    const outcomes = await Promise.all([
+      processOutboxBatch(db, { handler, now: () => '2026-07-10T00:10:00.000Z', workerId: 'worker-a' }),
+      processOutboxBatch(db, { handler, now: () => '2026-07-10T00:10:00.000Z', workerId: 'worker-b' }),
+    ]);
+
+    expect(outcomes.reduce((sum, outcome) => sum + outcome.processed, 0)).toBe(1);
+    expect(outcomes.reduce((sum, outcome) => sum + outcome.succeeded, 0)).toBe(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect((await db.doc(`outbox/${event.id}`).get()).data()?.status).toBe('DONE');
+  });
+
   it('does not mark registration side effects done without an event handler', async () => {
     const event = createOutboxEvent({
       tenantId,
@@ -255,5 +369,132 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
       sideEffects: { registrationDrive: 'SKIPPED', registrationSlack: 'SKIPPED' },
     });
     expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get()).exists).toBe(true);
+  });
+
+  it('relocates private registration attachments before atomically publishing canonical metadata', async () => {
+    const sourcePath = 'orgs/mysc/project-registration-drafts/draft-relocate/contract.pdf';
+    const canonicalPath = 'orgs/mysc/project-registration-documents/project-relocate/contract.pdf';
+    await db.doc(`orgs/${tenantId}/members/pm-registration`).set({
+      uid: 'pm-registration', name: 'Registration PM', role: 'pm', tenantId,
+    });
+    await db.doc(`orgs/${tenantId}/projects/project-relocate`).set({
+      id: 'project-relocate', name: 'Attachment project', teamMembersDetailed: [], contractDocument: null,
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/request-relocate`).set({
+      id: 'request-relocate', approvedProjectId: 'project-relocate', payload: { name: 'Attachment project', contractDocument: null },
+    });
+    const attachmentStorageService = {
+      relocateDraftAttachments: vi.fn(async () => [{
+        attachmentId: 'contract-1',
+        documentKind: 'contract',
+        path: canonicalPath,
+        name: 'contract.pdf',
+        contentType: 'application/pdf',
+        size: 3,
+        visibility: 'PRIVATE',
+      }]),
+    };
+    const notifyMessage = vi.fn(async (_payload, delivery) => {
+      const current = (await db.doc(`outbox/${event.id}`).get()).data();
+      expect(current?.sideEffects).toMatchObject({
+        registrationSlack: 'PROCESSING',
+        registrationSlackIdempotencyKey: delivery.idempotencyKey,
+      });
+    });
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-relocate',
+      eventType: 'project.registration.submitted',
+      entityType: 'project',
+      entityId: 'project-relocate',
+      payload: {
+        projectId: 'project-relocate',
+        projectRequestId: 'request-relocate',
+        draftId: 'draft-relocate',
+        attachmentRefs: [{
+          attachmentId: 'contract-1', documentKind: 'contract', path: sourcePath, name: 'contract.pdf',
+        }],
+      },
+      createdAt: new Date(0).toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const handler = createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService: { getConfig: () => ({ enabled: false, defaultParentFolderId: '' }) },
+      projectRegistrationSlackService: { enabled: true, notifyMessage },
+      projectRegistrationAttachmentStorageService: attachmentStorageService,
+    });
+
+    const result = await processOutboxBatch(db, {
+      eventHandlers: { 'project.registration.submitted': handler },
+      now: () => '2026-07-10T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect(attachmentStorageService.relocateDraftAttachments).toHaveBeenCalledWith({
+      tenantId,
+      draftId: 'draft-relocate',
+      projectId: 'project-relocate',
+      attachmentRefs: event.payload.attachmentRefs,
+    });
+    expect((await db.doc(`orgs/${tenantId}/projects/project-relocate`).get()).data()?.contractDocument)
+      .toMatchObject({ path: canonicalPath, visibility: 'PRIVATE' });
+    expect((await db.doc(`orgs/${tenantId}/project_requests/request-relocate`).get()).data()?.payload?.contractDocument)
+      .toMatchObject({ path: canonicalPath, visibility: 'PRIVATE' });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'DONE',
+      sideEffects: {
+        registrationAttachments: 'DONE',
+        registrationSlack: 'DONE',
+        registrationSlackIdempotencyKey: `outbox:${event.id}:registrationSlack`,
+      },
+    });
+    expect(notifyMessage).toHaveBeenCalledWith(expect.any(Object), {
+      idempotencyKey: `outbox:${event.id}:registrationSlack`,
+    });
+  });
+
+  it('keeps Slack delivery PROCESSING rather than falsely DONE after an ambiguous failure', async () => {
+    await db.doc(`orgs/${tenantId}/projects/project-slack-failure`).set({
+      id: 'project-slack-failure', name: 'Slack project', teamMembersDetailed: [],
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/request-slack-failure`).set({
+      id: 'request-slack-failure', approvedProjectId: 'project-slack-failure', payload: { name: 'Slack project' },
+    });
+    const notifyMessage = vi.fn(async () => {
+      throw new Error('Slack response lost after send');
+    });
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-slack-failure',
+      eventType: 'project.registration.submitted',
+      entityType: 'project',
+      entityId: 'project-slack-failure',
+      payload: { projectId: 'project-slack-failure', projectRequestId: 'request-slack-failure', attachmentRefs: [] },
+      createdAt: new Date(0).toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const handler = createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService: { getConfig: () => ({ enabled: false, defaultParentFolderId: '' }) },
+      projectRegistrationSlackService: { enabled: true, notifyMessage },
+    });
+
+    const result = await processOutboxBatch(db, {
+      eventHandlers: { 'project.registration.submitted': handler },
+      now: () => '2026-07-10T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 0, failed: 1 });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'FAILED',
+      sideEffects: {
+        registrationSlack: 'PROCESSING',
+        registrationSlackIdempotencyKey: `outbox:${event.id}:registrationSlack`,
+      },
+    });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()?.sideEffects?.registrationSlack).not.toBe('DONE');
   });
 });

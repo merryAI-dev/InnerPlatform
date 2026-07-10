@@ -117,4 +117,93 @@ describe('project-request-contract-storage', () => {
     expect(bucket.file).not.toHaveBeenCalled();
     expect(deleteFile).not.toHaveBeenCalled();
   });
+
+  it('idempotently copies exact draft-prefix attachments into the canonical private prefix', async () => {
+    const copy = vi.fn(async () => undefined);
+    const deleteFile = vi.fn(async () => undefined);
+    const files = new Map<string, any>();
+    const bucket = {
+      file: vi.fn((path: string) => {
+        const file = files.get(path) || { path, copy, delete: deleteFile };
+        files.set(path, file);
+        return file;
+      }),
+    };
+    const service = createProjectRequestContractStorageService({
+      projectId: 'demo-bff-it',
+      bucketName: 'demo-bff-it.firebasestorage.app',
+      storage: { bucket: vi.fn(() => bucket) },
+    });
+    const sourcePath = 'orgs/tenant-a/project-registration-drafts/draft-a/attachment-a-contract.pdf';
+
+    const relocated = await service.relocateDraftAttachments({
+      tenantId: 'tenant-a',
+      draftId: 'draft-a',
+      projectId: 'project-a',
+      attachmentRefs: [{
+        attachmentId: 'attachment-a',
+        documentKind: 'contract',
+        path: sourcePath,
+        name: 'contract.pdf',
+        size: 7,
+        contentType: 'application/pdf',
+      }],
+    });
+
+    const canonicalPath = 'orgs/tenant-a/project-registration-documents/project-a/attachment-a-contract.pdf';
+    expect(copy).toHaveBeenCalledWith(files.get(canonicalPath));
+    expect(relocated).toEqual([expect.objectContaining({
+      attachmentId: 'attachment-a',
+      documentKind: 'contract',
+      path: canonicalPath,
+      visibility: 'PRIVATE',
+    })]);
+    expect(deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses to relocate an attachment outside the exact tenant and current draft prefix', async () => {
+    const bucket = { file: vi.fn() };
+    const service = createProjectRequestContractStorageService({
+      projectId: 'demo-bff-it',
+      bucketName: 'demo-bff-it.firebasestorage.app',
+      storage: { bucket: vi.fn(() => bucket) },
+    });
+
+    await expect(service.relocateDraftAttachments({
+      tenantId: 'tenant-a',
+      draftId: 'draft-a',
+      projectId: 'project-a',
+      attachmentRefs: [{
+        documentKind: 'contract',
+        path: 'orgs/tenant-a/project-registration-drafts/draft-b/attachment-a-contract.pdf',
+      }],
+    })).rejects.toThrow('draft attachment path is outside its draft prefix');
+    expect(bucket.file).not.toHaveBeenCalled();
+  });
+
+  it('downloads only canonical private project registration attachments', async () => {
+    const download = vi.fn(async () => [Buffer.from('private-pdf')]);
+    const getMetadata = vi.fn(async () => [{ contentType: 'application/pdf', size: '11' }]);
+    const bucket = { file: vi.fn(() => ({ download, getMetadata })) };
+    const service = createProjectRequestContractStorageService({
+      projectId: 'demo-bff-it',
+      bucketName: 'demo-bff-it.firebasestorage.app',
+      storage: { bucket: vi.fn(() => bucket) },
+    });
+    const path = 'orgs/tenant-a/project-registration-documents/project-a/attachment-a-contract.pdf';
+
+    await expect(service.downloadProjectRegistrationAttachment({
+      tenantId: 'tenant-a', projectId: 'project-a', path,
+    })).resolves.toMatchObject({
+      buffer: Buffer.from('private-pdf'),
+      contentType: 'application/pdf',
+      size: 11,
+    });
+
+    await expect(service.downloadProjectRegistrationAttachment({
+      tenantId: 'tenant-a',
+      projectId: 'project-a',
+      path: 'orgs/tenant-a/project-registration-drafts/draft-a/attachment-a-contract.pdf',
+    })).rejects.toThrow('project registration attachment path is outside its canonical prefix');
+  });
 });

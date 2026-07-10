@@ -753,6 +753,7 @@ export function createBffApp(options = {}) {
       db,
       driveService,
       projectRegistrationSlackService,
+      projectRegistrationAttachmentStorageService: projectRegistrationDraftStorageService,
       now,
     });
 

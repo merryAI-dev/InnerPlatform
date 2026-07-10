@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createNotificationsForOutboxEvent } from './notifications.mjs';
 
 const HANDLER_REQUIRED_EVENT_TYPES = new Set(['project.registration.submitted']);
+const DEFAULT_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 
 function toIso(value = new Date()) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -22,6 +23,18 @@ function computeRetryDelaySeconds(nextAttempt) {
 
 function isAlreadyExistsError(error) {
   return !!(error && (error.code === 6 || /already exists/i.test(error.message || '')));
+}
+
+function validTime(value) {
+  const timestamp = Date.parse(typeof value === 'string' ? value : '');
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isStaleProcessing(event, nowMs, processingTimeoutMs) {
+  const expiresAt = validTime(event?.processingLeaseExpiresAt);
+  if (expiresAt !== null) return expiresAt <= nowMs;
+  const startedAt = validTime(event?.processingStartedAt);
+  return startedAt !== null && startedAt + processingTimeoutMs <= nowMs;
 }
 
 export function createOutboxEvent({
@@ -59,21 +72,34 @@ export function enqueueOutboxEventInTransaction(tx, db, event) {
   tx.create(db.doc(`outbox/${event.id}`), event);
 }
 
-async function claimEvent(db, ref, nowIso) {
-  // ponytail: PROCESSING recovery needs a claim owner/timeout contract; add it with worker heartbeats, not a blind status reset.
+async function claimEvent(db, ref, nowIso, {
+  workerId,
+  processingTimeoutMs,
+  createClaimToken,
+}) {
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
 
     const event = snap.data() || {};
-    if (!['PENDING', 'FAILED'].includes(event.status)) return null;
-    if (typeof event.nextAttemptAt === 'string' && event.nextAttemptAt > nowIso) return null;
+    const processing = event.status === 'PROCESSING';
+    if (!processing && !['PENDING', 'FAILED'].includes(event.status)) return null;
+    if (processing) {
+      if (!isStaleProcessing(event, Date.parse(nowIso), processingTimeoutMs)) return null;
+    } else if (typeof event.nextAttemptAt === 'string' && event.nextAttemptAt > nowIso) {
+      return null;
+    }
 
     const nextAttempts = parseAttempts(event.attempts) + 1;
+    const claimToken = createClaimToken();
+    const processingLeaseExpiresAt = new Date(Date.parse(nowIso) + processingTimeoutMs).toISOString();
     tx.update(ref, {
       status: 'PROCESSING',
       attempts: nextAttempts,
+      claimOwner: workerId,
+      claimToken,
       processingStartedAt: nowIso,
+      processingLeaseExpiresAt,
       updatedAt: nowIso,
     });
 
@@ -81,6 +107,11 @@ async function claimEvent(db, ref, nowIso) {
       ...event,
       id: snap.id,
       attempts: nextAttempts,
+      status: 'PROCESSING',
+      claimOwner: workerId,
+      claimToken,
+      processingStartedAt: nowIso,
+      processingLeaseExpiresAt,
     };
   });
 }
@@ -111,30 +142,49 @@ async function defaultOutboxHandler(db, event, nowIso, eventHandlers) {
   await createNotificationsForOutboxEvent(db, event, nowIso);
 }
 
-async function markSuccess(ref, nowIso) {
-  await ref.set({
-    status: 'DONE',
-    processedAt: nowIso,
-    updatedAt: nowIso,
-    lastError: null,
-  }, { merge: true });
+async function markSuccess(db, ref, event, nowIso) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists ? (snap.data() || {}) : {};
+    if (current.status !== 'PROCESSING' || current.claimToken !== event.claimToken) return false;
+    tx.set(ref, {
+      status: 'DONE',
+      processedAt: nowIso,
+      updatedAt: nowIso,
+      lastError: null,
+      claimOwner: null,
+      claimToken: null,
+      processingLeaseExpiresAt: null,
+    }, { merge: true });
+    return true;
+  });
 }
 
-async function markFailure(ref, event, nowIso, maxAttempts, error) {
+async function markFailure(db, ref, event, nowIso, maxAttempts, error) {
   const attempts = parseAttempts(event.attempts);
   const isDead = attempts >= maxAttempts;
   const delaySeconds = computeRetryDelaySeconds(attempts);
   const nextAttemptAt = new Date(new Date(nowIso).getTime() + (delaySeconds * 1000)).toISOString();
 
-  await ref.set({
-    status: isDead ? 'DEAD' : 'FAILED',
-    updatedAt: nowIso,
-    nextAttemptAt,
-    lastError: {
-      message: error instanceof Error ? error.message : String(error),
-      at: nowIso,
-    },
-  }, { merge: true });
+  const updated = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists ? (snap.data() || {}) : {};
+    if (current.status !== 'PROCESSING' || current.claimToken !== event.claimToken) return false;
+    tx.set(ref, {
+      status: isDead ? 'DEAD' : 'FAILED',
+      updatedAt: nowIso,
+      nextAttemptAt,
+      claimOwner: null,
+      claimToken: null,
+      processingLeaseExpiresAt: null,
+      lastError: {
+        message: error instanceof Error ? error.message : String(error),
+        at: nowIso,
+      },
+    }, { merge: true });
+    return true;
+  });
+  return { updated, isDead };
 }
 
 export async function processOutboxBatch(db, {
@@ -143,9 +193,15 @@ export async function processOutboxBatch(db, {
   now = () => new Date().toISOString(),
   handler,
   eventHandlers,
+  workerId = `worker-${randomUUID()}`,
+  processingTimeoutMs = DEFAULT_PROCESSING_TIMEOUT_MS,
+  createClaimToken = randomUUID,
 } = {}) {
   const safeLimit = Math.min(Math.max(Number.parseInt(String(limit), 10) || 50, 1), 500);
   const nowIso = toIso(now());
+  const safeProcessingTimeoutMs = Number.isFinite(processingTimeoutMs) && processingTimeoutMs > 0
+    ? processingTimeoutMs
+    : DEFAULT_PROCESSING_TIMEOUT_MS;
   const outboxHandler = handler || ((event) => defaultOutboxHandler(db, event, nowIso, eventHandlers));
 
   const dueDocs = [];
@@ -159,6 +215,16 @@ export async function processOutboxBatch(db, {
       .get();
     dueDocs.push(...snap.docs);
   }
+  const processingSnap = await db
+    .collection('outbox')
+    .where('status', '==', 'PROCESSING')
+    .limit(safeLimit)
+    .get();
+  dueDocs.push(...processingSnap.docs.filter((doc) => isStaleProcessing(
+    doc.data() || {},
+    Date.parse(nowIso),
+    safeProcessingTimeoutMs,
+  )));
 
   const seen = new Set();
   let processed = 0;
@@ -171,19 +237,22 @@ export async function processOutboxBatch(db, {
     seen.add(doc.id);
 
     const ref = db.doc(`outbox/${doc.id}`);
-    const claimed = await claimEvent(db, ref, nowIso);
+    const claimed = await claimEvent(db, ref, nowIso, {
+      workerId,
+      processingTimeoutMs: safeProcessingTimeoutMs,
+      createClaimToken,
+    });
     if (!claimed) continue;
 
     processed += 1;
     try {
       await outboxHandler(claimed);
-      await markSuccess(ref, nowIso);
-      succeeded += 1;
+      if (await markSuccess(db, ref, claimed, nowIso)) succeeded += 1;
     } catch (error) {
-      await markFailure(ref, claimed, nowIso, maxAttempts, error);
-      failed += 1;
-      if (claimed.attempts >= maxAttempts) {
-        dead += 1;
+      const outcome = await markFailure(db, ref, claimed, nowIso, maxAttempts, error);
+      if (outcome.updated) {
+        failed += 1;
+        if (outcome.isDead) dead += 1;
       }
     }
   }
