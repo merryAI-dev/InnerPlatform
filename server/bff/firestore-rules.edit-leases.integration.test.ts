@@ -20,6 +20,7 @@ const protectedCollections = [
   'projectRequestDrafts',
   'privateEditDrafts',
   'cashflowEditLocks',
+  'cashflow_edit_locks',
 ] as const;
 const actors = [
   { uid: 'draft-owner', role: 'viewer', label: 'project request draft owner' },

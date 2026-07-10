@@ -49,6 +49,9 @@ jobs:
 
       - run: npm ci
 
+      - name: BFF Firestore emulator integration
+        run: npm run bff:test:integration
+
       - name: JVM weekly API tests
         run: mvn -f server/jvm-weekly-api/pom.xml test
 

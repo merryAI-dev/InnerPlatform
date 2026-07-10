@@ -20,6 +20,7 @@ const policy = rbacPolicy as {
 };
 const firestoreRulesText = readFileSync(new URL('../../../firebase/firestore.rules', import.meta.url), 'utf8');
 const storageRulesText = readFileSync(new URL('../../../firebase/storage.rules', import.meta.url), 'utf8');
+const firebaseSourceText = readFileSync(new URL('../lib/firebase.ts', import.meta.url), 'utf8');
 
 describe('firestore rules policy alignment', () => {
   // ── isSignedIn: company email domain ──
@@ -172,7 +173,13 @@ describe('firestore rules policy alignment', () => {
 
   it('keeps edit drafts and legacy client locks behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
-    for (const collection of ['projectRequestDrafts', 'privateEditDrafts', 'cashflowEditLocks']) {
+    expect(firebaseSourceText).toContain("cashflowEditLocks: 'cashflow_edit_locks'");
+    for (const collection of [
+      'projectRequestDrafts',
+      'privateEditDrafts',
+      'cashflowEditLocks',
+      'cashflow_edit_locks',
+    ]) {
       expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
       expect(firestoreRulesText).toMatch(
         new RegExp(`match /orgs/\\{orgId\\}/${collection}/\\{[^}]+\\} \\{\\s*allow read, write: if false;\\s*\\}`),

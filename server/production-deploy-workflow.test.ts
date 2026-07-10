@@ -135,6 +135,20 @@ describe('CI security evidence gates', () => {
     expect(ciWorkflowText).toContain('npm run policy:verify');
   });
 
+  it('runs BFF Firestore emulator integration as a blocking product release gate', () => {
+    const productGateText = ciWorkflowText.slice(
+      ciWorkflowText.indexOf('product-release-gates:'),
+      ciWorkflowText.indexOf('edge-security-smoke:'),
+    );
+    const bffGateIndex = productGateText.indexOf('run: npm run bff:test:integration');
+
+    expect(productGateText.match(/actions\/setup-node@v5/g)).toHaveLength(1);
+    expect(productGateText.match(/actions\/setup-java@v5/g)).toHaveLength(1);
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('actions/setup-node@v5'));
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('actions/setup-java@v5'));
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('run: npm ci'));
+  });
+
   it('captures strict Cloudflare edge smoke evidence only for main pushes', () => {
     expect(ciWorkflowText).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
     expect(ciWorkflowText).toContain('Strict Cloudflare edge smoke');
