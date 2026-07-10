@@ -26,6 +26,18 @@ function buildDownloadUrl(bucketName, objectPath, token) {
   return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectPath)}?alt=media&token=${encodeURIComponent(token)}`;
 }
 
+function requireStoragePathSegment(value, fieldName) {
+  const normalized = readOptionalText(value);
+  if (!normalized || !/^[A-Za-z0-9._-]+$/.test(normalized) || normalized === '.' || normalized === '..') {
+    throw new Error(`${fieldName} must be a safe storage path segment`);
+  }
+  return normalized;
+}
+
+function draftAttachmentPrefix(tenantId, draftId) {
+  return `orgs/${requireStoragePathSegment(tenantId, 'tenantId')}/project-registration-drafts/${requireStoragePathSegment(draftId, 'draftId')}/`;
+}
+
 export function createProjectRequestContractStorageService(options = {}) {
   const bucketName = options.bucketName || resolveBucketName(options.env || process.env);
   const adminApp = options.adminApp || getOrInitAdminApp({ projectId: options.projectId });
@@ -73,6 +85,48 @@ export function createProjectRequestContractStorageService(options = {}) {
         contentType: mimeType,
         uploadedAt,
       };
+    },
+
+    async uploadDraftAttachment(input) {
+      const tenantId = requireStoragePathSegment(input?.tenantId, 'tenantId');
+      const draftId = requireStoragePathSegment(input?.draftId, 'draftId');
+      const attachmentId = requireStoragePathSegment(input?.attachmentId, 'attachmentId');
+      const fileName = normalizeSafeFileName(input?.fileName);
+      const mimeType = readOptionalText(input?.mimeType) || 'application/octet-stream';
+      const buffer = input?.buffer instanceof Uint8Array
+        ? Buffer.from(input.buffer)
+        : Buffer.isBuffer(input?.buffer)
+          ? input.buffer
+          : null;
+      if (!buffer) throw new Error('buffer is required');
+
+      const uploadedAt = new Date().toISOString();
+      const path = `${draftAttachmentPrefix(tenantId, draftId)}${attachmentId}-${fileName}`;
+      await bucket.file(path).save(buffer, {
+        resumable: false,
+        metadata: {
+          contentType: mimeType,
+          metadata: { tenantId, draftId, attachmentId },
+        },
+      });
+
+      return {
+        path,
+        name: readOptionalText(input?.fileName) || fileName,
+        size: buffer.byteLength,
+        contentType: mimeType,
+        uploadedAt,
+      };
+    },
+
+    async deleteDraftAttachment(input) {
+      const prefix = draftAttachmentPrefix(input?.tenantId, input?.draftId);
+      const path = readOptionalText(input?.path);
+      const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
+      if (!objectName || objectName.includes('/')) {
+        throw new Error('draft attachment path is outside its draft prefix');
+      }
+      await bucket.file(path).delete({ ignoreNotFound: true });
     },
   };
 }

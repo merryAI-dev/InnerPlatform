@@ -103,6 +103,10 @@ import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './ro
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
+import {
+  createProjectRegistrationDraftService,
+  mountProjectRegistrationDraftRoutes,
+} from './routes/project-registration-drafts.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -704,6 +708,21 @@ export function createBffApp(options = {}) {
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
+  const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
+    || projectRequestContractStorageService;
+  const projectRegistrationDraftService = options.projectRegistrationDraftService || (editLeasesEnabled
+    ? createProjectRegistrationDraftService({
+      db,
+      now,
+      createDraftId: options.createProjectRegistrationDraftId || randomUUID,
+      createLeaseId: options.createProjectRegistrationLeaseId || randomUUID,
+      createAttachmentId: options.createProjectRegistrationAttachmentId || randomUUID,
+      auditChainService,
+      idempotencyService,
+      draftStorageService: projectRegistrationDraftStorageService,
+      rbacPolicy,
+    })
+    : null);
   const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
   const businessCardStorageService = options.businessCardStorageService || createBusinessCardStorageService({ projectId });
   const businessCardGeminiAiService = options.businessCardGeminiAiService || createBusinessCardGeminiAiService();
@@ -1430,6 +1449,11 @@ export function createBffApp(options = {}) {
   mountEditLeaseRoutes(app, {
     enabled: editLeasesEnabled,
     editLeaseService,
+    piiProtector,
+  });
+  mountProjectRegistrationDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    projectRegistrationDraftService,
     piiProtector,
   });
   mountProjectRoutes(app, {

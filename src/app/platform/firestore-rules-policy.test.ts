@@ -213,7 +213,16 @@ describe('firestore rules policy alignment', () => {
   it('keeps business-card source images behind BFF-only Storage rules', () => {
     expect(storageRulesText).toContain('match /orgs/{orgId}/business-cards/{allPaths=**}');
     expect(storageRulesText).toContain('allow read, write: if false;');
-    expect(storageRulesText).toContain("collection != 'business-cards' && isMyscSignedIn()");
+    expect(storageRulesText).toContain("collection != 'business-cards'");
+  });
+
+  it('keeps project registration draft attachments behind BFF-only Storage rules', () => {
+    expect(storageRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/project-registration-drafts\/\{allPaths=\*\*\} \{\s*allow read, write: if false;\s*\}/,
+    );
+    expect(storageRulesText).toContain(
+      "collection != 'business-cards' && collection != 'project-registration-drafts' && isMyscSignedIn()",
+    );
   });
 
   it('keeps business-card indexes deployable and large fields exempted', () => {

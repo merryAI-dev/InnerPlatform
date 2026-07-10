@@ -3,6 +3,28 @@ import { z } from 'zod';
 const NON_EMPTY_STRING = z.string().trim().min(1);
 const RECORD_UNKNOWN = z.record(z.string(), z.unknown());
 
+const PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH = 14 * 1024 * 1024;
+
+export const projectRegistrationDraftCreateSchema = z.object({
+  payload: RECORD_UNKNOWN.optional().default({}),
+  stepIndex: z.number().int().nonnegative().optional().default(0),
+}).strict();
+
+export const projectRegistrationDraftPatchSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  payload: RECORD_UNKNOWN,
+  stepIndex: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectRegistrationDraftAttachmentSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
+  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
+}).strict();
+
 export const projectUpsertSchema = z.object({
   id: NON_EMPTY_STRING,
   name: NON_EMPTY_STRING,

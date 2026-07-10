@@ -102,6 +102,33 @@ function memberProjectIds(member = {}) {
   ].map(readOptionalText).filter(Boolean));
 }
 
+export async function assertEditLeaseActorAccessInTransaction({
+  tx,
+  db,
+  tenantId,
+  actorId,
+  rbacPolicy,
+}) {
+  const normalizedTenantId = requiredText(tenantId, 'tenantId');
+  const normalizedActorId = requiredText(actorId, 'actorId');
+  if (!rbacPolicy) throw new Error('RBAC policy is required for edit lease access');
+  const memberRef = db.doc(`orgs/${normalizedTenantId}/members/${normalizedActorId}`);
+  const memberSnap = await tx.get(memberRef);
+  const member = memberSnap.exists ? (memberSnap.data() || {}) : {};
+  const memberStatus = readOptionalText(member.status).toUpperCase();
+  const memberUid = readOptionalText(member.uid);
+  const actorRole = normalizeRole(member.role);
+  if (
+    !memberSnap.exists
+    || (memberStatus && memberStatus !== 'ACTIVE')
+    || (memberUid && memberUid !== normalizedActorId)
+    || !actorHasPermission(rbacPolicy, { actorRole, permission: 'project:write' })
+  ) {
+    throw createHttpError(403, 'Project write access is required', 'forbidden');
+  }
+  return { actorRole, member };
+}
+
 function requiresExpiryTransition(lease, nowMs) {
   const fence = auditFence(lease);
   return lease?.state === 'ACTIVE'
@@ -137,6 +164,79 @@ export function resolveEditLeaseDocumentId(resourceType, resourceId) {
     throw editLeaseError(400, 'Edit lease resource ID is too long', 'edit_lease_resource_invalid');
   }
   return documentId;
+}
+
+export function buildActiveEditLeaseDocument({
+  tenantId,
+  resourceType,
+  resourceId,
+  actorId,
+  actorDisplayName,
+  sessionId,
+  leaseId,
+  serverNow: nowValue,
+  existing,
+}) {
+  const resource = normalizeResource(resourceType, resourceId);
+  const normalizedTenantId = requiredText(tenantId, 'tenantId');
+  const normalizedActorId = requiredText(actorId, 'actorId');
+  const normalizedSessionId = requiredText(sessionId, 'sessionId');
+  const normalizedLeaseId = requiredText(leaseId, 'leaseId');
+  const nowMs = toMillis(nowValue);
+  if (!Number.isFinite(nowMs)) throw new Error('Edit lease serverNow is invalid');
+  const timestamp = asIso(nowMs);
+  const expiredFence = requiresExpiryTransition(existing, nowMs) ? auditFence(existing) : null;
+  const previousExpiredFence = Number(existing?.lastExpiredFence);
+  return {
+    tenantId: normalizedTenantId,
+    resourceType: resource.resourceType,
+    resourceId: resource.resourceId,
+    holderUid: normalizedActorId,
+    holderDisplayName: readOptionalText(actorDisplayName) || '사용자',
+    sessionId: normalizedSessionId,
+    leaseId: normalizedLeaseId,
+    fence: nextFence(existing),
+    state: 'ACTIVE',
+    acquiredAt: timestamp,
+    expiresAt: asIso(nowMs + EDIT_LEASE_TTL_MS),
+    updatedAt: timestamp,
+    ...((expiredFence || (Number.isSafeInteger(previousExpiredFence) && previousExpiredFence > 0))
+      ? { lastExpiredFence: expiredFence || previousExpiredFence }
+      : {}),
+  };
+}
+
+export function buildEditLeaseAuditEntry(current, actorRole, operation, {
+  state,
+  fence,
+  resultCode,
+  timestamp,
+  effectiveExpiresAt,
+  expiryObservedAt,
+}) {
+  return {
+    tenantId: current.tenantId,
+    entityType: 'edit_lease',
+    entityId: resolveEditLeaseDocumentId(current.resourceType, current.resourceId),
+    action: `EDIT_LEASE_${operation.toUpperCase()}`,
+    actorId: current.actorId,
+    actorRole,
+    actorEmailEnc: current.actorEmailEnc,
+    requestId: current.requestId,
+    details: `Edit lease ${operation}: ${current.resourceType}`,
+    metadata: {
+      source: 'bff',
+      resourceType: current.resourceType,
+      resourceId: current.resourceId,
+      sessionIdHash: sha256(`${current.tenantId}:${current.sessionId}`),
+      fence: Number.isSafeInteger(Number(fence)) && Number(fence) > 0 ? Number(fence) : null,
+      state,
+      resultCode,
+      ...(effectiveExpiresAt ? { effectiveExpiresAt } : {}),
+      ...(expiryObservedAt ? { expiryObservedAt } : {}),
+    },
+    timestamp,
+  };
 }
 
 export async function assertOwnedInTransaction({
@@ -241,20 +341,13 @@ export function createEditLeaseService({
   }
 
   async function assertResourceAccessInTransaction(tx, current) {
-    const memberRef = db.doc(`orgs/${current.tenantId}/members/${current.actorId}`);
-    const memberSnap = await tx.get(memberRef);
-    const member = memberSnap.exists ? (memberSnap.data() || {}) : {};
-    const memberStatus = readOptionalText(member.status).toUpperCase();
-    const memberUid = readOptionalText(member.uid);
-    const actorRole = normalizeRole(member.role);
-    if (
-      !memberSnap.exists
-      || (memberStatus && memberStatus !== 'ACTIVE')
-      || (memberUid && memberUid !== current.actorId)
-      || !actorHasPermission(rbacPolicy, { actorRole, permission: 'project:write' })
-    ) {
-      throw createHttpError(403, 'Project write access is required', 'forbidden');
-    }
+    const { actorRole, member } = await assertEditLeaseActorAccessInTransaction({
+      tx,
+      db,
+      tenantId: current.tenantId,
+      actorId: current.actorId,
+      rbacPolicy,
+    });
 
     if (current.resourceType === 'project-registration') {
       const draftRef = db.doc(`orgs/${current.tenantId}/projectRequestDrafts/${current.resourceId}`);
@@ -284,29 +377,14 @@ export function createEditLeaseService({
     effectiveExpiresAt,
     expiryObservedAt,
   }) {
-    return {
-      tenantId: current.tenantId,
-      entityType: 'edit_lease',
-      entityId: resolveEditLeaseDocumentId(current.resourceType, current.resourceId),
-      action: `EDIT_LEASE_${operation.toUpperCase()}`,
-      actorId: current.actorId,
-      actorRole,
-      actorEmailEnc: current.actorEmailEnc,
-      requestId: current.requestId,
-      details: `Edit lease ${operation}: ${current.resourceType}`,
-      metadata: {
-        source: 'bff',
-        resourceType: current.resourceType,
-        resourceId: current.resourceId,
-        sessionIdHash: sha256(`${current.tenantId}:${current.sessionId}`),
-        fence: Number.isSafeInteger(Number(fence)) && Number(fence) > 0 ? Number(fence) : null,
-        state,
-        resultCode,
-        ...(effectiveExpiresAt ? { effectiveExpiresAt } : {}),
-        ...(expiryObservedAt ? { expiryObservedAt } : {}),
-      },
+    return buildEditLeaseAuditEntry(current, actorRole, operation, {
+      state,
+      fence,
+      resultCode,
       timestamp,
-    };
+      effectiveExpiresAt,
+      expiryObservedAt,
+    });
   }
 
   async function checkIdempotency(tx, current, command, input, nowMs) {
@@ -436,24 +514,12 @@ export function createEditLeaseService({
         }
 
         const expiredFence = requiresExpiryTransition(existing, nowMs) ? auditFence(existing) : null;
-        const previousExpiredFence = Number(existing?.lastExpiredFence);
-        const lease = {
-          tenantId: current.tenantId,
-          resourceType: current.resourceType,
-          resourceId: current.resourceId,
-          holderUid: current.actorId,
-          holderDisplayName: current.actorDisplayName,
-          sessionId: current.sessionId,
+        const lease = buildActiveEditLeaseDocument({
+          ...current,
           leaseId: acquireLeaseId,
-          fence: nextFence(existing),
-          state: 'ACTIVE',
-          acquiredAt: timestamp,
-          expiresAt: asIso(nowMs + EDIT_LEASE_TTL_MS),
-          updatedAt: timestamp,
-          ...((expiredFence || (Number.isSafeInteger(previousExpiredFence) && previousExpiredFence > 0))
-            ? { lastExpiredFence: expiredFence || previousExpiredFence }
-            : {}),
-        };
+          serverNow: nowMs,
+          existing,
+        });
         const body = ownedStatus(lease, nowMs);
         const audits = [];
         if (expiredFence) {
