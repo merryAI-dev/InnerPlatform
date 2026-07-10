@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: jvm-weekly-api
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  datasource:
+    url: ${JVM_WEEKLY_DATABASE_URL:jdbc:postgresql://localhost:5432/innerplatform_weekly}
+    username: ${JVM_WEEKLY_DATABASE_USER:innerplatform}
+    password: ${JVM_WEEKLY_DATABASE_PASSWORD:innerplatform}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+server:
+  port: ${WEEKLY_API_PORT:8088}
+weekly:
+  storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
+  internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
+  internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
+  auth-mode: ${JVM_WEEKLY_AUTH_MODE:strict}
+  workspace-email-domain: ${JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN:mysc.co.kr}
+  firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}
+  firebase-auth-project-id: ${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID:${weekly.firebase-project-id}}
+  firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}
+  project-access-backend: ${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:firestore}
+  allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app}

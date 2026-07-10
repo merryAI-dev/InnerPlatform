@@ -49,6 +49,9 @@ jobs:
 
       - run: npm ci
 
+      - name: JVM weekly API tests
+        run: mvn -f server/jvm-weekly-api/pom.xml test
+
       - name: Settlement targeted vitest matrix
         run: npx vitest run src/app/platform/settlement-*.test.ts src/app/platform/weekly-accounting-state.test.ts src/app/data/portal-store.settlement.test.ts src/app/data/portal-store.integration.test.ts src/app/data/cashflow-weeks-store.integration.test.ts
 
