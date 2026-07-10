@@ -10,6 +10,7 @@ import {
 } from './auth.mjs';
 import { createIdempotencyService } from './idempotency.mjs';
 import { createAuditChainService } from './audit-chain.mjs';
+import { createEditLeaseService } from './edit-lease.mjs';
 import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
@@ -101,6 +102,7 @@ import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
+import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -661,8 +663,26 @@ export function createBffApp(options = {}) {
 
   assertBffRuntimeSafety(runtimeSafetyConfig);
 
+  const editLeasesOptionSet = typeof options.editLeasesEnabled === 'boolean';
+  const editLeasesEnabled = editLeasesOptionSet
+    ? options.editLeasesEnabled
+    : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  const localTestInjection = options.editLeasesEnabled === true && runtimeSafetyConfig.deployEnv === 'local';
+  if (editLeasesEnabled && runtimeSafetyConfig.deployEnv !== 'stage' && !localTestInjection) {
+    const error = new Error(
+      runtimeSafetyConfig.deployEnv === 'live'
+        ? 'Edit leases cannot run in Live runtime'
+        : 'Edit leases environment flag requires Stage runtime',
+    );
+    error.code = 'unsafe_bff_runtime';
+    throw error;
+  }
+
   const createDb = options.createDb || createFirestoreDb;
   const db = options.db || createDb({ projectId });
+  const editLeaseService = options.editLeaseService || (editLeasesEnabled
+    ? createEditLeaseService({ db, now, createLeaseId: options.createEditLeaseId || randomUUID })
+    : null);
   const authProjectId = resolveFirebaseAuthProjectId(options, env, projectId);
   const authAppName = authProjectId === projectId ? undefined : `auth:${authProjectId}`;
   const authMode = options.authMode || resolveAuthMode();
@@ -735,7 +755,7 @@ export function createBffApp(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token, x-file-name, x-file-type, x-file-size');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-actor-name, x-request-id, idempotency-key, x-edit-session-id, x-edit-lease-id, x-edit-fence, x-google-access-token, x-file-name, x-file-type, x-file-size');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -1400,6 +1420,14 @@ export function createBffApp(options = {}) {
   }));
 
   // ── Domain route modules ──────────────────────────────────────────────────
+  mountEditLeaseRoutes(app, {
+    enabled: editLeasesEnabled,
+    db,
+    editLeaseService,
+    rbacPolicy,
+    auditChainService,
+    piiProtector,
+  });
   mountProjectRoutes(app, {
     db, now, idempotencyService, auditChainService, piiProtector,
     driveService, googleSheetsService, googleSheetMigrationAiService,
