@@ -61,10 +61,37 @@ describe('BFF runtime config files', () => {
     expect(script).not.toContain('.firebase-bff-integration-XXXX.json');
   });
 
+  it('hard-rejects non-demo Firebase projects before starting emulators', () => {
+    const script = readRepoFile('scripts/test_bff_integration.sh');
+    const guard = script.indexOf('case "$PROJECT_ID" in');
+    const firstRun = script.indexOf('run_emulator_suite firestore');
+
+    expect(guard).toBeGreaterThan(-1);
+    expect(script).toContain('demo-?*)');
+    expect(guard).toBeLessThan(firstRun);
+  });
+
+  it('isolates Firebase and npm credentials behind a temporary HOME', () => {
+    const script = readRepoFile('scripts/test_bff_integration.sh');
+
+    expect(script).toContain('ORIGINAL_EMULATORS_PATH="${FIREBASE_EMULATORS_PATH:-$HOME/.cache/firebase/emulators}"');
+    expect(script).toContain('TMP_HOME="$(mktemp -d "${TMPDIR:-/tmp}/bff-emulator-home.XXXXXX")"');
+    expect(script).toContain('HOME="$TMP_HOME"');
+    expect(script).not.toContain('HOME="$HOME"');
+    expect(script).toContain('FIREBASE_EMULATORS_PATH="$ORIGINAL_EMULATORS_PATH"');
+    expect(script).toContain('rm -rf "$TMP_HOME"');
+  });
+
+  it('disables the emulator UI in the generated config', () => {
+    const script = readRepoFile('scripts/test_bff_integration.sh');
+
+    expect(script).toContain('cfg.emulators.ui={enabled:false};');
+  });
+
   it('starts Firebase emulators with a credential-free environment allowlist', () => {
     const script = readRepoFile('scripts/test_bff_integration.sh');
 
-    expect(script).toMatch(/env -i \\\n\s+HOME="\$HOME" \\\n\s+PATH="\$PATH"/);
+    expect(script).toMatch(/env -i \\\n\s+HOME="\$TMP_HOME" \\\n\s+PATH="\$PATH"/);
     expect(script).toContain('JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS"');
     expect(script).toContain('FIREBASE_PROJECT_ID="$PROJECT_ID"');
   });

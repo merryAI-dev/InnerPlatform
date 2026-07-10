@@ -163,6 +163,76 @@ describe('project registration draft service', () => {
     await expectHttpError(service.create({ ...input, sessionId: 'session-b' }), 409, 'idempotency_conflict');
   });
 
+  it('rejects a nested own __proto__ key before create fingerprinting without writes', async () => {
+    const { db, service, base, auditChainService } = createHarness();
+    const dangerousPayload = JSON.parse(
+      '{"profile":{"__proto__":{"displayName":"different"}}}',
+    );
+
+    await expectHttpError(
+      service.create({ ...base, idempotencyKey: 'idem-create-dangerous-key', payload: dangerousPayload }),
+      422,
+      'draft_payload_invalid',
+    );
+    expect([...db.documents.keys()].filter((path) => path.includes('/projectRequestDrafts/'))).toHaveLength(0);
+    expect([...db.documents.keys()].filter((path) => path.includes('/idempotency_keys/'))).toHaveLength(0);
+    expect(auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reused create key when two safe payloads differ', async () => {
+    const { service, base } = createHarness();
+    const idempotencyKey = 'idem-create-safe-conflict';
+
+    await service.create({ ...base, idempotencyKey, payload: { profile: { name: 'first' } } });
+
+    await expectHttpError(
+      service.create({ ...base, idempotencyKey, payload: { profile: { name: 'second' } } }),
+      409,
+      'idempotency_conflict',
+    );
+  });
+
+  it.each([
+    ['undefined', () => ({ nested: { value: undefined } })],
+    ['NaN', () => ({ value: Number.NaN })],
+    ['infinite number', () => ({ value: Number.POSITIVE_INFINITY })],
+    ['unsafe number', () => ({ value: Number.MAX_SAFE_INTEGER + 1 })],
+    ['root undefined', () => undefined],
+    ['root null', () => null],
+    ['root array', () => []],
+    ['root scalar', () => 'text'],
+    ['nested array', () => ({ rows: [[1]] })],
+    ['non-plain object', () => ({ createdAt: new Date() })],
+    ['BigInt', () => ({ value: 1n })],
+    ['oversized UTF-8 key', () => ({ ['가'.repeat(501)]: true })],
+    ['cycle', () => {
+      const value = {};
+      value.self = value;
+      return value;
+    }],
+    ['depth above 20', () => {
+      let value = 'leaf';
+      for (let depth = 0; depth < 10_000; depth += 1) value = { child: value };
+      return value;
+    }],
+  ])('rejects %s before create fingerprinting without writes', async (_label, createPayload) => {
+    const { db, service, base, auditChainService } = createHarness();
+
+    await expectHttpError(
+      service.create({
+        ...base,
+        idempotencyKey: `idem-invalid-${_label}`,
+        payload: createPayload(),
+      }),
+      422,
+      'draft_payload_invalid',
+    );
+
+    expect([...db.documents.keys()].filter((path) => path.includes('/projectRequestDrafts/'))).toHaveLength(0);
+    expect([...db.documents.keys()].filter((path) => path.includes('/idempotency_keys/'))).toHaveLength(0);
+    expect(auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
+  });
+
   it('adopts only the current owner legacy draft without deleting its data', async () => {
     const legacyPath = 'orgs/tenant-a/projectRequestDrafts/registration-actor-a';
     const legacy = {
@@ -271,6 +341,62 @@ describe('project registration draft service', () => {
     );
   });
 
+  it('rejects a reused PATCH key when two safe payloads differ', async () => {
+    const { service, base } = createHarness();
+    const created = await service.create({ ...base, idempotencyKey: 'idem-patch-safe-create' });
+    const common = {
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      idempotencyKey: 'idem-patch-safe-conflict',
+      expectedDraftRevision: 0,
+    };
+
+    await service.update({ ...common, payload: { profile: { name: 'first' } } });
+
+    await expectHttpError(
+      service.update({ ...common, payload: { profile: { name: 'second' } } }),
+      409,
+      'idempotency_conflict',
+    );
+  });
+
+  it.each([
+    ['nested own __proto__', () => ({
+      payload: JSON.parse('{"profile":{"__proto__":{"displayName":"different"}}}'),
+    })],
+    ['root array', () => ({ payload: [] })],
+    ['missing payload', () => ({})],
+  ])('rejects a %s PATCH payload before fingerprinting without writes', async (_label, createPatchInput) => {
+    const { db, service, base, auditChainService } = createHarness();
+    const created = await service.create({ ...base, idempotencyKey: 'idem-invalid-patch-create' });
+    const draftPath = 'orgs/tenant-a/projectRequestDrafts/draft-1';
+    const beforeDraft = clone(db.documents.get(draftPath));
+    const beforeIdempotencyCount = [...db.documents.keys()]
+      .filter((path) => path.includes('/idempotency_keys/')).length;
+    const beforeAuditCount = auditChainService.appendManyInTransaction.mock.calls.length;
+
+    await expectHttpError(
+      service.update({
+        ...base,
+        draftId: created.body.draft.draftId,
+        leaseId: created.body.lease.leaseId,
+        fence: created.body.lease.fence,
+        idempotencyKey: 'idem-invalid-patch',
+        expectedDraftRevision: 0,
+        ...createPatchInput(),
+      }),
+      422,
+      'draft_payload_invalid',
+    );
+
+    expect(db.documents.get(draftPath)).toEqual(beforeDraft);
+    expect([...db.documents.keys()].filter((path) => path.includes('/idempotency_keys/')))
+      .toHaveLength(beforeIdempotencyCount);
+    expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(beforeAuditCount);
+  });
+
   it('rejects a draft document above the safe Firestore size before writing it', async () => {
     const { db, service, base, auditChainService } = createHarness();
     const created = await service.create({ ...base, idempotencyKey: 'idem-size-create' });
@@ -304,7 +430,7 @@ describe('project registration draft service', () => {
       }),
       deleteDraftAttachment: vi.fn(async ({ path }) => {
         deleted.push(path);
-        throw new Error('cleanup failed');
+        throw new Error('sensitive cleanup detail: orgs/tenant-a/private/contract.pdf');
       }),
     };
     const harness = createHarness({ storageService });
@@ -339,6 +465,11 @@ describe('project registration draft service', () => {
         409,
         'draft_version_conflict',
       );
+      expect(warn).toHaveBeenCalledWith('[bff] draft attachment cleanup failed', {
+        requestId: 'request-a',
+        errorCode: 'draft_attachment_cleanup_failed',
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(/sensitive cleanup detail|contract\.pdf|orgs\/tenant-a/i);
     } finally {
       warn.mockRestore();
     }
@@ -348,6 +479,42 @@ describe('project registration draft service', () => {
     ]);
     expect(db.documents.get('orgs/tenant-a/projectRequestDrafts/draft-1').attachmentRefs)
       .toEqual([expect.objectContaining({ path: firstPath })]);
+  });
+
+  it('rejects a reused attachment key when only the raw file bytes differ', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
+        path: `orgs/${tenantId}/project-registration-drafts/${draftId}/${attachmentId}-${fileName}`,
+        name: fileName,
+        size: buffer.byteLength,
+        contentType: mimeType,
+        uploadedAt: '2026-07-10T00:00:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const { service, base } = createHarness({ storageService });
+    const created = await service.create({ ...base, idempotencyKey: 'idem-attachment-bytes-create' });
+    const common = {
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      idempotencyKey: 'idem-attachment-bytes',
+      expectedDraftRevision: 0,
+      fileName: 'bytes.bin',
+      mimeType: 'application/octet-stream',
+      fileSize: 1,
+    };
+
+    await service.addAttachment({ ...common, buffer: Buffer.from([0xff]) });
+
+    await expectHttpError(
+      service.addAttachment({ ...common, buffer: Buffer.from([0xfe]) }),
+      409,
+      'idempotency_conflict',
+    );
+    expect(storageService.uploadDraftAttachment).toHaveBeenCalledTimes(1);
+    expect(storageService.deleteDraftAttachment).not.toHaveBeenCalled();
   });
 });
 
@@ -416,5 +583,45 @@ describe('project registration draft routes', () => {
       payload: { name: 'Saved' },
       stepIndex: 2,
     }));
+  });
+
+  it('returns 422 for a root array before the real create service writes anything', async () => {
+    const harness = createHarness();
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.context = {
+        tenantId: 'tenant-a',
+        actorId: 'actor-a',
+        actorRole: 'pm',
+        actorName: 'Actor A',
+        requestId: 'request-array',
+        idempotencyKey: req.header('idempotency-key') || undefined,
+      };
+      next();
+    });
+    mountProjectRegistrationDraftRoutes(app, {
+      enabled: true,
+      projectRegistrationDraftService: harness.service,
+    });
+    app.use((error, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app)
+      .post('/api/v1/project-registration-drafts')
+      .set({
+        'idempotency-key': 'idem-route-root-array',
+        'x-edit-session-id': 'session-a',
+      })
+      .send({ payload: [], stepIndex: 0 })
+      .expect(422);
+
+    expect(response.body.error).toBe('draft_payload_invalid');
+    expect([...harness.db.documents.keys()].filter((path) => path.includes('/projectRequestDrafts/')))
+      .toHaveLength(0);
+    expect([...harness.db.documents.keys()].filter((path) => path.includes('/idempotency_keys/')))
+      .toHaveLength(0);
+    expect(harness.auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
   });
 });

@@ -31,12 +31,9 @@ function stableSort(value) {
     return value.map(stableSort);
   }
   if (value && typeof value === 'object') {
-    const sorted = {};
-    const keys = Object.keys(value).sort();
-    for (const key of keys) {
-      sorted[key] = stableSort(value[key]);
-    }
-    return sorted;
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, stableSort(value[key])]),
+    );
   }
   return value;
 }
@@ -46,7 +43,10 @@ export function stableStringify(value) {
 }
 
 export function sha256(value) {
-  return createHash('sha256').update(String(value)).digest('hex');
+  const input = Buffer.isBuffer(value) || value instanceof Uint8Array
+    ? value
+    : String(value);
+  return createHash('sha256').update(input).digest('hex');
 }
 
 export function buildRequestFingerprint({ method, path, body }) {

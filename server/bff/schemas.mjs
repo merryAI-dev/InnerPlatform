@@ -7,13 +7,13 @@ const PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH = 14 * 1024 * 1024;
 
 export const projectRegistrationDraftCreateSchema = z.object({
-  payload: RECORD_UNKNOWN.optional().default({}),
+  payload: z.unknown().optional().default({}),
   stepIndex: z.number().int().nonnegative().optional().default(0),
 }).strict();
 
 export const projectRegistrationDraftPatchSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
-  payload: RECORD_UNKNOWN,
+  payload: z.unknown(),
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 

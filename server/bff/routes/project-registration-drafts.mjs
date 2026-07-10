@@ -25,6 +25,8 @@ import { buildRequestFingerprint, sha256 } from '../utils.mjs';
 const RESOURCE_TYPE = 'project-registration';
 const MAX_DRAFT_DOCUMENT_BYTES = 900 * 1024;
 const MAX_ATTACHMENT_REFS = 100;
+const MAX_DRAFT_PAYLOAD_DEPTH = 20;
+const MAX_FIRESTORE_FIELD_NAME_BYTES = 1_500;
 
 function requiredText(value, fieldName) {
   const normalized = readOptionalText(value);
@@ -97,6 +99,110 @@ function assertDraftSize(draft) {
   if (bytes > MAX_DRAFT_DOCUMENT_BYTES) {
     throw createHttpError(413, 'Draft payload is too large', 'draft_payload_too_large');
   }
+}
+
+function invalidDraftPayload() {
+  throw createHttpError(422, 'Draft payload contains unsupported JSON data', 'draft_payload_invalid');
+}
+
+function assertDraftPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) invalidDraftPayload();
+  let rootPrototype;
+  try {
+    rootPrototype = Object.getPrototypeOf(payload);
+  } catch {
+    invalidDraftPayload();
+  }
+  if (rootPrototype !== Object.prototype && rootPrototype !== null) invalidDraftPayload();
+
+  const activeAncestors = new WeakSet();
+  const stack = [{ value: payload, depth: 0, parentIsArray: false, exiting: false }];
+
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    const { value, depth, parentIsArray, exiting } = frame;
+    if (exiting) {
+      activeAncestors.delete(value);
+      continue;
+    }
+    if (depth > MAX_DRAFT_PAYLOAD_DEPTH) invalidDraftPayload();
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') continue;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER) invalidDraftPayload();
+      continue;
+    }
+    if (!value || typeof value !== 'object') invalidDraftPayload();
+    if (activeAncestors.has(value)) invalidDraftPayload();
+
+    if (Array.isArray(value)) {
+      if (parentIsArray) invalidDraftPayload();
+      let ownKeys;
+      try {
+        ownKeys = Reflect.ownKeys(value);
+      } catch {
+        invalidDraftPayload();
+      }
+      if (ownKeys.length !== value.length + 1 || !ownKeys.includes('length')) invalidDraftPayload();
+      activeAncestors.add(value);
+      stack.push({ value, depth, parentIsArray, exiting: true });
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        const key = String(index);
+        let descriptor;
+        try {
+          descriptor = Object.getOwnPropertyDescriptor(value, key);
+        } catch {
+          invalidDraftPayload();
+        }
+        if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) invalidDraftPayload();
+        stack.push({ value: descriptor.value, depth: depth + 1, parentIsArray: true, exiting: false });
+      }
+      continue;
+    }
+
+    let prototype;
+    let ownKeys;
+    try {
+      prototype = Object.getPrototypeOf(value);
+      ownKeys = Reflect.ownKeys(value);
+    } catch {
+      invalidDraftPayload();
+    }
+    if (prototype !== Object.prototype && prototype !== null) invalidDraftPayload();
+    const entries = [];
+    for (const key of ownKeys) {
+      if (
+        typeof key !== 'string'
+        || key === '__proto__'
+        || Buffer.byteLength(key, 'utf8') > MAX_FIRESTORE_FIELD_NAME_BYTES
+      ) {
+        invalidDraftPayload();
+      }
+      let descriptor;
+      try {
+        descriptor = Object.getOwnPropertyDescriptor(value, key);
+      } catch {
+        invalidDraftPayload();
+      }
+      if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) invalidDraftPayload();
+      entries.push(descriptor.value);
+    }
+    activeAncestors.add(value);
+    stack.push({ value, depth, parentIsArray, exiting: true });
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: entries[index], depth: depth + 1, parentIsArray: false, exiting: false });
+    }
+  }
+}
+
+function readDraftPayload(input, { allowMissing = false } = {}) {
+  const hasPayload = Boolean(input && typeof input === 'object' && Object.hasOwn(input, 'payload'));
+  if (!hasPayload) {
+    if (allowMissing) return {};
+    invalidDraftPayload();
+  }
+  const payload = input.payload;
+  assertDraftPayload(payload);
+  return payload;
 }
 
 function idempotencyError(lock) {
@@ -255,9 +361,7 @@ export function createProjectRegistrationDraftService({
       const current = context(input, { draftRequired: false });
       current.draftId = documentId(createDraftId(), 'draftId');
       const generatedLeaseId = documentId(createLeaseId(), 'leaseId');
-      const payload = input?.payload && typeof input.payload === 'object' && !Array.isArray(input.payload)
-        ? input.payload
-        : {};
+      const payload = readDraftPayload(input, { allowMissing: true });
       const stepIndex = Number.isInteger(input?.stepIndex) && input.stepIndex >= 0 ? input.stepIndex : 0;
       const method = 'POST';
       const path = '/api/v1/project-registration-drafts';
@@ -381,9 +485,7 @@ export function createProjectRegistrationDraftService({
       if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
         throw createHttpError(400, 'expectedDraftRevision must be a non-negative integer', 'draft_request_invalid');
       }
-      const payload = input?.payload && typeof input.payload === 'object' && !Array.isArray(input.payload)
-        ? input.payload
-        : {};
+      const payload = readDraftPayload(input);
       const method = 'PATCH';
       const path = `/api/v1/project-registration-drafts/${current.draftId}`;
       const requestFingerprint = buildRequestFingerprint({
@@ -520,9 +622,12 @@ export function createProjectRegistrationDraftService({
             draftId: current.draftId,
             path: uploaded.path,
           });
-        } catch (cleanupError) {
+        } catch {
           // eslint-disable-next-line no-console
-          console.warn('[bff] draft attachment cleanup failed', cleanupError instanceof Error ? cleanupError.message : cleanupError);
+          console.warn('[bff] draft attachment cleanup failed', {
+            requestId: current.requestId,
+            errorCode: 'draft_attachment_cleanup_failed',
+          });
         }
       };
 
