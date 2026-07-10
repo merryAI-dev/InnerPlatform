@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { createHttpError, readOptionalText } from './bff-utils.mjs';
+import { actorHasPermission } from './rbac-policy.mjs';
+import { createHttpError, normalizeRole, readOptionalText } from './bff-utils.mjs';
+import { buildRequestFingerprint, sha256 } from './utils.mjs';
 
 export const EDIT_LEASE_TTL_MS = 1_800_000;
 
 const RESOURCE_TYPES = new Set(['project-registration', 'project-info', 'cashflow']);
+const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
 
 function editLeaseError(statusCode, message, code, publicDetails, auditContext) {
   const error = createHttpError(statusCode, message, code);
@@ -86,6 +89,46 @@ function leaseRefFor(db, tenantId, resourceType, resourceId) {
   return db.doc(`orgs/${tenantId}/editLeases/${resolveEditLeaseDocumentId(resourceType, resourceId)}`);
 }
 
+function memberProjectIds(member = {}) {
+  const profile = member.portalProfile && typeof member.portalProfile === 'object'
+    ? member.portalProfile
+    : {};
+  return new Set([
+    member.projectId,
+    ...(Array.isArray(member.projectIds) ? member.projectIds : []),
+    profile.projectId,
+    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+  ].map(readOptionalText).filter(Boolean));
+}
+
+function requiresExpiryTransition(lease, nowMs) {
+  const fence = auditFence(lease);
+  return lease?.state === 'ACTIVE'
+    && !activeAt(lease, nowMs)
+    && fence !== null
+    && Number(lease?.lastExpiredFence) !== fence;
+}
+
+function commandPath(current, command) {
+  return `/api/v1/edit-leases/${current.resourceType}/${current.resourceId}/${command}`;
+}
+
+function commandFingerprint(current, command, input) {
+  return buildRequestFingerprint({
+    method: 'POST',
+    path: commandPath(current, command),
+    body: {
+      resourceType: current.resourceType,
+      resourceId: current.resourceId,
+      command,
+      actorId: current.actorId,
+      sessionId: current.sessionId,
+      leaseId: readOptionalText(input?.leaseId) || null,
+      fence: Number.isSafeInteger(Number(input?.fence)) ? Number(input.fence) : null,
+    },
+  });
+}
+
 export function resolveEditLeaseDocumentId(resourceType, resourceId) {
   const resource = normalizeResource(resourceType, resourceId);
   return `v1_${Buffer.from(JSON.stringify([resource.resourceType, resource.resourceId]), 'utf8').toString('base64url')}`;
@@ -151,10 +194,28 @@ export async function assertOwnedInTransaction({
   return lease;
 }
 
-export function createEditLeaseService({ db, now = () => Date.now(), createLeaseId = randomUUID } = {}) {
+export function createEditLeaseService({
+  db,
+  now = () => Date.now(),
+  createLeaseId = randomUUID,
+  auditChainService,
+  idempotencyService,
+  rbacPolicy,
+} = {}) {
   if (!db || typeof db.runTransaction !== 'function') {
     throw new Error('Firestore is required for edit leases');
   }
+  if (!auditChainService || typeof auditChainService.appendManyInTransaction !== 'function') {
+    throw new Error('Atomic audit chain service is required for edit leases');
+  }
+  if (
+    !idempotencyService
+    || typeof idempotencyService.checkInTransaction !== 'function'
+    || typeof idempotencyService.completeInTransaction !== 'function'
+  ) {
+    throw new Error('Atomic idempotency service is required for edit leases');
+  }
+  if (!rbacPolicy) throw new Error('RBAC policy is required for edit leases');
 
   function context(input) {
     const resource = normalizeResource(input?.resourceType, input?.resourceId);
@@ -167,66 +228,199 @@ export function createEditLeaseService({ db, now = () => Date.now(), createLease
       actorId,
       sessionId,
       actorDisplayName: readOptionalText(input?.actorDisplayName) || '사용자',
+      actorEmailEnc: readOptionalText(input?.actorEmailEnc) || undefined,
+      requestId: readOptionalText(input?.requestId) || 'edit-lease-request',
+      idempotencyKey: readOptionalText(input?.idempotencyKey),
       leaseRef: leaseRefFor(db, tenantId, resource.resourceType, resource.resourceId),
     };
   }
 
-  return {
-    async getStatus(input) {
-      const current = context(input);
+  async function assertResourceAccessInTransaction(tx, current) {
+    const memberRef = db.doc(`orgs/${current.tenantId}/members/${current.actorId}`);
+    const memberSnap = await tx.get(memberRef);
+    const member = memberSnap.exists ? (memberSnap.data() || {}) : {};
+    const memberStatus = readOptionalText(member.status).toUpperCase();
+    const memberUid = readOptionalText(member.uid);
+    const actorRole = normalizeRole(member.role);
+    if (
+      !memberSnap.exists
+      || (memberStatus && memberStatus !== 'ACTIVE')
+      || (memberUid && memberUid !== current.actorId)
+      || !actorHasPermission(rbacPolicy, { actorRole, permission: 'project:write' })
+    ) {
+      throw createHttpError(403, 'Project write access is required', 'forbidden');
+    }
+
+    if (current.resourceType === 'project-registration') {
+      const draftRef = db.doc(`orgs/${current.tenantId}/projectRequestDrafts/${current.resourceId}`);
+      const draftSnap = await tx.get(draftRef);
+      const draft = draftSnap.exists ? (draftSnap.data() || {}) : {};
+      const ownerId = readOptionalText(draft.ownerUid) || readOptionalText(draft.ownerId);
+      if (!draftSnap.exists || ownerId !== current.actorId) {
+        throw createHttpError(404, 'Project registration draft not found', 'not_found');
+      }
+      return actorRole;
+    }
+
+    const projectRef = db.doc(`orgs/${current.tenantId}/projects/${current.resourceId}`);
+    const projectSnap = await tx.get(projectRef);
+    if (!projectSnap.exists) throw createHttpError(404, 'Project not found', 'not_found');
+    if (!CROSS_PROJECT_ROLES.has(actorRole) && !memberProjectIds(member).has(current.resourceId)) {
+      throw createHttpError(403, 'Project assignment is required', 'forbidden');
+    }
+    return actorRole;
+  }
+
+  function auditEntry(current, actorRole, operation, { state, fence, resultCode, timestamp }) {
+    return {
+      tenantId: current.tenantId,
+      entityType: 'edit_lease',
+      entityId: resolveEditLeaseDocumentId(current.resourceType, current.resourceId),
+      action: `EDIT_LEASE_${operation.toUpperCase()}`,
+      actorId: current.actorId,
+      actorRole,
+      actorEmailEnc: current.actorEmailEnc,
+      requestId: current.requestId,
+      details: `Edit lease ${operation}: ${current.resourceType}`,
+      metadata: {
+        source: 'bff',
+        resourceType: current.resourceType,
+        resourceId: current.resourceId,
+        sessionIdHash: sha256(`${current.tenantId}:${current.sessionId}`),
+        fence: Number.isSafeInteger(Number(fence)) && Number(fence) > 0 ? Number(fence) : null,
+        state,
+        resultCode,
+      },
+      timestamp,
+    };
+  }
+
+  async function checkIdempotency(tx, current, command, input, nowMs) {
+    if (!current.idempotencyKey) return { mode: 'started', ref: null, requestFingerprint: null };
+    const requestFingerprint = commandFingerprint(current, command, input);
+    return idempotencyService.checkInTransaction(tx, {
+      tenantId: current.tenantId,
+      idempotencyKey: current.idempotencyKey,
+      requestFingerprint,
+      nowDate: new Date(nowMs),
+    });
+  }
+
+  function completeIdempotency(tx, current, command, lock, body, nowMs) {
+    if (!current.idempotencyKey) return;
+    idempotencyService.completeInTransaction(tx, {
+      ref: lock.ref,
+      tenantId: current.tenantId,
+      idempotencyKey: current.idempotencyKey,
+      requestFingerprint: lock.requestFingerprint,
+      responseStatus: 200,
+      responseBody: body,
+      actorId: current.actorId,
+      requestId: current.requestId,
+      method: 'POST',
+      path: commandPath(current, command),
+      nowDate: new Date(nowMs),
+    });
+  }
+
+  function idempotencyError(lock) {
+    if (lock.mode === 'conflict') {
+      return editLeaseError(409, lock.reason, 'idempotency_conflict');
+    }
+    if (lock.mode === 'in_progress') {
+      return editLeaseError(409, lock.reason, 'idempotency_in_progress');
+    }
+    return null;
+  }
+
+  function expiredLeaseError(lease, nowMs) {
+    return editLeaseError(410, 'The edit lease has expired', 'edit_lease_expired', undefined, {
+      serverNow: asIso(nowMs),
+      fence: auditFence(lease),
+    });
+  }
+
+  function ownershipError(lease, nowMs) {
+    return editLeaseError(423, 'The edit lease is held by another session', 'edit_lease_held', undefined, {
+      serverNow: asIso(nowMs),
+      fence: auditFence(lease),
+    });
+  }
+
+  function matchesOwner(lease, current, input) {
+    const leaseId = requiredText(input?.leaseId, 'leaseId');
+    const fence = Number(input?.fence);
+    if (!Number.isSafeInteger(fence) || fence < 1) {
+      throw editLeaseError(400, 'fence must be a positive integer', 'edit_lease_request_invalid');
+    }
+    return readOptionalText(lease?.tenantId) === current.tenantId
+      && readOptionalText(lease?.resourceType) === current.resourceType
+      && readOptionalText(lease?.resourceId) === current.resourceId
+      && readOptionalText(lease?.holderUid) === current.actorId
+      && readOptionalText(lease?.sessionId) === current.sessionId
+      && readOptionalText(lease?.leaseId) === leaseId
+      && Number(lease?.fence) === fence;
+  }
+
+  function expiredDocument(lease, timestamp) {
+    return {
+      ...lease,
+      state: 'EXPIRED',
+      expiredAt: lease.expiredAt || timestamp,
+      lastExpiredFence: auditFence(lease),
+      updatedAt: timestamp,
+    };
+  }
+
+  async function runCommand(command, input) {
+    const current = context(input);
+    const outcome = await db.runTransaction(async (tx) => {
       const nowMs = serverNow(now);
-      const snap = await current.leaseRef.get();
-      if (!snap.exists) {
-        return { serverNow: asIso(nowMs), state: 'AVAILABLE', canEdit: false, expiresAt: null };
+      const timestamp = asIso(nowMs);
+      const actorRole = await assertResourceAccessInTransaction(tx, current);
+      const lock = await checkIdempotency(tx, current, command, input, nowMs);
+      if (lock.mode === 'replay') {
+        return { status: lock.status, body: lock.body, replayed: true };
       }
+      const lockError = idempotencyError(lock);
+      if (lockError) throw lockError;
 
-      const lease = snap.data() || {};
-      if (lease.state === 'RELEASED') {
-        return { serverNow: asIso(nowMs), state: 'RELEASED', canEdit: false, expiresAt: lease.expiresAt || null };
-      }
-      if (!activeAt(lease, nowMs)) {
-        return {
-          serverNow: asIso(nowMs),
-          state: 'EXPIRED',
-          canEdit: false,
-          expiresAt: lease.expiresAt || null,
-          audit: { fence: auditFence(lease) },
-        };
-      }
-      if (lease.holderUid === current.actorId && lease.sessionId === current.sessionId) {
-        return ownedStatus(lease, nowMs);
-      }
-      return {
-        serverNow: asIso(nowMs),
-        state: 'ACTIVE',
-        canEdit: false,
-        expiresAt: lease.expiresAt,
-        holderDisplayName: readOptionalText(lease.holderDisplayName) || '다른 사용자',
-        sameActor: lease.holderUid === current.actorId,
-      };
-    },
+      const snap = await tx.get(current.leaseRef);
+      const existing = snap.exists ? (snap.data() || {}) : null;
 
-    async acquire(input) {
-      const current = context(input);
-      return db.runTransaction(async (tx) => {
-        const nowMs = serverNow(now);
-        const snap = await tx.get(current.leaseRef);
-        const existing = snap.exists ? (snap.data() || {}) : null;
+      if (command === 'acquire') {
         if (activeAt(existing, nowMs)) {
           if (existing.holderUid === current.actorId && existing.sessionId === current.sessionId) {
-            return ownedStatus(existing, nowMs);
+            const body = ownedStatus(existing, nowMs);
+            await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'acquire', {
+              state: body.state,
+              fence: body.fence,
+              resultCode: 'edit_lease_acquired',
+              timestamp,
+            })]);
+            completeIdempotency(tx, current, command, lock, body, nowMs);
+            return { status: 200, body, replayed: false };
           }
-          throw editLeaseError(
+
+          const error = editLeaseError(
             423,
             'The edit lease is held by another session',
             'edit_lease_held',
             heldDetails(existing, current.actorId),
-            { serverNow: asIso(nowMs), fence: auditFence(existing) },
+            { serverNow: timestamp, fence: auditFence(existing) },
           );
+          await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'conflict', {
+            state: 'ACTIVE',
+            fence: auditFence(existing),
+            resultCode: error.code,
+            timestamp,
+          })]);
+          return { error };
         }
 
+        const expiredFence = requiresExpiryTransition(existing, nowMs) ? auditFence(existing) : null;
+        const previousExpiredFence = Number(existing?.lastExpiredFence);
         const leaseId = requiredText(createLeaseId(), 'leaseId');
-        const timestamp = asIso(nowMs);
         const lease = {
           tenantId: current.tenantId,
           resourceType: current.resourceType,
@@ -240,55 +434,148 @@ export function createEditLeaseService({ db, now = () => Date.now(), createLease
           acquiredAt: timestamp,
           expiresAt: asIso(nowMs + EDIT_LEASE_TTL_MS),
           updatedAt: timestamp,
+          ...((expiredFence || (Number.isSafeInteger(previousExpiredFence) && previousExpiredFence > 0))
+            ? { lastExpiredFence: expiredFence || previousExpiredFence }
+            : {}),
         };
+        const body = ownedStatus(lease, nowMs);
+        const audits = [];
+        if (expiredFence) {
+          audits.push(auditEntry(current, actorRole, 'expire', {
+            state: 'EXPIRED',
+            fence: expiredFence,
+            resultCode: 'edit_lease_expired',
+            timestamp,
+          }));
+        }
+        audits.push(auditEntry(current, actorRole, 'acquire', {
+          state: body.state,
+          fence: body.fence,
+          resultCode: 'edit_lease_acquired',
+          timestamp,
+        }));
+        await auditChainService.appendManyInTransaction(tx, audits);
         tx.set(current.leaseRef, lease);
-        return ownedStatus(lease, nowMs);
-      });
-    },
+        completeIdempotency(tx, current, command, lock, body, nowMs);
+        return { status: 200, body, replayed: false };
+      }
 
-    async extend(input) {
-      const current = context(input);
-      return db.runTransaction(async (tx) => {
-        const nowMs = serverNow(now);
-        const lease = await assertOwnedInTransaction({
-          tx,
-          leaseRef: current.leaseRef,
-          ...current,
-          leaseId: input?.leaseId,
-          fence: input?.fence,
-          serverNow: nowMs,
-        });
+      if (!activeAt(existing, nowMs)) {
+        const error = expiredLeaseError(existing, nowMs);
+        if (requiresExpiryTransition(existing, nowMs)) {
+          const expired = expiredDocument(existing, timestamp);
+          await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'expire', {
+            state: 'EXPIRED',
+            fence: auditFence(existing),
+            resultCode: error.code,
+            timestamp,
+          })]);
+          tx.set(current.leaseRef, expired);
+        }
+        return { error };
+      }
+
+      if (!matchesOwner(existing, current, input)) {
+        const error = ownershipError(existing, nowMs);
+        await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'conflict', {
+          state: 'ACTIVE',
+          fence: auditFence(existing),
+          resultCode: error.code,
+          timestamp,
+        })]);
+        return { error };
+      }
+
+      if (command === 'extend') {
         const extended = {
-          ...lease,
+          ...existing,
           expiresAt: asIso(nowMs + EDIT_LEASE_TTL_MS),
-          updatedAt: asIso(nowMs),
+          updatedAt: timestamp,
         };
+        const body = ownedStatus(extended, nowMs);
+        await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'extend', {
+          state: body.state,
+          fence: body.fence,
+          resultCode: 'edit_lease_extended',
+          timestamp,
+        })]);
         tx.set(current.leaseRef, extended);
-        return ownedStatus(extended, nowMs);
-      });
-    },
+        completeIdempotency(tx, current, command, lock, body, nowMs);
+        return { status: 200, body, replayed: false };
+      }
 
-    async release(input) {
+      const released = { ...existing, state: 'RELEASED', updatedAt: timestamp };
+      const body = {
+        serverNow: timestamp,
+        state: 'RELEASED',
+        canEdit: false,
+        expiresAt: released.expiresAt,
+      };
+      await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'release', {
+        state: body.state,
+        fence: auditFence(existing),
+        resultCode: 'edit_lease_released',
+        timestamp,
+      })]);
+      tx.set(current.leaseRef, released);
+      completeIdempotency(tx, current, command, lock, body, nowMs);
+      return { status: 200, body, replayed: false };
+    });
+
+    if (outcome.error) throw outcome.error;
+    return outcome;
+  }
+
+  return {
+    async getStatus(input) {
       const current = context(input);
       return db.runTransaction(async (tx) => {
         const nowMs = serverNow(now);
-        const lease = await assertOwnedInTransaction({
-          tx,
-          leaseRef: current.leaseRef,
-          ...current,
-          leaseId: input?.leaseId,
-          fence: input?.fence,
-          serverNow: nowMs,
-        });
-        const released = { ...lease, state: 'RELEASED', updatedAt: asIso(nowMs) };
-        tx.set(current.leaseRef, released);
+        const timestamp = asIso(nowMs);
+        const actorRole = await assertResourceAccessInTransaction(tx, current);
+        const snap = await tx.get(current.leaseRef);
+        if (!snap.exists) {
+          return { serverNow: timestamp, state: 'AVAILABLE', canEdit: false, expiresAt: null };
+        }
+
+        const lease = snap.data() || {};
+        if (lease.state === 'RELEASED') {
+          return { serverNow: timestamp, state: 'RELEASED', canEdit: false, expiresAt: lease.expiresAt || null };
+        }
+        if (!activeAt(lease, nowMs)) {
+          if (requiresExpiryTransition(lease, nowMs)) {
+            const expired = expiredDocument(lease, timestamp);
+            await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'expire', {
+              state: 'EXPIRED',
+              fence: auditFence(lease),
+              resultCode: 'edit_lease_expired',
+              timestamp,
+            })]);
+            tx.set(current.leaseRef, expired);
+          }
+          return {
+            serverNow: timestamp,
+            state: 'EXPIRED',
+            canEdit: false,
+            expiresAt: lease.expiresAt || null,
+          };
+        }
+        if (lease.holderUid === current.actorId && lease.sessionId === current.sessionId) {
+          return ownedStatus(lease, nowMs);
+        }
         return {
-          serverNow: asIso(nowMs),
-          state: 'RELEASED',
+          serverNow: timestamp,
+          state: 'ACTIVE',
           canEdit: false,
-          expiresAt: released.expiresAt,
+          expiresAt: lease.expiresAt,
+          holderDisplayName: readOptionalText(lease.holderDisplayName) || '다른 사용자',
+          sameActor: lease.holderUid === current.actorId,
         };
       });
     },
+
+    acquire: (input) => runCommand('acquire', input),
+    extend: (input) => runCommand('extend', input),
+    release: (input) => runCommand('release', input),
   };
 }

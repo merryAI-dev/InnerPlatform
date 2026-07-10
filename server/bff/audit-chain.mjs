@@ -35,67 +35,72 @@ function hashAuditEntry(entry) {
 }
 
 export function createAuditChainService(db, { now = () => new Date().toISOString() } = {}) {
-  return {
-    async append({
+  async function appendManyInTransaction(tx, entries) {
+    const batch = Array.isArray(entries) ? entries : [];
+    if (batch.length === 0) return [];
+
+    const tenantId = batch[0]?.tenantId;
+    if (!tenantId || batch.some((entry) => entry?.tenantId !== tenantId)) {
+      throw new Error('Audit entries must share one tenantId');
+    }
+
+    const headRef = db.doc(`orgs/${tenantId}/audit_chain/head`);
+    const headSnap = await tx.get(headRef);
+    const head = headSnap.exists ? (headSnap.data() || {}) : {};
+    let chainSeq = asPositiveInt(head.lastSeq, 0);
+    let prevHash = normalizeHash(head.lastHash);
+    let updatedAt;
+    const results = [];
+
+    for (const input of batch) {
+      const timestamp = input.timestamp === undefined ? now() : input.timestamp;
+      chainSeq += 1;
+      const auditId = buildAuditId(timestamp);
+      const logRef = db.doc(`orgs/${tenantId}/audit_logs/${auditId}`);
+      const entry = {
+        id: auditId,
+        tenantId,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        action: input.action,
+        userId: input.actorId,
+        userName: input.actorId,
+        userRole: input.actorRole || undefined,
+        userEmailEnc: input.actorEmailEnc || undefined,
+        requestId: input.requestId,
+        details: input.details,
+        metadata: input.metadata || undefined,
+        timestamp,
+        chainSeq,
+        prevHash,
+        hashAlg: 'sha256',
+      };
+
+      const hash = hashAuditEntry(entry);
+      entry.hash = hash;
+      tx.create(logRef, entry);
+      results.push({ id: auditId, chainSeq, hash, prevHash });
+      prevHash = hash;
+      updatedAt = timestamp;
+    }
+
+    tx.set(headRef, {
       tenantId,
-      entityType,
-      entityId,
-      action,
-      actorId,
-      actorRole,
-      actorEmailEnc,
-      requestId,
-      details,
-      metadata,
-      timestamp = now(),
-    }) {
+      lastSeq: chainSeq,
+      lastHash: prevHash,
+      updatedAt,
+    }, { merge: true });
+
+    return results;
+  }
+
+  return {
+    appendManyInTransaction,
+
+    async append(entry) {
       return db.runTransaction(async (tx) => {
-        const headRef = db.doc(`orgs/${tenantId}/audit_chain/head`);
-        const headSnap = await tx.get(headRef);
-        const head = headSnap.exists ? (headSnap.data() || {}) : {};
-
-        const lastSeq = asPositiveInt(head.lastSeq, 0);
-        const prevHash = normalizeHash(head.lastHash);
-        const chainSeq = lastSeq + 1;
-        const auditId = buildAuditId(timestamp);
-        const logRef = db.doc(`orgs/${tenantId}/audit_logs/${auditId}`);
-
-        const entry = {
-          id: auditId,
-          tenantId,
-          entityType,
-          entityId,
-          action,
-          userId: actorId,
-          userName: actorId,
-          userRole: actorRole || undefined,
-          userEmailEnc: actorEmailEnc || undefined,
-          requestId,
-          details,
-          metadata: metadata || undefined,
-          timestamp,
-          chainSeq,
-          prevHash,
-          hashAlg: 'sha256',
-        };
-
-        const hash = hashAuditEntry(entry);
-        entry.hash = hash;
-
-        tx.create(logRef, entry);
-        tx.set(headRef, {
-          tenantId,
-          lastSeq: chainSeq,
-          lastHash: hash,
-          updatedAt: timestamp,
-        }, { merge: true });
-
-        return {
-          id: auditId,
-          chainSeq,
-          hash,
-          prevHash,
-        };
+        const [result] = await appendManyInTransaction(tx, [entry]);
+        return result;
       });
     },
 

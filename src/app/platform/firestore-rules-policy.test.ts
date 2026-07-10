@@ -181,6 +181,20 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
   });
 
+  it('keeps edit lease secrets behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain("|| collection in ['editLeases']");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/editLeases\/\{leaseId\} \{\s*allow read, write: if false;\s*\}/,
+    );
+  });
+
+  it('keeps idempotent replay responses behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain("|| collection in ['idempotency_keys'];");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/idempotency_keys\/\{keyId\} \{\s*allow read, write: if false;\s*\}/,
+    );
+  });
+
   it('keeps project option settings admin-managed', () => {
     expect(firestoreRulesText).toContain('match /orgs/{orgId}/settings/project-departments');
     expect(firestoreRulesText).toContain('allow read: if canRead(orgId);');

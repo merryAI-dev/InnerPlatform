@@ -13,8 +13,97 @@ function addSeconds(date, seconds) {
   return new Date(date.getTime() + (seconds * 1000));
 }
 
+function resolveNowDate(value, fallback) {
+  const candidate = value === undefined ? fallback() : value;
+  const date = candidate instanceof Date ? candidate : new Date(candidate);
+  if (!Number.isFinite(date.getTime())) throw new Error('Invalid idempotency timestamp');
+  return date;
+}
+
 export function createIdempotencyService(db, { now = () => new Date() } = {}) {
   return {
+    async checkInTransaction(tx, {
+      tenantId,
+      idempotencyKey,
+      requestFingerprint,
+      nowDate,
+    }) {
+      const ref = db.doc(idempotencyDocPath(tenantId, idempotencyKey));
+      const currentDate = resolveNowDate(nowDate, now);
+      const snap = await tx.get(ref);
+
+      if (!snap.exists) {
+        return { mode: 'started', requestFingerprint, ref };
+      }
+
+      const data = snap.data() || {};
+      if (data.requestFingerprint && data.requestFingerprint !== requestFingerprint) {
+        return {
+          mode: 'conflict',
+          reason: 'Idempotency key was already used with different payload',
+          ref,
+        };
+      }
+
+      if (data.status === 'completed') {
+        return {
+          mode: 'replay',
+          status: Number.isInteger(data.responseStatus) ? data.responseStatus : 200,
+          body: data.responseBody ?? null,
+          requestFingerprint,
+          ref,
+        };
+      }
+
+      const pendingExpiresAt = typeof data.expiresAt === 'string' ? new Date(data.expiresAt) : null;
+      if (data.status === 'pending' && pendingExpiresAt && pendingExpiresAt > currentDate) {
+        return {
+          mode: 'in_progress',
+          reason: 'Idempotent request is still being processed',
+          ref,
+        };
+      }
+
+      return { mode: 'started', requestFingerprint, ref };
+    },
+
+    completeInTransaction(tx, {
+      ref,
+      tenantId,
+      idempotencyKey,
+      requestFingerprint,
+      responseStatus,
+      responseBody,
+      actorId,
+      requestId,
+      method,
+      path,
+      nowDate,
+      ttlSeconds = 600,
+    }) {
+      const targetRef = ref || db.doc(idempotencyDocPath(tenantId, idempotencyKey));
+      const currentDate = resolveNowDate(nowDate, now);
+      const timestamp = toIso(currentDate);
+      tx.set(targetRef, {
+        tenantId,
+        idempotencyKey,
+        requestFingerprint,
+        requestId,
+        actorId,
+        method: method.toUpperCase(),
+        path,
+        status: 'completed',
+        responseStatus,
+        responseBody,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: timestamp,
+        expiresAt: toIso(addSeconds(currentDate, ttlSeconds)),
+        lastError: null,
+      }, { merge: true });
+      return { ref: targetRef, requestFingerprint };
+    },
+
     async begin({ tenantId, idempotencyKey, method, path, body, actorId, requestId, ttlSeconds = 600 }) {
       const ref = db.doc(idempotencyDocPath(tenantId, idempotencyKey));
       const requestFingerprint = buildRequestFingerprint({ method, path, body });

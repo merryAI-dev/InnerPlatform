@@ -680,9 +680,6 @@ export function createBffApp(options = {}) {
 
   const createDb = options.createDb || createFirestoreDb;
   const db = options.db || createDb({ projectId });
-  const editLeaseService = options.editLeaseService || (editLeasesEnabled
-    ? createEditLeaseService({ db, now, createLeaseId: options.createEditLeaseId || randomUUID })
-    : null);
   const authProjectId = resolveFirebaseAuthProjectId(options, env, projectId);
   const authAppName = authProjectId === projectId ? undefined : `auth:${authProjectId}`;
   const authMode = options.authMode || resolveAuthMode();
@@ -692,6 +689,16 @@ export function createBffApp(options = {}) {
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
+  const editLeaseService = options.editLeaseService || (editLeasesEnabled
+    ? createEditLeaseService({
+      db,
+      now,
+      createLeaseId: options.createEditLeaseId || randomUUID,
+      auditChainService,
+      idempotencyService,
+      rbacPolicy,
+    })
+    : null);
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
@@ -1422,10 +1429,7 @@ export function createBffApp(options = {}) {
   // ── Domain route modules ──────────────────────────────────────────────────
   mountEditLeaseRoutes(app, {
     enabled: editLeasesEnabled,
-    db,
     editLeaseService,
-    rbacPolicy,
-    auditChainService,
     piiProtector,
   });
   mountProjectRoutes(app, {

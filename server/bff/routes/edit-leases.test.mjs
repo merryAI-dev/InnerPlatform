@@ -2,22 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createBffApp } from '../app.mjs';
-import { loadRbacPolicy } from '../rbac-policy.mjs';
-import { sha256 } from '../utils.mjs';
 import { mountEditLeaseRoutes } from './edit-leases.mjs';
-
-function createDb(seed = {}) {
-  const documents = new Map(Object.entries(seed));
-  return {
-    doc: (path) => ({
-      path,
-      get: async () => ({
-        exists: documents.has(path),
-        data: () => documents.get(path),
-      }),
-    }),
-  };
-}
 
 function createService() {
   return {
@@ -54,14 +39,9 @@ function createService() {
   };
 }
 
-function createApp({
-  enabled = true,
-  db = createDb(),
-  service = createService(),
-  context = {},
-  auditChainService = { append: vi.fn(async () => {}) },
-} = {}) {
+function createApp({ enabled = true, service = createService(), context = {} } = {}) {
   const app = express();
+  const outsideAudit = vi.fn(async () => {});
   app.use(express.json());
   app.use((req, _res, next) => {
     req.context = {
@@ -71,16 +51,15 @@ function createApp({
       actorEmail: 'actor@example.com',
       actorName: 'Actor A',
       requestId: 'request-a',
+      idempotencyKey: req.header('idempotency-key') || undefined,
       ...context,
     };
     next();
   });
   mountEditLeaseRoutes(app, {
     enabled,
-    db,
     editLeaseService: service,
-    rbacPolicy: loadRbacPolicy(),
-    auditChainService,
+    auditChainService: { append: outsideAudit },
     piiProtector: { encryptText: vi.fn(async () => ({ ciphertext: 'encrypted-email' })) },
   });
   app.use((error, _req, res, _next) => {
@@ -90,12 +69,13 @@ function createApp({
       ...(error.details ? { details: error.details } : {}),
     });
   });
-  return { app, service, auditChainService };
+  return { app, service, outsideAudit };
 }
 
 function leaseHeaders(extra = {}) {
   return {
     'x-edit-session-id': 'session-a',
+    'idempotency-key': 'idem-route-a',
     ...extra,
   };
 }
@@ -144,11 +124,8 @@ describe('edit lease routes', () => {
       .expect(404);
   });
 
-  it('requires an existing owner draft before acquiring a registration lease', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projectRequestDrafts/draft-a': { ownerUid: 'actor-a' },
-    });
-    const { app, service, auditChainService } = createApp({ db });
+  it('passes encrypted audit and idempotency context into the atomic service', async () => {
+    const { app, service, outsideAudit } = createApp();
 
     const response = await request(app)
       .post('/api/v1/edit-leases/project-registration/draft-a/acquire')
@@ -163,28 +140,17 @@ describe('edit lease routes', () => {
       resourceId: 'draft-a',
       actorId: 'actor-a',
       actorDisplayName: 'Actor A',
+      actorEmailEnc: 'encrypted-email',
+      requestId: 'request-a',
+      idempotencyKey: 'idem-route-a',
       sessionId: 'session-a',
     });
-    expect(auditChainService.append).toHaveBeenCalledOnce();
-    expect(auditChainService.append.mock.calls[0][0]).toMatchObject({
-      action: 'EDIT_LEASE_ACQUIRE',
-      metadata: {
-        resourceType: 'project-registration',
-        resourceId: 'draft-a',
-        sessionIdHash: sha256('tenant-a:session-a'),
-        fence: 4,
-        resultCode: 'edit_lease_acquired',
-      },
-    });
-    expect(JSON.stringify(auditChainService.append.mock.calls[0][0])).not.toMatch(/lease-secret|session-a|draft.*payload/i);
+    expect(outsideAudit).not.toHaveBeenCalled();
   });
 
-  it('audits conflicts while the HTTP details expose only the safe holder projection', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-    });
+  it('preserves a safe conflict response without appending audit outside the service transaction', async () => {
     const service = createService();
-    const conflict = Object.assign(new Error('The edit lease is held by another session'), {
+    service.acquire.mockRejectedValue(Object.assign(new Error('The edit lease is held by another session'), {
       statusCode: 423,
       code: 'edit_lease_held',
       details: {
@@ -192,19 +158,10 @@ describe('edit lease routes', () => {
         sameActor: false,
         expiresAt: '2026-07-10T00:30:00.000Z',
       },
-      auditContext: {
-        serverNow: '2026-07-10T00:00:00.000Z',
-        fence: 7,
-      },
       leaseId: 'must-not-leak',
       sessionId: 'must-not-leak',
-    });
-    service.acquire.mockRejectedValue(conflict);
-    const { app, auditChainService } = createApp({
-      db,
-      service,
-      context: { actorRole: 'admin' },
-    });
+    }));
+    const { app, outsideAudit } = createApp({ service });
 
     const response = await request(app)
       .post('/api/v1/edit-leases/project-info/project-a/acquire')
@@ -218,34 +175,18 @@ describe('edit lease routes', () => {
       expiresAt: '2026-07-10T00:30:00.000Z',
     });
     expect(JSON.stringify(response.body)).not.toMatch(/must-not-leak|leaseId|sessionId|fence|actor-a|@/i);
-    expect(auditChainService.append).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'EDIT_LEASE_CONFLICT',
-      metadata: expect.objectContaining({
-        resourceId: 'project-a',
-        sessionIdHash: sha256('tenant-a:session-a'),
-        fence: 7,
-        resultCode: 'edit_lease_held',
-      }),
-    }));
+    expect(outsideAudit).not.toHaveBeenCalled();
   });
 
-  it('strips internal audit context from expired status and records the expiry', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-    });
+  it('returns the service-owned expiry projection without internal audit fields', async () => {
     const service = createService();
     service.getStatus.mockResolvedValue({
       serverNow: '2026-07-10T00:30:00.000Z',
       state: 'EXPIRED',
       canEdit: false,
       expiresAt: '2026-07-10T00:30:00.000Z',
-      audit: { fence: 9 },
     });
-    const { app, auditChainService } = createApp({
-      db,
-      service,
-      context: { actorRole: 'admin' },
-    });
+    const { app, outsideAudit } = createApp({ service });
 
     const response = await request(app)
       .get('/api/v1/edit-leases/project-info/project-a')
@@ -258,115 +199,34 @@ describe('edit lease routes', () => {
       canEdit: false,
       expiresAt: '2026-07-10T00:30:00.000Z',
     });
-    expect(auditChainService.append).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'EDIT_LEASE_EXPIRE',
-      metadata: expect.objectContaining({
-        resourceId: 'project-a',
-        sessionIdHash: sha256('tenant-a:session-a'),
-        fence: 9,
-        resultCode: 'edit_lease_expired',
-      }),
-    }));
+    expect(outsideAudit).not.toHaveBeenCalled();
   });
 
-  it('returns draft privacy 404 before calling the lease service for another owner', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projectRequestDrafts/draft-a': { ownerUid: 'actor-b' },
-    });
-    const { app, service } = createApp({ db });
+  it('marks an exact atomic replay without changing its response body', async () => {
+    const service = createService();
+    const body = {
+      serverNow: '2026-07-10T00:05:00.000Z',
+      state: 'ACTIVE',
+      canEdit: true,
+      expiresAt: '2026-07-10T00:35:00.000Z',
+      leaseId: 'lease-secret',
+      fence: 4,
+    };
+    service.extend.mockResolvedValue({ status: 200, body, replayed: true });
+    const { app } = createApp({ service });
 
-    await request(app)
-      .post('/api/v1/edit-leases/project-registration/draft-a/acquire')
-      .set(leaseHeaders())
-      .send({})
-      .expect(404);
-
-    expect(service.acquire).not.toHaveBeenCalled();
-  });
-
-  it('accepts the existing ownerId field while legacy drafts await adoption', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projectRequestDrafts/draft-a': { ownerId: 'actor-a' },
-    });
-    const { app, service } = createApp({ db });
-
-    await request(app)
-      .post('/api/v1/edit-leases/project-registration/draft-a/acquire')
-      .set(leaseHeaders())
+    const response = await request(app)
+      .post('/api/v1/edit-leases/project-info/project-a/extend')
+      .set(leaseHeaders({ 'x-edit-lease-id': 'lease-secret', 'x-edit-fence': '4' }))
       .send({})
       .expect(200);
 
-    expect(service.acquire).toHaveBeenCalledOnce();
+    expect(response.headers['x-idempotency-replayed']).toBe('1');
+    expect(response.body).toEqual(body);
   });
 
-  it('allows a PM assigned through the member portal profile to access an existing project', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-      'orgs/tenant-a/members/actor-a': { portalProfile: { projectIds: ['project-a'] } },
-    });
-    const { app, service } = createApp({ db });
-
-    await request(app)
-      .get('/api/v1/edit-leases/cashflow/project-a')
-      .set(leaseHeaders())
-      .expect(200);
-
-    expect(service.getStatus).toHaveBeenCalledOnce();
-  });
-
-  it('denies an unassigned PM before calling the lease service', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-      'orgs/tenant-a/members/actor-a': { projectIds: ['project-b'] },
-    });
-    const { app, service } = createApp({ db });
-
-    await request(app)
-      .get('/api/v1/edit-leases/project-info/project-a')
-      .set(leaseHeaders())
-      .expect(403);
-
-    expect(service.getStatus).not.toHaveBeenCalled();
-  });
-
-  it('denies an explicitly inactive assigned member', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-      'orgs/tenant-a/members/actor-a': { status: 'INACTIVE', projectIds: ['project-a'] },
-    });
-    const { app, service } = createApp({ db });
-
-    await request(app)
-      .get('/api/v1/edit-leases/project-info/project-a')
-      .set(leaseHeaders())
-      .expect(403);
-
-    expect(service.getStatus).not.toHaveBeenCalled();
-  });
-
-  it('allows finance cross-project access but still requires the project to exist', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-    });
-    const { app, service } = createApp({ db, context: { actorRole: 'finance' } });
-
-    await request(app)
-      .get('/api/v1/edit-leases/project-info/project-a')
-      .set(leaseHeaders())
-      .expect(200);
-    await request(app)
-      .get('/api/v1/edit-leases/project-info/missing')
-      .set(leaseHeaders())
-      .expect(404);
-
-    expect(service.getStatus).toHaveBeenCalledOnce();
-  });
-
-  it('parses exact lease headers for extend and release', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-    });
-    const { app, service, auditChainService } = createApp({ db, context: { actorRole: 'admin' } });
+  it('parses exact lease ownership headers for extend and release', async () => {
+    const { app, service } = createApp();
     const headers = leaseHeaders({
       'x-edit-lease-id': 'lease-secret',
       'x-edit-fence': '4',
@@ -383,44 +243,16 @@ describe('edit lease routes', () => {
       .send({})
       .expect(200);
 
-    expect(service.extend.mock.calls[0][0]).toMatchObject({ leaseId: 'lease-secret', fence: 4 });
-    expect(service.release.mock.calls[0][0]).toMatchObject({ leaseId: 'lease-secret', fence: 4 });
-    expect(auditChainService.append.mock.calls.map(([entry]) => ({
-      action: entry.action,
-      metadata: entry.metadata,
-    }))).toEqual([
-      {
-        action: 'EDIT_LEASE_EXTEND',
-        metadata: {
-          source: 'bff',
-          resourceType: 'project-info',
-          resourceId: 'project-a',
-          sessionIdHash: sha256('tenant-a:session-a'),
-          fence: 4,
-          state: 'ACTIVE',
-          resultCode: 'edit_lease_extended',
-        },
-      },
-      {
-        action: 'EDIT_LEASE_RELEASE',
-        metadata: {
-          source: 'bff',
-          resourceType: 'project-info',
-          resourceId: 'project-a',
-          sessionIdHash: sha256('tenant-a:session-a'),
-          fence: 4,
-          state: 'RELEASED',
-          resultCode: 'edit_lease_released',
-        },
-      },
-    ]);
+    expect(service.extend.mock.calls[0][0]).toMatchObject({
+      sessionId: 'session-a', leaseId: 'lease-secret', fence: 4, idempotencyKey: 'idem-route-a',
+    });
+    expect(service.release.mock.calls[0][0]).toMatchObject({
+      sessionId: 'session-a', leaseId: 'lease-secret', fence: 4, idempotencyKey: 'idem-route-a',
+    });
   });
 
-  it('rejects missing or invalid edit headers before the lease service', async () => {
-    const db = createDb({
-      'orgs/tenant-a/projects/project-a': { id: 'project-a' },
-    });
-    const { app, service } = createApp({ db, context: { actorRole: 'admin' } });
+  it('rejects invalid ownership headers before the lease service', async () => {
+    const { app, service } = createApp();
 
     await request(app)
       .post('/api/v1/edit-leases/project-info/project-a/extend')

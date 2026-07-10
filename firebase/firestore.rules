@@ -65,7 +65,9 @@ service cloud.firestore {
     // 각 컬렉션의 상단 override 규칙만 적용되도록 막는다.
     function isCatchallExcludedCollection(collection) {
       return isBffOnlyCollection(collection)
-        || collection in ['projectRequestDrafts'];
+        || collection in ['projectRequestDrafts']
+        || collection in ['editLeases']
+        || collection in ['idempotency_keys'];
     }
 
     function isCatchallExcludedPath(collection, document) {
@@ -150,6 +152,16 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/contact_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    // ── 편집 lease: BFF API로만 접근 ──
+    match /orgs/{orgId}/editLeases/{leaseId} {
+      allow read, write: if false;
+    }
+
+    // ── 멱등 replay 결과: BFF API로만 접근 ──
+    match /orgs/{orgId}/idempotency_keys/{keyId} {
       allow read, write: if false;
     }
 
