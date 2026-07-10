@@ -170,13 +170,14 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
   });
 
-  it('keeps project request drafts hidden from admin review surfaces until submission', () => {
-    expect(firestoreRulesText).toContain('match /orgs/{orgId}/projectRequestDrafts/{draftId}');
-    expect(firestoreRulesText).toContain('resource.data.ownerId == request.auth.uid');
-    expect(firestoreRulesText).toContain('request.resource.data.ownerId == request.auth.uid');
-    expect(firestoreRulesText).toContain("request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED']");
+  it('keeps edit drafts and legacy client locks behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
-    expect(firestoreRulesText).toContain("collection in ['projectRequestDrafts']");
+    for (const collection of ['projectRequestDrafts', 'privateEditDrafts', 'cashflowEditLocks']) {
+      expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
+      expect(firestoreRulesText).toMatch(
+        new RegExp(`match /orgs/\\{orgId\\}/${collection}/\\{[^}]+\\} \\{\\s*allow read, write: if false;\\s*\\}`),
+      );
+    }
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
   });

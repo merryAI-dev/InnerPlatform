@@ -66,6 +66,8 @@ service cloud.firestore {
     function isCatchallExcludedCollection(collection) {
       return isBffOnlyCollection(collection)
         || collection in ['projectRequestDrafts']
+        || collection in ['privateEditDrafts']
+        || collection in ['cashflowEditLocks']
         || collection in ['editLeases']
         || collection in ['idempotency_keys'];
     }
@@ -178,25 +180,18 @@ service cloud.firestore {
       allow write: if isAdmin(orgId);
     }
 
-    // ── 프로젝트 등록/수정 임시저장: 제출 전 개인 작업공간 ──
-    // 관리자 승인 콘솔은 project_requests만 읽고, draft는 작성자 본인만 접근한다.
+    // ── 프로젝트 등록/수정 임시저장: BFF API로만 접근 ──
     match /orgs/{orgId}/projectRequestDrafts/{draftId} {
-      allow read: if isMember(orgId)
-        && resource.data.ownerId == request.auth.uid;
+      allow read, write: if false;
+    }
 
-      allow create: if isMember(orgId)
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.tenantId == orgId
-        && request.resource.data.status in ['DRAFT', 'SUBMITTED'];
+    match /orgs/{orgId}/privateEditDrafts/{draftId} {
+      allow read, write: if false;
+    }
 
-      allow update: if isMember(orgId)
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId
-        && request.resource.data.tenantId == orgId
-        && request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED'];
-
-      allow delete: if isMember(orgId)
-        && resource.data.ownerId == request.auth.uid;
+    // ── 구형 캐시플로 직접 잠금: BFF lease를 우회하지 못하도록 차단 ──
+    match /orgs/{orgId}/cashflowEditLocks/{lockId} {
+      allow read, write: if false;
     }
 
     // ── 일반 규칙: 나머지 모든 컬렉션 ──
