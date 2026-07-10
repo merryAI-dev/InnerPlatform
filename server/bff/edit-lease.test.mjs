@@ -75,7 +75,7 @@ function createDb(seed = {}) {
   };
 }
 
-function createHarness() {
+function createHarness({ createLeaseId } = {}) {
   let serverNow = Date.parse('2026-07-10T00:00:00.000Z');
   const leaseIds = ['lease-1', 'lease-2', 'lease-3'];
   const db = createDb({
@@ -92,7 +92,7 @@ function createHarness() {
   const service = createEditLeaseService({
     db,
     now: () => serverNow,
-    createLeaseId: () => leaseIds.shift(),
+    createLeaseId: createLeaseId || (() => leaseIds.shift()),
     auditChainService,
     idempotencyService,
     rbacPolicy: loadRbacPolicy(),
@@ -133,6 +133,30 @@ async function expectHttpError(promise, statusCode, code) {
 }
 
 describe('edit lease service', () => {
+  it('reuses one acquire ID when Firestore retries the transaction', async () => {
+    let uuidCalls = 0;
+    const { db, service, base } = createHarness({
+      createLeaseId: () => {
+        uuidCalls += 1;
+        if (uuidCalls > 1) throw new Error('lease ID supplier called more than once');
+        return 'lease-retry-stable';
+      },
+    });
+    let forcedRetry = false;
+    db.__onRead(async (path, snapshot, attempt) => {
+      if (!forcedRetry && attempt === 0 && path === 'orgs/tenant-a/members/actor-a') {
+        forcedRetry = true;
+        db.__set(path, snapshot.data());
+      }
+    });
+
+    const acquired = await command(service.acquire({ ...base, idempotencyKey: 'idem-uuid-retry' }));
+
+    expect(forcedRetry).toBe(true);
+    expect(uuidCalls).toBe(1);
+    expect(acquired).toMatchObject({ leaseId: 'lease-retry-stable', fence: 1, state: 'ACTIVE' });
+  });
+
   it('rolls back lease and idempotency writes when audit append fails', async () => {
     const { db, base, now } = createHarness();
     const service = createEditLeaseService({
@@ -341,6 +365,27 @@ describe('edit lease service', () => {
       state: 'EXPIRED',
       canEdit: false,
       expiresAt: '2026-07-10T00:30:00.000Z',
+    });
+  });
+
+  it('records effective expiry separately from the later observation time', async () => {
+    const { db, service, base, advance } = createHarness();
+    const acquired = await command(service.acquire(base));
+    advance(EDIT_LEASE_TTL_MS + 15_000);
+
+    await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'EXPIRED' });
+
+    const leasePath = `orgs/${base.tenantId}/editLeases/${resolveEditLeaseDocumentId(base.resourceType, base.resourceId)}`;
+    const expired = db.__documents.get(leasePath);
+    expect(expired).toMatchObject({
+      expiredAt: acquired.expiresAt,
+      expiryObservedAt: '2026-07-10T00:30:15.000Z',
+    });
+    const expireAudit = [...db.__documents.entries()]
+      .find(([path, entry]) => path.includes('/audit_logs/') && entry.action === 'EDIT_LEASE_EXPIRE')?.[1];
+    expect(expireAudit?.metadata).toMatchObject({
+      effectiveExpiresAt: acquired.expiresAt,
+      expiryObservedAt: '2026-07-10T00:30:15.000Z',
     });
   });
 

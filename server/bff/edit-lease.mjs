@@ -7,6 +7,7 @@ export const EDIT_LEASE_TTL_MS = 1_800_000;
 
 const RESOURCE_TYPES = new Set(['project-registration', 'project-info', 'cashflow']);
 const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
+const FIRESTORE_DOCUMENT_ID_MAX_BYTES = 1_500;
 
 function editLeaseError(statusCode, message, code, publicDetails, auditContext) {
   const error = createHttpError(statusCode, message, code);
@@ -131,7 +132,11 @@ function commandFingerprint(current, command, input) {
 
 export function resolveEditLeaseDocumentId(resourceType, resourceId) {
   const resource = normalizeResource(resourceType, resourceId);
-  return `v1_${Buffer.from(JSON.stringify([resource.resourceType, resource.resourceId]), 'utf8').toString('base64url')}`;
+  const documentId = `v1_${Buffer.from(JSON.stringify([resource.resourceType, resource.resourceId]), 'utf8').toString('base64url')}`;
+  if (Buffer.byteLength(documentId, 'utf8') > FIRESTORE_DOCUMENT_ID_MAX_BYTES) {
+    throw editLeaseError(400, 'Edit lease resource ID is too long', 'edit_lease_resource_invalid');
+  }
+  return documentId;
 }
 
 export async function assertOwnedInTransaction({
@@ -271,7 +276,14 @@ export function createEditLeaseService({
     return actorRole;
   }
 
-  function auditEntry(current, actorRole, operation, { state, fence, resultCode, timestamp }) {
+  function auditEntry(current, actorRole, operation, {
+    state,
+    fence,
+    resultCode,
+    timestamp,
+    effectiveExpiresAt,
+    expiryObservedAt,
+  }) {
     return {
       tenantId: current.tenantId,
       entityType: 'edit_lease',
@@ -290,6 +302,8 @@ export function createEditLeaseService({
         fence: Number.isSafeInteger(Number(fence)) && Number(fence) > 0 ? Number(fence) : null,
         state,
         resultCode,
+        ...(effectiveExpiresAt ? { effectiveExpiresAt } : {}),
+        ...(expiryObservedAt ? { expiryObservedAt } : {}),
       },
       timestamp,
     };
@@ -363,10 +377,12 @@ export function createEditLeaseService({
   }
 
   function expiredDocument(lease, timestamp) {
+    const effectiveExpiresAt = readOptionalText(lease?.expiresAt) || timestamp;
     return {
       ...lease,
       state: 'EXPIRED',
-      expiredAt: lease.expiredAt || timestamp,
+      expiredAt: lease.expiredAt || effectiveExpiresAt,
+      expiryObservedAt: lease.expiryObservedAt || timestamp,
       lastExpiredFence: auditFence(lease),
       updatedAt: timestamp,
     };
@@ -374,6 +390,7 @@ export function createEditLeaseService({
 
   async function runCommand(command, input) {
     const current = context(input);
+    const acquireLeaseId = command === 'acquire' ? requiredText(createLeaseId(), 'leaseId') : null;
     const outcome = await db.runTransaction(async (tx) => {
       const nowMs = serverNow(now);
       const timestamp = asIso(nowMs);
@@ -420,7 +437,6 @@ export function createEditLeaseService({
 
         const expiredFence = requiresExpiryTransition(existing, nowMs) ? auditFence(existing) : null;
         const previousExpiredFence = Number(existing?.lastExpiredFence);
-        const leaseId = requiredText(createLeaseId(), 'leaseId');
         const lease = {
           tenantId: current.tenantId,
           resourceType: current.resourceType,
@@ -428,7 +444,7 @@ export function createEditLeaseService({
           holderUid: current.actorId,
           holderDisplayName: current.actorDisplayName,
           sessionId: current.sessionId,
-          leaseId,
+          leaseId: acquireLeaseId,
           fence: nextFence(existing),
           state: 'ACTIVE',
           acquiredAt: timestamp,
@@ -446,6 +462,8 @@ export function createEditLeaseService({
             fence: expiredFence,
             resultCode: 'edit_lease_expired',
             timestamp,
+            effectiveExpiresAt: existing?.expiresAt,
+            expiryObservedAt: timestamp,
           }));
         }
         audits.push(auditEntry(current, actorRole, 'acquire', {
@@ -469,6 +487,8 @@ export function createEditLeaseService({
             fence: auditFence(existing),
             resultCode: error.code,
             timestamp,
+            effectiveExpiresAt: existing?.expiresAt,
+            expiryObservedAt: timestamp,
           })]);
           tx.set(current.leaseRef, expired);
         }
@@ -550,6 +570,8 @@ export function createEditLeaseService({
               fence: auditFence(lease),
               resultCode: 'edit_lease_expired',
               timestamp,
+              effectiveExpiresAt: lease.expiresAt,
+              expiryObservedAt: timestamp,
             })]);
             tx.set(current.leaseRef, expired);
           }

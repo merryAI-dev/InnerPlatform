@@ -4,6 +4,7 @@ import {
   encryptAuditEmail,
   readOptionalText,
 } from '../bff-utils.mjs';
+import { resolveEditLeaseDocumentId } from '../edit-lease.mjs';
 
 const RESOURCE_TYPES = new Set(['project-registration', 'project-info', 'cashflow']);
 
@@ -13,6 +14,7 @@ function readResource(req) {
   if (!RESOURCE_TYPES.has(resourceType) || !resourceId || resourceId.includes('/') || resourceId.length > 512) {
     throw createHttpError(400, 'Unsupported edit lease resource', 'edit_lease_resource_invalid');
   }
+  resolveEditLeaseDocumentId(resourceType, resourceId);
   return { resourceType, resourceId };
 }
 
@@ -78,7 +80,7 @@ export function mountEditLeaseRoutes(app, {
   app.get('/api/v1/edit-leases/:resourceType/:resourceId', asyncHandler(async (req, res) => {
     const resource = readResource(req);
     const sessionId = readSession(req);
-    const input = await serviceInput(req, resource, sessionId, piiProtector);
+    const input = await serviceInput(req, resource, sessionId);
     const result = await editLeaseService.getStatus(input);
     res.status(200).json(result);
   }));

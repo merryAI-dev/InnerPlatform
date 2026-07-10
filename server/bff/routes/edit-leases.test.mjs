@@ -39,7 +39,12 @@ function createService() {
   };
 }
 
-function createApp({ enabled = true, service = createService(), context = {} } = {}) {
+function createApp({
+  enabled = true,
+  service = createService(),
+  context = {},
+  piiProtector = { encryptText: vi.fn(async () => ({ ciphertext: 'encrypted-email' })) },
+} = {}) {
   const app = express();
   const outsideAudit = vi.fn(async () => {});
   app.use(express.json());
@@ -60,7 +65,7 @@ function createApp({ enabled = true, service = createService(), context = {} } =
     enabled,
     editLeaseService: service,
     auditChainService: { append: outsideAudit },
-    piiProtector: { encryptText: vi.fn(async () => ({ ciphertext: 'encrypted-email' })) },
+    piiProtector,
   });
   app.use((error, _req, res, _next) => {
     res.status(error.statusCode || 500).json({
@@ -69,7 +74,7 @@ function createApp({ enabled = true, service = createService(), context = {} } =
       ...(error.details ? { details: error.details } : {}),
     });
   });
-  return { app, service, outsideAudit };
+  return { app, service, outsideAudit, piiProtector };
 }
 
 function leaseHeaders(extra = {}) {
@@ -202,6 +207,19 @@ describe('edit lease routes', () => {
     expect(outsideAudit).not.toHaveBeenCalled();
   });
 
+  it('does not encrypt actor email for an ordinary active status read', async () => {
+    const piiProtector = { encryptText: vi.fn(async () => ({ ciphertext: 'must-not-be-used' })) };
+    const { app, service } = createApp({ piiProtector });
+
+    await request(app)
+      .get('/api/v1/edit-leases/project-info/project-a')
+      .set(leaseHeaders())
+      .expect(200);
+
+    expect(service.getStatus).toHaveBeenCalledOnce();
+    expect(piiProtector.encryptText).not.toHaveBeenCalled();
+  });
+
   it('marks an exact atomic replay without changing its response body', async () => {
     const service = createService();
     const body = {
@@ -261,5 +279,18 @@ describe('edit lease routes', () => {
       .expect(400);
 
     expect(service.extend).not.toHaveBeenCalled();
+  });
+
+  it('rejects resource IDs whose derived document ID exceeds the Firestore byte limit', async () => {
+    const { app, service } = createApp();
+    const oversizedResourceId = encodeURIComponent('한'.repeat(512));
+
+    const response = await request(app)
+      .get(`/api/v1/edit-leases/project-info/${oversizedResourceId}`)
+      .set(leaseHeaders())
+      .expect(400);
+
+    expect(response.body).toMatchObject({ error: 'edit_lease_resource_invalid' });
+    expect(service.getStatus).not.toHaveBeenCalled();
   });
 });
