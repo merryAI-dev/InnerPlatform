@@ -14,9 +14,28 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
   let draftSequence = 0;
   let leaseSequence = 0;
   let attachmentSequence = 0;
+  let projectSequence = 0;
+  let projectRequestSequence = 0;
   let uploadHook: null | ((input: Record<string, any>) => Promise<void>) = null;
+  let driveHook: null | ((input: Record<string, any>) => Promise<Record<string, any>>) = null;
   const uploadedPaths: string[] = [];
   const deletedPaths: string[] = [];
+  const driveService = {
+    getConfig: vi.fn(() => ({ enabled: true, defaultParentFolderId: 'stage-root' })),
+    ensureProjectRootFolder: vi.fn(async (input: Record<string, any>) => {
+      if (driveHook) return driveHook(input);
+      return {
+        id: `drive-${input.projectId}`,
+        name: `${input.projectName} (${input.projectId})`,
+        webViewLink: `https://drive.example/${input.projectId}`,
+        driveId: 'shared-drive-stage',
+      };
+    }),
+  };
+  const projectRegistrationSlackService = {
+    enabled: true,
+    notifyMessage: vi.fn(async () => undefined),
+  };
 
   const draftStorageService = {
     uploadDraftAttachment: vi.fn(async (input: Record<string, any>) => {
@@ -44,7 +63,17 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     createProjectRegistrationDraftId: () => `opaque-draft-${++draftSequence}`,
     createProjectRegistrationLeaseId: () => `draft-lease-${++leaseSequence}`,
     createProjectRegistrationAttachmentId: () => `draft-attachment-${++attachmentSequence}`,
+    createProjectRegistrationProjectId: () => `canonical-project-${++projectSequence}`,
+    createProjectRegistrationRequestId: () => `canonical-request-${++projectRequestSequence}`,
     projectRegistrationDraftStorageService: draftStorageService,
+    driveService,
+    projectRegistrationSlackService,
+    workerSecret: 'draft-worker-secret',
+    workerAuthPolicy: {
+      deployEnv: 'local',
+      schedulerOwner: 'manual',
+      secrets: { manual: 'draft-worker-secret', vercel: '', k8s: '' },
+    },
     env: {
       ...process.env,
       BFF_DEPLOY_ENV: 'stage',
@@ -96,6 +125,50 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     };
   }
 
+  function validPayload(overrides: Record<string, unknown> = {}) {
+    return {
+      name: 'Stage private project',
+      officialContractName: 'Stage contract',
+      type: 'D1',
+      status: 'CONTRACT_PENDING',
+      phase: 'CONFIRMED',
+      description: 'Description',
+      clientOrg: 'Client',
+      department: 'AXR',
+      currency: 'KRW',
+      contractAmount: 100_000,
+      salesVatAmount: 10_000,
+      totalRevenueAmount: 40_000,
+      supportAmount: 0,
+      financialInputFlags: { contractAmount: true, salesVatAmount: true, totalRevenueAmount: true },
+      contractStart: '2026-07-01',
+      contractEnd: '2026-12-31',
+      contractType: '계약서(날인)',
+      settlementType: 'TYPE1',
+      basis: '공급가액',
+      accountType: 'OPERATING',
+      fundInputMode: 'BANK_UPLOAD',
+      paymentPlan: { contract: 50_000, interim: 0, final: 50_000 },
+      managerId: 'actor-a',
+      managerName: 'Actor A',
+      registeredById: 'actor-a',
+      registeredByName: 'Actor A',
+      registeredByEmail: 'actor-a@example.com',
+      teamName: 'AXR',
+      teamMembersDetailed: [{ memberName: 'Actor A', role: 'PM', participationRate: 100 }],
+      projectPurpose: 'Purpose',
+      arbitraryBrowserField: 'must-not-persist',
+      ...overrides,
+    };
+  }
+
+  function submitDraft(created: any, key: string, expectedDraftRevision = created.body.draft.draftRevision) {
+    return api
+      .post(`/api/v1/project-registration-drafts/${created.body.draft.draftId}/submit`)
+      .set(mutationHeaders(created, key))
+      .send({ expectedDraftRevision });
+  }
+
   async function clearCollection(path: string) {
     const snap = await db.collection(path).get();
     if (snap.empty) return;
@@ -118,6 +191,8 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       'projects',
       'project_requests',
       'project_dashboard_projects',
+      'partEntries',
+      'outbox_deliveries',
       'members',
     ].map((collection) => clearCollection(`orgs/${tenantId}/${collection}`)));
     await Promise.all([clearCollection('outbox'), clearCollection('work_queue')]);
@@ -136,6 +211,9 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         uid,
         role,
         status: 'ACTIVE',
+        name: uid === 'actor-a' ? 'Actor A' : uid,
+        email: `${uid}@example.com`,
+        createdAt: '2025-01-01T00:00:00.000Z',
         projectIds: [],
       });
     }
@@ -144,7 +222,10 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     draftSequence = 0;
     leaseSequence = 0;
     attachmentSequence = 0;
+    projectSequence = 0;
+    projectRequestSequence = 0;
     uploadHook = null;
+    driveHook = null;
     uploadedPaths.length = 0;
     deletedPaths.length = 0;
     vi.clearAllMocks();
@@ -336,6 +417,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     const path = `/api/v1/project-registration-drafts/${created.body.draft.draftId}/attachments`;
     const fileBody = {
       expectedDraftRevision: 0,
+      documentKind: 'contract',
       fileName: 'contract.pdf',
       mimeType: 'application/pdf',
       fileSize: 3,
@@ -366,7 +448,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     const failed = await api
       .post(path)
       .set(mutationHeaders(created, 'idem-attachment-2'))
-      .send({ ...fileBody, expectedDraftRevision: 1, fileName: 'quote.pdf' });
+      .send({ ...fileBody, expectedDraftRevision: 1, documentKind: 'quote', fileName: 'quote.pdf' });
 
     expect(failed.status).toBe(409);
     expect(failed.body.error).toBe('draft_version_conflict');
@@ -376,4 +458,147 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     const stored = (await db.doc(`orgs/${tenantId}/projectRequestDrafts/${created.body.draft.draftId}`).get()).data();
     expect(stored?.attachmentRefs).toEqual([expect.objectContaining({ path: firstPath })]);
   });
+
+  it('atomically submits canonical records, replays after release, then runs external work only in the worker', async () => {
+    const created = await createDraft({
+      key: 'idem-submit-create',
+      body: { payload: validPayload(), stepIndex: 4 },
+    });
+    const attachment = await api
+      .post(`/api/v1/project-registration-drafts/${created.body.draft.draftId}/attachments`)
+      .set(mutationHeaders(created, 'idem-submit-contract'))
+      .send({
+        expectedDraftRevision: 0,
+        documentKind: 'contract',
+        fileName: 'contract.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 3,
+        contentBase64: Buffer.from('pdf').toString('base64'),
+      });
+    expect(attachment.status).toBe(200);
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(0);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(0);
+    expect(await count('outbox')).toBe(0);
+
+    const first = await submitDraft(created, 'idem-submit', 1);
+    const replay = await submitDraft(created, 'idem-submit', 1);
+
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({
+      status: 'SUBMITTED',
+      projectVersion: 1,
+      lease: { state: 'RELEASED', canEdit: false },
+    });
+    expect(replay.status).toBe(201);
+    expect(replay.headers['x-idempotency-replayed']).toBe('1');
+    expect(replay.body).toEqual(first.body);
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
+    expect(await count('outbox')).toBe(1);
+    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(0);
+    expect(driveService.ensureProjectRootFolder).not.toHaveBeenCalled();
+    expect(projectRegistrationSlackService.notifyMessage).not.toHaveBeenCalled();
+
+    const project = (await db.doc(`orgs/${tenantId}/projects/${first.body.projectId}`).get()).data();
+    expect(project).toMatchObject({
+      id: first.body.projectId,
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'PENDING',
+      version: 1,
+      contractDocument: {
+        documentKind: 'contract',
+        path: expect.stringContaining('/project-registration-drafts/'),
+        visibility: 'PRIVATE',
+      },
+    });
+    expect(project).not.toHaveProperty('arbitraryBrowserField');
+    expect(project?.contractDocument).not.toHaveProperty('downloadURL');
+    const requestDoc = (await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data();
+    expect(requestDoc).toMatchObject({ sourceDraftId: created.body.draft.draftId });
+    expect(requestDoc?.payload).not.toHaveProperty('arbitraryBrowserField');
+    expect(requestDoc?.payload?.contractDocument).not.toHaveProperty('downloadURL');
+    const draft = (await db.doc(`orgs/${tenantId}/projectRequestDrafts/${created.body.draft.draftId}`).get()).data();
+    expect(draft).toMatchObject({
+      status: 'SUBMITTED',
+      draftRevision: 2,
+      payload: validPayload(),
+      attachmentRefs: [expect.objectContaining({ documentKind: 'contract' })],
+    });
+    const lease = (await db.doc(
+      `orgs/${tenantId}/editLeases/${resolveEditLeaseDocumentId('project-registration', created.body.draft.draftId)}`,
+    ).get()).data();
+    expect(lease).toMatchObject({ state: 'RELEASED', releaseReason: 'FINAL_SUBMIT' });
+    expect((await db.doc(`orgs/${tenantId}/members/actor-a`).get()).data()).toMatchObject({
+      projectId: first.body.projectId,
+      projectIds: [first.body.projectId],
+      lastLoginAt: '2026-07-10T00:00:00.000Z',
+    });
+
+    const otherKey = await submitDraft(created, 'idem-submit-after-release', 2);
+    expect(otherKey.status).toBe(409);
+    expect(otherKey.body.error).toBe('draft_not_active');
+
+    const worker = await api
+      .post('/api/internal/workers/outbox/run')
+      .set('x-worker-secret', 'draft-worker-secret')
+      .send({ limit: 10, maxAttempts: 3 });
+    expect(worker.status).toBe(200);
+    expect(worker.body).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect(driveService.ensureProjectRootFolder).toHaveBeenCalledTimes(1);
+    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
+    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(1);
+    expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.status).toBe('DONE');
+    expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${first.body.outbox.id}`).get()).exists).toBe(true);
+  }, 60_000);
+
+  it('serializes concurrent final submits to one canonical result', async () => {
+    const sameKeyDraft = await createDraft({
+      key: 'idem-concurrent-same-create',
+      body: { payload: validPayload() },
+    });
+    const same = await Promise.all([
+      submitDraft(sameKeyDraft, 'idem-concurrent-same'),
+      submitDraft(sameKeyDraft, 'idem-concurrent-same'),
+    ]);
+    expect(same.map((response) => response.status)).toEqual([201, 201]);
+    expect(same[0].body).toEqual(same[1].body);
+    expect(same.filter((response) => response.headers['x-idempotency-replayed'] === '1')).toHaveLength(1);
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
+    expect(await count('outbox')).toBe(1);
+
+    await resetData();
+    const differentKeyDraft = await createDraft({
+      key: 'idem-concurrent-different-create',
+      body: { payload: validPayload({ name: 'Different key race' }) },
+    });
+    const different = await Promise.all([
+      submitDraft(differentKeyDraft, 'idem-concurrent-a'),
+      submitDraft(differentKeyDraft, 'idem-concurrent-b'),
+    ]);
+    expect(different.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
+    expect(await count('outbox')).toBe(1);
+  }, 60_000);
+
+  it('keeps canonical submit committed when a retryable Drive worker step fails', async () => {
+    driveHook = async () => { throw new Error('temporary Drive outage'); };
+    const created = await createDraft({
+      key: 'idem-worker-failure-create',
+      body: { payload: validPayload({ name: 'Worker failure project' }) },
+    });
+    const submitted = await submitDraft(created, 'idem-worker-failure');
+    expect(submitted.status).toBe(201);
+
+    const worker = await api
+      .post('/api/internal/workers/outbox/run')
+      .set('x-worker-secret', 'draft-worker-secret')
+      .send({ limit: 10, maxAttempts: 3 });
+    expect(worker.body).toMatchObject({ processed: 1, succeeded: 0, failed: 1 });
+    expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/project_requests`)).toBe(1);
+    expect((await db.doc(`outbox/${submitted.body.outbox.id}`).get()).data()?.status).toBe('FAILED');
+    expect(projectRegistrationSlackService.notifyMessage).not.toHaveBeenCalled();
+  }, 60_000);
 });

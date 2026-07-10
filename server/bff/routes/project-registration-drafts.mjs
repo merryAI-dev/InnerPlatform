@@ -19,8 +19,11 @@ import {
   projectRegistrationDraftAttachmentSchema,
   projectRegistrationDraftCreateSchema,
   projectRegistrationDraftPatchSchema,
+  projectRegistrationDraftSubmitSchema,
 } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
+import { createOutboxEvent } from '../outbox.mjs';
+import { buildProjectRegistrationCanonicalDocuments } from './projects.mjs';
 
 const RESOURCE_TYPE = 'project-registration';
 const MAX_DRAFT_DOCUMENT_BYTES = 900 * 1024;
@@ -223,6 +226,54 @@ function defaultAttachmentId() {
   return `att_${randomUUID().replace(/-/g, '')}`;
 }
 
+function defaultProjectId(timestamp) {
+  return `p${timestamp.getTime()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+}
+
+function defaultProjectRequestId(timestamp) {
+  return `pr-${timestamp.getTime()}-${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+}
+
+function uniqueText(values) {
+  return [...new Set(values.map(readOptionalText).filter(Boolean))];
+}
+
+function buildActorMemberAssignment(member, current, project, timestamp) {
+  const profile = member?.portalProfile && typeof member.portalProfile === 'object'
+    ? member.portalProfile
+    : {};
+  const projectIds = uniqueText([
+    ...(Array.isArray(member?.projectIds) ? member.projectIds : []),
+    member?.projectId,
+    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+    profile.projectId,
+    project.id,
+  ]);
+  const projectNames = {
+    ...(profile.projectNames && typeof profile.projectNames === 'object' ? profile.projectNames : {}),
+    ...(member?.projectNames && typeof member.projectNames === 'object' ? member.projectNames : {}),
+    [project.id]: project.name,
+  };
+  return {
+    projectId: project.id,
+    projectIds,
+    projectNames,
+    defaultWorkspace: 'portal',
+    lastWorkspace: 'portal',
+    lastLoginAt: timestamp,
+    portalProfile: {
+      ...profile,
+      projectId: project.id,
+      projectIds,
+      projectNames,
+      updatedAt: timestamp,
+      updatedByUid: current.actorId,
+      updatedByName: current.actorDisplayName,
+    },
+    updatedAt: timestamp,
+  };
+}
+
 function draftAudit(current, actorRole, action, revision, timestamp, metadata = {}) {
   return {
     tenantId: current.tenantId,
@@ -252,6 +303,9 @@ export function createProjectRegistrationDraftService({
   createDraftId = defaultDraftId,
   createLeaseId = randomUUID,
   createAttachmentId = defaultAttachmentId,
+  createProjectId = defaultProjectId,
+  createProjectRequestId = defaultProjectRequestId,
+  createRegistrationOutboxEvent = createOutboxEvent,
   auditChainService,
   idempotencyService,
   draftStorageService,
@@ -275,6 +329,7 @@ export function createProjectRegistrationDraftService({
       actorId,
       draftId,
       actorDisplayName: readOptionalText(input?.actorDisplayName) || '사용자',
+      actorEmail: readOptionalText(input?.actorEmail),
       actorEmailEnc: readOptionalText(input?.actorEmailEnc) || undefined,
       requestId: readOptionalText(input?.requestId) || 'project-registration-draft-request',
       idempotencyKey: idempotencyRequired ? requiredText(input?.idempotencyKey, 'idempotencyKey') : undefined,
@@ -322,7 +377,7 @@ export function createProjectRegistrationDraftService({
     });
   }
 
-  function completeIdempotency(tx, current, lock, { method, path, status, body }, nowDate) {
+  function completeIdempotency(tx, current, lock, { method, path, status, body, ttlSeconds }, nowDate) {
     idempotencyService.completeInTransaction(tx, {
       ref: lock.ref,
       tenantId: current.tenantId,
@@ -335,6 +390,7 @@ export function createProjectRegistrationDraftService({
       method,
       path,
       nowDate,
+      ...(ttlSeconds ? { ttlSeconds } : {}),
     });
   }
 
@@ -362,6 +418,7 @@ export function createProjectRegistrationDraftService({
       current.draftId = documentId(createDraftId(), 'draftId');
       const generatedLeaseId = documentId(createLeaseId(), 'leaseId');
       const payload = readDraftPayload(input, { allowMissing: true });
+      assertDraftSize({ payload });
       const stepIndex = Number.isInteger(input?.stepIndex) && input.stepIndex >= 0 ? input.stepIndex : 0;
       const method = 'POST';
       const path = '/api/v1/project-registration-drafts';
@@ -486,6 +543,7 @@ export function createProjectRegistrationDraftService({
         throw createHttpError(400, 'expectedDraftRevision must be a non-negative integer', 'draft_request_invalid');
       }
       const payload = readDraftPayload(input);
+      assertDraftSize({ payload });
       const method = 'PATCH';
       const path = `/api/v1/project-registration-drafts/${current.draftId}`;
       const requestFingerprint = buildRequestFingerprint({
@@ -544,6 +602,159 @@ export function createProjectRegistrationDraftService({
       });
     },
 
+    async submit(input) {
+      const current = context(input);
+      const leaseId = documentId(input?.leaseId, 'leaseId');
+      const fence = positiveFence(input?.fence);
+      const expectedDraftRevision = Number(input?.expectedDraftRevision);
+      if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+        throw createHttpError(400, 'expectedDraftRevision must be a non-negative integer', 'draft_request_invalid');
+      }
+      const submissionDate = clockDate(now);
+      const timestamp = submissionDate.toISOString();
+      const projectId = documentId(createProjectId(submissionDate), 'projectId');
+      const projectRequestId = documentId(createProjectRequestId(submissionDate), 'projectRequestId');
+      const method = 'POST';
+      const path = `/api/v1/project-registration-drafts/${current.draftId}/submit`;
+      const requestFingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId,
+          fence,
+          expectedDraftRevision,
+        },
+      });
+      const outboxEvent = createRegistrationOutboxEvent({
+        tenantId: current.tenantId,
+        requestId: current.requestId,
+        eventType: 'project.registration.submitted',
+        entityType: 'project',
+        entityId: projectId,
+        payload: {
+          projectId,
+          projectRequestId,
+          draftId: current.draftId,
+          actorId: current.actorId,
+        },
+        createdAt: timestamp,
+      });
+      const projectRef = db.doc(`orgs/${current.tenantId}/projects/${projectId}`);
+      const projectRequestRef = db.doc(`orgs/${current.tenantId}/project_requests/${projectRequestId}`);
+      const outboxRef = db.doc(`outbox/${documentId(outboxEvent?.id, 'outboxEvent.id')}`);
+
+      return db.runTransaction(async (tx) => {
+        const { actorRole, member, ref, draft } = await ownedDraft(tx, current);
+        const lock = await checkIdempotency(tx, current, requestFingerprint, submissionDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+
+        assertRevision(draft, expectedDraftRevision);
+        assertActive(draft);
+        const lease = await assertOwnedInTransaction({
+          tx,
+          leaseRef: leaseRef(current),
+          tenantId: current.tenantId,
+          resourceType: RESOURCE_TYPE,
+          resourceId: current.draftId,
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId,
+          fence,
+          serverNow: submissionDate,
+        });
+        const canonical = buildProjectRegistrationCanonicalDocuments({
+          tenantId: current.tenantId,
+          projectId,
+          projectRequestId,
+          sourceDraftId: current.draftId,
+          payload: draft.payload,
+          attachmentRefs: attachmentRefs(draft),
+          actorId: current.actorId,
+          actorName: current.actorDisplayName,
+          actorEmail: current.actorEmail,
+          timestamp,
+        });
+        const [projectSnap, projectRequestSnap] = await Promise.all([
+          tx.get(projectRef),
+          tx.get(projectRequestRef),
+        ]);
+        if (projectSnap.exists || projectRequestSnap.exists) {
+          throw createHttpError(409, 'Generated project registration ID already exists', 'canonical_id_conflict');
+        }
+
+        const nextRevision = expectedDraftRevision + 1;
+        const submittedDraft = {
+          ...draft,
+          draftRevision: nextRevision,
+          status: 'SUBMITTED',
+          updatedAt: timestamp,
+          submittedAt: timestamp,
+          submittedProjectId: projectId,
+          submittedProjectRequestId: projectRequestId,
+          submittedOutboxId: outboxEvent.id,
+        };
+        const releasedLease = {
+          ...lease,
+          state: 'RELEASED',
+          releasedAt: timestamp,
+          releaseReason: 'FINAL_SUBMIT',
+          updatedAt: timestamp,
+        };
+        const body = {
+          status: 'SUBMITTED',
+          projectId,
+          projectRequestId,
+          projectVersion: canonical.project.version,
+          draftId: current.draftId,
+          draftRevision: nextRevision,
+          submittedAt: timestamp,
+          lease: { state: 'RELEASED', canEdit: false },
+          outbox: { id: outboxEvent.id, status: outboxEvent.status || 'PENDING' },
+        };
+        await auditChainService.appendManyInTransaction(tx, [
+          draftAudit(current, actorRole, 'PROJECT_REGISTRATION_SUBMIT', nextRevision, timestamp, {
+            fence,
+            projectId,
+            projectRequestId,
+            outboxId: outboxEvent.id,
+          }),
+          buildEditLeaseAuditEntry({
+            ...current,
+            resourceType: RESOURCE_TYPE,
+            resourceId: current.draftId,
+          }, actorRole, 'release', {
+            state: 'RELEASED',
+            fence,
+            resultCode: 'edit_lease_released_on_submit',
+            timestamp,
+          }),
+        ]);
+        tx.create(projectRef, canonical.project);
+        tx.create(projectRequestRef, canonical.projectRequest);
+        tx.set(db.doc(`orgs/${current.tenantId}/members/${current.actorId}`), buildActorMemberAssignment(
+          member,
+          current,
+          canonical.project,
+          timestamp,
+        ), { merge: true });
+        tx.set(ref, submittedDraft);
+        tx.set(leaseRef(current), releasedLease);
+        tx.create(outboxRef, outboxEvent);
+        completeIdempotency(tx, current, lock, {
+          method,
+          path,
+          status: 201,
+          body,
+          ttlSeconds: 86_400,
+        }, submissionDate);
+        return { status: 201, body, replayed: false };
+      });
+    },
+
     async addAttachment(input) {
       if (!draftStorageService?.uploadDraftAttachment || !draftStorageService?.deleteDraftAttachment) {
         throw new Error('Draft attachment storage service is required');
@@ -566,6 +777,10 @@ export function createProjectRegistrationDraftService({
       }
       const fileName = requiredText(input?.fileName, 'fileName');
       const mimeType = requiredText(input?.mimeType, 'mimeType');
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!['contract', 'quote', 'proposal'].includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
       const attachmentId = documentId(createAttachmentId(), 'attachmentId');
       const method = 'POST';
       const path = `/api/v1/project-registration-drafts/${current.draftId}/attachments`;
@@ -578,6 +793,7 @@ export function createProjectRegistrationDraftService({
           leaseId,
           fence,
           expectedDraftRevision,
+          documentKind,
           fileName,
           mimeType,
           fileSize: buffer.byteLength,
@@ -649,6 +865,7 @@ export function createProjectRegistrationDraftService({
         }
         const attachment = {
           attachmentId,
+          documentKind,
           path: storagePath,
           name: fileName,
           size: buffer.byteLength,
@@ -735,6 +952,7 @@ async function routeContext(req, piiProtector) {
     actorId: req.context?.actorId,
     actorRole: req.context?.actorRole,
     actorDisplayName: req.context?.actorName,
+    actorEmail: req.context?.actorEmail,
     actorEmailEnc,
     requestId: req.context?.requestId,
     idempotencyKey: req.context?.idempotencyKey,
@@ -807,6 +1025,18 @@ export function mountProjectRegistrationDraftRoutes(app, {
       draftId: routeDraftId(req),
       ...parsed,
       buffer: decodeBase64(parsed.contentBase64, parsed.fileSize),
+    }));
+  }));
+
+  app.post('/api/v1/project-registration-drafts/:draftId/submit', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'submit a project registration draft');
+    const parsed = parseWithSchema(projectRegistrationDraftSubmitSchema, req.body);
+    const current = await routeContext(req, piiProtector);
+    sendOutcome(res, await projectRegistrationDraftService.submit({
+      ...current,
+      ...routeOwnership(req),
+      draftId: routeDraftId(req),
+      ...parsed,
     }));
   }));
 }

@@ -19,10 +19,15 @@ export const projectRegistrationDraftPatchSchema = z.object({
 
 export const projectRegistrationDraftAttachmentSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
+  documentKind: z.enum(['contract', 'quote', 'proposal']),
   fileName: NON_EMPTY_STRING.max(300),
   mimeType: NON_EMPTY_STRING.max(200),
   fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
   contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
+}).strict();
+
+export const projectRegistrationDraftSubmitSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
 }).strict();
 
 export const projectUpsertSchema = z.object({

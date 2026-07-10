@@ -340,7 +340,7 @@ export function createEditLeaseService({
     };
   }
 
-  async function assertResourceAccessInTransaction(tx, current) {
+  async function assertResourceAccessInTransaction(tx, current, { requireActiveRegistrationDraft = false } = {}) {
     const { actorRole, member } = await assertEditLeaseActorAccessInTransaction({
       tx,
       db,
@@ -356,6 +356,9 @@ export function createEditLeaseService({
       const ownerId = readOptionalText(draft.ownerUid) || readOptionalText(draft.ownerId);
       if (!draftSnap.exists || ownerId !== current.actorId) {
         throw createHttpError(404, 'Project registration draft not found', 'not_found');
+      }
+      if (requireActiveRegistrationDraft && readOptionalText(draft.status).toUpperCase() !== 'ACTIVE') {
+        throw createHttpError(409, 'Project registration draft is not active', 'draft_not_active');
       }
       return actorRole;
     }
@@ -472,7 +475,9 @@ export function createEditLeaseService({
     const outcome = await db.runTransaction(async (tx) => {
       const nowMs = serverNow(now);
       const timestamp = asIso(nowMs);
-      const actorRole = await assertResourceAccessInTransaction(tx, current);
+      const actorRole = await assertResourceAccessInTransaction(tx, current, {
+        requireActiveRegistrationDraft: command === 'acquire',
+      });
       const lock = await checkIdempotency(tx, current, command, input, nowMs);
       if (lock.mode === 'replay') {
         return { status: lock.status, body: lock.body, replayed: true };

@@ -273,6 +273,13 @@ describe('firestore rules policy alignment', () => {
       fieldPath: 'address',
       indexes: [],
     });
+    for (const fieldOverride of [
+      { collectionGroup: 'projectRequestDrafts', fieldPath: 'payload', indexes: [] },
+      { collectionGroup: 'projectRequestDrafts', fieldPath: 'attachmentRefs', indexes: [] },
+      { collectionGroup: 'idempotency_keys', fieldPath: 'responseBody', indexes: [] },
+    ]) {
+      expect(firestoreIndexes.fieldOverrides).toContainEqual(fieldOverride);
+    }
   });
 
   // ── HR rules assumptions ──

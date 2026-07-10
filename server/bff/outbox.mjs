@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { createNotificationsForOutboxEvent } from './notifications.mjs';
 
+const HANDLER_REQUIRED_EVENT_TYPES = new Set(['project.registration.submitted']);
+
 function toIso(value = new Date()) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
@@ -58,6 +60,7 @@ export function enqueueOutboxEventInTransaction(tx, db, event) {
 }
 
 async function claimEvent(db, ref, nowIso) {
+  // ponytail: PROCESSING recovery needs a claim owner/timeout contract; add it with worker heartbeats, not a blind status reset.
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
@@ -82,7 +85,13 @@ async function claimEvent(db, ref, nowIso) {
   });
 }
 
-async function defaultOutboxHandler(db, event, nowIso) {
+async function defaultOutboxHandler(db, event, nowIso, eventHandlers) {
+  const eventHandler = eventHandlers?.[event.eventType];
+  if (HANDLER_REQUIRED_EVENT_TYPES.has(event.eventType) && typeof eventHandler !== 'function') {
+    throw new Error(`Outbox handler is not configured for ${event.eventType}`);
+  }
+  if (typeof eventHandler === 'function') await eventHandler(event);
+
   const ref = db.doc(`orgs/${event.tenantId}/outbox_deliveries/${event.id}`);
   try {
     await ref.create({
@@ -133,10 +142,11 @@ export async function processOutboxBatch(db, {
   maxAttempts = 8,
   now = () => new Date().toISOString(),
   handler,
+  eventHandlers,
 } = {}) {
   const safeLimit = Math.min(Math.max(Number.parseInt(String(limit), 10) || 50, 1), 500);
   const nowIso = toIso(now());
-  const outboxHandler = handler || ((event) => defaultOutboxHandler(db, event, nowIso));
+  const outboxHandler = handler || ((event) => defaultOutboxHandler(db, event, nowIso, eventHandlers));
 
   const dueDocs = [];
   for (const status of ['PENDING', 'FAILED']) {

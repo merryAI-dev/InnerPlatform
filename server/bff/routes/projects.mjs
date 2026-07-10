@@ -72,7 +72,7 @@ function formatOptionalProjectAmount(value, explicit) {
   return Number.isFinite(value) ? formatKrw(value) : '-';
 }
 
-function buildProjectRegistrationSlackPayload(projectRequest) {
+export function buildProjectRegistrationSlackPayload(projectRequest) {
   const payload = projectRequest?.payload && typeof projectRequest.payload === 'object'
     ? projectRequest.payload
     : {};
@@ -372,6 +372,285 @@ function normalizeProjectType(value) {
     : 'D1';
 }
 
+const REGISTRATION_PROJECT_TYPES = new Set(['C1', 'A1', 'A2', 'I1', 'I2', 'I3', 'D1', 'S1', 'S2', 'E1', 'P1', 'Z1']);
+const PRIVATE_DOCUMENT_KINDS = ['contract', 'quote', 'proposal'];
+const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const REGISTRATION_PAYMENT_FIELDS = ['contract', 'interim', 'final'];
+const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+
+function invalidRegistration(message) {
+  throw createHttpError(422, message, 'project_registration_invalid');
+}
+
+function isRealIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function assertRegistrationAmount(value, fieldName, { required = false } = {}) {
+  if (value === undefined || value === null) {
+    if (required) invalidRegistration(`Project registration ${fieldName} is required`);
+    return;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isSafeInteger(value) || value < 0) {
+    invalidRegistration(`Project registration ${fieldName} must be a non-negative integer`);
+  }
+}
+
+function assertRegistrationFinancials(payload, type) {
+  for (const field of REGISTRATION_AMOUNT_FIELDS) {
+    assertRegistrationAmount(payload[field], field, { required: field === 'contractAmount' && type !== 'I1' });
+  }
+
+  if (payload.paymentPlan !== undefined && payload.paymentPlan !== null) {
+    if (typeof payload.paymentPlan !== 'object' || Array.isArray(payload.paymentPlan)) {
+      invalidRegistration('Project registration paymentPlan is invalid');
+    }
+    for (const field of REGISTRATION_PAYMENT_FIELDS) {
+      assertRegistrationAmount(payload.paymentPlan[field], `paymentPlan.${field}`, { required: true });
+    }
+  }
+
+  if (payload.financialInputFlags !== undefined && payload.financialInputFlags !== null) {
+    if (typeof payload.financialInputFlags !== 'object' || Array.isArray(payload.financialInputFlags)) {
+      invalidRegistration('Project registration financialInputFlags is invalid');
+    }
+    for (const field of REGISTRATION_FINANCIAL_FLAG_FIELDS) {
+      if (
+        Object.prototype.hasOwnProperty.call(payload.financialInputFlags, field)
+        && typeof payload.financialInputFlags[field] !== 'boolean'
+      ) {
+        invalidRegistration(`Project registration financialInputFlags.${field} must be boolean`);
+      }
+    }
+  }
+
+  if (type !== 'I1') {
+    const contractStart = readOptionalText(payload.contractStart);
+    const contractEnd = readOptionalText(payload.contractEnd);
+    if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+      invalidRegistration('Project registration contract dates are invalid');
+    }
+  }
+}
+
+function registrationAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+}
+
+function registrationSlug(value, fallback) {
+  return readOptionalText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 50) || fallback;
+}
+
+function registrationFinancialInputFlags(value = {}, amounts = {}) {
+  return {
+    contractAmount: value?.contractAmount === true || registrationAmount(amounts.contractAmount) > 0,
+    salesVatAmount: value?.salesVatAmount === true || registrationAmount(amounts.salesVatAmount) > 0,
+    totalRevenueAmount: value?.totalRevenueAmount === true || registrationAmount(amounts.totalRevenueAmount) > 0,
+    supportAmount: value?.supportAmount === true || registrationAmount(amounts.supportAmount) > 0,
+  };
+}
+
+function registrationSettlementSheetPolicy(value, fundInputMode) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const preset = ['STANDARD', 'DIRECT_ENTRY', 'BALANCE_TRACKING'].includes(source.preset)
+    ? source.preset
+    : (fundInputMode === 'DIRECT_ENTRY' ? 'DIRECT_ENTRY' : 'STANDARD');
+  const boolean = (key, fallback) => typeof source[key] === 'boolean' ? source[key] : fallback;
+  const defaultReadOnly = preset === 'BALANCE_TRACKING'
+    ? ['balance', 'expenseAmount', 'bankAmount', 'vatIn']
+    : (preset === 'DIRECT_ENTRY' ? ['balance'] : []);
+  const readOnlyDerivedFields = Array.isArray(source.readOnlyDerivedFields)
+    ? source.readOnlyDerivedFields.filter((field) => ['balance', 'expenseAmount', 'bankAmount', 'vatIn'].includes(field))
+    : defaultReadOnly;
+  return {
+    preset,
+    allowAdjustmentRows: boolean('allowAdjustmentRows', preset !== 'STANDARD'),
+    allowRowDelete: boolean('allowRowDelete', preset !== 'BALANCE_TRACKING'),
+    autoComputeBalance: boolean('autoComputeBalance', true),
+    autoComputeExpenseFromBank: boolean('autoComputeExpenseFromBank', preset === 'STANDARD'),
+    autoComputeBankFromExpense: boolean('autoComputeBankFromExpense', true),
+    requireCounterparty: boolean('requireCounterparty', true),
+    requireNoteForAdjustment: boolean('requireNoteForAdjustment', true),
+    requireEvidenceBeforeSubmit: boolean('requireEvidenceBeforeSubmit', false),
+    preserveExplicitZero: boolean('preserveExplicitZero', true),
+    readOnlyDerivedFields: [...new Set(readOnlyDerivedFields)],
+  };
+}
+
+function registrationPrivateDocuments(attachmentRefs) {
+  const latest = new Map();
+  for (const attachment of Array.isArray(attachmentRefs) ? attachmentRefs : []) {
+    const documentKind = readOptionalText(attachment?.documentKind);
+    const path = readOptionalText(attachment?.path);
+    if (!PRIVATE_DOCUMENT_KINDS.includes(documentKind) || !path) continue;
+    latest.set(documentKind, stripUndefinedDeep({
+      documentKind,
+      path,
+      name: readOptionalText(attachment?.name),
+      size: Number.isSafeInteger(attachment?.size) && attachment.size >= 0 ? attachment.size : 0,
+      contentType: readOptionalText(attachment?.contentType),
+      uploadedAt: readOptionalText(attachment?.uploadedAt),
+      visibility: 'PRIVATE',
+    }));
+  }
+  return {
+    contractDocument: latest.get('contract') || null,
+    quoteDocument: latest.get('quote') || null,
+    proposalDocument: latest.get('proposal') || null,
+  };
+}
+
+function assertRegistrationPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    invalidRegistration('Project registration payload is invalid');
+  }
+  const type = readOptionalText(payload.type);
+  const managerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName);
+  if (!readOptionalText(payload.name) || !readOptionalText(payload.department) || !managerName || !REGISTRATION_PROJECT_TYPES.has(type)) {
+    invalidRegistration('Project registration is missing required fields');
+  }
+  assertRegistrationFinancials(payload, type);
+  if (
+    type !== 'I1'
+    && (
+      payload.financialInputFlags?.contractAmount !== true
+    )
+  ) {
+    invalidRegistration('Project registration financial fields are incomplete');
+  }
+}
+
+export function buildProjectRegistrationCanonicalDocuments({
+  tenantId,
+  projectId,
+  projectRequestId,
+  sourceDraftId,
+  payload,
+  attachmentRefs,
+  actorId,
+  actorName,
+  actorEmail,
+  timestamp,
+}) {
+  assertRegistrationPayload(payload);
+  const ownerId = readOptionalText(payload.registeredById) || readOptionalText(payload.managerId) || actorId;
+  const ownerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName) || actorName;
+  const ownerEmail = readOptionalText(payload.registeredByEmail) || (ownerId === actorId ? readOptionalText(actorEmail) : '');
+  const fundInputMode = normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode));
+  const documents = registrationPrivateDocuments(attachmentRefs);
+  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  const requestPayload = stripUndefinedDeep({
+    name: readOptionalText(payload.name),
+    officialContractName: readOptionalText(payload.officialContractName),
+    type: normalizeProjectType(readOptionalText(payload.type)),
+    status: normalizeProjectStatus(readOptionalText(payload.status)),
+    phase: normalizeProjectPhase(readOptionalText(payload.phase)),
+    description: readOptionalText(payload.description),
+    clientOrg: readOptionalText(payload.clientOrg),
+    department: readOptionalText(payload.department),
+    groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(payload.name),
+    currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
+    contractAmount: registrationAmount(payload.contractAmount),
+    salesVatAmount: registrationAmount(payload.salesVatAmount),
+    totalRevenueAmount: registrationAmount(payload.totalRevenueAmount),
+    supportAmount: registrationAmount(payload.supportAmount),
+    financialInputFlags: registrationFinancialInputFlags(payload.financialInputFlags, payload),
+    contractStart: readOptionalText(payload.contractStart),
+    contractEnd: readOptionalText(payload.contractEnd),
+    contractType: normalizeProjectContractType(payload.contractType),
+    settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
+    basis: normalizeBasis(readOptionalText(payload.basis)),
+    accountType: normalizeAccountType(readOptionalText(payload.accountType)),
+    fundInputMode,
+    settlementSheetPolicy: registrationSettlementSheetPolicy(payload.settlementSheetPolicy, fundInputMode),
+    paymentPlan: {
+      contract: registrationAmount(payload.paymentPlan?.contract),
+      interim: registrationAmount(payload.paymentPlan?.interim),
+      final: registrationAmount(payload.paymentPlan?.final),
+    },
+    paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
+    settlementGuide: readOptionalText(payload.settlementGuide),
+    finalPaymentNote: readOptionalText(payload.finalPaymentNote),
+    projectPurpose: readOptionalText(payload.projectPurpose),
+    registeredById: ownerId,
+    registeredByName: ownerName,
+    registeredByEmail: ownerEmail,
+    managerId: ownerId,
+    managerName: ownerName,
+    teamName: readOptionalText(payload.teamName),
+    teamMembers: teamMembersDetailed.map(formatProjectRequestTeamMember).join(', '),
+    teamMembersDetailed,
+    participantCondition: readOptionalText(payload.participantCondition),
+    note: readOptionalText(payload.note),
+    ...documents,
+    contractAnalysis: payload.contractAnalysis && typeof payload.contractAnalysis === 'object'
+      ? payload.contractAnalysis
+      : null,
+  });
+  const projectPatch = buildProjectPatchFromChangeRequestPayload(requestPayload, {});
+  const project = stripUndefinedDeep({
+    id: projectId,
+    slug: registrationSlug(requestPayload.name, projectId),
+    orgId: tenantId,
+    tenantId,
+    registrationSource: 'pm_portal',
+    executiveReviewStatus: 'PENDING',
+    executiveReviewHistory: [{
+      status: 'PENDING',
+      previousStatus: null,
+      reviewedAt: timestamp,
+      reviewedById: actorId,
+      reviewedByName: actorName,
+      reviewComment: 'PM 신규 등록',
+    }],
+    registeredAt: timestamp,
+    ...projectPatch,
+    quoteDocument: documents.quoteDocument,
+    proposalDocument: documents.proposalDocument,
+    taxInvoiceAmount: 0,
+    isSettled: false,
+    confirmerName: '',
+    lastCheckedAt: '',
+    cashflowDiffNote: '',
+    version: 1,
+    createdBy: actorId,
+    createdAt: timestamp,
+    updatedBy: actorId,
+    updatedAt: timestamp,
+  });
+  const projectRequest = stripUndefinedDeep({
+    id: projectRequestId,
+    sourceDraftId,
+    tenantId,
+    requestKind: 'REGISTRATION',
+    requestVersion: 1,
+    status: 'PENDING',
+    reviewOutcome: null,
+    payload: requestPayload,
+    requestedBy: actorId,
+    requestedByName: actorName,
+    requestedByEmail: readOptionalText(actorEmail),
+    requestedAt: timestamp,
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    approvedProjectId: projectId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  return { project, projectRequest };
+}
+
 function normalizeSettlementType(value) {
   return ['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5'].includes(value) ? value : 'NONE';
 }
@@ -652,7 +931,7 @@ function resolveParticipationSettlementSystem(project) {
   return 'PRIVATE';
 }
 
-async function syncProjectParticipationEntries({
+export async function syncProjectParticipationEntries({
   db,
   tenantId,
   project,
@@ -721,6 +1000,78 @@ async function syncProjectParticipationEntries({
   if (desiredEntries.size > 0 || existingSyncEntries.length > 0) {
     await batch.commit();
   }
+}
+
+export function createProjectRegistrationSubmittedOutboxHandler({
+  db,
+  driveService,
+  projectRegistrationSlackService,
+  now = () => new Date().toISOString(),
+}) {
+  return async (event) => {
+    const tenantId = readOptionalText(event?.tenantId);
+    const projectId = readOptionalText(event?.payload?.projectId) || readOptionalText(event?.entityId);
+    const projectRequestId = readOptionalText(event?.payload?.projectRequestId);
+    if (!tenantId || !projectId || !projectRequestId) {
+      throw new Error('Project registration outbox event is missing canonical IDs');
+    }
+
+    const projectRef = db.doc(`orgs/${tenantId}/projects/${projectId}`);
+    const requestRef = db.doc(`orgs/${tenantId}/project_requests/${projectRequestId}`);
+    const [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
+    if (!projectSnap.exists || !requestSnap.exists) {
+      throw new Error('Project registration canonical documents are missing');
+    }
+    let project = { id: projectId, ...(projectSnap.data() || {}) };
+    const projectRequest = { id: projectRequestId, ...(requestSnap.data() || {}) };
+    if (readOptionalText(projectRequest.approvedProjectId) !== projectId) {
+      throw new Error('Project registration request does not match its project');
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    const sideEffects = event?.sideEffects && typeof event.sideEffects === 'object'
+      ? { ...event.sideEffects }
+      : {};
+    const driveConfig = typeof driveService?.getConfig === 'function' ? driveService.getConfig() : null;
+    const driveEnabled = typeof driveService?.ensureProjectRootFolder === 'function'
+      && (driveConfig ? Boolean(driveConfig.enabled && driveConfig.defaultParentFolderId) : true);
+    if (!readOptionalText(project.evidenceDriveRootFolderId) && driveEnabled) {
+      const folder = await driveService.ensureProjectRootFolder({
+        tenantId,
+        projectId,
+        projectName: project.name || projectId,
+        existingFolderId: project.evidenceDriveRootFolderId,
+      });
+      if (!readOptionalText(folder?.id)) throw new Error('Project registration Drive root was not created');
+      const drivePatch = stripUndefinedDeep({
+        evidenceDriveSharedDriveId: folder.driveId,
+        evidenceDriveRootFolderId: folder.id,
+        evidenceDriveRootFolderName: folder.name,
+        evidenceDriveRootFolderLink: folder.webViewLink,
+        evidenceDriveProvisionedAt: timestamp,
+      });
+      await projectRef.set(drivePatch, { merge: true });
+      project = { ...project, ...drivePatch };
+    }
+    sideEffects.registrationDrive = readOptionalText(project.evidenceDriveRootFolderId) ? 'DONE' : 'SKIPPED';
+    sideEffects.registrationDriveAt = timestamp;
+
+    await syncProjectParticipationEntries({ db, tenantId, project, now: timestamp });
+
+    if (
+      projectRegistrationSlackService?.enabled
+      && typeof projectRegistrationSlackService.notifyMessage === 'function'
+      && event?.sideEffects?.registrationSlack !== 'DONE'
+    ) {
+      await projectRegistrationSlackService.notifyMessage(buildProjectRegistrationSlackPayload(projectRequest));
+      sideEffects.registrationSlack = 'DONE';
+      sideEffects.registrationSlackAt = timestamp;
+    } else if (!projectRegistrationSlackService?.enabled) {
+      sideEffects.registrationSlack = 'SKIPPED';
+      sideEffects.registrationSlackAt = timestamp;
+    }
+    await db.doc(`outbox/${event.id}`).set({ sideEffects }, { merge: true });
+  };
 }
 
 async function updateProjectTrashState({

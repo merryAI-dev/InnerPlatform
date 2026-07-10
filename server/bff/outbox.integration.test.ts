@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFirestoreDb } from './firestore.mjs';
 import { createOutboxEvent, enqueueOutboxEvent, processOutboxBatch } from './outbox.mjs';
 import { buildNotificationId } from './notifications.mjs';
+import { createProjectRegistrationSubmittedOutboxHandler } from './routes/projects.mjs';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
 
@@ -24,6 +25,9 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     await clearCollection(`orgs/${tenantId}/members`);
     await clearCollection(`orgs/${tenantId}/outbox_deliveries`);
     await clearCollection(`orgs/${tenantId}/notifications`);
+    await clearCollection(`orgs/${tenantId}/projects`);
+    await clearCollection(`orgs/${tenantId}/project_requests`);
+    await clearCollection(`orgs/${tenantId}/partEntries`);
   }
 
   beforeAll(async () => {
@@ -166,5 +170,90 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
 
     const snap = await db.doc(`outbox/${event.id}`).get();
     expect(snap.data()?.status).toBe('DEAD');
+  });
+
+  it('does not mark registration side effects done without an event handler', async () => {
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-registration-handler-required',
+      eventType: 'project.registration.submitted',
+      entityType: 'project',
+      entityId: 'project-registration-1',
+      payload: { projectId: 'project-registration-1', projectRequestId: 'request-registration-1' },
+      createdAt: new Date().toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+
+    const result = await processOutboxBatch(db, { limit: 20, maxAttempts: 3 });
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 0, failed: 1 });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()?.status).toBe('FAILED');
+    expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get()).exists).toBe(false);
+  });
+
+  it('completes registration delivery when Drive and Slack are explicitly disabled', async () => {
+    await db.doc(`orgs/${tenantId}/members/pm-registration`).set({
+      uid: 'pm-registration',
+      name: 'Registration PM',
+      role: 'pm',
+      tenantId,
+    });
+    await db.doc(`orgs/${tenantId}/projects/project-disabled-side-effects`).set({
+      id: 'project-disabled-side-effects',
+      name: 'Disabled side effects project',
+      teamMembersDetailed: [{ memberName: 'Registration PM', role: 'PM', participationRate: 100 }],
+      settlementType: 'NONE',
+      accountType: 'NONE',
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/request-disabled-side-effects`).set({
+      id: 'request-disabled-side-effects',
+      approvedProjectId: 'project-disabled-side-effects',
+      payload: { name: 'Disabled side effects project' },
+    });
+    const ensureProjectRootFolder = vi.fn(async () => {
+      throw new Error('disabled Drive must not be called');
+    });
+    const notifyMessage = vi.fn(async () => {
+      throw new Error('disabled Slack must not be called');
+    });
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-disabled-side-effects',
+      eventType: 'project.registration.submitted',
+      entityType: 'project',
+      entityId: 'project-disabled-side-effects',
+      payload: {
+        projectId: 'project-disabled-side-effects',
+        projectRequestId: 'request-disabled-side-effects',
+      },
+      createdAt: new Date().toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const handler = createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService: {
+        getConfig: () => ({ enabled: false, defaultParentFolderId: '' }),
+        ensureProjectRootFolder,
+      },
+      projectRegistrationSlackService: { enabled: false, notifyMessage },
+    });
+
+    const result = await processOutboxBatch(db, {
+      limit: 20,
+      maxAttempts: 3,
+      eventHandlers: { 'project.registration.submitted': handler },
+    });
+
+    expect(result).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
+    expect(ensureProjectRootFolder).not.toHaveBeenCalled();
+    expect(notifyMessage).not.toHaveBeenCalled();
+    expect((await db.collection(`orgs/${tenantId}/partEntries`).get()).size).toBe(1);
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'DONE',
+      sideEffects: { registrationDrive: 'SKIPPED', registrationSlack: 'SKIPPED' },
+    });
+    expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get()).exists).toBe(true);
   });
 });

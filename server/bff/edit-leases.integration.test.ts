@@ -63,7 +63,7 @@ describeIfEmulator('edit leases (Firestore emulator)', () => {
     });
     batch.set(db.doc(`orgs/${tenantId}/projects/project-a`), { id: 'project-a' });
     batch.set(db.doc(`orgs/${tenantId}/projects/project-b`), { id: 'project-b' });
-    batch.set(db.doc(`orgs/${tenantId}/projectRequestDrafts/draft-a`), { ownerUid: actorId });
+    batch.set(db.doc(`orgs/${tenantId}/projectRequestDrafts/draft-a`), { ownerUid: actorId, status: 'ACTIVE' });
     await batch.commit();
     nowMs = Date.parse('2026-07-10T00:00:00.000Z');
   }

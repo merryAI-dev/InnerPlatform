@@ -282,6 +282,26 @@ describe('edit lease service', () => {
     await expect(service.getStatus(input)).resolves.toMatchObject({ state: 'AVAILABLE' });
   });
 
+  it('does not acquire a registration lease for a submitted draft', async () => {
+    const { db, service, base } = createHarness();
+    db.__set('orgs/tenant-a/projectRequestDrafts/draft-a', {
+      ownerUid: 'actor-a',
+      status: 'SUBMITTED',
+    });
+
+    await expectHttpError(
+      service.acquire({
+        ...base,
+        resourceType: 'project-registration',
+        resourceId: 'draft-a',
+        idempotencyKey: 'idem-submitted-draft-acquire',
+      }),
+      409,
+      'draft_not_active',
+    );
+    expect([...db.__documents.keys()].some((path) => path.includes('/editLeases/'))).toBe(false);
+  });
+
   it('uses an exact 1,800,000ms server-owned TTL', async () => {
     const { service, base, now } = createHarness();
 

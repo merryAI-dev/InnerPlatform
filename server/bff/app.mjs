@@ -92,7 +92,10 @@ import {
   resolveBffWorkerAuthPolicy,
 } from './runtime-safety.mjs';
 
-import { mountProjectRoutes } from './routes/projects.mjs';
+import {
+  createProjectRegistrationSubmittedOutboxHandler,
+  mountProjectRoutes,
+} from './routes/projects.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
@@ -717,6 +720,9 @@ export function createBffApp(options = {}) {
       createDraftId: options.createProjectRegistrationDraftId || randomUUID,
       createLeaseId: options.createProjectRegistrationLeaseId || randomUUID,
       createAttachmentId: options.createProjectRegistrationAttachmentId || randomUUID,
+      createProjectId: options.createProjectRegistrationProjectId,
+      createProjectRequestId: options.createProjectRegistrationRequestId,
+      createRegistrationOutboxEvent: options.createProjectRegistrationOutboxEvent,
       auditChainService,
       idempotencyService,
       draftStorageService: projectRegistrationDraftStorageService,
@@ -742,6 +748,13 @@ export function createBffApp(options = {}) {
   const slackAlertService = options.slackAlertService || createSlackAlertService();
   const projectRegistrationSlackService = options.projectRegistrationSlackService
     || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
+  const projectRegistrationOutboxHandler = options.projectRegistrationOutboxHandler
+    || createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService,
+      projectRegistrationSlackService,
+      now,
+    });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -873,6 +886,9 @@ export function createBffApp(options = {}) {
       limit,
       maxAttempts,
       now,
+      eventHandlers: {
+        'project.registration.submitted': projectRegistrationOutboxHandler,
+      },
     });
 
     res.status(200).json({
