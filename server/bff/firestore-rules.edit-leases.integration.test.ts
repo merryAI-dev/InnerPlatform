@@ -7,7 +7,16 @@ import {
 } from '@firebase/rules-unit-testing';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore, type Firestore as AdminFirestore } from 'firebase-admin/firestore';
-import { deleteDoc, doc, getDoc, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
+import {
+  collection as firestoreCollection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  setLogLevel,
+  updateDoc,
+} from 'firebase/firestore';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
@@ -21,6 +30,16 @@ const protectedCollections = [
   'privateEditDrafts',
   'cashflowEditLocks',
   'cashflow_edit_locks',
+] as const;
+const canonicalRootCollections = [
+  'projects',
+  'project_requests',
+  'projectRequests',
+  'cashflow_weeks',
+  'weekly_submission_status',
+  'transactions',
+  'comments',
+  'budget_evidence_maps',
 ] as const;
 const actors = [
   { uid: 'draft-owner', role: 'viewer', label: 'project request draft owner' },
@@ -76,7 +95,10 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
           doc(db, `orgs/${tenantId}/${collection}/existing`),
           protectedDocumentData(),
         )),
-        setDoc(doc(db, `orgs/${tenantId}/projects/existing`), { name: 'Existing project' }),
+        ...canonicalRootCollections.map((collection) => setDoc(
+          doc(db, `orgs/${tenantId}/${collection}/existing`),
+          { tenantId, value: 'original' },
+        )),
       ]);
     });
   }, 60_000);
@@ -106,17 +128,45 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     }
   }
 
-  it('keeps authorized member client reads and writes for ordinary projects', async () => {
+  for (const collection of canonicalRootCollections) {
+    for (const actor of actors.filter(({ role }) => role !== 'viewer')) {
+      it(`keeps ${actor.label} reads but denies client writes on canonical ${collection}`, async () => {
+        const db = testEnv.authenticatedContext(actor.uid, {
+          email: `${actor.uid}@mysc.co.kr`,
+        }).firestore();
+        const existing = doc(db, `orgs/${tenantId}/${collection}/existing`);
+        const created = doc(db, `orgs/${tenantId}/${collection}/created-${actor.uid}`);
+
+        expect((await assertSucceeds(getDoc(existing))).data()?.value).toBe('original');
+        await assertFails(setDoc(created, { tenantId, value: `created-${actor.uid}` }));
+        await assertFails(updateDoc(existing, { value: `updated-${actor.uid}` }));
+        await assertFails(deleteDoc(existing));
+      });
+    }
+  }
+
+  it('keeps viewer list access to canonical collections', async () => {
+    const db = testEnv.authenticatedContext('draft-owner', {
+      email: 'draft-owner@mysc.co.kr',
+    }).firestore();
+
+    for (const collection of canonicalRootCollections) {
+      const snapshot = await assertSucceeds(getDocs(
+        firestoreCollection(db, `orgs/${tenantId}/${collection}`),
+      ));
+      expect(snapshot.docs.some((item) => item.id === 'existing')).toBe(true);
+    }
+  });
+
+  it('keeps existing project subcollection writes until every client flow has a server replacement', async () => {
     const db = testEnv.authenticatedContext('pm-member', {
       email: 'pm-member@mysc.co.kr',
     }).firestore();
-    const existing = doc(db, `orgs/${tenantId}/projects/existing`);
-    const created = doc(db, `orgs/${tenantId}/projects/client-created`);
+    const ref = doc(db, `orgs/${tenantId}/projects/existing/expense_sheets/client-compat`);
 
-    expect((await assertSucceeds(getDoc(existing))).data()).toEqual({ name: 'Existing project' });
-    await assertSucceeds(setDoc(created, { name: 'Client project' }));
-    await assertSucceeds(updateDoc(created, { name: 'Updated client project' }));
-    await assertSucceeds(deleteDoc(created));
+    await assertSucceeds(setDoc(ref, { tenantId, value: 'created' }));
+    await assertSucceeds(updateDoc(ref, { value: 'updated' }));
+    await assertSucceeds(deleteDoc(ref));
   });
 
   it('allows first-login self-registration only with empty project assignment and safe keys', async () => {
@@ -242,8 +292,8 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     }));
   });
 
-  it('keeps Admin SDK CRUD available for protected collections', async () => {
-    for (const collection of protectedCollections) {
+  it('keeps Admin SDK CRUD available for protected and canonical collections', async () => {
+    for (const collection of [...protectedCollections, ...canonicalRootCollections]) {
       const ref = adminDb.doc(`orgs/${tenantId}/${collection}/admin-sdk`);
       await ref.set(protectedDocumentData());
       expect((await ref.get()).data()?.value).toBe('original');

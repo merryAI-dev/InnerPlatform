@@ -117,6 +117,21 @@ service cloud.firestore {
         || (collection == 'settings' && document == 'project-departments');
     }
 
+    // Canonical finance/project state is written only by the BFF/JVM Admin SDK.
+    // Reads remain available to org members through the root catchall below.
+    function isCanonicalServerWriteCollection(collection) {
+      return collection in [
+        'projects',
+        'project_requests',
+        'projectRequests',
+        'cashflow_weeks',
+        'weekly_submission_status',
+        'transactions',
+        'comments',
+        'budget_evidence_maps'
+      ];
+    }
+
     // ══════════════════════════════════════════════════════════════
     // 최상위 tenants는 클라이언트 목록 쿼리 권한을 안정적으로 검증할 수 없으므로 사용하지 않는다.
     // 조직DB는 orgs/{orgId}/tenant_registry에서 조직 admin 권한으로 관리한다.
@@ -234,11 +249,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ── 일반 규칙: 나머지 모든 컬렉션 ──
-    // (projects, ledgers, transactions, evidences, comments, 등)
-    match /orgs/{orgId}/{collection}/{document=**} {
+    // ── 일반 규칙: 최상위 문서 ──
+    match /orgs/{orgId}/{collection}/{document} {
       allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);
-      allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);
+      allow write: if !isCatchallExcludedPath(collection, document)
+        && !isCanonicalServerWriteCollection(collection)
+        && canWrite(orgId);
+    }
+
+    // 프로젝트 하위 컬렉션은 아직 일부 화면이 클라이언트 SDK로 저장한다.
+    // 서버 경로 전환이 끝난 하위 컬렉션부터 별도 규칙으로 차단한다.
+    match /orgs/{orgId}/{collection}/{document}/{subcollection}/{nested=**} {
+      allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);
+      allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);
     }
   }
 }

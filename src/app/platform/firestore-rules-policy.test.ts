@@ -185,7 +185,8 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
   });
 
   it('keeps edit drafts and legacy client locks behind BFF-only Firestore rules', () => {
@@ -203,7 +204,30 @@ describe('firestore rules policy alignment', () => {
       );
     }
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+  });
+
+  it('keeps canonical project and finance root writes behind server APIs', () => {
+    const canonicalWriteRule = firestoreRulesText.match(
+      /function isCanonicalServerWriteCollection\(collection\) \{[\s\S]*?\n    \}/,
+    )?.[0] || '';
+    for (const collection of [
+      'projects',
+      'project_requests',
+      'projectRequests',
+      'cashflow_weeks',
+      'weekly_submission_status',
+      'transactions',
+      'comments',
+      'budget_evidence_maps',
+    ]) {
+      expect(canonicalWriteRule).toContain(`'${collection}'`);
+    }
+    expect(firestoreRulesText).toContain('&& !isCanonicalServerWriteCollection(collection)');
+    expect(firestoreRulesText).toContain(
+      'match /orgs/{orgId}/{collection}/{document}/{subcollection}/{nested=**}',
+    );
   });
 
   it('keeps edit lease secrets behind BFF-only Firestore rules', () => {
