@@ -871,7 +871,10 @@ export function createProjectRegistrationDraftService({
           serverNow: nowDate,
         });
         assertRevision(draft, expectedDraftRevision);
-        if (attachmentRefs(draft).length >= MAX_ATTACHMENT_REFS) {
+        if (
+          attachmentRefs(draft).length >= MAX_ATTACHMENT_REFS
+          && !attachmentRefs(draft).some((attachment) => attachment?.documentKind === documentKind)
+        ) {
           throw createHttpError(422, 'Draft attachment limit exceeded', 'draft_attachment_limit_exceeded');
         }
         return { outcome: null };
@@ -946,7 +949,10 @@ export function createProjectRegistrationDraftService({
           const revision = assertRevision(draft, expectedDraftRevision) + 1;
           const next = {
             ...draft,
-            attachmentRefs: [...attachmentRefs(draft), attachment],
+            attachmentRefs: [
+              ...attachmentRefs(draft).filter((currentAttachment) => currentAttachment?.documentKind !== documentKind),
+              attachment,
+            ],
             draftRevision: revision,
             updatedAt: timestamp,
           };

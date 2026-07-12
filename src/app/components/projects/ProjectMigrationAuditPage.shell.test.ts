@@ -78,6 +78,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(previewSource).toContain('data-testid="contract-document-preview"');
     expect(previewSource).toContain('<iframe');
     expect(previewSource).toContain('PDF 미리보기');
+    expect(previewSource).toContain('첨부 파일 원문을 불러올 수 없습니다.');
   });
 
   it('highlights attachment changes and previews the pending request document', () => {

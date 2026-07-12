@@ -764,7 +764,6 @@ describe('project registration draft service', () => {
     expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
       .not.toHaveProperty('attachmentRefs');
     expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs).toEqual([
-      expect.objectContaining({ documentKind: 'contract', name: 'old-contract.pdf' }),
       expect.objectContaining({ documentKind: 'contract', name: 'latest-contract.pdf' }),
     ]);
   });
