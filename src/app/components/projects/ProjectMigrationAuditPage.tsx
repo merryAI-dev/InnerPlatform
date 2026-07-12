@@ -19,6 +19,7 @@ import type {
 import { getOrgDocumentPath, getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import { isPlatformApiEnabled, reviewProjectExecutiveStatusViaBff } from '../../lib/platform-bff-client';
+import { downloadProjectRequestAttachmentViaBff } from '../../lib/project-request-attachment-client';
 import {
   type MigrationAuditConsoleStatus,
   buildMigrationAuditConsoleRecords,
@@ -30,6 +31,7 @@ import {
 import {
   buildProjectPatchFromRequestPayload,
   resolveProjectRequestKind,
+  resolveProjectRequestPayload,
 } from '../../platform/project-change-request';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
@@ -155,6 +157,7 @@ export function ProjectMigrationAuditPage({
   const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
   const [reviewComment, setReviewComment] = useState('');
   const [acting, setActing] = useState(false);
+  const [secureContractDocument, setSecureContractDocument] = useState({ key: '', url: '', error: '' });
 
   useEffect(() => {
     if (!db || !isOnline) {
@@ -256,6 +259,74 @@ export function ProjectMigrationAuditPage({
     }
     setSelectedRecordId(activeRecord.id);
   }, [activeRecord]);
+
+  const pendingContractDocument = activeRecord?.request?.status === 'PENDING'
+    ? resolveProjectRequestPayload(activeRecord.request)?.contractDocument
+    : null;
+  const pendingContractPath = String(pendingContractDocument?.path || '').trim();
+  const pendingContractDownloadUrl = String(pendingContractDocument?.downloadURL || '').trim();
+  const pendingRequestId = String(activeRecord?.request?.id || '').trim();
+  const secureContractDocumentKey = pendingRequestId && pendingContractPath
+    ? `${pendingRequestId}:${pendingContractPath}`
+    : '';
+  const secureContractDocumentUrl = secureContractDocument.key === secureContractDocumentKey
+    ? secureContractDocument.url
+    : '';
+  const privateAttachmentError = secureContractDocument.key === secureContractDocumentKey
+    ? secureContractDocument.error
+    : '';
+
+  useEffect(() => {
+    setSecureContractDocument({ key: secureContractDocumentKey, url: '', error: '' });
+    if (
+      !isPlatformApiEnabled()
+      || !authUser?.uid
+      || !pendingRequestId
+      || !pendingContractPath
+      || pendingContractDownloadUrl
+    ) return undefined;
+
+    let disposed = false;
+    let objectUrl = '';
+    void downloadProjectRequestAttachmentViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken: authUser.idToken,
+      },
+      requestId: pendingRequestId,
+      documentKind: 'contract',
+    }).then(({ blob }) => {
+      if (disposed) return;
+      objectUrl = URL.createObjectURL(blob);
+      setSecureContractDocument({ key: secureContractDocumentKey, url: objectUrl, error: '' });
+    }).catch((error) => {
+      if (disposed) return;
+      console.error('[ProjectMigrationAuditPage] private attachment download failed:', error);
+      setSecureContractDocument({
+        key: secureContractDocumentKey,
+        url: '',
+        error: '보안 원문을 불러오지 못했습니다. 권한 또는 파일 처리 상태를 확인해 주세요.',
+      });
+    });
+
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [
+    authUser?.email,
+    authUser?.idToken,
+    authUser?.role,
+    authUser?.uid,
+    orgId,
+    pendingContractDownloadUrl,
+    pendingContractPath,
+    pendingRequestId,
+    secureContractDocumentKey,
+  ]);
 
   async function handleConfirmAction() {
     if (!activeRecord || !actionMode) return;
@@ -434,6 +505,8 @@ export function ProjectMigrationAuditPage({
             <MigrationAuditDetailPanel
               record={activeRecord}
               acting={acting}
+              contractDocumentDownloadURL={secureContractDocumentUrl}
+              contractDocumentError={privateAttachmentError}
               onApprove={() => {
                 setActionMode('approve');
                 setReviewComment(activeRecord?.project.executiveReviewComment || '');

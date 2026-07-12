@@ -283,6 +283,7 @@ export async function mergeProjectAndRequestDocs({
   buildProjectPatch,
   buildRequestPatch,
   requestRefs,
+  enforceChangeRequestVersion = false,
   tenantId,
   actorId,
   now,
@@ -293,10 +294,42 @@ export async function mergeProjectAndRequestDocs({
     const snap = await tx.get(projectRef);
     if (!snap.exists) throw createHttpError(404, notFoundMessage || `Document not found: ${projectPath}`, 'not_found');
 
+    const resolvedRequestRefs = Array.isArray(requestRefs) ? requestRefs : [];
+    const requestSnaps = await Promise.all(resolvedRequestRefs.map((ref) => tx.get(ref)));
+    const existingRequestIndexes = requestSnaps.flatMap((requestSnap, index) => requestSnap.exists ? [index] : []);
+    if (enforceChangeRequestVersion && existingRequestIndexes.length > 1) {
+      throw createHttpError(409, 'Duplicate project request collections must be reconciled', 'request_collection_conflict');
+    }
+    const currentRequestIndex = existingRequestIndexes[0] ?? -1;
+    const currentRequestSnap = currentRequestIndex >= 0 ? requestSnaps[currentRequestIndex] : null;
+    const currentRequestRef = currentRequestIndex >= 0 ? resolvedRequestRefs[currentRequestIndex] : null;
+    const currentRequest = currentRequestSnap ? (currentRequestSnap.data() || {}) : null;
+
     const current = snap.data() || {};
     const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
     const nextVersion = currentVersion + 1;
-    const projectPatch = buildProjectPatch(current);
+    if (enforceChangeRequestVersion && resolvedRequestRefs.length > 0 && !currentRequest) {
+      throw createHttpError(409, 'Project request changed before approval', 'canonical_version_conflict');
+    }
+    if (enforceChangeRequestVersion && isProjectChangeRequest(currentRequest)) {
+      const baseProjectVersion = Number(currentRequest.baseProjectVersion);
+      const targetProjectVersion = Number(currentRequest.targetProjectVersion);
+      if (
+        readOptionalText(currentRequest.status) !== 'PENDING'
+        || !Number.isSafeInteger(baseProjectVersion)
+        || baseProjectVersion < 1
+        || !Number.isSafeInteger(targetProjectVersion)
+        || targetProjectVersion !== baseProjectVersion + 1
+        || targetProjectVersion !== currentVersion
+      ) {
+        throw createHttpError(
+          409,
+          `Canonical version mismatch: request ${baseProjectVersion}->${targetProjectVersion}, actual ${currentVersion}`,
+          'canonical_version_conflict',
+        );
+      }
+    }
+    const projectPatch = buildProjectPatch(current, currentRequest, nextVersion);
     const document = {
       ...current, ...projectPatch, tenantId, version: nextVersion,
       createdBy: current.createdBy || actorId, createdAt: current.createdAt || now,
@@ -305,15 +338,13 @@ export async function mergeProjectAndRequestDocs({
     const sanitizedProject = stripUndefinedDeep(document);
     tx.set(projectRef, sanitizedProject, { merge: true });
 
-    const requestPatch = buildRequestPatch?.(current) || null;
-    if (requestPatch) {
+    const requestPatch = buildRequestPatch?.(current, currentRequest, nextVersion) || null;
+    if (requestPatch && currentRequestRef) {
       const sanitizedRequestPatch = stripUndefinedDeep(requestPatch);
-      for (const ref of requestRefs) {
-        tx.set(ref, sanitizedRequestPatch, { merge: true });
-      }
+      tx.set(currentRequestRef, sanitizedRequestPatch, { merge: true });
     }
 
-    return { version: nextVersion, data: sanitizedProject };
+    return { version: nextVersion, data: sanitizedProject, request: currentRequest };
   });
 }
 
@@ -365,6 +396,38 @@ function normalizeProjectStatus(value) {
 
 function normalizeProjectPhase(value) {
   return value === 'PROSPECT' || value === 'CONFIRMED' ? value : 'CONFIRMED';
+}
+
+async function readProjectAttachmentMember({ db, tenantId, actorId }) {
+  const normalizedActorId = readOptionalText(actorId);
+  if (!normalizedActorId || normalizedActorId.includes('/')) {
+    throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+  }
+  const memberSnap = await db.doc(`orgs/${tenantId}/members/${normalizedActorId}`).get();
+  const member = memberSnap.exists ? (memberSnap.data() || {}) : null;
+  if (
+    !member
+    || readOptionalText(member.uid) !== normalizedActorId
+    || readOptionalText(member.status).toUpperCase() !== 'ACTIVE'
+  ) {
+    throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+  }
+  return member;
+}
+
+function sendPrivateProjectAttachment(res, downloaded, attachment, objectName) {
+  const buffer = Buffer.isBuffer(downloaded?.buffer)
+    ? downloaded.buffer
+    : Buffer.from(downloaded?.buffer || []);
+  const fileName = readOptionalText(attachment?.name) || objectName;
+  const contentType = readOptionalText(downloaded?.contentType);
+  res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
+    ? contentType
+    : 'application/octet-stream');
+  res.setHeader('content-length', String(buffer.byteLength));
+  res.setHeader('cache-control', 'private, no-store');
+  res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+  res.status(200).send(buffer);
 }
 
 function normalizeProjectType(value) {
@@ -1466,12 +1529,7 @@ export function mountProjectRoutes(app, {
     if (!projectId || !field) {
       throw createHttpError(400, 'Project attachment request is invalid', 'project_attachment_invalid');
     }
-    const normalizedActorId = readOptionalText(actorId);
-    if (!normalizedActorId || normalizedActorId.includes('/')) {
-      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
-    }
-    const memberSnap = await db.doc(`orgs/${tenantId}/members/${normalizedActorId}`).get();
-    const member = memberSnap.exists ? (memberSnap.data() || {}) : null;
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
     const profile = member?.portalProfile && typeof member.portalProfile === 'object'
       ? member.portalProfile
       : {};
@@ -1483,10 +1541,7 @@ export function mountProjectRoutes(app, {
       ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
     ].map(readOptionalText).filter(Boolean));
     if (
-      !member
-      || readOptionalText(member.uid) !== normalizedActorId
-      || readOptionalText(member.status).toUpperCase() !== 'ACTIVE'
-      || (!['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId))
+      !['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId)
     ) {
       throw createHttpError(403, 'Project attachment access denied', 'forbidden');
     }
@@ -1507,18 +1562,48 @@ export function mountProjectRoutes(app, {
       projectId,
       path,
     });
-    const buffer = Buffer.isBuffer(downloaded?.buffer)
-      ? downloaded.buffer
-      : Buffer.from(downloaded?.buffer || []);
-    const fileName = readOptionalText(attachment?.name) || objectName;
-    const contentType = readOptionalText(downloaded?.contentType);
-    res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
-      ? contentType
-      : 'application/octet-stream');
-    res.setHeader('content-length', String(buffer.byteLength));
-    res.setHeader('cache-control', 'private, no-store');
-    res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    res.status(200).send(buffer);
+    sendPrivateProjectAttachment(res, downloaded, attachment, objectName);
+  }));
+
+  app.get('/api/v1/project-requests/:requestId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const requestId = readOptionalText(req.params.requestId);
+    const documentKind = readOptionalText(req.params.documentKind);
+    const field = {
+      contract: 'contractDocument',
+      quote: 'quoteDocument',
+      proposal: 'proposalDocument',
+    }[documentKind];
+    if (!requestId || requestId.includes('/') || !field) {
+      throw createHttpError(400, 'Project request attachment is invalid', 'project_request_attachment_invalid');
+    }
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+    if (!['admin', 'finance'].includes(normalizeRole(member.role))) {
+      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+    }
+    const projectRequest = await readProjectRequestById(db, tenantId, requestId);
+    if (!projectRequest) throw createHttpError(404, `Project request not found: ${requestId}`, 'not_found');
+    if (readOptionalText(projectRequest.status) !== 'PENDING') {
+      throw createHttpError(409, 'Project request attachment is not pending', 'project_request_attachment_not_pending');
+    }
+    const projectId = readOptionalText(projectRequest.targetProjectId || projectRequest.approvedProjectId);
+    const payload = resolveProjectRequestPayloadForReview(projectRequest);
+    const attachment = payload?.[field];
+    const path = readOptionalText(attachment?.path);
+    const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    const objectName = projectId && path.startsWith(expectedPrefix) ? path.slice(expectedPrefix.length) : '';
+    if (!objectName || objectName.includes('/')) {
+      throw createHttpError(409, 'Project request attachment is not ready', 'project_request_attachment_not_ready');
+    }
+    if (typeof projectRequestContractStorageService?.downloadProjectRegistrationAttachment !== 'function') {
+      throw new Error('Project registration attachment storage is not configured');
+    }
+    const downloaded = await projectRequestContractStorageService.downloadProjectRegistrationAttachment({
+      tenantId,
+      projectId,
+      path,
+    });
+    sendPrivateProjectAttachment(res, downloaded, attachment, objectName);
   }));
 
   // ── POST /api/v1/projects ────────────────────────────────────────────────────
@@ -1993,12 +2078,13 @@ export function mountProjectRoutes(app, {
     const projectResult = await mergeProjectAndRequestDocs({
       db,
       projectPath,
-      buildProjectPatch: (currentProject) => {
+      buildProjectPatch: (currentProject, currentRequest) => {
+        const reviewRequest = currentRequest || request;
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
-        const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request);
-        const requestChanges = Array.isArray(request?.changedFields) ? request.changedFields : [];
-        const requestPayload = resolveProjectRequestPayloadForReview(request);
+        const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(reviewRequest);
+        const requestChanges = Array.isArray(reviewRequest?.changedFields) ? reviewRequest.changedFields : [];
+        const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
         const payloadPatch = isApprovedChangeRequest
           ? buildProjectPatchFromChangeRequestPayload(requestPayload, currentProject)
           : {};
@@ -2023,7 +2109,7 @@ export function mountProjectRoutes(app, {
           ],
         };
       },
-      buildRequestPatch: () => resolvedRequestId ? ({
+      buildRequestPatch: (_currentProject, currentRequest, nextVersion) => resolvedRequestId ? ({
         status: parsed.reviewStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
         reviewOutcome: parsed.reviewStatus,
         reviewedBy: actorId,
@@ -2033,12 +2119,14 @@ export function mountProjectRoutes(app, {
         rejectedReason: parsed.reviewStatus === 'APPROVED' ? null : (readOptionalText(parsed.reviewComment) || null),
         approvedProjectId: projectId,
         targetProjectId: projectId,
-        ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request) ? {
-          approvedSnapshot: resolveProjectRequestPayloadForReview(request),
+        ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(currentRequest || request) ? {
+          approvedSnapshot: resolveProjectRequestPayloadForReview(currentRequest || request),
+          approvedProjectVersion: nextVersion,
         } : {}),
         updatedAt: now,
       }) : null,
       requestRefs: resolvedRequestId ? refs : [],
+      enforceChangeRequestVersion: parsed.reviewStatus === 'APPROVED',
       tenantId,
       actorId,
       now,
@@ -2053,7 +2141,7 @@ export function mountProjectRoutes(app, {
       try {
         await projectRegistrationSlackService.notifyMessage(buildProjectExecutiveReviewSlackPayload({
           project: projectResult.data,
-          projectRequest: request,
+          projectRequest: projectResult.request || request,
           reviewStatus: parsed.reviewStatus,
           reviewComment: parsed.reviewComment,
           reviewerName,

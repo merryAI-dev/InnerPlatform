@@ -755,6 +755,7 @@ export interface ProjectRequest {
   baseProjectVersion?: number;
   requestVersion?: number;
   targetProjectVersion?: number;
+  approvedProjectVersion?: number;
   beforeSnapshot?: ProjectRequestPayload | null;
   proposedSnapshot?: ProjectRequestPayload | null;
   approvedSnapshot?: ProjectRequestPayload | null;

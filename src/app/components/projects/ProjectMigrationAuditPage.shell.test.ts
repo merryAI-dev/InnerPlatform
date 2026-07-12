@@ -91,6 +91,18 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('requestPayload?.contractDocument || record.project.contractDocument || null');
   });
 
+  it('loads private pending request attachments through the authenticated BFF', () => {
+    expect(pageSource).toContain('downloadProjectRequestAttachmentViaBff');
+    expect(pageSource).toContain('URL.createObjectURL');
+    expect(pageSource).toContain('URL.revokeObjectURL');
+    expect(pageSource).toContain('secureContractDocumentUrl');
+    expect(pageSource).toContain('secureContractDocumentKey');
+    expect(pageSource).toContain('privateAttachmentError');
+    expect(detailSource).toContain('contractDocumentDownloadURL');
+    expect(detailSource).toContain('contractDocumentError');
+    expect(detailSource).toContain('downloadURL: contractDocumentDownloadURL || contractDocument.downloadURL');
+  });
+
   it('keeps CIC registration review read-only while improving scan hierarchy', () => {
     expect(detailSource).toContain('ReviewSection');
     expect(detailSource).toContain('ReviewFactGrid');
