@@ -12,6 +12,11 @@ describe('PortalProjectEdit private draft boundary', () => {
     expect(source).toContain('<EditLeaseDialogs');
   });
 
+  it('reopens the owner draft when the same tab refreshes with an active lease', () => {
+    expect(source).toContain('const status = await lease.checkStatus()');
+    expect(source).toContain('draftClient.open(status.ownership)');
+  });
+
   it('does not write project drafts, requests, or canonical projects through the browser Firestore SDK', () => {
     expect(source).not.toContain('projectRequestDrafts');
     expect(source).not.toContain('setDoc(');

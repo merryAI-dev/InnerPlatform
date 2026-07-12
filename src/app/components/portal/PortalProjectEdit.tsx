@@ -151,8 +151,23 @@ function ProjectInfoEditor({
   const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`;
 
   useEffect(() => {
-    void lease.checkStatus();
-  }, [lease.checkStatus]);
+    let cancelled = false;
+    void (async () => {
+      const status = await lease.checkStatus();
+      if (!status.canEdit || !status.ownership) return;
+      try {
+        const opened = await draftClient.open(status.ownership);
+        if (cancelled) return;
+        revisionRef.current = opened.draft.draftRevision;
+        setRecord(opened.draft);
+      } catch (error) {
+        if (cancelled) return;
+        await lease.checkStatus();
+        toast.error(error instanceof Error ? error.message : '수정 임시저장을 다시 열지 못했습니다.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draftClient, lease.checkStatus]);
 
   const enqueueMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
     const run = mutationQueueRef.current.then(operation, operation);
