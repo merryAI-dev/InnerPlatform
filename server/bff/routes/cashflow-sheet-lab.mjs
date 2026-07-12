@@ -36,7 +36,11 @@ function readEditSession(req) {
   if (!sessionId || !leaseId || !Number.isSafeInteger(fence)) {
     throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
   }
-  return { sessionId, leaseId, fence };
+  const finalizeText = readOptionalText(req.header('x-edit-finalize'));
+  if (finalizeText && finalizeText !== 'true') {
+    throw createHttpError(400, 'x-edit-finalize must be true when present.', 'cashflow_edit_lease_request_invalid');
+  }
+  return { sessionId, leaseId, fence, ...(finalizeText === 'true' ? { finalize: true } : {}) };
 }
 
 function javaCashflowSnapshot(result = {}) {

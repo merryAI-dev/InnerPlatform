@@ -390,6 +390,7 @@ describe('cashflow sheet lab route', () => {
         'x-edit-session-id': 'session-a',
         'x-edit-lease-id': 'lease-a',
         'x-edit-fence': '7',
+        'x-edit-finalize': 'true',
       })
       .send({ idempotencyKey: 'apply-jvm-001' })
       .expect(200);
@@ -397,7 +398,7 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'project-a',
       idempotencyKey: 'apply-jvm-001',
-      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
       lines: expect.arrayContaining([
         expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),
         expect.objectContaining({ mode: 'actual', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),

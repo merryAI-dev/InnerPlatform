@@ -539,7 +539,8 @@ public class WeeklyExpenseController {
         String dataProjectId,
         String sessionId,
         String leaseId,
-        String fenceValue
+        String fenceValue,
+        String finalizeValue
     ) {
         long fence = 0;
         if (fenceValue != null && !fenceValue.isBlank()) {
@@ -556,7 +557,11 @@ public class WeeklyExpenseController {
                 throw new IllegalArgumentException("x-edit-fence must be a positive integer.");
             }
         }
-        return new CashflowEditSession(dataProjectId, sessionId, leaseId, fence);
+        String normalizedFinalize = finalizeValue == null ? "" : finalizeValue.trim();
+        if (!normalizedFinalize.isEmpty() && !"true".equals(normalizedFinalize)) {
+            throw new IllegalArgumentException("x-edit-finalize must be true when present.");
+        }
+        return new CashflowEditSession(dataProjectId, sessionId, leaseId, fence, "true".equals(normalizedFinalize));
     }
 
     private CashflowEditSession editSession(HttpServletRequest request) {
@@ -564,7 +569,8 @@ public class WeeklyExpenseController {
             request.getHeader("x-data-project-id"),
             request.getHeader("x-edit-session-id"),
             request.getHeader("x-edit-lease-id"),
-            request.getHeader("x-edit-fence")
+            request.getHeader("x-edit-fence"),
+            request.getHeader("x-edit-finalize")
         );
     }
 

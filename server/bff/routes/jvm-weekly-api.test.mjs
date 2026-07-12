@@ -124,6 +124,53 @@ describe('JVM weekly API BFF proxy', () => {
         'x-data-project-id': 'stage-data-project',
         ...editLeaseHeaders,
       });
+      expect(calls[0].init.headers['x-edit-finalize']).toBeUndefined();
+    },
+  );
+
+  it('forwards only the canonical final-save signal to the JVM', async () => {
+    const fetchImpl = vi.fn(async (_url, init) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      init,
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'admin-1', actorRole: 'admin',
+    }, { env: stageEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({
+        'idempotency-key': 'final-projection-1',
+        ...editLeaseHeaders,
+        'x-edit-finalize': 'true',
+      })
+      .send({ lines: [] })
+      .expect(200);
+
+    expect(fetchImpl.mock.calls[0][1].headers['x-edit-finalize']).toBe('true');
+  });
+
+  it.each(['1', 'TRUE', 'yes', 'false'])(
+    'rejects ambiguous edit finalization value %s before the JVM',
+    async (finalize) => {
+      const fetchImpl = vi.fn();
+      const { app } = createApp(fetchImpl, createIdempotencyService(), {
+        actorId: 'admin-1', actorRole: 'admin',
+      }, { env: stageEnv });
+
+      await request(app)
+        .post('/api/v1/cashflow/project-a/projection')
+        .set({
+          'idempotency-key': `bad-finalize-${finalize}`,
+          ...editLeaseHeaders,
+          'x-edit-finalize': finalize,
+        })
+        .send({ lines: [] })
+        .expect(400);
+
+      expect(fetchImpl).not.toHaveBeenCalled();
     },
   );
 
@@ -652,7 +699,45 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
-  it('proxies weekly close as an admin-only Java command', async () => {
+  it('forwards a compound weekly sheet snapshot and FINAL_SAVE header to Java submit', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, commandName: 'weeklyExpense.submitWeek', state: 'submitted' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1',
+      actorRole: 'pm',
+      actorEmail: 'pm@example.com',
+    }, { env: stageEnv });
+    const weeklySheet = {
+      sheetKey: 'default',
+      expectedSheetVersion: 3,
+      sheetName: '기본 탭',
+      rows: [{ rowIndex: 0, entryKind: 'manual', cells: [] }],
+    };
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/submit')
+      .set({ 'idempotency-key': 'idem-submit-compound-1', ...editLeaseHeaders, 'x-edit-finalize': 'true' })
+      .send({ yearMonth: '2026-06', weekNo: 1, weeklySheet })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({ 'x-edit-finalize': 'true' });
+    expect(JSON.parse(calls[0].init.body)).toEqual({
+      idempotencyKey: 'idem-submit-compound-1',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      weeklySheet,
+    });
+  });
+
+  it('proxies compound weekly close as an admin-only Java final command', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {
       calls.push({ url, init });
@@ -670,12 +755,13 @@ describe('JVM weekly API BFF proxy', () => {
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/close')
-      .set({ 'idempotency-key': 'idem-close-1', ...editLeaseHeaders })
+      .set({ 'idempotency-key': 'idem-close-1', ...editLeaseHeaders, 'x-edit-finalize': 'true' })
       .send({
         tenantId: 'spoofed-tenant',
         actor: { id: 'spoofed-admin', role: 'admin' },
         yearMonth: '2026-06',
         weekNo: 1,
+        projectionLines: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: 'SALES_IN', amount: 2500 }],
       })
       .expect(200);
 
@@ -687,11 +773,13 @@ describe('JVM weekly API BFF proxy', () => {
       'x-actor-id': 'admin-1',
       'x-actor-role': 'admin',
       'x-actor-email': 'admin@example.com',
+      'x-edit-finalize': 'true',
     });
     expect(JSON.parse(calls[0].init.body)).toEqual({
       idempotencyKey: 'idem-close-1',
       yearMonth: '2026-06',
       weekNo: 1,
+      projectionLines: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: 'SALES_IN', amount: 2500 }],
     });
   });
 

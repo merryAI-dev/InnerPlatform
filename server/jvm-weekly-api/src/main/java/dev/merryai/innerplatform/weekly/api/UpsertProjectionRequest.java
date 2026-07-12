@@ -13,7 +13,7 @@ import java.util.List;
 
 public record UpsertProjectionRequest(
     @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH) String idempotencyKey,
-    @Valid @NotNull @Size(min = 1, max = WeeklyExpenseRequestLimits.MAX_ROW_OPERATION_COUNT) List<ProjectionLinePatch> lines
+    @Valid @NotNull @Size(max = WeeklyExpenseRequestLimits.MAX_ROW_OPERATION_COUNT) List<ProjectionLinePatch> lines
 ) {
     public record ProjectionLinePatch(
         @NotBlank

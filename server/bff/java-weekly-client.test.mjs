@@ -35,7 +35,7 @@ describe('Java weekly cashflow client', () => {
       projectId: 'project-a',
       idempotencyKey: 'apply-1',
       sourceSheetKey: 'caller-controlled',
-      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
       lines: [{ mode: 'actual', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', amount: 1000 }],
     });
 
@@ -45,6 +45,7 @@ describe('Java weekly cashflow client', () => {
       'x-edit-session-id': 'session-a',
       'x-edit-lease-id': 'lease-a',
       'x-edit-fence': '7',
+      'x-edit-finalize': 'true',
     });
     expect(JSON.parse(init.body)).toEqual({
       idempotencyKey: 'apply-1',

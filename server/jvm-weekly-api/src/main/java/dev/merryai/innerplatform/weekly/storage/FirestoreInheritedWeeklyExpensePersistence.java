@@ -123,7 +123,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 transactionDocumentCache.set(new LinkedHashMap<>());
                 currentCashflowLeaseScope.remove();
                 try {
-                    return call(action);
+                    T result = call(action);
+                    releaseCashflowLeaseAfterSuccessfulFinalCommand();
+                    return result;
                 } finally {
                     currentCashflowLeaseScope.remove();
                     currentTransaction.remove();
@@ -192,8 +194,45 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || session.fence() != longValue(lease.get("fence"), 0)) {
             throw leaseError(423, "edit_lease_held", "The cashflow edit lease is held by another session.");
         }
-        currentCashflowLeaseScope.set(new CashflowLeaseScope(actor.tenantId(), projectId));
+        currentCashflowLeaseScope.set(new CashflowLeaseScope(
+            actor.tenantId(),
+            projectId,
+            actor.id(),
+            session.sessionId(),
+            session.leaseId(),
+            session.fence(),
+            session.finalizeLease()
+        ));
         return storedRole;
+    }
+
+    private void releaseCashflowLeaseAfterSuccessfulFinalCommand() {
+        CashflowLeaseScope scope = currentCashflowLeaseScope.get();
+        if (scope == null || !scope.finalizeLease()) return;
+        DocumentReference leaseRef = db.document(cashflowLeasePath(scope.tenantId(), scope.projectId()));
+        Map<String, Object> lease = cachedDocumentIfPresent(leaseRef)
+            .orElseThrow(() -> leaseError(
+                503,
+                "cashflow_edit_lease_cache_missing",
+                "The validated cashflow edit lease is unavailable for atomic finalization."
+            ));
+        if (!"ACTIVE".equals(text(lease.get("state"), "").toUpperCase(Locale.ROOT))
+            || !scope.tenantId().equals(text(lease.get("tenantId"), ""))
+            || !"cashflow".equals(text(lease.get("resourceType"), ""))
+            || !scope.projectId().equals(text(lease.get("resourceId"), ""))
+            || !scope.actorId().equals(text(lease.get("holderUid"), ""))
+            || !scope.sessionId().equals(text(lease.get("sessionId"), ""))
+            || !scope.leaseId().equals(text(lease.get("leaseId"), ""))
+            || scope.fence() != longValue(lease.get("fence"), 0)) {
+            throw leaseError(423, "edit_lease_held", "The cashflow edit lease is held by another session.");
+        }
+        String timestamp = clock.instant().toString();
+        set(leaseRef, Map.of(
+            "state", "RELEASED",
+            "releasedAt", timestamp,
+            "releaseReason", "FINAL_SAVE",
+            "updatedAt", timestamp
+        ));
     }
 
     @Override
@@ -1189,6 +1228,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private record WeekDocParts(String yearMonth, int weekNo) {
     }
 
-    private record CashflowLeaseScope(String tenantId, String projectId) {
+    private record CashflowLeaseScope(
+        String tenantId,
+        String projectId,
+        String actorId,
+        String sessionId,
+        String leaseId,
+        long fence,
+        boolean finalizeLease
+    ) {
     }
 }

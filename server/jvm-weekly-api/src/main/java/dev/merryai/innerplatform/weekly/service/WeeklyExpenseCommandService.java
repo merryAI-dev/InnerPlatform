@@ -353,7 +353,7 @@ public class WeeklyExpenseCommandService {
         ImportBankStatementBatchRequest request
     ) {
         actor = requireCashflowWriteLease(BANK_IMPORT_BATCH_COMMAND, actor, projectId, editSession);
-        assertAtomicWriteBudget(request.lines().size(), 3, "Bank statement import");
+        assertAtomicWriteBudget(request.lines().size(), 3 + finalizeWriteCount(editSession), "Bank statement import");
         String requestHash = hashJson(request);
         Optional<ImportBankStatementBatchResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -617,7 +617,10 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         UpsertProjectionRequest request
     ) {
-        assertAtomicWriteBudget(request.lines().size(), 2, "Projection command");
+        if (request.lines().isEmpty() && (editSession == null || !editSession.finalizeLease())) {
+            throw new IllegalArgumentException("Empty projection lines are allowed only for a final save.");
+        }
+        assertAtomicWriteBudget(request.lines().size(), 2 + finalizeWriteCount(editSession), "Projection command");
         TrustedActorContext writer = requireCashflowWriteLease(UPSERT_PROJECTION_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<UpsertProjectionResponse> replay = readIdempotentResponse(
@@ -630,50 +633,12 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
-        for (UpsertProjectionRequest.ProjectionLinePatch line : request.lines()) {
-            String cashflowLine = requireKnownCashflowLine(line.cashflowLine());
-            String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
-            ProjectionLineAccumulator accumulator = projectionPatches.get(key);
-            BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
-            if (accumulator == null) {
-                projectionPatches.put(key, new ProjectionLineAccumulator(line.yearMonth(), line.weekNo(), cashflowLine, amount));
-            } else {
-                accumulator.add(amount);
-            }
-        }
-
-        List<WeeklyExpenseProjectionEntity> projectionEntities = new ArrayList<>();
-        for (ProjectionLineAccumulator line : projectionPatches.values()) {
-            WeeklyExpenseProjectionEntity projectionEntity = persistence
-                .findProjectionLine(
-                    writer.tenantId(),
-                    projectId,
-                    line.yearMonth,
-                    line.weekNo,
-                    line.cashflowLine
-                )
-                .orElseGet(() -> new WeeklyExpenseProjectionEntity(
-                    writer.tenantId(),
-                    projectId,
-                    line.yearMonth,
-                    line.weekNo,
-                    line.cashflowLine
-                ));
-            projectionEntity.setAmount(line.amount);
-            projectionEntities.add(projectionEntity);
-        }
-
-        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
-        for (WeeklyExpenseProjectionEntity projectionEntity : projectionEntities) {
-            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
-            projection.add(new CashflowSnapshotResponse.ProjectionLine(
-                saved.getYearMonth(),
-                saved.getWeekNo(),
-                saved.getCashflowLine(),
-                saved.getAmount()
-            ));
-        }
+        List<WeeklyExpenseProjectionEntity> projectionEntities = prepareProjectionEntities(
+            writer,
+            projectId,
+            request.lines()
+        );
+        List<CashflowSnapshotResponse.ProjectionLine> projection = saveProjectionEntities(projectionEntities);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -712,7 +677,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CashflowSheetLabApplyRequest request
     ) {
-        assertAtomicWriteBudget(request.lines().size(), 2, "Cashflow sheet apply");
+        assertAtomicWriteBudget(request.lines().size(), 2 + finalizeWriteCount(editSession), "Cashflow sheet apply");
         TrustedActorContext writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CashflowSheetLabApplyResponse> replay = readIdempotentResponse(
@@ -783,7 +748,7 @@ public class WeeklyExpenseCommandService {
         );
         assertAtomicWriteBudget(
             sheetLabProjectionEntities.size() + actualWriteCount,
-            2,
+            2 + finalizeWriteCount(editSession),
             "Cashflow sheet apply"
         );
         List<WeeklyExpenseActualEntity> savedActual = persistence.replaceActualLines(
@@ -866,6 +831,16 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
+        SubmitWeekRequest.WeeklySheetSnapshot weeklySheet = request.weeklySheet();
+        WeeklyExpenseSheetEntity sheet = weeklySheet == null
+            ? null
+            : loadSheet(
+                tenantId,
+                projectId,
+                weeklySheet.sheetKey(),
+                weeklySheet.sheetName(),
+                weeklySheet.expectedSheetVersion()
+            );
         WeeklyExpenseWeeklyStatusEntity status = persistence
             .findWeeklyStatus(
                 tenantId,
@@ -879,6 +854,33 @@ public class WeeklyExpenseCommandService {
                 request.yearMonth(),
                 request.weekNo()
             ));
+        List<CellValidationIssue> issues = List.of();
+        List<SaveDraftResponse.ActualDelta> actualDelta = List.of();
+        int actualWriteCount = 0;
+        if (sheet != null) {
+            replaceRows(sheet, weeklySheet.rows());
+            issues = spreadsheetService.validateAndRecalculateRows(sheet);
+            actualDelta = calculateActuals(sheet);
+            actualWriteCount = persistence.countCashflowActualReplacementWrites(
+                tenantId,
+                projectId,
+                weeklySheet.sheetKey(),
+                actualDelta.stream()
+                    .map(delta -> projectId + "-" + delta.yearMonth() + "-w" + delta.weekNo())
+                    .distinct()
+                    .toList()
+            );
+        }
+        assertAtomicWriteBudget(
+            actualWriteCount,
+            (sheet == null ? 3 : 4) + finalizeWriteCount(editSession),
+            "Weekly submit"
+        );
+        WeeklyExpenseSheetEntity savedSheet = null;
+        if (sheet != null) {
+            persistence.replaceActuals(sheet, actualDelta);
+            savedSheet = persistence.saveSheet(sheet);
+        }
         try {
             status.submit(actor.id());
         } catch (IllegalStateException error) {
@@ -890,6 +892,13 @@ public class WeeklyExpenseCommandService {
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
+        if (savedSheet != null) {
+            metadata.put("sheetKey", savedSheet.getSheetKey());
+            metadata.put("sheetVersion", savedSheet.getSheetVersion());
+            metadata.put("savedRowCount", savedSheet.getRows().size());
+            metadata.put("validationIssueCount", issues.size());
+            metadata.put("actualDeltaCount", actualDelta.size());
+        }
         putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
@@ -931,6 +940,12 @@ public class WeeklyExpenseCommandService {
         CloseWeekRequest request
     ) {
         actor = requireCashflowWriteLease(CLOSE_WEEK_COMMAND, actor, projectId, editSession);
+        requireProjectionLinesMatchWeek(request);
+        assertAtomicWriteBudget(
+            request.projectionLines().size(),
+            3 + finalizeWriteCount(editSession),
+            "Weekly close"
+        );
         String requestHash = hashJson(request);
         Optional<CloseWeekResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -942,6 +957,11 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
+        List<WeeklyExpenseProjectionEntity> projectionEntities = prepareProjectionEntities(
+            actor,
+            projectId,
+            request.projectionLines()
+        );
         WeeklyExpenseWeeklyStatusEntity status = persistence
             .findWeeklyStatus(
                 actor.tenantId(),
@@ -950,6 +970,7 @@ public class WeeklyExpenseCommandService {
                 request.weekNo()
             )
             .orElseThrow(() -> new WeeklyExpenseConflictException("Week must be submitted before close."));
+        saveProjectionEntities(projectionEntities);
         try {
             status.close(actor.id());
         } catch (IllegalStateException error) {
@@ -961,6 +982,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("yearMonth", request.yearMonth());
         metadata.put("weekNo", request.weekNo());
         metadata.put("state", saved.getState());
+        metadata.put("projectionLineCount", projectionEntities.size());
         putActorMetadata(metadata, actor);
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
@@ -1391,6 +1413,71 @@ public class WeeklyExpenseCommandService {
         return sheet;
     }
 
+    private List<WeeklyExpenseProjectionEntity> prepareProjectionEntities(
+        TrustedActorContext actor,
+        String projectId,
+        List<UpsertProjectionRequest.ProjectionLinePatch> lines
+    ) {
+        Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
+        for (UpsertProjectionRequest.ProjectionLinePatch line : lines) {
+            String cashflowLine = requireKnownCashflowLine(line.cashflowLine());
+            String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
+            ProjectionLineAccumulator accumulator = projectionPatches.get(key);
+            BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
+            if (accumulator == null) {
+                projectionPatches.put(key, new ProjectionLineAccumulator(
+                    line.yearMonth(), line.weekNo(), cashflowLine, amount
+                ));
+            } else {
+                accumulator.add(amount);
+            }
+        }
+
+        List<WeeklyExpenseProjectionEntity> entities = new ArrayList<>();
+        for (ProjectionLineAccumulator line : projectionPatches.values()) {
+            WeeklyExpenseProjectionEntity entity = persistence.findProjectionLine(
+                actor.tenantId(),
+                projectId,
+                line.yearMonth,
+                line.weekNo,
+                line.cashflowLine
+            ).orElseGet(() -> new WeeklyExpenseProjectionEntity(
+                actor.tenantId(),
+                projectId,
+                line.yearMonth,
+                line.weekNo,
+                line.cashflowLine
+            ));
+            entity.setAmount(line.amount);
+            entities.add(entity);
+        }
+        return entities;
+    }
+
+    private List<CashflowSnapshotResponse.ProjectionLine> saveProjectionEntities(
+        List<WeeklyExpenseProjectionEntity> entities
+    ) {
+        List<CashflowSnapshotResponse.ProjectionLine> savedLines = new ArrayList<>();
+        for (WeeklyExpenseProjectionEntity entity : entities) {
+            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(entity);
+            savedLines.add(new CashflowSnapshotResponse.ProjectionLine(
+                saved.getYearMonth(),
+                saved.getWeekNo(),
+                saved.getCashflowLine(),
+                saved.getAmount()
+            ));
+        }
+        return savedLines;
+    }
+
+    private void requireProjectionLinesMatchWeek(CloseWeekRequest request) {
+        for (UpsertProjectionRequest.ProjectionLinePatch line : request.projectionLines()) {
+            if (!request.yearMonth().equals(line.yearMonth()) || request.weekNo() != line.weekNo()) {
+                throw new IllegalArgumentException("Close projection lines must match the week being closed.");
+            }
+        }
+    }
+
     private WeeklyExpenseSheetEntity loadExistingSheet(
         String tenantId,
         String projectId,
@@ -1765,6 +1852,10 @@ public class WeeklyExpenseCommandService {
     }
 
     private List<SaveDraftResponse.ActualDelta> persistActuals(WeeklyExpenseSheetEntity sheet) {
+        return persistence.replaceActuals(sheet, calculateActuals(sheet));
+    }
+
+    private List<SaveDraftResponse.ActualDelta> calculateActuals(WeeklyExpenseSheetEntity sheet) {
         Map<String, SaveDraftResponse.ActualDelta> deltas = new LinkedHashMap<>();
         for (WeeklyExpenseRowEntity row : sheet.getRows()) {
             if (row.getValidationErrorCount() > 0 || row.getReviewRequiredCount() > 0) {
@@ -1781,7 +1872,7 @@ public class WeeklyExpenseCommandService {
             deltas.put(key, new SaveDraftResponse.ActualDelta(week.yearMonth, week.weekNo, cashflowLine, nextAmount));
         }
 
-        return persistence.replaceActuals(sheet, new ArrayList<>(deltas.values()));
+        return new ArrayList<>(deltas.values());
     }
 
     private WeekKey parseWeek(WeeklyExpenseRowEntity row) {
@@ -2207,6 +2298,10 @@ public class WeeklyExpenseCommandService {
         if (expectedWriteCount > WeeklyExpenseRequestLimits.FIRESTORE_ATOMIC_WRITE_LIMIT) {
             throw new WeeklyExpenseAtomicWriteLimitException(command, expectedWriteCount);
         }
+    }
+
+    private int finalizeWriteCount(CashflowEditSession editSession) {
+        return editSession != null && editSession.finalizeLease() ? 1 : 0;
     }
 
     private String hashJson(Object request) {

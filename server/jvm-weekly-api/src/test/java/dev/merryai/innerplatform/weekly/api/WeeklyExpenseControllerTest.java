@@ -12,6 +12,7 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
 import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,7 +30,10 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -702,6 +706,74 @@ class WeeklyExpenseControllerTest {
             .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.DIRECT_COST_OUT").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.weeks[0].weekOut").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.monthTotals.net").value(-3000000));
+    }
+
+    @Test
+    void emptyProjectionFinalizesWithoutCanonicalProjectionRows() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "projection-final-no-change-controller",
+              "lines": []
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-final-no-change/projection"),
+                "tenant-final-no-change",
+                "pm-final-no-change",
+                "pm"
+            )
+                .header("x-edit-finalize", "true")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.commandName").value("weeklyExpense.projection.upsert"))
+            .andExpect(jsonPath("$.savedLineCount").value(0))
+            .andExpect(jsonPath("$.projection").isEmpty());
+
+        assertThat(projectionRepository.findByTenantIdAndProjectId(
+            "tenant-final-no-change",
+            "project-final-no-change"
+        )).isEmpty();
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(
+            "tenant-final-no-change",
+            "project-final-no-change"
+        )).hasSize(1);
+        assertThat(idempotencyRepository.findByTenantIdAndProjectIdAndCommandNameAndIdempotencyKey(
+            "tenant-final-no-change",
+            "project-final-no-change",
+            "weeklyExpense.projection.upsert",
+            "projection-final-no-change-controller"
+        )).isPresent();
+    }
+
+    @Test
+    void emptyProjectionWithoutFinalizationIsRejected() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "projection-empty-non-final-controller",
+              "lines": []
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-empty-non-final/projection"),
+                "tenant-empty-non-final",
+                "pm-empty-non-final",
+                "pm"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest());
+
+        assertThat(projectionRepository.findByTenantIdAndProjectId(
+            "tenant-empty-non-final",
+            "project-empty-non-final"
+        )).isEmpty();
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(
+            "tenant-empty-non-final",
+            "project-empty-non-final"
+        )).isEmpty();
     }
 
     @Test
@@ -1399,6 +1471,61 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"))
             .andExpect(jsonPath("$.message").value("x-edit-fence must be a positive integer."));
+    }
+
+    @Test
+    void projectionWriteParsesOnlyCanonicalFinalizationHeader() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "projection-finalize-header",
+              "lines": [
+                {"yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "SALES_IN", "amount": 1000}
+              ]
+            }
+            """;
+        clearInvocations(weeklyExpensePersistence);
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-finalize-header/projection"), "tenant-finalize-header", "finance-1", "finance")
+                .header("x-edit-finalize", "true")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<CashflowEditSession> session = ArgumentCaptor.forClass(CashflowEditSession.class);
+        verify(weeklyExpensePersistence).requireCashflowWriteLease(any(), eq("project-finalize-header"), session.capture());
+        assertThat(session.getValue().finalizeLease()).isTrue();
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-finalize-header-invalid/projection"), "tenant-finalize-header", "finance-1", "finance")
+                .header("x-edit-finalize", "yes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("projection-finalize-header", "projection-finalize-header-invalid")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("x-edit-finalize must be true when present."));
+    }
+
+    @Test
+    void finalProjectionCountsTheAtomicLeaseReleaseWrite() throws Exception {
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int index = 0; index < 498; index += 1) {
+            lines.add(Map.of(
+                "yearMonth", "2026-06",
+                "weekNo", 1,
+                "cashflowLine", "SALES_IN",
+                "amount", index + 1
+            ));
+        }
+        String body = objectMapper.writeValueAsString(Map.of(
+            "idempotencyKey", "projection-final-atomic-budget",
+            "lines", lines
+        ));
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-final-budget/projection"), "tenant-projection-final-budget", "finance-1", "finance")
+                .header("x-edit-finalize", "true")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.code").value("atomic_write_limit_exceeded"))
+            .andExpect(jsonPath("$.expectedWriteCount").value(501));
     }
 
     @Test

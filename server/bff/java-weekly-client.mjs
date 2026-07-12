@@ -113,6 +113,7 @@ export async function buildJavaWeeklyTrustedHeaders({
     headers['x-edit-session-id'] = readOptionalText(editSession.sessionId);
     headers['x-edit-lease-id'] = readOptionalText(editSession.leaseId);
     headers['x-edit-fence'] = String(editSession.fence);
+    if (editSession.finalize === true) headers['x-edit-finalize'] = 'true';
   }
   const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience);
   if (identityToken) {
@@ -223,7 +224,7 @@ export function createJavaWeeklyClient({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/apply`,
-      editSession: { sessionId, leaseId, fence },
+      editSession: { sessionId, leaseId, fence, finalize: editSession?.finalize === true },
       dataProjectId: bffDataProjectId,
       body: {
         idempotencyKey,
