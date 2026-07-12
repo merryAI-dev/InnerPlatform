@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createIdempotencyService } from '../idempotency.mjs';
 import { buildActiveEditLeaseDocument, resolveEditLeaseDocumentId } from '../edit-lease.mjs';
 import { loadRbacPolicy } from '../rbac-policy.mjs';
-import { createProjectInfoDraftService } from './project-info-drafts.mjs';
+import {
+  createProjectInfoDraftService,
+  createProjectInfoSubmittedOutboxHandler,
+} from './project-info-drafts.mjs';
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -140,6 +143,54 @@ async function openedDraft(h, key = 'open-a') {
 }
 
 describe('project information private drafts', () => {
+  it('skips a delayed attachment event after a newer request replaced it', async () => {
+    const requestPath = 'orgs/tenant-a/project_requests/change-project-a';
+    const db = createDb({
+      [requestPath]: {
+        targetProjectId: 'project-a',
+        requestVersion: 2,
+        targetProjectVersion: 5,
+        submittedOutboxId: 'outbox-new',
+        payload: { contractDocument: { path: 'new-contract.pdf' } },
+        proposedSnapshot: { contractDocument: { path: 'new-contract.pdf' } },
+      },
+      'outbox/outbox-old': { status: 'PROCESSING', claimToken: 'claim-old' },
+    });
+    const relocateDraftAttachments = vi.fn(async () => [{
+      documentKind: 'contract',
+      path: 'orgs/tenant-a/project-registration-documents/project-a/old-contract.pdf',
+      name: 'old-contract.pdf',
+      size: 3,
+      contentType: 'application/pdf',
+    }]);
+    const handler = createProjectInfoSubmittedOutboxHandler({
+      db,
+      draftStorageService: { relocateDraftAttachments },
+      now: () => '2026-07-12T00:05:00.000Z',
+    });
+
+    await handler({
+      id: 'outbox-old',
+      claimToken: 'claim-old',
+      tenantId: 'tenant-a',
+      payload: {
+        projectId: 'project-a',
+        projectRequestId: 'change-project-a',
+        draftId: 'draft-old',
+        requestVersion: 1,
+        targetProjectVersion: 4,
+        attachmentRefs: [{ documentKind: 'contract', path: 'private-old.pdf' }],
+      },
+    });
+
+    expect(relocateDraftAttachments).not.toHaveBeenCalled();
+    expect(db.documents.get(requestPath)).toMatchObject({
+      submittedOutboxId: 'outbox-new',
+      payload: { contractDocument: { path: 'new-contract.pdf' } },
+      proposedSnapshot: { contractDocument: { path: 'new-contract.pdf' } },
+    });
+  });
+
   it('opens an owner-only draft from canonical data and hides it from admins', async () => {
     const h = harness();
     h.db.documents.set('orgs/tenant-a/members/actor-a', {
@@ -172,7 +223,7 @@ describe('project information private drafts', () => {
 
     expect(saved.body.draft).toMatchObject({ draftRevision: 1, payload: { name: 'Private changed name' } });
     expect(h.db.documents.get('orgs/tenant-a/projects/project-a').name).toBe('Project A');
-    expect(h.db.documents.has('orgs/tenant-a/projectRequests/change-project-a')).toBe(false);
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
     await expect(h.service.update({
       ...h.base,
       idempotencyKey: 'save-stale',
@@ -200,7 +251,7 @@ describe('project information private drafts', () => {
     const replay = await h.service.submit(submitInput);
 
     const project = h.db.documents.get('orgs/tenant-a/projects/project-a');
-    const request = h.db.documents.get('orgs/tenant-a/projectRequests/change-project-a');
+    const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
     const draft = [...h.db.documents.entries()].find(([path]) => path.includes('/privateEditDrafts/'))[1];
     const storedLease = h.db.documents.get(`orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-info', 'project-a')}`);
     expect(submitted.body).toMatchObject({
@@ -211,14 +262,19 @@ describe('project information private drafts', () => {
     expect(project).toMatchObject({ name: 'Project A', version: 4, executiveReviewStatus: 'PENDING' });
     expect(request).toMatchObject({
       requestKind: 'CHANGE', status: 'PENDING', baseProjectVersion: 3,
-      targetProjectVersion: 4, proposedSnapshot: { name: 'Submitted name' },
+      targetProjectVersion: 4, requestVersion: 1, submittedOutboxId: 'outbox-a',
+      proposedSnapshot: { name: 'Submitted name' },
     });
+    expect(h.db.documents.has('orgs/tenant-a/projectRequests/change-project-a')).toBe(false);
     expect(request.proposedSnapshot).not.toHaveProperty('browserOnlyField');
     expect(draft).toMatchObject({ status: 'SUBMITTED', draftRevision: 2, submittedProjectRequestId: 'change-project-a' });
     expect(draft).not.toHaveProperty('payload');
     expect(draft).not.toHaveProperty('attachmentRefs');
     expect(storedLease).toMatchObject({ state: 'RELEASED', releaseReason: 'FINAL_SUBMIT' });
-    expect(h.db.documents.get('outbox/outbox-a')).toMatchObject({ eventType: 'project.info.submitted' });
+    expect(h.db.documents.get('outbox/outbox-a')).toMatchObject({
+      eventType: 'project.info.submitted',
+      payload: { requestVersion: 1, targetProjectVersion: 4 },
+    });
     expect([...h.db.documents.keys()].some((path) => path.includes('/idempotency_keys/'))).toBe(true);
     expect(h.auditChainService.appendManyInTransaction).toHaveBeenCalled();
     expect(replay).toEqual({ ...submitted, replayed: true });
@@ -238,7 +294,7 @@ describe('project information private drafts', () => {
     await expect(h.service.submit({
       ...h.base, idempotencyKey: 'submit-conflict', expectedDraftRevision: 1, expectedVersion: 3,
     })).rejects.toMatchObject({ statusCode: 409, code: 'canonical_version_conflict' });
-    expect(h.db.documents.has('orgs/tenant-a/projectRequests/change-project-a')).toBe(false);
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
     expect(h.db.documents.has('outbox/outbox-a')).toBe(false);
     expect([...h.db.documents.values()].find((value) => value?.resourceType === 'project-info' && value?.ownerUid))
       .toMatchObject({ status: 'ACTIVE', payload: { name: 'Must remain private' } });

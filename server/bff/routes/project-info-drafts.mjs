@@ -21,7 +21,7 @@ import {
   projectInfoDraftSubmitSchema,
 } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
-import { createOutboxEvent } from '../outbox.mjs';
+import { createOutboxEvent as createOutboxEventRecord } from '../outbox.mjs';
 import {
   buildProjectInfoChangeSubmission,
   buildProjectInfoDraftSeed,
@@ -246,29 +246,25 @@ export function createProjectInfoSubmittedOutboxHandler({
     const projectId = readOptionalText(event?.payload?.projectId);
     const projectRequestId = readOptionalText(event?.payload?.projectRequestId);
     const sourceDraftId = readOptionalText(event?.payload?.draftId);
+    const requestVersion = Number(event?.payload?.requestVersion);
+    const targetProjectVersion = Number(event?.payload?.targetProjectVersion);
     const attachmentRefs = Array.isArray(event?.payload?.attachmentRefs) ? event.payload.attachmentRefs : [];
-    if (!tenantId || !projectId || !projectRequestId) throw new Error('Project information outbox IDs are missing');
+    if (
+      !tenantId
+      || !projectId
+      || !projectRequestId
+      || !Number.isSafeInteger(requestVersion)
+      || requestVersion < 1
+      || !Number.isSafeInteger(targetProjectVersion)
+      || targetProjectVersion < 1
+    ) throw new Error('Project information outbox identity is missing');
     if (attachmentRefs.length === 0) return;
     if (!sourceDraftId || typeof draftStorageService?.relocateDraftAttachments !== 'function') {
       throw new Error('Project information attachment relocation is not configured');
     }
-    const relocated = await draftStorageService.relocateDraftAttachments({
-      tenantId, projectId, draftId: sourceDraftId, attachmentRefs,
-    });
-    if (!Array.isArray(relocated) || relocated.length !== attachmentRefs.length) {
-      throw new Error('Project information attachment relocation returned an incomplete result');
-    }
-    const prefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
-    if (relocated.some((attachment) => {
-      const path = readOptionalText(attachment?.path);
-      const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
-      return !DOCUMENT_KINDS.includes(readOptionalText(attachment?.documentKind)) || !objectName || objectName.includes('/');
-    })) throw new Error('Project information attachment relocation returned an invalid path');
-    const documents = privateDocuments(relocated);
-    const requestRef = db.doc(`orgs/${tenantId}/projectRequests/${projectRequestId}`);
+    const requestRef = db.doc(`orgs/${tenantId}/project_requests/${projectRequestId}`);
     const outboxRef = db.doc(`outbox/${event.id}`);
-    const timestamp = new Date(now()).toISOString();
-    await db.runTransaction(async (tx) => {
+    const deliveryIsCurrent = async (tx) => {
       const [requestSnap, outboxSnap] = await Promise.all([tx.get(requestRef), tx.get(outboxRef)]);
       if (!requestSnap.exists || !outboxSnap.exists) throw new Error('Project information delivery records are missing');
       const outbox = outboxSnap.data() || {};
@@ -279,6 +275,29 @@ export function createProjectInfoSubmittedOutboxHandler({
       if (readOptionalText(request.targetProjectId) !== projectId) {
         throw new Error('Project information request does not match its project');
       }
+      return readOptionalText(request.submittedOutboxId) === readOptionalText(event.id)
+        && Number(request.requestVersion) === requestVersion
+        && Number(request.targetProjectVersion) === targetProjectVersion;
+    };
+    const currentBeforeRelocation = await db.runTransaction(deliveryIsCurrent);
+    if (!currentBeforeRelocation) return;
+
+    const relocated = await draftStorageService.relocateDraftAttachments({ tenantId, projectId, draftId: sourceDraftId, attachmentRefs });
+    if (!Array.isArray(relocated) || relocated.length !== attachmentRefs.length) {
+      throw new Error('Project information attachment relocation returned an incomplete result');
+    }
+    const prefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    if (relocated.some((attachment) => {
+      const path = readOptionalText(attachment?.path);
+      const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
+      return !DOCUMENT_KINDS.includes(readOptionalText(attachment?.documentKind)) || !objectName || objectName.includes('/');
+    })) throw new Error('Project information attachment relocation returned an invalid path');
+    const documents = privateDocuments(relocated);
+    const timestamp = new Date(now()).toISOString();
+    await db.runTransaction(async (tx) => {
+      if (!await deliveryIsCurrent(tx)) return;
+      const requestSnap = await tx.get(requestRef);
+      const request = requestSnap.data() || {};
       const documentPatch = Object.fromEntries(Object.entries(documents).filter(([, value]) => value));
       tx.set(requestRef, {
         payload: { ...(request.payload || {}), ...documentPatch },
@@ -294,7 +313,7 @@ export function createProjectInfoDraftService({
   db,
   now = () => new Date().toISOString(),
   createAttachmentId = () => `att_${randomUUID().replace(/-/g, '')}`,
-  createOutboxEvent = createOutboxEvent,
+  createOutboxEvent = createOutboxEventRecord,
   auditChainService,
   idempotencyService,
   draftStorageService,
@@ -330,7 +349,7 @@ export function createProjectInfoDraftService({
     project: db.doc(`orgs/${current.tenantId}/projects/${current.projectId}`),
     draft: db.doc(`orgs/${current.tenantId}/privateEditDrafts/${current.draftDocumentId}`),
     lease: db.doc(`orgs/${current.tenantId}/editLeases/${resolveEditLeaseDocumentId(RESOURCE_TYPE, current.projectId)}`),
-    request: db.doc(`orgs/${current.tenantId}/projectRequests/change-${current.projectId}`),
+    request: db.doc(`orgs/${current.tenantId}/project_requests/change-${current.projectId}`),
   });
 
   async function accessProject(tx, current) {
@@ -713,6 +732,10 @@ export function createProjectInfoDraftService({
           resubmit: input?.resubmit === true,
           reviewComment: input?.reviewComment,
         });
+        const submittedProjectRequest = {
+          ...projectRequest,
+          submittedOutboxId: eventTemplate.id,
+        };
         const nextProject = {
           ...project,
           ...projectPatch,
@@ -750,8 +773,10 @@ export function createProjectInfoDraftService({
           ...eventTemplate,
           payload: {
             projectId: current.projectId,
-            projectRequestId: projectRequest.id,
+            projectRequestId: submittedProjectRequest.id,
             draftId: current.draftDocumentId,
+            requestVersion: submittedProjectRequest.requestVersion,
+            targetProjectVersion: submittedProjectRequest.targetProjectVersion,
             attachmentRefs: draftAttachments(draft),
           },
           createdAt: timestamp,
@@ -777,7 +802,7 @@ export function createProjectInfoDraftService({
           }),
         ]);
         tx.set(projectRef, nextProject);
-        tx.set(requestRef, projectRequest);
+        tx.set(requestRef, submittedProjectRequest);
         tx.set(draftRef, submittedDraft);
         tx.set(refs(current).lease, releasedLease);
         tx.create(outboxRef, outboxEvent);

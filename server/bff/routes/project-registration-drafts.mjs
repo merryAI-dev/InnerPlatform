@@ -925,6 +925,7 @@ export function createProjectRegistrationDraftService({
           uploadedAt: readOptionalText(uploaded?.uploadedAt) || clockDate(now).toISOString(),
         };
 
+        let replacedAttachments = [];
         const outcome = await db.runTransaction(async (tx) => {
           const nowDate = clockDate(now);
           const timestamp = nowDate.toISOString();
@@ -947,6 +948,8 @@ export function createProjectRegistrationDraftService({
             serverNow: nowDate,
           });
           const revision = assertRevision(draft, expectedDraftRevision) + 1;
+          replacedAttachments = attachmentRefs(draft)
+            .filter((currentAttachment) => currentAttachment?.documentKind === documentKind);
           const next = {
             ...draft,
             attachmentRefs: [
@@ -969,6 +972,24 @@ export function createProjectRegistrationDraftService({
           return { status: 200, body, replayed: false };
         });
         if (outcome.replayed) await cleanup();
+        else {
+          await Promise.all(replacedAttachments.map(async (replaced) => {
+            if (!readOptionalText(replaced?.path) || replaced.path === attachment.path) return;
+            try {
+              await draftStorageService.deleteDraftAttachment({
+                tenantId: current.tenantId,
+                draftId: current.draftId,
+                path: replaced.path,
+              });
+            } catch {
+              // eslint-disable-next-line no-console
+              console.warn('[bff] replaced draft attachment cleanup failed', {
+                requestId: current.requestId,
+                errorCode: 'draft_attachment_replacement_cleanup_failed',
+              });
+            }
+          }));
+        }
         return outcome;
       } catch (error) {
         await cleanup();

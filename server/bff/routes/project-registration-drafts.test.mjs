@@ -908,6 +908,44 @@ describe('project registration draft service', () => {
     expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it('deletes the superseded private object after a same-kind replacement commits', async () => {
+    let uploadCount = 0;
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
+        path: `orgs/${tenantId}/project-registration-drafts/${draftId}/${attachmentId}-${++uploadCount}-${fileName}`,
+        name: fileName,
+        size: buffer.byteLength,
+        contentType: mimeType,
+        uploadedAt: '2026-07-10T00:00:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const { service, base } = createHarness({ storageService });
+    const created = await service.create({ ...base, idempotencyKey: 'idem-replace-create' });
+    const common = {
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      documentKind: 'contract',
+      mimeType: 'application/pdf',
+      fileSize: 3,
+      buffer: Buffer.from('pdf'),
+    };
+    const first = await service.addAttachment({
+      ...common, idempotencyKey: 'idem-replace-first', expectedDraftRevision: 0, fileName: 'first.pdf',
+    });
+    await service.addAttachment({
+      ...common, idempotencyKey: 'idem-replace-second', expectedDraftRevision: 1, fileName: 'second.pdf',
+    });
+
+    expect(storageService.deleteDraftAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a',
+      draftId: created.body.draft.draftId,
+      path: first.body.attachment.path,
+    });
+  });
+
   it('deletes only the just-uploaded object when the post-upload transaction conflicts', async () => {
     const deleted = [];
     let uploadCount = 0;

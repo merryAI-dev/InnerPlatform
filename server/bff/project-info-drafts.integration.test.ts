@@ -93,7 +93,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
 
   async function reset() {
     await Promise.all([
-      'members', 'projects', 'projectRequests', 'privateEditDrafts', 'editLeases',
+      'members', 'projects', 'project_requests', 'projectRequests', 'privateEditDrafts', 'editLeases',
       'audit_logs', 'audit_chain', 'idempotency_keys', 'outbox_deliveries',
     ].map((name) => clearCollection(`orgs/${tenantId}/${name}`)));
     await clearCollection('outbox');
@@ -147,7 +147,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .send({ expectedDraftRevision: 0, payload: validPayload({ name: 'Private name' }), stepIndex: 4 });
     expect(saved.status).toBe(200);
     expect((await db.doc(`orgs/${tenantId}/projects/project-a`).get()).data()?.name).toBe('Project A');
-    expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);
+    expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).exists).toBe(false);
 
     const adminRead = await api.get('/api/v1/project-info-drafts/project-a').set(actorHeaders('actor-admin', 'admin'));
     expect(adminRead.status).toBe(404);
@@ -159,11 +159,12 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(submitted.body).toMatchObject({ projectVersion: 4, lease: { state: 'RELEASED' } });
     const [project, changeRequest, drafts] = await Promise.all([
       db.doc(`orgs/${tenantId}/projects/project-a`).get(),
-      db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get(),
+      db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get(),
       db.collection(`orgs/${tenantId}/privateEditDrafts`).get(),
     ]);
     expect(project.data()).toMatchObject({ name: 'Project A', version: 4 });
     expect(changeRequest.data()).toMatchObject({ status: 'PENDING', proposedSnapshot: { name: 'Private name' } });
+    expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);
     expect(drafts.docs[0].data()).not.toHaveProperty('payload');
   });
 
@@ -185,7 +186,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .send({ expectedDraftRevision: 1, expectedVersion: 3 });
     expect(conflict.status).toBe(409);
     expect(conflict.body.error).toBe('canonical_version_conflict');
-    expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);
+    expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).exists).toBe(false);
     expect((await db.collection('outbox').get()).empty).toBe(true);
 
     await db.doc(`orgs/${tenantId}/projects/project-a`).set({ version: 3 }, { merge: true });
@@ -199,7 +200,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(worker.status).toBe(200);
     expect(worker.body.succeeded).toBe(1);
     expect(relocated).toHaveLength(1);
-    expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).data())
+    expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).data())
       .toMatchObject({ proposedSnapshot: { contractDocument: { path: relocated[0] } } });
   });
 
