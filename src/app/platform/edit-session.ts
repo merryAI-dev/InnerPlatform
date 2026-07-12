@@ -10,6 +10,14 @@ export interface BroadcastChannelLike {
   close(): void;
 }
 
+export interface EditSessionLockManager {
+  request<T>(
+    name: string,
+    options: { mode: 'exclusive'; ifAvailable: true },
+    callback: (lock: { name: string } | null) => T | PromiseLike<T>,
+  ): Promise<T>;
+}
+
 export interface EditSession {
   sessionId: string;
   dispose(): void;
@@ -19,6 +27,7 @@ export interface EditSessionRuntime {}
 
 const STORAGE_KEY = 'myscube.edit-session.v1';
 const CHANNEL_NAME = 'myscube-edit-session-v1';
+const LOCK_NAME_PREFIX = 'myscube-edit-session-v1:';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface ProbeMessage {
@@ -74,6 +83,58 @@ function nativeStorage(): EditSessionStorage {
   return sessionStorage;
 }
 
+function nativeLockManager(): EditSessionLockManager | null {
+  if (typeof navigator === 'undefined' || !navigator.locks || typeof navigator.locks.request !== 'function') {
+    return null;
+  }
+  return navigator.locks as unknown as EditSessionLockManager;
+}
+
+function acquireSessionLock(
+  lockManager: EditSessionLockManager,
+  sessionId: string,
+): Promise<{ release(): void } | null> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const resolveOnce = (value: { release(): void } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    try {
+      void lockManager.request(
+        `${LOCK_NAME_PREFIX}${sessionId}`,
+        { mode: 'exclusive', ifAvailable: true },
+        async (lock) => {
+          if (!lock) {
+            resolveOnce(null);
+            return;
+          }
+          let released = false;
+          let releaseLock!: () => void;
+          const held = new Promise<void>((release) => { releaseLock = release; });
+          resolveOnce({
+            release() {
+              if (released) return;
+              released = true;
+              releaseLock();
+            },
+          });
+          await held;
+        },
+      ).catch(rejectOnce);
+    } catch (error) {
+      rejectOnce(error);
+    }
+  });
+}
+
 interface OpenEditSessionOptions {
   storage?: EditSessionStorage;
   createChannel?: () => BroadcastChannelLike;
@@ -81,6 +142,7 @@ interface OpenEditSessionOptions {
   createProbeId?: () => string;
   probeDelayMs?: number;
   setTimeoutFn?: typeof setTimeout;
+  lockManager?: EditSessionLockManager | null;
   runtime?: EditSessionRuntime;
 }
 
@@ -91,7 +153,30 @@ async function establishEditSession(options: OpenEditSessionOptions): Promise<Ed
   const setTimeoutFn = options.setTimeoutFn || setTimeout;
   const probeDelayMs = options.probeDelayMs ?? 75;
   const stored = storage.getItem(STORAGE_KEY);
-  let sessionId = stored && UUID_PATTERN.test(stored) ? stored : requireUuid(createUuid);
+  const storedSessionId = stored && UUID_PATTERN.test(stored) ? stored : null;
+  let sessionId = storedSessionId || requireUuid(createUuid);
+  const lockManager = options.lockManager === undefined ? nativeLockManager() : options.lockManager;
+  if (lockManager) {
+    let heldLock = await acquireSessionLock(lockManager, sessionId);
+    if (!heldLock) {
+      const previous = sessionId;
+      sessionId = requireUuid(createUuid);
+      if (sessionId === previous) throw new Error('Edit session UUID collision could not be resolved');
+      heldLock = await acquireSessionLock(lockManager, sessionId);
+      if (!heldLock) throw new Error('A unique edit session lock could not be acquired');
+    }
+    storage.setItem(STORAGE_KEY, sessionId);
+    return {
+      sessionId,
+      dispose() {
+        heldLock.release();
+      },
+    };
+  }
+  if (storedSessionId) {
+    sessionId = requireUuid(createUuid);
+    if (sessionId === storedSessionId) throw new Error('Edit session UUID collision could not be resolved');
+  }
   const probeId = createProbeId();
   const channel = (options.createChannel || nativeChannel)();
   let collision = false;
