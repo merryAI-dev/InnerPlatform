@@ -14,6 +14,7 @@ describe('PortalProjectEdit private draft boundary', () => {
 
   it('reopens the owner draft when the same tab refreshes with an active lease', () => {
     expect(source).toContain('const status = await lease.checkStatus()');
+    expect(source).toContain('!status.ownership || recordLoadedRef.current');
     expect(source).toContain('draftClient.open(status.ownership)');
   });
 
@@ -21,6 +22,11 @@ describe('PortalProjectEdit private draft boundary', () => {
     expect(source).toContain('current.actor.idToken === idToken');
     expect(source).toContain('createProjectInfoDraftClient({');
     expect(source).toContain('user?.idToken, user?.uid');
+  });
+
+  it('keeps local editor state isolated when the route switches projects', () => {
+    expect(source).toContain('<ProjectInfoEditor');
+    expect(source).toContain('key={project.id}');
   });
 
   it('does not write project drafts, requests, or canonical projects through the browser Firestore SDK', () => {

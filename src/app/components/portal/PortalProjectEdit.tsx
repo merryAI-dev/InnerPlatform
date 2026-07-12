@@ -132,6 +132,7 @@ function ProjectInfoEditor({
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [resubmitComment, setResubmitComment] = useState('');
   const revisionRef = useRef(0);
+  const recordLoadedRef = useRef(false);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const leaseClient = useMemo(() => createEditLeaseClient({
     tenantId: orgId,
@@ -154,11 +155,12 @@ function ProjectInfoEditor({
     let cancelled = false;
     void (async () => {
       const status = await lease.checkStatus();
-      if (!status.canEdit || !status.ownership) return;
+      if (!status.canEdit || !status.ownership || recordLoadedRef.current) return;
       try {
         const opened = await draftClient.open(status.ownership);
         if (cancelled) return;
         revisionRef.current = opened.draft.draftRevision;
+        recordLoadedRef.current = true;
         setRecord(opened.draft);
       } catch (error) {
         if (cancelled) return;
@@ -194,6 +196,7 @@ function ProjectInfoEditor({
     try {
       const opened = await draftClient.open(ownership);
       revisionRef.current = opened.draft.draftRevision;
+      recordLoadedRef.current = true;
       setRecord(opened.draft);
     } catch (error) {
       await lease.checkStatus();
@@ -480,6 +483,7 @@ export function PortalProjectEdit() {
   if (!bootstrap) return <div className="p-6 text-sm text-muted-foreground">읽기 모드를 준비하는 중...</div>;
   return (
     <ProjectInfoEditor
+      key={project.id}
       actor={bootstrap.actor}
       canonicalDraft={canonicalDraft}
       departmentOptions={departmentOptions}
