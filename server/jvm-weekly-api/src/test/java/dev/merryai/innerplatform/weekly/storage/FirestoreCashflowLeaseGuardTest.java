@@ -7,9 +7,12 @@ import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.Transaction;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseProjectionEntity;
+import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseSheetEntity;
+import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -144,6 +147,72 @@ class FirestoreCashflowLeaseGuardTest {
             .extracting(error -> ((WeeklyExpenseEditLeaseException) error).statusCode())
             .isEqualTo(403);
         verify(missingProject.transaction, never()).set(any(DocumentReference.class), any(), any());
+    }
+
+    @Test
+    void everyCashflowWeekWriterFailsClosedWithoutAnExactValidatedLeaseScope() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+
+        assertMissingScope(fixture, () -> fixture.persistence.saveProjection(projection("project-a")));
+        assertMissingScope(fixture, () -> fixture.persistence.replaceActualLines(
+            "tenant-a",
+            "project-a",
+            "cashflow-sheet-lab",
+            List.of(new SaveDraftResponse.ActualDelta("2026-07", 1, "DIRECT_COST_OUT", BigDecimal.ONE))
+        ));
+        WeeklyExpenseSheetEntity sheet = new WeeklyExpenseSheetEntity("tenant-a", "project-a", "default", "Default");
+        assertMissingScope(fixture, () -> fixture.persistence.replaceActuals(
+            sheet,
+            List.of(new SaveDraftResponse.ActualDelta("2026-07", 1, "DIRECT_COST_OUT", BigDecimal.ONE))
+        ));
+        assertMissingScope(fixture, () -> fixture.persistence.saveWeeklyStatus(
+            new WeeklyExpenseWeeklyStatusEntity("tenant-a", "project-a", "2026-07", 1)
+        ));
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION);
+            fixture.persistence.saveProjection(projection("project-b"));
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> {
+                WeeklyExpenseEditLeaseException lease = (WeeklyExpenseEditLeaseException) error;
+                org.assertj.core.api.Assertions.assertThat(lease.statusCode()).isEqualTo(423);
+                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_edit_lease_scope_mismatch");
+            });
+    }
+
+    @Test
+    void validatedLeaseScopeDoesNotLeakIntoTheNextTransaction() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+
+        fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION);
+            return null;
+        });
+
+        assertMissingScope(fixture, () -> fixture.persistence.saveProjection(projection("project-a")));
+    }
+
+    private static void assertMissingScope(Fixture fixture, Runnable writer) {
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            writer.run();
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> {
+                WeeklyExpenseEditLeaseException lease = (WeeklyExpenseEditLeaseException) error;
+                org.assertj.core.api.Assertions.assertThat(lease.statusCode()).isEqualTo(503);
+                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_edit_lease_required");
+            });
+    }
+
+    private static WeeklyExpenseProjectionEntity projection(String projectId) {
+        WeeklyExpenseProjectionEntity projection = new WeeklyExpenseProjectionEntity(
+            "tenant-a", projectId, "2026-07", 1, "SALES_IN"
+        );
+        projection.setAmount(BigDecimal.ONE);
+        return projection;
     }
 
     private static Fixture fixture(Map<String, Object> member, Map<String, Object> lease) {

@@ -5,12 +5,14 @@ import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseAtomicWriteLimitException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -113,8 +115,13 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             new CashflowEditSession("stage-data-project", "session-a", "lease-a", 1),
             request
         ))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("atomic write budget");
+            .isInstanceOf(WeeklyExpenseAtomicWriteLimitException.class)
+            .satisfies(error -> {
+                WeeklyExpenseAtomicWriteLimitException limit = (WeeklyExpenseAtomicWriteLimitException) error;
+                org.assertj.core.api.Assertions.assertThat(limit.statusCode()).isEqualTo(422);
+                org.assertj.core.api.Assertions.assertThat(limit.code()).isEqualTo("atomic_write_limit_exceeded");
+                org.assertj.core.api.Assertions.assertThat(limit.expectedWriteCount()).isEqualTo(502);
+            });
 
         verify(persistence, never()).replaceActualLines(
             org.mockito.ArgumentMatchers.anyString(),
@@ -125,6 +132,47 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
         verify(persistence, never()).saveProjection(org.mockito.ArgumentMatchers.any());
         verify(persistence, never()).saveAuditEvent(org.mockito.ArgumentMatchers.any());
         verify(persistence, never()).saveIdempotency(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void projectionLimitReportsExpectedWriteCountBeforeLeaseLookupOrWrites() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> true,
+            canonicalProjectsExist(),
+            "strict"
+        );
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence,
+            authorization,
+            new ObjectMapper(),
+            true,
+            "stage"
+        );
+        UpsertProjectionRequest request = new UpsertProjectionRequest(
+            "projection-over-limit",
+            IntStream.range(0, 499)
+                .mapToObj(index -> new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07",
+                    1,
+                    "SALES_IN",
+                    BigDecimal.valueOf(index + 1L)
+                ))
+                .toList()
+        );
+
+        assertThatThrownBy(() -> service.upsertProjection(
+            new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm"),
+            "project-a",
+            new CashflowEditSession("stage-data-project", "session-a", "lease-a", 1),
+            request
+        ))
+            .isInstanceOf(WeeklyExpenseAtomicWriteLimitException.class)
+            .satisfies(error -> org.assertj.core.api.Assertions.assertThat(
+                ((WeeklyExpenseAtomicWriteLimitException) error).expectedWriteCount()
+            ).isEqualTo(501));
+
+        verifyNoInteractions(persistence);
     }
 
     private static WeeklyProjectExistenceRepository canonicalProjectsExist() {

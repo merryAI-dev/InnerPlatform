@@ -92,9 +92,17 @@ class WeeklyExpenseControllerTest {
         String role,
         String email
     ) {
-        return request
+        return withEditLease(request)
             .header("authorization", "Bearer " + firebaseTestToken(tenantId, actorId, role, email))
             .header("x-tenant-id", tenantId);
+    }
+
+    private static MockHttpServletRequestBuilder withEditLease(MockHttpServletRequestBuilder request) {
+        return request
+            .header("x-data-project-id", "test-data-project")
+            .header("x-edit-session-id", "test-session")
+            .header("x-edit-lease-id", "test-lease")
+            .header("x-edit-fence", "1");
     }
 
     private static String firebaseTestToken(String tenantId, String actorId, String role, String email) {
@@ -133,7 +141,7 @@ class WeeklyExpenseControllerTest {
             }
             """;
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-auth/sheets/default/save-draft")
+        mockMvc.perform(withEditLease(post("/api/v1/weekly-expenses/project-auth/sheets/default/save-draft"))
                 .header(InternalServiceTokenFilter.HEADER_NAME, "test-weekly-api-token")
                 .header("x-tenant-id", "tenant-auth")
                 .header("x-actor-id", "spoofed-admin")
@@ -226,7 +234,7 @@ class WeeklyExpenseControllerTest {
             }
             """;
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
+        mockMvc.perform(withEditLease(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft"))
                 .header("authorization", "Bearer " + firebaseTestToken("tenant-direct", "firebase-pm-1", "pm", "pm@mysc.co.kr"))
                 .header("x-tenant-id", "tenant-other")
                 .header("x-actor-id", "spoofed-admin")
@@ -258,7 +266,7 @@ class WeeklyExpenseControllerTest {
         String missingClaimsToken = "test-firebase:" + Base64.getUrlEncoder()
             .encodeToString("uid=firebase-pm-claims;email=pm-claims@mysc.co.kr".getBytes(StandardCharsets.UTF_8));
 
-        mockMvc.perform(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft")
+        mockMvc.perform(withEditLease(post("/api/v1/weekly-expenses/project-missing-claims/sheets/default/save-draft"))
                 .header("authorization", "Bearer " + missingClaimsToken)
                 .header("x-tenant-id", "tenant-direct")
                 .header("x-actor-id", "firebase-pm-claims")
@@ -694,6 +702,40 @@ class WeeklyExpenseControllerTest {
             .andExpect(jsonPath("$.readModel.months[0].projection.rowTotals.DIRECT_COST_OUT").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.weeks[0].weekOut").value(3000000))
             .andExpect(jsonPath("$.readModel.months[0].projection.monthTotals.net").value(-3000000));
+    }
+
+    @Test
+    void projectionAtomicLimitReturnsStable422BeforePersistence() throws Exception {
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int index = 0; index < 499; index += 1) {
+            lines.add(Map.of(
+                "yearMonth", "2026-06",
+                "weekNo", 1,
+                "cashflowLine", "SALES_IN",
+                "amount", index + 1
+            ));
+        }
+        String body = objectMapper.writeValueAsString(Map.of(
+            "idempotencyKey", "projection-atomic-limit",
+            "lines", lines
+        ));
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-projection-limit/projection"),
+                "tenant-projection-limit",
+                "pm-limit",
+                "pm"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.code").value("atomic_write_limit_exceeded"))
+            .andExpect(jsonPath("$.expectedWriteCount").value(501));
+
+        assertThat(projectionRepository.findByTenantIdAndProjectId(
+            "tenant-projection-limit",
+            "project-projection-limit"
+        )).isEmpty();
     }
 
     @Test
@@ -1335,7 +1377,23 @@ class WeeklyExpenseControllerTest {
             """;
 
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-fence/projection"), "tenant-projection-fence", "finance-1", "finance")
-                .header("x-edit-fence", "not-an-integer")
+                .with(request -> {
+                    request.removeHeader("x-edit-fence");
+                    request.addHeader("x-edit-fence", "not-an-integer");
+                    return request;
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"))
+            .andExpect(jsonPath("$.message").value("x-edit-fence must be a positive integer."));
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-fence/projection"), "tenant-projection-fence", "finance-1", "finance")
+                .with(request -> {
+                    request.removeHeader("x-edit-fence");
+                    request.addHeader("x-edit-fence", "9007199254740992");
+                    return request;
+                })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isBadRequest())
@@ -1362,8 +1420,9 @@ class WeeklyExpenseControllerTest {
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-projection-budget/projection"), "tenant-projection-budget", "finance-1", "finance")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"));
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.code").value("atomic_write_limit_exceeded"))
+            .andExpect(jsonPath("$.expectedWriteCount").value(501));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-projection-budget", "project-projection-budget"))
             .isEmpty();

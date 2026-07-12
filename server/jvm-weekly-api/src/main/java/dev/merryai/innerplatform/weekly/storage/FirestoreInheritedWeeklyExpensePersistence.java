@@ -77,6 +77,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final FirestoreWeeklyExpenseDocumentMapper sheetMapper = new FirestoreWeeklyExpenseDocumentMapper();
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
+    private final ThreadLocal<CashflowLeaseScope> currentCashflowLeaseScope = new ThreadLocal<>();
 
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId
@@ -120,9 +121,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             return db.runTransaction(transaction -> {
                 currentTransaction.set(transaction);
                 transactionDocumentCache.set(new LinkedHashMap<>());
+                currentCashflowLeaseScope.remove();
                 try {
                     return call(action);
                 } finally {
+                    currentCashflowLeaseScope.remove();
                     currentTransaction.remove();
                     transactionDocumentCache.remove();
                 }
@@ -189,6 +192,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || session.fence() != longValue(lease.get("fence"), 0)) {
             throw leaseError(423, "edit_lease_held", "The cashflow edit lease is held by another session.");
         }
+        currentCashflowLeaseScope.set(new CashflowLeaseScope(actor.tenantId(), projectId));
         return storedRole;
     }
 
@@ -202,6 +206,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (currentTransaction.get() == null) {
             throw leaseError(503, "cashflow_atomic_plan_transaction_required", "Cashflow write planning must run inside the canonical Firestore transaction.");
         }
+        requireValidatedCashflowWriteScope(tenantId, projectId);
         Set<String> writeDocumentIds = new java.util.LinkedHashSet<>(requestedWeekDocumentIds == null
             ? List.of()
             : requestedWeekDocumentIds);
@@ -378,6 +383,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         WeeklyExpenseSheetEntity sheet,
         List<SaveDraftResponse.ActualDelta> deltas
     ) {
+        requireValidatedCashflowWriteScope(sheet.getTenantId(), sheet.getProjectId());
         Map<String, Map<String, BigDecimal>> deltasByDoc = new LinkedHashMap<>();
         for (SaveDraftResponse.ActualDelta delta : deltas) {
             deltasByDoc
@@ -431,6 +437,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String sheetKey,
         List<SaveDraftResponse.ActualDelta> deltas
     ) {
+        requireValidatedCashflowWriteScope(tenantId, projectId);
         Map<String, Map<String, BigDecimal>> deltasByDoc = new LinkedHashMap<>();
         for (SaveDraftResponse.ActualDelta delta : deltas) {
             deltasByDoc
@@ -672,6 +679,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public WeeklyExpenseProjectionEntity saveProjection(WeeklyExpenseProjectionEntity projection) {
+        requireValidatedCashflowWriteScope(projection.getTenantId(), projection.getProjectId());
         String docId = cashflowWeekId(projection.getProjectId(), projection.getYearMonth(), projection.getWeekNo());
         DocumentReference ref = cashflowWeekRef(projection.getTenantId(), docId);
         Map<String, Object> cached = cachedDocument(ref);
@@ -723,6 +731,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public WeeklyExpenseWeeklyStatusEntity saveWeeklyStatus(WeeklyExpenseWeeklyStatusEntity status) {
+        requireValidatedCashflowWriteScope(status.getTenantId(), status.getProjectId());
         Map<String, Object> patch = new LinkedHashMap<>();
         patch.put("tenantId", status.getTenantId());
         patch.put("projectId", status.getProjectId());
@@ -969,6 +978,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private void set(DocumentReference ref, Map<String, Object> data) {
         try {
+            if (ref.getPath().contains("/cashflow_weeks/")) {
+                requireValidatedCashflowWriteScope(
+                    text(data.get("tenantId"), ""),
+                    text(data.get("projectId"), "")
+                );
+            }
             Transaction tx = currentTransaction.get();
             if (tx == null) {
                 ref.set(data, SetOptions.merge()).get();
@@ -976,6 +991,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 tx.set(ref, data, SetOptions.merge());
             }
             mergeCachedDocument(ref, data);
+        } catch (WeeklyExpenseEditLeaseException error) {
+            throw error;
         } catch (Exception error) {
             throw new IllegalStateException("Could not write Firestore document: " + ref.getPath(), error);
         }
@@ -1151,6 +1168,27 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return value == null ? null : value.toString();
     }
 
+    private void requireValidatedCashflowWriteScope(String tenantId, String projectId) {
+        CashflowLeaseScope scope = currentCashflowLeaseScope.get();
+        if (currentTransaction.get() == null || scope == null) {
+            throw leaseError(
+                503,
+                "cashflow_edit_lease_required",
+                "A validated cashflow edit lease is required for canonical cashflow writes."
+            );
+        }
+        if (!scope.tenantId().equals(tenantId) || !scope.projectId().equals(projectId)) {
+            throw leaseError(
+                423,
+                "cashflow_edit_lease_scope_mismatch",
+                "The validated cashflow edit lease does not match this project."
+            );
+        }
+    }
+
     private record WeekDocParts(String yearMonth, int weekNo) {
+    }
+
+    private record CashflowLeaseScope(String tenantId, String projectId) {
     }
 }

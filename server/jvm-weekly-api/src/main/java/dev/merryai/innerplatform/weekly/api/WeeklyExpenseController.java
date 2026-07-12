@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import jakarta.servlet.http.HttpServletRequest;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import jakarta.validation.Valid;
@@ -33,6 +34,7 @@ import java.util.TreeMap;
 @RestController
 @RequestMapping("/api/v1")
 public class WeeklyExpenseController {
+    private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private final WeeklyExpenseCommandService commandService;
     private final WeeklyExpensePersistence persistence;
 
@@ -57,9 +59,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody SaveDraftRequest request
     ) {
-        return commandService.saveDraft(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.saveDraft(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @GetMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}")
@@ -92,9 +101,15 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody ImportBankStatementBatchRequest request
     ) {
-        return commandService.importBankStatementBatch(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.importBankStatementBatch(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @GetMapping("/weekly-expenses/{projectId}/bank-statements/import-lines")
@@ -120,9 +135,15 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody ApplyBankStatementItemsRequest request
     ) {
-        return commandService.applyBankStatementItems(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.applyBankStatementItems(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/cell-patch")
@@ -133,9 +154,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody CellPatchCommandRequest request
     ) {
-        return commandService.patchCells(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.patchCells(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/paste")
@@ -146,9 +174,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody PasteCellsRequest request
     ) {
-        return commandService.pasteCells(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.pasteCells(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/copy")
@@ -159,9 +194,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody CopyCellsRequest request
     ) {
-        return commandService.copyCells(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.copyCells(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/cut")
@@ -172,9 +214,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody CutCellsRequest request
     ) {
-        return commandService.cutCells(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.cutCells(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/row-insert")
@@ -185,9 +234,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody RowInsertRequest request
     ) {
-        return commandService.insertRows(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.insertRows(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/sheets/{sheetKey}/commands/row-delete")
@@ -198,9 +254,16 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody RowDeleteRequest request
     ) {
-        return commandService.deleteRows(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, sheetKey, request);
+        return commandService.deleteRows(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            sheetKey,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @GetMapping("/cashflow/{projectId}")
@@ -244,16 +307,13 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
-        @RequestHeader(value = "x-data-project-id", required = false) String dataProjectId,
-        @RequestHeader(value = "x-edit-session-id", required = false) String editSessionId,
-        @RequestHeader(value = "x-edit-lease-id", required = false) String editLeaseId,
-        @RequestHeader(value = "x-edit-fence", required = false) String editFence,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody UpsertProjectionRequest request
     ) {
         return commandService.upsertProjection(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
-            editSession(dataProjectId, editSessionId, editLeaseId, editFence),
+            editSession(httpRequest),
             request
         );
     }
@@ -265,16 +325,13 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
-        @RequestHeader(value = "x-data-project-id", required = false) String dataProjectId,
-        @RequestHeader(value = "x-edit-session-id", required = false) String editSessionId,
-        @RequestHeader(value = "x-edit-lease-id", required = false) String editLeaseId,
-        @RequestHeader(value = "x-edit-fence", required = false) String editFence,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody CashflowSheetLabApplyRequest request
     ) {
         return commandService.applyCashflowSheetLab(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
-            editSession(dataProjectId, editSessionId, editLeaseId, editFence),
+            editSession(httpRequest),
             request
         );
     }
@@ -286,9 +343,15 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody SubmitWeekRequest request
     ) {
-        return commandService.submitWeek(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.submitWeek(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @PostMapping("/weekly-expenses/{projectId}/close")
@@ -298,9 +361,15 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-id") String actorId,
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
         @Valid @RequestBody CloseWeekRequest request
     ) {
-        return commandService.closeWeek(actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request);
+        return commandService.closeWeek(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
     }
 
     @GetMapping("/weekly-expenses/{projectId}/statuses")
@@ -474,13 +543,29 @@ public class WeeklyExpenseController {
     ) {
         long fence = 0;
         if (fenceValue != null && !fenceValue.isBlank()) {
+            String normalizedFence = fenceValue.trim();
+            if (!normalizedFence.matches("^[1-9]\\d*$")) {
+                throw new IllegalArgumentException("x-edit-fence must be a positive integer.");
+            }
             try {
-                fence = Long.parseLong(fenceValue.trim());
+                fence = Long.parseLong(normalizedFence);
             } catch (NumberFormatException error) {
+                throw new IllegalArgumentException("x-edit-fence must be a positive integer.");
+            }
+            if (fence > MAX_SAFE_INTEGER) {
                 throw new IllegalArgumentException("x-edit-fence must be a positive integer.");
             }
         }
         return new CashflowEditSession(dataProjectId, sessionId, leaseId, fence);
+    }
+
+    private CashflowEditSession editSession(HttpServletRequest request) {
+        return editSession(
+            request.getHeader("x-data-project-id"),
+            request.getHeader("x-edit-session-id"),
+            request.getHeader("x-edit-lease-id"),
+            request.getHeader("x-edit-fence")
+        );
     }
 
     private record CashflowAmountLine(
@@ -497,6 +582,16 @@ public class WeeklyExpenseController {
             "ok", "false",
             "code", "weekly_expense_conflict",
             "message", error.getMessage()
+        ));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(WeeklyExpenseAtomicWriteLimitException.class)
+    public ResponseEntity<Map<String, Object>> atomicWriteLimit(WeeklyExpenseAtomicWriteLimitException error) {
+        return ResponseEntity.status(error.statusCode()).body(Map.of(
+            "ok", false,
+            "code", error.code(),
+            "message", error.getMessage(),
+            "expectedWriteCount", error.expectedWriteCount()
         ));
     }
 

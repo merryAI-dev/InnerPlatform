@@ -169,7 +169,11 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
     private static MockHttpServletRequestBuilder workspaceActor(MockHttpServletRequestBuilder request) {
         return request
             .header("authorization", "Bearer " + firebaseTestToken("tenant-workspace", "workspace-user", "viewer", "workspace-user@mysc.co.kr", "Workspace User"))
-            .header("x-tenant-id", "tenant-workspace");
+            .header("x-tenant-id", "tenant-workspace")
+            .header("x-data-project-id", "test-data-project")
+            .header("x-edit-session-id", "test-session")
+            .header("x-edit-lease-id", "test-lease")
+            .header("x-edit-fence", "1");
     }
 
     private static MockHttpServletRequestBuilder nonMyscActor(MockHttpServletRequestBuilder request) {

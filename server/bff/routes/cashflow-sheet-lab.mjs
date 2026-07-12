@@ -31,8 +31,9 @@ const CASHFLOW_PROJECTION_SYNC_JOBS_COLLECTION_ID = 'cashflow_projection_sync_jo
 function readEditSession(req) {
   const sessionId = readOptionalText(req.header('x-edit-session-id'));
   const leaseId = readOptionalText(req.header('x-edit-lease-id'));
-  const fence = Number(req.header('x-edit-fence'));
-  if (!sessionId || !leaseId || !Number.isSafeInteger(fence) || fence < 1) {
+  const fenceText = readOptionalText(req.header('x-edit-fence'));
+  const fence = /^[1-9]\d*$/.test(fenceText) ? Number(fenceText) : Number.NaN;
+  if (!sessionId || !leaseId || !Number.isSafeInteger(fence)) {
     throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
   }
   return { sessionId, leaseId, fence };

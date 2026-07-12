@@ -33,6 +33,29 @@ class WeeklyExpenseAuthorizationServiceTest {
     }
 
     @Test
+    void assignedPmCanUpsertProjectionWhileViewerRemainsDenied() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> "project-allowed".equals(projectId),
+            (tenantId, projectId) -> true,
+            "strict"
+        );
+        TrustedActorContext pm = new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm");
+        TrustedActorContext viewer = new TrustedActorContext("tenant-a", "viewer-1", "viewer@example.com", "viewer");
+
+        assertThatCode(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.UPSERT_PROJECTION_COMMAND,
+            pm,
+            "project-allowed"
+        )).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.UPSERT_PROJECTION_COMMAND,
+            viewer,
+            "project-allowed"
+        )).isInstanceOf(WeeklyExpenseForbiddenException.class);
+    }
+
+    @Test
     void tenantWideRolesStillRespectCommandRoleGate() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> false,

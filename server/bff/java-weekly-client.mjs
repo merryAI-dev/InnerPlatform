@@ -42,8 +42,16 @@ export function resolveJavaWeeklyFirestoreProjectId(options = {}, env = process.
 export function resolveBffDataProjectId(options = {}, env = process.env) {
   return readOptionalText(options.bffDataProjectId)
     || readOptionalText(env.FIREBASE_PROJECT_ID)
+    || readOptionalText(env.VITE_FIREBASE_PROJECT_ID)
     || readOptionalText(env.GCLOUD_PROJECT)
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
+}
+
+function parsePositiveSafeInteger(value) {
+  const text = readOptionalText(String(value ?? ''));
+  if (!/^[1-9]\d*$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 export function isWorkspaceAuthMode(authMode) {
@@ -116,7 +124,11 @@ export async function buildJavaWeeklyTrustedHeaders({
 function readJavaError(status, payload) {
   const message = readOptionalText(payload?.message) || readOptionalText(payload?.error) || `Java weekly API request failed with ${status}`;
   const code = readOptionalText(payload?.code) || readOptionalText(payload?.error) || 'java_weekly_api_error';
-  return createHttpError(status, message, code);
+  const error = createHttpError(status, message, code);
+  if (Number.isSafeInteger(payload?.expectedWriteCount)) {
+    error.details = { expectedWriteCount: payload.expectedWriteCount };
+  }
+  return error;
 }
 
 async function readJsonResponse(response) {
@@ -203,8 +215,8 @@ export function createJavaWeeklyClient({
     }
     const sessionId = readOptionalText(editSession?.sessionId);
     const leaseId = readOptionalText(editSession?.leaseId);
-    const fence = Number(editSession?.fence);
-    if (!sessionId || !leaseId || !Number.isSafeInteger(fence) || fence < 1) {
+    const fence = parsePositiveSafeInteger(editSession?.fence);
+    if (!sessionId || !leaseId || fence === null) {
       throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
     }
     const result = await requestJson({

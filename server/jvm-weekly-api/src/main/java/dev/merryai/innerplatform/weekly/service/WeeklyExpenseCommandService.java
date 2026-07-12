@@ -32,6 +32,7 @@ import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseAtomicWriteLimitException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseRequestLimits;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetResponse;
@@ -241,8 +242,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public SaveDraftResponse saveDraft(TrustedActorContext actor, String projectId, String sheetKey, SaveDraftRequest request) {
-        authorizationService.requireProjectAllowed(SAVE_DRAFT_COMMAND, actor, projectId);
+    public SaveDraftResponse saveDraft(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        SaveDraftRequest request
+    ) {
+        actor = requireCashflowWriteLease(SAVE_DRAFT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<SaveDraftResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -342,9 +349,10 @@ public class WeeklyExpenseCommandService {
     public ImportBankStatementBatchResponse importBankStatementBatch(
         TrustedActorContext actor,
         String projectId,
+        CashflowEditSession editSession,
         ImportBankStatementBatchRequest request
     ) {
-        authorizationService.requireProjectAllowed(BANK_IMPORT_BATCH_COMMAND, actor, projectId);
+        actor = requireCashflowWriteLease(BANK_IMPORT_BATCH_COMMAND, actor, projectId, editSession);
         assertAtomicWriteBudget(request.lines().size(), 3, "Bank statement import");
         String requestHash = hashJson(request);
         Optional<ImportBankStatementBatchResponse> replay = readIdempotentResponse(
@@ -466,9 +474,10 @@ public class WeeklyExpenseCommandService {
     public ApplyBankStatementItemsResponse applyBankStatementItems(
         TrustedActorContext actor,
         String projectId,
+        CashflowEditSession editSession,
         ApplyBankStatementItemsRequest request
     ) {
-        authorizationService.requireProjectAllowed(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId);
+        actor = requireCashflowWriteLease(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<ApplyBankStatementItemsResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -838,11 +847,17 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public SubmitWeekResponse submitWeek(TrustedActorContext actor, String projectId, SubmitWeekRequest request) {
-        authorizationService.requireProjectAllowed(SUBMIT_WEEK_COMMAND, actor, projectId);
+    public SubmitWeekResponse submitWeek(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        SubmitWeekRequest request
+    ) {
+        actor = requireCashflowWriteLease(SUBMIT_WEEK_COMMAND, actor, projectId, editSession);
+        String tenantId = actor.tenantId();
         String requestHash = hashJson(request);
         Optional<SubmitWeekResponse> replay = readIdempotentResponse(
-            actor.tenantId(),
+            tenantId,
             projectId,
             SUBMIT_WEEK_COMMAND,
             request.idempotencyKey(),
@@ -853,13 +868,13 @@ public class WeeklyExpenseCommandService {
 
         WeeklyExpenseWeeklyStatusEntity status = persistence
             .findWeeklyStatus(
-                actor.tenantId(),
+                tenantId,
                 projectId,
                 request.yearMonth(),
                 request.weekNo()
             )
             .orElseGet(() -> new WeeklyExpenseWeeklyStatusEntity(
-                actor.tenantId(),
+                tenantId,
                 projectId,
                 request.yearMonth(),
                 request.weekNo()
@@ -909,8 +924,13 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public CloseWeekResponse closeWeek(TrustedActorContext actor, String projectId, CloseWeekRequest request) {
-        authorizationService.requireProjectAllowed(CLOSE_WEEK_COMMAND, actor, projectId);
+    public CloseWeekResponse closeWeek(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        CloseWeekRequest request
+    ) {
+        actor = requireCashflowWriteLease(CLOSE_WEEK_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CloseWeekResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1062,8 +1082,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public CellCommandResponse patchCells(TrustedActorContext actor, String projectId, String sheetKey, CellPatchCommandRequest request) {
-        authorizationService.requireProjectAllowed(CELL_PATCH_COMMAND, actor, projectId);
+    public CellCommandResponse patchCells(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        CellPatchCommandRequest request
+    ) {
+        actor = requireCashflowWriteLease(CELL_PATCH_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1101,8 +1127,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public CellCommandResponse copyCells(TrustedActorContext actor, String projectId, String sheetKey, CopyCellsRequest request) {
-        authorizationService.requireProjectAllowed(CELLS_COPY_COMMAND, actor, projectId);
+    public CellCommandResponse copyCells(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        CopyCellsRequest request
+    ) {
+        actor = requireCashflowWriteLease(CELLS_COPY_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1141,8 +1173,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public CellCommandResponse pasteCells(TrustedActorContext actor, String projectId, String sheetKey, PasteCellsRequest request) {
-        authorizationService.requireProjectAllowed(CELLS_PASTE_COMMAND, actor, projectId);
+    public CellCommandResponse pasteCells(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        PasteCellsRequest request
+    ) {
+        actor = requireCashflowWriteLease(CELLS_PASTE_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1191,8 +1229,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public CellCommandResponse cutCells(TrustedActorContext actor, String projectId, String sheetKey, CutCellsRequest request) {
-        authorizationService.requireProjectAllowed(CELLS_CUT_COMMAND, actor, projectId);
+    public CellCommandResponse cutCells(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        CutCellsRequest request
+    ) {
+        actor = requireCashflowWriteLease(CELLS_CUT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1233,8 +1277,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public RowCommandResponse insertRows(TrustedActorContext actor, String projectId, String sheetKey, RowInsertRequest request) {
-        authorizationService.requireProjectAllowed(ROW_INSERT_COMMAND, actor, projectId);
+    public RowCommandResponse insertRows(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        RowInsertRequest request
+    ) {
+        actor = requireCashflowWriteLease(ROW_INSERT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<RowCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1274,8 +1324,14 @@ public class WeeklyExpenseCommandService {
     }
 
     @Transactional
-    public RowCommandResponse deleteRows(TrustedActorContext actor, String projectId, String sheetKey, RowDeleteRequest request) {
-        authorizationService.requireProjectAllowed(ROW_DELETE_COMMAND, actor, projectId);
+    public RowCommandResponse deleteRows(
+        TrustedActorContext actor,
+        String projectId,
+        String sheetKey,
+        CashflowEditSession editSession,
+        RowDeleteRequest request
+    ) {
+        actor = requireCashflowWriteLease(ROW_DELETE_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<RowCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -2147,8 +2203,9 @@ public class WeeklyExpenseCommandService {
     }
 
     private void assertAtomicWriteBudget(int inputCount, int fixedWriteCount, String command) {
-        if (inputCount + fixedWriteCount > WeeklyExpenseRequestLimits.FIRESTORE_ATOMIC_WRITE_LIMIT) {
-            throw new IllegalArgumentException(command + " exceeds the Firestore atomic write budget.");
+        int expectedWriteCount = inputCount + fixedWriteCount;
+        if (expectedWriteCount > WeeklyExpenseRequestLimits.FIRESTORE_ATOMIC_WRITE_LIMIT) {
+            throw new WeeklyExpenseAtomicWriteLimitException(command, expectedWriteCount);
         }
     }
 

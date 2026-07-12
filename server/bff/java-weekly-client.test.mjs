@@ -85,4 +85,69 @@ describe('Java weekly cashflow client', () => {
       lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
     })).rejects.toMatchObject({ statusCode: 502, code: 'jvm_weekly_project_mismatch' });
   });
+
+  it('uses the frontend Firebase project id when it is the only Stage data-project source', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+    }));
+    const env = stageEnv({
+      FIREBASE_PROJECT_ID: undefined,
+      VITE_FIREBASE_PROJECT_ID: 'stage-data-project',
+    });
+    const client = createJavaWeeklyClient({ env, fetchImpl });
+
+    await client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-vite-project',
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+    });
+
+    expect(fetchImpl.mock.calls[0][1].headers['x-data-project-id']).toBe('stage-data-project');
+  });
+
+  it.each(['0', '-1', '01', '1e2', '1.0', '9007199254740992'])(
+    'rejects non-canonical edit fence %s before network',
+    async (fence) => {
+      const fetchImpl = vi.fn();
+      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+      await expect(client.applyCashflowSheetLab({
+        context,
+        projectId: 'project-a',
+        idempotencyKey: `apply-bad-fence-${fence}`,
+        editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence },
+        lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+      })).rejects.toMatchObject({ statusCode: 400, code: 'cashflow_edit_lease_request_invalid' });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves the JVM atomic write count on client errors', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 422,
+      text: async () => JSON.stringify({
+        code: 'atomic_write_limit_exceeded',
+        message: 'Cashflow apply requires 501 writes.',
+        expectedWriteCount: 501,
+      }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-atomic-limit',
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+    })).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'atomic_write_limit_exceeded',
+      details: { expectedWriteCount: 501 },
+    });
+  });
 });

@@ -407,6 +407,28 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
+  it.each(['0', '-1', '01', '1e2', '1.0', '9007199254740992'])(
+    'rejects non-canonical final-apply edit fence %s before the JVM',
+    async (fence) => {
+      const javaWeeklyClient = { applyCashflowSheetLab: vi.fn() };
+      await request(createApp({
+        routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+      }))
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+        .set({
+          'x-edit-session-id': 'session-a',
+          'x-edit-lease-id': 'lease-a',
+          'x-edit-fence': fence,
+        })
+        .send({ idempotencyKey: `bad-fence-${fence}` })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.code).toBe('cashflow_edit_lease_request_invalid');
+        });
+      expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    },
+  );
+
   it('stages sheet values as cell-level review candidates without updating cashflow weeks', async () => {
     const db = createDb({
       project: {
