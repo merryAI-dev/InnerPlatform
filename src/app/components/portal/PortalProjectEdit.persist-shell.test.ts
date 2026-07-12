@@ -6,22 +6,23 @@ const source = readFileSync(resolve(import.meta.dirname, 'PortalProjectEdit.tsx'
 
 describe('PortalProjectEdit persistence shell', () => {
   it('stores portal edits as approval-gated change requests instead of mutating the project snapshot', () => {
-    expect(source).toContain('buildProjectChangeRequest');
-    expect(source).toContain("doc(db, getOrgDocumentPath(orgId, 'projectRequests', changeRequest.id))");
+    expect(source).toContain('createProjectInfoDraftClient');
+    expect(source).toContain('draftClient.submit(ownership');
     expect(source).not.toContain('patchProjectSnapshot');
     expect(source).not.toContain('upsertProjectViaBff');
+    expect(source).not.toContain('setDoc(');
   });
 
   it('uses the executive review resubmit endpoint only for explicit resubmission', () => {
-    expect(source).toContain('resubmitProjectExecutiveReviewViaBff');
-    expect(source).toContain("const forcePendingReview = actionId === 'resubmit'");
-    expect(source).toContain('if (forcePendingReview && changeRequest)');
+    expect(source).toContain("resubmit: actionId === 'resubmit'");
+    expect(source).toContain("actionId === 'resubmit' && resubmitComment.trim()");
+    expect(source).not.toContain('resubmitProjectExecutiveReviewViaBff');
   });
 
   it('keeps the project edit draft key stable across request listener updates', () => {
-    expect(source).toContain("const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`");
+    expect(source).toContain('const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`');
     expect(source).toContain('draftKey={autosaveKey}');
-    expect(source).not.toContain("draftKey={`portal-edit-${myProject.id}-${requestDoc?.updatedAt || myProject.updatedAt}`}");
+    expect(source).not.toContain('requestDoc?.updatedAt');
   });
 
   it('shows a centered confirmation dialog instead of a corner toast after saving', () => {

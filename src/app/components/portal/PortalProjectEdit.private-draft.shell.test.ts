@@ -7,9 +7,16 @@ describe('PortalProjectEdit private draft boundary', () => {
   it('starts read-only and uses project-info lease plus BFF draft commands', () => {
     expect(source).toContain("resourceType: 'project-info'");
     expect(source).toContain('createProjectInfoDraftClient');
-    expect(source).toContain('readOnly={!lease.canEdit}');
+    expect(source).toContain('readOnly={!editorCanEdit}');
     expect(source).toContain('lease.checkBeforeSave()');
     expect(source).toContain('<EditLeaseDialogs');
+  });
+
+  it('fails closed and releases ownership when the private draft cannot open', () => {
+    expect(source).toContain('const editorCanEdit = lease.canEdit && record !== null');
+    expect(source).toContain('await lease.release()');
+    expect(source).toContain('recordLoadedRef.current = false');
+    expect(source).toContain("toast.error('수정 임시저장이 준비되지 않았습니다.')");
   });
 
   it('reopens the owner draft when the same tab refreshes with an active lease', () => {

@@ -73,6 +73,7 @@ import {
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
 } from '../../platform/project-team-members';
+import { shouldResetProjectEditorDraft } from './project-editor-reset';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -524,7 +525,14 @@ export function ProjectEditorWizard({
 
   useEffect(() => {
     const resetKey = `${draftKey}::${autosave?.key || ''}`;
-    if (lastResetKeyRef.current === resetKey) return;
+    const currentFingerprint = JSON.stringify(createProjectEditorDraft(draftRef.current));
+    if (!shouldResetProjectEditorDraft({
+      lastResetKey: lastResetKeyRef.current,
+      resetKey,
+      currentFingerprint,
+      lastPersistedFingerprint: lastPersistedFingerprintRef.current,
+      incomingFingerprint: initialDraftFingerprint,
+    })) return;
     lastResetKeyRef.current = resetKey;
     const nextDraft = createProjectEditorWizardDraft(initialDraft);
     lastPersistedFingerprintRef.current = JSON.stringify(createProjectEditorDraft(nextDraft));

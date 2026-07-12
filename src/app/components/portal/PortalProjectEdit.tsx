@@ -150,6 +150,13 @@ function ProjectInfoEditor({
     [canonicalDraft, record],
   );
   const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`;
+  const editorCanEdit = lease.canEdit && record !== null;
+  const releaseLeaseAfterDraftOpenFailure = useCallback(async (error: unknown, fallback: string) => {
+    recordLoadedRef.current = false;
+    setRecord(null);
+    await lease.release();
+    toast.error(error instanceof Error ? error.message : fallback);
+  }, [lease.release]);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,12 +171,11 @@ function ProjectInfoEditor({
         setRecord(opened.draft);
       } catch (error) {
         if (cancelled) return;
-        await lease.checkStatus();
-        toast.error(error instanceof Error ? error.message : '수정 임시저장을 다시 열지 못했습니다.');
+        await releaseLeaseAfterDraftOpenFailure(error, '수정 임시저장을 다시 열지 못했습니다.');
       }
     })();
     return () => { cancelled = true; };
-  }, [draftClient, lease.checkStatus]);
+  }, [draftClient, lease.checkStatus, releaseLeaseAfterDraftOpenFailure]);
 
   const enqueueMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
     const run = mutationQueueRef.current.then(operation, operation);
@@ -199,10 +205,9 @@ function ProjectInfoEditor({
       recordLoadedRef.current = true;
       setRecord(opened.draft);
     } catch (error) {
-      await lease.checkStatus();
-      toast.error(error instanceof Error ? error.message : '수정 임시저장을 열지 못했습니다.');
+      await releaseLeaseAfterDraftOpenFailure(error, '수정 임시저장을 열지 못했습니다.');
     }
-  }, [draftClient, lease.acquire, lease.checkStatus]);
+  }, [draftClient, lease.acquire, releaseLeaseAfterDraftOpenFailure]);
 
   const persistDraft = useCallback((draft: ProjectEditorDraft, stepIndex: number) => enqueueMutation(() => (
     withOwnership(async (ownership) => {
@@ -232,7 +237,11 @@ function ProjectInfoEditor({
   )), [draftClient, enqueueMutation, record, withOwnership]);
 
   const handleSubmit = async (_draft: ProjectEditorDraft, actionId: string) => {
-    if (!record || busyActionId) return;
+    if (busyActionId) return;
+    if (!record) {
+      toast.error('수정 임시저장이 준비되지 않았습니다.');
+      return;
+    }
     setBusyActionId(actionId);
     try {
       await enqueueMutation(() => withOwnership((ownership) => draftClient.submit(ownership, {
@@ -257,7 +266,9 @@ function ProjectInfoEditor({
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
       <div className="flex items-center gap-2 text-slate-700">
         {lease.canEdit ? <Pencil className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
-        <span>{lease.error || (lease.canEdit ? `수정 세션 사용 중 · ${minutesLeft}분 남음` : '읽기 모드')}</span>
+        <span>{lease.error || (lease.canEdit
+          ? (record ? `수정 세션 사용 중 · ${minutesLeft}분 남음` : '수정 임시저장 준비 중')
+          : '읽기 모드')}</span>
       </div>
       <div className="flex gap-2">
         {lease.canEdit ? (
@@ -298,7 +309,7 @@ function ProjectInfoEditor({
                   onChange={(event) => setResubmitComment(event.target.value)}
                   placeholder="보완한 내용을 짧게 남길 수 있습니다."
                   className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
-                  disabled={!lease.canEdit}
+                  disabled={!editorCanEdit}
                 />
               </div>
             ) : null}
@@ -321,16 +332,19 @@ function ProjectInfoEditor({
         members={members}
         departmentOptions={departmentOptions}
         topSlot={topSlot}
-        readOnly={!lease.canEdit}
+        readOnly={!editorCanEdit}
         canRemoveContractDocument={false}
         canRemoveProjectDocuments={false}
-        autosave={record ? { key: autosaveKey, disabled: !lease.canEdit, onSave: persistDraft } : undefined}
+        autosave={record ? { key: autosaveKey, disabled: !editorCanEdit, onSave: persistDraft } : undefined}
         actions={[
           { id: 'save', label: '최종 저장', icon: Save },
           ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
         ]}
         busyActionId={busyActionId}
-        onContractFileUpload={(file) => uploadDocument('contract', file)}
+        onContractFileUpload={async (file) => {
+          const uploaded = await uploadDocument('contract', file);
+          return { contractDocument: uploaded.document, contractAnalysis: uploaded.contractAnalysis };
+        }}
         onProjectDocumentFileUpload={({ kind, file }) => uploadDocument(kind, file)}
         onCancel={() => navigate('/portal/project-select')}
         onSubmit={handleSubmit}

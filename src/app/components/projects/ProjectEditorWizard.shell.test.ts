@@ -130,7 +130,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('keeps portal edit drafts stable when async listener data refreshes', () => {
     expect(source).toContain('const lastResetKeyRef = useRef<string | null>(null)');
     expect(source).toContain("const resetKey = `${draftKey}::${autosave?.key || ''}`");
-    expect(source).toContain('if (lastResetKeyRef.current === resetKey) return;');
+    expect(source).toContain('shouldResetProjectEditorDraft({');
+    expect(source).toContain('lastPersistedFingerprint: lastPersistedFingerprintRef.current');
+    expect(source).toContain('incomingFingerprint: initialDraftFingerprint');
     expect(source).not.toContain('lastInitialDraftFingerprintRef');
   });
 
@@ -186,7 +188,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('<fieldset disabled={readOnly} className="contents">');
     expect(source).toContain('disabled={readOnly || autosaveState');
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || !!busyActionId");
-    expect(source).toContain('if (lastResetKeyRef.current === resetKey) return');
+    expect(source).toContain('shouldResetProjectEditorDraft({');
     expect(source).toContain('autosave?.onSave, draftKey, readOnly');
   });
 
