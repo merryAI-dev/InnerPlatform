@@ -111,6 +111,19 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('Stage artifact is not READY');
   });
 
+  it('injects only the guarded Stage lease and JVM runtime into the preview artifact', () => {
+    expect(stageWorkflowText).toContain('STAGE_FIREBASE_PROJECT_ID: mysc-bmp-14173451');
+    expect(stageWorkflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
+    expect(stageWorkflowText).toContain('JVM_WEEKLY_API_BASE_URL_STAGE');
+    expect(stageWorkflowText).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE');
+    expect(stageWorkflowText).toContain('node scripts/assert-stage-edit-lease-runtime.mjs');
+    expect(stageWorkflowText).toContain('--env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}"');
+    expect(stageWorkflowText).toContain('--env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}"');
+    expect(stageWorkflowText).toContain('--env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}"');
+    expect(stageWorkflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}"');
+    expect(stageWorkflowText).not.toContain('--prod');
+  });
+
   it('keeps deploy workflows focused on deployment after CI gates have passed', () => {
     expect(stageWorkflowText).not.toContain('run: npm ci');
     expect(stageWorkflowText).not.toContain('Unit tests');

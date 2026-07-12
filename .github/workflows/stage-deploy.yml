@@ -34,6 +34,14 @@ jobs:
       url: https://inner-platform-internal-stage-merryai-devs-projects.vercel.app
     env:
       STAGE_CANONICAL_HOST: inner-platform-internal-stage-merryai-devs-projects.vercel.app
+      STAGE_FIREBASE_PROJECT_ID: mysc-bmp-14173451
+      LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316
+      BFF_DEPLOY_ENV: stage
+      BFF_EDIT_LEASES_ENABLED: 'true'
+      VERCEL_TARGET_ENV: preview
+      JVM_WEEKLY_FIRESTORE_PROJECT_ID: mysc-bmp-14173451
+      JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_STAGE }}
+      JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE }}
       VERCEL_CLI_PACKAGE: vercel@50.14.0
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -72,6 +80,9 @@ jobs:
           test -n "${VERCEL_TOKEN}" || { echo "Missing secret: VERCEL_DEPLOY_TOKEN_STAGE" >&2; exit 1; }
           test -n "${VERCEL_ORG_ID}" || { echo "Missing secret: VERCEL_ORG_ID" >&2; exit 1; }
           test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_API_BASE_URL}" || { echo "Missing Stage variable: JVM_WEEKLY_API_BASE_URL_STAGE" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}" || { echo "Missing Stage secret: JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE" >&2; exit 1; }
+          FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}" node scripts/assert-stage-edit-lease-runtime.mjs
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
           test -n "$(git rev-parse HEAD)" || { echo "Could not resolve deploy commit." >&2; exit 1; }
 
@@ -84,6 +95,15 @@ jobs:
           output_file="$(mktemp)"
           commit_sha="$(git rev-parse HEAD)"
           npx --yes "${VERCEL_CLI_PACKAGE}" deploy --yes --no-wait --target preview --token "${VERCEL_TOKEN}" \
+            --build-env VITE_PLATFORM_API_ENABLED=true \
+            --env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}" \
+            --env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}" \
+            --env BFF_ALLOWED_ORIGINS="https://${STAGE_CANONICAL_HOST}" \
+            --env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}" \
+            --env BFF_LIVE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
+            --env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}" \
+            --env JVM_WEEKLY_API_BASE_URL="${JVM_WEEKLY_API_BASE_URL}" \
+            --env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             --meta stagePolicy=github-actions-git-only \
             --meta githubCommitSha="${commit_sha}" \
             --meta githubCommitRef="${TARGET_REF}" \
