@@ -7,6 +7,10 @@ const source = readFileSync(resolve(import.meta.dirname, 'ProjectRegisterRedirec
 describe('ProjectRegisterRedirectPage redirect contract', () => {
   it('keeps legacy project registration entry explicit instead of auto redirecting', () => {
     expect(source).toContain('프로젝트 등록 요청 열기');
+    expect(source).toContain("import { Link, useLocation } from 'react-router'");
+    expect(source).toContain('<Link');
+    expect(source).toContain('to={target}');
+    expect(source).not.toContain('<a');
     expect(source).not.toContain('Navigate');
     expect(source).not.toContain('replace');
   });

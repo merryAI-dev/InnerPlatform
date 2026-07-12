@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, UserPlus } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
@@ -32,6 +32,7 @@ import {
 } from '../../components/ui/alert-dialog';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
+import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 
 function formatAmount(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -260,17 +261,22 @@ export function CashflowSheetLabPage({
   const { user: authUser, loginWithGoogle } = useAuth();
   const { activeProjectId, myProject } = usePortalStore();
   const { orgId } = useFirebase();
+  const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
+  const routeProjectId = routeProjectIdParam?.trim() || '';
+  const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const portalProjectId = activeProjectId || myProject?.id || '';
   const initialProjectId = useMemo(() => (
-    projectIdOverride?.trim()
+    routeProjectId
+    || projectIdOverride?.trim()
     || searchParams.get('projectId')?.trim()
     || portalProjectId
     || authUser?.projectId
     || authUser?.projectIds?.[0]
     || readRecentPortalProjectIds()[0]
     || ''
-  ), [authUser?.projectId, authUser?.projectIds, portalProjectId, projectIdOverride, searchParams]);
+  ), [authUser?.projectId, authUser?.projectIds, portalProjectId, projectIdOverride, routeProjectId, searchParams]);
   const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
@@ -304,6 +310,7 @@ export function CashflowSheetLabPage({
   const previewRequestRef = useRef(0);
 
   const projectId = projectIdInput.trim();
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
   const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim() || startWeek.trim() || endWeek.trim());
   const sourceKey = useMemo(() => buildSourceKey({
@@ -440,10 +447,16 @@ export function CashflowSheetLabPage({
   }, [initialProjectId, projectIdInput]);
 
   useEffect(() => {
+    if (!routeProjectId || routeProjectId === projectIdInput) return;
+    setProjectIdInput(routeProjectId);
+  }, [projectIdInput, routeProjectId]);
+
+  useEffect(() => {
+    if (routeProjectId) return;
     const nextProjectId = projectIdOverride?.trim();
     if (!nextProjectId || nextProjectId === projectIdInput) return;
     setProjectIdInput(nextProjectId);
-  }, [projectIdInput, projectIdOverride]);
+  }, [projectIdInput, projectIdOverride, routeProjectId]);
 
   useEffect(() => {
     if (projectIdInput || !portalProjectId) return;
@@ -454,6 +467,11 @@ export function CashflowSheetLabPage({
     if (!projectId) return;
     rememberRecentPortalProject(projectId);
   }, [projectId]);
+
+  useEffect(() => {
+    if (routeProjectId || !projectId) return;
+    navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true });
+  }, [currentPath, navigate, projectId, routeProjectId]);
 
   async function handleLoadShareAccount() {
     if (!projectId || accountLoading) return;
@@ -940,7 +958,7 @@ export function CashflowSheetLabPage({
                           {reflectResult.skippedRiskLineCount ? ` · 확인 필요 ${reflectResult.skippedRiskLineCount.toLocaleString()}건 남김` : ''}
                       </div>
                       <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
-                        <Link to="/portal/cashflow">캐시플로우로 이동</Link>
+                        <Link to={resolvePortalProjectResourcePath('/portal/cashflow', projectId)}>캐시플로우로 이동</Link>
                       </Button>
                     </div>
                   ) : (

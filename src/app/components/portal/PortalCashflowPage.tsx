@@ -1,7 +1,16 @@
+import { useEffect } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { CashflowProjectSheet } from '../cashflow/CashflowProjectSheet';
 import { usePortalStore } from '../../data/portal-store';
+import {
+  resolvePortalProjectResourceId,
+  resolvePortalProjectResourcePath,
+} from '../../platform/portal-project-selection';
 
 export function PortalCashflowPage() {
+  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     activeProjectId,
     portalUser,
@@ -9,7 +18,13 @@ export function PortalCashflowPage() {
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
 
-  const projectId = activeProjectId || myProject?.id || '';
+  const projectId = resolvePortalProjectResourceId(routeProjectId, activeProjectId, myProject?.id);
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
+
+  useEffect(() => {
+    if (routeProjectId || !projectId) return;
+    navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true });
+  }, [currentPath, navigate, projectId, routeProjectId]);
 
   if (!projectId) {
     return (

@@ -3,8 +3,11 @@ import type { Project } from '../data/types';
 import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
+  resolvePortalProjectResourceId,
+  resolvePortalProjectResourcePath,
   resolvePortalProjectSelectPath,
   resolvePortalProjectSwitchPath,
+  runPortalProjectSwitch,
 } from './portal-project-selection';
 
 const projects = [
@@ -94,5 +97,71 @@ describe('portal project selection helpers', () => {
     expect(resolvePortalProjectSwitchPath('/portal')).toBe('/portal/budget');
     expect(resolvePortalProjectSwitchPath('/portal/project-select')).toBe('/portal/budget');
     expect(resolvePortalProjectSwitchPath('/portal/project-select?redirect=%2Fportal%2Fbudget')).toBe('/portal/budget');
+  });
+
+  it('gives the canonical route project precedence over session fallbacks', () => {
+    expect(resolvePortalProjectResourceId('route-project', 'session-project', 'primary-project')).toBe('route-project');
+    expect(resolvePortalProjectResourceId('', 'session-project', 'primary-project')).toBe('session-project');
+    expect(resolvePortalProjectResourceId(undefined, '', 'primary-project')).toBe('primary-project');
+  });
+
+  it('replaces project IDs in canonical and legacy resource paths while preserving query and hash', () => {
+    expect(resolvePortalProjectResourcePath('/portal/edit-project/old?tab=contract#top', 'new/project')).toBe(
+      '/portal/edit-project/new%2Fproject?tab=contract#top',
+    );
+    expect(resolvePortalProjectResourcePath('/portal/cashflow/old', 'new-project')).toBe('/portal/cashflow/new-project');
+    expect(resolvePortalProjectResourcePath('/portal/cashflow/old/sheets-lab?step=2', 'new-project')).toBe(
+      '/portal/cashflow/new-project/sheets-lab?step=2',
+    );
+    expect(resolvePortalProjectResourcePath('/portal/cashflow/sheets-lab#review', 'new-project')).toBe(
+      '/portal/cashflow/new-project/sheets-lab#review',
+    );
+    expect(resolvePortalProjectResourcePath('/portal/budget?month=2026-07', 'new-project')).toBe(
+      '/portal/budget?month=2026-07',
+    );
+  });
+
+  it('runs the dirty guard before state mutation and navigation', async () => {
+    const blockedEvents: string[] = [];
+    const blocked = await runPortalProjectSwitch({
+      projectId: 'project-b',
+      currentPath: '/portal/cashflow/project-a?month=2026-07',
+      label: '캐시플로우',
+      isNavigationBlocked: (attempt) => {
+        blockedEvents.push(`guard:${attempt.path}`);
+        return true;
+      },
+      setActiveProject: async () => {
+        blockedEvents.push('set');
+        return true;
+      },
+      navigate: () => blockedEvents.push('navigate'),
+    });
+
+    expect(blocked).toBe(false);
+    expect(blockedEvents).toEqual(['guard:/portal/cashflow/project-b?month=2026-07']);
+
+    const allowedEvents: string[] = [];
+    const allowed = await runPortalProjectSwitch({
+      projectId: 'project-b',
+      currentPath: '/portal/cashflow/project-a/sheets-lab#review',
+      label: '시트 연동 검토',
+      isNavigationBlocked: (attempt) => {
+        allowedEvents.push(`guard:${attempt.path}`);
+        return false;
+      },
+      setActiveProject: async (projectId) => {
+        allowedEvents.push(`set:${projectId}`);
+        return true;
+      },
+      navigate: (path) => allowedEvents.push(`navigate:${path}`),
+    });
+
+    expect(allowed).toBe(true);
+    expect(allowedEvents).toEqual([
+      'guard:/portal/cashflow/project-b/sheets-lab#review',
+      'set:project-b',
+      'navigate:/portal/cashflow/project-b/sheets-lab#review',
+    ]);
   });
 });

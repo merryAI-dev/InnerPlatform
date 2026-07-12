@@ -785,6 +785,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
   const { allowRealtimeListeners: livePortalMode } = useFirestoreAccessPolicy(portalUser?.role || authUser?.role);
+  const hasHydratedPortalSession = Boolean(
+    isAuthenticated && authUser?.uid && portalUser?.id === authUser.uid,
+  );
 
   useEffect(() => {
     if (!firestoreEnabled || !db || !isAuthenticated || !authUser) {
@@ -996,7 +999,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     };
 
     loadFromStore();
-  }, [authLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser]);
+  }, [authLoading, isAuthenticated, authUser?.uid, authUser?.email, authUser?.name, authUser?.role, authUser?.registeredAt, authUser?.projectId, authUserProjectIdsKey, firestoreEnabled, db, orgId, isDevHarnessUser]);
 
   useEffect(() => {
     projectCatalogUnsubsRef.current.forEach((unsub) => unsub());
@@ -1012,6 +1015,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         setProjects(nextProjects);
       });
     };
+
+    if ((authLoading || isMemberLoading) && hasHydratedPortalSession) {
+      setProjectCatalogLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) {
       setProjectsIfChanged([]);
@@ -1084,12 +1094,19 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectCatalogUnsubsRef.current.forEach((unsub) => unsub());
       projectCatalogUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIds, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIdsKey, livePortalMode]);
 
   useEffect(() => {
     projectScopeUnsubsRef.current.forEach((unsub) => unsub());
     projectScopeUnsubsRef.current = [];
     let cancelled = false;
+
+    if ((authLoading || isMemberLoading) && hasHydratedPortalSession) {
+      setProjectScopeLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) {
       setLedgers([]);
@@ -1692,7 +1709,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectScopeUnsubsRef.current.forEach((unsub) => unsub());
       projectScopeUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);
 
   useEffect(() => {
     weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
@@ -1720,6 +1737,12 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       console.error('[PortalStore] weekly submission listen error:', err);
       ifActive(() => setWeeklySubmissionStatuses([]));
     };
+
+    if ((authLoading || isMemberLoading) && hasHydratedPortalSession) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser || isDevHarnessUser) {
       if (!isDevHarnessUser) {
@@ -1753,7 +1776,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       weeklySubmissionUnsubsRef.current.forEach((unsub) => unsub());
       weeklySubmissionUnsubsRef.current = [];
     };
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);
 
   useEffect(() => {
     if (authLoading || isMemberLoading || !isAuthenticated || !authUser) return;
@@ -1765,7 +1788,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (selection.rowsChanged) {
       setExpenseSheetRows(selection.expenseSheetRows);
     }
-  }, [authLoading, isMemberLoading, isAuthenticated, authUser, expenseSheets, activeExpenseSheetId, expenseSheetRows]);
+  }, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, expenseSheets, activeExpenseSheetId, expenseSheetRows]);
 
   const persistExpenseSet = useCallback(async (set: ExpenseSet) => {
     if (!db) return;

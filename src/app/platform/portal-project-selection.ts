@@ -112,3 +112,58 @@ export function resolvePortalProjectSwitchPath(pathname?: string): string {
   }
   return normalizedPath || PORTAL_PROJECT_SWITCH_FALLBACK_PATH;
 }
+
+function normalizedId(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function resolvePortalProjectResourceId(
+  routeProjectId?: string | null,
+  ...fallbackProjectIds: Array<string | null | undefined>
+): string {
+  return [routeProjectId, ...fallbackProjectIds].map(normalizedId).find(Boolean) || '';
+}
+
+export function resolvePortalProjectResourcePath(requestedPath: string, projectId: string): string {
+  const normalizedProjectId = normalizedId(projectId);
+  const normalizedPath = typeof requestedPath === 'string' ? requestedPath.trim() : '';
+  if (!normalizedProjectId || !normalizedPath) return normalizedPath;
+
+  const suffixIndex = [normalizedPath.indexOf('?'), normalizedPath.indexOf('#')]
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0] ?? normalizedPath.length;
+  const pathname = normalizedPath.slice(0, suffixIndex).replace(/\/+$/, '');
+  const suffix = normalizedPath.slice(suffixIndex);
+  const encodedProjectId = encodeURIComponent(normalizedProjectId);
+
+  if (/^\/portal\/edit-project(?:\/[^/]+)?$/.test(pathname)) {
+    return `/portal/edit-project/${encodedProjectId}${suffix}`;
+  }
+  if (
+    pathname === '/portal/cashflow/sheets-lab'
+    || /^\/portal\/cashflow\/[^/]+\/sheets-lab$/.test(pathname)
+  ) {
+    return `/portal/cashflow/${encodedProjectId}/sheets-lab${suffix}`;
+  }
+  if (pathname === '/portal/cashflow' || /^\/portal\/cashflow\/[^/]+$/.test(pathname)) {
+    return `/portal/cashflow/${encodedProjectId}${suffix}`;
+  }
+  return normalizedPath;
+}
+
+export async function runPortalProjectSwitch(input: {
+  projectId: string;
+  currentPath: string;
+  label: string;
+  isNavigationBlocked: (attempt: { path: string; label: string }) => boolean;
+  setActiveProject: (projectId: string) => Promise<boolean>;
+  navigate: (path: string) => void;
+}): Promise<boolean> {
+  const projectId = normalizedId(input.projectId);
+  if (!projectId) return false;
+  const targetPath = resolvePortalProjectResourcePath(input.currentPath, projectId);
+  if (input.isNavigationBlocked({ path: targetPath, label: input.label })) return false;
+  if (!await input.setActiveProject(projectId)) return false;
+  input.navigate(targetPath);
+  return true;
+}

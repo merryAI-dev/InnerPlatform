@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { AlertTriangle, CheckCircle2, Loader2, Save, SendHorizontal } from 'lucide-react';
 import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ import {
   resolveProjectRequestKind,
 } from '../../platform/project-change-request';
 import { buildProjectRequestDraft } from '../../platform/project-request-draft';
+import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -85,9 +86,24 @@ function bannerClassName(tone: string) {
 
 export function PortalProjectEdit() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
+  const routeProjectId = routeProjectIdParam?.trim() || '';
   const { user: authUser } = useAuth();
   const { db, isOnline, orgId } = useFirebase();
-  const { members, myProject } = usePortalStore();
+  const {
+    activeProjectId,
+    isLoading: portalLoading,
+    members,
+    myProject: sessionProject,
+    projects,
+  } = usePortalStore();
+  const routeProject = routeProjectId
+    ? projects.find((project) => project.id === routeProjectId) || null
+    : null;
+  const fallbackProject = projects.find((project) => project.id === activeProjectId) || sessionProject;
+  const myProject = routeProjectId ? routeProject : fallbackProject;
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -95,6 +111,11 @@ export function PortalProjectEdit() {
   const [resubmitComment, setResubmitComment] = useState('');
   const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
   const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`;
+
+  useEffect(() => {
+    if (routeProjectId || !myProject?.id) return;
+    navigate(resolvePortalProjectResourcePath(currentPath, myProject.id), { replace: true });
+  }, [currentPath, myProject?.id, navigate, routeProjectId]);
 
   useEffect(() => {
     if (!db || !isOnline || !myProject?.id) {
@@ -225,7 +246,7 @@ export function PortalProjectEdit() {
   };
 
   const markProjectPendingReview = async (request: ProjectRequest, reviewComment: string | null) => {
-    if (!orgId || !myProject || !authUser?.uid) return;
+    if (!db || !orgId || !myProject || !authUser?.uid) return;
     const now = new Date().toISOString();
     const reviewerName = authUser.name || authUser.email || 'PM';
     if (isPlatformApiEnabled()) {
@@ -333,6 +354,15 @@ export function PortalProjectEdit() {
     });
     return { document, contractAnalysis: null };
   };
+
+  if (!myProject && portalLoading) {
+    return (
+      <div className="flex min-h-48 items-center justify-center text-sm text-slate-500" role="status">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        프로젝트를 불러오는 중...
+      </div>
+    );
+  }
 
   if (!myProject) {
     return (

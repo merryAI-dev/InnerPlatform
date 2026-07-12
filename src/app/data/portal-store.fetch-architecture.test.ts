@@ -14,13 +14,19 @@ describe('portal-store fetch architecture', () => {
 
   it('keeps project catalog loading isolated from scoped project ids', () => {
     expect(portalStoreSource).toContain(
-      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIds, livePortalMode]);',
+      '}, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIdsKey, livePortalMode]);',
     );
     expect(portalStoreSource).toContain(
-      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);',
+      '}, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, currentProjectId, firestoreEnabled, db, orgId, scopedProjectIdsKey, isDevHarnessUser, portalUserProjectIdsKey, livePortalMode]);',
     );
     expect(portalStoreSource).toContain(
-      '}, [authLoading, isMemberLoading, isAuthenticated, authUser, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);',
+      '}, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, firestoreEnabled, db, orgId, isDevHarnessUser, scopedProjectIdsKey, livePortalMode]);',
     );
+  });
+
+  it('does not restart data listeners only because the auth token object changed', () => {
+    expect(portalStoreSource).not.toContain('isAuthenticated, authUser, firestoreEnabled');
+    expect(portalStoreSource).not.toContain('isAuthenticated, authUser, currentProjectId');
+    expect(portalStoreSource).toContain('authUserProjectIdsKey, firestoreEnabled');
   });
 });
