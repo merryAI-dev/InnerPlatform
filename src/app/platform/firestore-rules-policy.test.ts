@@ -186,7 +186,7 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
   });
 
   it('keeps edit drafts and legacy client locks behind BFF-only Firestore rules', () => {
@@ -205,7 +205,7 @@ describe('firestore rules policy alignment', () => {
     }
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
     expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
   });
 
   it('keeps canonical project and finance root writes behind server APIs', () => {
@@ -220,6 +220,7 @@ describe('firestore rules policy alignment', () => {
       'weekly_submission_status',
       'transactions',
       'comments',
+      'evidences',
       'budget_evidence_maps',
     ]) {
       expect(canonicalWriteRule).toContain(`'${collection}'`);
@@ -227,6 +228,12 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('&& !isCanonicalServerWriteCollection(collection)');
     expect(firestoreRulesText).toContain(
       'match /orgs/{orgId}/{collection}/{document}/{subcollection}/{nested=**}',
+    );
+    expect(firestoreRulesText).toContain(
+      "return collection == 'projects' && subcollection == 'bank_statements';",
+    );
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/projects\/\{projectId\}\/bank_statements\/\{documentId\} \{\s*allow read: if canRead\(orgId\);\s*allow write: if false;\s*\}/,
     );
   });
 

@@ -128,8 +128,13 @@ service cloud.firestore {
         'weekly_submission_status',
         'transactions',
         'comments',
+        'evidences',
         'budget_evidence_maps'
       ];
+    }
+
+    function isCanonicalServerWriteSubcollection(collection, subcollection) {
+      return collection == 'projects' && subcollection == 'bank_statements';
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -249,6 +254,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── 은행거래 원본: BFF/JVM API로만 쓰기 ──
+    match /orgs/{orgId}/projects/{projectId}/bank_statements/{documentId} {
+      allow read: if canRead(orgId);
+      allow write: if false;
+    }
+
     // ── 일반 규칙: 최상위 문서 ──
     match /orgs/{orgId}/{collection}/{document} {
       allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);
@@ -261,7 +272,9 @@ service cloud.firestore {
     // 서버 경로 전환이 끝난 하위 컬렉션부터 별도 규칙으로 차단한다.
     match /orgs/{orgId}/{collection}/{document}/{subcollection}/{nested=**} {
       allow read: if !isCatchallExcludedCollection(collection) && canRead(orgId);
-      allow write: if !isCatchallExcludedCollection(collection) && canWrite(orgId);
+      allow write: if !isCatchallExcludedCollection(collection)
+        && !isCanonicalServerWriteSubcollection(collection, subcollection)
+        && canWrite(orgId);
     }
   }
 }

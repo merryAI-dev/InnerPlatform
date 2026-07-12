@@ -39,8 +39,10 @@ const canonicalRootCollections = [
   'weekly_submission_status',
   'transactions',
   'comments',
+  'evidences',
   'budget_evidence_maps',
 ] as const;
+const canonicalProjectSubcollections = ['bank_statements'] as const;
 const actors = [
   { uid: 'draft-owner', role: 'viewer', label: 'project request draft owner' },
   { uid: 'pm-member', role: 'pm', label: 'PM' },
@@ -99,6 +101,10 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
           doc(db, `orgs/${tenantId}/${collection}/existing`),
           { tenantId, value: 'original' },
         )),
+        ...canonicalProjectSubcollections.map((collection) => setDoc(
+          doc(db, `orgs/${tenantId}/projects/existing/${collection}/existing`),
+          { tenantId, value: 'original' },
+        )),
       ]);
     });
   }, 60_000);
@@ -145,6 +151,24 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     }
   }
 
+  for (const collection of canonicalProjectSubcollections) {
+    for (const actor of actors.filter(({ role }) => role !== 'viewer')) {
+      it(`keeps ${actor.label} reads but denies client writes on project ${collection}`, async () => {
+        const db = testEnv.authenticatedContext(actor.uid, {
+          email: `${actor.uid}@mysc.co.kr`,
+        }).firestore();
+        const basePath = `orgs/${tenantId}/projects/existing/${collection}`;
+        const existing = doc(db, `${basePath}/existing`);
+        const created = doc(db, `${basePath}/created-${actor.uid}`);
+
+        expect((await assertSucceeds(getDoc(existing))).data()?.value).toBe('original');
+        await assertFails(setDoc(created, { tenantId, value: `created-${actor.uid}` }));
+        await assertFails(updateDoc(existing, { value: `updated-${actor.uid}` }));
+        await assertFails(deleteDoc(existing));
+      });
+    }
+  }
+
   it('keeps viewer list access to canonical collections', async () => {
     const db = testEnv.authenticatedContext('draft-owner', {
       email: 'draft-owner@mysc.co.kr',
@@ -154,6 +178,13 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
       const snapshot = await assertSucceeds(getDocs(
         firestoreCollection(db, `orgs/${tenantId}/${collection}`),
       ));
+      expect(snapshot.docs.some((item) => item.id === 'existing')).toBe(true);
+    }
+    for (const collection of canonicalProjectSubcollections) {
+      const snapshot = await assertSucceeds(getDocs(firestoreCollection(
+        db,
+        `orgs/${tenantId}/projects/existing/${collection}`,
+      )));
       expect(snapshot.docs.some((item) => item.id === 'existing')).toBe(true);
     }
   });
@@ -295,6 +326,14 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
   it('keeps Admin SDK CRUD available for protected and canonical collections', async () => {
     for (const collection of [...protectedCollections, ...canonicalRootCollections]) {
       const ref = adminDb.doc(`orgs/${tenantId}/${collection}/admin-sdk`);
+      await ref.set(protectedDocumentData());
+      expect((await ref.get()).data()?.value).toBe('original');
+      await ref.update({ value: 'updated' });
+      expect((await ref.get()).data()?.value).toBe('updated');
+      await ref.delete();
+    }
+    for (const collection of canonicalProjectSubcollections) {
+      const ref = adminDb.doc(`orgs/${tenantId}/projects/existing/${collection}/admin-sdk`);
       await ref.set(protectedDocumentData());
       expect((await ref.get()).data()?.value).toBe('original');
       await ref.update({ value: 'updated' });
