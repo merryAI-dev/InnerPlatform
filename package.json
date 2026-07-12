@@ -25,6 +25,7 @@
     "bff:outbox:worker": "node server/bff/outbox-worker.mjs",
     "bff:work-queue:worker": "node server/bff/work-queue-worker.mjs",
     "bff:deploy:cloud-run": "bash scripts/deploy_bff_cloud_run.sh",
+    "weekly-api:smoke": "node scripts/smoke_jvm_weekly_api.mjs",
     "firebase:bootstrap": "bash scripts/firebase_bootstrap.sh",
     "firebase:login": "npx firebase-tools login --no-localhost",
     "firebase:login:daemon:start": "node scripts/firebase_login_daemon.mjs start --open",
