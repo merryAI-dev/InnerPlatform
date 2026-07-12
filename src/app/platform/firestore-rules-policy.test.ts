@@ -105,6 +105,23 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).not.toContain("isAdmin('mysc')");
   });
 
+  it('keeps self-service member writes on a strict non-assignment allowlist', () => {
+    expect(firestoreRulesText).toContain('function isSafeSelfMemberCreate(orgId, memberId)');
+    expect(firestoreRulesText).toContain('function isSafeSelfMemberUpdate(orgId, memberId)');
+    expect(firestoreRulesText).toContain("collection in ['members']");
+    expect(firestoreRulesText).toContain('request.resource.data.keys().hasOnly([');
+    expect(firestoreRulesText).toContain("request.resource.data.projectIds.size() == 0");
+    expect(firestoreRulesText).toContain("!request.resource.data.keys().hasAny(['portalProfile', 'projectNames'])");
+    expect(firestoreRulesText).toContain('request.resource.data.diff(resource.data).affectedKeys().hasOnly([');
+    for (const protectedField of [
+      'uid', 'status', 'role', 'tenantId', 'projectId', 'projectIds', 'portalProfile',
+    ]) {
+      expect(firestoreRulesText).not.toMatch(
+        new RegExp(`affectedKeys\\(\\)\\.hasOnly\\(\\[[^\\]]*'${protectedField}'`),
+      );
+    }
+  });
+
   // ── canAccessProject: project-scoped ──
   it('admin and finance access all projects without assignment', () => {
     for (const role of ['admin', 'finance'] as const) {
@@ -220,9 +237,11 @@ describe('firestore rules policy alignment', () => {
     expect(storageRulesText).toMatch(
       /match \/orgs\/\{orgId\}\/project-registration-drafts\/\{allPaths=\*\*\} \{\s*allow read, write: if false;\s*\}/,
     );
-    expect(storageRulesText).toContain(
-      "collection != 'business-cards' && collection != 'project-registration-drafts' && isMyscSignedIn()",
+    expect(storageRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/project-registration-documents\/\{allPaths=\*\*\} \{\s*allow read, write: if false;\s*\}/,
     );
+    expect(storageRulesText).toContain("collection != 'project-registration-drafts'");
+    expect(storageRulesText).toContain("collection != 'project-registration-documents'");
   });
 
   it('keeps business-card indexes deployable and large fields exempted', () => {

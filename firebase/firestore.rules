@@ -55,6 +55,44 @@ service cloud.firestore {
         && getMemberRole(orgId) in ['admin', 'finance'];
     }
 
+    function isSafeSelfMemberCreate(orgId, memberId) {
+      return isSignedIn()
+        && memberId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'uid', 'name', 'email', 'role', 'status', 'tenantId',
+          'projectId', 'projectIds', 'avatarUrl', 'createdAt', 'updatedAt',
+          'lastLoginAt', 'defaultWorkspace', 'lastWorkspace'
+        ])
+        && request.resource.data.keys().hasAll([
+          'uid', 'name', 'email', 'role', 'status', 'tenantId'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'pm'
+        && request.resource.data.status == 'ACTIVE'
+        && request.resource.data.tenantId == orgId
+        && (!request.resource.data.keys().hasAny(['projectId'])
+          || request.resource.data.projectId == '')
+        && (!request.resource.data.keys().hasAny(['projectIds'])
+          || (request.resource.data.projectIds is list
+            && request.resource.data.projectIds.size() == 0))
+        && !request.resource.data.keys().hasAny(['portalProfile', 'projectNames']);
+    }
+
+    function isSafeSelfMemberUpdate(orgId, memberId) {
+      return isSignedIn()
+        && memberId == request.auth.uid
+        && resource.data.uid == request.auth.uid
+        && resource.data.tenantId == orgId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.tenantId == orgId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'email', 'avatarUrl', 'updatedAt', 'lastLoginAt',
+          'defaultWorkspace', 'lastWorkspace'
+        ]);
+    }
+
     // BFF 전용 PII 컬렉션: 클라이언트 SDK 직접 접근 금지.
     // BFF(Admin SDK)는 rules를 우회하므로 검증, 감사, idempotency를 서버에서 강제한다.
     function isBffOnlyCollection(collection) {
@@ -65,6 +103,7 @@ service cloud.firestore {
     // 각 컬렉션의 상단 override 규칙만 적용되도록 막는다.
     function isCatchallExcludedCollection(collection) {
       return isBffOnlyCollection(collection)
+        || collection in ['members']
         || collection in ['projectRequestDrafts']
         || collection in ['privateEditDrafts']
         || collection in ['cashflowEditLocks']
@@ -100,15 +139,10 @@ service cloud.firestore {
       // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
       // (auth-store.tsx의 upsertMemberFromFirebase 지원)
       // 다른 역할 부여는 admin이 /users 페이지에서 변경
-      allow create: if isSignedIn()
-        && memberId == request.auth.uid
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.role == 'pm';
+      allow create: if isSafeSelfMemberCreate(orgId, memberId);
 
       // 자기 문서 업데이트: lastLoginAt/avatarUrl 등 갱신 허용, role 변경 불가
-      allow update: if isSignedIn()
-        && memberId == request.auth.uid
-        && request.resource.data.role == resource.data.role;
+      allow update: if isSafeSelfMemberUpdate(orgId, memberId);
 
       // Admin: 역할 변경·삭제·타인 문서 수정 포함 모든 쓰기
       allow write: if isAdmin(orgId);

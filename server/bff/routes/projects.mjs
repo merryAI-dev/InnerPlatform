@@ -1320,6 +1320,7 @@ export function mountProjectRoutes(app, {
     ].map(readOptionalText).filter(Boolean));
     if (
       !member
+      || readOptionalText(member.uid) !== normalizedActorId
       || readOptionalText(member.status).toUpperCase() !== 'ACTIVE'
       || (!['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId))
     ) {

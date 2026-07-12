@@ -11,6 +11,21 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
   const tenantId = 'mysc';
   const db = createFirestoreDb({ projectId });
 
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((next) => { resolve = next; });
+    return { promise, resolve };
+  }
+
+  async function waitUntil(check: () => Promise<boolean>, timeoutMs = 2_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await check()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return false;
+  }
+
   async function clearCollection(path: string): Promise<void> {
     const snap = await db.collection(path).get();
     if (snap.empty) return;
@@ -65,6 +80,34 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
 
     const deliverySnap = await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get();
     expect(deliverySnap.exists).toBe(true);
+  });
+
+  it('samples fresh claim and default-delivery time for each event in a batch', async () => {
+    const events = ['a', 'b'].map((suffix) => {
+      const event = createOutboxEvent({
+        tenantId,
+        requestId: `req-outbox-fresh-time-${suffix}`,
+        eventType: 'transaction.upsert',
+        entityType: 'transaction',
+        entityId: `tx-fresh-time-${suffix}`,
+        payload: {},
+        createdAt: new Date(0).toISOString(),
+      });
+      event.nextAttemptAt = new Date(0).toISOString();
+      return event;
+    });
+    await Promise.all(events.map((event) => enqueueOutboxEvent(db, event)));
+    let nowCalls = 0;
+
+    const result = await processOutboxBatch(db, {
+      now: () => new Date(Date.parse('2026-07-10T00:00:00.000Z') + (nowCalls++ * 1_000)).toISOString(),
+    });
+
+    expect(result).toMatchObject({ processed: 2, succeeded: 2 });
+    const deliveredAt = await Promise.all(events.map(async (event) => (
+      await db.doc(`orgs/${tenantId}/outbox_deliveries/${event.id}`).get()
+    ).data()?.deliveredAt));
+    expect(new Set(deliveredAt).size).toBe(2);
   });
 
   it('creates notifications when transaction is submitted', async () => {
@@ -284,6 +327,106 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     expect(outcomes.reduce((sum, outcome) => sum + outcome.succeeded, 0)).toBe(1);
     expect(handler).toHaveBeenCalledTimes(1);
     expect((await db.doc(`outbox/${event.id}`).get()).data()?.status).toBe('DONE');
+  });
+
+  it('heartbeats a long handler so another worker cannot reclaim its live claim', async () => {
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-outbox-long-handler',
+      eventType: 'transaction.upsert',
+      entityType: 'transaction',
+      entityId: 'tx-long-handler',
+      payload: {},
+      createdAt: new Date(0).toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const started = deferred();
+    const release = deferred();
+    let nowMs = Date.parse('2026-07-10T00:00:00.000Z');
+    const firstRun = processOutboxBatch(db, {
+      handler: async () => {
+        started.resolve();
+        await release.promise;
+      },
+      now: () => new Date(nowMs).toISOString(),
+      workerId: 'long-worker',
+      processingTimeoutMs: 1_000,
+      heartbeatIntervalMs: 10,
+    });
+    await started.promise;
+    nowMs += 2_000;
+
+    const renewed = await waitUntil(async () => {
+      const current = (await db.doc(`outbox/${event.id}`).get()).data();
+      return Date.parse(current?.processingLeaseExpiresAt || '') > nowMs;
+    });
+    let second;
+    try {
+      expect(renewed).toBe(true);
+      second = await processOutboxBatch(db, {
+        handler: vi.fn(async () => undefined),
+        now: () => new Date(nowMs).toISOString(),
+        workerId: 'competing-worker',
+        processingTimeoutMs: 1_000,
+        heartbeatIntervalMs: 10,
+      });
+      expect(second).toMatchObject({ processed: 0, succeeded: 0 });
+    } finally {
+      release.resolve();
+      await firstRun;
+    }
+    expect((await db.doc(`outbox/${event.id}`).get()).data()?.status).toBe('DONE');
+  });
+
+  it('prevents an old worker from overwriting a claim reclaimed after heartbeat loss', async () => {
+    const event = createOutboxEvent({
+      tenantId,
+      requestId: 'req-outbox-lost-heartbeat',
+      eventType: 'transaction.upsert',
+      entityType: 'transaction',
+      entityId: 'tx-lost-heartbeat',
+      payload: {},
+      createdAt: new Date(0).toISOString(),
+    });
+    event.nextAttemptAt = new Date(0).toISOString();
+    await enqueueOutboxEvent(db, event);
+    const started = deferred();
+    const release = deferred();
+    let nowMs = Date.parse('2026-07-10T00:00:00.000Z');
+    const inertTimer = { unref: () => undefined };
+    const oldRun = processOutboxBatch(db, {
+      handler: async () => {
+        started.resolve();
+        await release.promise;
+      },
+      now: () => new Date(nowMs).toISOString(),
+      workerId: 'old-worker',
+      processingTimeoutMs: 1_000,
+      heartbeatIntervalMs: 10,
+      setIntervalFn: () => inertTimer,
+      clearIntervalFn: () => undefined,
+    });
+    await started.promise;
+    nowMs += 2_000;
+
+    const replacement = await processOutboxBatch(db, {
+      handler: vi.fn(async () => undefined),
+      now: () => new Date(nowMs).toISOString(),
+      workerId: 'replacement-worker',
+      processingTimeoutMs: 1_000,
+      heartbeatIntervalMs: 10,
+    });
+    release.resolve();
+    const old = await oldRun;
+
+    expect(replacement).toMatchObject({ processed: 1, succeeded: 1 });
+    expect(old).toMatchObject({ processed: 1, succeeded: 0, failed: 0 });
+    expect((await db.doc(`outbox/${event.id}`).get()).data()).toMatchObject({
+      status: 'DONE',
+      claimOwner: null,
+      claimToken: null,
+    });
   });
 
   it('does not mark registration side effects done without an event handler', async () => {

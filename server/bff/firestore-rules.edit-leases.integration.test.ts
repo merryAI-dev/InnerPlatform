@@ -62,6 +62,16 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
           uid: actor.uid,
           role: actor.role,
         })),
+        setDoc(doc(db, `orgs/${tenantId}/members/self-member`), {
+          uid: 'self-member',
+          name: 'Self Member',
+          email: 'self-member@mysc.co.kr',
+          role: 'pm',
+          status: 'ACTIVE',
+          tenantId,
+          projectId: '',
+          projectIds: [],
+        }),
         ...protectedCollections.map((collection) => setDoc(
           doc(db, `orgs/${tenantId}/${collection}/existing`),
           protectedDocumentData(),
@@ -107,6 +117,125 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     await assertSucceeds(setDoc(created, { name: 'Client project' }));
     await assertSucceeds(updateDoc(created, { name: 'Updated client project' }));
     await assertSucceeds(deleteDoc(created));
+  });
+
+  it('allows first-login self-registration only with empty project assignment and safe keys', async () => {
+    const uid = 'safe-self-create';
+    const email = `${uid}@mysc.co.kr`;
+    const db = testEnv.authenticatedContext(uid, { email }).firestore();
+
+    await assertSucceeds(setDoc(doc(db, `orgs/${tenantId}/members/${uid}`), {
+      uid,
+      name: 'Safe Self Create',
+      email,
+      role: 'pm',
+      status: 'ACTIVE',
+      tenantId,
+      projectId: '',
+      projectIds: [],
+      avatarUrl: 'https://example.test/avatar.png',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
+      lastLoginAt: '2026-07-10T00:00:00.000Z',
+      defaultWorkspace: 'portal',
+      lastWorkspace: 'portal',
+    }));
+
+    const unassignedUid = 'safe-self-create-without-assignment-fields';
+    const unassignedDb = testEnv.authenticatedContext(unassignedUid, {
+      email: `${unassignedUid}@mysc.co.kr`,
+    }).firestore();
+    await assertSucceeds(setDoc(doc(unassignedDb, `orgs/${tenantId}/members/${unassignedUid}`), {
+      uid: unassignedUid,
+      name: 'Safe Self Create Without Assignment Fields',
+      email: `${unassignedUid}@mysc.co.kr`,
+      role: 'pm',
+      status: 'ACTIVE',
+      tenantId,
+    }));
+  });
+
+  it('denies self-registration with assignment, elevated identity, tenant drift, or unknown keys', async () => {
+    const unsafeCases = [
+      { label: 'projectId', patch: { projectId: 'project-a' } },
+      { label: 'projectIds', patch: { projectIds: ['project-a'] } },
+      { label: 'portalProfile', patch: { portalProfile: { projectId: 'project-a', projectIds: ['project-a'] } } },
+      { label: 'projectNames', patch: { projectNames: { 'project-a': 'Project A' } } },
+      { label: 'role', patch: { role: 'admin' } },
+      { label: 'status', patch: { status: 'DISABLED' } },
+      { label: 'tenantId', patch: { tenantId: 'another-tenant' } },
+      { label: 'uid', patch: { uid: 'another-user' } },
+      { label: 'department', patch: { department: 'Strategy' } },
+      { label: 'unknown', patch: { isSuperuser: true } },
+    ];
+
+    for (const { label, patch } of unsafeCases) {
+      const uid = `unsafe-create-${label}`;
+      const email = `${uid}@mysc.co.kr`;
+      const db = testEnv.authenticatedContext(uid, { email }).firestore();
+      await assertFails(setDoc(doc(db, `orgs/${tenantId}/members/${uid}`), {
+        uid,
+        name: 'Unsafe Self Create',
+        email,
+        role: 'pm',
+        status: 'ACTIVE',
+        tenantId,
+        projectId: '',
+        projectIds: [],
+        ...patch,
+      }));
+    }
+  });
+
+  it('allows only safe self profile and session updates tied to the auth email', async () => {
+    const db = testEnv.authenticatedContext('self-member', {
+      email: 'self-member@mysc.co.kr',
+    }).firestore();
+    const memberRef = doc(db, `orgs/${tenantId}/members/self-member`);
+
+    await assertSucceeds(updateDoc(memberRef, {
+      name: 'Updated Self Member',
+      avatarUrl: 'https://example.test/updated.png',
+      email: 'self-member@mysc.co.kr',
+      lastLoginAt: '2026-07-10T00:10:00.000Z',
+      updatedAt: '2026-07-10T00:10:00.000Z',
+      defaultWorkspace: 'portal',
+      lastWorkspace: 'portal',
+    }));
+    await assertFails(updateDoc(memberRef, { email: 'someone-else@mysc.co.kr' }));
+  });
+
+  it('denies every self-update to persisted identity or assignment fields', async () => {
+    const db = testEnv.authenticatedContext('self-member', {
+      email: 'self-member@mysc.co.kr',
+    }).firestore();
+    const memberRef = doc(db, `orgs/${tenantId}/members/self-member`);
+    for (const patch of [
+      { uid: 'different-user' },
+      { status: 'DISABLED' },
+      { role: 'admin' },
+      { tenantId: 'another-tenant' },
+      { projectId: 'project-a' },
+      { projectIds: ['project-a'] },
+      { portalProfile: { projectId: 'project-a', projectIds: ['project-a'] } },
+      { projectNames: { 'project-a': 'Project A' } },
+      { department: 'Strategy' },
+    ]) {
+      await assertFails(updateDoc(memberRef, patch));
+    }
+  });
+
+  it('keeps admin assignment writes available', async () => {
+    const db = testEnv.authenticatedContext('admin-member', {
+      email: 'admin-member@mysc.co.kr',
+    }).firestore();
+    const memberRef = doc(db, `orgs/${tenantId}/members/self-member`);
+
+    await assertSucceeds(updateDoc(memberRef, {
+      projectId: 'project-a',
+      projectIds: ['project-a'],
+      portalProfile: { projectId: 'project-a', projectIds: ['project-a'] },
+    }));
   });
 
   it('keeps Admin SDK CRUD available for protected collections', async () => {

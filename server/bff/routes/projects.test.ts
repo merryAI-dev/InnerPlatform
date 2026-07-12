@@ -107,6 +107,51 @@ describe('project route helpers', () => {
     expect(downloadProjectRegistrationAttachment).not.toHaveBeenCalled();
   });
 
+  it('denies a persisted member document whose uid does not match the authenticated actor', async () => {
+    const projectGet = vi.fn(async () => ({
+      exists: true,
+      data: () => ({
+        id: 'project-a',
+        contractDocument: {
+          path: 'orgs/mysc/project-registration-documents/project-a/contract.pdf',
+          name: 'contract.pdf',
+        },
+      }),
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: documentPath.includes('/members/')
+          ? vi.fn(async () => ({
+              exists: true,
+              data: () => ({ uid: 'different-actor', role: 'admin', status: 'ACTIVE' }),
+            }))
+          : projectGet,
+      })),
+    };
+    const downloadProjectRegistrationAttachment = vi.fn();
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'admin-a', actorRole: 'admin' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).get('/api/v1/projects/project-a/attachments/contract');
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(projectGet).not.toHaveBeenCalled();
+    expect(downloadProjectRegistrationAttachment).not.toHaveBeenCalled();
+  });
+
   it('allows an ACTIVE PM assigned through the persisted portal profile', async () => {
     const path = 'orgs/mysc/project-registration-documents/project-a/contract.pdf';
     const downloadProjectRegistrationAttachment = vi.fn(async () => ({
