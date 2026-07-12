@@ -264,6 +264,9 @@ describe('edit lease service', () => {
     });
     await expectHttpError(service.getStatus(base), 403, 'forbidden');
 
+    db.__set('orgs/tenant-a/projects/project-a', { id: 'project-a', managerId: 'actor-a' });
+    await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
+
     db.__set(memberPath, { uid: 'actor-a', role: 'finance', status: 'ACTIVE' });
     await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
   });

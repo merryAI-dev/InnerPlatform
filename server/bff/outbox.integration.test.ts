@@ -429,11 +429,12 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     });
   });
 
-  it('does not mark registration side effects done without an event handler', async () => {
+  it.each(['project.registration.submitted', 'project.info.submitted'])(
+    'does not mark %s side effects done without an event handler', async (eventType) => {
     const event = createOutboxEvent({
       tenantId,
-      requestId: 'req-registration-handler-required',
-      eventType: 'project.registration.submitted',
+      requestId: `req-handler-required-${eventType}`,
+      eventType,
       entityType: 'project',
       entityId: 'project-registration-1',
       payload: { projectId: 'project-registration-1', projectRequestId: 'request-registration-1' },

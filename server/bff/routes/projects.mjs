@@ -794,6 +794,170 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
   }), 'totalRevenueAmount');
 }
 
+const PROJECT_INFO_CHANGE_LABELS = {
+  name: '프로젝트명',
+  officialContractName: '공식 계약명',
+  clientOrg: '계약 대상',
+  department: '담당조직(CIC)',
+  type: '프로젝트 유형',
+  contractStart: '계약 시작일',
+  contractEnd: '계약 종료일',
+  currency: '통화',
+  contractAmount: '계약금액',
+  totalRevenueAmount: '총수익',
+  supportAmount: '지원금',
+  settlementType: '정산 유형',
+  basis: '정산 기준',
+  accountType: '통장 유형',
+  fundInputMode: '자금 입력 방식',
+  registeredByName: '사업 담당자',
+  teamName: '사내기업팀',
+  teamMembersDetailed: '서류상 참여인력',
+  paymentPlan: '입금 분할',
+  paymentPlanDesc: '입금 계획',
+  finalPaymentNote: '최종 입금 메모',
+  projectPurpose: '프로젝트 목적',
+  description: '주요 내용',
+  note: '비고',
+  contractDocument: '계약서 PDF',
+  quoteDocument: '견적서 PDF',
+  proposalDocument: '제안서 PDF',
+};
+
+const PROJECT_INFO_PAYLOAD_FIELDS = [
+  'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg',
+  'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
+  'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'contractStart', 'contractEnd',
+  'contractType', 'settlementType', 'basis', 'accountType', 'fundInputMode',
+  'settlementSheetPolicy', 'paymentPlan', 'paymentPlanDesc', 'settlementGuide',
+  'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
+  'registeredByEmail', 'managerId', 'managerName', 'teamName', 'teamMembers',
+  'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
+  'quoteDocument', 'proposalDocument', 'contractAnalysis',
+];
+
+function projectInfoChangeValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'object') {
+    if (readOptionalText(value?.name)) return readOptionalText(value.name);
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
+  return Object.entries(PROJECT_INFO_CHANGE_LABELS).flatMap(([key, label]) => {
+    const before = projectInfoChangeValue(beforeSnapshot[key]);
+    const after = projectInfoChangeValue(proposedSnapshot[key]);
+    return before === after ? [] : [{ key, label, before, after }];
+  });
+}
+
+function projectInfoPayloadWithDocuments(payload, project, attachmentRefs) {
+  const privateDocuments = registrationPrivateDocuments(attachmentRefs);
+  const normalizedPatch = buildProjectPatchFromChangeRequestPayload(payload, project);
+  const proposedWithLegacyFallback = buildProjectRequestPayloadFromProject({ ...project, ...normalizedPatch }, payload);
+  const proposed = Object.fromEntries(PROJECT_INFO_PAYLOAD_FIELDS.flatMap((field) => (
+    Object.hasOwn(proposedWithLegacyFallback, field) ? [[field, proposedWithLegacyFallback[field]]] : []
+  )));
+  return stripUndefinedDeep({
+    ...proposed,
+    contractDocument: privateDocuments.contractDocument || payload.contractDocument || project.contractDocument || null,
+    quoteDocument: privateDocuments.quoteDocument || payload.quoteDocument || project.quoteDocument || null,
+    proposalDocument: privateDocuments.proposalDocument || payload.proposalDocument || project.proposalDocument || null,
+    contractAnalysis: payload.contractAnalysis || project.contractAnalysis || null,
+  });
+}
+
+export function buildProjectInfoDraftSeed(project, previousRequest) {
+  const isPendingChange = readOptionalText(previousRequest?.requestKind) === 'CHANGE'
+    && readOptionalText(previousRequest?.status) === 'PENDING';
+  const pendingPayload = isPendingChange
+    ? (previousRequest.proposedSnapshot || previousRequest.payload)
+    : null;
+  if (pendingPayload && typeof pendingPayload === 'object' && !Array.isArray(pendingPayload)) {
+    return projectInfoPayloadWithDocuments(pendingPayload, project, []);
+  }
+  return projectInfoPayloadWithDocuments(buildProjectRequestPayloadFromProject(project), project, []);
+}
+
+export function buildProjectInfoChangeSubmission({
+  tenantId,
+  project,
+  previousRequest,
+  payload,
+  attachmentRefs,
+  actorId,
+  actorName,
+  actorEmail,
+  timestamp,
+  targetProjectVersion,
+  resubmit = false,
+  reviewComment,
+}) {
+  assertRegistrationPayload(payload);
+  const beforeSnapshot = projectInfoPayloadWithDocuments(
+    buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
+    project,
+    [],
+  );
+  const proposedSnapshot = projectInfoPayloadWithDocuments(payload, project, attachmentRefs);
+  const changedFields = projectInfoChanges(beforeSnapshot, proposedSnapshot);
+  const currentVersion = Number.isInteger(project.version) && project.version > 0 ? project.version : 1;
+  const requestVersion = Number.isInteger(previousRequest?.requestVersion) && previousRequest.requestVersion > 0
+    ? previousRequest.requestVersion + 1
+    : 1;
+  const projectPatch = resubmit ? {
+    executiveReviewStatus: 'PENDING',
+    executiveReviewedAt: timestamp,
+    executiveReviewedById: actorId,
+    executiveReviewedByName: actorName,
+    executiveReviewComment: readOptionalText(reviewComment) || null,
+    executiveReviewHistory: [
+      ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
+      {
+        status: 'PENDING',
+        previousStatus: readOptionalText(project.executiveReviewStatus) || 'PENDING',
+        reviewedAt: timestamp,
+        reviewedById: actorId,
+        reviewedByName: actorName,
+        reviewComment: readOptionalText(reviewComment) || null,
+        ...(changedFields.length ? { changes: changedFields } : {}),
+      },
+    ],
+  } : {};
+  const projectRequestId = `change-${readOptionalText(project.id)}`;
+  const projectRequest = stripUndefinedDeep({
+    id: projectRequestId,
+    tenantId,
+    requestKind: 'CHANGE',
+    targetProjectId: project.id,
+    approvedProjectId: project.id,
+    baseProjectVersion: currentVersion,
+    targetProjectVersion,
+    requestVersion,
+    beforeSnapshot,
+    proposedSnapshot,
+    changedFields,
+    humanSummary: `${actorName || '요청자'}가 요청한 프로젝트 변경입니다. 기준 프로젝트 v${currentVersion} · 요청 v${requestVersion}`,
+    status: 'PENDING',
+    reviewOutcome: null,
+    payload: proposedSnapshot,
+    requestedBy: actorId,
+    requestedByName: actorName,
+    requestedByEmail: readOptionalText(actorEmail),
+    requestedAt: timestamp,
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    reviewComment: readOptionalText(reviewComment) || null,
+    rejectedReason: null,
+    createdAt: previousRequest?.createdAt || timestamp,
+    updatedAt: timestamp,
+  });
+  return { projectPatch, projectRequest };
+}
+
 function isProjectChangeRequest(request) {
   return readOptionalText(request?.requestKind) === 'CHANGE';
 }

@@ -102,6 +102,13 @@ function memberProjectIds(member = {}) {
   ].map(readOptionalText).filter(Boolean));
 }
 
+function projectOwnerIds(project = {}) {
+  return new Set([
+    project.registeredById,
+    project.managerId,
+  ].map(readOptionalText).filter(Boolean));
+}
+
 export async function assertEditLeaseActorAccessInTransaction({
   tx,
   db,
@@ -366,7 +373,12 @@ export function createEditLeaseService({
     const projectRef = db.doc(`orgs/${current.tenantId}/projects/${current.resourceId}`);
     const projectSnap = await tx.get(projectRef);
     if (!projectSnap.exists) throw createHttpError(404, 'Project not found', 'not_found');
-    if (!CROSS_PROJECT_ROLES.has(actorRole) && !memberProjectIds(member).has(current.resourceId)) {
+    const project = projectSnap.data() || {};
+    if (
+      !CROSS_PROJECT_ROLES.has(actorRole)
+      && !memberProjectIds(member).has(current.resourceId)
+      && !projectOwnerIds(project).has(current.actorId)
+    ) {
       throw createHttpError(403, 'Project assignment is required', 'forbidden');
     }
     return actorRole;

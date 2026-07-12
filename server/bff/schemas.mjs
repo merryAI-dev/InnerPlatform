@@ -30,6 +30,23 @@ export const projectRegistrationDraftSubmitSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
 }).strict();
 
+export const projectInfoDraftOpenSchema = z.object({}).strict();
+
+export const projectInfoDraftPatchSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  payload: z.unknown(),
+  stepIndex: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema;
+
+export const projectInfoDraftSubmitSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().positive(),
+  resubmit: z.boolean().optional().default(false),
+  reviewComment: z.string().trim().max(2000).optional(),
+}).strict();
+
 export const projectUpsertSchema = z.object({
   id: NON_EMPTY_STRING,
   name: NON_EMPTY_STRING,

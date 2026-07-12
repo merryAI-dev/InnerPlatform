@@ -110,6 +110,11 @@ import {
   createProjectRegistrationDraftService,
   mountProjectRegistrationDraftRoutes,
 } from './routes/project-registration-drafts.mjs';
+import {
+  createProjectInfoDraftService,
+  createProjectInfoSubmittedOutboxHandler,
+  mountProjectInfoDraftRoutes,
+} from './routes/project-info-drafts.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -729,6 +734,18 @@ export function createBffApp(options = {}) {
       rbacPolicy,
     })
     : null);
+  const projectInfoDraftService = options.projectInfoDraftService || (editLeasesEnabled
+    ? createProjectInfoDraftService({
+      db,
+      now,
+      createAttachmentId: options.createProjectInfoAttachmentId,
+      createOutboxEvent: options.createProjectInfoOutboxEvent,
+      auditChainService,
+      idempotencyService,
+      draftStorageService: projectRegistrationDraftStorageService,
+      rbacPolicy,
+    })
+    : null);
   const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
   const businessCardStorageService = options.businessCardStorageService || createBusinessCardStorageService({ projectId });
   const businessCardGeminiAiService = options.businessCardGeminiAiService || createBusinessCardGeminiAiService();
@@ -754,6 +771,12 @@ export function createBffApp(options = {}) {
       driveService,
       projectRegistrationSlackService,
       projectRegistrationAttachmentStorageService: projectRegistrationDraftStorageService,
+      now,
+    });
+  const projectInfoOutboxHandler = options.projectInfoOutboxHandler
+    || createProjectInfoSubmittedOutboxHandler({
+      db,
+      draftStorageService: projectRegistrationDraftStorageService,
       now,
     });
 
@@ -889,6 +912,7 @@ export function createBffApp(options = {}) {
       now,
       eventHandlers: {
         'project.registration.submitted': projectRegistrationOutboxHandler,
+        'project.info.submitted': projectInfoOutboxHandler,
       },
     });
 
@@ -1471,6 +1495,11 @@ export function createBffApp(options = {}) {
   mountProjectRegistrationDraftRoutes(app, {
     enabled: editLeasesEnabled,
     projectRegistrationDraftService,
+    piiProtector,
+  });
+  mountProjectInfoDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    projectInfoDraftService,
     piiProtector,
   });
   mountProjectRoutes(app, {
