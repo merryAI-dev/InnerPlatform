@@ -115,6 +115,10 @@ import {
   createProjectInfoSubmittedOutboxHandler,
   mountProjectInfoDraftRoutes,
 } from './routes/project-info-drafts.mjs';
+import {
+  createCashflowEditDraftService,
+  mountCashflowEditDraftRoutes,
+} from './routes/cashflow-edit-drafts.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -743,6 +747,15 @@ export function createBffApp(options = {}) {
       auditChainService,
       idempotencyService,
       draftStorageService: projectRegistrationDraftStorageService,
+      rbacPolicy,
+    })
+    : null);
+  const cashflowEditDraftService = options.cashflowEditDraftService || (editLeasesEnabled
+    ? createCashflowEditDraftService({
+      db,
+      now,
+      auditChainService,
+      idempotencyService,
       rbacPolicy,
     })
     : null);
@@ -1500,6 +1513,11 @@ export function createBffApp(options = {}) {
   mountProjectInfoDraftRoutes(app, {
     enabled: editLeasesEnabled,
     projectInfoDraftService,
+    piiProtector,
+  });
+  mountCashflowEditDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    cashflowEditDraftService,
     piiProtector,
   });
   mountProjectRoutes(app, {
