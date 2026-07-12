@@ -106,6 +106,30 @@ interface MemberDoc {
   lastWorkspace?: WorkspaceId;
 }
 
+export function buildSafeFirstLoginMember(input: {
+  uid: string;
+  name: string;
+  email: string;
+  tenantId: string;
+  avatarUrl?: string;
+  now: string;
+}): MemberDoc {
+  return omitUndefinedFields<MemberDoc>({
+    uid: input.uid,
+    name: input.name,
+    email: input.email,
+    role: 'pm',
+    tenantId: input.tenantId,
+    status: 'ACTIVE',
+    projectId: '',
+    projectIds: [],
+    avatarUrl: input.avatarUrl,
+    createdAt: input.now,
+    updatedAt: input.now,
+    lastLoginAt: input.now,
+  });
+}
+
 const AUTH_STORAGE_KEY = 'mysc-auth-user';
 const ACTIVE_TENANT_KEY = 'MYSC_ACTIVE_TENANT';
 const GOOGLE_WORKSPACE_TOKEN_STORAGE_KEY = 'mysc-google-workspace-token-map';
@@ -302,15 +326,25 @@ async function upsertMemberFromFirebase(
   const legacyMemberRef = legacyMemberId && legacyMemberId !== firebaseUser.uid
     ? doc(db, getOrgDocumentPath(tenantId, 'members', legacyMemberId))
     : null;
-  const [memberSnap, legacySnap] = await Promise.all([
-    getDoc(memberRef),
-    legacyMemberRef ? getDoc(legacyMemberRef) : Promise.resolve(null),
-  ]);
+  const memberSnap = await getDoc(memberRef);
+  const now = new Date().toISOString();
+  if (!memberSnap.exists()) {
+    const created = buildSafeFirstLoginMember({
+      uid: firebaseUser.uid,
+      name: firebaseUser.displayName || '사용자',
+      email: normalizedEmail,
+      tenantId,
+      avatarUrl: firebaseUser.photoURL || undefined,
+      now,
+    });
+    await setDoc(memberRef, created);
+    return created;
+  }
+  const legacySnap = legacyMemberRef ? await getDoc(legacyMemberRef) : null;
   const existing = mergeMemberRecordSources(
     memberSnap.exists() ? (memberSnap.data() as Record<string, unknown>) : undefined,
     legacySnap?.exists() ? (legacySnap.data() as Record<string, unknown>) : undefined,
   ) as Partial<MemberDoc> | undefined;
-  const now = new Date().toISOString();
   const bootstrapAdmin = isBootstrapAdminEmail(normalizedEmail);
   const access = resolveMemberProjectAccessState(existing);
   const mergedProjectIds = normalizeProjectIds([

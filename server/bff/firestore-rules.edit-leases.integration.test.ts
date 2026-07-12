@@ -123,8 +123,11 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
     const uid = 'safe-self-create';
     const email = `${uid}@mysc.co.kr`;
     const db = testEnv.authenticatedContext(uid, { email }).firestore();
+    const memberRef = doc(db, `orgs/${tenantId}/members/${uid}`);
 
-    await assertSucceeds(setDoc(doc(db, `orgs/${tenantId}/members/${uid}`), {
+    expect((await assertSucceeds(getDoc(memberRef))).exists()).toBe(false);
+
+    await assertSucceeds(setDoc(memberRef, {
       uid,
       name: 'Safe Self Create',
       email,
@@ -140,6 +143,7 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
       defaultWorkspace: 'portal',
       lastWorkspace: 'portal',
     }));
+    expect((await assertSucceeds(getDoc(memberRef))).data()?.role).toBe('pm');
 
     const unassignedUid = 'safe-self-create-without-assignment-fields';
     const unassignedDb = testEnv.authenticatedContext(unassignedUid, {

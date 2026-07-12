@@ -134,7 +134,8 @@ service cloud.firestore {
     // ── 구성원(members) ──
     // 테넌트 격리의 핵심: 이 문서가 존재해야 isMember() 통과
     match /orgs/{orgId}/members/{memberId} {
-      allow read: if canRead(orgId);
+      allow get: if (isSignedIn() && memberId == request.auth.uid) || canRead(orgId);
+      allow list: if canRead(orgId);
 
       // 최초 로그인 자기 등록: 본인 UID로만, 기본 역할 pm 고정
       // (auth-store.tsx의 upsertMemberFromFirebase 지원)
