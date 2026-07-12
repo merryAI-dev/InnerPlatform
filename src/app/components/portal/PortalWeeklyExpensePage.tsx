@@ -33,6 +33,7 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  readWeeklyExpenseSheetViaBff,
   syncProjectCashflowActualsViaBff,
 } from '../../lib/platform-bff-client';
 import { PlatformApiError } from '../../platform/api-client';
@@ -68,6 +69,9 @@ import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
 import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { useCashflowEditLease } from '../cashflow/useCashflowEditLease';
+import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -119,6 +123,9 @@ export function PortalWeeklyExpensePage() {
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
+  const [restoredExpenseRows, setRestoredExpenseRows] = useState<ImportRow[] | null>(null);
+  const loadedPrivateDraftKeyRef = useRef('');
+  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const actualSyncSignatureRef = useRef('');
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
@@ -271,6 +278,113 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
+  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor: bffActor });
+  const cashflowPrivateDraftClient = useMemo(() => (
+    cashflowLease.sessionId && projectId
+      ? createCashflowPrivateDraftClient({
+          tenantId: orgId,
+          projectId,
+          actor: bffActor,
+          sessionId: cashflowLease.sessionId,
+        })
+      : null
+  ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
+  const saveExpenseSheetRowsWithLease = useCallback(async (rows: ImportRow[]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    const saved = await saveExpenseSheetRows(rows, { cashflowLease: mutationLease });
+    setRestoredExpenseRows(saved);
+    return saved;
+  }, [cashflowLease.checkBeforeMutation, saveExpenseSheetRows]);
+  const saveBankStatementRowsWithLease = useCallback(async (sheet: Parameters<typeof saveBankStatementRows>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return saveBankStatementRows(sheet, { cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, saveBankStatementRows]);
+  const upsertWeekAmountsWithLease = useCallback(async (input: Parameters<typeof upsertWeekAmounts>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return upsertWeekAmounts({ ...input, cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, upsertWeekAmounts]);
+  const buildWeeklySubmitSheet = useCallback(async () => {
+    const current = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      projectId,
+      sheetKey: activeExpenseSheetId,
+    });
+    return {
+      sheetKey: activeExpenseSheetId,
+      expectedSheetVersion: current.sheetVersion,
+      sheetName: activeSheetName,
+      rows: (restoredExpenseRows || expenseSheetRows || []).map((row, rowIndex) => ({
+        rowIndex,
+        tempId: row.tempId,
+        sourceTxId: row.sourceTxId,
+        entryKind: row.entryKind,
+        cells: row.cells.map((rawValue, columnIndex) => ({
+          columnIndex,
+          rawValue: String(rawValue ?? ''),
+          userEdited: row.userEditedCells?.has(columnIndex) || false,
+        })),
+      })),
+    };
+  }, [activeExpenseSheetId, activeSheetName, bffActor, expenseSheetRows, orgId, projectId, restoredExpenseRows]);
+  const hydrateWeeklyPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }) => {
+    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
+    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
+    if (loadedPrivateDraftKeyRef.current === key) return;
+    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
+    const promise = (async () => {
+      const opened = await cashflowPrivateDraftClient.open(ownership, { baseSnapshot: {}, payload: {} });
+      const weeklyExpense = opened.draft.payload.weeklyExpense;
+      if (weeklyExpense && typeof weeklyExpense === 'object' && !Array.isArray(weeklyExpense)) {
+        const rawRows = (weeklyExpense as { rows?: unknown }).rows;
+        if (Array.isArray(rawRows)) {
+          const restored = rawRows.map((value, rowIndex) => {
+            const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+            const rawCells = Array.isArray(row.cells) ? row.cells : [];
+            const cells = rawCells
+              .filter((cell): cell is Record<string, unknown> => Boolean(cell && typeof cell === 'object'))
+              .sort((a, b) => Number(a.columnIndex) - Number(b.columnIndex));
+            return {
+              tempId: typeof row.tempId === 'string' ? row.tempId : `draft-row-${rowIndex}`,
+              sourceTxId: typeof row.sourceTxId === 'string' ? row.sourceTxId : undefined,
+              entryKind: typeof row.entryKind === 'string' ? row.entryKind : undefined,
+              cells: cells.map((cell) => String(cell.rawValue ?? '')),
+              userEditedCells: new Set(cells.filter((cell) => cell.userEdited === true).map((cell) => Number(cell.columnIndex))),
+            };
+          }) as ImportRow[];
+          setRestoredExpenseRows(restored);
+        }
+      }
+      loadedPrivateDraftKeyRef.current = key;
+    })();
+    privateDraftLoadRef.current = { key, promise };
+    try {
+      await promise;
+    } finally {
+      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
+    }
+  }, [cashflowPrivateDraftClient, projectId]);
+  useEffect(() => {
+    loadedPrivateDraftKeyRef.current = '';
+    privateDraftLoadRef.current = null;
+    setRestoredExpenseRows(null);
+  }, [projectId]);
+  useEffect(() => {
+    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
+    void hydrateWeeklyPrivateDraft(cashflowLease.ownership).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 복구하지 못했습니다.'));
+    });
+  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateWeeklyPrivateDraft]);
+  const beginWeeklyEditing = useCallback(async () => {
+    const ownership = await cashflowLease.acquire();
+    if (!ownership) return;
+    try {
+      await hydrateWeeklyPrivateDraft(ownership);
+    } catch (error) {
+      await cashflowLease.release();
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
+    }
+  }, [cashflowLease.acquire, cashflowLease.release, hydrateWeeklyPrivateDraft]);
   const deriveRowsWithLocalKernel = useCallback(async (
     rows: ImportRow[],
     context: Parameters<typeof deriveSettlementRowsLocally>[1],
@@ -339,25 +453,8 @@ export function PortalWeeklyExpensePage() {
       return [...result.weeks, ...result.cleared];
     }
 
-    await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
-      projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      mode: 'actual',
-      amounts: week.amounts as any,
-    })));
-    if (projectActualSyncPayload.length > 0) {
-      await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
-        projectId,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        expenseUpdated: true,
-        expenseSyncState: 'synced',
-        expenseReviewPendingCount: 0,
-      })));
-    }
-    return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
-  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
+    throw new Error('Actual 원장 읽기 API가 연결되지 않아 읽기 전용으로 유지됩니다.');
+  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectId]);
 
   useEffect(() => {
     if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
@@ -771,7 +868,13 @@ export function PortalWeeklyExpensePage() {
     }
     let updatedCount = 0;
     try {
-      await submitWeekAsPm({ projectId, yearMonth, weekNo });
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
+      const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
+      const weeklySheet = await buildWeeklySubmitSheet();
+      await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
+      await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
+      await cashflowLease.checkStatus();
       for (const txId of txIds) {
         await changeTransactionState(txId, 'SUBMITTED');
         updatedCount += 1;
@@ -784,7 +887,7 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(err, fallback));
       throw err;
     }
-  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
+  }, [buildWeeklySubmitSheet, cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
 
   const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
     void changeTransactionState(txId, newState, reason).catch((error) => {
@@ -846,6 +949,24 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={cashflowLease.canEdit ? 'default' : 'outline'}
+          disabled={!cashflowLease.sessionId || cashflowLease.busy || cashflowLease.canEdit}
+          onClick={() => void beginWeeklyEditing()}
+        >
+          {cashflowLease.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {cashflowLease.canEdit ? '수정 중' : '수정 시작'}
+        </Button>
+        {cashflowLease.canEdit && (
+          <Button type="button" size="sm" variant="ghost" disabled={cashflowLease.busy} onClick={() => void cashflowLease.extend()}>
+            {cashflowLease.remainingLabel} · 30분 연장
+          </Button>
+        )}
+        {!cashflowLease.canEdit && <span className="text-[11px] text-muted-foreground">읽기는 가능하며 저장은 수정 세션을 선점한 뒤 활성화됩니다.</span>}
+      </div>
       {weeklySetupPanel ? (
         <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
           <CardContent className="px-4 py-3">
@@ -934,8 +1055,8 @@ export function PortalWeeklyExpensePage() {
           showSaveStatusButton={weeklyExpenseSavePolicy.showStatusButton}
           evidenceRequiredMap={evidenceRequiredMap}
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
-          sheetRows={expenseSheetRows}
-          onSaveSheetRows={saveExpenseSheetRows}
+          sheetRows={restoredExpenseRows || expenseSheetRows}
+          onSaveSheetRows={saveExpenseSheetRowsWithLease}
           onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
@@ -960,7 +1081,7 @@ export function PortalWeeklyExpensePage() {
           onSavingStateChange={setIsSettlementSaving}
           weeklySubmissionStatuses={weeklySubmissionStatuses}
           discardChangesRequestToken={0}
-          ledgerViewOnly
+          ledgerViewOnly={!cashflowLease.canEdit}
         />
       </Suspense>
       {isSettlementSaving && (
@@ -986,19 +1107,19 @@ export function PortalWeeklyExpensePage() {
               projectAccountType={myProject?.accountType}
               activeSheetName={activeSheetName}
               bffActor={bffActor}
-              expenseSheetRows={expenseSheetRows || []}
+              expenseSheetRows={restoredExpenseRows || expenseSheetRows || []}
               budgetPlanRows={budgetPlanRows || []}
               evidenceRequiredMap={evidenceRequiredMap}
               sheetSources={sheetSources}
               devHarnessEnabled={devHarnessConfig.enabled}
               ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveExpenseSheetRows={saveExpenseSheetRows}
+              saveExpenseSheetRows={saveExpenseSheetRowsWithLease}
               saveBudgetPlanRows={saveBudgetPlanRows}
               saveBudgetCodeBook={saveBudgetCodeBook}
-              saveBankStatementRows={saveBankStatementRows}
+              saveBankStatementRows={saveBankStatementRowsWithLease}
               saveEvidenceRequiredMap={saveEvidenceRequiredMap}
               markSheetSourceApplied={markSheetSourceApplied}
-              upsertWeekAmounts={upsertWeekAmounts}
+              upsertWeekAmounts={upsertWeekAmountsWithLease}
               previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>
@@ -1037,7 +1158,13 @@ export function PortalWeeklyExpensePage() {
                 setParticipationRiskWarning(null);
                 let updatedCount = 0;
                 try {
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
+                  const mutationLease = await cashflowLease.checkBeforeMutation();
+                  if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
+                  const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
+                  const weeklySheet = await buildWeeklySubmitSheet();
+                  await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
+                  await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
+                  await cashflowLease.checkStatus();
                   for (const txId of txIds) {
                     await changeTransactionState(txId, 'SUBMITTED');
                     updatedCount += 1;
@@ -1056,6 +1183,18 @@ export function PortalWeeklyExpensePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditLeaseDialogs
+        warningOpen={cashflowLease.warningOpen}
+        expiredOpen={cashflowLease.expiredOpen}
+        conflictOpen={cashflowLease.conflictOpen}
+        holder={cashflowLease.holder}
+        busy={cashflowLease.busy}
+        onDismissWarning={cashflowLease.dismissWarning}
+        onExtend={() => { void cashflowLease.extend(); }}
+        onContinueReadOnly={cashflowLease.continueReadOnly}
+        onReacquire={() => { void beginWeeklyEditing(); }}
+      />
 
     </div>
   );

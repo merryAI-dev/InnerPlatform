@@ -60,6 +60,7 @@ import { SETTLEMENT_COLUMNS } from '../platform/settlement-csv';
 import type { ImportRow } from '../platform/settlement-csv';
 import {
   BANK_STATEMENT_COLUMNS,
+  buildBankStatementServerImportLines,
   buildBankImportIntakeItemsFromBankSheet,
   mapBankStatementsToImportRows,
   mergeBankRowsIntoExpenseSheet,
@@ -95,10 +96,16 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
+  applyBankStatementItemsViaBff,
+  importBankStatementBatchViaBff,
   isPlatformApiEnabled,
+  readWeeklyExpenseSheetViaBff,
+  saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
   upsertProjectViaBff,
 } from '../lib/platform-bff-client';
+import type { CashflowMutationLease } from '../lib/cashflow-edit-lease';
+import { createCashflowPrivateDraftClient } from '../lib/cashflow-private-draft-client';
 import { duplicateExpenseSetAsDraft, withExpenseItems } from './portal-store.helpers';
 import { buildPortalProfilePatch, readMemberWorkspace, resolveMemberProjectAccessState } from './member-workspace';
 import { buildLegacyMemberDocId, mergeMemberRecordSources } from './member-documents';
@@ -136,6 +143,13 @@ export interface BankStatementApplyCellPatch {
 
 export interface BankStatementApplyOptions {
   cellPatchesByRowKey?: Record<string, BankStatementApplyCellPatch[]>;
+  cashflowLease?: CashflowMutationLease;
+}
+
+export interface CashflowMutationOptions {
+  cashflowLease?: CashflowMutationLease;
+  canonicalFinal?: boolean;
+  finalize?: boolean;
 }
 
 const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
@@ -526,8 +540,8 @@ interface PortalActions {
   createExpenseSheet: (name?: string) => Promise<string | null>;
   renameExpenseSheet: (sheetId: string, name: string) => Promise<boolean>;
   deleteExpenseSheet: (sheetId: string) => Promise<boolean>;
-  saveExpenseSheetRows: (rows: ImportRow[]) => Promise<ImportRow[]>;
-  saveBankStatementRows: (sheet: BankStatementSheet) => Promise<void>;
+  saveExpenseSheetRows: (rows: ImportRow[], options?: CashflowMutationOptions) => Promise<ImportRow[]>;
+  saveBankStatementRows: (sheet: BankStatementSheet, options?: CashflowMutationOptions) => Promise<void>;
   applyBankStatementRowsToExpenseSheet: (sheet: BankStatementSheet & { selectedRowIds?: string[] }, options?: BankStatementApplyOptions) => Promise<{ appliedCount: number }>;
   refreshBankStatementRows: (status?: 'staged' | 'applied') => Promise<void>;
   saveBudgetPlanRows: (rows: BudgetPlanRow[]) => Promise<void>;
@@ -2006,7 +2020,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     );
   }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
 
-  const saveExpenseSheetRows = useCallback(async (rows: ImportRow[]) => {
+  const saveExpenseSheetRows = useCallback(async (rows: ImportRow[], options?: CashflowMutationOptions) => {
     const now = new Date().toISOString();
     const activeSheet = expenseSheets.find((sheet) => sheet.id === activeExpenseSheetId) || null;
     const activeSheetId = activeSheet?.id || activeExpenseSheetId || 'default';
@@ -2038,7 +2052,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         ? { userEditedCells: new Set(row.userEditedCells) }
         : {}),
     }));
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    if (isDevHarnessUser) {
       setExpenseSheetRows(sanitizedRows as ImportRow[]);
       setExpenseSheets((prev) => upsertExpenseSheetTabRows({
         sheets: prev,
@@ -2072,22 +2086,68 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       });
       return sanitizedRows as ImportRow[];
     }
-    const payload = buildExpenseSheetPersistenceDoc({
-      orgId,
+    if (!currentProjectId || !authUser || !isPlatformApiEnabled()) {
+      throw new Error('사업비 저장 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!options?.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const actor = {
+      uid: authUser.uid,
+      email: authUser.email,
+      role: authUser.role,
+      idToken: authUser.idToken,
+      googleAccessToken: authUser.googleAccessToken,
+    };
+    const weeklyRows = (sanitizedRows as ImportRow[]).map((row, rowIndex) => ({
+      rowIndex,
+      tempId: row.tempId,
+      sourceTxId: row.sourceTxId,
+      entryKind: row.entryKind,
+      cells: row.cells.map((rawValue, columnIndex) => ({
+        columnIndex,
+        rawValue: String(rawValue ?? ''),
+        userEdited: row.userEditedCells?.has(columnIndex) || false,
+      })),
+    }));
+    if (!options.canonicalFinal) {
+      const draftClient = createCashflowPrivateDraftClient({
+        tenantId: orgId,
+        actor,
+        projectId: currentProjectId,
+        sessionId: options.cashflowLease.sessionId,
+      });
+      const opened = await draftClient.open(options.cashflowLease, {
+        baseSnapshot: { sheetKey: activeSheetId },
+        payload: {},
+      });
+      await draftClient.save(options.cashflowLease, {
+        expectedDraftRevision: opened.draft.draftRevision,
+        payload: {
+          ...opened.draft.payload,
+          weeklyExpense: { sheetKey: activeSheetId, sheetName: activeSheetName, rows: weeklyRows },
+        },
+      });
+    } else {
+    const current = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor,
       projectId: currentProjectId,
-      activeSheetId,
-      activeSheetName,
-      order: activeSheet?.order || (activeSheetId === 'default' ? 0 : expenseSheets.length + 1),
-      rows: sanitizedRows as ImportRow[],
-      createdAt: activeSheet?.createdAt,
-      now,
-      updatedBy: portalUser?.name || authUser?.name || '',
+      sheetKey: activeSheetId,
     });
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_sheets/${activeSheetId}`),
-      payload,
-      { merge: true },
-    );
+    await saveWeeklyExpenseDraftViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: currentProjectId,
+      sheetKey: activeSheetId,
+      idempotencyKey: `weekly-expense-save:${currentProjectId}:${activeSheetId}:${Date.now()}`,
+      lease: options.cashflowLease,
+      finalize: options.finalize === true,
+      payload: {
+        expectedSheetVersion: current.sheetVersion,
+        sheetName: activeSheetName,
+        rows: weeklyRows,
+      },
+    });
+    }
     const nextSheets = upsertExpenseSheetTabRows({
       sheets: expenseSheetsRef.current,
       sheetId: activeSheetId,
@@ -2560,8 +2620,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return id;
   }, [db, orgId, portalUser, authUser]);
 
-  const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet) => {
-    const now = new Date().toISOString();
+  const saveBankStatementRows = useCallback(async (sheet: BankStatementSheet, options?: CashflowMutationOptions) => {
     const incomingColumns = Array.isArray(sheet?.columns) ? sheet.columns : [];
     const maxLenFromRows = Array.isArray(sheet?.rows)
       ? sheet.rows.reduce((max, row) => Math.max(max, Array.isArray(row?.cells) ? row.cells.length : 0), 0)
@@ -2587,24 +2646,71 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       status: row?.status === 'applied' ? 'applied' as const : 'staged' as const,
     }));
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    if (isDevHarnessUser) {
       setBankStatementRows(sanitizedSheet);
       return;
     }
-    const payload = withTenantScope(orgId, {
+    if (!currentProjectId || !authUser || !isPlatformApiEnabled()) {
+      throw new Error('통장내역 저장 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!options?.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    if (!options.canonicalFinal) {
+      const actor = {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken: authUser.idToken,
+        googleAccessToken: authUser.googleAccessToken,
+      };
+      const draftClient = createCashflowPrivateDraftClient({
+        tenantId: orgId,
+        actor,
+        projectId: currentProjectId,
+        sessionId: options.cashflowLease.sessionId,
+      });
+      const opened = await draftClient.open(options.cashflowLease, {
+        baseSnapshot: { source: 'bank-statement' },
+        payload: {},
+      });
+      await draftClient.save(options.cashflowLease, {
+        expectedDraftRevision: opened.draft.draftRevision,
+        payload: { ...opened.draft.payload, bankStatement: sanitizedSheet },
+      });
+      setBankStatementRows(sanitizedSheet);
+      return;
+    }
+    const idempotencyKey = `bank-import:${currentProjectId}:${Date.now()}`;
+    const result = await importBankStatementBatchViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken: authUser.idToken,
+        googleAccessToken: authUser.googleAccessToken,
+      },
       projectId: currentProjectId,
-      columns: sanitizedColumns,
-      rows: sanitizedRows,
-      updatedAt: now,
-      updatedBy: portalUser?.name || authUser?.name || '',
+      idempotencyKey,
+      lease: options.cashflowLease,
+      finalize: options.finalize === true,
+      payload: {
+        idempotencyKey,
+        uploadName: 'portal-bank-statement',
+        columns: sanitizedColumns,
+        lines: buildBankStatementServerImportLines(sanitizedSheet),
+      },
     });
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
-      payload,
-      { merge: true },
+    const importedIdBySourceKey = new Map(
+      result.lines.map((line) => [line.sourceLineKey, line.id || line.sourceLineKey]),
     );
-    setBankStatementRows(sanitizedSheet);
-  }, [authUser?.name, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name]);
+    setBankStatementRows({
+      columns: sanitizedSheet.columns,
+      rows: sanitizedSheet.rows.map((row) => ({
+        ...row,
+        tempId: importedIdBySourceKey.get(row.tempId) || row.tempId,
+      })),
+    });
+  }, [authUser, currentProjectId, isDevHarnessUser, orgId]);
 
   const applyBankStatementRowsToExpenseSheet = useCallback(async (sheet: BankStatementSheet & { selectedRowIds?: string[] }, options?: BankStatementApplyOptions) => {
     const now = new Date().toISOString();
@@ -2647,8 +2753,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     });
     const reconciledIntakeItems = reconcileBankImportUploadItems(expenseIntakeItemsRef.current, intakeItems);
 
-    await saveExpenseSheetRows(mergedExpenseRows);
-
     const shouldMarkApplied = (row: BankStatementRow) => selectedIds.size === 0 || selectedIds.has(row.tempId);
     const nextBankSheet = {
       columns: currentSheet.columns.length > 0 ? currentSheet.columns : fullSheet.columns,
@@ -2656,35 +2760,109 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         shouldMarkApplied(row) ? { ...row, status: 'applied' as const } : row
       )),
     };
-    if (isDevHarnessUser || !db || !currentProjectId) {
+    if (isDevHarnessUser) {
+      await saveExpenseSheetRows(mergedExpenseRows, options);
       setBankStatementRows(nextBankSheet);
       expenseIntakeItemsRef.current = reconciledIntakeItems;
       setExpenseIntakeItems(reconciledIntakeItems);
       return { appliedCount: importRows.length };
     }
-    await setDoc(
-      doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`),
-      withTenantScope(orgId, {
-        projectId: currentProjectId,
-        columns: nextBankSheet.columns,
-        rows: nextBankSheet.rows,
-        updatedAt: now,
-        updatedBy: portalUser?.name || authUser?.name || '',
-      }),
-      { merge: true },
-    );
-    await Promise.all(
-      reconciledIntakeItems.map((item) => setDoc(
-        doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/expense_intake/${item.id}`),
-        buildBankImportIntakeDoc({ orgId, item }),
-        { merge: true },
-      )),
-    );
+    if (!currentProjectId || !authUser || !isPlatformApiEnabled()) {
+      throw new Error('통장내역 반영 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!options?.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const actor = {
+      uid: authUser.uid,
+      email: authUser.email,
+      role: authUser.role,
+      idToken: authUser.idToken,
+      googleAccessToken: authUser.googleAccessToken,
+    };
+    const importIdempotencyKey = `bank-apply-import:${currentProjectId}:${Date.now()}`;
+    const imported = await importBankStatementBatchViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: currentProjectId,
+      idempotencyKey: importIdempotencyKey,
+      lease: options.cashflowLease,
+      payload: {
+        idempotencyKey: importIdempotencyKey,
+        uploadName: 'portal-bank-apply',
+        columns: selectedSheet.columns,
+        lines: buildBankStatementServerImportLines(selectedSheet),
+      },
+    });
+    const importLineIdBySourceKey = new Map<string, string>();
+    imported.lines.forEach((line) => {
+      if (line.id) importLineIdBySourceKey.set(line.sourceLineKey, line.id);
+    });
+    const currentWeeklySheet = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: currentProjectId,
+      sheetKey: targetSheetId,
+    });
+    const applyIdempotencyKey = `bank-apply:${currentProjectId}:${targetSheetId}:${Date.now()}`;
+    const applied = await applyBankStatementItemsViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: currentProjectId,
+      idempotencyKey: applyIdempotencyKey,
+      lease: options.cashflowLease,
+      finalize: true,
+      payload: {
+        idempotencyKey: applyIdempotencyKey,
+        sheetKey: targetSheetId,
+        sheetName: targetSheet?.name,
+        expectedSheetVersion: currentWeeklySheet.sheetVersion,
+        items: importRows.map((row, index) => {
+          const sourceLineKey = selectedSheet.rows[index]?.tempId || `row-${index}`;
+          const importLineId = importLineIdBySourceKey.get(sourceLineKey);
+          if (!importLineId) throw new Error('통장내역 반영 ID를 확인하지 못했습니다.');
+          return {
+            importLineId,
+            cells: row.cells.map((rawValue, columnIndex) => ({
+              columnIndex,
+              rawValue: String(rawValue ?? ''),
+              userEdited: row.userEditedCells?.has(columnIndex) || false,
+            })),
+          };
+        }),
+      },
+    });
+    const readback = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: currentProjectId,
+      sheetKey: targetSheetId,
+    });
+    const readbackRows = readback.rows.map((row) => ({
+      tempId: row.id,
+      sourceTxId: row.sourceTxId || undefined,
+      entryKind: row.entryKind || undefined,
+      cells: row.cells
+        .slice()
+        .sort((a, b) => a.columnIndex - b.columnIndex)
+        .map((cell) => cell.rawValue),
+      userEditedCells: new Set(row.cells.filter((cell) => cell.userEdited).map((cell) => cell.columnIndex)),
+    })) as ImportRow[];
+    const nextExpenseSheets = upsertExpenseSheetTabRows({
+      sheets: expenseSheetsRef.current,
+      sheetId: targetSheetId,
+      sheetName: targetSheet?.name || readback.sheetName,
+      order: targetSheet?.order || (targetSheetId === 'default' ? 0 : expenseSheetsRef.current.length + 1),
+      rows: readbackRows,
+      now,
+      createdAt: targetSheet?.createdAt,
+    });
+    expenseSheetsRef.current = nextExpenseSheets;
+    setExpenseSheets(nextExpenseSheets);
+    setExpenseSheetRows(readbackRows);
     expenseIntakeItemsRef.current = reconciledIntakeItems;
     setExpenseIntakeItems(reconciledIntakeItems);
     setBankStatementRows(nextBankSheet);
-    return { appliedCount: importRows.length };
-  }, [authUser?.name, bankStatementRows, currentProjectId, db, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
+    return { appliedCount: applied.appliedLineCount };
+  }, [authUser, bankStatementRows, currentProjectId, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
 
   const refreshBankStatementRows = useCallback(async () => {
     if (isDevHarnessUser || !db || !currentProjectId) return;

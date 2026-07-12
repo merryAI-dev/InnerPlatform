@@ -28,17 +28,182 @@ import {
   type PlatformApiClientLike,
   upsertProjectViaBff,
   upsertTransactionViaBff,
+  upsertCashflowWeekAmountsViaBff,
+  saveCashflowProjectionBatchViaBff,
+  submitCashflowWeekViaBff,
+  closeCashflowWeekViaBff,
+  readWeeklyExpenseSheetViaBff,
+  saveWeeklyExpenseDraftViaBff,
+  importBankStatementBatchViaBff,
+  applyBankStatementItemsViaBff,
+  syncProjectCashflowActualsViaBff,
 } from './platform-bff-client';
+
+const cashflowLease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
 
 function asMockClient<T extends {
   post: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
+  patch?: ReturnType<typeof vi.fn>;
   request: ReturnType<typeof vi.fn>;
 }>(client: T): T & PlatformApiClientLike {
   return client as T & PlatformApiClientLike;
 }
 
 describe('platform-bff-client', () => {
+  it('final-saves all projection lines in one fenced JVM command', async () => {
+    const client = asMockClient({ post: vi.fn(async () => ({ data: { ok: true } })), get: vi.fn(), request: vi.fn() });
+    const lines = [
+      { yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 },
+      { yearMonth: '2026-07', weekNo: 2, cashflowLine: 'DIRECT_COST_OUT', amount: 400 },
+    ];
+    await saveCashflowProjectionBatchViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001',
+      lines, idempotencyKey: 'projection-final-1', lease: cashflowLease, finalize: true, client,
+    });
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/p001/projection', expect.objectContaining({
+      body: { lines },
+      headers: expect.objectContaining({ 'x-edit-fence': '7', 'x-edit-finalize': 'true' }),
+    }));
+  });
+
+  it('routes projection, submit, and close through fenced JVM-owned BFF endpoints', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { ok: true, projectId: 'p001' } })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await upsertCashflowWeekAmountsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      payload: { yearMonth: '2026-07', weekNo: 1, mode: 'projection', amounts: { SALES_IN: 1000 } },
+      idempotencyKey: 'projection-1',
+      lease: cashflowLease,
+      client,
+    });
+    await submitCashflowWeekViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001',
+      payload: {
+        yearMonth: '2026-07', weekNo: 1,
+        weeklySheet: { sheetKey: 'default', expectedSheetVersion: 3, sheetName: '기본 탭', rows: [] },
+      }, idempotencyKey: 'submit-1', lease: cashflowLease, finalize: true, client,
+    });
+    await closeCashflowWeekViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'finance' }, projectId: 'p001',
+      payload: {
+        yearMonth: '2026-07', weekNo: 1,
+        projectionLines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+      }, idempotencyKey: 'close-1', lease: cashflowLease, finalize: true, client,
+    });
+
+    const headers = {
+      'x-edit-session-id': 'session-a',
+      'x-edit-lease-id': 'lease-a',
+      'x-edit-fence': '7',
+    };
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/projection', expect.objectContaining({
+      idempotencyKey: 'projection-1', headers,
+      body: { lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }] },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p001/submit', expect.objectContaining({
+      idempotencyKey: 'submit-1', headers: { ...headers, 'x-edit-finalize': 'true' },
+      body: {
+        yearMonth: '2026-07', weekNo: 1,
+        weeklySheet: { sheetKey: 'default', expectedSheetVersion: 3, sheetName: '기본 탭', rows: [] },
+      },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/weekly-expenses/p001/close', expect.objectContaining({
+      idempotencyKey: 'close-1', headers: { ...headers, 'x-edit-finalize': 'true' },
+      body: {
+        yearMonth: '2026-07', weekNo: 1,
+        projectionLines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+      },
+    }));
+  });
+
+  it('reads the current JVM sheet version before a fenced weekly draft save', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: { ok: true, projectId: 'p001', sheetKey: 'default', sheetVersion: 3, rows: [] } })),
+      post: vi.fn(async () => ({ data: { ok: true, projectId: 'p001', sheetVersion: 4 } })),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'u001', role: 'pm' };
+    const current = await readWeeklyExpenseSheetViaBff({ tenantId: 'mysc', actor, projectId: 'p001', sheetKey: 'default', client });
+    await saveWeeklyExpenseDraftViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', sheetKey: 'default', idempotencyKey: 'draft-1',
+      lease: cashflowLease,
+      payload: { expectedSheetVersion: current.sheetVersion, sheetName: '기본 탭', rows: [] },
+      client,
+    });
+    expect(client.get).toHaveBeenCalledWith('/api/v1/weekly-expenses/p001/sheets/default', expect.any(Object));
+    expect(client.post).toHaveBeenCalledWith('/api/v1/weekly-expenses/p001/sheets/default/save-draft', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-fence': '7' }),
+      idempotencyKey: 'draft-1',
+      body: { expectedSheetVersion: 3, sheetName: '기본 탭', rows: [] },
+    }));
+  });
+
+  it('requires the same lease headers for bank import and apply', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { ok: true, projectId: 'p001', lines: [] } })),
+      get: vi.fn(), request: vi.fn(),
+    });
+    const actor = { uid: 'u001', role: 'pm' };
+    await importBankStatementBatchViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'import-1', lease: cashflowLease,
+      payload: { idempotencyKey: 'ignored-client-body', columns: [], lines: [] }, client,
+    });
+    await applyBankStatementItemsViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'apply-1', lease: cashflowLease, finalize: true,
+      payload: { idempotencyKey: 'ignored-client-body', sheetKey: 'default', items: [] }, client,
+    });
+    expect(client.post).toHaveBeenNthCalledWith(1, expect.any(String), expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a' }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-finalize': 'true' }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(1, expect.any(String), expect.not.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-finalize': expect.anything() }),
+    }));
+  });
+
+  it('reads actual cashflow from the JVM snapshot without invoking a canonical mutation', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: {
+        projectId: 'p001',
+        projection: [],
+        actual: [
+          { sheetKey: 'default', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', amount: 1000 },
+          { sheetKey: 'receipts', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', amount: 500 },
+        ],
+        readModel: { months: [{
+          yearMonth: '2026-07',
+          projection: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
+          actual: {
+            rowTotals: { DIRECT_COST_OUT: 1500 },
+            weeks: [{ weekNo: 1, amounts: { DIRECT_COST_OUT: 1500 }, totalIn: 0, totalOut: 1500, net: -1500, weekIn: 0, weekOut: 1500 }],
+            monthTotals: { totalIn: 0, totalOut: 1500, net: -1500 },
+          },
+        }] },
+      } })),
+      post: vi.fn(), request: vi.fn(),
+    });
+
+    const result = await syncProjectCashflowActualsViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001', expect.any(Object));
+    expect(client.post).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      projectId: 'p001', sourceRows: 2, sheetCount: 2, upsertedWeeks: 1,
+      weeks: [{ yearMonth: '2026-07', weekNo: 1, amounts: { DIRECT_COST_OUT: 1500 } }],
+      cleared: [],
+    });
+  });
   it('reads runtime config with defaults', () => {
     expect(readPlatformApiRuntimeConfig({})).toEqual({
       enabled: false,

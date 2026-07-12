@@ -45,7 +45,7 @@ describe('CashflowSheetLabPage shell', () => {
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).toContain('previewCashflowSheetLabViaBff');
-    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
+    expect(pageSource).toContain('createCashflowPrivateDraftClient');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
@@ -172,5 +172,28 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('getIdToken(Boolean(options.forceRefresh))');
     expect(pageSource).not.toContain('actor.idToken || firebaseToken');
     expect(pageSource).not.toContain("navigate('/login'");
+  });
+
+  it('shares the project cashflow lease while leaving preview and staging read-only', () => {
+    expect(pageSource).toContain('useCashflowEditLease');
+    expect(pageSource).toContain('checkBeforeMutation');
+    expect(pageSource).toContain('EditLeaseDialogs');
+    expect(pageSource).toContain('수정 시작');
+    expect(pageSource).toContain('lease: mutationLease');
+    expect(pageSource).not.toContain('cashflowEditLocks');
+  });
+
+  it('stores sheet config in the owner private draft and finalizes only the reviewed apply', () => {
+    expect(pageSource).toContain('createCashflowPrivateDraftClient');
+    expect(pageSource).toContain('settings.private_save.ok');
+    expect(pageSource).not.toContain('saveCashflowSheetLabConfigViaBff');
+    expect(pageSource).toContain('finalize: true');
+    expect(pageSource).toContain('cashflowPrivateDraftClient.complete');
+  });
+
+  it('rehydrates the sheet draft once per active lease after same-tab refresh', () => {
+    expect(pageSource).toContain('loadedPrivateDraftKeyRef');
+    expect(pageSource).toContain('privateDraftLoadRef');
+    expect(pageSource).toContain('hydrateSheetPrivateDraft');
   });
 });

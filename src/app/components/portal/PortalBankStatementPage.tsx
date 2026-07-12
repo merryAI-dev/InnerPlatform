@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Upload, Loader2, ShieldAlert, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
-import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Checkbox } from '../ui/checkbox';
@@ -22,8 +21,11 @@ import { readTextFile } from '../../platform/text-file-decoder';
 import { CASHFLOW_LINE_OPTIONS, SETTLEMENT_COLUMNS, type ImportRow } from '../../platform/settlement-csv';
 import { findWeekForDate, getYearMondayWeeks } from '../../platform/cashflow-weeks';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgDocumentPath } from '../../lib/firebase';
 import { normalizeBudgetLabel, buildBudgetLabelKey } from '../../platform/budget-labels';
+import { useAuth } from '../../data/auth-store';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { useCashflowEditLease } from '../cashflow/useCashflowEditLease';
+import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
 
 function getTransactionAmountColumnIndexes(columns: string[]): Set<number> {
   return new Set(
@@ -166,8 +168,31 @@ function formatWizardDraftVersionLabel(createdAtIso: string): string {
   return `${pick('year')}년${pick('month')}월${pick('day')}일${pick('hour')}시${pick('minute')}분 작성본 불러오기`;
 }
 
-function wizardDraftCollectionPath(orgId: string, projectId: string): string {
-  return `${getOrgDocumentPath(orgId, 'projects', projectId)}/weekly_expense_apply_drafts`;
+function parseWizardDraftVersions(value: unknown, batchKey?: string): WizardDraftVersion[] {
+  if (!Array.isArray(value)) return [];
+  const minCreatedAt = Date.now() - WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return value
+    .map((item): WizardDraftVersion | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+      const source = item as Partial<WizardDraftVersion>;
+      const createdAtIso = String(source.createdAtIso || '');
+      const createdAt = new Date(createdAtIso).getTime();
+      const versionBatchKey = String(source.batchKey || '');
+      if (!source.id || !Number.isFinite(createdAt) || createdAt < minCreatedAt || !versionBatchKey) return null;
+      if (batchKey && versionBatchKey !== batchKey) return null;
+      return {
+        id: String(source.id),
+        createdAtIso,
+        draftName: String(source.draftName || ''),
+        rows: Array.isArray(source.rows) ? source.rows : [],
+        drafts: source.drafts && typeof source.drafts === 'object' && !Array.isArray(source.drafts)
+          ? source.drafts
+          : {},
+        batchKey: versionBatchKey,
+      };
+    })
+    .filter((version): version is WizardDraftVersion => version !== null)
+    .sort((left, right) => new Date(right.createdAtIso).getTime() - new Date(left.createdAtIso).getTime());
 }
 
 function getBankRowCounterparty(columns: string[], row: BankStatementRow): string {
@@ -232,7 +257,7 @@ function buildWizardCellPatchesByRowKey(rows: BankStatementRow[], drafts: Record
     const rowKey = bankRowKey(row, index);
     const draft = drafts[rowKey] || {};
     const patches = WIZARD_FIELDS
-      .map((field) => {
+      .map((field): BankStatementApplyCellPatch | null => {
         const columnIndex = settlementColumnIndex(field.column);
         const rawValue = String(draft[field.key] || '').trim();
         if (columnIndex < 0 || !rawValue) return null;
@@ -246,6 +271,7 @@ function buildWizardCellPatchesByRowKey(rows: BankStatementRow[], drafts: Record
 
 export function PortalBankStatementPage() {
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
   const {
     activeProjectId,
     portalUser,
@@ -259,7 +285,7 @@ export function PortalBankStatementPage() {
     applyBankStatementRowsToExpenseSheet,
     refreshBankStatementRows,
   } = usePortalStore();
-  const { db, orgId } = useFirebase();
+  const { orgId } = useFirebase();
   const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
   const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
   const [dirty, setDirty] = useState(false);
@@ -280,9 +306,93 @@ export function PortalBankStatementPage() {
   const wizardDraftsRef = useRef<Record<string, WizardDraft>>({});
   const wizardGridDraggingRef = useRef(false);
   const loadedProjectIdRef = useRef('');
+  const loadedPrivateDraftKeyRef = useRef('');
+  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
 
   const projectName = myProject?.name || '내 사업';
   const projectId = activeProjectId || myProject?.id || '';
+  const bffActor = useMemo(() => ({
+    uid: authUser?.uid || portalUser?.id || 'portal-user',
+    email: authUser?.email || portalUser?.email || '',
+    role: authUser?.role || portalUser?.role || 'pm',
+    idToken: authUser?.idToken,
+    googleAccessToken: authUser?.googleAccessToken,
+  }), [
+    authUser?.email,
+    authUser?.googleAccessToken,
+    authUser?.idToken,
+    authUser?.role,
+    authUser?.uid,
+    portalUser?.email,
+    portalUser?.id,
+    portalUser?.role,
+  ]);
+  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor: bffActor });
+  const cashflowPrivateDraftClient = useMemo(() => (
+    cashflowLease.sessionId && projectId
+      ? createCashflowPrivateDraftClient({
+          tenantId: orgId,
+          projectId,
+          actor: bffActor,
+          sessionId: cashflowLease.sessionId,
+        })
+      : null
+  ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
+  const hydrateBankPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }) => {
+    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
+    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
+    if (loadedPrivateDraftKeyRef.current === key) return;
+    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
+    const promise = (async () => {
+      const opened = await cashflowPrivateDraftClient.open(ownership, { baseSnapshot: {}, payload: {} });
+      const bankStatement = opened.draft.payload.bankStatement;
+      if (bankStatement && typeof bankStatement === 'object' && !Array.isArray(bankStatement)) {
+        const snapshot = bankStatement as { columns?: unknown; rows?: unknown };
+        if (Array.isArray(snapshot.columns) && Array.isArray(snapshot.rows)) {
+          const restoredColumns = snapshot.columns.map((value) => String(value ?? ''));
+          const restoredRows = snapshot.rows.map((value, index) => {
+            const row = value && typeof value === 'object' ? value as Partial<BankStatementRow> : {};
+            return {
+              tempId: typeof row.tempId === 'string' ? row.tempId : `bank-draft-${index}`,
+              cells: Array.isArray(row.cells) ? row.cells.map((cell) => String(cell ?? '')) : [],
+              status: row.status === 'applied' ? 'applied' as const : 'staged' as const,
+            };
+          });
+          setColumns(restoredColumns);
+          setRows(restoredRows);
+          setDirty(true);
+        }
+      }
+      setWizardDraftVersions(parseWizardDraftVersions(opened.draft.payload.bankWizardDraftVersions));
+      loadedPrivateDraftKeyRef.current = key;
+    })();
+    privateDraftLoadRef.current = { key, promise };
+    try {
+      await promise;
+    } finally {
+      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
+    }
+  }, [cashflowPrivateDraftClient, projectId]);
+  useEffect(() => {
+    loadedPrivateDraftKeyRef.current = '';
+    privateDraftLoadRef.current = null;
+  }, [projectId]);
+  useEffect(() => {
+    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
+    void hydrateBankPrivateDraft(cashflowLease.ownership).catch((error) => {
+      toast.error(error instanceof Error ? error.message : '임시저장본을 복구하지 못했습니다.');
+    });
+  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateBankPrivateDraft]);
+  const beginBankEditing = useCallback(async () => {
+    const ownership = await cashflowLease.acquire();
+    if (!ownership) return;
+    try {
+      await hydrateBankPrivateDraft(ownership);
+    } catch (error) {
+      await cashflowLease.release();
+      toast.error(error instanceof Error ? error.message : '임시저장본을 열지 못했습니다.');
+    }
+  }, [cashflowLease.acquire, cashflowLease.release, hydrateBankPrivateDraft]);
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const transactionAmountColIdxs = useMemo(() => getTransactionAmountColumnIndexes(columns), [columns]);
   const hasTransactionAmountColumns = transactionAmountColIdxs.size > 0;
@@ -455,16 +565,24 @@ export function PortalBankStatementPage() {
   }, [parseExcelToMatrix]);
 
   const openFilePicker = useCallback(() => {
+    if (!cashflowLease.canEdit) {
+      toast.info('수정 시작을 눌러 수정 세션을 먼저 선점해 주세요.');
+      return;
+    }
     warmExcelJs();
     fileInputRef.current?.click();
-  }, []);
+  }, [cashflowLease.canEdit]);
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragActive(false);
+    if (!cashflowLease.canEdit) {
+      toast.info('수정 시작을 눌러 수정 세션을 먼저 선점해 주세요.');
+      return;
+    }
     const file = event.dataTransfer.files?.[0];
     if (file) void handleFileUpload(file);
-  }, [handleFileUpload]);
+  }, [cashflowLease.canEdit, handleFileUpload]);
 
   const persistSheet = useCallback(async (options?: { silent?: boolean }) => {
     if (!saveBankStatementRows) {
@@ -473,7 +591,8 @@ export function PortalBankStatementPage() {
     }
     setSaving(true);
     try {
-      await saveBankStatementRows({ columns, rows });
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await saveBankStatementRows({ columns, rows }, { cashflowLease: mutationLease });
       setDirty(false);
       if (!options?.silent) toast.success('통장내역을 저장했습니다.');
     } catch (err) {
@@ -482,7 +601,7 @@ export function PortalBankStatementPage() {
     } finally {
       setSaving(false);
     }
-  }, [columns, rows, saveBankStatementRows]);
+  }, [cashflowLease.checkBeforeMutation, columns, rows, saveBankStatementRows]);
 
   const toggleRowSelection = useCallback((rowIdx: number, checked: boolean) => {
     const row = rows[rowIdx];
@@ -517,67 +636,56 @@ export function PortalBankStatementPage() {
   }, [activeStatusTab, dirty, refreshBankStatementRows]);
 
   const loadWizardDraftVersions = useCallback(async (targetRows: BankStatementRow[] = wizardRows) => {
-    if (!db || !orgId || !projectId || targetRows.length === 0) {
+    if (!cashflowPrivateDraftClient || !cashflowLease.ownership || !projectId || targetRows.length === 0) {
       setWizardDraftVersions([]);
       return;
     }
     const batchKey = buildWizardBatchKey(projectId, targetRows);
-    const minCreatedAt = Date.now() - WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     try {
-      const snapshot = await getDocs(collection(db, wizardDraftCollectionPath(orgId, projectId)));
-      const versions = snapshot.docs
-        .map((draftDoc) => {
-          const data = draftDoc.data() as Partial<WizardDraftVersion>;
-          return {
-            id: draftDoc.id,
-            createdAtIso: String(data.createdAtIso || ''),
-            draftName: String(data.draftName || ''),
-            rows: Array.isArray(data.rows) ? data.rows : [],
-            drafts: data.drafts && typeof data.drafts === 'object' ? data.drafts : {},
-            batchKey: String(data.batchKey || ''),
-          } satisfies WizardDraftVersion;
-        })
-        .filter((version) => {
-          const createdAt = new Date(version.createdAtIso).getTime();
-          return version.batchKey === batchKey && Number.isFinite(createdAt) && createdAt >= minCreatedAt;
-        })
-        .sort((left, right) => new Date(right.createdAtIso).getTime() - new Date(left.createdAtIso).getTime());
-      setWizardDraftVersions(versions);
+      const opened = await cashflowPrivateDraftClient.open(cashflowLease.ownership, { baseSnapshot: {}, payload: {} });
+      setWizardDraftVersions(parseWizardDraftVersions(opened.draft.payload.bankWizardDraftVersions, batchKey));
     } catch (err) {
       console.error('[BankStatement] wizard draft load failed:', err);
       toast.error('임시 작성본을 불러오지 못했습니다.');
     }
-  }, [db, orgId, projectId, wizardRows]);
+  }, [cashflowLease.ownership, cashflowPrivateDraftClient, projectId, wizardRows]);
 
   const handleSaveWizardDraft = useCallback(async () => {
-    if (!db || !orgId || !projectId || wizardRows.length === 0) {
+    if (!cashflowPrivateDraftClient || !projectId || wizardRows.length === 0) {
       toast.error('임시저장을 사용할 수 없습니다.');
       return;
     }
     setWizardSavingDraft(true);
     try {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
       const createdAtIso = new Date().toISOString();
       const batchKey = buildWizardBatchKey(projectId, wizardRows);
-      const draftRef = doc(collection(db, wizardDraftCollectionPath(orgId, projectId)));
-      await setDoc(draftRef, {
+      const version: WizardDraftVersion = {
+        id: `wizard-${Date.now()}`,
         createdAtIso,
         draftName: formatWizardDraftVersionLabel(createdAtIso),
         batchKey,
-        projectId,
         rows: wizardRows,
         drafts: wizardDrafts,
-        createdBy: portalUser?.name || portalUser?.email || 'unknown',
-        expiresAtIso: new Date(Date.now() + WIZARD_DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      };
+      const retainedVersions = parseWizardDraftVersions(opened.draft.payload.bankWizardDraftVersions);
+      const saved = await cashflowPrivateDraftClient.save(mutationLease, {
+        expectedDraftRevision: opened.draft.draftRevision,
+        payload: {
+          ...opened.draft.payload,
+          bankWizardDraftVersions: [version, ...retainedVersions],
+        },
       });
+      setWizardDraftVersions(parseWizardDraftVersions(saved.draft.payload.bankWizardDraftVersions, batchKey));
       toast.success('임시 작성본을 저장했습니다.');
-      await loadWizardDraftVersions(wizardRows);
     } catch (err) {
       console.error('[BankStatement] wizard draft save failed:', err);
       toast.error('임시 작성본 저장에 실패했습니다.');
     } finally {
       setWizardSavingDraft(false);
     }
-  }, [db, loadWizardDraftVersions, orgId, portalUser?.email, portalUser?.name, projectId, wizardDrafts, wizardRows]);
+  }, [cashflowLease.checkBeforeMutation, cashflowPrivateDraftClient, projectId, wizardDrafts, wizardRows]);
 
   const handleLoadWizardDraft = useCallback((version: WizardDraftVersion) => {
     setWizardRows(version.rows);
@@ -852,7 +960,15 @@ export function PortalBankStatementPage() {
     setSaving(true);
     try {
       const cellPatchesByRowKey = buildWizardCellPatchesByRowKey(wizardRows, wizardDrafts);
-      const result = await applyBankStatementRowsToExpenseSheet({ columns, rows: wizardRows }, { cellPatchesByRowKey });
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
+      const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
+      const result = await applyBankStatementRowsToExpenseSheet(
+        { columns, rows: wizardRows },
+        { cellPatchesByRowKey, cashflowLease: mutationLease },
+      );
+      await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
+      await cashflowLease.checkStatus();
       toast.success(`선택한 통장내역 ${result.appliedCount}건을 사업비 입력에 반영했습니다.`);
       setSelectedRowIds(new Set());
       closeWizard();
@@ -862,7 +978,7 @@ export function PortalBankStatementPage() {
     } finally {
       setSaving(false);
     }
-  }, [applyBankStatementRowsToExpenseSheet, closeWizard, columns, wizardDrafts, wizardRows]);
+  }, [applyBankStatementRowsToExpenseSheet, cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, closeWizard, columns, wizardDrafts, wizardRows]);
 
   const getSubCategoryOptions = useCallback((budgetCategory: string): string[] => {
     return budgetHierarchyIndex.subCategoriesByBudget.get(normalizeBudgetLabel(budgetCategory)) || [];
@@ -984,9 +1100,28 @@ export function PortalBankStatementPage() {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-white px-3 py-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={cashflowLease.canEdit ? 'default' : 'outline'}
+          disabled={!cashflowLease.sessionId || cashflowLease.busy || cashflowLease.canEdit}
+          onClick={() => void beginBankEditing()}
+        >
+          {cashflowLease.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {cashflowLease.canEdit ? '수정 중' : '수정 시작'}
+        </Button>
+        {cashflowLease.canEdit && (
+          <Button type="button" size="sm" variant="ghost" disabled={cashflowLease.busy} onClick={() => void cashflowLease.extend()}>
+            {cashflowLease.remainingLabel} · 30분 연장
+          </Button>
+        )}
+        {!cashflowLease.canEdit && <span className="text-[11px] text-slate-500">통장내역은 읽을 수 있지만 업로드·저장·반영은 수정 세션이 필요합니다.</span>}
+      </div>
       <input
         ref={fileInputRef}
         type="file"
+        disabled={!cashflowLease.canEdit}
         accept=".csv,.xlsx"
         className="hidden"
         onClick={() => warmExcelJs()}
@@ -1032,7 +1167,7 @@ export function PortalBankStatementPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button size="sm" onClick={openFilePicker}>
+                  <Button size="sm" onClick={openFilePicker} disabled={!cashflowLease.canEdit}>
                     {uploadPreparing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Upload className="mr-1 h-4 w-4" />}
                     {uploadPreparing ? '엑셀 준비 중' : '파일 선택'}
                   </Button>
@@ -1149,7 +1284,7 @@ export function PortalBankStatementPage() {
             <Button variant="outline" size="sm" onClick={() => navigate('/portal/weekly-expenses')}>
               취소
             </Button>
-            <Button size="sm" onClick={handleApplySelected} disabled={saving || activeStatusTab !== 'staged' || selectedRows.length === 0}>
+            <Button size="sm" onClick={handleApplySelected} disabled={!cashflowLease.canEdit || saving || activeStatusTab !== 'staged' || selectedRows.length === 0}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               선택 행 반영
             </Button>
@@ -1436,7 +1571,7 @@ export function PortalBankStatementPage() {
               <Button variant="outline" size="sm" onClick={closeWizard} disabled={saving}>
                 취소
               </Button>
-              <Button size="sm" onClick={() => void handleSubmitWizard()} disabled={saving || wizardRows.length === 0}>
+              <Button size="sm" onClick={() => void handleSubmitWizard()} disabled={!cashflowLease.canEdit || saving || wizardRows.length === 0}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 작성 내용 반영
               </Button>
@@ -1444,6 +1579,17 @@ export function PortalBankStatementPage() {
           </div>
         </div>
       ) : null}
+      <EditLeaseDialogs
+        warningOpen={cashflowLease.warningOpen}
+        expiredOpen={cashflowLease.expiredOpen}
+        conflictOpen={cashflowLease.conflictOpen}
+        holder={cashflowLease.holder}
+        busy={cashflowLease.busy}
+        onDismissWarning={cashflowLease.dismissWarning}
+        onExtend={() => { void cashflowLease.extend(); }}
+        onContinueReadOnly={cashflowLease.continueReadOnly}
+        onReacquire={() => { void beginBankEditing(); }}
+      />
     </div>
   );
 }

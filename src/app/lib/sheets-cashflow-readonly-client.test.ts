@@ -8,6 +8,8 @@ import {
   stageCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
 
+const lease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
+
 function asMockClient(client: {
   post?: ReturnType<typeof vi.fn>;
   get?: ReturnType<typeof vi.fn>;
@@ -154,7 +156,7 @@ describe('sheets cashflow readonly client', () => {
     expect(client.request.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
-  it('applies explicitly provided sheet values through same-origin BFF', async () => {
+  it('final-applies explicitly provided sheet values and atomically finalizes the lease', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -187,6 +189,8 @@ describe('sheets cashflow readonly client', () => {
       startWeek: '26-1-1',
       endWeek: '26-6-5',
       idempotencyKey: 'apply-001',
+      lease,
+      finalize: true,
       client,
     });
 
@@ -202,6 +206,12 @@ describe('sheets cashflow readonly client', () => {
           idempotencyKey: 'apply-001',
         },
         idempotencyKey: 'apply-001',
+        headers: {
+          'x-edit-session-id': 'session-a',
+          'x-edit-lease-id': 'lease-a',
+          'x-edit-fence': '7',
+          'x-edit-finalize': 'true',
+        },
       }),
     );
   });
@@ -250,6 +260,7 @@ describe('sheets cashflow readonly client', () => {
         idempotencyKey: 'stage-001',
       }),
     );
+    expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('loads the service account share target manually through same-origin BFF', async () => {

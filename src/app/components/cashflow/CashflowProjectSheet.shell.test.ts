@@ -38,11 +38,12 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('작성완료');
   });
 
-  it('saves visible month values instead of draft-only input changes', () => {
-    expect(cashflowProjectSheetSource).toContain('persistWeekValues');
+  it('keeps visible input in a private draft until an explicit final action', () => {
+    expect(cashflowProjectSheetSource).toContain('prepareAuditedWeekAmounts');
     expect(cashflowProjectSheetSource).toContain('persisted.hasValue');
     expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
-    expect(cashflowProjectSheetSource).toContain('void persistWeekValues(input)');
+    expect(cashflowProjectSheetSource).toContain('void savePrivateCashflowDraft()');
+    expect(cashflowProjectSheetSource).not.toContain('void persistWeekValues(input)');
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 
@@ -77,7 +78,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('handleCompleteProjectionWeek');
     expect(cashflowProjectSheetSource).toContain("tableMode === 'projection' && canEdit");
     expect(cashflowProjectSheetSource).not.toContain("tableMode === 'projection' && !weekMeta[w.weekNo]?.projectionUpdated");
-    expect(cashflowProjectSheetSource).toContain('projectionUpdated: true');
+    expect(cashflowProjectSheetSource).toContain('markCompleted: true');
+    expect(cashflowProjectSheetSource).toContain('finalize: true');
     expect(cashflowProjectSheetSource).toContain('주차 Projection을 작성완료 처리했습니다.');
     expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
   });
@@ -87,6 +89,8 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain("function renderSheetTable(tableMode: 'projection' | 'actual'");
     expect(cashflowProjectSheetSource).toContain('renderUnifiedMonthlyBoard');
     expect(cashflowProjectSheetSource).toContain('renderProjectionActualDiffTable');
+    expect(cashflowProjectSheetSource).toContain('/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab');
+    expect(cashflowProjectSheetSource).not.toContain('/portal/cashflow/sheets-lab?projectId=');
   });
 
   it('replaces the empty-row toggle with an explicit sheet refresh action', () => {
@@ -169,5 +173,40 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('cashflowPresence');
     expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey');
     expect(cashflowProjectSheetSource).not.toContain('mysc:cashflow-projection-saved');
+  });
+
+  it('uses the shared 30-minute BFF lease and removes the legacy two-minute Firestore lock', () => {
+    expect(cashflowProjectSheetSource).toContain('useCashflowEditLease');
+    expect(cashflowProjectSheetSource).toContain('checkBeforeMutation');
+    expect(cashflowProjectSheetSource).toContain('EditLeaseDialogs');
+    expect(cashflowProjectSheetSource).toContain('30분 연장');
+    expect(cashflowProjectSheetSource).toContain('임시저장');
+    expect(cashflowProjectSheetSource).toContain('최종저장');
+    expect(cashflowProjectSheetSource).not.toContain('CASHFLOW_EDIT_LOCK_TTL_MS');
+    expect(cashflowProjectSheetSource).not.toContain('cashflowEditLocks');
+    expect(cashflowProjectSheetSource).not.toContain('acquireCashflowEditLock');
+    expect(cashflowProjectSheetSource).not.toContain('releaseCashflowEditLock');
+    expect(cashflowWeeksStoreSource).not.toContain("transport: 'firestore'");
+  });
+
+  it('keeps ordinary saves private and batches only explicit final save into one atomic JVM command', () => {
+    const ordinarySave = cashflowProjectSheetSource.slice(
+      cashflowProjectSheetSource.indexOf('const handleSaveWeekValues'),
+      cashflowProjectSheetSource.indexOf('const handleSubmitWeek'),
+    );
+    expect(ordinarySave).toContain('savePrivateCashflowDraft()');
+    expect(cashflowProjectSheetSource).toContain('board: { drafts, weekSaveState, yearMonth }');
+    expect(ordinarySave).not.toContain('persistWeekValues(input)');
+    expect(cashflowProjectSheetSource).toContain('saveCashflowProjectionBatchViaBff');
+    expect(cashflowProjectSheetSource).toContain('finalize: true');
+    expect(cashflowProjectSheetSource).toContain('임시저장');
+    expect(cashflowProjectSheetSource).toContain('최종저장');
+  });
+
+  it('rehydrates the owner draft after same-tab refresh without overwriting on token refresh', () => {
+    expect(cashflowProjectSheetSource).toContain('loadedPrivateDraftKeyRef');
+    expect(cashflowProjectSheetSource).toContain('privateDraftLoadRef');
+    expect(cashflowProjectSheetSource).toContain('cashflowLease.ownership');
+    expect(cashflowProjectSheetSource).toContain('hydrateCashflowPrivateDraft');
   });
 });
