@@ -434,6 +434,25 @@ export function PortalProjectEdit() {
   // Token refresh must not remount the editor; identity or project changes must.
   }, [identityKey, orgId, project?.id]);
 
+  useEffect(() => {
+    const idToken = user?.idToken;
+    if (!user?.uid || !idToken || !project?.id) return;
+    setBootstrap((current) => {
+      if (!current || current.actor.uid !== user.uid || current.actor.idToken === idToken) return current;
+      const actor = { ...current.actor, idToken };
+      return {
+        ...current,
+        actor,
+        draftClient: createProjectInfoDraftClient({
+          tenantId: orgId,
+          actor,
+          sessionId: current.session.sessionId,
+          projectId: project.id,
+        }),
+      };
+    });
+  }, [orgId, project?.id, user?.idToken, user?.uid]);
+
   const canonicalDraft = useMemo(() => {
     if (!project) return createProjectEditorDraft();
     const pendingChange = requestDoc?.status === 'PENDING' && resolveProjectRequestKind(requestDoc) === 'CHANGE';

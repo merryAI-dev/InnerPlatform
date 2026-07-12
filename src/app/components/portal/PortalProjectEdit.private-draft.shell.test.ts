@@ -17,6 +17,12 @@ describe('PortalProjectEdit private draft boundary', () => {
     expect(source).toContain('draftClient.open(status.ownership)');
   });
 
+  it('refreshes the BFF clients when Firebase rotates the ID token', () => {
+    expect(source).toContain('current.actor.idToken === idToken');
+    expect(source).toContain('createProjectInfoDraftClient({');
+    expect(source).toContain('user?.idToken, user?.uid');
+  });
+
   it('does not write project drafts, requests, or canonical projects through the browser Firestore SDK', () => {
     expect(source).not.toContain('projectRequestDrafts');
     expect(source).not.toContain('setDoc(');
