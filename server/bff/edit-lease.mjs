@@ -48,6 +48,20 @@ function serverNow(clock) {
   return value;
 }
 
+function isInvalidOrClosedTransactionError(error) {
+  if (Number(error?.code) !== 3) return false;
+  return /transaction is invalid or closed/i.test(`${error?.details || ''} ${error?.message || ''}`);
+}
+
+async function runEditLeaseTransaction(db, callback) {
+  try {
+    return await db.runTransaction(callback);
+  } catch (error) {
+    if (!isInvalidOrClosedTransactionError(error)) throw error;
+    return db.runTransaction(callback);
+  }
+}
+
 function asIso(value) {
   return new Date(value).toISOString();
 }
@@ -494,7 +508,7 @@ export function createEditLeaseService({
     const acquireLeaseId = command === 'acquire' || command === 'takeover'
       ? requiredText(createLeaseId(), 'leaseId')
       : null;
-    const outcome = await db.runTransaction(async (tx) => {
+    const outcome = await runEditLeaseTransaction(db, async (tx) => {
       const nowMs = serverNow(now);
       const timestamp = asIso(nowMs);
       const actorRole = await assertResourceAccessInTransaction(tx, current, {
@@ -667,7 +681,7 @@ export function createEditLeaseService({
   return {
     async getStatus(input) {
       const current = context(input);
-      return db.runTransaction(async (tx) => {
+      return runEditLeaseTransaction(db, async (tx) => {
         const nowMs = serverNow(now);
         const timestamp = asIso(nowMs);
         const actorRole = await assertResourceAccessInTransaction(tx, current);
