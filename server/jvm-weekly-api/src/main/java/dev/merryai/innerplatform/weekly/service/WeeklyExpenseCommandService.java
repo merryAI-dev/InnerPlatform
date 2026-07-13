@@ -677,8 +677,11 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CashflowSheetLabApplyRequest request
     ) {
-        assertAtomicWriteBudget(request.lines().size(), 2 + finalizeWriteCount(editSession), "Cashflow sheet apply");
-        TrustedActorContext writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
+        TrustedActorContext writer = requireCashflowWritePermission(
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            actor,
+            projectId
+        );
         String requestHash = hashJson(request);
         Optional<CashflowSheetLabApplyResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -690,74 +693,19 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
+        List<CashflowSheetLabApplyRequest.Cell> cells = requireCompleteCashflowSheetMonth(request);
+        assertAtomicWriteBudget(cells.size(), 2 + finalizeWriteCount(editSession), "Cashflow sheet apply");
+        writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
-        Map<String, ProjectionLineAccumulator> projectionPatches = new LinkedHashMap<>();
-        Map<String, ProjectionLineAccumulator> actualPatches = new LinkedHashMap<>();
-        for (CashflowSheetLabApplyRequest.LinePatch line : request.lines()) {
-            String cashflowLine = requireKnownCashflowLine(line.cashflowLine());
-            String key = line.yearMonth() + ":" + line.weekNo() + ":" + cashflowLine;
-            BigDecimal amount = line.amount() == null ? BigDecimal.ZERO : line.amount();
-            Map<String, ProjectionLineAccumulator> target = "actual".equals(line.mode())
-                ? actualPatches
-                : projectionPatches;
-            ProjectionLineAccumulator accumulator = target.get(key);
-            if (accumulator == null) {
-                target.put(key, new ProjectionLineAccumulator(line.yearMonth(), line.weekNo(), cashflowLine, amount));
-            } else {
-                accumulator.add(amount);
-            }
-        }
-
-        List<WeeklyExpenseProjectionEntity> sheetLabProjectionEntities = new ArrayList<>();
-        for (ProjectionLineAccumulator line : projectionPatches.values()) {
-            WeeklyExpenseProjectionEntity projectionEntity = persistence
-                .findProjectionLine(
-                    writer.tenantId(),
-                    projectId,
-                    line.yearMonth,
-                    line.weekNo,
-                    line.cashflowLine
-                )
-                .orElseGet(() -> new WeeklyExpenseProjectionEntity(
-                    writer.tenantId(),
-                    projectId,
-                    line.yearMonth,
-                    line.weekNo,
-                    line.cashflowLine
-                ));
-            projectionEntity.setAmount(line.amount);
-            sheetLabProjectionEntities.add(projectionEntity);
-        }
-
-        List<SaveDraftResponse.ActualDelta> actualDeltas = actualPatches.values().stream()
-            .map(line -> new SaveDraftResponse.ActualDelta(
-                line.yearMonth,
-                line.weekNo,
-                line.cashflowLine,
-                line.amount
-            ))
-            .toList();
-        int actualWriteCount = persistence.countCashflowActualReplacementWrites(
+        WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
             writer.tenantId(),
             projectId,
             sourceSheetKey,
-            actualDeltas.stream()
-                .map(delta -> projectId + "-" + delta.yearMonth() + "-w" + delta.weekNo())
-                .distinct()
-                .toList()
+            request.yearMonth(),
+            request.targetRevision(),
+            cells
         );
-        assertAtomicWriteBudget(
-            sheetLabProjectionEntities.size() + actualWriteCount,
-            2 + finalizeWriteCount(editSession),
-            "Cashflow sheet apply"
-        );
-        List<WeeklyExpenseActualEntity> savedActual = persistence.replaceActualLines(
-            writer.tenantId(),
-            projectId,
-            sourceSheetKey,
-            actualDeltas
-        );
-        List<CashflowSnapshotResponse.ActualLine> actual = savedActual.stream()
+        List<CashflowSnapshotResponse.ActualLine> actual = replacement.actual().stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
                 line.getSheetKey(),
                 line.getYearMonth(),
@@ -766,17 +714,14 @@ public class WeeklyExpenseCommandService {
                 line.getAmount()
             ))
             .toList();
-
-        List<CashflowSnapshotResponse.ProjectionLine> projection = new ArrayList<>();
-        for (WeeklyExpenseProjectionEntity projectionEntity : sheetLabProjectionEntities) {
-            WeeklyExpenseProjectionEntity saved = persistence.saveProjection(projectionEntity);
-            projection.add(new CashflowSnapshotResponse.ProjectionLine(
-                saved.getYearMonth(),
-                saved.getWeekNo(),
-                saved.getCashflowLine(),
-                saved.getAmount()
-            ));
-        }
+        List<CashflowSnapshotResponse.ProjectionLine> projection = replacement.projection().stream()
+            .map(line -> new CashflowSnapshotResponse.ProjectionLine(
+                line.getYearMonth(),
+                line.getWeekNo(),
+                line.getCashflowLine(),
+                line.getAmount()
+            ))
+            .toList();
 
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -786,7 +731,16 @@ public class WeeklyExpenseCommandService {
             writer.id(),
             normalizeRole(writer.role()),
             request.idempotencyKey(),
-            cashflowSheetLabMetadataJson(writer, sourceSheetKey, projection.size(), actual.size())
+            cashflowSheetLabMetadataJson(
+                writer,
+                sourceSheetKey,
+                request.yearMonth(),
+                request.sourceRevision(),
+                request.targetRevision(),
+                replacement.resultingTargetRevision(),
+                projection.size(),
+                actual.size()
+            )
         ));
 
         CashflowSheetLabApplyResponse response = new CashflowSheetLabApplyResponse(
@@ -794,6 +748,10 @@ public class WeeklyExpenseCommandService {
             CASHFLOW_SHEET_LAB_APPLY_COMMAND,
             projectId,
             sourceSheetKey,
+            request.yearMonth(),
+            request.sourceRevision(),
+            request.targetRevision(),
+            replacement.resultingTargetRevision(),
             projection.size(),
             actual.size(),
             projection,
@@ -2133,11 +2091,19 @@ public class WeeklyExpenseCommandService {
     private String cashflowSheetLabMetadataJson(
         TrustedActorContext actor,
         String sourceSheetKey,
+        String yearMonth,
+        String sourceRevision,
+        String targetRevision,
+        String resultingTargetRevision,
         int projectionLineCount,
         int actualLineCount
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSheetKey", sourceSheetKey);
+        metadata.put("yearMonth", yearMonth);
+        metadata.put("sourceRevision", sourceRevision);
+        metadata.put("targetRevision", targetRevision);
+        metadata.put("resultingTargetRevision", resultingTargetRevision);
         metadata.put("projectionLineCount", projectionLineCount);
         metadata.put("actualLineCount", actualLineCount);
         putActorMetadata(metadata, actor);
@@ -2283,6 +2249,91 @@ public class WeeklyExpenseCommandService {
         );
         authorizationService.requireAllowed(commandName, storedActor);
         return storedActor;
+    }
+
+    private TrustedActorContext requireCashflowWritePermission(
+        String commandName,
+        TrustedActorContext actor,
+        String projectId
+    ) {
+        if (!cashflowEditLeasesEnabled) {
+            throw new WeeklyExpenseEditLeaseException(
+                503,
+                "cashflow_edit_leases_disabled",
+                "Cashflow writes require the Stage edit-lease runtime."
+            );
+        }
+        String storedRole = persistence.requireCashflowWritePermission(actor, projectId);
+        TrustedActorContext storedActor = new TrustedActorContext(
+            actor.tenantId(),
+            actor.id(),
+            actor.email(),
+            storedRole,
+            actor.name()
+        );
+        authorizationService.requireAllowed(commandName, storedActor);
+        return storedActor;
+    }
+
+    private List<CashflowSheetLabApplyRequest.Cell> requireCompleteCashflowSheetMonth(
+        CashflowSheetLabApplyRequest request
+    ) {
+        Map<String, CashflowSheetLabApplyRequest.Cell> cellsByKey = new LinkedHashMap<>();
+        Set<Integer> weekNumbers = new LinkedHashSet<>();
+        for (CashflowSheetLabApplyRequest.Cell cell : request.cells()) {
+            if (cell.weekNo() < 1 || cell.weekNo() > 6) {
+                throw new IllegalArgumentException("Cashflow sheet month must use weeks 1 through 6.");
+            }
+            String lineId = requireKnownCashflowLine(cell.cashflowLine());
+            String state = text(cell.cellState()).trim().toUpperCase(Locale.ROOT);
+            if ("VALUE".equals(state) && cell.amount() == null) {
+                throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
+            }
+            if ("VALUE".equals(state)) {
+                try {
+                    cell.amount().longValueExact();
+                } catch (ArithmeticException error) {
+                    throw new IllegalArgumentException("Cashflow amounts must be whole won values in the supported range.");
+                }
+            }
+            if ("EMPTY".equals(state) && cell.amount() != null) {
+                throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");
+            }
+            if (!"VALUE".equals(state) && !"EMPTY".equals(state)) {
+                throw new IllegalArgumentException("Cashflow cellState must be VALUE or EMPTY.");
+            }
+            CashflowSheetLabApplyRequest.Cell canonical = new CashflowSheetLabApplyRequest.Cell(
+                cell.mode(),
+                cell.weekNo(),
+                lineId,
+                state,
+                cell.amount(),
+                cell.sourceCell(),
+                cell.sourceLabel()
+            );
+            String key = canonical.mode() + ":" + canonical.weekNo() + ":" + canonical.cashflowLine();
+            if (cellsByKey.putIfAbsent(key, canonical) != null) {
+                throw new IllegalArgumentException("Cashflow sheet month contains duplicate cells.");
+            }
+            weekNumbers.add(canonical.weekNo());
+        }
+        int lastWeek = weekNumbers.stream().mapToInt(Integer::intValue).max().orElse(0);
+        for (int weekNo = 1; weekNo <= lastWeek; weekNo += 1) {
+            if (!weekNumbers.contains(weekNo)) {
+                throw new IllegalArgumentException("Cashflow sheet month must contain complete consecutive weeks.");
+            }
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    if (!cellsByKey.containsKey(mode + ":" + weekNo + ":" + lineId)) {
+                        throw new IllegalArgumentException("Cashflow sheet month must contain complete cells for both modes.");
+                    }
+                }
+            }
+        }
+        if (lastWeek == 0 || cellsByKey.size() != lastWeek * CashflowLineCatalog.ALL_LINES.size() * 2) {
+            throw new IllegalArgumentException("Cashflow sheet month must contain complete cells for every week.");
+        }
+        return List.copyOf(cellsByKey.values());
     }
 
     private String requireKnownCashflowLine(String value) {

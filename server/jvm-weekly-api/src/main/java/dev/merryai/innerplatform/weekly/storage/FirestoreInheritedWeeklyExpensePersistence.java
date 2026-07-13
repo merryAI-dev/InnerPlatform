@@ -15,7 +15,9 @@ import com.google.cloud.firestore.SetOptions;
 import com.google.cloud.firestore.Transaction;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
@@ -34,18 +36,22 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
@@ -164,17 +170,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw leaseError(400, "cashflow_edit_lease_request_invalid", "Cashflow edit lease headers are required.");
         }
 
-        DocumentSnapshot projectSnap = get(db.document("orgs/" + actor.tenantId() + "/projects/" + projectId));
-        Map<String, Object> project = projectSnap.exists() ? data(projectSnap) : Map.of();
-        if (project.isEmpty()
-            || (!text(project.get("id"), "").isBlank() && !projectId.equals(text(project.get("id"), "")))
-            || (!text(project.get("tenantId"), "").isBlank() && !actor.tenantId().equals(text(project.get("tenantId"), "")))) {
-            throw leaseError(403, "cashflow_project_write_forbidden", "Canonical project access is required for cashflow writes.");
-        }
-
-        DocumentSnapshot memberSnap = get(db.document("orgs/" + actor.tenantId() + "/members/" + actor.id()));
-        Map<String, Object> member = memberSnap.exists() ? data(memberSnap) : Map.of();
-        String storedRole = requireStoredCashflowWriter(member, actor, projectId);
+        String storedRole = requireCashflowWritePermission(actor, projectId);
 
         DocumentSnapshot leaseSnap = get(db.document(cashflowLeasePath(actor.tenantId(), projectId)));
         if (!leaseSnap.exists()) {
@@ -206,6 +202,29 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             session.finalizeLease()
         ));
         return storedRole;
+    }
+
+    @Override
+    public String requireCashflowWritePermission(TrustedActorContext actor, String projectId) {
+        if (currentTransaction.get() == null) {
+            throw leaseError(
+                503,
+                "cashflow_write_permission_transaction_required",
+                "Cashflow write permission validation must run inside the canonical Firestore transaction."
+            );
+        }
+
+        DocumentSnapshot projectSnap = get(db.document("orgs/" + actor.tenantId() + "/projects/" + projectId));
+        Map<String, Object> project = projectSnap.exists() ? data(projectSnap) : Map.of();
+        if (project.isEmpty()
+            || (!text(project.get("id"), "").isBlank() && !projectId.equals(text(project.get("id"), "")))
+            || (!text(project.get("tenantId"), "").isBlank() && !actor.tenantId().equals(text(project.get("tenantId"), "")))) {
+            throw leaseError(403, "cashflow_project_write_forbidden", "Canonical project access is required for cashflow writes.");
+        }
+
+        DocumentSnapshot memberSnap = get(db.document("orgs/" + actor.tenantId() + "/members/" + actor.id()));
+        Map<String, Object> member = memberSnap.exists() ? data(memberSnap) : Map.of();
+        return requireStoredCashflowWriter(member, actor, projectId);
     }
 
     private void releaseCashflowLeaseAfterSuccessfulFinalCommand() {
@@ -260,6 +279,204 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return writeDocumentIds.size();
     }
 
+    @Override
+    public CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells
+    ) {
+        requireValidatedCashflowWriteScope(tenantId, projectId);
+        QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
+        Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
+        for (DocumentSnapshot doc : existingSnapshot.getDocuments()) {
+            allProjectWeeks.put(doc.getId(), data(doc));
+        }
+        String currentRevision = computeCashflowTargetRevision(allProjectWeeks.values());
+        if (!currentRevision.equals(targetRevision)) {
+            throw new WeeklyExpenseConflictException("Cashflow target revision changed. Refresh the sheet before applying.");
+        }
+
+        DocumentSnapshot closeSnapshot = get(db.document(monthlyClosePath(tenantId, projectId, yearMonth)));
+        if (closeSnapshot.exists()) {
+            String status = text(data(closeSnapshot).get("status"), "OPEN").toUpperCase(Locale.ROOT);
+            if ("CLOSED".equals(status) || "REOPEN_REQUESTED".equals(status)) {
+                throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
+            }
+        }
+
+        Map<Integer, List<CashflowSheetLabApplyRequest.Cell>> cellsByWeek = new LinkedHashMap<>();
+        for (CashflowSheetLabApplyRequest.Cell cell : cells) {
+            cellsByWeek.computeIfAbsent(cell.weekNo(), ignored -> new ArrayList<>()).add(cell);
+        }
+        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
+        for (Map.Entry<String, Map<String, Object>> entry : allProjectWeeks.entrySet()) {
+            if (yearMonth.equals(text(entry.getValue().get("yearMonth"), ""))) {
+                if (bool(entry.getValue().get("adminClosed"))
+                    || "closed".equals(text(entry.getValue().get("weeklyStatusState"), "").toLowerCase(Locale.ROOT))) {
+                    throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
+                }
+                targetMonthDocs.put(entry.getKey(), entry.getValue());
+            }
+        }
+        for (Integer weekNo : cellsByWeek.keySet()) {
+            String docId = cashflowWeekId(projectId, yearMonth, weekNo);
+            targetMonthDocs.putIfAbsent(docId, baseCashflowWeekDoc(tenantId, projectId, docId));
+        }
+
+        Instant now = clock.instant();
+        Map<String, Map<String, Object>> replacements = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Object>> entry : targetMonthDocs.entrySet()) {
+            String docId = entry.getKey();
+            Map<String, Object> existing = entry.getValue();
+            WeekDocParts parts = parseCashflowWeekId(projectId, docId);
+            int weekNo = intValue(existing.get("weekNo"), parts.weekNo());
+            List<CashflowSheetLabApplyRequest.Cell> weekCells = cellsByWeek.getOrDefault(weekNo, List.of());
+
+            Map<String, BigDecimal> projectionAmounts = new LinkedHashMap<>();
+            List<SaveDraftResponse.ActualDelta> actualDeltas = new ArrayList<>();
+            for (CashflowSheetLabApplyRequest.Cell cell : weekCells) {
+                if (!"VALUE".equals(cell.cellState())) continue;
+                if ("projection".equals(cell.mode())) {
+                    projectionAmounts.put(cell.cashflowLine(), amount(cell.amount()));
+                } else {
+                    actualDeltas.add(new SaveDraftResponse.ActualDelta(
+                        yearMonth,
+                        weekNo,
+                        cell.cashflowLine(),
+                        amount(cell.amount())
+                    ));
+                }
+            }
+
+            Map<String, Object> replacement = new LinkedHashMap<>(existing);
+            replacement.put("id", docId);
+            replacement.put("tenantId", tenantId);
+            replacement.put("projectId", projectId);
+            replacement.put("yearMonth", yearMonth);
+            replacement.put("weekNo", weekNo);
+            replacement.put("projection", FirestoreCashflowWeekActualMerge.numberMap(projectionAmounts));
+            replacement.put("projectionTotals", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionAmounts));
+            replacement.put("projectionUpdated", true);
+            replacement.put("projectionUpdatedAt", now.toString());
+            replacement.putAll(FirestoreCashflowWeekActualMerge.buildPatch(
+                tenantId,
+                projectId,
+                sourceSheetKey,
+                existing,
+                actualDeltas,
+                now
+            ));
+            replacements.put(docId, replacement);
+        }
+
+        for (Map.Entry<String, Map<String, Object>> replacement : replacements.entrySet()) {
+            replaceDocument(cashflowWeekRef(tenantId, replacement.getKey()), replacement.getValue());
+        }
+
+        List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
+        List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
+        for (CashflowSheetLabApplyRequest.Cell cell : cells) {
+            if (!"VALUE".equals(cell.cellState())) continue;
+            if ("projection".equals(cell.mode())) {
+                WeeklyExpenseProjectionEntity line = new WeeklyExpenseProjectionEntity(
+                    tenantId, projectId, yearMonth, cell.weekNo(), cell.cashflowLine()
+                );
+                line.setAmount(cell.amount());
+                projection.add(line);
+            } else {
+                WeeklyExpenseActualEntity line = new WeeklyExpenseActualEntity(
+                    tenantId, projectId, sourceSheetKey, yearMonth, cell.weekNo(), cell.cashflowLine()
+                );
+                line.setAmount(cell.amount());
+                actual.add(line);
+            }
+        }
+        Comparator<WeeklyExpenseProjectionEntity> projectionOrder = Comparator
+            .comparingInt(WeeklyExpenseProjectionEntity::getWeekNo)
+            .thenComparing(WeeklyExpenseProjectionEntity::getCashflowLine);
+        Comparator<WeeklyExpenseActualEntity> actualOrder = Comparator
+            .comparingInt(WeeklyExpenseActualEntity::getWeekNo)
+            .thenComparing(WeeklyExpenseActualEntity::getCashflowLine);
+        projection.sort(projectionOrder);
+        actual.sort(actualOrder);
+        Map<String, Map<String, Object>> resultingWeeks = new LinkedHashMap<>(allProjectWeeks);
+        resultingWeeks.putAll(replacements);
+        return new CashflowSheetMonthReplacement(
+            List.copyOf(projection),
+            List.copyOf(actual),
+            computeCashflowTargetRevision(resultingWeeks.values())
+        );
+    }
+
+    static String computeCashflowTargetRevision(Collection<Map<String, Object>> documents) {
+        List<Map<String, Object>> weeks = new ArrayList<>();
+        for (Map<String, Object> document : documents == null ? List.<Map<String, Object>>of() : documents) {
+            String yearMonth = textValue(document.get("yearMonth"));
+            Object weekValue = document.get("weekNo");
+            if (yearMonth.isBlank() || !(weekValue instanceof Number weekNumber)) continue;
+            Map<String, Object> week = new TreeMap<>();
+            week.put("actual", revisionAmounts(document.get("actual")));
+            week.put("adminClosed", revisionBoolean(document.get("adminClosed")));
+            week.put("projection", revisionAmounts(document.get("projection")));
+            week.put("weekNo", normalizedRevisionNumber(weekNumber));
+            week.put("yearMonth", yearMonth);
+            weeks.add(week);
+        }
+        weeks.sort(Comparator
+            .comparing((Map<String, Object> week) -> String.valueOf(week.get("yearMonth")))
+            .thenComparing(week -> new BigDecimal(String.valueOf(week.get("weekNo")))));
+        Map<String, Object> root = new TreeMap<>();
+        root.put("weeks", weeks);
+        try {
+            String json = JSON.writeValueAsString(root);
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(json.getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(digest);
+        } catch (JsonProcessingException | NoSuchAlgorithmException error) {
+            throw new IllegalStateException("Could not compute cashflow target revision.", error);
+        }
+    }
+
+    private static Map<String, Object> revisionAmounts(Object value) {
+        Map<String, Object> normalized = new TreeMap<>();
+        if (!(value instanceof Map<?, ?> amounts)) return normalized;
+        for (Map.Entry<?, ?> entry : amounts.entrySet()) {
+            if (entry.getValue() instanceof Number number && isFinite(number)) {
+                normalized.put(String.valueOf(entry.getKey()), normalizedRevisionNumber(number));
+            }
+        }
+        return normalized;
+    }
+
+    private static Object normalizedRevisionNumber(Number number) {
+        BigDecimal value = number instanceof BigDecimal decimal
+            ? decimal
+            : new BigDecimal(number.toString());
+        value = value.signum() == 0 ? BigDecimal.ZERO : value.stripTrailingZeros();
+        try {
+            return value.longValueExact();
+        } catch (ArithmeticException ignored) {
+            return value;
+        }
+    }
+
+    private static boolean isFinite(Number number) {
+        if (number instanceof Double value) return Double.isFinite(value);
+        if (number instanceof Float value) return Float.isFinite(value);
+        return true;
+    }
+
+    private static boolean revisionBoolean(Object value) {
+        if (value instanceof Boolean bool) return bool;
+        return value != null && !String.valueOf(value).isBlank();
+    }
+
+    private static String textValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
     private String requireStoredCashflowWriter(
         Map<String, Object> member,
         TrustedActorContext actor,
@@ -306,6 +523,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         } catch (JsonProcessingException error) {
             throw new IllegalArgumentException("Invalid cashflow project id.", error);
         }
+    }
+
+    private String monthlyClosePath(String tenantId, String projectId, String yearMonth) {
+        return "orgs/" + tenantId + "/monthly_closes/" + projectId + "-" + yearMonth;
     }
 
     private WeeklyExpenseEditLeaseException leaseError(int statusCode, String code, String message) {
@@ -1036,6 +1257,29 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw error;
         } catch (Exception error) {
             throw new IllegalStateException("Could not write Firestore document: " + ref.getPath(), error);
+        }
+    }
+
+    private void replaceDocument(DocumentReference ref, Map<String, Object> data) {
+        try {
+            requireValidatedCashflowWriteScope(
+                text(data.get("tenantId"), ""),
+                text(data.get("projectId"), "")
+            );
+            Transaction tx = currentTransaction.get();
+            if (tx == null) {
+                ref.set(data).get();
+            } else {
+                tx.set(ref, data);
+            }
+            Map<String, Map<String, Object>> cache = transactionDocumentCache.get();
+            if (cache != null) {
+                cache.put(ref.getPath(), new LinkedHashMap<>(data));
+            }
+        } catch (WeeklyExpenseEditLeaseException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not replace Firestore document: " + ref.getPath(), error);
         }
     }
 

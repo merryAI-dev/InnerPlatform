@@ -196,7 +196,16 @@ export function createJavaWeeklyClient({
     });
   }
 
-  async function applyCashflowSheetLab({ context, projectId, idempotencyKey, editSession, lines }) {
+  async function applyCashflowSheetLab({
+    context,
+    projectId,
+    idempotencyKey,
+    editSession,
+    sourceRevision,
+    targetRevision,
+    yearMonth,
+    cells,
+  }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
@@ -228,7 +237,10 @@ export function createJavaWeeklyClient({
       dataProjectId: bffDataProjectId,
       body: {
         idempotencyKey,
-        lines,
+        sourceRevision,
+        targetRevision,
+        yearMonth,
+        cells,
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {

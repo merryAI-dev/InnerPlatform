@@ -2,6 +2,7 @@ package dev.merryai.innerplatform.weekly.storage;
 
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
@@ -20,6 +21,13 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 public interface WeeklyExpensePersistence {
+    record CashflowSheetMonthReplacement(
+        List<WeeklyExpenseProjectionEntity> projection,
+        List<WeeklyExpenseActualEntity> actual,
+        String resultingTargetRevision
+    ) {
+    }
+
     default <T> T runCommandTransaction(Callable<T> action) {
         try {
             return action.call();
@@ -39,6 +47,29 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_edit_lease_backend_unavailable",
             "Cashflow edit leases require the Firestore transaction backend."
+        );
+    }
+
+    default String requireCashflowWritePermission(TrustedActorContext actor, String projectId) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_write_permission_backend_unavailable",
+            "Cashflow write permission checks require the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_replace_backend_unavailable",
+            "Authoritative monthly cashflow replacement requires the Firestore transaction backend."
         );
     }
 
