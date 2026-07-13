@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { collection, doc, getDoc, getDocs, limit, query, runTransaction, where, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Database, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
@@ -27,7 +27,7 @@ import {
   type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeCashflowTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
@@ -37,6 +37,7 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../..
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   fetchCashflowLaborRiskViaBff,
+  saveCashflowProjectionBatchViaBff,
   type CashflowLaborRiskResult,
 } from '../../lib/platform-bff-client';
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
@@ -44,6 +45,10 @@ import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
 import { applyCashflowSheetLabViaBff, stageCashflowSheetLabViaBff, type CashflowSheetLabChangeCandidate } from '../../lib/sheets-cashflow-readonly-client';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { useCashflowEditLease } from './useCashflowEditLease';
+import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
+import type { CashflowMutationLease } from '../../lib/cashflow-edit-lease';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -63,26 +68,6 @@ function formatSheetAppliedAt(value?: string): string {
     timeStyle: 'short',
   }).format(date);
 }
-
-const CASHFLOW_EDIT_LOCK_TTL_MS = 2 * 60 * 1000;
-
-type CashflowEditLock = {
-  projectId: string;
-  editorUid?: string | null;
-  editorName?: string | null;
-  editorEmail?: string | null;
-  status?: 'editing' | 'idle';
-  startedAt?: number;
-  updatedAt?: number;
-  expiresAt?: number;
-  releasedAt?: number;
-  releasedByUid?: string | null;
-  releaseReason?: string | null;
-  lastEditedAt?: number;
-  lastEditedByUid?: string | null;
-  lastEditedByName?: string | null;
-  lastEditedByEmail?: string | null;
-};
 
 type CashflowEventType =
   | 'sheet_apply'
@@ -118,19 +103,6 @@ type CashflowEvent = {
   createdAt: string;
   revertedAt?: string;
 };
-
-function safeDocId(value: string): string {
-  return String(value || '').replace(/[^A-Za-z0-9._-]/g, '_');
-}
-
-function getUserDisplayName(user: unknown): string {
-  const source = (user || {}) as { name?: unknown; displayName?: unknown; email?: unknown; uid?: unknown };
-  const name = String(source.name || source.displayName || '').trim();
-  if (name) return name;
-  const email = String(source.email || '').trim();
-  if (email) return email.split('@')[0] || email;
-  return String(source.uid || '사용자');
-}
 
 function diffColorExplanation(section: '입금' | '출금', diff: number): string {
   if (diff === 0) return '차이가 없습니다.';
@@ -315,9 +287,6 @@ export function CashflowProjectSheet({
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const canUseCashflowActions = Boolean(role || user);
-  const canSubmitActual = canUseCashflowActions;
-  const canClose = canUseCashflowActions;
-  const canEdit = canUseCashflowActions;
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
@@ -334,6 +303,20 @@ export function CashflowProjectSheet({
     user?.role,
     user?.uid,
   ]);
+  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor: bffActor });
+  const cashflowPrivateDraftClient = useMemo(() => (
+    cashflowLease.sessionId
+      ? createCashflowPrivateDraftClient({
+          tenantId: orgId,
+          projectId,
+          actor: bffActor,
+          sessionId: cashflowLease.sessionId,
+        })
+      : null
+  ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
+  const canEdit = canUseCashflowActions && cashflowLease.canEdit;
+  const canSubmitActual = canEdit;
+  const canClose = canEdit;
   const latestBffActorRef = useRef(bffActor);
   useEffect(() => {
     latestBffActorRef.current = bffActor;
@@ -407,9 +390,6 @@ export function CashflowProjectSheet({
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
-  const [editLockBusy, setEditLockBusy] = useState(false);
-  const lockDocId = useMemo(() => safeDocId(projectId), [projectId]);
-  const currentUserName = useMemo(() => getUserDisplayName(user), [user]);
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
   const selectedYear = useMemo(() => {
@@ -509,6 +489,10 @@ export function CashflowProjectSheet({
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   type CashflowAuditIssue = { key: string; label: string; detail: string };
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
+  const [privateDraftRevision, setPrivateDraftRevision] = useState<number | null>(null);
+  const [privateDraftPayload, setPrivateDraftPayload] = useState<Record<string, unknown>>({});
+  const loadedPrivateDraftKeyRef = useRef('');
+  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const [auditDialog, setAuditDialog] = useState<{
     title: string;
     weekLabel: string;
@@ -557,70 +541,98 @@ export function CashflowProjectSheet({
     setEditingWeekModes({});
     setWeekSaveState({});
     setSubmitConfirm(null);
-  }, [yearMonth, projectId]);
+    setPrivateDraftRevision(null);
+    setPrivateDraftPayload({});
+    loadedPrivateDraftKeyRef.current = '';
+    privateDraftLoadRef.current = null;
+  }, [projectId]);
 
-  const acquireCashflowEditLock = useCallback(async (): Promise<boolean> => {
-    if (!db || !user?.uid || !projectId) return true;
-    setEditLockBusy(true);
-    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
-    const now = Date.now();
-    let lockedBy = '다른 사용자';
-    try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(lockRef);
-        const existing = snap.exists() ? (snap.data() as CashflowEditLock) : null;
-        const active = existing?.status === 'editing' && Number(existing.expiresAt || 0) > now;
-        if (active && existing?.editorUid && existing.editorUid !== user.uid) {
-          lockedBy = existing.editorName || existing.editorEmail || lockedBy;
-          throw new Error('cashflow_edit_locked');
+  const hydrateCashflowPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }): Promise<void> => {
+    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
+    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
+    if (loadedPrivateDraftKeyRef.current === key) return;
+    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
+    const promise = (async () => {
+      const { draft } = await cashflowPrivateDraftClient.open(ownership);
+      setPrivateDraftRevision(draft.draftRevision);
+      const payload = draft.payload || {};
+      setPrivateDraftPayload(payload);
+      const board = payload.board && typeof payload.board === 'object' && !Array.isArray(payload.board)
+        ? payload.board as Record<string, unknown>
+        : payload;
+      if (draft.status === 'ACTIVE') {
+        if (board.drafts && typeof board.drafts === 'object' && !Array.isArray(board.drafts)) {
+          setDrafts(board.drafts as Record<string, string>);
         }
-        tx.set(lockRef, {
-          projectId,
-          editorUid: user.uid,
-          editorName: currentUserName,
-          editorEmail: user.email || '',
-          status: 'editing',
-          startedAt: active && existing?.editorUid === user.uid ? existing.startedAt || now : now,
-          updatedAt: now,
-          expiresAt: now + CASHFLOW_EDIT_LOCK_TTL_MS,
-        } satisfies CashflowEditLock, { merge: true });
-      });
+        if (board.weekSaveState && typeof board.weekSaveState === 'object' && !Array.isArray(board.weekSaveState)) {
+          setWeekSaveState(board.weekSaveState as Record<string, WeekSaveState>);
+        }
+      }
+      loadedPrivateDraftKeyRef.current = key;
+    })();
+    privateDraftLoadRef.current = { key, promise };
+    try {
+      await promise;
+    } finally {
+      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
+    }
+  }, [cashflowPrivateDraftClient, projectId]);
+
+  useEffect(() => {
+    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
+    void hydrateCashflowPrivateDraft(cashflowLease.ownership).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 복구하지 못했습니다.'));
+    });
+  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateCashflowPrivateDraft]);
+
+  const beginCashflowEditing = useCallback(async (): Promise<boolean> => {
+    if (!cashflowPrivateDraftClient) return false;
+    const ownership = await cashflowLease.acquire();
+    if (!ownership) return false;
+    try {
+      await hydrateCashflowPrivateDraft(ownership);
       return true;
     } catch (error) {
-      toast.error(`${lockedBy}이 수정 중입니다. 저장 후 다시 시도해 주세요.`);
+      await cashflowLease.release();
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
       return false;
-    } finally {
-      setEditLockBusy(false);
     }
-  }, [currentUserName, db, lockDocId, orgId, projectId, user]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
 
-  const releaseCashflowEditLock = useCallback(async (reason: 'save' | 'leave' | 'cancel' = 'save'): Promise<void> => {
-    if (!db || !user?.uid || !projectId) return;
-    const lockRef = doc(db, getOrgDocumentPath(orgId, 'cashflowEditLocks', lockDocId));
-    const now = Date.now();
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(lockRef);
-      if (!snap.exists()) return;
-      const existing = snap.data() as CashflowEditLock;
-      if (existing.editorUid !== user.uid) return;
-      tx.set(lockRef, {
-        projectId,
-        status: 'idle',
-        editorUid: null,
-        editorName: null,
-        editorEmail: null,
-        updatedAt: now,
-        expiresAt: now,
-        releasedAt: now,
-        releasedByUid: user.uid,
-        releaseReason: reason,
-        lastEditedAt: reason === 'save' ? now : existing.lastEditedAt || null,
-        lastEditedByUid: reason === 'save' ? user.uid : existing.lastEditedByUid || null,
-        lastEditedByName: reason === 'save' ? currentUserName : existing.lastEditedByName || null,
-        lastEditedByEmail: reason === 'save' ? user.email || '' : existing.lastEditedByEmail || null,
-      } satisfies CashflowEditLock, { merge: true });
+  const savePrivateCashflowDraft = useCallback(async (): Promise<void> => {
+    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    let revision = privateDraftRevision;
+    let payload = privateDraftPayload;
+    if (revision === null) {
+      const opened = await cashflowPrivateDraftClient.open(mutationLease);
+      revision = opened.draft.draftRevision;
+      payload = opened.draft.payload;
+    }
+    const nextPayload = { ...payload, board: { drafts, weekSaveState, yearMonth } };
+    const { draft } = await cashflowPrivateDraftClient.save(mutationLease, {
+      expectedDraftRevision: revision,
+      payload: nextPayload,
     });
-  }, [currentUserName, db, lockDocId, orgId, projectId, user]);
+    setPrivateDraftRevision(draft.draftRevision);
+    setPrivateDraftPayload(draft.payload);
+  }, [
+    cashflowLease.checkBeforeMutation,
+    cashflowPrivateDraftClient,
+    drafts,
+    privateDraftRevision,
+    privateDraftPayload,
+    weekSaveState,
+    yearMonth,
+  ]);
+
+  const completePrivateCashflowDraft = useCallback(async (mutationLease: CashflowMutationLease): Promise<void> => {
+    if (!cashflowPrivateDraftClient || privateDraftRevision === null) return;
+    await cashflowPrivateDraftClient.complete(mutationLease, {
+      expectedDraftRevision: privateDraftRevision,
+    });
+    setPrivateDraftRevision(null);
+  }, [cashflowPrivateDraftClient, privateDraftRevision]);
 
   useEffect(() => {
     if (!db || !projectId) {
@@ -920,7 +932,10 @@ export function CashflowProjectSheet({
       toast.error('바로 저장할 수 있는 값이 없습니다. 확인 필요 항목을 먼저 검토해 주세요.');
       return;
     }
-    const apply = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
+    let finalMutationLease: Awaited<ReturnType<typeof cashflowLease.checkBeforeMutation>> | null = null;
+    const apply = async (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      finalMutationLease = mutationLease;
       const idempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
       return applyCashflowSheetLabViaBff({
         tenantId: orgId,
@@ -929,6 +944,8 @@ export function CashflowProjectSheet({
         stageRunId: sheetStageDialog.runId,
         applyRiskCandidates: false,
         idempotencyKey,
+        lease: mutationLease,
+        finalize: true,
       });
     };
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
@@ -944,6 +961,13 @@ export function CashflowProjectSheet({
       } : current);
       setSheetStageDialog(null);
       setSheetRefreshResult(null);
+      if (cashflowPrivateDraftClient && privateDraftRevision !== null && finalMutationLease) {
+        await cashflowPrivateDraftClient.complete(finalMutationLease, {
+          expectedDraftRevision: privateDraftRevision,
+        });
+        setPrivateDraftRevision(null);
+      }
+      await cashflowLease.checkStatus();
       toast.success(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.`);
     };
 
@@ -973,7 +997,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetStageApplyLoading(false);
     }
-  }, [loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, projectId, resolveBffActor, sheetStageDialog]);
+  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, privateDraftRevision, projectId, resolveBffActor, sheetStageDialog]);
 
   const handleOpenSheetReviewDialog = useCallback(() => {
     setSheetReviewDirection('sheet-to-cashflow');
@@ -987,105 +1011,12 @@ export function CashflowProjectSheet({
 
   const handleStartProjectionSheetWrite = useCallback(() => {
     setSheetReviewDialogOpen(false);
-    navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}&direction=platform-to-sheet`);
+    navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab?direction=platform-to-sheet`);
   }, [navigate, projectId]);
 
-  const handleRevertCashflowRun = useCallback(async (runId: string): Promise<void> => {
-    if (!db || !user?.uid) {
-      toast.error('로그인 세션이 만료되었습니다.');
-      return;
-    }
-    const runEvents = cashflowEvents.filter((event) => event.runId === runId);
-    const amountEvents = runEvents.filter((event) => (
-      event.source === 'google_sheet_apply'
-      && !event.revertedAt
-      && (event.type === 'projection_amount_change' || event.type === 'actual_amount_change')
-      && event.yearMonth
-      && event.weekNo
-      && event.mode
-      && event.lineId
-    ));
-    if (amountEvents.length === 0) {
-      toast.info('되돌릴 금액 변경이 없습니다.');
-      return;
-    }
-    if (!window.confirm(`이 시트 반영의 금액 변경 ${amountEvents.length}건을 이전 값으로 되돌릴까요?`)) return;
-
-    setRevertingRunId(runId);
-    try {
-      const now = new Date().toISOString();
-      const batch = writeBatch(db);
-      const byWeek = new Map<string, CashflowEvent[]>();
-      for (const event of amountEvents) {
-        const key = `${event.yearMonth}:w${event.weekNo}`;
-        byWeek.set(key, [...(byWeek.get(key) || []), event]);
-      }
-
-      for (const [key, events] of byWeek) {
-        const [targetYearMonth, rawWeekNo] = key.split(':w');
-        const weekNo = Number(rawWeekNo);
-        const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', `${projectId}-${targetYearMonth}-w${weekNo}`));
-        const snap = await getDoc(ref);
-        const current = snap.exists() ? (snap.data() as CashflowWeekSheet) : undefined;
-        const nextProjection = { ...(current?.projection || {}) };
-        const nextActual = { ...(current?.actual || {}) };
-        let touchedProjection = false;
-        let touchedActual = false;
-
-        for (const event of events) {
-          const target = event.mode === 'projection' ? nextProjection : nextActual;
-          if (!event.beforeHadValue) {
-            delete target[event.lineId as CashflowSheetLineId];
-          } else {
-            target[event.lineId as CashflowSheetLineId] = Number(event.beforeAmount || 0);
-          }
-          touchedProjection = touchedProjection || event.mode === 'projection';
-          touchedActual = touchedActual || event.mode === 'actual';
-        }
-
-        batch.set(ref, {
-          ...(touchedProjection ? { projection: nextProjection, projectionTotals: computeCashflowTotals(nextProjection) } : {}),
-          ...(touchedActual ? { actual: nextActual, actualTotals: computeCashflowTotals(nextActual) } : {}),
-          updatedAt: now,
-          updatedByUid: user.uid,
-          updatedByName: getUserDisplayName(user),
-          tenantId: orgId,
-        } as Partial<CashflowWeekSheet> as any, { merge: true });
-      }
-
-      for (const event of runEvents) {
-        if (!event.id) continue;
-        batch.set(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', event.id)), {
-          revertedAt: now,
-          revertedByUid: user.uid,
-          revertedByName: getUserDisplayName(user),
-        }, { merge: true });
-      }
-      const revertId = safeDocId(`cashflow-revert:${runId}:${now}`);
-      batch.set(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', revertId)), {
-        id: revertId,
-        tenantId: orgId,
-        projectId,
-        runId: `cashflow-revert:${runId}:${now}`,
-        revertedRunId: runId,
-        type: 'sheet_apply_reverted',
-        source: 'revert',
-        actorUid: user.uid,
-        actorName: getUserDisplayName(user),
-        actorEmail: user.email || '',
-        createdAt: now,
-      } as CashflowEvent);
-
-      await batch.commit();
-      await loadCashflowSheetRangeWeeks();
-      await loadCashflowEvents();
-      toast.success('시트 반영 이전 값으로 되돌렸습니다.');
-    } catch (error) {
-      toast.error('되돌리기에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    } finally {
-      setRevertingRunId(null);
-    }
-  }, [cashflowEvents, db, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, projectId, user]);
+  const handleRevertCashflowRun = useCallback(async (_runId: string): Promise<void> => {
+    toast.info('되돌리기는 서버 검증 경로가 준비될 때까지 읽기 전용입니다.');
+  }, []);
 
   const weekMeta = useMemo(() => {
     const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
@@ -1468,165 +1399,10 @@ export function CashflowProjectSheet({
     });
   }, [annualWeeks, byYearMonthWeek, laborRisk, projectionActualYearDiff.changedCellCount, todayIso]);
 
-  const flushWeek = useCallback(async (input: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-    silent?: boolean;
-  }): Promise<void> => {
-    if (input.mode === 'actual') return;
-    const targetYearMonth = input.yearMonth || yearMonth;
-    const wkKey = resolveWeekKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo });
-    const doc = byYearMonthWeek.get(`${targetYearMonth}:${input.weekNo}`);
-
-    const rawByLine: Partial<Record<CashflowSheetLineId, string>> = {};
-    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const cellKey = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const hasDraft = Object.prototype.hasOwnProperty.call(drafts, cellKey);
-      if (!hasDraft) continue;
-
-      const raw = drafts[cellKey];
-      rawByLine[lineId] = raw;
-
-      const nextAmount = parseAmount(raw);
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
-      if (nextAmount !== persisted.amount || !persisted.hasValue) {
-        amounts[lineId] = nextAmount;
-      }
-    }
-
-    const hasAnyDrafts = Object.keys(rawByLine).length > 0;
-    if (!hasAnyDrafts) return;
-
-    if (Object.keys(amounts).length === 0) {
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-          if (next[key] === rawByLine[lineId]) delete next[key];
-        }
-        return next;
-      });
-      return;
-    }
-
-    setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
-    try {
-      await upsertWeekAmounts({
-        projectId,
-        yearMonth: targetYearMonth,
-        weekNo: input.weekNo,
-        mode: input.mode,
-        amounts,
-      });
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth: targetYearMonth,
-          weekNo: input.weekNo,
-          ...(input.mode === 'projection'
-            ? { projectionEdited: true, projectionUpdated: true }
-            : { expenseEdited: true, expenseUpdated: true }),
-        });
-      }
-      await loadCashflowEvents();
-
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const lineId of Object.keys(rawByLine) as CashflowSheetLineId[]) {
-          const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-          if (next[key] === rawByLine[lineId]) delete next[key];
-        }
-        return next;
-      });
-    } catch (error) {
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'error' }));
-      if (!input.silent) {
-        toast.error('저장에 실패했습니다. 네트워크/권한을 확인하고 다시 시도해 주세요.');
-      }
-      throw error;
-    }
-  }, [byYearMonthWeek, canEdit, drafts, loadCashflowEvents, onUpdateWeeklySubmissionStatus, projectId, resolveCellKey, resolveWeekKey, upsertWeekAmounts, yearMonth]);
-
   const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
   }, [resolveWeekKey, yearMonth]);
-
-  const persistWeekValues = useCallback(async (input: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-  }): Promise<void> => {
-    if (input.mode === 'actual') return;
-
-    const targetYearMonth = input.yearMonth || yearMonth;
-    const wkKey = resolveWeekKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo });
-    const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({ ...input, yearMonth: targetYearMonth });
-    const auditIssues = [
-      ...preparedIssues,
-      ...collectAuditIssues({ ...input, yearMonth: targetYearMonth, amounts })
-        .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
-    ];
-
-    if (auditIssues.length > 0) {
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'error' }));
-      showAuditBlock('저장 전에 확인이 필요합니다', input.weekNo, auditIssues, targetYearMonth);
-      throw new Error('cashflow_audit_validation_failed');
-    }
-
-    if (Object.keys(amounts).length === 0) {
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
-      return;
-    }
-
-    setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saving' }));
-    try {
-      await upsertWeekAmounts({
-        projectId,
-        yearMonth: targetYearMonth,
-        weekNo: input.weekNo,
-        mode: input.mode,
-        amounts,
-      });
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth: targetYearMonth,
-          weekNo: input.weekNo,
-          ...(input.mode === 'projection'
-            ? { projectionEdited: true, projectionUpdated: true }
-            : { expenseEdited: true, expenseUpdated: true }),
-        });
-      }
-      await loadCashflowEvents();
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const lineId of CASHFLOW_ALL_LINES) {
-          delete next[resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId })];
-        }
-        return next;
-      });
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'saved' }));
-    } catch (error) {
-      setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'error' }));
-      throw error;
-    }
-  }, [
-    byYearMonthWeek,
-    canEdit,
-    drafts,
-    loadCashflowEvents,
-    onUpdateWeeklySubmissionStatus,
-    projectId,
-    resolveCellKey,
-    resolveWeekKey,
-    upsertWeekAmounts,
-    yearMonth,
-  ]);
 
   const handleSaveWeekValues = useCallback((input: {
     yearMonth?: string;
@@ -1637,13 +1413,12 @@ export function CashflowProjectSheet({
       toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
       return;
     }
-    void persistWeekValues(input)
-      .then(() => toast.success('저장했습니다.'))
+    void savePrivateCashflowDraft()
+      .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
       .catch((error) => {
-        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
-        toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+        toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.'));
       });
-  }, [persistWeekValues]);
+  }, [savePrivateCashflowDraft]);
 
   const handleSaveBoardWeekValues = useCallback((input: {
     yearMonth: string;
@@ -1654,24 +1429,20 @@ export function CashflowProjectSheet({
       toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
       return;
     }
-    void persistWeekValues(input)
-      .then(() => {
-        setEditingWeekModes((prev) => ({
-          ...prev,
-          [resolveWeekKey(input)]: false,
-        }));
-        toast.success('저장했습니다.');
-      })
+    void savePrivateCashflowDraft()
+      .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
       .catch((error) => {
-        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
-        toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.');
+        toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.'));
       });
-  }, [persistWeekValues, resolveWeekKey]);
+  }, [savePrivateCashflowDraft]);
 
   const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
     setSubmitBusy(true);
     try {
-      await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo });
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo, cashflowLease: mutationLease, finalize: true });
+      await completePrivateCashflowDraft(mutationLease);
+      await cashflowLease.checkStatus();
       await loadCashflowEvents();
       toast.success('작성완료 처리했습니다.');
     } catch (e) {
@@ -1680,7 +1451,7 @@ export function CashflowProjectSheet({
       setSubmitBusy(false);
       setSubmitConfirm(null);
     }
-  }, [loadCashflowEvents, projectId, submitWeekAsPm]);
+  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, completePrivateCashflowDraft, loadCashflowEvents, projectId, submitWeekAsPm]);
 
   const handleCompleteProjectionWeek = useCallback((weekNo: number, targetYearMonth = yearMonth) => {
     if (!canEdit) return;
@@ -1699,6 +1470,7 @@ export function CashflowProjectSheet({
         return;
       }
 
+      const mutationLease = await cashflowLease.checkBeforeMutation();
       await upsertWeekAmounts({
         projectId,
         yearMonth: targetYearMonth,
@@ -1706,17 +1478,12 @@ export function CashflowProjectSheet({
         mode: 'projection',
         amounts,
         markCompleted: true,
+        cashflowLease: mutationLease,
+        finalize: true,
       });
+      await completePrivateCashflowDraft(mutationLease);
+      await cashflowLease.checkStatus();
 
-      if (onUpdateWeeklySubmissionStatus) {
-        await onUpdateWeeklySubmissionStatus({
-          projectId,
-          yearMonth: targetYearMonth,
-          weekNo,
-          projectionEdited: true,
-          projectionUpdated: true,
-        });
-      }
       await loadCashflowEvents();
 
       setDrafts((prev) => {
@@ -1739,8 +1506,10 @@ export function CashflowProjectSheet({
     });
   }, [
     canEdit,
+    cashflowLease.checkBeforeMutation,
+    cashflowLease.checkStatus,
+    completePrivateCashflowDraft,
     getEffectiveAmount,
-    onUpdateWeeklySubmissionStatus,
     loadCashflowEvents,
     projectId,
     resolveCellKey,
@@ -1752,8 +1521,36 @@ export function CashflowProjectSheet({
   const handleCloseWeek = useCallback(async (weekNo: number, targetYearMonth = yearMonth) => {
     setCloseBusy(true);
     try {
-      await persistWeekValues({ yearMonth: targetYearMonth, weekNo, mode: 'projection' });
-      await closeWeekAsAdmin({ projectId, yearMonth: targetYearMonth, weekNo });
+      const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({
+        yearMonth: targetYearMonth,
+        weekNo,
+        mode: 'projection',
+      });
+      const auditIssues = [
+        ...preparedIssues,
+        ...collectAuditIssues({ yearMonth: targetYearMonth, weekNo, mode: 'projection', amounts })
+          .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
+      ];
+      if (auditIssues.length > 0) {
+        showAuditBlock('결산 전에 확인이 필요합니다', weekNo, auditIssues, targetYearMonth);
+        throw new Error('cashflow_audit_validation_failed');
+      }
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await closeWeekAsAdmin({
+        projectId,
+        yearMonth: targetYearMonth,
+        weekNo,
+        projectionLines: Object.entries(amounts).map(([cashflowLine, amount]) => ({
+          yearMonth: targetYearMonth,
+          weekNo,
+          cashflowLine,
+          amount: Number(amount) || 0,
+        })),
+        cashflowLease: mutationLease,
+        finalize: true,
+      });
+      await completePrivateCashflowDraft(mutationLease);
+      await cashflowLease.checkStatus();
       await loadCashflowEvents();
       toast.success('결산완료 처리했습니다.');
     } catch (e) {
@@ -1762,7 +1559,7 @@ export function CashflowProjectSheet({
       setCloseBusy(false);
       setCloseDialog(null);
     }
-  }, [closeWeekAsAdmin, loadCashflowEvents, persistWeekValues, projectId, yearMonth]);
+  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, closeWeekAsAdmin, completePrivateCashflowDraft, loadCashflowEvents, projectId, yearMonth]);
 
   const handleStartCloseWeek = useCallback(async (weekNo: number) => {
     if (!db) {
@@ -1993,26 +1790,67 @@ export function CashflowProjectSheet({
       });
     };
     const startBoardEditing = () => {
-      void acquireCashflowEditLock().then((locked) => {
-        if (!locked) return;
+      void beginCashflowEditing().then((started) => {
+        if (!started) return;
         setBoardEditing(true);
       });
     };
     const saveBoardDrafts = async () => {
-      for (const week of visibleWeeks) {
-        await flushWeek({ yearMonth: week.yearMonth, weekNo: week.weekNo, mode: 'projection', silent: true });
-      }
+      const weeksToSave = visibleWeeks.filter((week) => (
+        weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
+      ));
+      const lines = weeksToSave.flatMap((week) => {
+        const persisted = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
+        return CASHFLOW_ALL_LINES.flatMap((lineId) => {
+          const key = resolveCellKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
+          if (!Object.prototype.hasOwnProperty.call(drafts, key)) return [];
+          const amount = parseAmount(drafts[key]);
+          const before = getPersistedCell({ doc: persisted, mode: 'projection', lineId });
+          return amount === before.amount && before.hasValue
+            ? []
+            : [{ yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine: lineId, amount }];
+        });
+      });
+      const finalMutationLease = await cashflowLease.checkBeforeMutation();
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      await saveCashflowProjectionBatchViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        lines,
+        idempotencyKey: `cashflow-projection-final:${projectId}:${Date.now()}`,
+        lease: finalMutationLease,
+        finalize: true,
+      });
+      await completePrivateCashflowDraft(finalMutationLease);
+      await cashflowLease.checkStatus();
+      setDrafts((current) => {
+        const next = { ...current };
+        for (const week of weeksToSave) {
+          for (const lineId of CASHFLOW_ALL_LINES) {
+            delete next[resolveCellKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId })];
+          }
+        }
+        return next;
+      });
+      await loadCashflowSheetRangeWeeks();
+      await loadCashflowEvents();
       setBoardEditing(false);
-      await releaseCashflowEditLock('save');
     };
-    const saveBoard = () => {
+    const saveBoardFinal = () => {
       void saveBoardDrafts()
-        .then(() => toast.success('저장했습니다.'))
-        .catch(() => toast.error('저장에 실패했습니다. 네트워크/권한을 확인해 주세요.'));
+        .then(() => toast.success('최종저장했습니다.'))
+        .catch(() => toast.error('최종저장에 실패했습니다. 입력값은 임시저장본에 유지됩니다.'));
+    };
+    const saveBoardTemporary = () => {
+      void savePrivateCashflowDraft()
+        .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
+        .catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')));
     };
     const settleWeek = (week: MonthMondayWeek) => {
       void (async () => {
-        await saveBoardDrafts();
+        await savePrivateCashflowDraft();
         const issues: CashflowAuditIssue[] = [];
         for (const lineId of CASHFLOW_ALL_LINES) {
           const projectionAmount = getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
@@ -2113,23 +1951,39 @@ export function CashflowProjectSheet({
                 variant={boardIsEditing ? 'default' : 'outline'}
                 className="h-8 rounded-full px-3 text-[11px] shadow-sm"
                 onClick={startBoardEditing}
-                disabled={!canEdit || boardIsEditing || editLockBusy}
+                disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}
                 title="수정"
               >
-                {editLockBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
-                수정
+                {cashflowLease.busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
+                수정 시작
               </Button>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
-                onClick={saveBoard}
-                disabled={!canEdit || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
+                onClick={saveBoardTemporary}
+                disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
               >
                 <Save className="mr-1 h-3 w-3" />
-                저장
+                임시저장
               </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
+                onClick={saveBoardFinal}
+                disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
+              >
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                최종저장
+              </Button>
+              {cashflowLease.canEdit && (
+                <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-[10px]" onClick={() => void cashflowLease.extend()} disabled={cashflowLease.busy}>
+                  {cashflowLease.remainingLabel} · 30분 연장
+                </Button>
+              )}
               <Badge variant="outline" className="rounded-full border-0 bg-white px-2.5 py-1 text-[10px] text-slate-600 shadow-sm">
                 {weekCount.toLocaleString()}주
               </Badge>
@@ -2415,11 +2269,11 @@ export function CashflowProjectSheet({
                                 className="h-7 text-[10px] gap-1"
                                 onClick={() => handleSaveWeekValues({ weekNo: w.weekNo, mode: tableMode })}
                                 disabled={saveState === 'saving'}
-                                aria-label="저장"
-                                title="저장"
+                                aria-label="임시저장"
+                                title="임시저장"
                               >
                                 {saveState === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ClipboardCheck className="w-3 h-3" />}
-                                {!compact && '저장'}
+                                {!compact && '임시저장'}
                               </Button>
                             )}
                             {tableMode === 'projection' && canEdit && (
@@ -3171,7 +3025,7 @@ export function CashflowProjectSheet({
                   size="sm"
                   variant="outline"
                   className={`h-7 rounded-full px-2.5 text-[10px] transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}
+                  onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
                 >
                   {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
                 </Button>
@@ -3604,7 +3458,7 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel>닫기</AlertDialogCancel>
             {!cashflowSheetConfig?.value ? (
-              <AlertDialogAction onClick={() => navigate(`/portal/cashflow/sheets-lab?projectId=${encodeURIComponent(projectId)}`)}>
+              <AlertDialogAction onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}>
                 시트 연동 설정
               </AlertDialogAction>
             ) : sheetReviewDirection === 'sheet-to-cashflow' ? (
@@ -3900,6 +3754,18 @@ export function CashflowProjectSheet({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditLeaseDialogs
+        warningOpen={cashflowLease.warningOpen}
+        expiredOpen={cashflowLease.expiredOpen}
+        conflictOpen={cashflowLease.conflictOpen}
+        holder={cashflowLease.holder}
+        busy={cashflowLease.busy}
+        onDismissWarning={cashflowLease.dismissWarning}
+        onExtend={() => { void cashflowLease.extend(); }}
+        onContinueReadOnly={cashflowLease.continueReadOnly}
+        onReacquire={() => { void beginCashflowEditing(); }}
+      />
     </div>
   );
 }

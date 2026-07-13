@@ -3,6 +3,50 @@ import { z } from 'zod';
 const NON_EMPTY_STRING = z.string().trim().min(1);
 const RECORD_UNKNOWN = z.record(z.string(), z.unknown());
 
+const PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH = 14 * 1024 * 1024;
+
+export const projectRegistrationDraftCreateSchema = z.object({
+  payload: z.unknown().optional().default({}),
+  stepIndex: z.number().int().nonnegative().optional().default(0),
+}).strict();
+
+export const projectRegistrationDraftPatchSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  payload: z.unknown(),
+  stepIndex: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectRegistrationDraftAttachmentSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  documentKind: z.enum(['contract', 'quote', 'proposal']),
+  fileName: NON_EMPTY_STRING.max(300),
+  mimeType: NON_EMPTY_STRING.max(200),
+  fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
+  contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
+}).strict();
+
+export const projectRegistrationDraftSubmitSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+}).strict();
+
+export const projectInfoDraftOpenSchema = z.object({}).strict();
+
+export const projectInfoDraftPatchSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  payload: z.unknown(),
+  stepIndex: z.number().int().nonnegative().optional(),
+}).strict();
+
+export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema;
+
+export const projectInfoDraftSubmitSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+  expectedVersion: z.number().int().positive(),
+  resubmit: z.boolean().optional().default(false),
+  reviewComment: z.string().trim().max(2000).optional(),
+}).strict();
+
 export const projectUpsertSchema = z.object({
   id: NON_EMPTY_STRING,
   name: NON_EMPTY_STRING,
@@ -35,6 +79,11 @@ export const commentCreateSchema = z.object({
   id: NON_EMPTY_STRING.optional(),
   content: NON_EMPTY_STRING,
   authorName: NON_EMPTY_STRING.optional(),
+  projectId: NON_EMPTY_STRING.optional(),
+  targetType: z.enum(['transaction', 'expense_sheet_row']).optional(),
+  sheetRowId: NON_EMPTY_STRING.optional(),
+  fieldKey: NON_EMPTY_STRING.optional(),
+  fieldLabel: NON_EMPTY_STRING.optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
 }).strict();
 

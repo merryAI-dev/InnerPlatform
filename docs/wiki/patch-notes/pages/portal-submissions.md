@@ -28,6 +28,7 @@
 
 ## Recent Changes
 
+- [2026-07-13] 프로젝트별 cashflow lease를 확인한 뒤 제출 상태 변경을 BFF command로 전환했다. 활성 수정 세션이 없으면 저장하지 않고 읽기 전용으로 남긴다.
 - [2026-04-14] 포털 session active project를 따라 제출 현황이 현재 선택한 사업 기준으로 즉시 바뀌도록 맞췄다.
 - [2026-04-14] header slab, 표 헤더, 상태칩, 탭, 보조 카드 톤을 dashboard와 같은 Salesforce형 enterprise palette로 정리했다.
 - [2026-04-14] 상단 설명 header, helper badge, 빈 상태 코칭 문구를 걷어내고 상태표/신청목록만 남겼다.

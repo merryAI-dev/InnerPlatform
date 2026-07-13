@@ -25,6 +25,7 @@
     "bff:outbox:worker": "node server/bff/outbox-worker.mjs",
     "bff:work-queue:worker": "node server/bff/work-queue-worker.mjs",
     "bff:deploy:cloud-run": "bash scripts/deploy_bff_cloud_run.sh",
+    "weekly-api:smoke": "node scripts/smoke_jvm_weekly_api.mjs",
     "firebase:bootstrap": "bash scripts/firebase_bootstrap.sh",
     "firebase:login": "npx firebase-tools login --no-localhost",
     "firebase:login:daemon:start": "node scripts/firebase_login_daemon.mjs start --open",
@@ -137,6 +138,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@mermaid-js/mermaid-cli": "^11.12.0",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "4.1.12",

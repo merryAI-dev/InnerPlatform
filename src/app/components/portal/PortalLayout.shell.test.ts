@@ -93,11 +93,19 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain("p-4 md:p-6");
   });
 
-  it('does not block cashflow pages on unrelated portal background loading once a project is resolved', () => {
+  it('keeps the mounted outlet visible during background auth and portal loading', () => {
     expect(portalLayoutSource).toContain('cashflowHasProjectContext');
+    expect(portalLayoutSource).toContain('portalBootstrapped');
     expect(portalLayoutSource).toContain('shouldShowPortalLoading');
-    expect(portalLayoutSource).toContain('portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext)');
+    expect(portalLayoutSource).toContain('!portalBootstrapped &&');
+    expect(portalLayoutSource).toContain('data-testid="portal-background-loading"');
     expect(portalLayoutSource).not.toContain('if (authLoading || portalLoading)');
+  });
+
+  it('checks the dirty guard before changing project state or the canonical URL', () => {
+    expect(portalLayoutSource).toContain('runPortalProjectSwitch');
+    expect(portalLayoutSource).toContain('isNavigationBlocked: (attempt) => Boolean(navigationHandlerRef.current?.(attempt))');
+    expect(portalLayoutSource).not.toContain('setSessionActiveProject(projectId).then');
   });
 
   it('does not start cashflow realtime presence or edit-lock listeners from the portal shell', () => {

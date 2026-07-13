@@ -71,7 +71,7 @@ import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
-import { resolvePortalProjectCandidates } from '../../platform/portal-project-selection';
+import { resolvePortalProjectCandidates, runPortalProjectSwitch } from '../../platform/portal-project-selection';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -187,6 +187,7 @@ function PortalContent() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [portalBootstrapped, setPortalBootstrapped] = useState(false);
   const [labEnabled, setLabEnabled] = useShellLabEnabled();
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
@@ -275,8 +276,11 @@ function PortalContent() {
     portalUser
     && (activeProjectId || myProject?.id || authUser?.projectId || currentProject?.id || assignedProjectIds.length > 0),
   );
-  const shouldShowPortalLoading = authLoading || (
-    portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext)
+  useEffect(() => {
+    if (!authLoading && !portalLoading) setPortalBootstrapped(true);
+  }, [authLoading, portalLoading]);
+  const shouldShowPortalLoading = !portalBootstrapped && (
+    authLoading || (portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext))
   );
   const portalDisplayName = portalUser?.name || authUser?.name || '사용자';
   const portalDisplayRole = portalUser?.role || authUser?.role || 'pm';
@@ -310,11 +314,15 @@ function PortalContent() {
   const projectCommandItems = useMemo(() => shellCommandItems.filter((item) => item.category === '프로젝트'), [shellCommandItems]);
   const adminCommandItems = useMemo(() => shellCommandItems.filter((item) => item.category === '관리'), [shellCommandItems]);
   const switchProjectInPlace = useCallback((projectId: string, targetPath = currentPath) => {
-    void setSessionActiveProject(projectId).then((ok: boolean) => {
-      if (!ok) return;
-      requestPortalNavigation(targetPath, currentSectionLabel);
+    void runPortalProjectSwitch({
+      projectId,
+      currentPath: targetPath,
+      label: currentSectionLabel,
+      isNavigationBlocked: (attempt) => Boolean(navigationHandlerRef.current?.(attempt)),
+      setActiveProject: setSessionActiveProject,
+      navigate: (path) => navigate(path),
     });
-  }, [currentPath, currentSectionLabel, requestPortalNavigation, setSessionActiveProject]);
+  }, [currentPath, currentSectionLabel, navigate, setSessionActiveProject]);
 
 
   // 미인증 시 로그인으로
@@ -529,6 +537,16 @@ function PortalContent() {
     <PortalNavigationGuardContext.Provider value={{ registerNavigationHandler }}>
       <TooltipProvider delayDuration={300}>
       <div className="flex h-screen w-full overflow-hidden relative">
+        {portalBootstrapped && (authLoading || portalLoading) && (
+          <div
+            data-testid="portal-background-loading"
+            className="fixed right-4 top-4 z-[70] flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm"
+            role="status"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            최신 정보를 확인하는 중...
+          </div>
+        )}
         {/* ── Mobile overlay ── */}
         {mobileOpen && (
           <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setMobileOpen(false)} />

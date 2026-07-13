@@ -163,6 +163,14 @@
         { "fieldPath": "recipientId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "weekly_api_audit_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -189,6 +197,21 @@
     {
       "collectionGroup": "contacts",
       "fieldPath": "address",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "projectRequestDrafts",
+      "fieldPath": "payload",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "projectRequestDrafts",
+      "fieldPath": "attachmentRefs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "idempotency_keys",
+      "fieldPath": "responseBody",
       "indexes": []
     }
   ]

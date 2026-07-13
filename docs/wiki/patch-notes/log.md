@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-07-13] patch-note | stage-lease-bff-boundary | 프로젝트별 수정 lease와 BFF canonical write 경계
+- pages: [portal-submissions](./pages/portal-submissions.md), [portal-weekly-expense](./pages/portal-weekly-expense.md), [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 프로젝트 등록/수정과 cashflow에 30분 서버 lease, 세션·fence 검증, 임시저장/최종저장 경계를 적용하고 canonical Firestore browser write를 차단했다. Stage에서만 검증·배포한다.
+
 ## [2026-06-19] patch-note | shared-portal-architecture | Cashflow service account and portal stability
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: Cashflow Sheet Lab의 Google Sheets 접근을 사용자 OAuth token pass-through에서 서버 서비스 계정 전용으로 전환하고, 설정 저장은 시트 검증 없이 config만 저장하도록 분리했다. `/portal/cashflow`는 route-scoped provider만 로딩하고, 프로젝트 catalog 권한 오류가 있어도 배정 프로젝트 선택을 유지하며 labor risk 배경 요청이 cashflow week stream 변화마다 반복되지 않도록 고정했다.

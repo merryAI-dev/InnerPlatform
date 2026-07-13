@@ -10,7 +10,11 @@ import { TrainingProvider } from './training-store';
 
 export function resolvePortalProviderScope(pathname = typeof window !== 'undefined' ? window.location.pathname : '') {
   const path = pathname.replace(/\/+$/, '') || '/portal';
-  if (path === '/portal/cashflow' || path === '/portal/cashflow/sheets-lab') {
+  if (
+    path === '/portal/cashflow'
+    || path === '/portal/cashflow/sheets-lab'
+    || /^\/portal\/cashflow\/[^/]+(?:\/sheets-lab)?$/.test(path)
+  ) {
     return {
       hrAnnouncements: true,
       payroll: true,

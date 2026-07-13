@@ -389,8 +389,21 @@ export function mountTransactionRoutes(app, {
     const { txId } = req.params;
     const timestamp = now();
     const parsed = parseWithSchema(commentCreateSchema, req.body, 'Invalid comment payload');
-
-    await ensureDocumentExists(db, `orgs/${tenantId}/transactions/${txId}`, `Transaction not found: ${txId}`);
+    const targetType = parsed.targetType || 'transaction';
+    let projectId;
+    if (targetType === 'expense_sheet_row') {
+      projectId = readOptionalText(parsed.projectId);
+      if (!projectId || readOptionalText(parsed.sheetRowId) !== txId) {
+        throw createHttpError(400, 'Sheet row comments require matching projectId and sheetRowId', 'invalid_comment_target');
+      }
+      await ensureDocumentExists(db, `orgs/${tenantId}/projects/${projectId}`, `Project not found: ${projectId}`);
+    } else {
+      const transaction = await ensureDocumentExists(db, `orgs/${tenantId}/transactions/${txId}`, `Transaction not found: ${txId}`);
+      projectId = readOptionalText(transaction.projectId);
+      if (!projectId || (parsed.projectId && parsed.projectId !== projectId)) {
+        throw createHttpError(400, 'Comment project does not match the transaction', 'invalid_comment_target');
+      }
+    }
 
     const commentId = parsed.id?.trim() || `c_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
     const authorName = (parsed.authorName || actorId).trim();
@@ -411,6 +424,11 @@ export function mountTransactionRoutes(app, {
       id: commentId,
       tenantId,
       transactionId: txId,
+      projectId,
+      targetType,
+      ...(targetType === 'expense_sheet_row' ? { sheetRowId: txId } : {}),
+      ...(parsed.fieldKey ? { fieldKey: parsed.fieldKey.trim() } : {}),
+      ...(parsed.fieldLabel ? { fieldLabel: parsed.fieldLabel.trim() } : {}),
       authorId: actorId,
       authorName: piiProtector.enabled ? undefined : authorName,
       authorNameEnc: piiProtector.enabled ? authorEncrypted?.ciphertext : undefined,

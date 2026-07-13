@@ -329,7 +329,42 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(response.body?.error || response.text).toMatch(/reviewComment/i);
+    expect(response.body.error).toBe('request_error');
+    expect(response.body.message).toMatch(/reviewComment/i);
+  });
+
+  it('atomically trashes a project with its duplicate-discard review', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    const projectRef = db.doc(`orgs/${tenantId}/projects/p_exec_discard_001`);
+    await projectRef.set({
+      id: 'p_exec_discard_001',
+      tenantId,
+      name: '중복 폐기 테스트',
+      version: 1,
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'PENDING',
+      createdAt: '2026-07-12T00:00:00.000Z',
+      updatedAt: '2026-07-12T00:00:00.000Z',
+    });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_discard_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-discard-001' })
+      .send({
+        reviewStatus: 'DUPLICATE_DISCARDED',
+        reviewComment: '동일 계약 프로젝트가 이미 등록되어 있습니다.',
+        reviewerName: '임원B',
+      });
+
+    expect(response.status).toBe(200);
+    expect((await projectRef.get()).data()).toMatchObject({
+      version: 2,
+      executiveReviewStatus: 'DUPLICATE_DISCARDED',
+      trashedById: actorId,
+      trashedByEmail: null,
+      trashedReason: '동일 계약 프로젝트가 이미 등록되어 있습니다.',
+    });
+    expect((await projectRef.get()).data()?.trashedAt).toEqual(expect.any(String));
   });
 
   it('resubmits an executive-rejected pm portal project back to pending', async () => {
@@ -1368,6 +1403,35 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({ content: '검토 요청', authorName: '관리자' });
 
     expect(comment.status).toBe(201);
+    const transactionComment = await db.doc(`orgs/${tenantId}/comments/${comment.body.id}`).get();
+    expect(transactionComment.data()).toMatchObject({
+      projectId: 'p-bff-004',
+      targetType: 'transaction',
+    });
+
+    const sheetRowComment = await api
+      .post('/api/v1/transactions/sheet-row:row-004/comments')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-sheet-row-comment-004' })
+      .send({
+        content: '금액 확인',
+        authorName: '관리자',
+        projectId: 'p-bff-004',
+        targetType: 'expense_sheet_row',
+        sheetRowId: 'sheet-row:row-004',
+        fieldKey: 'amount',
+        fieldLabel: '금액',
+      });
+
+    expect(sheetRowComment.status).toBe(201);
+    const savedSheetRowComment = await db.doc(`orgs/${tenantId}/comments/${sheetRowComment.body.id}`).get();
+    expect(savedSheetRowComment.data()).toMatchObject({
+      transactionId: 'sheet-row:row-004',
+      projectId: 'p-bff-004',
+      targetType: 'expense_sheet_row',
+      sheetRowId: 'sheet-row:row-004',
+      fieldKey: 'amount',
+      fieldLabel: '금액',
+    });
 
     const evidence = await api
       .post('/api/v1/transactions/tx004/evidences')
@@ -1773,7 +1837,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({ role: 'finance', reason: 'quarter close' });
 
     expect(changed.status).toBe(200);
-    expect(changed.body.previousRole).toBe('viewer');
+    expect(changed.body.previousRole).toBe('pm');
     expect(changed.body.role).toBe('finance');
 
     const memberSnap = await db.doc(`orgs/${tenantId}/members/u-target`).get();
@@ -1989,7 +2053,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(ok.status).toBe(200);
     expect(ok.body.previousRole).toBe('admin');
-    expect(ok.body.role).toBe('viewer');
+    expect(ok.body.role).toBe('pm');
   });
 
   it('enforces permission-level RBAC for transaction state changes (submit vs approve)', async () => {
@@ -2033,7 +2097,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(approved.body.state).toBe('APPROVED');
   });
 
-  it('enforces route-level RBAC for audit reads and write APIs', async () => {
+  it('enforces audit-read RBAC while normalizing legacy viewer to pm for writes', async () => {
     const deniedAudit = await api
       .get('/api/v1/audit-logs')
       .set({ ...defaultHeaders, 'x-actor-role': 'pm' });
@@ -2041,13 +2105,13 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(deniedAudit.status).toBe(403);
     expect(deniedAudit.body.error).toBe('forbidden');
 
-    const deniedWrite = await api
+    const viewerWrite = await api
       .post('/api/v1/projects')
-      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-deny-write' })
-      .send({ id: 'p-rbac-denied', name: 'Denied Project' });
+      .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-viewer-write' })
+      .send({ id: 'p-rbac-viewer-write', name: 'Viewer Project' });
 
-    expect(deniedWrite.status).toBe(403);
-    expect(deniedWrite.body.error).toBe('forbidden');
+    expect(viewerWrite.status).toBe(201);
+    expect(viewerWrite.body.id).toBe('p-rbac-viewer-write');
   });
 
   it('writes through generic pipeline and synchronizes projection views', async () => {

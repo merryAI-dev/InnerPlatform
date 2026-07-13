@@ -55,12 +55,12 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).not.toContain("{isPmPortalProject ? 'PM 등록' : '기존 등록'}");
   });
 
-  it('routes duplicate-discard decisions through the project trash flow', () => {
-    expect(pageSource).toContain('trashProject');
-    expect(pageSource).toContain("const shouldTrashProject = actionMode === 'discard'");
-    expect(pageSource).toContain('await trashProject(activeRecord.project.id, trashReason)');
-    expect(pageSource).toContain('trashedAt: now');
-    expect(pageSource).toContain('trashedReason: trashReason');
+  it('routes every decision through one fail-closed BFF command', () => {
+    expect(pageSource).toContain('reviewProjectExecutiveStatusViaBff');
+    expect(pageSource).toContain('if (!isPlatformApiEnabled() || !authUser?.uid)');
+    expect(pageSource).not.toContain('trashProject');
+    expect(pageSource).not.toContain('updateProject');
+    expect(pageSource).not.toContain('setDoc(');
   });
 
   it('listens to both canonical and legacy project request collections', () => {
@@ -78,6 +78,7 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(previewSource).toContain('data-testid="contract-document-preview"');
     expect(previewSource).toContain('<iframe');
     expect(previewSource).toContain('PDF 미리보기');
+    expect(previewSource).toContain('첨부 파일 원문을 불러올 수 없습니다.');
   });
 
   it('highlights attachment changes and previews the pending request document', () => {
@@ -88,6 +89,18 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('useRequestPayloadAsCurrent');
     expect(detailSource).toContain('resolveProjectRequestPayload');
     expect(detailSource).toContain('requestPayload?.contractDocument || record.project.contractDocument || null');
+  });
+
+  it('loads private pending request attachments through the authenticated BFF', () => {
+    expect(pageSource).toContain('downloadProjectRequestAttachmentViaBff');
+    expect(pageSource).toContain('URL.createObjectURL');
+    expect(pageSource).toContain('URL.revokeObjectURL');
+    expect(pageSource).toContain('secureContractDocumentUrl');
+    expect(pageSource).toContain('secureContractDocumentKey');
+    expect(pageSource).toContain('privateAttachmentError');
+    expect(detailSource).toContain('contractDocumentDownloadURL');
+    expect(detailSource).toContain('contractDocumentError');
+    expect(detailSource).toContain('downloadURL: contractDocumentDownloadURL || contractDocument.downloadURL');
   });
 
   it('keeps CIC registration review read-only while improving scan hierarchy', () => {

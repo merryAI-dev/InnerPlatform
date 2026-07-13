@@ -9,32 +9,29 @@ import React, {
 } from 'react';
 import {
   collection,
-  doc,
-  getDoc,
   getDocs,
   limit,
   query,
-  setDoc,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
-import { filterCashflowWeeksThroughSelectedYear, shouldCreateDocOnUpdateError } from './cashflow-weeks.helpers';
-import {
-  buildCashflowWeekUpdatePatch,
-  buildInitialCashflowWeekDoc,
-  resolveWeekDocId,
-} from './cashflow-weeks.persistence';
+import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
+import { filterCashflowWeeksThroughSelectedYear } from './cashflow-weeks.helpers';
+import { resolveWeekDocId } from './cashflow-weeks.persistence';
 import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
+import { getOrgCollectionPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
+  closeCashflowWeekViaBff,
+  submitCashflowWeekViaBff,
   syncProjectCashflowActualsViaBff,
   upsertCashflowWeekAmountsViaBff,
+  applyCashflowVarianceIntentViaBff,
   type ProjectCashflowActualSyncResult,
+  type WeeklyExpenseWeekPayload,
 } from '../lib/platform-bff-client';
+import type { CashflowMutationLease } from '../lib/cashflow-edit-lease';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { recordDevtoolsLog, summarizeAmountMap, toDevtoolsError } from '../platform/devtools-transaction-log';
@@ -56,6 +53,8 @@ interface CashflowWeekActions {
     mode: 'projection' | 'actual';
     amounts: Partial<Record<CashflowSheetLineId, number>>;
     markCompleted?: boolean;
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }) => Promise<void>;
   upsertLineAmount: (input: {
     projectId: string;
@@ -64,9 +63,11 @@ interface CashflowWeekActions {
     mode: 'projection' | 'actual';
     lineId: CashflowSheetLineId;
     amount: number;
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }) => Promise<void>;
-  submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
-  closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number }) => Promise<void>;
+  submitWeekAsPm: (input: { projectId: string; yearMonth: string; weekNo: number; weeklySheet?: WeeklyExpenseWeekPayload['weeklySheet']; cashflowLease?: CashflowMutationLease; finalize?: boolean }) => Promise<void>;
+  closeWeekAsAdmin: (input: { projectId: string; yearMonth: string; weekNo: number; projectionLines?: WeeklyExpenseWeekPayload['projectionLines']; cashflowLease?: CashflowMutationLease; finalize?: boolean }) => Promise<void>;
   syncProjectActualsFromExpenseSheets: (input: { projectId: string }) => Promise<ProjectCashflowActualSyncResult>;
   applyProjectActualSyncResultLocally: (input: {
     projectId: string;
@@ -74,8 +75,9 @@ interface CashflowWeekActions {
   }) => void;
   updateVarianceFlag: (input: {
     sheetId: string;
-    varianceFlag: VarianceFlag | undefined;
-    varianceHistory: VarianceFlagEvent[];
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    content?: string;
+    cashflowLease?: CashflowMutationLease;
   }) => Promise<void>;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
 }
@@ -85,88 +87,6 @@ if (!_g.__MYSC_CASHFLOW_WEEKS_CTX__) {
   _g.__MYSC_CASHFLOW_WEEKS_CTX__ = createContext<(CashflowWeekState & CashflowWeekActions) | null>(null);
 }
 const CashflowWeekContext: React.Context<(CashflowWeekState & CashflowWeekActions) | null> = _g.__MYSC_CASHFLOW_WEEKS_CTX__;
-
-type CashflowEventType =
-  | 'projection_amount_change'
-  | 'actual_amount_change'
-  | 'projection_completed'
-  | 'actual_completed'
-  | 'admin_closed';
-
-type CashflowEvent = {
-  id?: string;
-  tenantId: string;
-  projectId: string;
-  runId: string;
-  type: CashflowEventType;
-  source: 'manual';
-  yearMonth: string;
-  weekNo: number;
-  mode?: 'projection' | 'actual';
-  lineId?: CashflowSheetLineId;
-  beforeAmount?: number;
-  afterAmount?: number;
-  beforeHadValue?: boolean;
-  afterHadValue?: boolean;
-  actorUid: string;
-  actorName: string;
-  actorEmail?: string;
-  createdAt: string;
-};
-
-function safeCashflowEventDocId(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 140);
-}
-
-async function writeCashflowEvents(db: NonNullable<ReturnType<typeof useFirebase>['db']>, orgId: string, events: CashflowEvent[]): Promise<void> {
-  await Promise.all(events.map((event, index) => {
-    const id = safeCashflowEventDocId(`${event.runId}:${event.type}:${event.mode || 'status'}:${event.yearMonth}:w${event.weekNo}:${event.lineId || index}`);
-    return setDoc(doc(db, getOrgDocumentPath(orgId, 'cashflowEvents', id)), { ...event, id }, { merge: false });
-  }));
-}
-
-function buildAmountChangeEvents(input: {
-  tenantId: string;
-  projectId: string;
-  runId: string;
-  mode: 'projection' | 'actual';
-  yearMonth: string;
-  weekNo: number;
-  amounts: Partial<Record<CashflowSheetLineId, number>>;
-  existing?: CashflowWeekSheet;
-  actorUid: string;
-  actorName: string;
-  actorEmail?: string;
-  now: string;
-}): CashflowEvent[] {
-  const src = input.mode === 'projection' ? input.existing?.projection : input.existing?.actual;
-  return Object.entries(input.amounts || {}).flatMap(([lineId, rawAmount]) => {
-    const typedLineId = lineId as CashflowSheetLineId;
-    const beforeHadValue = !!src && Object.prototype.hasOwnProperty.call(src, typedLineId);
-    const beforeAmount = Number(src?.[typedLineId] ?? 0);
-    const afterAmount = Number(rawAmount) || 0;
-    if (beforeHadValue && beforeAmount === afterAmount) return [];
-    return [{
-      tenantId: input.tenantId,
-      projectId: input.projectId,
-      runId: input.runId,
-      type: input.mode === 'projection' ? 'projection_amount_change' : 'actual_amount_change',
-      source: 'manual',
-      yearMonth: input.yearMonth,
-      weekNo: input.weekNo,
-      mode: input.mode,
-      lineId: typedLineId,
-      beforeAmount,
-      afterAmount,
-      beforeHadValue,
-      afterHadValue: true,
-      actorUid: input.actorUid,
-      actorName: input.actorName,
-      actorEmail: input.actorEmail,
-      createdAt: input.now,
-    }];
-  });
-}
 
 function patchCashflowWeekLocally(
   rows: CashflowWeekSheet[],
@@ -307,88 +227,29 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     projectId: string;
     yearMonth: string;
     weekNo: number;
+    weeklySheet?: WeeklyExpenseWeekPayload['weeklySheet'];
     mode: 'projection' | 'actual';
     amounts: Partial<Record<CashflowSheetLineId, number>>;
     markCompleted?: boolean;
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }): Promise<void> => {
     const actor = user;
-    if (!actor) return;
+    if (!actor) throw new Error('캐시플로우 저장 권한 정보가 없습니다.');
 
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
-    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) {
+      throw new Error('캐시플로우 저장 범위가 올바르지 않습니다.');
+    }
 
-    const monthWeeks = getMonthMondayWeeks(ym);
-    const def = monthWeeks.find((w) => w.weekNo === weekNo);
-    if (!def) return;
-    const amountSummary = summarizeAmountMap(input.amounts || {});
+    const def = getMonthMondayWeeks(ym).find((week) => week.weekNo === weekNo);
+    if (!def) throw new Error('캐시플로우 주차가 올바르지 않습니다.');
 
-    if (isPlatformApiEnabled() && actor.source !== 'dev_harness') {
-      const normalizedAmounts = input.amounts || {};
-      recordDevtoolsLog({
-        kind: 'cashflow_transaction',
-        phase: 'start',
-        operation: 'cashflow.week.upsert',
-        transport: 'bff',
-        tenantId: orgId,
-        actorId: actor.uid,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        mode: input.mode,
-        summary: amountSummary,
-      });
-      try {
-        await upsertCashflowWeekAmountsViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: actor.uid,
-            email: actor.email,
-            role: actor.role,
-            idToken: (actor as any).idToken,
-            googleAccessToken: (actor as any).googleAccessToken,
-          },
-          projectId,
-          payload: {
-            yearMonth: ym,
-            weekNo,
-            mode: input.mode,
-            amounts: Object.fromEntries(
-              Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
-            ),
-          },
-        });
-        recordDevtoolsLog({
-          kind: 'cashflow_transaction',
-          phase: 'success',
-          operation: 'cashflow.week.upsert',
-          transport: 'bff',
-          tenantId: orgId,
-          actorId: actor.uid,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          mode: input.mode,
-          summary: amountSummary,
-        });
-      } catch (error) {
-        recordDevtoolsLog({
-          kind: 'cashflow_transaction',
-          phase: 'error',
-          operation: 'cashflow.week.upsert',
-          transport: 'bff',
-          tenantId: orgId,
-          actorId: actor.uid,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          mode: input.mode,
-          summary: amountSummary,
-          error: toDevtoolsError(error),
-        });
-        throw error;
-      }
+    const normalizedAmounts = input.amounts || {};
+    const amountSummary = summarizeAmountMap(normalizedAmounts);
+    const applyLocally = () => {
       const now = new Date().toISOString();
       setWeeks((prev) => applyWeekAmountsToLocalWeeks({
         weeks: prev,
@@ -404,11 +265,9 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         amounts: normalizedAmounts,
         now,
       }));
-      return;
-    }
+    };
 
-    if (!db && actor.source === 'dev_harness') {
-      const now = new Date().toISOString();
+    if (actor.source === 'dev_harness') {
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
@@ -422,184 +281,89 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         mode: input.mode,
         summary: amountSummary,
       });
-      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
-        weeks: prev,
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        weekStart: def.weekStart,
-        weekEnd: def.weekEnd,
-        mode: input.mode,
-        amounts: input.amounts || {},
-        now,
-      }));
+      applyLocally();
       return;
     }
 
-    if (!db) return;
-
-    const id = resolveWeekDocId(projectId, ym, weekNo);
-    const now = new Date().toISOString();
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
+    if (!isPlatformApiEnabled()) {
+      throw new Error('캐시플로우 저장 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!input.cashflowLease) {
+      throw new Error('수정 세션을 먼저 시작해 주세요.');
+    }
+    if (input.mode !== 'projection') {
+      throw new Error('Actual 값은 주간 사용내역 임시저장 또는 통장내역 반영으로만 저장할 수 있습니다.');
+    }
 
     recordDevtoolsLog({
       kind: 'cashflow_transaction',
       phase: 'start',
       operation: 'cashflow.week.upsert',
-      transport: 'firestore',
+      transport: 'bff',
       tenantId: orgId,
       actorId: actor.uid,
       projectId,
       yearMonth: ym,
       weekNo,
       mode: input.mode,
-      summary: { ...amountSummary, docId: id },
+      summary: amountSummary,
     });
 
     try {
-      const existingSnap = await getDoc(ref).catch(() => null);
-      const existingData = existingSnap?.exists() ? (existingSnap.data() as CashflowWeekSheet) : undefined;
-      const runId = `cashflow-manual:${projectId}:${ym}:w${weekNo}:${input.mode}:${now}`;
-      const events = [
-        ...buildAmountChangeEvents({
-          tenantId: orgId,
-          projectId,
-          runId,
-          mode: input.mode,
-          yearMonth: ym,
-          weekNo,
-          amounts: input.amounts || {},
-          existing: existingData,
-          actorUid: actor.uid,
-          actorName: actor.name,
-          actorEmail: actor.email,
-          now,
-        }),
-        ...(input.markCompleted && input.mode === 'projection' ? [{
-          tenantId: orgId,
-          projectId,
-          runId,
-          type: 'projection_completed' as const,
-          source: 'manual' as const,
-          yearMonth: ym,
-          weekNo,
-          mode: 'projection' as const,
-          actorUid: actor.uid,
-          actorName: actor.name,
-          actorEmail: actor.email,
-          createdAt: now,
-        }] : []),
-      ];
-      const patch = buildCashflowWeekUpdatePatch({
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
-        mode: input.mode,
-        amounts: input.amounts || {},
-        now,
-        weekStart: def.weekStart,
-        existingProjection: existingData?.projection,
-        existingActual: existingData?.actual,
-      });
-
-      if (existingSnap?.exists()) {
-        await updateDoc(ref, patch as any);
-        await writeCashflowEvents(db, orgId, events);
-        recordDevtoolsLog({
-          kind: 'cashflow_transaction',
-          phase: 'success',
-          operation: 'cashflow.week.upsert',
-          transport: 'firestore',
-          tenantId: orgId,
-          actorId: actor.uid,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          mode: input.mode,
-          summary: { ...amountSummary, docId: id, created: false },
-        });
-        setWeeks((prev) => applyWeekAmountsToLocalWeeks({
-          weeks: prev,
-          orgId,
-          actorUid: actor.uid,
-          actorName: actor.name,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          weekStart: def.weekStart,
-          weekEnd: def.weekEnd,
-          mode: input.mode,
-          amounts: input.amounts || {},
-          now,
-        }));
-        return;
-      }
-
-      const initial: CashflowWeekSheet = buildInitialCashflowWeekDoc({
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
+      await upsertCashflowWeekAmountsViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
         projectId,
-        yearMonth: ym,
-        weekNo,
-        weekStart: def.weekStart,
-        weekEnd: def.weekEnd,
-        mode: input.mode,
-        amounts: input.amounts || {},
-        now,
+        idempotencyKey: `cashflow-projection:${projectId}:${ym}:w${weekNo}:${Date.now()}`,
+        lease: input.cashflowLease,
+        finalize: input.finalize === true,
+        payload: {
+          yearMonth: ym,
+          weekNo,
+          mode: input.mode,
+          amounts: Object.fromEntries(
+            Object.entries(normalizedAmounts).map(([lineId, amount]) => [lineId, Number(amount) || 0]),
+          ),
+        },
       });
-      await setDoc(ref, initial, { merge: false });
-      await writeCashflowEvents(db, orgId, events);
+      applyLocally();
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'success',
         operation: 'cashflow.week.upsert',
-        transport: 'firestore',
+        transport: 'bff',
         tenantId: orgId,
         actorId: actor.uid,
         projectId,
         yearMonth: ym,
         weekNo,
         mode: input.mode,
-        summary: { ...amountSummary, docId: id, created: true },
+        summary: amountSummary,
       });
-      setWeeks((prev) => applyWeekAmountsToLocalWeeks({
-        weeks: prev,
-        orgId,
-        actorUid: actor.uid,
-        actorName: actor.name,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        weekStart: def.weekStart,
-        weekEnd: def.weekEnd,
-        mode: input.mode,
-        amounts: input.amounts || {},
-        now,
-      }));
-      return;
     } catch (error) {
       recordDevtoolsLog({
         kind: 'cashflow_transaction',
         phase: 'error',
         operation: 'cashflow.week.upsert',
-        transport: 'firestore',
+        transport: 'bff',
         tenantId: orgId,
         actorId: actor.uid,
         projectId,
         yearMonth: ym,
         weekNo,
         mode: input.mode,
-        summary: { ...amountSummary, docId: id },
+        summary: amountSummary,
         error: toDevtoolsError(error),
       });
       throw error;
     }
-  }, [db, orgId, user]);
-
+  }, [orgId, user]);
   const upsertLineAmount = useCallback(async (input: {
     projectId: string;
     yearMonth: string;
@@ -607,6 +371,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     mode: 'projection' | 'actual';
     lineId: CashflowSheetLineId;
     amount: number;
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }): Promise<void> => {
     return upsertWeekAmounts({
       projectId: input.projectId,
@@ -614,6 +380,8 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       weekNo: input.weekNo,
       mode: input.mode,
       amounts: { [input.lineId]: input.amount },
+      cashflowLease: input.cashflowLease,
+      finalize: input.finalize,
     });
   }, [upsertWeekAmounts]);
 
@@ -688,102 +456,57 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     projectId: string;
     yearMonth: string;
     weekNo: number;
+    weeklySheet?: WeeklyExpenseWeekPayload['weeklySheet'];
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
-    if (!actor) return;
+    if (!actor) throw new Error('캐시플로우 제출 권한 정보가 없습니다.');
+
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
-    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) {
+      throw new Error('캐시플로우 제출 범위가 올바르지 않습니다.');
+    }
+    const def = getMonthMondayWeeks(ym).find((week) => week.weekNo === weekNo);
+    if (!def) throw new Error('캐시플로우 주차가 올바르지 않습니다.');
 
-    const monthWeeks = getMonthMondayWeeks(ym);
-    const def = monthWeeks.find((w) => w.weekNo === weekNo);
-    if (!def) return;
-
-    const id = resolveWeekDocId(projectId, ym, weekNo);
-    const now = new Date().toISOString();
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
-    const event: CashflowEvent = {
-      tenantId: orgId,
-      projectId,
-      runId: `cashflow-status:${projectId}:${ym}:w${weekNo}:actual-completed:${now}`,
-      type: 'actual_completed',
-      source: 'manual',
-      yearMonth: ym,
-      weekNo,
-      mode: 'actual',
-      actorUid: actor.uid,
-      actorName: actor.name,
-      actorEmail: actor.email,
-      createdAt: now,
-    };
-
-    recordDevtoolsLog({
-      kind: 'cashflow_transaction',
-      phase: 'start',
-      operation: 'cashflow.week.submitActual',
-      transport: 'firestore',
-      tenantId: orgId,
-      actorId: actor.uid,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      mode: 'actual',
-      summary: { docId: id },
-    });
-
-    try {
-      const patch: Partial<CashflowWeekSheet> = {
-        pmSubmitted: true,
-        pmSubmittedAt: now,
-        pmSubmittedByUid: actor.uid,
-        pmSubmittedByName: actor.name,
-        updatedAt: now,
-        updatedByUid: actor.uid,
-        updatedByName: actor.name,
-        tenantId: orgId,
-      };
-      await updateDoc(ref, {
-        ...patch,
-      } as Partial<CashflowWeekSheet> as any);
-      await writeCashflowEvents(db, orgId, [event]);
-      recordDevtoolsLog({
-        kind: 'cashflow_transaction',
-        phase: 'success',
-        operation: 'cashflow.week.submitActual',
-        transport: 'firestore',
-        tenantId: orgId,
-        actorId: actor.uid,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        mode: 'actual',
-        summary: { docId: id, created: false },
-      });
-      setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch));
-      return;
-    } catch (error) {
-      if (!shouldCreateDocOnUpdateError(error)) {
-        recordDevtoolsLog({
-          kind: 'cashflow_transaction',
-          phase: 'error',
-          operation: 'cashflow.week.submitActual',
-          transport: 'firestore',
-          tenantId: orgId,
-          actorId: actor.uid,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          mode: 'actual',
-          summary: { docId: id },
-          error: toDevtoolsError(error),
-        });
-        throw error;
+    if (actor.source !== 'dev_harness') {
+      if (!isPlatformApiEnabled()) {
+        throw new Error('캐시플로우 제출 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
       }
+      if (!input.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+      await submitCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+        idempotencyKey: `cashflow-submit:${projectId}:${ym}:w${weekNo}:${Date.now()}`,
+        lease: input.cashflowLease,
+        finalize: input.finalize === true,
+        payload: { yearMonth: ym, weekNo, ...(input.weeklySheet ? { weeklySheet: input.weeklySheet } : {}) },
+      });
     }
 
-    const initial: CashflowWeekSheet = {
+    const now = new Date().toISOString();
+    const id = resolveWeekDocId(projectId, ym, weekNo);
+    const patch: Partial<CashflowWeekSheet> = {
+      pmSubmitted: true,
+      pmSubmittedAt: now,
+      pmSubmittedByUid: actor.uid,
+      pmSubmittedByName: actor.name,
+      updatedAt: now,
+      updatedByUid: actor.uid,
+      updatedByName: actor.name,
+      tenantId: orgId,
+    };
+    const fallback: CashflowWeekSheet = {
       id,
       tenantId: orgId,
       projectId,
@@ -794,129 +517,68 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       projection: {},
       actual: {},
       pmSubmitted: true,
-      pmSubmittedAt: now,
-      pmSubmittedByUid: actor.uid,
-      pmSubmittedByName: actor.name,
       adminClosed: false,
       createdAt: now,
+      ...patch,
       updatedAt: now,
-      updatedByUid: actor.uid,
-      updatedByName: actor.name,
     };
-    await setDoc(ref, initial, { merge: false });
-    await writeCashflowEvents(db, orgId, [event]);
-    recordDevtoolsLog({
-      kind: 'cashflow_transaction',
-      phase: 'success',
-      operation: 'cashflow.week.submitActual',
-      transport: 'firestore',
-      tenantId: orgId,
-      actorId: actor.uid,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      mode: 'actual',
-      summary: { docId: id, created: true },
-    });
-    setWeeks((prev) => patchCashflowWeekLocally(prev, id, initial, initial));
-  }, [db, orgId, user]);
-
+    setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch, fallback));
+  }, [orgId, user]);
   const closeWeekAsAdmin = useCallback(async (input: {
     projectId: string;
     yearMonth: string;
     weekNo: number;
+    projectionLines?: WeeklyExpenseWeekPayload['projectionLines'];
+    cashflowLease?: CashflowMutationLease;
+    finalize?: boolean;
   }): Promise<void> => {
-    if (!db) return;
     const actor = user;
-    if (!actor) return;
+    if (!actor) throw new Error('캐시플로우 결산 권한 정보가 없습니다.');
+
     const projectId = input.projectId.trim();
     const ym = input.yearMonth.trim();
     const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
-    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) return;
+    if (!projectId || !/^\d{4}-\d{2}$/.test(ym)) {
+      throw new Error('캐시플로우 결산 범위가 올바르지 않습니다.');
+    }
+    const def = getMonthMondayWeeks(ym).find((week) => week.weekNo === weekNo);
+    if (!def) throw new Error('캐시플로우 주차가 올바르지 않습니다.');
 
-    const monthWeeks = getMonthMondayWeeks(ym);
-    const def = monthWeeks.find((w) => w.weekNo === weekNo);
-    if (!def) return;
-
-    const id = resolveWeekDocId(projectId, ym, weekNo);
-    const now = new Date().toISOString();
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', id));
-    const event: CashflowEvent = {
-      tenantId: orgId,
-      projectId,
-      runId: `cashflow-status:${projectId}:${ym}:w${weekNo}:admin-closed:${now}`,
-      type: 'admin_closed',
-      source: 'manual',
-      yearMonth: ym,
-      weekNo,
-      actorUid: actor.uid,
-      actorName: actor.name,
-      actorEmail: actor.email,
-      createdAt: now,
-    };
-
-    recordDevtoolsLog({
-      kind: 'cashflow_transaction',
-      phase: 'start',
-      operation: 'cashflow.week.close',
-      transport: 'firestore',
-      tenantId: orgId,
-      actorId: actor.uid,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      summary: { docId: id },
-    });
-
-    try {
-      const patch: Partial<CashflowWeekSheet> = {
-        adminClosed: true,
-        adminClosedAt: now,
-        adminClosedByUid: actor.uid,
-        adminClosedByName: actor.name,
-        updatedAt: now,
-        updatedByUid: actor.uid,
-        updatedByName: actor.name,
-        tenantId: orgId,
-      };
-      await updateDoc(ref, {
-        ...patch,
-      } as Partial<CashflowWeekSheet> as any);
-      await writeCashflowEvents(db, orgId, [event]);
-      recordDevtoolsLog({
-        kind: 'cashflow_transaction',
-        phase: 'success',
-        operation: 'cashflow.week.close',
-        transport: 'firestore',
-        tenantId: orgId,
-        actorId: actor.uid,
-        projectId,
-        yearMonth: ym,
-        weekNo,
-        summary: { docId: id, created: false },
-      });
-      setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch));
-      return;
-    } catch (error) {
-      if (!shouldCreateDocOnUpdateError(error)) {
-        recordDevtoolsLog({
-          kind: 'cashflow_transaction',
-          phase: 'error',
-          operation: 'cashflow.week.close',
-          transport: 'firestore',
-          tenantId: orgId,
-          actorId: actor.uid,
-          projectId,
-          yearMonth: ym,
-          weekNo,
-          summary: { docId: id },
-          error: toDevtoolsError(error),
-        });
-        throw error;
+    if (actor.source !== 'dev_harness') {
+      if (!isPlatformApiEnabled()) {
+        throw new Error('캐시플로우 결산 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
       }
+      if (!input.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+      await closeCashflowWeekViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: actor.uid,
+          email: actor.email,
+          role: actor.role,
+          idToken: (actor as any).idToken,
+          googleAccessToken: (actor as any).googleAccessToken,
+        },
+        projectId,
+        idempotencyKey: `cashflow-close:${projectId}:${ym}:w${weekNo}:${Date.now()}`,
+        lease: input.cashflowLease,
+        finalize: input.finalize === true,
+        payload: { yearMonth: ym, weekNo, ...(input.projectionLines ? { projectionLines: input.projectionLines } : {}) },
+      });
     }
 
-    const initial: CashflowWeekSheet = {
+    const now = new Date().toISOString();
+    const id = resolveWeekDocId(projectId, ym, weekNo);
+    const patch: Partial<CashflowWeekSheet> = {
+      adminClosed: true,
+      adminClosedAt: now,
+      adminClosedByUid: actor.uid,
+      adminClosedByName: actor.name,
+      updatedAt: now,
+      updatedByUid: actor.uid,
+      updatedByName: actor.name,
+      tenantId: orgId,
+    };
+    const fallback: CashflowWeekSheet = {
       id,
       tenantId: orgId,
       projectId,
@@ -928,53 +590,75 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       actual: {},
       pmSubmitted: false,
       adminClosed: true,
-      adminClosedAt: now,
-      adminClosedByUid: actor.uid,
-      adminClosedByName: actor.name,
       createdAt: now,
+      ...patch,
       updatedAt: now,
-      updatedByUid: actor.uid,
-      updatedByName: actor.name,
     };
-    await setDoc(ref, initial, { merge: false });
-    await writeCashflowEvents(db, orgId, [event]);
-    recordDevtoolsLog({
-      kind: 'cashflow_transaction',
-      phase: 'success',
-      operation: 'cashflow.week.close',
-      transport: 'firestore',
-      tenantId: orgId,
-      actorId: actor.uid,
-      projectId,
-      yearMonth: ym,
-      weekNo,
-      summary: { docId: id, created: true },
-    });
-    setWeeks((prev) => patchCashflowWeekLocally(prev, id, initial, initial));
-  }, [db, orgId, user]);
-
+    setWeeks((prev) => patchCashflowWeekLocally(prev, id, patch, fallback));
+  }, [orgId, user]);
   const updateVarianceFlag = useCallback(async (input: {
     sheetId: string;
-    varianceFlag: VarianceFlag | undefined;
-    varianceHistory: VarianceFlagEvent[];
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    content?: string;
+    cashflowLease?: CashflowMutationLease;
   }): Promise<void> => {
-    if (!db) return;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
-    const now = new Date().toISOString();
-    const firestorePatch = {
-      varianceFlag: input.varianceFlag ?? null,
-      varianceHistory: input.varianceHistory,
-      updatedAt: now,
+    const actor = user;
+    const current = weeks.find((week) => week.id === input.sheetId);
+    if (!actor || !current) throw new Error('편차 확인 대상 또는 권한 정보를 찾을 수 없습니다.');
+    if (actor.source === 'dev_harness') {
+      const now = new Date().toISOString();
+      const revision = (current.varianceRevision || 0) + 1;
+      const previous = current.varianceFlag;
+      const varianceFlag = input.action === 'FLAG'
+        ? { status: 'OPEN' as const, reason: input.content || '', flaggedBy: actor.name, flaggedByUid: actor.uid, flaggedAt: now }
+        : input.action === 'REPLY'
+          ? { ...previous!, status: 'REPLIED' as const, pmReply: input.content || '', pmRepliedBy: actor.name, pmRepliedByUid: actor.uid, pmRepliedAt: now }
+          : { ...previous!, status: 'RESOLVED' as const, resolvedBy: actor.name, resolvedByUid: actor.uid, resolvedAt: now };
+      setWeeks((prev) => patchCashflowWeekLocally(prev, input.sheetId, {
+        varianceFlag,
+        varianceHistory: [...(current.varianceHistory || []), {
+          id: `vf-${revision}`,
+          action: input.action,
+          actor: actor.name,
+          actorUid: actor.uid,
+          content: input.action === 'RESOLVE' ? (input.content || '해결 처리') : (input.content || ''),
+          timestamp: now,
+        }],
+        varianceRevision: revision,
+        updatedAt: now,
+      }));
+      return;
+    }
+    if (!isPlatformApiEnabled()) {
+      throw new Error('편차 확인 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!input.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const result = await applyCashflowVarianceIntentViaBff({
       tenantId: orgId,
-    };
-    await updateDoc(ref, firestorePatch as any);
+      actor: {
+        uid: actor.uid,
+        email: actor.email,
+        role: actor.role,
+        idToken: actor.idToken,
+        googleAccessToken: actor.googleAccessToken,
+      },
+      projectId: current.projectId,
+      lease: input.cashflowLease,
+      idempotencyKey: `cashflow-variance:${input.sheetId}:${input.action}:${Date.now()}`,
+      intent: {
+        sheetId: input.sheetId,
+        action: input.action,
+        content: input.content,
+        expectedRevision: current.varianceRevision || 0,
+      },
+    });
     setWeeks((prev) => patchCashflowWeekLocally(prev, input.sheetId, {
-      varianceFlag: input.varianceFlag,
-      varianceHistory: input.varianceHistory,
-      updatedAt: now,
-      tenantId: orgId,
+      varianceFlag: result.week.varianceFlag,
+      varianceHistory: result.week.varianceHistory,
+      varianceRevision: result.week.varianceRevision,
+      updatedAt: result.week.updatedAt,
     }));
-  }, [db, orgId]);
+  }, [orgId, user, weeks]);
 
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
     const pid = projectId.trim();

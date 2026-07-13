@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { BarChart3, ChevronLeft, ChevronRight, ExternalLink, Flag, Check, MessageSquareText } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, ExternalLink, Flag, Check, Loader2, MessageSquareText } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
@@ -10,7 +10,12 @@ import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
-import type { CashflowWeekSheet, CashflowWeekTotals, VarianceFlag, VarianceFlagEvent } from '../../data/types';
+import type { CashflowWeekSheet, CashflowWeekTotals } from '../../data/types';
+import { useFirebase } from '../../lib/firebase-context';
+import { useCashflowEditLease } from './useCashflowEditLease';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { toast } from 'sonner';
 
 function fmtShort(n: number): string {
   const abs = Math.abs(n);
@@ -27,7 +32,20 @@ export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
   const { user } = useAuth();
-  const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
+  const { orgId } = useFirebase();
+  const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth, updateVarianceFlag } = useCashflowWeeks();
+  const [varianceLeaseProjectId, setVarianceLeaseProjectId] = useState('');
+  const varianceLease = useCashflowEditLease({
+    tenantId: orgId,
+    projectId: varianceLeaseProjectId,
+    actor: {
+      uid: user?.uid || 'admin-user',
+      email: user?.email || '',
+      role: user?.role || 'admin',
+      idToken: user?.idToken,
+      googleAccessToken: user?.googleAccessToken,
+    },
+  });
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
 
@@ -65,6 +83,36 @@ export function CashflowWeeklyPage() {
         description={`프로젝트별 주간 작성/결산 현황 · ${yearMonth}`}
         actions={(
           <div className="flex items-center gap-2">
+            <select
+              aria-label="편차 수정 프로젝트"
+              value={varianceLeaseProjectId}
+              disabled={varianceLease.canEdit}
+              onChange={(event) => setVarianceLeaseProjectId(event.target.value)}
+              className="h-8 max-w-48 rounded-md border bg-background px-2 text-[11px]"
+            >
+              <option value="">프로젝트 선택</option>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-[11px]"
+              disabled={!varianceLeaseProjectId || !varianceLease.sessionId || varianceLease.busy || varianceLease.canEdit}
+              onClick={() => void varianceLease.acquire()}
+            >
+              {varianceLease.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {varianceLease.canEdit ? '수정 중' : '수정 시작'}
+            </Button>
+            {varianceLease.canEdit ? (
+              <>
+                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void varianceLease.extend()}>
+                  {varianceLease.remainingLabel} · 30분 연장
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void varianceLease.release()}>
+                  수정 종료
+                </Button>
+              </>
+            ) : null}
             <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1.5" onClick={goPrevMonth}>
               <ChevronLeft className="w-3.5 h-3.5" /> 이전 달
             </Button>
@@ -145,8 +193,12 @@ export function CashflowWeeklyPage() {
                             )}
                             <VarianceFlagButton
                               sheet={sheet}
-                              adminName={user?.name || 'Admin'}
-                              adminUid={user?.uid || ''}
+                              canEdit={varianceLease.canEdit && varianceLeaseProjectId === p.id}
+                              onUpdate={async (intent) => {
+                                if (varianceLeaseProjectId !== p.id) throw new Error('해당 프로젝트 수정 세션을 먼저 시작해 주세요.');
+                                const cashflowLease = await varianceLease.checkBeforeMutation();
+                                await updateVarianceFlag({ ...intent, cashflowLease });
+                              }}
                             />
                           </div>
                         </td>
@@ -191,6 +243,17 @@ export function CashflowWeeklyPage() {
           )}
         </CardContent>
       </Card>
+      <EditLeaseDialogs
+        warningOpen={varianceLease.warningOpen}
+        expiredOpen={varianceLease.expiredOpen}
+        conflictOpen={varianceLease.conflictOpen}
+        holder={varianceLease.holder}
+        busy={varianceLease.busy}
+        onDismissWarning={varianceLease.dismissWarning}
+        onExtend={() => { void varianceLease.extend(); }}
+        onContinueReadOnly={varianceLease.continueReadOnly}
+        onReacquire={() => { void varianceLease.acquire(); }}
+      />
     </div>
   );
 }
@@ -205,55 +268,37 @@ const FLAG_COLORS: Record<string, { icon: string; bg: string }> = {
 
 function VarianceFlagButton({
   sheet,
-  adminName,
-  adminUid,
+  canEdit,
+  onUpdate,
 }: {
   sheet: CashflowWeekSheet | undefined;
-  adminName: string;
-  adminUid: string;
+  canEdit: boolean;
+  onUpdate: (input: { sheetId: string; action: 'FLAG' | 'REPLY' | 'RESOLVE'; content?: string }) => Promise<void>;
 }) {
   const flag = sheet?.varianceFlag;
   const history = sheet?.varianceHistory || [];
   const [reason, setReason] = useState('');
   const [open, setOpen] = useState(false);
 
-  const { updateVarianceFlag } = useCashflowWeeks();
-
-  const handleFlag = () => {
+  const handleFlag = async () => {
     if (!reason.trim() || !sheet) return;
-    const now = new Date().toISOString();
-    const nextFlag: VarianceFlag = {
-      status: 'OPEN',
-      reason: reason.trim(),
-      flaggedBy: adminName,
-      flaggedByUid: adminUid,
-      flaggedAt: now,
-    };
-    const nextHistory: VarianceFlagEvent[] = [
-      ...history,
-      { id: `vf-${Date.now()}`, action: 'FLAG', actor: adminName, actorUid: adminUid, content: reason.trim(), timestamp: now },
-    ];
-    updateVarianceFlag({ sheetId: sheet.id, varianceFlag: nextFlag, varianceHistory: nextHistory }).catch(console.error);
-    setReason('');
-    setOpen(false);
+    try {
+      await onUpdate({ sheetId: sheet.id, action: 'FLAG', content: reason.trim() });
+      setReason('');
+      setOpen(false);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '편차 확인 요청을 저장하지 못했습니다.'));
+    }
   };
 
-  const handleResolve = () => {
+  const handleResolve = async () => {
     if (!sheet || !flag) return;
-    const now = new Date().toISOString();
-    const nextFlag: VarianceFlag = {
-      ...flag,
-      status: 'RESOLVED',
-      resolvedBy: adminName,
-      resolvedByUid: adminUid,
-      resolvedAt: now,
-    };
-    const nextHistory: VarianceFlagEvent[] = [
-      ...history,
-      { id: `vf-${Date.now()}`, action: 'RESOLVE', actor: adminName, actorUid: adminUid, content: '해결 처리', timestamp: now },
-    ];
-    updateVarianceFlag({ sheetId: sheet.id, varianceFlag: nextFlag, varianceHistory: nextHistory }).catch(console.error);
-    setOpen(false);
+    try {
+      await onUpdate({ sheetId: sheet.id, action: 'RESOLVE' });
+      setOpen(false);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '편차 확인 완료를 저장하지 못했습니다.'));
+    }
   };
 
   const flagStatus = flag?.status;
@@ -320,6 +365,11 @@ function VarianceFlagButton({
           )}
 
           {/* Actions */}
+          {!canEdit ? (
+            <p className="rounded-md bg-muted/50 px-2 py-1.5 text-center text-[10px] text-muted-foreground">
+              위에서 이 프로젝트의 수정 세션을 먼저 시작해 주세요.
+            </p>
+          ) : null}
           {!flag || flag.status === 'RESOLVED' ? (
             // No active flag → can create new one
             <div className="space-y-1.5">
@@ -332,8 +382,8 @@ function VarianceFlagButton({
               <Button
                 size="sm"
                 className="w-full h-7 text-[11px] gap-1"
-                onClick={handleFlag}
-                disabled={!reason.trim()}
+                onClick={() => void handleFlag()}
+                disabled={!canEdit || !reason.trim()}
               >
                 <Flag className="h-3 w-3" />
                 확인요청 보내기
@@ -345,7 +395,8 @@ function VarianceFlagButton({
               size="sm"
               variant="outline"
               className="w-full h-7 text-[11px] gap-1"
-              onClick={handleResolve}
+              onClick={() => void handleResolve()}
+              disabled={!canEdit}
             >
               <Check className="h-3 w-3" />
               확인 완료 (해결)

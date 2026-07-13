@@ -755,6 +755,7 @@ export interface ProjectRequest {
   baseProjectVersion?: number;
   requestVersion?: number;
   targetProjectVersion?: number;
+  approvedProjectVersion?: number;
   beforeSnapshot?: ProjectRequestPayload | null;
   proposedSnapshot?: ProjectRequestPayload | null;
   approvedSnapshot?: ProjectRequestPayload | null;
@@ -941,6 +942,7 @@ export interface WeeklySubmissionStatus {
   projectId: string;
   yearMonth: string; // "YYYY-MM"
   weekNo: number; // financeWeek 1..5
+  statusRevision?: number;
   projectionEdited?: boolean;
   projectionEditedAt?: string;
   projectionEditedByName?: string;
@@ -1250,6 +1252,7 @@ export interface CashflowWeekSheet {
   varianceFlag?: VarianceFlag;
   // 편차 확인 영구 이력 — 모든 플래그/답변/해결 기록 (삭제 불가)
   varianceHistory?: VarianceFlagEvent[];
+  varianceRevision?: number;
 }
 
 export interface CashflowWeekTotals {

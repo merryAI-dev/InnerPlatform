@@ -29,27 +29,20 @@ import {
   provisionProjectEvidenceDriveRootViaBff,
   provisionTransactionEvidenceDriveViaBff,
   syncTransactionEvidenceDriveViaBff,
-  upsertTransactionViaBff,
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
+  readWeeklyExpenseSheetViaBff,
   syncProjectCashflowActualsViaBff,
 } from '../../lib/platform-bff-client';
-import { PlatformApiError } from '../../platform/api-client';
 import {
   deriveSettlementRowsLocally,
   buildSettlementActualSyncPayloadLocally,
 } from '../../platform/settlement-calculation-kernel';
-import {
-  GoogleDriveBrowserUploadError,
-  uploadFileToGoogleDriveFolder,
-} from '../../platform/google-drive-browser-upload';
-import { shouldFallbackToBffOnBrowserUploadError } from '../../platform/evidence-drive-upload';
 import { splitLooseNameList } from '../../platform/name-list';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
-import { buildOptimisticUploadedEvidencePatch } from '../../platform/evidence-upload-flow';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
 import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
@@ -68,6 +61,9 @@ import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
 import { getYearMondayWeeks } from '../../platform/cashflow-weeks';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { useCashflowEditLease } from '../cashflow/useCashflowEditLease';
+import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
 const GoogleSheetMigrationWizard = lazy(
   () => import('./GoogleSheetMigrationWizard').then((module) => ({ default: module.GoogleSheetMigrationWizard })),
 );
@@ -90,6 +86,7 @@ export function PortalWeeklyExpensePage() {
     transactions,
     addTransaction,
     updateTransaction,
+    patchTransactionSnapshot,
     changeTransactionState,
     evidenceRequiredMap,
     sheetSources,
@@ -113,12 +110,20 @@ export function PortalWeeklyExpensePage() {
     weeklySubmissionStatuses,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
-  const { submitWeekAsPm, upsertWeekAmounts, applyProjectActualSyncResultLocally } = useCashflowWeeks();
+  const {
+    submitWeekAsPm,
+    upsertWeekAmounts,
+    updateVarianceFlag,
+    applyProjectActualSyncResultLocally,
+  } = useCashflowWeeks();
   const devHarnessConfig = readDevAuthHarnessConfig(import.meta.env, typeof window !== 'undefined' ? window.location : undefined);
   const [projectDriveProvisioning, setProjectDriveProvisioning] = useState(false);
   const [googleSheetImportOpen, setGoogleSheetImportOpen] = useState(false);
   const [hasUnsavedSettlementChanges, setHasUnsavedSettlementChanges] = useState(false);
   const [isSettlementSaving, setIsSettlementSaving] = useState(false);
+  const [restoredExpenseRows, setRestoredExpenseRows] = useState<ImportRow[] | null>(null);
+  const loadedPrivateDraftKeyRef = useRef('');
+  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const actualSyncSignatureRef = useRef('');
   const [participationRiskWarning, setParticipationRiskWarning] = useState<{
     yearMonth: string;
@@ -271,6 +276,127 @@ export function PortalWeeklyExpensePage() {
     portalUser?.email,
     portalUser?.role,
   ]);
+  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor: bffActor });
+  const cashflowPrivateDraftClient = useMemo(() => (
+    cashflowLease.sessionId && projectId
+      ? createCashflowPrivateDraftClient({
+          tenantId: orgId,
+          projectId,
+          actor: bffActor,
+          sessionId: cashflowLease.sessionId,
+        })
+      : null
+  ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
+  const saveExpenseSheetRowsWithLease = useCallback(async (rows: ImportRow[]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    const saved = await saveExpenseSheetRows(rows, { cashflowLease: mutationLease });
+    setRestoredExpenseRows(saved);
+    return saved;
+  }, [cashflowLease.checkBeforeMutation, saveExpenseSheetRows]);
+  const saveBankStatementRowsWithLease = useCallback(async (sheet: Parameters<typeof saveBankStatementRows>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return saveBankStatementRows(sheet, { cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, saveBankStatementRows]);
+  const upsertWeekAmountsWithLease = useCallback(async (input: Parameters<typeof upsertWeekAmounts>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return upsertWeekAmounts({ ...input, cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, upsertWeekAmounts]);
+  const updateVarianceFlagWithLease = useCallback(async (input: Parameters<typeof updateVarianceFlag>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return updateVarianceFlag({ ...input, cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, updateVarianceFlag]);
+  const upsertWeeklySubmissionStatusWithLease = useCallback(async (
+    input: Parameters<typeof upsertWeeklySubmissionStatus>[0],
+  ) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return upsertWeeklySubmissionStatus({ ...input, cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, upsertWeeklySubmissionStatus]);
+  const saveEvidenceRequiredMapWithLease = useCallback(async (map: Record<string, string>) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    return saveEvidenceRequiredMap(map, { cashflowLease: mutationLease });
+  }, [cashflowLease.checkBeforeMutation, saveEvidenceRequiredMap]);
+  const buildWeeklySubmitSheet = useCallback(async () => {
+    const current = await readWeeklyExpenseSheetViaBff({
+      tenantId: orgId,
+      actor: bffActor,
+      projectId,
+      sheetKey: activeExpenseSheetId,
+    });
+    return {
+      sheetKey: activeExpenseSheetId,
+      expectedSheetVersion: current.sheetVersion,
+      sheetName: activeSheetName,
+      rows: (restoredExpenseRows || expenseSheetRows || []).map((row, rowIndex) => ({
+        rowIndex,
+        tempId: row.tempId,
+        sourceTxId: row.sourceTxId,
+        entryKind: row.entryKind,
+        cells: row.cells.map((rawValue, columnIndex) => ({
+          columnIndex,
+          rawValue: String(rawValue ?? ''),
+          userEdited: row.userEditedCells?.has(columnIndex) || false,
+        })),
+      })),
+    };
+  }, [activeExpenseSheetId, activeSheetName, bffActor, expenseSheetRows, orgId, projectId, restoredExpenseRows]);
+  const hydrateWeeklyPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }) => {
+    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
+    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
+    if (loadedPrivateDraftKeyRef.current === key) return;
+    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
+    const promise = (async () => {
+      const opened = await cashflowPrivateDraftClient.open(ownership, { baseSnapshot: {}, payload: {} });
+      const weeklyExpense = opened.draft.payload.weeklyExpense;
+      if (weeklyExpense && typeof weeklyExpense === 'object' && !Array.isArray(weeklyExpense)) {
+        const rawRows = (weeklyExpense as { rows?: unknown }).rows;
+        if (Array.isArray(rawRows)) {
+          const restored = rawRows.map((value, rowIndex) => {
+            const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+            const rawCells = Array.isArray(row.cells) ? row.cells : [];
+            const cells = rawCells
+              .filter((cell): cell is Record<string, unknown> => Boolean(cell && typeof cell === 'object'))
+              .sort((a, b) => Number(a.columnIndex) - Number(b.columnIndex));
+            return {
+              tempId: typeof row.tempId === 'string' ? row.tempId : `draft-row-${rowIndex}`,
+              sourceTxId: typeof row.sourceTxId === 'string' ? row.sourceTxId : undefined,
+              entryKind: typeof row.entryKind === 'string' ? row.entryKind : undefined,
+              cells: cells.map((cell) => String(cell.rawValue ?? '')),
+              userEditedCells: new Set(cells.filter((cell) => cell.userEdited === true).map((cell) => Number(cell.columnIndex))),
+            };
+          }) as ImportRow[];
+          setRestoredExpenseRows(restored);
+        }
+      }
+      loadedPrivateDraftKeyRef.current = key;
+    })();
+    privateDraftLoadRef.current = { key, promise };
+    try {
+      await promise;
+    } finally {
+      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
+    }
+  }, [cashflowPrivateDraftClient, projectId]);
+  useEffect(() => {
+    loadedPrivateDraftKeyRef.current = '';
+    privateDraftLoadRef.current = null;
+    setRestoredExpenseRows(null);
+  }, [projectId]);
+  useEffect(() => {
+    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
+    void hydrateWeeklyPrivateDraft(cashflowLease.ownership).catch((error) => {
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 복구하지 못했습니다.'));
+    });
+  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateWeeklyPrivateDraft]);
+  const beginWeeklyEditing = useCallback(async () => {
+    const ownership = await cashflowLease.acquire();
+    if (!ownership) return;
+    try {
+      await hydrateWeeklyPrivateDraft(ownership);
+    } catch (error) {
+      await cashflowLease.release();
+      toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
+    }
+  }, [cashflowLease.acquire, cashflowLease.release, hydrateWeeklyPrivateDraft]);
   const deriveRowsWithLocalKernel = useCallback(async (
     rows: ImportRow[],
     context: Parameters<typeof deriveSettlementRowsLocally>[1],
@@ -339,25 +465,8 @@ export function PortalWeeklyExpensePage() {
       return [...result.weeks, ...result.cleared];
     }
 
-    await Promise.all(projectActualSyncPayload.map((week) => upsertWeekAmounts({
-      projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      mode: 'actual',
-      amounts: week.amounts as any,
-    })));
-    if (projectActualSyncPayload.length > 0) {
-      await Promise.all(projectActualSyncPayload.map((week) => upsertWeeklySubmissionStatus({
-        projectId,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        expenseUpdated: true,
-        expenseSyncState: 'synced',
-        expenseReviewPendingCount: 0,
-      })));
-    }
-    return projectActualSyncPayload.map((week) => ({ yearMonth: week.yearMonth, weekNo: week.weekNo }));
-  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectActualSyncPayload, projectId, upsertWeekAmounts, upsertWeeklySubmissionStatus]);
+    throw new Error('Actual 원장 읽기 API가 연결되지 않아 읽기 전용으로 유지됩니다.');
+  }, [applyProjectActualSyncResultLocally, bffActor, orgId, projectId]);
 
   useEffect(() => {
     if (!projectId || portalStoreLoading || hasUnsavedSettlementChanges || isSettlementSaving) return;
@@ -413,30 +522,14 @@ export function PortalWeeklyExpensePage() {
         },
       },
     });
-    const fallback = error instanceof GoogleDriveBrowserUploadError
-      ? (error.message || `${actionLabel}에 실패했습니다.`)
-      : `${actionLabel}에 실패했습니다.`;
-    toast.error(resolveApiErrorMessage(error, fallback));
+    toast.error(resolveApiErrorMessage(error, `${actionLabel}에 실패했습니다.`));
   }, [bffActor.uid, projectId]);
-
-  const resolveVersionFromApiError = useCallback((error: unknown): number | null => {
-    if (!(error instanceof PlatformApiError)) return null;
-    const bodyMessage = typeof error.body === 'object' && error.body && 'message' in (error.body as Record<string, unknown>)
-      ? String((error.body as Record<string, unknown>).message || '')
-      : '';
-    const source = `${error.message} ${bodyMessage}`;
-    const currentMatch = source.match(/current=(\d+)/i);
-    if (currentMatch) return Number.parseInt(currentMatch[1], 10);
-    const actualMatch = source.match(/actual\s+(\d+)/i);
-    if (actualMatch) return Number.parseInt(actualMatch[1], 10);
-    return null;
-  }, []);
 
   const applyProvisionedDriveState = useCallback(async (
     txId: string,
     result: ProvisionTransactionEvidenceDriveResult,
   ) => {
-    await updateTransaction(txId, {
+    patchTransactionSnapshot(txId, {
       version: result.version,
       evidenceDriveFolderId: result.folderId,
       evidenceDriveFolderName: result.folderName,
@@ -445,13 +538,13 @@ export function PortalWeeklyExpensePage() {
       evidenceDriveSyncStatus: result.syncStatus,
       updatedAt: result.updatedAt,
     });
-  }, [updateTransaction]);
+  }, [patchTransactionSnapshot]);
 
   const applySyncedEvidenceState = useCallback(async (
     txId: string,
     result: SyncTransactionEvidenceDriveResult | UploadTransactionEvidenceDriveResult,
   ) => {
-    await updateTransaction(txId, {
+    patchTransactionSnapshot(txId, {
       version: result.version,
       attachmentsCount: result.evidenceCount,
       evidenceDriveFolderId: result.folderId,
@@ -469,7 +562,7 @@ export function PortalWeeklyExpensePage() {
       evidenceStatus: result.evidenceStatus,
       updatedAt: result.updatedAt,
     });
-  }, [updateTransaction]);
+  }, [patchTransactionSnapshot]);
 
   const ensureTransactionPersisted = useCallback(async ({
     transaction,
@@ -497,41 +590,11 @@ export function PortalWeeklyExpensePage() {
     };
 
     try {
-      const requestPayload = {
-        ...nextTx,
-        ...(Number.isFinite(existingTx?.version)
-          ? { expectedVersion: existingTx?.version }
-          : {}),
-      };
-      let result;
-      try {
-        result = await upsertTransactionViaBff({
-          tenantId: orgId,
-          actor: bffActor,
-          transaction: requestPayload,
-        });
-      } catch (error) {
-        const retryVersion = resolveVersionFromApiError(error);
-        if (retryVersion == null) throw error;
-        result = await upsertTransactionViaBff({
-          tenantId: orgId,
-          actor: bffActor,
-          transaction: {
-            ...nextTx,
-            expectedVersion: retryVersion,
-          },
-        });
-      }
-      const syncedTx = {
-        ...nextTx,
-        version: result.version,
-        updatedAt: result.updatedAt,
-        state: result.state as TransactionState,
-      };
+      const mutationLease = await cashflowLease.checkBeforeMutation();
       if (existingTx) {
-        await updateTransaction(txId, syncedTx);
+        await updateTransaction(txId, nextTx, { cashflowLease: mutationLease });
       } else {
-        await addTransaction(syncedTx);
+        await addTransaction(nextTx, { cashflowLease: mutationLease });
       }
       return txId;
     } catch (error) {
@@ -541,13 +604,11 @@ export function PortalWeeklyExpensePage() {
   }, [
     addTransaction,
     authUser?.name,
-    bffActor,
+    cashflowLease.checkBeforeMutation,
     defaultLedgerId,
     handleEvidenceDriveError,
-    orgId,
     portalUser?.name,
     projectId,
-    resolveVersionFromApiError,
     transactions,
     updateTransaction,
   ]);
@@ -572,10 +633,12 @@ export function PortalWeeklyExpensePage() {
     }
 
     try {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
       const result = await provisionTransactionEvidenceDriveViaBff({
         tenantId: orgId,
         actor: bffActor,
         transactionId: tx.id,
+        lease: mutationLease,
       });
       await applyProvisionedDriveState(tx.id, result);
       toast.success(`증빙 폴더 연결 완료: ${result.folderName}`);
@@ -584,14 +647,16 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '증빙 폴더 생성');
       throw error;
     }
-  }, [applyProvisionedDriveState, bffActor, handleEvidenceDriveError, myProject?.evidenceDriveRootFolderId, myProject?.evidenceDriveRootFolderName, myProject?.evidenceDriveSharedDriveId, orgId]);
+  }, [applyProvisionedDriveState, bffActor, cashflowLease.checkBeforeMutation, handleEvidenceDriveError, myProject?.evidenceDriveRootFolderId, myProject?.evidenceDriveRootFolderName, myProject?.evidenceDriveSharedDriveId, orgId]);
 
   const syncEvidenceDrive = useCallback(async (tx: Transaction) => {
     try {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
       const result = await syncTransactionEvidenceDriveViaBff({
         tenantId: orgId,
         actor: bffActor,
         transactionId: tx.id,
+        lease: mutationLease,
       });
       await applySyncedEvidenceState(tx.id, result);
       toast.success(`증빙 동기화 완료: Drive 폴더 파일 ${result.evidenceCount}건 반영`);
@@ -599,7 +664,7 @@ export function PortalWeeklyExpensePage() {
       handleEvidenceDriveError(error, '증빙 동기화');
       throw error;
     }
-  }, [applySyncedEvidenceState, bffActor, handleEvidenceDriveError, orgId]);
+  }, [applySyncedEvidenceState, bffActor, cashflowLease.checkBeforeMutation, handleEvidenceDriveError, orgId]);
 
   const provisionProjectDriveRoot = useCallback(async () => {
     setProjectDriveProvisioning(true);
@@ -620,80 +685,15 @@ export function PortalWeeklyExpensePage() {
 
   const uploadEvidenceDrive = useCallback(async (tx: Transaction, uploads: EvidenceUploadSelection[]) => {
     try {
-      const googleAccessToken = bffActor.googleAccessToken || await ensureGoogleWorkspaceAccess() || undefined;
-      let workingTx = transactions.find((candidate) => candidate.id === tx.id) || tx;
-      let folderId = workingTx.evidenceDriveFolderId || '';
-      let sharedDriveId = workingTx.evidenceDriveSharedDriveId || '';
-
-      if (!folderId) {
-        const provisioned = await provisionEvidenceDrive(workingTx);
-        folderId = provisioned.folderId;
-        sharedDriveId = provisioned.sharedDriveId || sharedDriveId;
-        workingTx = {
-          ...workingTx,
-          version: provisioned.version,
-          evidenceDriveFolderId: provisioned.folderId,
-          evidenceDriveFolderName: provisioned.folderName,
-          evidenceDriveLink: provisioned.webViewLink || workingTx.evidenceDriveLink,
-          evidenceDriveSharedDriveId: provisioned.sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-        };
-      }
-
-      if (!folderId) {
-        throw new Error('증빙 Drive 폴더를 찾지 못했습니다.');
-      }
-
-      let usedBrowserUpload = false;
       let lastResult: UploadTransactionEvidenceDriveResult | null = null;
       for (const upload of uploads) {
-        if (googleAccessToken) {
-          try {
-            await uploadFileToGoogleDriveFolder({
-              accessToken: googleAccessToken,
-              folderId,
-              file: upload.file,
-              fileName: upload.reviewedFileName,
-              mimeType: upload.file.type || 'application/octet-stream',
-              appProperties: {
-                managedBy: 'mysc-platform',
-                tenantId: orgId,
-                projectId,
-                transactionId: tx.id,
-                evidenceSource: 'platform-upload',
-                originalFileName: upload.file.name,
-                category: upload.category,
-                sharedDriveId,
-              },
-            });
-            usedBrowserUpload = true;
-            continue;
-          } catch (error) {
-            if (!shouldFallbackToBffOnBrowserUploadError(error)) {
-              throw error;
-            }
-            reportError(error, {
-              message: '[PortalWeeklyExpensePage] Browser Drive upload failed; falling back to BFF upload:',
-              options: {
-                level: 'warning',
-                tags: {
-                  surface: 'portal_weekly_expense',
-                  action: 'browser_drive_upload_fallback',
-                },
-                extra: {
-                  projectId,
-                  transactionId: tx.id,
-                  actorId: bffActor.uid,
-                },
-              },
-            });
-          }
-        }
-
+        const mutationLease = await cashflowLease.checkBeforeMutation();
         const contentBase64 = await readFileAsBase64(upload.file);
         lastResult = await uploadTransactionEvidenceDriveViaBff({
           tenantId: orgId,
           actor: bffActor,
           transactionId: tx.id,
+          lease: mutationLease,
           upload: {
             fileName: upload.reviewedFileName,
             originalFileName: upload.file.name,
@@ -705,22 +705,12 @@ export function PortalWeeklyExpensePage() {
         });
       }
 
-      if (usedBrowserUpload) {
-        await updateTransaction(tx.id, buildOptimisticUploadedEvidencePatch({
-          transaction: workingTx,
-          folderId,
-          folderName: workingTx.evidenceDriveFolderName,
-          webViewLink: workingTx.evidenceDriveLink,
-          sharedDriveId: sharedDriveId || workingTx.evidenceDriveSharedDriveId,
-          uploadedCategories: uploads.map((upload) => String(upload.category || upload.parserCategory).trim()).filter(Boolean),
-          updatedAt: new Date().toISOString(),
-        }));
+      if (lastResult) {
+        await applySyncedEvidenceState(tx.id, lastResult);
         const uploadLabel = uploads.length === 1
           ? uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일 1건'
           : `${uploads[0]?.reviewedFileName || uploads[0]?.file.name || '파일'} 외 ${uploads.length - 1}건`;
         toast.success(`업로드 완료: ${uploadLabel}`);
-      } else if (lastResult) {
-        await applySyncedEvidenceState(tx.id, lastResult);
       }
     } catch (error) {
       handleEvidenceDriveError(error, '증빙 업로드');
@@ -729,26 +719,24 @@ export function PortalWeeklyExpensePage() {
   }, [
     applySyncedEvidenceState,
     bffActor,
-    ensureGoogleWorkspaceAccess,
+    cashflowLease.checkBeforeMutation,
     handleEvidenceDriveError,
     orgId,
-    projectId,
-    provisionEvidenceDrive,
-    transactions,
-    updateTransaction,
   ]);
 
   const handleAddTransaction = useCallback((tx: Transaction) => {
-    void addTransaction(tx).catch((error) => {
-      toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.'));
-    });
-  }, [addTransaction]);
+    void (async () => {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await addTransaction(tx, { cashflowLease: mutationLease });
+    })().catch((error) => toast.error(resolveApiErrorMessage(error, '거래 저장에 실패했습니다.')));
+  }, [addTransaction, cashflowLease.checkBeforeMutation]);
 
   const handleUpdateTransaction = useCallback((txId: string, updates: Partial<Transaction>) => {
-    void updateTransaction(txId, updates).catch((error) => {
-      toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.'));
-    });
-  }, [updateTransaction]);
+    void (async () => {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await updateTransaction(txId, updates, { cashflowLease: mutationLease });
+    })().catch((error) => toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.')));
+  }, [cashflowLease.checkBeforeMutation, updateTransaction]);
 
   const handleSubmitWeek = useCallback(async ({ yearMonth, weekNo, txIds }: {
     yearMonth: string;
@@ -771,9 +759,15 @@ export function PortalWeeklyExpensePage() {
     }
     let updatedCount = 0;
     try {
-      await submitWeekAsPm({ projectId, yearMonth, weekNo });
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
+      const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
+      const weeklySheet = await buildWeeklySubmitSheet();
+      await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
+      await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
+      await cashflowLease.checkStatus();
       for (const txId of txIds) {
-        await changeTransactionState(txId, 'SUBMITTED');
+        await changeTransactionState(txId, 'SUBMITTED', undefined, { cashflowLease: mutationLease });
         updatedCount += 1;
       }
       toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
@@ -784,13 +778,19 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(err, fallback));
       throw err;
     }
-  }, [changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
+  }, [buildWeeklySubmitSheet, cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
 
   const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
-    void changeTransactionState(txId, newState, reason).catch((error) => {
-      toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.'));
-    });
-  }, [changeTransactionState]);
+    void (async () => {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await changeTransactionState(txId, newState, reason, { cashflowLease: mutationLease });
+    })().catch((error) => toast.error(resolveApiErrorMessage(error, '거래 상태 변경에 실패했습니다.')));
+  }, [cashflowLease.checkBeforeMutation, changeTransactionState]);
+
+  const handleAddComment = useCallback(async (comment: Parameters<typeof addComment>[0]) => {
+    const mutationLease = await cashflowLease.checkBeforeMutation();
+    await addComment(comment, { cashflowLease: mutationLease });
+  }, [addComment, cashflowLease.checkBeforeMutation]);
 
   const handleFetchBudgetSuggestion = useCallback(async (counterparty: string) => {
     return fetchBudgetSuggestionViaBff({ tenantId: orgId, actor: bffActor, projectId, counterparty });
@@ -846,6 +846,24 @@ export function PortalWeeklyExpensePage() {
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={cashflowLease.canEdit ? 'default' : 'outline'}
+          disabled={!cashflowLease.sessionId || cashflowLease.busy || cashflowLease.canEdit}
+          onClick={() => void beginWeeklyEditing()}
+        >
+          {cashflowLease.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {cashflowLease.canEdit ? '수정 중' : '수정 시작'}
+        </Button>
+        {cashflowLease.canEdit && (
+          <Button type="button" size="sm" variant="ghost" disabled={cashflowLease.busy} onClick={() => void cashflowLease.extend()}>
+            {cashflowLease.remainingLabel} · 30분 연장
+          </Button>
+        )}
+        {!cashflowLease.canEdit && <span className="text-[11px] text-muted-foreground">읽기는 가능하며 저장은 수정 세션을 선점한 뒤 활성화됩니다.</span>}
+      </div>
       {weeklySetupPanel ? (
         <Card data-testid="weekly-expense-setup-panel" className={weeklySetupPanel.toneClass}>
           <CardContent className="px-4 py-3">
@@ -903,8 +921,7 @@ export function PortalWeeklyExpensePage() {
 
       <VarianceFlagBanner
         projectId={projectId}
-        pmName={portalUser?.name || 'PM'}
-        pmUid={portalUser?.id || ''}
+        onUpdateVarianceFlag={updateVarianceFlagWithLease}
       />
       <Suspense
         fallback={(
@@ -933,9 +950,9 @@ export function PortalWeeklyExpensePage() {
           autoSaveSyncCashflow={false}
           showSaveStatusButton={weeklyExpenseSavePolicy.showStatusButton}
           evidenceRequiredMap={evidenceRequiredMap}
-          onSaveEvidenceRequiredMap={saveEvidenceRequiredMap}
-          sheetRows={expenseSheetRows}
-          onSaveSheetRows={saveExpenseSheetRows}
+          onSaveEvidenceRequiredMap={saveEvidenceRequiredMapWithLease}
+          sheetRows={restoredExpenseRows || expenseSheetRows}
+          onSaveSheetRows={saveExpenseSheetRowsWithLease}
           onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
@@ -943,7 +960,7 @@ export function PortalWeeklyExpensePage() {
           userRole={ledgerUserRole}
           allowEditSubmitted
           comments={comments}
-          onAddComment={addComment}
+          onAddComment={handleAddComment}
           onProvisionEvidenceDrive={provisionEvidenceDrive}
           onSyncEvidenceDrive={syncEvidenceDrive}
           onUploadEvidenceDrive={uploadEvidenceDrive}
@@ -952,7 +969,7 @@ export function PortalWeeklyExpensePage() {
           workflowMode={fundInputMode}
           settlementSheetPolicy={settlementSheetPolicy}
           basis={myProject?.basis}
-          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
+          onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatusWithLease}
           onDeriveRows={deriveRowsWithLocalKernel}
           onPreviewActualSyncPayload={previewActualSyncWithLocalKernel}
           onSyncCashflowActuals={syncCashflowActualsFromCanonicalSource}
@@ -960,7 +977,7 @@ export function PortalWeeklyExpensePage() {
           onSavingStateChange={setIsSettlementSaving}
           weeklySubmissionStatuses={weeklySubmissionStatuses}
           discardChangesRequestToken={0}
-          ledgerViewOnly
+          ledgerViewOnly={!cashflowLease.canEdit}
         />
       </Suspense>
       {isSettlementSaving && (
@@ -986,19 +1003,19 @@ export function PortalWeeklyExpensePage() {
               projectAccountType={myProject?.accountType}
               activeSheetName={activeSheetName}
               bffActor={bffActor}
-              expenseSheetRows={expenseSheetRows || []}
+              expenseSheetRows={restoredExpenseRows || expenseSheetRows || []}
               budgetPlanRows={budgetPlanRows || []}
               evidenceRequiredMap={evidenceRequiredMap}
               sheetSources={sheetSources}
               devHarnessEnabled={devHarnessConfig.enabled}
               ensureGoogleWorkspaceAccess={ensureGoogleWorkspaceAccess}
-              saveExpenseSheetRows={saveExpenseSheetRows}
+              saveExpenseSheetRows={saveExpenseSheetRowsWithLease}
               saveBudgetPlanRows={saveBudgetPlanRows}
               saveBudgetCodeBook={saveBudgetCodeBook}
-              saveBankStatementRows={saveBankStatementRows}
-              saveEvidenceRequiredMap={saveEvidenceRequiredMap}
+              saveBankStatementRows={saveBankStatementRowsWithLease}
+              saveEvidenceRequiredMap={saveEvidenceRequiredMapWithLease}
               markSheetSourceApplied={markSheetSourceApplied}
-              upsertWeekAmounts={upsertWeekAmounts}
+              upsertWeekAmounts={upsertWeekAmountsWithLease}
               previewActualSyncPayload={previewActualSyncWithLocalKernel}
             />
         </Suspense>
@@ -1037,7 +1054,13 @@ export function PortalWeeklyExpensePage() {
                 setParticipationRiskWarning(null);
                 let updatedCount = 0;
                 try {
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo });
+                  const mutationLease = await cashflowLease.checkBeforeMutation();
+                  if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
+                  const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
+                  const weeklySheet = await buildWeeklySubmitSheet();
+                  await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
+                  await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
+                  await cashflowLease.checkStatus();
                   for (const txId of txIds) {
                     await changeTransactionState(txId, 'SUBMITTED');
                     updatedCount += 1;
@@ -1056,6 +1079,18 @@ export function PortalWeeklyExpensePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <EditLeaseDialogs
+        warningOpen={cashflowLease.warningOpen}
+        expiredOpen={cashflowLease.expiredOpen}
+        conflictOpen={cashflowLease.conflictOpen}
+        holder={cashflowLease.holder}
+        busy={cashflowLease.busy}
+        onDismissWarning={cashflowLease.dismissWarning}
+        onExtend={() => { void cashflowLease.extend(); }}
+        onContinueReadOnly={cashflowLease.continueReadOnly}
+        onReacquire={() => { void beginWeeklyEditing(); }}
+      />
 
     </div>
   );
@@ -1080,12 +1115,14 @@ async function readFileAsBase64(file: File): Promise<string> {
 
 function VarianceFlagBanner({
   projectId,
-  pmName,
-  pmUid,
+  onUpdateVarianceFlag,
 }: {
   projectId: string;
-  pmName: string;
-  pmUid: string;
+  onUpdateVarianceFlag: (input: {
+    sheetId: string;
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    content?: string;
+  }) => Promise<void>;
 }) {
   const { weeks } = useCashflowWeeks();
   const [replyText, setReplyText] = useState('');
@@ -1100,26 +1137,15 @@ function VarianceFlagBanner({
     );
   }, [weeks, projectId]);
 
-  const { updateVarianceFlag } = useCashflowWeeks();
-
-  const handleReply = (sheet: CashflowWeekSheet) => {
+  const handleReply = async (sheet: CashflowWeekSheet) => {
     if (!replyText.trim() || !sheet.varianceFlag) return;
-    const now = new Date().toISOString();
-    const nextFlag = {
-      ...sheet.varianceFlag,
-      status: 'REPLIED' as const,
-      pmReply: replyText.trim(),
-      pmRepliedBy: pmName,
-      pmRepliedByUid: pmUid,
-      pmRepliedAt: now,
-    };
-    const nextHistory = [
-      ...(sheet.varianceHistory || []),
-      { id: `vf-${Date.now()}`, action: 'REPLY' as const, actor: pmName, actorUid: pmUid, content: replyText.trim(), timestamp: now },
-    ];
-    updateVarianceFlag({ sheetId: sheet.id, varianceFlag: nextFlag, varianceHistory: nextHistory }).catch(console.error);
-    setReplyText('');
-    setReplyingId(null);
+    try {
+      await onUpdateVarianceFlag({ sheetId: sheet.id, action: 'REPLY', content: replyText.trim() });
+      setReplyText('');
+      setReplyingId(null);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '편차 확인 답변을 저장하지 못했습니다.'));
+    }
   };
 
   if (openFlags.length === 0) return null;
@@ -1170,14 +1196,14 @@ function VarianceFlagBanner({
                   className="flex-1 h-8 rounded-md border bg-background px-2.5 text-[11px] outline-none focus:ring-1 focus:ring-ring"
                   autoFocus
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleReply(sheet);
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleReply(sheet);
                     if (e.key === 'Escape') setReplyingId(null);
                   }}
                 />
                 <Button
                   size="sm"
                   className="h-8 text-[11px] gap-1 px-3"
-                  onClick={() => handleReply(sheet)}
+                  onClick={() => void handleReply(sheet)}
                   disabled={!replyText.trim()}
                 >
                   <Send className="h-3 w-3" />

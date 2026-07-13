@@ -11,6 +11,34 @@ function createIdempotencyService() {
   };
 }
 
+const stageEnv = {
+  BFF_DEPLOY_ENV: 'stage',
+  BFF_EDIT_LEASES_ENABLED: 'true',
+  VITE_FIREBASE_PROJECT_ID: 'stage-data-project',
+  JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
+};
+
+const editLeaseHeaders = {
+  'x-edit-session-id': 'session-a',
+  'x-edit-lease-id': 'lease-a',
+  'x-edit-fence': '7',
+};
+
+const canonicalWriterRoutes = [
+  '/api/v1/weekly-expenses/project-a/sheets/default/save-draft',
+  '/api/v1/weekly-expenses/project-a/bank-statements/import-batch',
+  '/api/v1/weekly-expenses/project-a/bank-statements/apply-items',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/cell-patch',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/copy',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/paste',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/cut',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/row-insert',
+  '/api/v1/weekly-expenses/project-a/sheets/default/commands/row-delete',
+  '/api/v1/weekly-expenses/project-a/submit',
+  '/api/v1/weekly-expenses/project-a/close',
+  '/api/v1/cashflow/project-a/projection',
+];
+
 function createApp(fetchImpl, idempotencyService = createIdempotencyService(), contextPatch = {}, routeOptions = {}) {
   const app = express();
   app.use(express.json());
@@ -33,10 +61,236 @@ function createApp(fetchImpl, idempotencyService = createIdempotencyService(), c
     jvmWeeklyApiServiceToken: 'test-service-token',
     ...routeOptions,
   });
+  app.use((error, _req, res, _next) => {
+    res.status(error.statusCode || 500).json({
+      code: error.code || 'error',
+      message: error.message,
+      ...(error.details ? { details: error.details } : {}),
+    });
+  });
   return { app, idempotencyService };
 }
 
 describe('JVM weekly API BFF proxy', () => {
+  it('rejects every canonical weekly writer before the JVM when the cashflow lease is missing', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'admin-1',
+      actorRole: 'admin',
+    }, { env: stageEnv });
+
+    for (const path of canonicalWriterRoutes) {
+      await request(app)
+        .post(path)
+        .set('idempotency-key', `missing-lease-${canonicalWriterRoutes.indexOf(path)}`)
+        .send({})
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.code).toBe('cashflow_edit_lease_request_invalid');
+        });
+    }
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(canonicalWriterRoutes)(
+    'forwards the same validated cashflow lease to canonical writer %s',
+    async (path) => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'admin-1',
+      actorRole: 'admin',
+    }, { env: stageEnv });
+
+      await request(app)
+        .post(path)
+        .set({
+          'idempotency-key': `valid-lease-${canonicalWriterRoutes.indexOf(path)}`,
+          ...editLeaseHeaders,
+        })
+        .send({})
+        .expect(200);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].init.headers).toMatchObject({
+        'x-data-project-id': 'stage-data-project',
+        ...editLeaseHeaders,
+      });
+      expect(calls[0].init.headers['x-edit-finalize']).toBeUndefined();
+    },
+  );
+
+  it('forwards only the canonical final-save signal to the JVM', async () => {
+    const fetchImpl = vi.fn(async (_url, init) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      init,
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'admin-1', actorRole: 'admin',
+    }, { env: stageEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({
+        'idempotency-key': 'final-projection-1',
+        ...editLeaseHeaders,
+        'x-edit-finalize': 'true',
+      })
+      .send({ lines: [] })
+      .expect(200);
+
+    expect(fetchImpl.mock.calls[0][1].headers['x-edit-finalize']).toBe('true');
+  });
+
+  it.each(['1', 'TRUE', 'yes', 'false'])(
+    'rejects ambiguous edit finalization value %s before the JVM',
+    async (finalize) => {
+      const fetchImpl = vi.fn();
+      const { app } = createApp(fetchImpl, createIdempotencyService(), {
+        actorId: 'admin-1', actorRole: 'admin',
+      }, { env: stageEnv });
+
+      await request(app)
+        .post('/api/v1/cashflow/project-a/projection')
+        .set({
+          'idempotency-key': `bad-finalize-${finalize}`,
+          ...editLeaseHeaders,
+          'x-edit-finalize': finalize,
+        })
+        .send({ lines: [] })
+        .expect(400);
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['0', '-1', '01', '1e2', '1.0', '9007199254740992'])(
+    'rejects non-canonical edit fence %s before the JVM',
+    async (fence) => {
+      const fetchImpl = vi.fn();
+      const { app } = createApp(fetchImpl, createIdempotencyService(), {
+        actorId: 'admin-1',
+        actorRole: 'admin',
+      }, { env: stageEnv });
+
+      await request(app)
+        .post('/api/v1/weekly-expenses/project-a/sheets/default/save-draft')
+        .set({
+          'idempotency-key': `bad-fence-${fence}`,
+          ...editLeaseHeaders,
+          'x-edit-fence': fence,
+        })
+        .send({})
+        .expect(400);
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves the JVM atomic write count in the BFF 422 error contract', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 422,
+      text: async () => JSON.stringify({
+        code: 'atomic_write_limit_exceeded',
+        message: 'Projection command requires 501 writes.',
+        expectedWriteCount: 501,
+      }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1',
+      actorRole: 'pm',
+    }, { env: stageEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({ 'idempotency-key': 'atomic-limit-1', ...editLeaseHeaders })
+      .send({ lines: [] })
+      .expect(422)
+      .expect((response) => {
+        expect(response.body).toMatchObject({
+          code: 'atomic_write_limit_exceeded',
+          details: { expectedWriteCount: 501 },
+        });
+      });
+  });
+
+  it('forwards Stage cashflow projection lease headers and rejects caller source context', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1',
+      actorRole: 'finance',
+    }, {
+      env: {
+        BFF_DEPLOY_ENV: 'stage',
+        BFF_EDIT_LEASES_ENABLED: 'true',
+        FIREBASE_PROJECT_ID: 'stage-data-project',
+        JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
+      },
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({
+        'idempotency-key': 'projection-stage-1',
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
+      .send({
+        sourceSheetKey: 'caller-controlled',
+        actor: { id: 'spoofed', role: 'admin' },
+        tenantId: 'spoofed',
+        lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+      })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({
+      'x-data-project-id': 'stage-data-project',
+      'x-edit-session-id': 'session-a',
+      'x-edit-lease-id': 'lease-a',
+      'x-edit-fence': '7',
+    });
+    expect(JSON.parse(calls[0].init.body)).toEqual({
+      idempotencyKey: 'projection-stage-1',
+      lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
+    });
+  });
+
+  it('fails closed before JVM cashflow projection when edit leases are disabled', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1',
+      actorRole: 'finance',
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set('idempotency-key', 'projection-disabled-1')
+      .send({ lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }] })
+      .expect(503);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('forwards only trusted context headers and strips client actor/tenant body fields', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {
@@ -47,11 +301,11 @@ describe('JVM weekly API BFF proxy', () => {
         text: async () => JSON.stringify({ ok: true }),
       };
     });
-    const { app } = createApp(fetchImpl);
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/sheets/default/commands/cell-patch')
-      .set('idempotency-key', 'idem-proxy-1')
+      .set({ 'idempotency-key': 'idem-proxy-1', ...editLeaseHeaders })
       .send({
         tenantId: 'spoofed-tenant',
         actor: { id: 'spoofed-admin', role: 'admin' },
@@ -84,11 +338,11 @@ describe('JVM weekly API BFF proxy', () => {
     idempotencyService.begin.mockImplementation(async () => {
       throw new Error('BFF idempotency must not run for Java weekly commands');
     });
-    const { app } = createApp(fetchImpl, idempotencyService);
+    const { app } = createApp(fetchImpl, idempotencyService, {}, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/sheets/default/commands/cell-patch')
-      .set('idempotency-key', 'idem-java-owned-1')
+      .set({ 'idempotency-key': 'idem-java-owned-1', ...editLeaseHeaders })
       .send({
         cells: [{ rowIndex: 0, columnIndex: 1, rawValue: '1000' }],
       })
@@ -114,11 +368,11 @@ describe('JVM weekly API BFF proxy', () => {
         }),
       };
     });
-    const { app } = createApp(fetchImpl);
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/sheets/default/commands/copy')
-      .set('idempotency-key', 'idem-copy-1')
+      .set({ 'idempotency-key': 'idem-copy-1', ...editLeaseHeaders })
       .send({
         expectedSheetVersion: 3,
         startRow: 0,
@@ -445,7 +699,45 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
-  it('proxies weekly close as an admin-only Java command', async () => {
+  it('forwards a compound weekly sheet snapshot and FINAL_SAVE header to Java submit', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, commandName: 'weeklyExpense.submitWeek', state: 'submitted' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1',
+      actorRole: 'pm',
+      actorEmail: 'pm@example.com',
+    }, { env: stageEnv });
+    const weeklySheet = {
+      sheetKey: 'default',
+      expectedSheetVersion: 3,
+      sheetName: '기본 탭',
+      rows: [{ rowIndex: 0, entryKind: 'manual', cells: [] }],
+    };
+
+    await request(app)
+      .post('/api/v1/weekly-expenses/project-a/submit')
+      .set({ 'idempotency-key': 'idem-submit-compound-1', ...editLeaseHeaders, 'x-edit-finalize': 'true' })
+      .send({ yearMonth: '2026-06', weekNo: 1, weeklySheet })
+      .expect(200);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers).toMatchObject({ 'x-edit-finalize': 'true' });
+    expect(JSON.parse(calls[0].init.body)).toEqual({
+      idempotencyKey: 'idem-submit-compound-1',
+      yearMonth: '2026-06',
+      weekNo: 1,
+      weeklySheet,
+    });
+  });
+
+  it('proxies compound weekly close as an admin-only Java final command', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {
       calls.push({ url, init });
@@ -459,16 +751,17 @@ describe('JVM weekly API BFF proxy', () => {
       actorId: 'admin-1',
       actorRole: 'admin',
       actorEmail: 'admin@example.com',
-    });
+    }, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/close')
-      .set('idempotency-key', 'idem-close-1')
+      .set({ 'idempotency-key': 'idem-close-1', ...editLeaseHeaders, 'x-edit-finalize': 'true' })
       .send({
         tenantId: 'spoofed-tenant',
         actor: { id: 'spoofed-admin', role: 'admin' },
         yearMonth: '2026-06',
         weekNo: 1,
+        projectionLines: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: 'SALES_IN', amount: 2500 }],
       })
       .expect(200);
 
@@ -480,11 +773,13 @@ describe('JVM weekly API BFF proxy', () => {
       'x-actor-id': 'admin-1',
       'x-actor-role': 'admin',
       'x-actor-email': 'admin@example.com',
+      'x-edit-finalize': 'true',
     });
     expect(JSON.parse(calls[0].init.body)).toEqual({
       idempotencyKey: 'idem-close-1',
       yearMonth: '2026-06',
       weekNo: 1,
+      projectionLines: [{ yearMonth: '2026-06', weekNo: 1, cashflowLine: 'SALES_IN', amount: 2500 }],
     });
   });
 
@@ -498,11 +793,11 @@ describe('JVM weekly API BFF proxy', () => {
         text: async () => JSON.stringify({ ok: true }),
       };
     });
-    const { app } = createApp(fetchImpl);
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/bank-statements/import-batch')
-      .set('idempotency-key', 'idem-bank-import-1')
+      .set({ 'idempotency-key': 'idem-bank-import-1', ...editLeaseHeaders })
       .send({
         tenantId: 'spoofed-tenant',
         actor: { id: 'spoofed-admin', role: 'admin' },
@@ -513,7 +808,7 @@ describe('JVM weekly API BFF proxy', () => {
 
     await request(app)
       .post('/api/v1/weekly-expenses/project-a/bank-statements/apply-items')
-      .set('idempotency-key', 'idem-bank-apply-1')
+      .set({ 'idempotency-key': 'idem-bank-apply-1', ...editLeaseHeaders })
       .send({
         tenantId: 'spoofed-tenant',
         actor: { id: 'spoofed-admin', role: 'admin' },

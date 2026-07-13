@@ -111,6 +111,19 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('Stage artifact is not READY');
   });
 
+  it('injects only the guarded Stage lease and JVM runtime into the preview artifact', () => {
+    expect(stageWorkflowText).toContain('STAGE_FIREBASE_PROJECT_ID: mysc-bmp-14173451');
+    expect(stageWorkflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
+    expect(stageWorkflowText).toContain('JVM_WEEKLY_API_BASE_URL_STAGE');
+    expect(stageWorkflowText).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE');
+    expect(stageWorkflowText).toContain('node scripts/assert-stage-edit-lease-runtime.mjs');
+    expect(stageWorkflowText).toContain('--env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}"');
+    expect(stageWorkflowText).toContain('--env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}"');
+    expect(stageWorkflowText).toContain('--env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}"');
+    expect(stageWorkflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}"');
+    expect(stageWorkflowText).not.toContain('--prod');
+  });
+
   it('keeps deploy workflows focused on deployment after CI gates have passed', () => {
     expect(stageWorkflowText).not.toContain('run: npm ci');
     expect(stageWorkflowText).not.toContain('Unit tests');
@@ -133,6 +146,20 @@ describe('CI security evidence gates', () => {
   it('runs static route policy on every CI pass through policy verification', () => {
     expect(ciWorkflowText).toContain('RBAC policy verify');
     expect(ciWorkflowText).toContain('npm run policy:verify');
+  });
+
+  it('runs BFF Firestore emulator integration as a blocking product release gate', () => {
+    const productGateText = ciWorkflowText.slice(
+      ciWorkflowText.indexOf('product-release-gates:'),
+      ciWorkflowText.indexOf('edge-security-smoke:'),
+    );
+    const bffGateIndex = productGateText.indexOf('run: npm run bff:test:integration');
+
+    expect(productGateText.match(/actions\/setup-node@v5/g)).toHaveLength(1);
+    expect(productGateText.match(/actions\/setup-java@v5/g)).toHaveLength(1);
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('actions/setup-node@v5'));
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('actions/setup-java@v5'));
+    expect(bffGateIndex).toBeGreaterThan(productGateText.indexOf('run: npm ci'));
   });
 
   it('captures strict Cloudflare edge smoke evidence only for main pushes', () => {

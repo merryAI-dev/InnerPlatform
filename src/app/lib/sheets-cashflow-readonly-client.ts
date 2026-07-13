@@ -6,6 +6,10 @@ import {
 } from './platform-bff-client';
 import { PlatformApiClient } from '../platform/api-client';
 import { extractSpreadsheetId } from '../integrations/google-sheets/link';
+import {
+  cashflowMutationHeaders,
+  type CashflowMutationLease,
+} from './cashflow-edit-lease';
 
 export interface CashflowSheetLabWeekColumn {
   raw: string;
@@ -346,6 +350,8 @@ export async function applyCashflowSheetLabViaBff(params: {
   stageRunId?: string;
   applyRiskCandidates?: boolean;
   idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabApplyResult> {
   const apiClient = params.client || createSameOriginBffClient();
@@ -364,6 +370,10 @@ export async function applyCashflowSheetLabViaBff(params: {
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
       timeoutMs: 30000,
       retries: 0,
     },

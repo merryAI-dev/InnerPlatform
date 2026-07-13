@@ -9,6 +9,10 @@ import type {
 } from '../data/types';
 import { PlatformApiClient } from '../platform/api-client';
 import { buildStandardHeaders, type RequestActor } from '../platform/request-context';
+import {
+  cashflowMutationHeaders,
+  type CashflowMutationLease,
+} from './cashflow-edit-lease';
 
 export interface PlatformApiRuntimeConfig {
   enabled: boolean;
@@ -58,6 +62,11 @@ export interface CreateCommentPayload {
   id?: string;
   content: string;
   authorName?: string;
+  projectId?: string;
+  targetType?: 'transaction' | 'expense_sheet_row';
+  sheetRowId?: string;
+  fieldKey?: string;
+  fieldLabel?: string;
 }
 
 export interface CreateEvidencePayload {
@@ -577,13 +586,49 @@ export interface CashflowWeekAmountsPayload {
 
 export interface CashflowWeekAmountsResult {
   ok: boolean;
+  commandName: string;
   projectId: string;
+  savedLineCount: number;
+  projection: CashflowProjectionLine[];
+  auditId: string;
+}
+
+export interface CashflowProjectionLine {
   yearMonth: string;
   weekNo: number;
-  weekStart: string;
-  weekEnd: string;
-  mode: 'projection' | 'actual';
-  updatedAt: string;
+  cashflowLine: string;
+  amount: number;
+}
+
+export interface CashflowActualLine extends CashflowProjectionLine {
+  sheetKey: string;
+}
+
+export interface CashflowModeReadModel {
+  rowTotals: Record<string, number>;
+  weeks: Array<{
+    weekNo: number;
+    amounts: Record<string, number>;
+    totalIn: number;
+    totalOut: number;
+    net: number;
+    weekIn: number;
+    weekOut: number;
+  }>;
+  monthTotals: { totalIn: number; totalOut: number; net: number };
+}
+
+export interface CashflowSnapshotResult {
+  projectId: string;
+  projection: CashflowProjectionLine[];
+  actual: CashflowActualLine[];
+  readModel: {
+    months: Array<{
+      yearMonth: string;
+      projection: CashflowModeReadModel;
+      actual: CashflowModeReadModel;
+    }>;
+  };
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -779,6 +824,142 @@ export interface ApplyBankStatementItemsResult {
   auditId: string;
 }
 
+export interface WeeklyExpenseSheetResult {
+  ok: boolean;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetName: string;
+  sheetVersion: number;
+  rows: Array<{
+    id: string;
+    rowIndex: number;
+    rowVersion: number;
+    sourceTxId?: string | null;
+    entryKind?: string | null;
+    cells: Array<{
+      columnIndex: number;
+      rawValue: string;
+      normalizedValue: string;
+      valueType: string;
+      validationStatus: string;
+      validationMessage?: string | null;
+      userEdited: boolean;
+    }>;
+  }>;
+  recentAuditEvents?: unknown[];
+}
+
+export interface WeeklyExpenseDraftPayload {
+  expectedSheetVersion?: number | null;
+  sheetName?: string;
+  rows: Array<{
+    rowIndex: number;
+    tempId?: string;
+    sourceTxId?: string;
+    entryKind?: string;
+    cells: Array<{
+      columnIndex: number;
+      rawValue: string;
+      userEdited?: boolean;
+    }>;
+  }>;
+}
+
+export interface WeeklyExpenseDraftResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  sheetId: string;
+  sheetKey: string;
+  sheetVersion: number;
+  savedRowCount: number;
+  savedCellCount: number;
+  touchedRows: number[];
+  cellIssues: unknown[];
+  actualDelta: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
+  auditId: string;
+}
+
+export interface WeeklyExpenseWeekPayload {
+  yearMonth: string;
+  weekNo: number;
+  projectionLines?: Array<{
+    yearMonth: string;
+    weekNo: number;
+    cashflowLine: string;
+    amount: number;
+  }>;
+  weeklySheet?: WeeklyExpenseDraftPayload & { sheetKey: string };
+}
+
+export interface WeeklyExpenseWeekResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  state: string;
+  auditId: string;
+}
+
+export interface CashflowVarianceIntent {
+  sheetId: string;
+  expectedRevision: number;
+  action: 'FLAG' | 'REPLY' | 'RESOLVE';
+  content?: string;
+}
+
+export interface CashflowVarianceMetadataResult {
+  week: {
+    id: string;
+    projectId: string;
+    varianceFlag: import('../data/types').VarianceFlag;
+    varianceHistory: import('../data/types').VarianceFlagEvent[];
+    varianceRevision: number;
+    updatedAt: string;
+  };
+}
+
+export interface WeeklySubmissionStatusIntent {
+  yearMonth: string;
+  weekNo: number;
+  expectedRevision: number;
+  changes: {
+    projectionEdited?: boolean;
+    projectionUpdated?: boolean;
+    expenseEdited?: boolean;
+    expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
+  };
+}
+
+export interface WeeklySubmissionStatusMetadataResult {
+  status: import('../data/types').WeeklySubmissionStatus;
+}
+
+export interface EvidenceRequiredMapIntent {
+  expectedRevision: number;
+  map: Record<string, string>;
+}
+
+export interface EvidenceRequiredMapMetadataResult {
+  evidenceRequiredMap: {
+    tenantId: string;
+    projectId: string;
+    map: Record<string, string>;
+    evidenceMapRevision: number;
+    updatedAt: string;
+    updatedBy: string;
+  };
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -969,6 +1150,7 @@ export async function upsertTransactionViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transaction: UpsertTransactionPayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; tenantId: string; version: number; updatedAt: string; state: string }> {
   const apiClient = resolveClient(params.client);
@@ -976,6 +1158,7 @@ export async function upsertTransactionViaBff(params: {
     tenantId: params.tenantId,
     actor: toRequestActor(params.actor),
     body: params.transaction,
+    ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
   });
   return response.data;
 }
@@ -987,6 +1170,7 @@ export async function changeTransactionStateViaBff(params: {
   newState: TransactionState;
   expectedVersion: number;
   reason?: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; state: string; rejectedReason: string | null; version: number; updatedAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1001,6 +1185,7 @@ export async function changeTransactionStateViaBff(params: {
         expectedVersion: params.expectedVersion,
         reason: params.reason,
       },
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
 
@@ -1012,6 +1197,7 @@ export async function addCommentViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   comment: CreateCommentPayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; transactionId: string; version: number; createdAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1021,6 +1207,7 @@ export async function addCommentViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.comment,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1031,6 +1218,7 @@ export async function addEvidenceViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   evidence: CreateEvidencePayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; transactionId: string; version: number; uploadedAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1040,6 +1228,7 @@ export async function addEvidenceViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.evidence,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1361,6 +1550,7 @@ export async function provisionTransactionEvidenceDriveViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transactionId: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<ProvisionTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1372,6 +1562,7 @@ export async function provisionTransactionEvidenceDriveViaBff(params: {
       actor: toRequestActor(params.actor),
       retries: 0,
       timeoutMs: 15000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1381,6 +1572,7 @@ export async function syncTransactionEvidenceDriveViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transactionId: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<SyncTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1392,6 +1584,7 @@ export async function syncTransactionEvidenceDriveViaBff(params: {
       actor: toRequestActor(params.actor),
       retries: 0,
       timeoutMs: 20000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1402,6 +1595,7 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   upload: UploadTransactionEvidenceDrivePayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<UploadTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1414,6 +1608,7 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
       body: params.upload,
       retries: 0,
       timeoutMs: 30000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1557,15 +1752,125 @@ export async function upsertCashflowWeekAmountsViaBff(params: {
   actor: ActorLike;
   projectId: string;
   payload: CashflowWeekAmountsPayload;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeekAmountsResult> {
+  if (params.payload.mode !== 'projection') {
+    throw new Error('Canonical actual cashflow must be saved through a weekly expense sheet');
+  }
+  return saveCashflowProjectionBatchViaBff({
+    tenantId: params.tenantId,
+    actor: params.actor,
+    projectId: params.projectId,
+    idempotencyKey: params.idempotencyKey,
+    lease: params.lease,
+    finalize: params.finalize,
+    client: params.client,
+    lines: Object.entries(params.payload.amounts).map(([cashflowLine, amount]) => ({
+      yearMonth: params.payload.yearMonth,
+      weekNo: params.payload.weekNo,
+      cashflowLine,
+      amount,
+    })),
+  });
+}
+
+export async function applyCashflowVarianceIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: CashflowVarianceIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowVarianceMetadataResult> {
+  const response = await resolveClient(params.client).post<CashflowVarianceMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/variance`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyWeeklySubmissionStatusIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: WeeklySubmissionStatusIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklySubmissionStatusMetadataResult> {
+  const response = await resolveClient(params.client).post<WeeklySubmissionStatusMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/weekly-submission-status`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyEvidenceRequiredMapIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: EvidenceRequiredMapIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<EvidenceRequiredMapMetadataResult> {
+  const response = await resolveClient(params.client).post<EvidenceRequiredMapMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/evidence-required-map`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
+}
+
+export async function saveCashflowProjectionBatchViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  lines: Array<{ yearMonth: string; weekNo: number; cashflowLine: string; amount: number }>;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeekAmountsResult> {
   const apiClient = resolveClient(params.client);
   const response = await apiClient.post<CashflowWeekAmountsResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-weeks/upsert`,
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/projection`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: params.payload,
+      body: { lines: params.lines },
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
+      idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 12000,
     },
@@ -1580,17 +1885,125 @@ export async function syncProjectCashflowActualsViaBff(params: {
   client?: PlatformApiClientLike;
 }): Promise<ProjectCashflowActualSyncResult> {
   const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<ProjectCashflowActualSyncResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-actuals/sync`,
+  const response = await apiClient.get<CashflowSnapshotResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: {},
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  const weeks = response.data.readModel.months.flatMap((month) => month.actual.weeks.map((week) => ({
+    yearMonth: month.yearMonth,
+    weekNo: week.weekNo,
+    amounts: week.amounts,
+  })));
+  return {
+    ok: true,
+    projectId: response.data.projectId,
+    sourceRows: response.data.actual.length,
+    sheetCount: new Set(response.data.actual.map((line) => line.sheetKey)).size,
+    upsertedWeeks: weeks.length,
+    clearedWeeks: 0,
+    weeks,
+    cleared: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function readWeeklyExpenseSheetViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey?: string;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseSheetResult> {
+  const apiClient = resolveClient(params.client);
+  const sheetKey = params.sheetKey || 'default';
+  const response = await apiClient.get<WeeklyExpenseSheetResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(sheetKey)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function saveWeeklyExpenseDraftViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sheetKey?: string;
+  payload: WeeklyExpenseDraftPayload;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseDraftResult> {
+  const apiClient = resolveClient(params.client);
+  const sheetKey = params.sheetKey || 'default';
+  const response = await apiClient.post<WeeklyExpenseDraftResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/sheets/${encodeURIComponent(sheetKey)}/save-draft`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
+      idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
     },
   );
   return response.data;
+}
+
+async function mutateWeeklyExpenseWeek(params: {
+  command: 'submit' | 'close';
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: WeeklyExpenseWeekPayload;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklyExpenseWeekResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<WeeklyExpenseWeekResult>(
+    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/${params.command}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export function submitCashflowWeekViaBff(
+  params: Omit<Parameters<typeof mutateWeeklyExpenseWeek>[0], 'command'>,
+): Promise<WeeklyExpenseWeekResult> {
+  return mutateWeeklyExpenseWeek({ ...params, command: 'submit' });
+}
+
+export function closeCashflowWeekViaBff(
+  params: Omit<Parameters<typeof mutateWeeklyExpenseWeek>[0], 'command'>,
+): Promise<WeeklyExpenseWeekResult> {
+  return mutateWeeklyExpenseWeek({ ...params, command: 'close' });
 }
 
 export async function fetchCashflowLaborRiskViaBff(params: {
@@ -1618,6 +2031,8 @@ export async function importBankStatementBatchViaBff(params: {
   projectId: string;
   payload: BankStatementImportBatchPayload;
   idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<BankStatementImportBatchResult> {
   const apiClient = resolveClient(params.client);
@@ -1627,6 +2042,10 @@ export async function importBankStatementBatchViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.payload,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,
@@ -1641,6 +2060,8 @@ export async function applyBankStatementItemsViaBff(params: {
   projectId: string;
   payload: ApplyBankStatementItemsPayload;
   idempotencyKey: string;
+  lease: CashflowMutationLease;
+  finalize?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<ApplyBankStatementItemsResult> {
   const apiClient = resolveClient(params.client);
@@ -1650,6 +2071,10 @@ export async function applyBankStatementItemsViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.payload,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+      },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,

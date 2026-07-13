@@ -10,6 +10,7 @@ interface ContractDocumentPreviewProps {
   description?: string;
   descriptionClassName?: string;
   className?: string;
+  privateDraftAttachment?: boolean;
 }
 
 function isPdfDocument(document: ContractDocumentPreviewAttachment) {
@@ -24,6 +25,7 @@ export function ContractDocumentPreview({
   description = '업로드된 PDF를 화면 안에서 바로 확인합니다.',
   descriptionClassName = 'text-slate-600',
   className = '',
+  privateDraftAttachment = false,
 }: ContractDocumentPreviewProps) {
   const downloadURL = String(document?.downloadURL || '').trim();
   const canPreviewPdf = !!document && !!downloadURL && isPdfDocument(document);
@@ -64,10 +66,22 @@ export function ContractDocumentPreview({
         <div className="flex min-h-[220px] items-center justify-center bg-slate-50 px-5 py-8 text-center">
           <div>
             <p className="text-[13px] font-semibold text-slate-800">
-              {downloadURL ? '이 파일 형식은 화면 미리보기를 지원하지 않습니다.' : '첨부된 계약서 파일이 없습니다.'}
+              {downloadURL
+                ? '이 파일 형식은 화면 미리보기를 지원하지 않습니다.'
+                : document && privateDraftAttachment
+                  ? '첨부 파일이 안전하게 임시저장되었습니다.'
+                  : document
+                    ? '첨부 파일 원문을 불러올 수 없습니다.'
+                  : '첨부된 계약서 파일이 없습니다.'}
             </p>
             <p className="mt-2 text-[12px] text-slate-500">
-              {downloadURL ? '새 탭에서 원문 파일을 확인해 주세요.' : '계약서가 첨부되면 이 영역에 PDF 원문이 표시됩니다.'}
+              {downloadURL
+                ? '새 탭에서 원문 파일을 확인해 주세요.'
+                : document && privateDraftAttachment
+                  ? '최종 저장 후 권한이 있는 사용자만 원문을 열 수 있습니다.'
+                  : document
+                    ? '파일 권한 또는 원문 링크 상태를 확인해 주세요.'
+                  : '계약서가 첨부되면 이 영역에 PDF 원문이 표시됩니다.'}
             </p>
           </div>
         </div>

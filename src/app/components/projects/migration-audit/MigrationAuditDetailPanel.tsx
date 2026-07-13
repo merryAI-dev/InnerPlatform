@@ -28,6 +28,8 @@ import { ContractDocumentPreview } from '../ContractDocumentPreview';
 interface MigrationAuditDetailPanelProps {
   record: MigrationAuditConsoleRecord | null;
   acting: boolean;
+  contractDocumentDownloadURL?: string;
+  contractDocumentError?: string;
   onApprove: () => void;
   onReject: () => void;
   onDiscard: () => void;
@@ -171,6 +173,8 @@ function ChangeRow({
 export function MigrationAuditDetailPanel({
   record,
   acting,
+  contractDocumentDownloadURL = '',
+  contractDocumentError = '',
   onApprove,
   onReject,
   onDiscard,
@@ -386,9 +390,13 @@ export function MigrationAuditDetailPanel({
                 </div>
               </div>
               <ContractDocumentPreview
-                document={contractDocument}
+                document={contractDocument ? {
+                  ...contractDocument,
+                  downloadURL: contractDocumentDownloadURL || contractDocument.downloadURL,
+                } : null}
                 title="계약서 PDF 원문"
-                description="분석 결과가 부족하면 여기서 원문을 바로 대조합니다."
+                description={contractDocumentError || '분석 결과가 부족하면 여기서 원문을 바로 대조합니다.'}
+                descriptionClassName={contractDocumentError ? 'text-rose-700' : 'text-slate-600'}
               />
             </div>
           </ReviewSection>

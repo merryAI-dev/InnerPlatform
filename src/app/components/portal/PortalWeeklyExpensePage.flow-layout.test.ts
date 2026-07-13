@@ -63,4 +63,38 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('applyProjectActualSyncResultLocally({ projectId, result })');
     expect(weeklyExpenseSource).toContain('actual_realtime_sync');
   });
+
+  it('fails closed until the project cashflow lease is owned and checks it before every save', () => {
+    expect(weeklyExpenseSource).toContain('useCashflowEditLease');
+    expect(weeklyExpenseSource).toContain('checkBeforeMutation');
+    expect(weeklyExpenseSource).toContain('EditLeaseDialogs');
+    expect(weeklyExpenseSource).toContain('cashflowLease.canEdit');
+    expect(weeklyExpenseSource).toContain('cashflowLease: mutationLease');
+  });
+
+  it('temporary-saves weekly rows privately and finalizes canonical rows only during submit', () => {
+    expect(weeklyExpenseSource).toContain('saveExpenseSheetRowsWithLease');
+    expect(weeklyExpenseSource).toContain('buildWeeklySubmitSheet');
+    expect(weeklyExpenseSource).toContain('weeklySheet, cashflowLease: mutationLease');
+    expect(weeklyExpenseSource).toContain('finalize: true');
+    expect(weeklyExpenseSource).toContain('cashflowPrivateDraftClient.complete');
+  });
+
+  it('restores the owner weekly snapshot once per lease after same-tab refresh', () => {
+    expect(weeklyExpenseSource).toContain('loadedPrivateDraftKeyRef');
+    expect(weeklyExpenseSource).toContain('privateDraftLoadRef');
+    expect(weeklyExpenseSource).toContain('hydrateWeeklyPrivateDraft');
+    expect(weeklyExpenseSource).toContain('restoredExpenseRows || expenseSheetRows');
+  });
+
+  it('uses the existing project lease for variance replies and weekly status metadata', () => {
+    expect(weeklyExpenseSource).toContain('updateVarianceFlagWithLease');
+    expect(weeklyExpenseSource).toContain('upsertWeeklySubmissionStatusWithLease');
+    expect(weeklyExpenseSource).toContain('cashflowLease: mutationLease');
+  });
+
+  it('checks the same project lease before saving the evidence-required map', () => {
+    expect(weeklyExpenseSource).toContain('saveEvidenceRequiredMapWithLease');
+    expect(weeklyExpenseSource).toContain('onSaveEvidenceRequiredMap={saveEvidenceRequiredMapWithLease}');
+  });
 });

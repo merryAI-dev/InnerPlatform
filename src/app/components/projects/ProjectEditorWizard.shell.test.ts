@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
 const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
+const portalRegisterSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectRegister.tsx'), 'utf8');
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
@@ -128,10 +129,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
 
   it('keeps portal edit drafts stable when async listener data refreshes', () => {
     expect(source).toContain('const lastResetKeyRef = useRef<string | null>(null)');
-    expect(source).toContain("const lastInitialDraftFingerprintRef = useRef('')");
     expect(source).toContain("const resetKey = `${draftKey}::${autosave?.key || ''}`");
-    expect(source).toContain('currentDraftFingerprint !== lastInitialDraftFingerprintRef.current');
-    expect(source).not.toContain('if (lastResetKeyRef.current === resetKey) return;');
+    expect(source).toContain('shouldResetProjectEditorDraft({');
+    expect(source).toContain('lastPersistedFingerprint: lastPersistedFingerprintRef.current');
+    expect(source).toContain('incomingFingerprint: initialDraftFingerprint');
+    expect(source).not.toContain('lastInitialDraftFingerprintRef');
   });
 
   it('labels project name as the groupware registration name without touching the team step', () => {
@@ -179,5 +181,43 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(adminWizardSource).toContain('onProjectDocumentFileUpload={handleProjectDocumentFileUpload}');
     expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');
     expect(adminWizardSource).toContain('canRemoveContractDocument');
+  });
+
+  it('keeps private edit inputs read-only without disabling step navigation', () => {
+    expect(source).toContain('readOnly?: boolean');
+    expect(source).toContain('<fieldset disabled={readOnly} className="contents">');
+    expect(source).toContain('disabled={readOnly || autosaveState');
+    expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || !!busyActionId");
+    expect(source).toContain('shouldResetProjectEditorDraft({');
+    expect(source).toContain('autosave?.onSave, draftKey, readOnly');
+  });
+
+  it('keeps failed attachment files retryable and clears the input only after success', () => {
+    expect(source).toContain('retryDocumentFileRef');
+    expect(source).toContain('processProjectDocument(kind, retryFile');
+    expect(source).toContain('다시 시도`');
+    expect(source).toContain('if (input) input.value =');
+    expect(source).not.toContain('finally {\n      input.value =');
+  });
+
+  it('blocks unload, history, and portal navigation while input, upload, or a retry file is unsaved', () => {
+    expect(source).toContain('usePortalNavigationGuard');
+    expect(source).toContain('useBlocker(shouldBlockNavigation)');
+    expect(source).toContain("window.addEventListener('beforeunload'");
+    expect(source).toContain('registerNavigationHandler(confirmLeave)');
+    expect(source).toContain('hasUnsavedInput || uploadInProgress || hasPendingRetryFile');
+  });
+
+  it('never double-submits or final-submits after the latest private draft save fails', () => {
+    expect(source).toContain('if (submitInFlightRef.current) return');
+    expect(source).toContain("throw new Error('최신 입력을 임시저장하지 못해 최종 저장을 중단했습니다.')");
+    expect(source.indexOf('persistAutosaveSnapshot(draft, stepIndex)')).toBeLessThan(source.indexOf('await onSubmit(createProjectEditorDraft(draft), actionId)'));
+  });
+
+  it('does not offer a local-only attachment removal in private registration drafts', () => {
+    expect(source).toContain('canRemoveProjectDocuments?: boolean');
+    expect(source).toContain('const canRemove = canRemoveProjectDocuments &&');
+    expect(portalRegisterSource).toContain('canRemoveProjectDocuments={false}');
+    expect(source).toContain("privateDraftAttachment={mode === 'portal-register'");
   });
 });

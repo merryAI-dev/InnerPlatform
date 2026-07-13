@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { useBlocker } from 'react-router';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
@@ -72,6 +73,7 @@ import {
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
 } from '../../platform/project-team-members';
+import { shouldResetProjectEditorDraft } from './project-editor-reset';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -99,6 +101,7 @@ import {
   CommandSeparator,
 } from '../ui/command';
 import { cn } from '../ui/utils';
+import { usePortalNavigationGuard } from '../portal/PortalLayout';
 
 type ProjectEditorStep = 'basic' | 'financial' | 'team' | 'payment' | 'review';
 
@@ -122,6 +125,7 @@ interface ProjectEditorWizardProps {
   topSlot?: ReactNode;
   actions: ProjectEditorAction[];
   busyActionId?: string | null;
+  readOnly?: boolean;
   onContractFileUpload?: (file: File) => Promise<{
     contractDocument: ProjectEditorDraft['contractDocument'];
     contractAnalysis: ProjectRequestContractAnalysis | null;
@@ -132,6 +136,7 @@ interface ProjectEditorWizardProps {
   }>;
   contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
+  canRemoveProjectDocuments?: boolean;
   autosave?: {
     key: string;
     disabled?: boolean;
@@ -448,10 +453,12 @@ export function ProjectEditorWizard({
   topSlot,
   actions,
   busyActionId,
+  readOnly = false,
   onContractFileUpload,
   onProjectDocumentFileUpload,
   contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
+  canRemoveProjectDocuments = true,
   autosave,
   onCancel,
   onSubmit,
@@ -475,9 +482,12 @@ export function ProjectEditorWizard({
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
   const quoteUploadInputRef = useRef<HTMLInputElement | null>(null);
   const proposalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const retryDocumentFileRef = useRef<Partial<Record<ProjectRequestDocumentKind, File>>>({});
+  const submitInFlightRef = useRef(false);
+  const portalNavigationConfirmedRef = useRef(false);
   const draftRef = useRef(draft);
+  const lastPersistedFingerprintRef = useRef(JSON.stringify(createProjectEditorDraft(initialDraft)));
   const lastResetKeyRef = useRef<string | null>(null);
-  const lastInitialDraftFingerprintRef = useRef('');
   const initialDraftFingerprint = useMemo(() => JSON.stringify(createProjectEditorDraft(initialDraft)), [initialDraft]);
   const initialContractDocument = initialDraft.contractDocument ?? null;
   const initialContractAnalysis = initialDraft.contractAnalysis ?? null;
@@ -494,6 +504,20 @@ export function ProjectEditorWizard({
     initial: initialContractDocument,
     canRemoveExistingContractDocument,
   });
+  const { registerNavigationHandler } = usePortalNavigationGuard();
+  const currentDraftFingerprint = JSON.stringify(createProjectEditorDraft(draft));
+  const uploadInProgress = Object.values(documentUploadState).some((state) => state === 'extracting');
+  const hasPendingRetryFile = PROJECT_DOCUMENT_KINDS.some((kind) => Boolean(retryDocumentFileRef.current[kind]));
+  const hasUnsavedInput = currentDraftFingerprint !== lastPersistedFingerprintRef.current;
+  const shouldBlockNavigation = hasUnsavedInput || uploadInProgress || hasPendingRetryFile;
+  const blocker = useBlocker(shouldBlockNavigation);
+  const requestCancel = () => {
+    if (shouldBlockNavigation && typeof window !== 'undefined') {
+      if (!window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?')) return;
+      portalNavigationConfirmedRef.current = true;
+    }
+    onCancel?.();
+  };
 
   useEffect(() => {
     draftRef.current = draft;
@@ -501,18 +525,17 @@ export function ProjectEditorWizard({
 
   useEffect(() => {
     const resetKey = `${draftKey}::${autosave?.key || ''}`;
-    const currentDraftFingerprint = JSON.stringify(createProjectEditorDraft(draftRef.current));
-    if (
-      lastResetKeyRef.current === resetKey
-      && lastInitialDraftFingerprintRef.current
-      && currentDraftFingerprint !== lastInitialDraftFingerprintRef.current
-    ) {
-      lastInitialDraftFingerprintRef.current = initialDraftFingerprint;
-      return;
-    }
+    const currentFingerprint = JSON.stringify(createProjectEditorDraft(draftRef.current));
+    if (!shouldResetProjectEditorDraft({
+      lastResetKey: lastResetKeyRef.current,
+      resetKey,
+      currentFingerprint,
+      lastPersistedFingerprint: lastPersistedFingerprintRef.current,
+      incomingFingerprint: initialDraftFingerprint,
+    })) return;
     lastResetKeyRef.current = resetKey;
-    lastInitialDraftFingerprintRef.current = initialDraftFingerprint;
     const nextDraft = createProjectEditorWizardDraft(initialDraft);
+    lastPersistedFingerprintRef.current = JSON.stringify(createProjectEditorDraft(nextDraft));
     draftRef.current = nextDraft;
     setDraft(nextDraft);
     setStepIndex(0);
@@ -522,7 +545,40 @@ export function ProjectEditorWizard({
     setLastAutosavedAt('');
     setPreloadWarningVisible(false);
     setRestoreCandidate(autosave?.key ? readStoredProjectEditorDraft(autosave.key) : null);
-  }, [autosave?.key, draftKey, initialDraft]);
+  }, [autosave?.key, draftKey, initialDraft, initialDraftFingerprint]);
+
+  useEffect(() => {
+    if (!shouldBlockNavigation || typeof window === 'undefined') {
+      registerNavigationHandler(null);
+      return () => registerNavigationHandler(null);
+    }
+    const confirmLeave = () => {
+      const blocked = !window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?');
+      if (!blocked) portalNavigationConfirmedRef.current = true;
+      return blocked;
+    };
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    registerNavigationHandler(confirmLeave);
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => {
+      registerNavigationHandler(null);
+      window.removeEventListener('beforeunload', beforeUnload);
+    };
+  }, [registerNavigationHandler, shouldBlockNavigation]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (portalNavigationConfirmedRef.current) {
+      portalNavigationConfirmedRef.current = false;
+      blocker.proceed();
+      return;
+    }
+    if (window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?')) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -535,7 +591,7 @@ export function ProjectEditorWizard({
     nextDraft: ProjectEditorDraft,
     nextStepIndex: number,
   ) => {
-    if (!autosave?.key || autosave.disabled) return false;
+    if (readOnly || !autosave?.key || autosave.disabled) return false;
     const now = new Date().toISOString();
     const storedDraft: StoredProjectEditorDraft = {
       schemaVersion: PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION,
@@ -548,6 +604,7 @@ export function ProjectEditorWizard({
     try {
       writeStoredProjectEditorDraft(autosave.key, storedDraft);
       await autosave.onSave?.(storedDraft.draft, nextStepIndex);
+      lastPersistedFingerprintRef.current = JSON.stringify(storedDraft.draft);
       setLastAutosavedAt(now);
       setAutosaveState('saved');
       return true;
@@ -557,10 +614,10 @@ export function ProjectEditorWizard({
       setAutosaveState('error');
       return false;
     }
-  }, [autosave, draftKey]);
+  }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, readOnly]);
 
   useEffect(() => {
-    if (!autosave?.key || autosave.disabled || restoreCandidate) return undefined;
+    if (readOnly || !autosave?.key || autosave.disabled || restoreCandidate) return undefined;
     const isInitialDraft = stepIndex === 0 && JSON.stringify(createProjectEditorDraft(draft)) === initialDraftFingerprint;
     if (isInitialDraft) return undefined;
 
@@ -568,7 +625,7 @@ export function ProjectEditorWizard({
       void persistAutosaveSnapshot(draft, stepIndex);
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [autosave?.disabled, autosave?.key, draft, initialDraftFingerprint, persistAutosaveSnapshot, restoreCandidate, stepIndex]);
+  }, [autosave?.disabled, autosave?.key, draft, initialDraftFingerprint, persistAutosaveSnapshot, readOnly, restoreCandidate, stepIndex]);
 
   const restoreLocalDraft = () => {
     if (!restoreCandidate) return;
@@ -592,14 +649,22 @@ export function ProjectEditorWizard({
   };
 
   const handleActionSubmit = async (actionId: string) => {
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     try {
-      await persistAutosaveSnapshot(draft, stepIndex);
+      if (autosave?.key && !await persistAutosaveSnapshot(draft, stepIndex)) {
+        throw new Error('최신 입력을 임시저장하지 못해 최종 저장을 중단했습니다.');
+      }
       await onSubmit(createProjectEditorDraft(draft), actionId);
+      lastPersistedFingerprintRef.current = JSON.stringify(createProjectEditorDraft(draft));
       if (autosave?.key) removeStoredProjectEditorDraft(autosave.key);
       setAutosaveState('idle');
       setLastAutosavedAt('');
     } catch (error) {
       console.error('[ProjectEditorWizard] submit failed:', error);
+      toast.error(error instanceof Error ? error.message : '저장에 실패했습니다.');
+    } finally {
+      submitInFlightRef.current = false;
     }
   };
 
@@ -715,24 +780,12 @@ export function ProjectEditorWizard({
     throw new Error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드를 사용할 수 없는 화면입니다.`);
   };
 
-  const handleProjectDocumentSelect = async (kind: ProjectRequestDocumentKind, event: ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file) return;
-    if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-      toast.error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일은 PDF로 업로드해 주세요.`);
-      input.value = '';
-      return;
-    }
-    if (file.size > PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES) {
-      const message = `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF는 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`;
-      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
-      setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
-      toast.error(message);
-      input.value = '';
-      return;
-    }
-
+  const processProjectDocument = async (
+    kind: ProjectRequestDocumentKind,
+    file: File,
+    input?: HTMLInputElement,
+  ) => {
+    retryDocumentFileRef.current[kind] = file;
     setDocumentUploadState((prev) => ({ ...prev, [kind]: 'extracting' }));
     setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
     try {
@@ -755,15 +808,35 @@ export function ProjectEditorWizard({
       });
       setDocumentUploadState((prev) => ({ ...prev, [kind]: 'ready' }));
       toast.success(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF 업로드 완료: ${file.name}`);
+      delete retryDocumentFileRef.current[kind];
+      if (input) input.value = '';
     } catch (error) {
       console.error(`[ProjectEditorWizard] ${kind} upload failed:`, error);
       const message = error instanceof Error ? error.message : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드에 실패했습니다.`;
       setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
       setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
       toast.error(message);
-    } finally {
-      input.value = '';
     }
+  };
+
+  const handleProjectDocumentSelect = async (kind: ProjectRequestDocumentKind, event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      toast.error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일은 PDF로 업로드해 주세요.`);
+      input.value = '';
+      return;
+    }
+    if (file.size > PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES) {
+      const message = `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF는 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`;
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
+      setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
+      toast.error(message);
+      input.value = '';
+      return;
+    }
+    await processProjectDocument(kind, file, input);
   };
 
   const removeContractDocument = () => {
@@ -778,6 +851,7 @@ export function ProjectEditorWizard({
     }));
     setDocumentUploadState((prev) => ({ ...prev, contract: 'idle' }));
     setDocumentUploadError((prev) => ({ ...prev, contract: '' }));
+    delete retryDocumentFileRef.current.contract;
   };
 
   const removeSupplementalDocument = (kind: 'quote' | 'proposal') => {
@@ -787,6 +861,7 @@ export function ProjectEditorWizard({
     }));
     setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
     setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
+    delete retryDocumentFileRef.current[kind];
   };
 
   const submitIssues = useMemo(() => {
@@ -923,9 +998,9 @@ export function ProjectEditorWizard({
     const uploadState = documentUploadState[kind];
     const uploadError = documentUploadError[kind];
     const inputRef = getDocumentInputRef(kind);
-    const canRemove = kind === 'contract'
+    const canRemove = canRemoveProjectDocuments && (kind === 'contract'
       ? contractDocumentEditPolicy.canRemoveCurrentContractDocument
-      : Boolean(document);
+      : Boolean(document));
     const removeLabel = kind === 'contract' ? contractDocumentEditPolicy.removeButtonLabel : '첨부 제거';
     const remove = kind === 'contract' ? removeContractDocument : () => removeSupplementalDocument(kind);
 
@@ -950,9 +1025,11 @@ export function ProjectEditorWizard({
                 <span className="text-muted-foreground">
                   {(document.size / 1024 / 1024).toFixed(2)} MB
                 </span>
-                <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
-                  <a href={document.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
-                </Button>
+                {document.downloadURL ? (
+                  <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+                    <a href={document.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+                  </Button>
+                ) : null}
                 {canRemove ? (
                   <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={remove}>
                     <X className="mr-1 h-3.5 w-3.5" />
@@ -989,10 +1066,18 @@ export function ProjectEditorWizard({
               variant="outline"
               className="w-full gap-2 lg:w-auto"
               disabled={uploadState === 'extracting'}
-              onClick={() => inputRef.current?.click()}
+              onClick={() => {
+                const retryFile = retryDocumentFileRef.current[kind];
+                if (retryFile) void processProjectDocument(kind, retryFile, inputRef.current || undefined);
+                else inputRef.current?.click();
+              }}
             >
               {uploadState === 'extracting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              {document ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체` : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`}
+              {retryDocumentFileRef.current[kind]
+                ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 다시 시도`
+                : document
+                  ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체`
+                  : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`}
             </Button>
           </div>
         </div>
@@ -1489,6 +1574,7 @@ export function ProjectEditorWizard({
           <div className="lg:col-span-2">
             <ContractDocumentPreview
               document={draft.contractDocument}
+              privateDraftAttachment={mode === 'portal-register' && !draft.contractDocument.downloadURL}
               title="계약서 원문"
               description="등록하려는 계약서가 맞는지 꼭 확인해주세요!"
               descriptionClassName="text-rose-600"
@@ -1499,6 +1585,7 @@ export function ProjectEditorWizard({
           <div className="lg:col-span-2">
             <ContractDocumentPreview
               document={draft.quoteDocument}
+              privateDraftAttachment={mode === 'portal-register' && !draft.quoteDocument.downloadURL}
               title="견적서 원문"
               description="첨부한 견적서가 맞는지 확인해주세요."
             />
@@ -1508,6 +1595,7 @@ export function ProjectEditorWizard({
           <div className="lg:col-span-2">
             <ContractDocumentPreview
               document={draft.proposalDocument}
+              privateDraftAttachment={mode === 'portal-register' && !draft.proposalDocument.downloadURL}
               title="제안서 원문"
               description="첨부한 제안서가 맞는지 확인해주세요."
             />
@@ -1530,7 +1618,7 @@ export function ProjectEditorWizard({
       {embeddedInShell ? (
         onCancel ? (
           <div className="flex justify-end">
-            <Button variant="outline" size="sm" className="gap-2" onClick={onCancel}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={requestCancel}>
               <ArrowLeft className="h-4 w-4" />
               나가기
             </Button>
@@ -1547,7 +1635,7 @@ export function ProjectEditorWizard({
             {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
           </div>
           {onCancel ? (
-            <Button variant="outline" className="gap-2" onClick={onCancel}>
+            <Button variant="outline" className="gap-2" onClick={requestCancel}>
               <ArrowLeft className="h-4 w-4" />
               나가기
             </Button>
@@ -1638,7 +1726,9 @@ export function ProjectEditorWizard({
           </CardTitle>
         </CardHeader>
         <CardContent className={cn('space-y-5', PROJECT_EDITOR_FORM_SURFACE_CLASS)}>
-          {renderStep()}
+          <fieldset disabled={readOnly} className="contents">
+            {renderStep()}
+          </fieldset>
         </CardContent>
       </Card>
 
@@ -1670,7 +1760,7 @@ export function ProjectEditorWizard({
                 type="button"
                 variant="outline"
                 onClick={() => void handleManualAutosave()}
-                disabled={autosaveState === 'saving'}
+                disabled={readOnly || autosaveState === 'saving'}
                 className="gap-2"
               >
                 {autosaveState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1700,7 +1790,7 @@ export function ProjectEditorWizard({
                     key={action.id}
                     type="button"
                     variant={action.variant || 'default'}
-                    disabled={!!busyActionId || action.disabled || !canSubmit}
+                    disabled={readOnly || autosaveState === 'saving' || !!busyActionId || action.disabled || !canSubmit}
                     onClick={() => void handleActionSubmit(action.id)}
                     className="gap-2"
                   >

@@ -1,34 +1,47 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { AlertTriangle, CheckCircle2, Loader2, Save, SendHorizontal } from 'lucide-react';
-import { collection, doc, limit, onSnapshot, orderBy, query, setDoc, where } from 'firebase/firestore';
+import { useLocation, useNavigate, useParams } from 'react-router';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  LockKeyhole,
+  Pencil,
+  Save,
+  SendHorizontal,
+} from 'lucide-react';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import { usePortalStore } from '../../data/portal-store';
-import type { Project, ProjectRequest, ProjectRequestDraft, ProjectRequestDraftStatus } from '../../data/types';
-import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
+import type { FileAttachment, Project, ProjectRequest } from '../../data/types';
+import { getAuthInstance, getOrgCollectionPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
+import { createEditLeaseClient } from '../../lib/edit-lease-client';
 import {
-  isPlatformApiEnabled,
-  resubmitProjectExecutiveReviewViaBff,
-} from '../../lib/platform-bff-client';
-import {
-  uploadProjectRequestContractFile,
-  uploadProjectRequestSupplementalDocumentFile,
-  type ProjectRequestDocumentKind,
-} from '../../platform/project-contract-upload';
+  createProjectInfoDraftClient,
+  type ProjectInfoAttachment,
+  type ProjectInfoDraft,
+  type ProjectInfoFileLike,
+} from '../../lib/project-info-draft-client';
+import type { ActorLike } from '../../lib/platform-bff-client';
+import { openEditSession, type EditSession } from '../../platform/edit-session';
 import {
   buildProjectEditorDraftFromProject,
+  buildProjectRequestPayloadFromDraft,
   createProjectEditorDraft,
   type ProjectEditorDraft,
 } from '../../platform/project-editor';
 import {
-  buildProjectChangeRequest,
-  resolveProjectRequestPayload,
   resolveProjectRequestKind,
+  resolveProjectRequestPayload,
 } from '../../platform/project-change-request';
-import { buildProjectRequestDraft } from '../../platform/project-request-draft';
+import type { ProjectRequestDocumentKind } from '../../platform/project-contract-upload';
+import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
+import { useEditLease } from '../editing/useEditLease';
+import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Label } from '../ui/label';
@@ -42,269 +55,205 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
+
+type DraftClient = ReturnType<typeof createProjectInfoDraftClient>;
 
 function resolveExecutiveBanner(project: Project) {
   const status = project.executiveReviewStatus || 'PENDING';
   const reason = project.executiveReviewComment || '';
-
-  if (status === 'APPROVED') {
-    return {
-      tone: 'success',
-      title: '승인 완료',
-      description: 'CIC 대표 검토가 승인된 프로젝트입니다. PM이 수정 저장하면 다시 검토 대기로 전환됩니다.',
-    };
-  }
-  if (status === 'REVISION_REJECTED') {
-    return {
-      tone: 'danger',
-      title: '수정 요청 후 반려',
-      description: reason || '수정이 필요한 상태입니다. 내용을 보완한 뒤 다시 제출해 주세요.',
-    };
-  }
-  if (status === 'DUPLICATE_DISCARDED') {
-    return {
-      tone: 'neutral',
-      title: '중복·폐기',
-      description: reason || '중복 또는 폐기 대상으로 정리된 상태입니다. 필요한 경우 내용을 보완해 다시 제출할 수 있습니다.',
-    };
-  }
+  if (status === 'APPROVED') return {
+    tone: 'success', title: '승인 완료',
+    description: 'CIC 대표 검토가 승인된 프로젝트입니다. PM이 수정 저장하면 다시 검토 대기로 전환됩니다.',
+  };
+  if (status === 'REVISION_REJECTED') return {
+    tone: 'danger', title: '수정 요청 후 반려',
+    description: reason || '수정이 필요한 상태입니다. 내용을 보완한 뒤 다시 제출해 주세요.',
+  };
+  if (status === 'DUPLICATE_DISCARDED') return {
+    tone: 'neutral', title: '중복·폐기',
+    description: reason || '중복 또는 폐기 대상으로 정리된 상태입니다. 필요한 경우 내용을 보완해 다시 제출할 수 있습니다.',
+  };
   return {
-    tone: 'warning',
-    title: '검토 대기',
+    tone: 'warning', title: '검토 대기',
     description: 'CIC 대표 검토 대기 상태입니다. 수정 저장 시 같은 승인 대기열에서 최신 값으로 확인됩니다.',
   };
 }
 
 function bannerClassName(tone: string) {
-  if (tone === 'success') return 'border-slate-200 bg-white text-slate-900';
   if (tone === 'danger') return 'border-slate-200 bg-white text-red-700';
   if (tone === 'neutral') return 'border-slate-200 bg-slate-50 text-slate-900';
-  return 'border-slate-200 bg-white text-red-700';
+  if (tone === 'warning') return 'border-slate-200 bg-white text-red-700';
+  return 'border-slate-200 bg-white text-slate-900';
 }
 
-export function PortalProjectEdit() {
+function attachmentDocument(attachment: ProjectInfoAttachment): FileAttachment {
+  return {
+    path: attachment.path,
+    name: attachment.name,
+    downloadURL: '',
+    size: attachment.size,
+    contentType: attachment.contentType,
+    uploadedAt: attachment.uploadedAt || '',
+  };
+}
+
+function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
+  const documents: Partial<Record<ProjectRequestDocumentKind, FileAttachment>> = {};
+  for (const attachment of record.attachmentRefs) documents[attachment.documentKind] = attachmentDocument(attachment);
+  return createProjectEditorDraft({
+    ...(record.payload as Partial<ProjectEditorDraft>),
+    ...(documents.contract ? { contractDocument: documents.contract } : {}),
+    ...(documents.quote ? { quoteDocument: documents.quote } : {}),
+    ...(documents.proposal ? { proposalDocument: documents.proposal } : {}),
+  });
+}
+
+function ProjectInfoEditor({
+  actor,
+  canonicalDraft,
+  departmentOptions,
+  draftClient,
+  members,
+  project,
+  session,
+}: {
+  actor: ActorLike;
+  canonicalDraft: ProjectEditorDraft;
+  departmentOptions: string[];
+  draftClient: DraftClient;
+  members: ReturnType<typeof usePortalStore>['members'];
+  project: Project;
+  session: EditSession;
+}) {
   const navigate = useNavigate();
-  const { user: authUser } = useAuth();
-  const { db, isOnline, orgId } = useFirebase();
-  const { members, myProject } = usePortalStore();
-  const { options: departmentOptions } = useProjectDepartmentSettings();
-  const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
+  const { orgId } = useFirebase();
+  const [record, setRecord] = useState<ProjectInfoDraft | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [resubmitComment, setResubmitComment] = useState('');
-  const serverDraftRef = useRef<ProjectRequestDraft | null>(null);
-  const autosaveKey = `portal-edit-${orgId}-${myProject?.id || 'no-project'}-${authUser?.uid || 'anonymous'}`;
+  const revisionRef = useRef(0);
+  const recordLoadedRef = useRef(false);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const leaseClient = useMemo(() => createEditLeaseClient({
+    tenantId: orgId,
+    actor,
+    sessionId: session.sessionId,
+    resourceType: 'project-info',
+    resourceId: project.id,
+  }), [actor, orgId, project.id, session.sessionId]);
+  const lease = useEditLease({ client: leaseClient });
+  const canResubmit = project.executiveReviewStatus === 'REVISION_REJECTED'
+    || project.executiveReviewStatus === 'DUPLICATE_DISCARDED';
+  const executiveBanner = useMemo(() => resolveExecutiveBanner(project), [project]);
+  const initialDraft = useMemo(
+    () => (record ? editorDraftFromPrivate(record) : canonicalDraft),
+    [canonicalDraft, record],
+  );
+  const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`;
+  const editorCanEdit = lease.canEdit && record !== null;
+  const releaseLeaseAfterDraftOpenFailure = useCallback(async (error: unknown, fallback: string) => {
+    recordLoadedRef.current = false;
+    setRecord(null);
+    await lease.release();
+    toast.error(error instanceof Error ? error.message : fallback);
+  }, [lease.release]);
 
   useEffect(() => {
-    if (!db || !isOnline || !myProject?.id) {
-      setRequestDoc(null);
-      return;
-    }
-
-    const q = query(
-      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
-      where('approvedProjectId', '==', myProject.id),
-      orderBy('requestedAt', 'desc'),
-      limit(1),
-    );
-    return onSnapshot(q, (snapshot) => {
-      setRequestDoc(snapshot.docs[0]?.data() as ProjectRequest || null);
-    }, (error) => {
-      console.error('[PortalProjectEdit] request listen failed:', error);
-      setRequestDoc(null);
-    });
-  }, [db, isOnline, myProject?.id, orgId]);
-
-  const initialDraft = useMemo(
-    () => {
-      if (!myProject) return createProjectEditorDraft();
-      const shouldReadPendingChange = requestDoc?.status === 'PENDING'
-        && resolveProjectRequestKind(requestDoc) === 'CHANGE';
-      const requestPayload = resolveProjectRequestPayload(requestDoc);
-      if (!shouldReadPendingChange) {
-        return buildProjectEditorDraftFromProject(myProject, requestPayload);
+    let cancelled = false;
+    void (async () => {
+      const status = await lease.checkStatus();
+      if (!status.canEdit || !status.ownership || recordLoadedRef.current) return;
+      try {
+        const opened = await draftClient.open(status.ownership);
+        if (cancelled) return;
+        revisionRef.current = opened.draft.draftRevision;
+        recordLoadedRef.current = true;
+        setRecord(opened.draft);
+      } catch (error) {
+        if (cancelled) return;
+        await releaseLeaseAfterDraftOpenFailure(error, '수정 임시저장을 다시 열지 못했습니다.');
       }
-      return buildProjectEditorDraftFromProject({
-        ...myProject,
-        ...requestPayload,
-        id: myProject.id,
-        slug: myProject.slug,
-        orgId: myProject.orgId,
-        createdAt: myProject.createdAt,
-        updatedAt: myProject.updatedAt,
-        isSettled: myProject.isSettled,
-        confirmerName: myProject.confirmerName,
-        lastCheckedAt: myProject.lastCheckedAt,
-        cashflowDiffNote: myProject.cashflowDiffNote,
-      } as Project);
-    },
-    [myProject, requestDoc?.payload, requestDoc?.proposedSnapshot],
-  );
+    })();
+    return () => { cancelled = true; };
+  }, [draftClient, lease.checkStatus, releaseLeaseAfterDraftOpenFailure]);
 
-  const executiveBanner = useMemo(
-    () => (myProject ? resolveExecutiveBanner(myProject) : null),
-    [myProject],
-  );
+  const enqueueMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const run = mutationQueueRef.current.then(operation, operation);
+    mutationQueueRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  }, []);
 
-  const canResubmit = myProject?.executiveReviewStatus === 'REVISION_REJECTED'
-    || myProject?.executiveReviewStatus === 'DUPLICATE_DISCARDED';
-
-  const persistDraft = useCallback(async (
-    draft: ProjectEditorDraft,
-    stepIndex: number,
-    status: ProjectRequestDraftStatus = 'DRAFT',
+  const withOwnership = useCallback(async <T,>(
+    operation: (ownership: { leaseId: string; fence: number }) => Promise<T>,
   ) => {
-    if (!db || !orgId || !myProject?.id || !authUser?.uid) return;
-    const now = new Date().toISOString();
-    const nextDraft = buildProjectRequestDraft({
-      tenantId: orgId,
-      kind: 'CHANGE',
-      ownerId: authUser.uid,
-      ownerName: authUser.name || authUser.email || 'PM',
-      ownerEmail: authUser.email || '',
-      targetProjectId: myProject.id,
-      draftKey: autosaveKey,
-      draft,
-      stepIndex,
-      previousDraft: serverDraftRef.current,
-      status,
-      now,
-    });
-    await setDoc(
-      doc(db, getOrgDocumentPath(orgId, 'projectRequestDrafts', nextDraft.id)),
-      nextDraft,
-      { merge: true },
-    );
-    serverDraftRef.current = nextDraft;
-  }, [authUser?.email, authUser?.name, authUser?.uid, autosaveKey, db, myProject?.id, orgId]);
-
-  const autosaveConfig = useMemo(
-    () => (authUser?.uid ? {
-      key: autosaveKey,
-      onSave: persistDraft,
-    } : undefined),
-    [authUser?.uid, autosaveKey, persistDraft],
-  );
-
-  const persistProject = async (
-    draft: ProjectEditorDraft,
-    options: { forcePendingReview?: boolean; reviewComment?: string | null } = {},
-  ) => {
-    if (!orgId || !myProject || !authUser?.uid) return null;
-    if (!db) {
-      throw new Error('프로젝트 변경 요청을 저장하려면 Firestore 연결이 필요합니다.');
+    const ownership = await lease.checkBeforeSave();
+    if (!ownership) throw new Error('수정 세션이 종료되었거나 다른 세션이 사용 중입니다.');
+    try {
+      return await operation(ownership);
+    } catch (error) {
+      await lease.checkStatus();
+      throw error;
     }
-    const now = new Date().toISOString();
-    const actorName = authUser.name || authUser.email || 'PM';
-    const previousChangeRequest = requestDoc?.status === 'PENDING'
-      && resolveProjectRequestKind(requestDoc) === 'CHANGE'
-      ? requestDoc
-      : null;
-    const changeRequest = buildProjectChangeRequest({
-      baseProject: myProject,
-      draft,
-      previousRequest: previousChangeRequest,
-      actorId: authUser.uid,
-      actorName,
-      actorEmail: authUser.email || '',
-      tenantId: orgId,
-      requestedAt: now,
-    });
+  }, [lease.checkBeforeSave, lease.checkStatus]);
 
-    await setDoc(
-      doc(db, getOrgDocumentPath(orgId, 'projectRequests', changeRequest.id)),
-      {
-        ...changeRequest,
-        ...(options.reviewComment ? { reviewComment: options.reviewComment } : {}),
-      },
-      { merge: true },
-    );
+  const startEditing = useCallback(async () => {
+    const ownership = await lease.acquire();
+    if (!ownership) return;
+    try {
+      const opened = await draftClient.open(ownership);
+      revisionRef.current = opened.draft.draftRevision;
+      recordLoadedRef.current = true;
+      setRecord(opened.draft);
+    } catch (error) {
+      await releaseLeaseAfterDraftOpenFailure(error, '수정 임시저장을 열지 못했습니다.');
+    }
+  }, [draftClient, lease.acquire, releaseLeaseAfterDraftOpenFailure]);
 
-    return changeRequest;
-  };
-
-  const markProjectPendingReview = async (request: ProjectRequest, reviewComment: string | null) => {
-    if (!orgId || !myProject || !authUser?.uid) return;
-    const now = new Date().toISOString();
-    const reviewerName = authUser.name || authUser.email || 'PM';
-    if (isPlatformApiEnabled()) {
-      const idToken = authUser.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
-      await resubmitProjectExecutiveReviewViaBff({
-        tenantId: orgId,
-        actor: {
-          uid: authUser.uid,
-          email: authUser.email,
-          role: authUser.role,
-          idToken,
-        },
-        projectId: myProject.id,
-        payload: {
-          requestId: request.id,
-          ...(reviewComment ? { reviewComment } : {}),
-          reviewerName,
-        },
+  const persistDraft = useCallback((draft: ProjectEditorDraft, stepIndex: number) => enqueueMutation(() => (
+    withOwnership(async (ownership) => {
+      if (!record) throw new Error('수정 임시저장이 준비되지 않았습니다.');
+      const saved = await draftClient.save(ownership, {
+        expectedDraftRevision: revisionRef.current,
+        payload: buildProjectRequestPayloadFromDraft(draft) as unknown as Record<string, unknown>,
+        stepIndex,
       });
+      revisionRef.current = saved.draft.draftRevision;
+      setRecord(saved.draft);
+    })
+  )), [draftClient, enqueueMutation, record, withOwnership]);
+
+  const uploadDocument = useCallback((kind: ProjectRequestDocumentKind, file: File) => enqueueMutation(() => (
+    withOwnership(async (ownership) => {
+      if (!record) throw new Error('수정 임시저장이 준비되지 않았습니다.');
+      const uploaded = await draftClient.upload(ownership, {
+        expectedDraftRevision: revisionRef.current,
+        documentKind: kind,
+        file: file as ProjectInfoFileLike,
+      });
+      revisionRef.current = uploaded.draft.draftRevision;
+      setRecord(uploaded.draft);
+      return { document: attachmentDocument(uploaded.attachment), contractAnalysis: null };
+    })
+  )), [draftClient, enqueueMutation, record, withOwnership]);
+
+  const handleSubmit = async (_draft: ProjectEditorDraft, actionId: string) => {
+    if (busyActionId) return;
+    if (!record) {
+      toast.error('수정 임시저장이 준비되지 않았습니다.');
       return;
     }
-
-    const previousStatus = myProject.executiveReviewStatus || 'PENDING';
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projects', myProject.id)), {
-      executiveReviewStatus: 'PENDING',
-      executiveReviewedAt: now,
-      executiveReviewedById: authUser.uid,
-      executiveReviewedByName: reviewerName,
-      executiveReviewComment: reviewComment,
-      executiveReviewHistory: [
-        ...(Array.isArray(myProject.executiveReviewHistory) ? myProject.executiveReviewHistory : []),
-        {
-          status: 'PENDING',
-          previousStatus,
-          reviewedAt: now,
-          reviewedById: authUser.uid,
-          reviewedByName: reviewerName,
-          reviewComment,
-        },
-      ],
-      updatedAt: now,
-    }, { merge: true });
-    await setDoc(doc(db, getOrgDocumentPath(orgId, 'projectRequests', request.id)), {
-      status: 'PENDING',
-      reviewOutcome: null,
-      reviewedBy: null,
-      reviewedByName: null,
-      reviewedAt: null,
-      reviewComment: null,
-      rejectedReason: null,
-      updatedAt: now,
-    }, { merge: true });
-  };
-
-  const handleSubmit = async (draft: ProjectEditorDraft, actionId: string) => {
-    if (!myProject || busyActionId) return;
-
     setBusyActionId(actionId);
     try {
-      const forcePendingReview = actionId === 'resubmit';
-      const reviewComment = forcePendingReview ? resubmitComment.trim() || null : null;
-      const changeRequest = await persistProject(draft, {
-        forcePendingReview,
-        reviewComment,
-      });
-      if (forcePendingReview && changeRequest) {
-        await markProjectPendingReview(changeRequest, reviewComment);
-      }
-      try {
-        await persistDraft(draft, 4, 'SUBMITTED');
-      } catch (draftError) {
-        console.warn('[PortalProjectEdit] submitted draft marker failed:', draftError);
-      }
-      if (forcePendingReview) {
-        setResubmitComment('');
-      }
+      await enqueueMutation(() => withOwnership((ownership) => draftClient.submit(ownership, {
+        expectedDraftRevision: revisionRef.current,
+        expectedVersion: Number.isInteger(project.version) && Number(project.version) > 0 ? Number(project.version) : 1,
+        resubmit: actionId === 'resubmit',
+        ...(actionId === 'resubmit' && resubmitComment.trim() ? { reviewComment: resubmitComment.trim() } : {}),
+      })));
+      await lease.checkStatus();
+      if (actionId === 'resubmit') setResubmitComment('');
       setSaveSuccessDialogOpen(true);
     } catch (error) {
-      console.error('[PortalProjectEdit] save failed:', error);
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
       throw error;
     } finally {
@@ -312,86 +261,104 @@ export function PortalProjectEdit() {
     }
   };
 
-  const handleContractFileUpload = async (file: File) => {
-    return uploadProjectRequestContractFile({
-      tenantId: orgId,
-      actor: authUser,
-      file,
-    });
-  };
+  const minutesLeft = Math.max(0, Math.ceil(lease.remainingMs / 60_000));
+  const leaseBar = (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+      <div className="flex items-center gap-2 text-slate-700">
+        {lease.canEdit ? <Pencil className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+        <span>{lease.error || (lease.canEdit
+          ? (record ? `수정 세션 사용 중 · ${minutesLeft}분 남음` : '수정 임시저장 준비 중')
+          : '읽기 모드')}</span>
+      </div>
+      <div className="flex gap-2">
+        {lease.canEdit ? (
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => void lease.extend()} disabled={lease.busy}>
+              <Clock3 className="mr-1 h-4 w-4" />30분 연장
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void lease.release()} disabled={lease.busy}>
+              수정 종료
+            </Button>
+          </>
+        ) : (
+          <Button type="button" size="sm" onClick={() => void startEditing()} disabled={lease.busy}>
+            수정 시작
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
-  const handleProjectDocumentFileUpload = async (input: { kind: ProjectRequestDocumentKind; file: File }) => {
-    if (input.kind === 'contract') {
-      const processed = await handleContractFileUpload(input.file);
-      return { document: processed.contractDocument!, contractAnalysis: processed.contractAnalysis };
-    }
-    const document = await uploadProjectRequestSupplementalDocumentFile({
-      tenantId: orgId,
-      actor: authUser,
-      file: input.file,
-      kind: input.kind,
-    });
-    return { document, contractAnalysis: null };
-  };
-
-  if (!myProject) {
-    return (
-      <Card className="border-dashed border-slate-200 bg-slate-50">
-        <CardContent className="p-8 text-center">
-          <p className="text-sm text-slate-600">수정할 프로젝트를 찾지 못했습니다.</p>
-          <Button className="mt-4" onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
-        </CardContent>
-      </Card>
-    );
-  }
+  const topSlot = (
+    <div className="space-y-3">
+      {leaseBar}
+      <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
+              {canResubmit ? '반려 사유' : '검토 상태'}
+            </p>
+            <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
+            {canResubmit ? (
+              <div className="mt-4">
+                <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
+                <Textarea
+                  value={resubmitComment}
+                  onChange={(event) => setResubmitComment(event.target.value)}
+                  placeholder="보완한 내용을 짧게 남길 수 있습니다."
+                  className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
+                  disabled={!editorCanEdit}
+                />
+              </div>
+            ) : null}
+          </div>
+          {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <>
       <ProjectEditorWizard
         mode="portal-edit"
         title="프로젝트 수정"
-        description="등록 화면과 같은 5단계 구조로 수정하고, 승인 상태는 변경 이력과 함께 관리됩니다."
+        description="임시저장 내용은 본인에게만 보이며, 최종 저장 후 승인 대기열에 표시됩니다."
         embeddedInShell
         initialDraft={initialDraft}
         draftKey={autosaveKey}
         members={members}
         departmentOptions={departmentOptions}
-        autosave={autosaveConfig}
+        topSlot={topSlot}
+        readOnly={!editorCanEdit}
+        canRemoveContractDocument={false}
+        canRemoveProjectDocuments={false}
+        autosave={record ? { key: autosaveKey, disabled: !editorCanEdit, onSave: persistDraft } : undefined}
         actions={[
-          { id: 'save', label: '저장', icon: Save },
+          { id: 'save', label: '최종 저장', icon: Save },
           ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
         ]}
         busyActionId={busyActionId}
-        onContractFileUpload={handleContractFileUpload}
-        onProjectDocumentFileUpload={handleProjectDocumentFileUpload}
+        onContractFileUpload={async (file) => {
+          const uploaded = await uploadDocument('contract', file);
+          return { contractDocument: uploaded.document, contractAnalysis: uploaded.contractAnalysis };
+        }}
+        onProjectDocumentFileUpload={({ kind, file }) => uploadDocument(kind, file)}
         onCancel={() => navigate('/portal/project-select')}
-        onSubmit={(draft, actionId) => handleSubmit(draft, actionId)}
-        topSlot={executiveBanner ? (
-          <div className={`rounded-2xl border px-4 py-4 ${bannerClassName(executiveBanner.tone)}`}>
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-                  {canResubmit ? '반려 사유' : '검토 상태'}
-                </p>
-                <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
-                {canResubmit ? (
-                  <div className="mt-4">
-                    <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
-                    <Textarea
-                      value={resubmitComment}
-                      onChange={(event) => setResubmitComment(event.target.value)}
-                      placeholder="보완한 내용을 짧게 남길 수 있습니다."
-                      className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
-                    />
-                  </div>
-                ) : null}
-              </div>
-              {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            </div>
-          </div>
-        ) : null}
+        onSubmit={handleSubmit}
+      />
+      <EditLeaseDialogs
+        warningOpen={lease.warningOpen}
+        expiredOpen={lease.expiredOpen}
+        conflictOpen={lease.conflictOpen}
+        holder={lease.holder}
+        busy={lease.busy}
+        onDismissWarning={lease.dismissWarning}
+        onExtend={() => { void lease.extend(); }}
+        onContinueReadOnly={lease.continueReadOnly}
+        onReacquire={() => { void startEditing(); }}
       />
       <AlertDialog open={saveSuccessDialogOpen} onOpenChange={setSaveSuccessDialogOpen}>
         <AlertDialogContent className="max-w-md border border-slate-200 bg-white">
@@ -410,5 +377,134 @@ export function PortalProjectEdit() {
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+export function PortalProjectEdit() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
+  const routeProjectId = routeProjectIdParam?.trim() || '';
+  const { user } = useAuth();
+  const { db, isOnline, orgId } = useFirebase();
+  const { activeProjectId, isLoading: portalLoading, members, myProject: sessionProject, projects } = usePortalStore();
+  const { options: departmentOptions } = useProjectDepartmentSettings();
+  const routeProject = routeProjectId ? projects.find((project) => project.id === routeProjectId) || null : null;
+  const fallbackProject = projects.find((project) => project.id === activeProjectId) || sessionProject;
+  const project = routeProjectId ? routeProject : fallbackProject;
+  const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const [requestDoc, setRequestDoc] = useState<ProjectRequest | null>(null);
+  const [bootstrap, setBootstrap] = useState<{
+    actor: ActorLike;
+    draftClient: DraftClient;
+    session: EditSession;
+  } | null>(null);
+  const [error, setError] = useState('');
+  const identityKey = [user?.uid, user?.email, user?.name, user?.role].join('|');
+
+  useEffect(() => {
+    if (routeProjectId || !project?.id) return;
+    navigate(resolvePortalProjectResourcePath(currentPath, project.id), { replace: true });
+  }, [currentPath, navigate, project?.id, routeProjectId]);
+
+  useEffect(() => {
+    if (!db || !isOnline || !project?.id) {
+      setRequestDoc(null);
+      return undefined;
+    }
+    const requestQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
+      where('approvedProjectId', '==', project.id),
+      orderBy('requestedAt', 'desc'),
+      limit(1),
+    );
+    return onSnapshot(requestQuery, (snapshot) => {
+      setRequestDoc(snapshot.docs[0]?.data() as ProjectRequest || null);
+    }, () => setRequestDoc(null));
+  }, [db, isOnline, orgId, project?.id]);
+
+  useEffect(() => {
+    if (!user?.uid || !project?.id) {
+      setBootstrap(null);
+      return undefined;
+    }
+    let cancelled = false;
+    let session: EditSession | null = null;
+    void (async () => {
+      try {
+        setError('');
+        session = await openEditSession();
+        const idToken = user.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+        const actor: ActorLike = { uid: user.uid, email: user.email, role: user.role, idToken };
+        const draftClient = createProjectInfoDraftClient({
+          tenantId: orgId, actor, sessionId: session.sessionId, projectId: project.id,
+        });
+        if (!cancelled) setBootstrap({ actor, draftClient, session });
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : '수정 세션을 준비하지 못했습니다.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+      session?.dispose();
+    };
+  // Token refresh must not remount the editor; identity or project changes must.
+  }, [identityKey, orgId, project?.id]);
+
+  useEffect(() => {
+    const idToken = user?.idToken;
+    if (!user?.uid || !idToken || !project?.id) return;
+    setBootstrap((current) => {
+      if (!current || current.actor.uid !== user.uid || current.actor.idToken === idToken) return current;
+      const actor = { ...current.actor, idToken };
+      return {
+        ...current,
+        actor,
+        draftClient: createProjectInfoDraftClient({
+          tenantId: orgId,
+          actor,
+          sessionId: current.session.sessionId,
+          projectId: project.id,
+        }),
+      };
+    });
+  }, [orgId, project?.id, user?.idToken, user?.uid]);
+
+  const canonicalDraft = useMemo(() => {
+    if (!project) return createProjectEditorDraft();
+    const pendingChange = requestDoc?.status === 'PENDING' && resolveProjectRequestKind(requestDoc) === 'CHANGE';
+    return buildProjectEditorDraftFromProject(project, pendingChange ? resolveProjectRequestPayload(requestDoc) : undefined);
+  }, [project, requestDoc]);
+
+  if (!project && portalLoading) {
+    return (
+      <div className="flex min-h-48 items-center justify-center text-sm text-slate-500" role="status">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />프로젝트를 불러오는 중...
+      </div>
+    );
+  }
+  if (!project) {
+    return (
+      <Card className="border-dashed border-slate-200 bg-slate-50">
+        <CardContent className="p-8 text-center">
+          <p className="text-sm text-slate-600">수정할 프로젝트를 찾지 못했습니다.</p>
+          <Button className="mt-4" onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (error) return <div className="rounded-lg border border-red-200 bg-white p-5 text-sm text-red-700">{error}</div>;
+  if (!bootstrap) return <div className="p-6 text-sm text-muted-foreground">읽기 모드를 준비하는 중...</div>;
+  return (
+    <ProjectInfoEditor
+      key={project.id}
+      actor={bootstrap.actor}
+      canonicalDraft={canonicalDraft}
+      departmentOptions={departmentOptions}
+      draftClient={bootstrap.draftClient}
+      members={members}
+      project={project}
+      session={bootstrap.session}
+    />
   );
 }

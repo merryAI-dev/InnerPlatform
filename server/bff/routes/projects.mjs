@@ -13,6 +13,7 @@ import {
   parseLimit, parseCursor, buildListResponse,
   ensureDocumentExists, upsertVersionedDoc, mergeSystemManagedDoc,
   stripServerManagedFields, stripExpectedVersion, stripUndefinedDeep, readOptionalText, decodeHeaderValue,
+  normalizeRole,
 } from '../bff-utils.mjs';
 import {
   parseWithSchema,
@@ -72,7 +73,7 @@ function formatOptionalProjectAmount(value, explicit) {
   return Number.isFinite(value) ? formatKrw(value) : '-';
 }
 
-function buildProjectRegistrationSlackPayload(projectRequest) {
+export function buildProjectRegistrationSlackPayload(projectRequest) {
   const payload = projectRequest?.payload && typeof projectRequest.payload === 'object'
     ? projectRequest.payload
     : {};
@@ -282,6 +283,7 @@ export async function mergeProjectAndRequestDocs({
   buildProjectPatch,
   buildRequestPatch,
   requestRefs,
+  enforceChangeRequestVersion = false,
   tenantId,
   actorId,
   now,
@@ -292,10 +294,42 @@ export async function mergeProjectAndRequestDocs({
     const snap = await tx.get(projectRef);
     if (!snap.exists) throw createHttpError(404, notFoundMessage || `Document not found: ${projectPath}`, 'not_found');
 
+    const resolvedRequestRefs = Array.isArray(requestRefs) ? requestRefs : [];
+    const requestSnaps = await Promise.all(resolvedRequestRefs.map((ref) => tx.get(ref)));
+    const existingRequestIndexes = requestSnaps.flatMap((requestSnap, index) => requestSnap.exists ? [index] : []);
+    if (enforceChangeRequestVersion && existingRequestIndexes.length > 1) {
+      throw createHttpError(409, 'Duplicate project request collections must be reconciled', 'request_collection_conflict');
+    }
+    const currentRequestIndex = existingRequestIndexes[0] ?? -1;
+    const currentRequestSnap = currentRequestIndex >= 0 ? requestSnaps[currentRequestIndex] : null;
+    const currentRequestRef = currentRequestIndex >= 0 ? resolvedRequestRefs[currentRequestIndex] : null;
+    const currentRequest = currentRequestSnap ? (currentRequestSnap.data() || {}) : null;
+
     const current = snap.data() || {};
     const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
     const nextVersion = currentVersion + 1;
-    const projectPatch = buildProjectPatch(current);
+    if (enforceChangeRequestVersion && resolvedRequestRefs.length > 0 && !currentRequest) {
+      throw createHttpError(409, 'Project request changed before approval', 'canonical_version_conflict');
+    }
+    if (enforceChangeRequestVersion && isProjectChangeRequest(currentRequest)) {
+      const baseProjectVersion = Number(currentRequest.baseProjectVersion);
+      const targetProjectVersion = Number(currentRequest.targetProjectVersion);
+      if (
+        readOptionalText(currentRequest.status) !== 'PENDING'
+        || !Number.isSafeInteger(baseProjectVersion)
+        || baseProjectVersion < 1
+        || !Number.isSafeInteger(targetProjectVersion)
+        || targetProjectVersion !== baseProjectVersion + 1
+        || targetProjectVersion !== currentVersion
+      ) {
+        throw createHttpError(
+          409,
+          `Canonical version mismatch: request ${baseProjectVersion}->${targetProjectVersion}, actual ${currentVersion}`,
+          'canonical_version_conflict',
+        );
+      }
+    }
+    const projectPatch = buildProjectPatch(current, currentRequest, nextVersion);
     const document = {
       ...current, ...projectPatch, tenantId, version: nextVersion,
       createdBy: current.createdBy || actorId, createdAt: current.createdAt || now,
@@ -304,15 +338,13 @@ export async function mergeProjectAndRequestDocs({
     const sanitizedProject = stripUndefinedDeep(document);
     tx.set(projectRef, sanitizedProject, { merge: true });
 
-    const requestPatch = buildRequestPatch?.(current) || null;
-    if (requestPatch) {
+    const requestPatch = buildRequestPatch?.(current, currentRequest, nextVersion) || null;
+    if (requestPatch && currentRequestRef) {
       const sanitizedRequestPatch = stripUndefinedDeep(requestPatch);
-      for (const ref of requestRefs) {
-        tx.set(ref, sanitizedRequestPatch, { merge: true });
-      }
+      tx.set(currentRequestRef, sanitizedRequestPatch, { merge: true });
     }
 
-    return { version: nextVersion, data: sanitizedProject };
+    return { version: nextVersion, data: sanitizedProject, request: currentRequest };
   });
 }
 
@@ -366,10 +398,321 @@ function normalizeProjectPhase(value) {
   return value === 'PROSPECT' || value === 'CONFIRMED' ? value : 'CONFIRMED';
 }
 
+async function readProjectAttachmentMember({ db, tenantId, actorId }) {
+  const normalizedActorId = readOptionalText(actorId);
+  if (!normalizedActorId || normalizedActorId.includes('/')) {
+    throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+  }
+  const memberSnap = await db.doc(`orgs/${tenantId}/members/${normalizedActorId}`).get();
+  const member = memberSnap.exists ? (memberSnap.data() || {}) : null;
+  if (
+    !member
+    || readOptionalText(member.uid) !== normalizedActorId
+    || readOptionalText(member.status).toUpperCase() !== 'ACTIVE'
+  ) {
+    throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+  }
+  return member;
+}
+
+function sendPrivateProjectAttachment(res, downloaded, attachment, objectName) {
+  const buffer = Buffer.isBuffer(downloaded?.buffer)
+    ? downloaded.buffer
+    : Buffer.from(downloaded?.buffer || []);
+  const fileName = readOptionalText(attachment?.name) || objectName;
+  const contentType = readOptionalText(downloaded?.contentType);
+  res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
+    ? contentType
+    : 'application/octet-stream');
+  res.setHeader('content-length', String(buffer.byteLength));
+  res.setHeader('cache-control', 'private, no-store');
+  res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+  res.status(200).send(buffer);
+}
+
 function normalizeProjectType(value) {
   return ['C1', 'A1', 'A2', 'I1', 'I2', 'I3', 'D1', 'S1', 'S2', 'E1', 'P1', 'Z1'].includes(value)
     ? value
     : 'D1';
+}
+
+const REGISTRATION_PROJECT_TYPES = new Set(['C1', 'A1', 'A2', 'I1', 'I2', 'I3', 'D1', 'S1', 'S2', 'E1', 'P1', 'Z1']);
+const PRIVATE_DOCUMENT_KINDS = ['contract', 'quote', 'proposal'];
+const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const REGISTRATION_PAYMENT_FIELDS = ['contract', 'interim', 'final'];
+const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+
+function invalidRegistration(message) {
+  throw createHttpError(422, message, 'project_registration_invalid');
+}
+
+function isRealIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+function assertRegistrationAmount(value, fieldName, { required = false } = {}) {
+  if (value === undefined || value === null) {
+    if (required) invalidRegistration(`Project registration ${fieldName} is required`);
+    return;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isSafeInteger(value) || value < 0) {
+    invalidRegistration(`Project registration ${fieldName} must be a non-negative integer`);
+  }
+}
+
+function assertRegistrationFinancials(payload, type) {
+  for (const field of REGISTRATION_AMOUNT_FIELDS) {
+    assertRegistrationAmount(payload[field], field, { required: field === 'contractAmount' && type !== 'I1' });
+  }
+
+  if (payload.paymentPlan !== undefined && payload.paymentPlan !== null) {
+    if (typeof payload.paymentPlan !== 'object' || Array.isArray(payload.paymentPlan)) {
+      invalidRegistration('Project registration paymentPlan is invalid');
+    }
+    for (const field of REGISTRATION_PAYMENT_FIELDS) {
+      assertRegistrationAmount(payload.paymentPlan[field], `paymentPlan.${field}`, { required: true });
+    }
+  }
+
+  if (payload.financialInputFlags !== undefined && payload.financialInputFlags !== null) {
+    if (typeof payload.financialInputFlags !== 'object' || Array.isArray(payload.financialInputFlags)) {
+      invalidRegistration('Project registration financialInputFlags is invalid');
+    }
+    for (const field of REGISTRATION_FINANCIAL_FLAG_FIELDS) {
+      if (
+        Object.prototype.hasOwnProperty.call(payload.financialInputFlags, field)
+        && typeof payload.financialInputFlags[field] !== 'boolean'
+      ) {
+        invalidRegistration(`Project registration financialInputFlags.${field} must be boolean`);
+      }
+    }
+  }
+
+  if (type !== 'I1') {
+    const contractStart = readOptionalText(payload.contractStart);
+    const contractEnd = readOptionalText(payload.contractEnd);
+    if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+      invalidRegistration('Project registration contract dates are invalid');
+    }
+  }
+}
+
+function registrationAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+}
+
+function registrationSlug(value, fallback) {
+  return readOptionalText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 50) || fallback;
+}
+
+function registrationFinancialInputFlags(value = {}, amounts = {}) {
+  return {
+    contractAmount: value?.contractAmount === true || registrationAmount(amounts.contractAmount) > 0,
+    salesVatAmount: value?.salesVatAmount === true || registrationAmount(amounts.salesVatAmount) > 0,
+    totalRevenueAmount: value?.totalRevenueAmount === true || registrationAmount(amounts.totalRevenueAmount) > 0,
+    supportAmount: value?.supportAmount === true || registrationAmount(amounts.supportAmount) > 0,
+  };
+}
+
+function registrationSettlementSheetPolicy(value, fundInputMode) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const preset = ['STANDARD', 'DIRECT_ENTRY', 'BALANCE_TRACKING'].includes(source.preset)
+    ? source.preset
+    : (fundInputMode === 'DIRECT_ENTRY' ? 'DIRECT_ENTRY' : 'STANDARD');
+  const boolean = (key, fallback) => typeof source[key] === 'boolean' ? source[key] : fallback;
+  const defaultReadOnly = preset === 'BALANCE_TRACKING'
+    ? ['balance', 'expenseAmount', 'bankAmount', 'vatIn']
+    : (preset === 'DIRECT_ENTRY' ? ['balance'] : []);
+  const readOnlyDerivedFields = Array.isArray(source.readOnlyDerivedFields)
+    ? source.readOnlyDerivedFields.filter((field) => ['balance', 'expenseAmount', 'bankAmount', 'vatIn'].includes(field))
+    : defaultReadOnly;
+  return {
+    preset,
+    allowAdjustmentRows: boolean('allowAdjustmentRows', preset !== 'STANDARD'),
+    allowRowDelete: boolean('allowRowDelete', preset !== 'BALANCE_TRACKING'),
+    autoComputeBalance: boolean('autoComputeBalance', true),
+    autoComputeExpenseFromBank: boolean('autoComputeExpenseFromBank', preset === 'STANDARD'),
+    autoComputeBankFromExpense: boolean('autoComputeBankFromExpense', true),
+    requireCounterparty: boolean('requireCounterparty', true),
+    requireNoteForAdjustment: boolean('requireNoteForAdjustment', true),
+    requireEvidenceBeforeSubmit: boolean('requireEvidenceBeforeSubmit', false),
+    preserveExplicitZero: boolean('preserveExplicitZero', true),
+    readOnlyDerivedFields: [...new Set(readOnlyDerivedFields)],
+  };
+}
+
+function registrationPrivateDocuments(attachmentRefs) {
+  const latest = new Map();
+  for (const attachment of Array.isArray(attachmentRefs) ? attachmentRefs : []) {
+    const documentKind = readOptionalText(attachment?.documentKind);
+    const path = readOptionalText(attachment?.path);
+    if (!PRIVATE_DOCUMENT_KINDS.includes(documentKind) || !path) continue;
+    latest.set(documentKind, stripUndefinedDeep({
+      documentKind,
+      path,
+      name: readOptionalText(attachment?.name),
+      size: Number.isSafeInteger(attachment?.size) && attachment.size >= 0 ? attachment.size : 0,
+      contentType: readOptionalText(attachment?.contentType),
+      uploadedAt: readOptionalText(attachment?.uploadedAt),
+      visibility: 'PRIVATE',
+    }));
+  }
+  return {
+    contractDocument: latest.get('contract') || null,
+    quoteDocument: latest.get('quote') || null,
+    proposalDocument: latest.get('proposal') || null,
+  };
+}
+
+function assertRegistrationPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    invalidRegistration('Project registration payload is invalid');
+  }
+  const type = readOptionalText(payload.type);
+  const managerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName);
+  if (!readOptionalText(payload.name) || !readOptionalText(payload.department) || !managerName || !REGISTRATION_PROJECT_TYPES.has(type)) {
+    invalidRegistration('Project registration is missing required fields');
+  }
+  assertRegistrationFinancials(payload, type);
+  if (
+    type !== 'I1'
+    && (
+      payload.financialInputFlags?.contractAmount !== true
+    )
+  ) {
+    invalidRegistration('Project registration financial fields are incomplete');
+  }
+}
+
+export function buildProjectRegistrationCanonicalDocuments({
+  tenantId,
+  projectId,
+  projectRequestId,
+  sourceDraftId,
+  payload,
+  attachmentRefs,
+  actorId,
+  actorName,
+  actorEmail,
+  timestamp,
+}) {
+  assertRegistrationPayload(payload);
+  const ownerId = readOptionalText(payload.registeredById) || readOptionalText(payload.managerId) || actorId;
+  const ownerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName) || actorName;
+  const ownerEmail = readOptionalText(payload.registeredByEmail) || (ownerId === actorId ? readOptionalText(actorEmail) : '');
+  const fundInputMode = normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode));
+  const documents = registrationPrivateDocuments(attachmentRefs);
+  const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  const requestPayload = stripUndefinedDeep({
+    name: readOptionalText(payload.name),
+    officialContractName: readOptionalText(payload.officialContractName),
+    type: normalizeProjectType(readOptionalText(payload.type)),
+    status: normalizeProjectStatus(readOptionalText(payload.status)),
+    phase: normalizeProjectPhase(readOptionalText(payload.phase)),
+    description: readOptionalText(payload.description),
+    clientOrg: readOptionalText(payload.clientOrg),
+    department: readOptionalText(payload.department),
+    groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(payload.name),
+    currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
+    contractAmount: registrationAmount(payload.contractAmount),
+    salesVatAmount: registrationAmount(payload.salesVatAmount),
+    totalRevenueAmount: registrationAmount(payload.totalRevenueAmount),
+    supportAmount: registrationAmount(payload.supportAmount),
+    financialInputFlags: registrationFinancialInputFlags(payload.financialInputFlags, payload),
+    contractStart: readOptionalText(payload.contractStart),
+    contractEnd: readOptionalText(payload.contractEnd),
+    contractType: normalizeProjectContractType(payload.contractType),
+    settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
+    basis: normalizeBasis(readOptionalText(payload.basis)),
+    accountType: normalizeAccountType(readOptionalText(payload.accountType)),
+    fundInputMode,
+    settlementSheetPolicy: registrationSettlementSheetPolicy(payload.settlementSheetPolicy, fundInputMode),
+    paymentPlan: {
+      contract: registrationAmount(payload.paymentPlan?.contract),
+      interim: registrationAmount(payload.paymentPlan?.interim),
+      final: registrationAmount(payload.paymentPlan?.final),
+    },
+    paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
+    settlementGuide: readOptionalText(payload.settlementGuide),
+    finalPaymentNote: readOptionalText(payload.finalPaymentNote),
+    projectPurpose: readOptionalText(payload.projectPurpose),
+    registeredById: ownerId,
+    registeredByName: ownerName,
+    registeredByEmail: ownerEmail,
+    managerId: ownerId,
+    managerName: ownerName,
+    teamName: readOptionalText(payload.teamName),
+    teamMembers: teamMembersDetailed.map(formatProjectRequestTeamMember).join(', '),
+    teamMembersDetailed,
+    participantCondition: readOptionalText(payload.participantCondition),
+    note: readOptionalText(payload.note),
+    ...documents,
+    contractAnalysis: payload.contractAnalysis && typeof payload.contractAnalysis === 'object'
+      ? payload.contractAnalysis
+      : null,
+  });
+  const projectPatch = buildProjectPatchFromChangeRequestPayload(requestPayload, {});
+  const project = stripUndefinedDeep({
+    id: projectId,
+    slug: registrationSlug(requestPayload.name, projectId),
+    orgId: tenantId,
+    tenantId,
+    registrationSource: 'pm_portal',
+    executiveReviewStatus: 'PENDING',
+    executiveReviewHistory: [{
+      status: 'PENDING',
+      previousStatus: null,
+      reviewedAt: timestamp,
+      reviewedById: actorId,
+      reviewedByName: actorName,
+      reviewComment: 'PM 신규 등록',
+    }],
+    registeredAt: timestamp,
+    ...projectPatch,
+    quoteDocument: documents.quoteDocument,
+    proposalDocument: documents.proposalDocument,
+    taxInvoiceAmount: 0,
+    isSettled: false,
+    confirmerName: '',
+    lastCheckedAt: '',
+    cashflowDiffNote: '',
+    version: 1,
+    createdBy: actorId,
+    createdAt: timestamp,
+    updatedBy: actorId,
+    updatedAt: timestamp,
+  });
+  const projectRequest = stripUndefinedDeep({
+    id: projectRequestId,
+    sourceDraftId,
+    tenantId,
+    requestKind: 'REGISTRATION',
+    requestVersion: 1,
+    status: 'PENDING',
+    reviewOutcome: null,
+    payload: requestPayload,
+    requestedBy: actorId,
+    requestedByName: actorName,
+    requestedByEmail: readOptionalText(actorEmail),
+    requestedAt: timestamp,
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    approvedProjectId: projectId,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  return { project, projectRequest };
 }
 
 function normalizeSettlementType(value) {
@@ -514,6 +857,170 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
   }), 'totalRevenueAmount');
 }
 
+const PROJECT_INFO_CHANGE_LABELS = {
+  name: '프로젝트명',
+  officialContractName: '공식 계약명',
+  clientOrg: '계약 대상',
+  department: '담당조직(CIC)',
+  type: '프로젝트 유형',
+  contractStart: '계약 시작일',
+  contractEnd: '계약 종료일',
+  currency: '통화',
+  contractAmount: '계약금액',
+  totalRevenueAmount: '총수익',
+  supportAmount: '지원금',
+  settlementType: '정산 유형',
+  basis: '정산 기준',
+  accountType: '통장 유형',
+  fundInputMode: '자금 입력 방식',
+  registeredByName: '사업 담당자',
+  teamName: '사내기업팀',
+  teamMembersDetailed: '서류상 참여인력',
+  paymentPlan: '입금 분할',
+  paymentPlanDesc: '입금 계획',
+  finalPaymentNote: '최종 입금 메모',
+  projectPurpose: '프로젝트 목적',
+  description: '주요 내용',
+  note: '비고',
+  contractDocument: '계약서 PDF',
+  quoteDocument: '견적서 PDF',
+  proposalDocument: '제안서 PDF',
+};
+
+const PROJECT_INFO_PAYLOAD_FIELDS = [
+  'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg',
+  'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
+  'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'contractStart', 'contractEnd',
+  'contractType', 'settlementType', 'basis', 'accountType', 'fundInputMode',
+  'settlementSheetPolicy', 'paymentPlan', 'paymentPlanDesc', 'settlementGuide',
+  'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
+  'registeredByEmail', 'managerId', 'managerName', 'teamName', 'teamMembers',
+  'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
+  'quoteDocument', 'proposalDocument', 'contractAnalysis',
+];
+
+function projectInfoChangeValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'object') {
+    if (readOptionalText(value?.name)) return readOptionalText(value.name);
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
+  return Object.entries(PROJECT_INFO_CHANGE_LABELS).flatMap(([key, label]) => {
+    const before = projectInfoChangeValue(beforeSnapshot[key]);
+    const after = projectInfoChangeValue(proposedSnapshot[key]);
+    return before === after ? [] : [{ key, label, before, after }];
+  });
+}
+
+function projectInfoPayloadWithDocuments(payload, project, attachmentRefs) {
+  const privateDocuments = registrationPrivateDocuments(attachmentRefs);
+  const normalizedPatch = buildProjectPatchFromChangeRequestPayload(payload, project);
+  const proposedWithLegacyFallback = buildProjectRequestPayloadFromProject({ ...project, ...normalizedPatch }, payload);
+  const proposed = Object.fromEntries(PROJECT_INFO_PAYLOAD_FIELDS.flatMap((field) => (
+    Object.hasOwn(proposedWithLegacyFallback, field) ? [[field, proposedWithLegacyFallback[field]]] : []
+  )));
+  return stripUndefinedDeep({
+    ...proposed,
+    contractDocument: privateDocuments.contractDocument || payload.contractDocument || project.contractDocument || null,
+    quoteDocument: privateDocuments.quoteDocument || payload.quoteDocument || project.quoteDocument || null,
+    proposalDocument: privateDocuments.proposalDocument || payload.proposalDocument || project.proposalDocument || null,
+    contractAnalysis: payload.contractAnalysis || project.contractAnalysis || null,
+  });
+}
+
+export function buildProjectInfoDraftSeed(project, previousRequest) {
+  const isPendingChange = readOptionalText(previousRequest?.requestKind) === 'CHANGE'
+    && readOptionalText(previousRequest?.status) === 'PENDING';
+  const pendingPayload = isPendingChange
+    ? (previousRequest.proposedSnapshot || previousRequest.payload)
+    : null;
+  if (pendingPayload && typeof pendingPayload === 'object' && !Array.isArray(pendingPayload)) {
+    return projectInfoPayloadWithDocuments(pendingPayload, project, []);
+  }
+  return projectInfoPayloadWithDocuments(buildProjectRequestPayloadFromProject(project), project, []);
+}
+
+export function buildProjectInfoChangeSubmission({
+  tenantId,
+  project,
+  previousRequest,
+  payload,
+  attachmentRefs,
+  actorId,
+  actorName,
+  actorEmail,
+  timestamp,
+  targetProjectVersion,
+  resubmit = false,
+  reviewComment,
+}) {
+  assertRegistrationPayload(payload);
+  const beforeSnapshot = projectInfoPayloadWithDocuments(
+    buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
+    project,
+    [],
+  );
+  const proposedSnapshot = projectInfoPayloadWithDocuments(payload, project, attachmentRefs);
+  const changedFields = projectInfoChanges(beforeSnapshot, proposedSnapshot);
+  const currentVersion = Number.isInteger(project.version) && project.version > 0 ? project.version : 1;
+  const requestVersion = Number.isInteger(previousRequest?.requestVersion) && previousRequest.requestVersion > 0
+    ? previousRequest.requestVersion + 1
+    : 1;
+  const projectPatch = resubmit ? {
+    executiveReviewStatus: 'PENDING',
+    executiveReviewedAt: timestamp,
+    executiveReviewedById: actorId,
+    executiveReviewedByName: actorName,
+    executiveReviewComment: readOptionalText(reviewComment) || null,
+    executiveReviewHistory: [
+      ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
+      {
+        status: 'PENDING',
+        previousStatus: readOptionalText(project.executiveReviewStatus) || 'PENDING',
+        reviewedAt: timestamp,
+        reviewedById: actorId,
+        reviewedByName: actorName,
+        reviewComment: readOptionalText(reviewComment) || null,
+        ...(changedFields.length ? { changes: changedFields } : {}),
+      },
+    ],
+  } : {};
+  const projectRequestId = `change-${readOptionalText(project.id)}`;
+  const projectRequest = stripUndefinedDeep({
+    id: projectRequestId,
+    tenantId,
+    requestKind: 'CHANGE',
+    targetProjectId: project.id,
+    approvedProjectId: project.id,
+    baseProjectVersion: currentVersion,
+    targetProjectVersion,
+    requestVersion,
+    beforeSnapshot,
+    proposedSnapshot,
+    changedFields,
+    humanSummary: `${actorName || '요청자'}가 요청한 프로젝트 변경입니다. 기준 프로젝트 v${currentVersion} · 요청 v${requestVersion}`,
+    status: 'PENDING',
+    reviewOutcome: null,
+    payload: proposedSnapshot,
+    requestedBy: actorId,
+    requestedByName: actorName,
+    requestedByEmail: readOptionalText(actorEmail),
+    requestedAt: timestamp,
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    reviewComment: readOptionalText(reviewComment) || null,
+    rejectedReason: null,
+    createdAt: previousRequest?.createdAt || timestamp,
+    updatedAt: timestamp,
+  });
+  return { projectPatch, projectRequest };
+}
+
 function isProjectChangeRequest(request) {
   return readOptionalText(request?.requestKind) === 'CHANGE';
 }
@@ -652,7 +1159,7 @@ function resolveParticipationSettlementSystem(project) {
   return 'PRIVATE';
 }
 
-async function syncProjectParticipationEntries({
+export async function syncProjectParticipationEntries({
   db,
   tenantId,
   project,
@@ -723,6 +1230,229 @@ async function syncProjectParticipationEntries({
   }
 }
 
+export function createProjectRegistrationSubmittedOutboxHandler({
+  db,
+  driveService,
+  projectRegistrationSlackService,
+  projectRegistrationAttachmentStorageService,
+  now = () => new Date().toISOString(),
+}) {
+  function assertCurrentClaim(outbox, event) {
+    if (
+      event?.claimToken
+      && (outbox?.status !== 'PROCESSING' || outbox?.claimToken !== event.claimToken)
+    ) {
+      throw new Error('Project registration outbox claim is no longer current');
+    }
+  }
+
+  async function mutateSideEffects(event, mutate) {
+    const ref = db.doc(`outbox/${event.id}`);
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('Project registration outbox event is missing');
+      const outbox = snap.data() || {};
+      assertCurrentClaim(outbox, event);
+      const current = outbox.sideEffects && typeof outbox.sideEffects === 'object'
+        ? outbox.sideEffects
+        : {};
+      const next = mutate({ ...current });
+      if (!next) return false;
+      tx.set(ref, { sideEffects: next }, { merge: true });
+      return true;
+    });
+  }
+
+  return async (event) => {
+    const tenantId = readOptionalText(event?.tenantId);
+    const projectId = readOptionalText(event?.payload?.projectId) || readOptionalText(event?.entityId);
+    const projectRequestId = readOptionalText(event?.payload?.projectRequestId);
+    if (!tenantId || !projectId || !projectRequestId) {
+      throw new Error('Project registration outbox event is missing canonical IDs');
+    }
+
+    const projectRef = db.doc(`orgs/${tenantId}/projects/${projectId}`);
+    const requestRef = db.doc(`orgs/${tenantId}/project_requests/${projectRequestId}`);
+    let [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
+    if (!projectSnap.exists || !requestSnap.exists) {
+      throw new Error('Project registration canonical documents are missing');
+    }
+    let project = { id: projectId, ...(projectSnap.data() || {}) };
+    const projectRequest = { id: projectRequestId, ...(requestSnap.data() || {}) };
+    if (readOptionalText(projectRequest.approvedProjectId) !== projectId) {
+      throw new Error('Project registration request does not match its project');
+    }
+
+    const timestamp = new Date(now()).toISOString();
+    const attachmentRefs = Array.isArray(event?.payload?.attachmentRefs)
+      ? event.payload.attachmentRefs
+      : [];
+    if (attachmentRefs.length === 0) {
+      await mutateSideEffects(event, (sideEffects) => {
+        if (['DONE', 'SKIPPED'].includes(sideEffects.registrationAttachments)) return null;
+        return {
+          ...sideEffects,
+          registrationAttachments: 'SKIPPED',
+          registrationAttachmentsAt: timestamp,
+        };
+      });
+    } else {
+      const draftId = readOptionalText(event?.payload?.draftId);
+      if (!draftId || typeof projectRegistrationAttachmentStorageService?.relocateDraftAttachments !== 'function') {
+        throw new Error('Project registration attachment relocation is not configured');
+      }
+      const attachmentIdempotencyKey = `outbox:${event.id}:registrationAttachments`;
+      const shouldRelocate = await mutateSideEffects(event, (sideEffects) => {
+        if (sideEffects.registrationAttachments === 'DONE') return null;
+        return {
+          ...sideEffects,
+          registrationAttachments: 'PROCESSING',
+          registrationAttachmentsIdempotencyKey: attachmentIdempotencyKey,
+          registrationAttachmentsClaimToken: event.claimToken || null,
+          registrationAttachmentsProcessingAt: timestamp,
+        };
+      });
+      if (shouldRelocate) {
+        const relocated = await projectRegistrationAttachmentStorageService.relocateDraftAttachments({
+          tenantId,
+          draftId,
+          projectId,
+          attachmentRefs,
+        });
+        if (!Array.isArray(relocated) || relocated.length !== attachmentRefs.length) {
+          throw new Error('Project registration attachment relocation returned an incomplete result');
+        }
+        const canonicalPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+        for (const attachment of relocated) {
+          const path = readOptionalText(attachment?.path);
+          const objectName = path.startsWith(canonicalPrefix) ? path.slice(canonicalPrefix.length) : '';
+          if (!PRIVATE_DOCUMENT_KINDS.includes(readOptionalText(attachment?.documentKind)) || !objectName || objectName.includes('/')) {
+            throw new Error('Project registration attachment relocation returned an invalid path');
+          }
+        }
+        const documents = registrationPrivateDocuments(relocated);
+        await db.runTransaction(async (tx) => {
+          const outboxRef = db.doc(`outbox/${event.id}`);
+          const [currentProjectSnap, currentRequestSnap, outboxSnap] = await Promise.all([
+            tx.get(projectRef),
+            tx.get(requestRef),
+            tx.get(outboxRef),
+          ]);
+          if (!currentProjectSnap.exists || !currentRequestSnap.exists || !outboxSnap.exists) {
+            throw new Error('Project registration delivery records are missing');
+          }
+          const outbox = outboxSnap.data() || {};
+          assertCurrentClaim(outbox, event);
+          const sideEffects = outbox.sideEffects && typeof outbox.sideEffects === 'object'
+            ? outbox.sideEffects
+            : {};
+          if (sideEffects.registrationAttachments === 'DONE') return;
+          if (sideEffects.registrationAttachmentsIdempotencyKey !== attachmentIdempotencyKey) {
+            throw new Error('Project registration attachment delivery claim changed');
+          }
+          const currentRequest = currentRequestSnap.data() || {};
+          if (readOptionalText(currentRequest.approvedProjectId) !== projectId) {
+            throw new Error('Project registration request does not match its project');
+          }
+          tx.set(projectRef, {
+            ...documents,
+            registrationAttachmentsPublishedAt: timestamp,
+          }, { merge: true });
+          tx.set(requestRef, {
+            payload: {
+              ...(currentRequest.payload && typeof currentRequest.payload === 'object' ? currentRequest.payload : {}),
+              ...documents,
+            },
+            registrationAttachmentsPublishedAt: timestamp,
+            updatedAt: timestamp,
+          }, { merge: true });
+          tx.set(outboxRef, {
+            sideEffects: {
+              ...sideEffects,
+              registrationAttachments: 'DONE',
+              registrationAttachmentsAt: timestamp,
+              registrationAttachmentsClaimToken: null,
+            },
+          }, { merge: true });
+        });
+      }
+      [projectSnap, requestSnap] = await Promise.all([projectRef.get(), requestRef.get()]);
+      project = { id: projectId, ...(projectSnap.data() || {}) };
+    }
+
+    const driveConfig = typeof driveService?.getConfig === 'function' ? driveService.getConfig() : null;
+    const driveEnabled = typeof driveService?.ensureProjectRootFolder === 'function'
+      && (driveConfig ? Boolean(driveConfig.enabled && driveConfig.defaultParentFolderId) : true);
+    if (!readOptionalText(project.evidenceDriveRootFolderId) && driveEnabled) {
+      const folder = await driveService.ensureProjectRootFolder({
+        tenantId,
+        projectId,
+        projectName: project.name || projectId,
+        existingFolderId: project.evidenceDriveRootFolderId,
+      });
+      if (!readOptionalText(folder?.id)) throw new Error('Project registration Drive root was not created');
+      const drivePatch = stripUndefinedDeep({
+        evidenceDriveSharedDriveId: folder.driveId,
+        evidenceDriveRootFolderId: folder.id,
+        evidenceDriveRootFolderName: folder.name,
+        evidenceDriveRootFolderLink: folder.webViewLink,
+        evidenceDriveProvisionedAt: timestamp,
+      });
+      await projectRef.set(drivePatch, { merge: true });
+      project = { ...project, ...drivePatch };
+    }
+    await mutateSideEffects(event, (sideEffects) => ({
+      ...sideEffects,
+      registrationDrive: readOptionalText(project.evidenceDriveRootFolderId) ? 'DONE' : 'SKIPPED',
+      registrationDriveAt: timestamp,
+    }));
+
+    await syncProjectParticipationEntries({ db, tenantId, project, now: timestamp });
+
+    if (!projectRegistrationSlackService?.enabled) {
+      await mutateSideEffects(event, (sideEffects) => {
+        if (['DONE', 'SKIPPED'].includes(sideEffects.registrationSlack)) return null;
+        return { ...sideEffects, registrationSlack: 'SKIPPED', registrationSlackAt: timestamp };
+      });
+      return;
+    }
+    if (typeof projectRegistrationSlackService.notifyMessage !== 'function') {
+      throw new Error('Project registration Slack delivery is not configured');
+    }
+    const slackIdempotencyKey = `outbox:${event.id}:registrationSlack`;
+    const shouldNotify = await mutateSideEffects(event, (sideEffects) => {
+      if (sideEffects.registrationSlack === 'DONE') return null;
+      return {
+        ...sideEffects,
+        registrationSlack: 'PROCESSING',
+        registrationSlackIdempotencyKey: slackIdempotencyKey,
+        registrationSlackClaimToken: event.claimToken || null,
+        registrationSlackProcessingAt: timestamp,
+      };
+    });
+    if (!shouldNotify) return;
+    const slackPayload = buildProjectRegistrationSlackPayload(projectRequest);
+    const delivery = { idempotencyKey: slackIdempotencyKey };
+    if (typeof projectRegistrationSlackService.notifyMessageWithIdempotency === 'function') {
+      await projectRegistrationSlackService.notifyMessageWithIdempotency(slackPayload, delivery);
+    } else {
+      await projectRegistrationSlackService.notifyMessage(slackPayload, delivery);
+    }
+    const markedDone = await mutateSideEffects(event, (sideEffects) => {
+      if (sideEffects.registrationSlackIdempotencyKey !== slackIdempotencyKey) {
+        throw new Error('Project registration Slack delivery claim changed');
+      }
+      return {
+        ...sideEffects,
+        registrationSlack: 'DONE',
+        registrationSlackAt: timestamp,
+        registrationSlackClaimToken: null,
+      };
+    });
+    if (!markedDone) throw new Error('Project registration Slack delivery was not recorded');
+  };
+}
+
 async function updateProjectTrashState({
   db,
   tenantId,
@@ -785,6 +1515,95 @@ export function mountProjectRoutes(app, {
     const snap = await query.get();
     const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(buildListResponse(items, limit));
+  }));
+
+  app.get('/api/v1/projects/:projectId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const projectId = readOptionalText(req.params.projectId);
+    const documentKind = readOptionalText(req.params.documentKind);
+    const field = {
+      contract: 'contractDocument',
+      quote: 'quoteDocument',
+      proposal: 'proposalDocument',
+    }[documentKind];
+    if (!projectId || !field) {
+      throw createHttpError(400, 'Project attachment request is invalid', 'project_attachment_invalid');
+    }
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+    const profile = member?.portalProfile && typeof member.portalProfile === 'object'
+      ? member.portalProfile
+      : {};
+    const storedRole = normalizeRole(member?.role);
+    const assignedProjectIds = new Set([
+      member?.projectId,
+      ...(Array.isArray(member?.projectIds) ? member.projectIds : []),
+      profile.projectId,
+      ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+    ].map(readOptionalText).filter(Boolean));
+    if (
+      !['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId)
+    ) {
+      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+    }
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
+    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    const attachment = projectSnap.data()?.[field];
+    const path = readOptionalText(attachment?.path);
+    const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    const objectName = path.startsWith(expectedPrefix) ? path.slice(expectedPrefix.length) : '';
+    if (!objectName || objectName.includes('/')) {
+      throw createHttpError(409, 'Project attachment is not ready', 'project_attachment_not_ready');
+    }
+    if (typeof projectRequestContractStorageService?.downloadProjectRegistrationAttachment !== 'function') {
+      throw new Error('Project registration attachment storage is not configured');
+    }
+    const downloaded = await projectRequestContractStorageService.downloadProjectRegistrationAttachment({
+      tenantId,
+      projectId,
+      path,
+    });
+    sendPrivateProjectAttachment(res, downloaded, attachment, objectName);
+  }));
+
+  app.get('/api/v1/project-requests/:requestId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const requestId = readOptionalText(req.params.requestId);
+    const documentKind = readOptionalText(req.params.documentKind);
+    const field = {
+      contract: 'contractDocument',
+      quote: 'quoteDocument',
+      proposal: 'proposalDocument',
+    }[documentKind];
+    if (!requestId || requestId.includes('/') || !field) {
+      throw createHttpError(400, 'Project request attachment is invalid', 'project_request_attachment_invalid');
+    }
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+    if (!['admin', 'finance'].includes(normalizeRole(member.role))) {
+      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+    }
+    const projectRequest = await readProjectRequestById(db, tenantId, requestId);
+    if (!projectRequest) throw createHttpError(404, `Project request not found: ${requestId}`, 'not_found');
+    if (readOptionalText(projectRequest.status) !== 'PENDING') {
+      throw createHttpError(409, 'Project request attachment is not pending', 'project_request_attachment_not_pending');
+    }
+    const projectId = readOptionalText(projectRequest.targetProjectId || projectRequest.approvedProjectId);
+    const payload = resolveProjectRequestPayloadForReview(projectRequest);
+    const attachment = payload?.[field];
+    const path = readOptionalText(attachment?.path);
+    const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    const objectName = projectId && path.startsWith(expectedPrefix) ? path.slice(expectedPrefix.length) : '';
+    if (!objectName || objectName.includes('/')) {
+      throw createHttpError(409, 'Project request attachment is not ready', 'project_request_attachment_not_ready');
+    }
+    if (typeof projectRequestContractStorageService?.downloadProjectRegistrationAttachment !== 'function') {
+      throw new Error('Project registration attachment storage is not configured');
+    }
+    const downloaded = await projectRequestContractStorageService.downloadProjectRegistrationAttachment({
+      tenantId,
+      projectId,
+      path,
+    });
+    sendPrivateProjectAttachment(res, downloaded, attachment, objectName);
   }));
 
   // ── POST /api/v1/projects ────────────────────────────────────────────────────
@@ -1259,12 +2078,13 @@ export function mountProjectRoutes(app, {
     const projectResult = await mergeProjectAndRequestDocs({
       db,
       projectPath,
-      buildProjectPatch: (currentProject) => {
+      buildProjectPatch: (currentProject, currentRequest) => {
+        const reviewRequest = currentRequest || request;
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
-        const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request);
-        const requestChanges = Array.isArray(request?.changedFields) ? request.changedFields : [];
-        const requestPayload = resolveProjectRequestPayloadForReview(request);
+        const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(reviewRequest);
+        const requestChanges = Array.isArray(reviewRequest?.changedFields) ? reviewRequest.changedFields : [];
+        const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
         const payloadPatch = isApprovedChangeRequest
           ? buildProjectPatchFromChangeRequestPayload(requestPayload, currentProject)
           : {};
@@ -1287,9 +2107,15 @@ export function mountProjectRoutes(app, {
               ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],
+          ...(parsed.reviewStatus === 'DUPLICATE_DISCARDED' ? {
+            trashedAt: now,
+            trashedById: actorId,
+            trashedByEmail: readOptionalText(actorEmail) || null,
+            trashedReason: readOptionalText(parsed.reviewComment),
+          } : {}),
         };
       },
-      buildRequestPatch: () => resolvedRequestId ? ({
+      buildRequestPatch: (_currentProject, currentRequest, nextVersion) => resolvedRequestId ? ({
         status: parsed.reviewStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
         reviewOutcome: parsed.reviewStatus,
         reviewedBy: actorId,
@@ -1299,12 +2125,14 @@ export function mountProjectRoutes(app, {
         rejectedReason: parsed.reviewStatus === 'APPROVED' ? null : (readOptionalText(parsed.reviewComment) || null),
         approvedProjectId: projectId,
         targetProjectId: projectId,
-        ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(request) ? {
-          approvedSnapshot: resolveProjectRequestPayloadForReview(request),
+        ...(parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(currentRequest || request) ? {
+          approvedSnapshot: resolveProjectRequestPayloadForReview(currentRequest || request),
+          approvedProjectVersion: nextVersion,
         } : {}),
         updatedAt: now,
       }) : null,
       requestRefs: resolvedRequestId ? refs : [],
+      enforceChangeRequestVersion: parsed.reviewStatus === 'APPROVED',
       tenantId,
       actorId,
       now,
@@ -1319,7 +2147,7 @@ export function mountProjectRoutes(app, {
       try {
         await projectRegistrationSlackService.notifyMessage(buildProjectExecutiveReviewSlackPayload({
           project: projectResult.data,
-          projectRequest: request,
+          projectRequest: projectResult.request || request,
           reviewStatus: parsed.reviewStatus,
           reviewComment: parsed.reviewComment,
           reviewerName,

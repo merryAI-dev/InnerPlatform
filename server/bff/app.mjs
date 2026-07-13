@@ -10,6 +10,7 @@ import {
 } from './auth.mjs';
 import { createIdempotencyService } from './idempotency.mjs';
 import { createAuditChainService } from './audit-chain.mjs';
+import { createEditLeaseService } from './edit-lease.mjs';
 import {
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
@@ -91,7 +92,10 @@ import {
   resolveBffWorkerAuthPolicy,
 } from './runtime-safety.mjs';
 
-import { mountProjectRoutes } from './routes/projects.mjs';
+import {
+  createProjectRegistrationSubmittedOutboxHandler,
+  mountProjectRoutes,
+} from './routes/projects.mjs';
 import { mountLedgerRoutes } from './routes/ledgers.mjs';
 import { mountTransactionRoutes } from './routes/transactions.mjs';
 import { mountAuditRoutes } from './routes/audit.mjs';
@@ -101,6 +105,20 @@ import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
 import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
+import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
+import {
+  createProjectRegistrationDraftService,
+  mountProjectRegistrationDraftRoutes,
+} from './routes/project-registration-drafts.mjs';
+import {
+  createProjectInfoDraftService,
+  createProjectInfoSubmittedOutboxHandler,
+  mountProjectInfoDraftRoutes,
+} from './routes/project-info-drafts.mjs';
+import {
+  createCashflowEditDraftService,
+  mountCashflowEditDraftRoutes,
+} from './routes/cashflow-edit-drafts.mjs';
 
 function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
@@ -661,6 +679,21 @@ export function createBffApp(options = {}) {
 
   assertBffRuntimeSafety(runtimeSafetyConfig);
 
+  const editLeasesOptionSet = typeof options.editLeasesEnabled === 'boolean';
+  const editLeasesEnabled = editLeasesOptionSet
+    ? options.editLeasesEnabled
+    : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  const localTestInjection = options.editLeasesEnabled === true && runtimeSafetyConfig.deployEnv === 'local';
+  if (editLeasesEnabled && runtimeSafetyConfig.deployEnv !== 'stage' && !localTestInjection) {
+    const error = new Error(
+      runtimeSafetyConfig.deployEnv === 'live'
+        ? 'Edit leases cannot run in Live runtime'
+        : 'Edit leases environment flag requires Stage runtime',
+    );
+    error.code = 'unsafe_bff_runtime';
+    throw error;
+  }
+
   const createDb = options.createDb || createFirestoreDb;
   const db = options.db || createDb({ projectId });
   const authProjectId = resolveFirebaseAuthProjectId(options, env, projectId);
@@ -672,11 +705,60 @@ export function createBffApp(options = {}) {
   const auditChainService = createAuditChainService(db, { now });
   const piiProtector = options.piiProtector || createPiiProtector();
   const rbacPolicy = options.rbacPolicy || loadRbacPolicy();
+  const editLeaseService = options.editLeaseService || (editLeasesEnabled
+    ? createEditLeaseService({
+      db,
+      now,
+      createLeaseId: options.createEditLeaseId || randomUUID,
+      auditChainService,
+      idempotencyService,
+      rbacPolicy,
+    })
+    : null);
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
+  const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
+    || projectRequestContractStorageService;
+  const projectRegistrationDraftService = options.projectRegistrationDraftService || (editLeasesEnabled
+    ? createProjectRegistrationDraftService({
+      db,
+      now,
+      createDraftId: options.createProjectRegistrationDraftId || randomUUID,
+      createLeaseId: options.createProjectRegistrationLeaseId || randomUUID,
+      createAttachmentId: options.createProjectRegistrationAttachmentId || randomUUID,
+      createProjectId: options.createProjectRegistrationProjectId,
+      createProjectRequestId: options.createProjectRegistrationRequestId,
+      createRegistrationOutboxEvent: options.createProjectRegistrationOutboxEvent,
+      auditChainService,
+      idempotencyService,
+      draftStorageService: projectRegistrationDraftStorageService,
+      rbacPolicy,
+    })
+    : null);
+  const projectInfoDraftService = options.projectInfoDraftService || (editLeasesEnabled
+    ? createProjectInfoDraftService({
+      db,
+      now,
+      createAttachmentId: options.createProjectInfoAttachmentId,
+      createOutboxEvent: options.createProjectInfoOutboxEvent,
+      auditChainService,
+      idempotencyService,
+      draftStorageService: projectRegistrationDraftStorageService,
+      rbacPolicy,
+    })
+    : null);
+  const cashflowEditDraftService = options.cashflowEditDraftService || (editLeasesEnabled
+    ? createCashflowEditDraftService({
+      db,
+      now,
+      auditChainService,
+      idempotencyService,
+      rbacPolicy,
+    })
+    : null);
   const projectSheetSourceStorageService = options.projectSheetSourceStorageService || createProjectSheetSourceStorageService({ projectId });
   const businessCardStorageService = options.businessCardStorageService || createBusinessCardStorageService({ projectId });
   const businessCardGeminiAiService = options.businessCardGeminiAiService || createBusinessCardGeminiAiService();
@@ -696,6 +778,20 @@ export function createBffApp(options = {}) {
   const slackAlertService = options.slackAlertService || createSlackAlertService();
   const projectRegistrationSlackService = options.projectRegistrationSlackService
     || createSlackAlertService(resolveProjectRegistrationSlackConfig(options));
+  const projectRegistrationOutboxHandler = options.projectRegistrationOutboxHandler
+    || createProjectRegistrationSubmittedOutboxHandler({
+      db,
+      driveService,
+      projectRegistrationSlackService,
+      projectRegistrationAttachmentStorageService: projectRegistrationDraftStorageService,
+      now,
+    });
+  const projectInfoOutboxHandler = options.projectInfoOutboxHandler
+    || createProjectInfoSubmittedOutboxHandler({
+      db,
+      draftStorageService: projectRegistrationDraftStorageService,
+      now,
+    });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -735,7 +831,7 @@ export function createBffApp(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', allowAnyOrigin ? '*' : requestOrigin);
     }
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-request-id, idempotency-key, x-google-access-token, x-file-name, x-file-type, x-file-size');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-tenant-id, x-actor-id, x-actor-role, x-actor-email, x-actor-name, x-request-id, idempotency-key, x-edit-session-id, x-edit-lease-id, x-edit-fence, x-google-access-token, x-file-name, x-file-type, x-file-size');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -827,6 +923,10 @@ export function createBffApp(options = {}) {
       limit,
       maxAttempts,
       now,
+      eventHandlers: {
+        'project.registration.submitted': projectRegistrationOutboxHandler,
+        'project.info.submitted': projectInfoOutboxHandler,
+      },
     });
 
     res.status(200).json({
@@ -1400,6 +1500,26 @@ export function createBffApp(options = {}) {
   }));
 
   // ── Domain route modules ──────────────────────────────────────────────────
+  mountEditLeaseRoutes(app, {
+    enabled: editLeasesEnabled,
+    editLeaseService,
+    piiProtector,
+  });
+  mountProjectRegistrationDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    projectRegistrationDraftService,
+    piiProtector,
+  });
+  mountProjectInfoDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    projectInfoDraftService,
+    piiProtector,
+  });
+  mountCashflowEditDraftRoutes(app, {
+    enabled: editLeasesEnabled,
+    cashflowEditDraftService,
+    piiProtector,
+  });
   mountProjectRoutes(app, {
     db, now, idempotencyService, auditChainService, piiProtector,
     driveService, googleSheetsService, googleSheetMigrationAiService,

@@ -20,6 +20,7 @@ const policy = rbacPolicy as {
 };
 const firestoreRulesText = readFileSync(new URL('../../../firebase/firestore.rules', import.meta.url), 'utf8');
 const storageRulesText = readFileSync(new URL('../../../firebase/storage.rules', import.meta.url), 'utf8');
+const firebaseSourceText = readFileSync(new URL('../lib/firebase.ts', import.meta.url), 'utf8');
 
 describe('firestore rules policy alignment', () => {
   // ── isSignedIn: company email domain ──
@@ -104,6 +105,23 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).not.toContain("isAdmin('mysc')");
   });
 
+  it('keeps self-service member writes on a strict non-assignment allowlist', () => {
+    expect(firestoreRulesText).toContain('function isSafeSelfMemberCreate(orgId, memberId)');
+    expect(firestoreRulesText).toContain('function isSafeSelfMemberUpdate(orgId, memberId)');
+    expect(firestoreRulesText).toContain("collection in ['members']");
+    expect(firestoreRulesText).toContain('request.resource.data.keys().hasOnly([');
+    expect(firestoreRulesText).toContain("request.resource.data.projectIds.size() == 0");
+    expect(firestoreRulesText).toContain("!request.resource.data.keys().hasAny(['portalProfile', 'projectNames'])");
+    expect(firestoreRulesText).toContain('request.resource.data.diff(resource.data).affectedKeys().hasOnly([');
+    for (const protectedField of [
+      'uid', 'status', 'role', 'tenantId', 'projectId', 'projectIds', 'portalProfile',
+    ]) {
+      expect(firestoreRulesText).not.toMatch(
+        new RegExp(`affectedKeys\\(\\)\\.hasOnly\\(\\[[^\\]]*'${protectedField}'`),
+      );
+    }
+  });
+
   // ── canAccessProject: project-scoped ──
   it('admin and finance access all projects without assignment', () => {
     for (const role of ['admin', 'finance'] as const) {
@@ -167,18 +185,70 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toContain('function isBffOnlyCollection(collection)');
     expect(firestoreRulesText).toContain("['contacts', 'business_card_imports', 'contact_events']");
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
   });
 
-  it('keeps project request drafts hidden from admin review surfaces until submission', () => {
-    expect(firestoreRulesText).toContain('match /orgs/{orgId}/projectRequestDrafts/{draftId}');
-    expect(firestoreRulesText).toContain('resource.data.ownerId == request.auth.uid');
-    expect(firestoreRulesText).toContain('request.resource.data.ownerId == request.auth.uid');
-    expect(firestoreRulesText).toContain("request.resource.data.status in ['DRAFT', 'SUBMITTED', 'DISCARDED']");
+  it('keeps edit drafts and legacy client locks behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain('function isCatchallExcludedCollection(collection)');
-    expect(firestoreRulesText).toContain("collection in ['projectRequestDrafts']");
+    expect(firebaseSourceText).toContain("cashflowEditLocks: 'cashflow_edit_locks'");
+    for (const collection of [
+      'projectRequestDrafts',
+      'privateEditDrafts',
+      'cashflowEditLocks',
+      'cashflow_edit_locks',
+    ]) {
+      expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
+      expect(firestoreRulesText).toMatch(
+        new RegExp(`match /orgs/\\{orgId\\}/${collection}/\\{[^}]+\\} \\{\\s*allow read, write: if false;\\s*\\}`),
+      );
+    }
     expect(firestoreRulesText).toContain('allow read: if !isCatchallExcludedPath(collection, document) && canRead(orgId);');
-    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document) && canWrite(orgId);');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedPath(collection, document)');
+    expect(firestoreRulesText).toContain('allow write: if !isCatchallExcludedCollection(collection)');
+  });
+
+  it('keeps canonical project and finance root writes behind server APIs', () => {
+    const canonicalWriteRule = firestoreRulesText.match(
+      /function isCanonicalServerWriteCollection\(collection\) \{[\s\S]*?\n    \}/,
+    )?.[0] || '';
+    for (const collection of [
+      'projects',
+      'project_requests',
+      'projectRequests',
+      'cashflow_weeks',
+      'weekly_submission_status',
+      'transactions',
+      'comments',
+      'evidences',
+      'budget_evidence_maps',
+    ]) {
+      expect(canonicalWriteRule).toContain(`'${collection}'`);
+    }
+    expect(firestoreRulesText).toContain('&& !isCanonicalServerWriteCollection(collection)');
+    expect(firestoreRulesText).toContain(
+      'match /orgs/{orgId}/{collection}/{document}/{subcollection}/{nested=**}',
+    );
+    expect(firestoreRulesText).toContain(
+      "return collection == 'projects' && subcollection == 'bank_statements';",
+    );
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/projects\/\{projectId\}\/bank_statements\/\{documentId\} \{\s*allow read: if canRead\(orgId\);\s*allow write: if false;\s*\}/,
+    );
+  });
+
+  it('keeps edit lease secrets behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain("|| collection in ['editLeases']");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/editLeases\/\{leaseId\} \{\s*allow read, write: if false;\s*\}/,
+    );
+  });
+
+  it('keeps idempotent replay responses behind BFF-only Firestore rules', () => {
+    expect(firestoreRulesText).toContain("|| collection in ['idempotency_keys'];");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/idempotency_keys\/\{keyId\} \{\s*allow read, write: if false;\s*\}/,
+    );
   });
 
   it('keeps project option settings admin-managed', () => {
@@ -191,7 +261,18 @@ describe('firestore rules policy alignment', () => {
   it('keeps business-card source images behind BFF-only Storage rules', () => {
     expect(storageRulesText).toContain('match /orgs/{orgId}/business-cards/{allPaths=**}');
     expect(storageRulesText).toContain('allow read, write: if false;');
-    expect(storageRulesText).toContain("collection != 'business-cards' && isMyscSignedIn()");
+    expect(storageRulesText).toContain("collection != 'business-cards'");
+  });
+
+  it('keeps project registration draft attachments behind BFF-only Storage rules', () => {
+    expect(storageRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/project-registration-drafts\/\{allPaths=\*\*\} \{\s*allow read, write: if false;\s*\}/,
+    );
+    expect(storageRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/project-registration-documents\/\{allPaths=\*\*\} \{\s*allow read, write: if false;\s*\}/,
+    );
+    expect(storageRulesText).toContain("collection != 'project-registration-drafts'");
+    expect(storageRulesText).toContain("collection != 'project-registration-documents'");
   });
 
   it('keeps business-card indexes deployable and large fields exempted', () => {
@@ -242,6 +323,13 @@ describe('firestore rules policy alignment', () => {
       fieldPath: 'address',
       indexes: [],
     });
+    for (const fieldOverride of [
+      { collectionGroup: 'projectRequestDrafts', fieldPath: 'payload', indexes: [] },
+      { collectionGroup: 'projectRequestDrafts', fieldPath: 'attachmentRefs', indexes: [] },
+      { collectionGroup: 'idempotency_keys', fieldPath: 'responseBody', indexes: [] },
+    ]) {
+      expect(firestoreIndexes.fieldOverrides).toContainEqual(fieldOverride);
+    }
   });
 
   // ── HR rules assumptions ──
