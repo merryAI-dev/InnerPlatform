@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeCashflowSheetTemplate,
+  buildCashflowLineLookup,
   parseCashflowWeekLabel,
   toA1,
 } from './cashflow-sheet-template.mjs';
@@ -285,5 +286,102 @@ describe('cashflow sheet template mapping', () => {
         lineIds: expect.arrayContaining(['SALES_IN']),
       }),
     ]));
+  });
+
+  it('rejects stored cashflow lines that are not in policy order', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    const projectionHeaderIndex = matrix.findIndex((row) => row[0] === 'Projection');
+    [matrix[projectionHeaderIndex + 2], matrix[projectionHeaderIndex + 3]] = [
+      matrix[projectionHeaderIndex + 3],
+      matrix[projectionHeaderIndex + 2],
+    ];
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_line_order_invalid', mode: 'projection' }),
+    ]));
+  });
+
+  it('rejects a missing derived row', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    matrix.find((row) => row[0] === '출금 합계')[0] = '알 수 없는 합계';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'cashflow_derived_row_missing',
+        mode: 'projection',
+        kinds: ['withdrawal_total'],
+      }),
+    ]));
+  });
+
+  it('rejects a duplicate derived row', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    const withdrawalTotalIndex = matrix.findIndex((row) => row[0] === '출금 합계');
+    matrix.splice(withdrawalTotalIndex + 1, 0, [...matrix[withdrawalTotalIndex]]);
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'cashflow_derived_row_duplicate',
+        mode: 'projection',
+        kinds: ['withdrawal_total'],
+      }),
+    ]));
+  });
+
+  it('rejects reordered derived rows', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    const withdrawalTotalIndex = matrix.findIndex((row) => row[0] === '출금 합계');
+    [matrix[withdrawalTotalIndex], matrix[withdrawalTotalIndex + 1]] = [
+      matrix[withdrawalTotalIndex + 1],
+      matrix[withdrawalTotalIndex],
+    ];
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(false);
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'cashflow_derived_row_order_invalid', mode: 'projection' }),
+    ]));
+  });
+
+  it('ignores explanatory text containing the word balance after the table', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    matrix.push(['Projection Total 금액(잔액=0원)을 맞추세요.']);
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(true);
+    expect(result.sections[1].derivedRows.map((row) => row.kind)).toEqual([
+      'deposit_total',
+      'withdrawal_total',
+      'balance',
+    ]);
+  });
+
+  it('fails closed when different line IDs share a normalized label in one mode and direction', () => {
+    const resolve = buildCashflowLineLookup([
+      { lineId: 'LINE_A', label: '공 유 라벨', direction: 'IN', aliases: [] },
+      { lineId: 'LINE_B', label: '공유라벨', direction: 'IN', aliases: [] },
+    ]);
+
+    expect(resolve('공 유 라벨', 'projection', 'IN')).toBeNull();
+    expect(resolve('공유라벨', 'projection', 'IN')).toBeNull();
+  });
+
+  it('allows duplicate normalized labels owned by the same line ID', () => {
+    const resolve = buildCashflowLineLookup([
+      { lineId: 'LINE_A', label: '공 유 라벨', direction: 'IN', aliases: ['공유라벨'] },
+    ]);
+
+    expect(resolve('공유라벨', 'actual', 'IN')).toMatchObject({ lineId: 'LINE_A' });
   });
 });

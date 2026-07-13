@@ -5,6 +5,7 @@ const SUPPORTED_MODES = ['projection', 'actual'];
 const MIN_WEEK_LABELS_PER_SECTION = 2;
 const LINE_ENTRIES = Array.isArray(cashflowPolicyData.lineEntries) ? cashflowPolicyData.lineEntries : [];
 const EXPECTED_LINE_IDS = LINE_ENTRIES.map((entry) => entry.lineId);
+const EXPECTED_DERIVED_KINDS = ['deposit_total', 'withdrawal_total', 'balance'];
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -14,20 +15,43 @@ function normalizeLabelKey(value) {
   return normalizeText(value).replace(/\s+/g, '');
 }
 
-const LINE_BY_MODE_DIRECTION_LABEL = new Map();
-const LINE_ENTRY_BY_ID = new Map();
-for (const entry of LINE_ENTRIES) {
-  LINE_ENTRY_BY_ID.set(entry.lineId, entry);
-  for (const mode of SUPPORTED_MODES) {
-    const modeLabel = mode === 'projection' ? entry.projectionLabel : entry.actualLabel;
-    for (const label of [entry.lineId, entry.label, ...(entry.aliases || []), modeLabel]) {
-      const normalized = normalizeText(label);
-      if (normalized) LINE_BY_MODE_DIRECTION_LABEL.set(`${mode}|${entry.direction}|${normalized}`, entry);
-      const stripped = normalizeLabelKey(label);
-      if (stripped) LINE_BY_MODE_DIRECTION_LABEL.set(`${mode}|${entry.direction}|${stripped}`, entry);
+export function buildCashflowLineLookup(lineEntries) {
+  const entriesByKey = new Map();
+  const ambiguousKeys = new Set();
+
+  for (const entry of lineEntries) {
+    for (const mode of SUPPORTED_MODES) {
+      const modeLabel = mode === 'projection' ? entry.projectionLabel : entry.actualLabel;
+      for (const label of [entry.lineId, entry.label, ...(entry.aliases || []), modeLabel]) {
+        for (const normalized of new Set([normalizeText(label), normalizeLabelKey(label)].filter(Boolean))) {
+          const key = `${mode}|${entry.direction}|${normalized}`;
+          const existing = entriesByKey.get(key);
+          if (existing && existing.lineId !== entry.lineId) {
+            entriesByKey.delete(key);
+            ambiguousKeys.add(key);
+          } else if (!ambiguousKeys.has(key)) {
+            entriesByKey.set(key, entry);
+          }
+        }
+      }
     }
   }
+
+  return (label, mode, direction) => {
+    const prefix = `${mode}|${direction}|`;
+    const keys = new Set([normalizeText(label), normalizeLabelKey(label)]
+      .filter(Boolean)
+      .map((normalized) => `${prefix}${normalized}`));
+    if ([...keys].some((key) => ambiguousKeys.has(key))) return null;
+    for (const key of keys) {
+      const entry = entriesByKey.get(key);
+      if (entry) return entry;
+    }
+    return null;
+  };
 }
+
+const resolveLineEntry = buildCashflowLineLookup(LINE_ENTRIES);
 
 function columnName(columnIndex) {
   let n = columnIndex + 1;
@@ -88,21 +112,12 @@ function readRowLabel(row) {
   return { label: '', columnIndex: -1 };
 }
 
-function resolveLineEntry(label, mode, direction) {
-  const normalized = normalizeText(label);
-  if (!normalized) return null;
-  const prefix = `${mode}|${direction}|`;
-  return LINE_BY_MODE_DIRECTION_LABEL.get(`${prefix}${normalized}`)
-    || LINE_BY_MODE_DIRECTION_LABEL.get(`${prefix}${normalizeLabelKey(normalized)}`)
-    || null;
-}
-
 function resolveDerivedKind(label) {
   const normalized = normalizeLabelKey(label);
   if (!normalized) return null;
-  if (normalized.includes('입금합계')) return 'deposit_total';
-  if (normalized.includes('출금합계')) return 'withdrawal_total';
-  if (normalized.includes('잔액')) return 'balance';
+  if (normalized === '입금합계') return 'deposit_total';
+  if (normalized === '출금합계') return 'withdrawal_total';
+  if (normalized === '잔액' || normalized === '잔액(※중요)') return 'balance';
   return null;
 }
 
@@ -293,6 +308,51 @@ export function analyzeCashflowSheetTemplate(matrix) {
         mode: section.mode,
         lineIds: section.duplicateLineIds,
         message: `${section.mode} 섹션에 중복 cashflow 라벨이 있습니다.`,
+      });
+    }
+
+    const lineIds = section.lineRows.map((row) => row.lineId);
+    if (lineIds.length !== EXPECTED_LINE_IDS.length
+      || lineIds.some((lineId, index) => lineId !== EXPECTED_LINE_IDS[index])) {
+      reasons.push({
+        code: 'cashflow_line_order_invalid',
+        mode: section.mode,
+        expectedLineIds: EXPECTED_LINE_IDS,
+        actualLineIds: lineIds,
+        message: `${section.mode} 섹션 cashflow 라벨 순서가 정책과 다릅니다.`,
+      });
+    }
+
+    const derivedKinds = section.derivedRows.map((row) => row.kind);
+    const missingDerivedKinds = EXPECTED_DERIVED_KINDS.filter((kind) => !derivedKinds.includes(kind));
+    const duplicateDerivedKinds = EXPECTED_DERIVED_KINDS.filter(
+      (kind) => derivedKinds.filter((candidate) => candidate === kind).length > 1,
+    );
+    if (missingDerivedKinds.length > 0) {
+      reasons.push({
+        code: 'cashflow_derived_row_missing',
+        mode: section.mode,
+        kinds: missingDerivedKinds,
+        message: `${section.mode} 섹션 합계/잔액 행이 부족합니다.`,
+      });
+    }
+    if (duplicateDerivedKinds.length > 0) {
+      reasons.push({
+        code: 'cashflow_derived_row_duplicate',
+        mode: section.mode,
+        kinds: duplicateDerivedKinds,
+        message: `${section.mode} 섹션 합계/잔액 행이 중복되었습니다.`,
+      });
+    }
+    if (missingDerivedKinds.length === 0
+      && duplicateDerivedKinds.length === 0
+      && derivedKinds.some((kind, index) => kind !== EXPECTED_DERIVED_KINDS[index])) {
+      reasons.push({
+        code: 'cashflow_derived_row_order_invalid',
+        mode: section.mode,
+        expectedKinds: EXPECTED_DERIVED_KINDS,
+        actualKinds: derivedKinds,
+        message: `${section.mode} 섹션 합계/잔액 행 순서가 다릅니다.`,
       });
     }
   }
