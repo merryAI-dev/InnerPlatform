@@ -102,9 +102,12 @@ Projection과 ACTUAL은 같은 line ID를 사용하고 표시 문구만 mode별�
 - 성공한 조회 결과는 `sourceRevision`이 붙은 last-good snapshot으로 고정한다. 다음 명시적 조회 전까지 화면 비교와 검토는 같은 revision만 사용한다.
 - 조회 실패 시 last-good snapshot을 지우지 않고 `STALE`로 표시한다. last-good도 없으면 `ERROR`다.
 - `sourceRevision`은 정규화한 시트 snapshot만으로 계산하고, 조회 당시 canonical 상태는 별도 `targetRevision`으로 기록한다.
+- `targetRevision`은 Projection, Actual 합계, `weeklyExpenseActualBySheet` 원천별 기여, 결산 flag를 함께 포함한다. 합계가 같아도 원천 구성이 달라지면 다른 revision이다.
 - 셀은 `VALUE`, `EMPTY`, `INVALID`로 구분한다. 명시적 `0`은 VALUE이며, 빈칸과 `-`는 EMPTY다. INVALID가 있으면 해당 월 반영을 차단한다.
 - 시트 조회와 검토 stage는 canonical cashflow를 쓰지 않는다. 최종 반영만 project lease와 JVM 권한 검증을 거친다.
-- 최종 반영 단위는 `projectId + yearMonth`다. 대상 월의 Projection과 해당 시트 Actual 기여를 전체 교체하고 다른 Actual 원천과 다른 월은 보존한다.
+- 검토와 최종 반영 단위는 정확히 하나의 `projectId + yearMonth`다. 한 번의 고정본에는 해당 월 1~5주차, 두 mode, 16개 line의 160셀이 모두 있어야 하며 여러 월을 한 요청에서 반영하지 않는다.
+- 대상 월의 Projection과 해당 시트 Actual 기여를 전체 교체하고 다른 Actual 원천과 다른 월은 보존한다. 원천별 원장이 없던 legacy Actual은 기존 합계값을 검토 전 값으로 노출해 삭제·변경 후보도 사람이 확인한 뒤 현재 시트 기준으로 덮어쓴다.
+- 대상 월의 canonical 주차 중 하나라도 결산 상태면 월 전체를 `BLOCKED`로 표시하고 저장하지 않는다.
 - Apply 시 pinned `sourceRevision`과 현재 `targetRevision`이 다르면 409로 중단하고 다시 검토한다.
 
 ## Error and Compatibility

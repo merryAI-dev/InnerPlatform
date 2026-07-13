@@ -39,6 +39,8 @@ const ACTUAL_OUT_LABELS = [
   ...PROJECTION_OUT_LABELS.slice(2),
 ];
 
+const JANUARY_FINANCE_WEEKS = ['26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5'];
+
 function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3']) {
   const weekRow = ['', '', '', ...weekLabels];
   const valueCells = weekLabels.map(() => '999');
@@ -75,6 +77,7 @@ function buildMatrixWithWeekLabels(weekLabels) {
 
 function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments = {} } = {}) {
   const documents = new Map();
+  const queries = [];
   documents.set('orgs/tenant-a/projects/project-a', { ...project });
   for (const week of weeks) {
     documents.set(`orgs/tenant-a/cashflow_weeks/${week.id}`, { ...week });
@@ -107,16 +110,19 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
             data: () => data,
           })),
       })),
-      where: vi.fn((_field, _op, value) => ({
-        get: vi.fn(async () => ({
-          docs: [...documents.entries()]
-            .filter(([docPath, data]) => docPath.startsWith(`${path}/`) && data.projectId === value)
-            .map(([docPath, data]) => ({
-              id: docPath.slice(path.length + 1),
-              data: () => data,
-            })),
-        })),
-      })),
+      where: vi.fn((field, op, value) => {
+        queries.push({ path, field, op, value });
+        return {
+          get: vi.fn(async () => ({
+            docs: [...documents.entries()]
+              .filter(([docPath, data]) => docPath.startsWith(`${path}/`) && data[field] === value)
+              .map(([docPath, data]) => ({
+                id: docPath.slice(path.length + 1),
+                data: () => data,
+              })),
+          })),
+        };
+      }),
     })),
     runTransaction: vi.fn(async (callback) => callback({
       get: (docRef) => docRef.get(),
@@ -126,6 +132,7 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
     __getDocumentsByPrefix: (prefix) => [...documents.entries()]
       .filter(([path]) => path.startsWith(prefix))
       .map(([path, data]) => ({ path, data })),
+    __getQueries: () => [...queries],
   };
 }
 
@@ -615,7 +622,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-1',
+          endWeek: '26-1-5',
         },
       },
       weeks: [{
@@ -633,7 +640,7 @@ describe('cashflow sheet lab route', () => {
       spreadsheetTitle: 'Cashflow workbook',
       selectedSheetName: 'cashflow(사용내역 연동)',
       availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-      matrix: buildMatrix(),
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
     }));
     const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
     const mirror = await request(app)
@@ -652,16 +659,16 @@ describe('cashflow sheet lab route', () => {
     expect(response.body).toMatchObject({
       ok: true,
       commandName: 'cashflowSheetLab.stage.firebase',
-      stagedLineCount: 32,
-      projectionLineCount: 16,
-      actualLineCount: 16,
+      stagedLineCount: 160,
+      projectionLineCount: 80,
+      actualLineCount: 80,
     });
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 100 },
       actual: { MYSC_PREPAY_IN: 200 },
     });
     const candidates = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/');
-    expect(candidates).toHaveLength(32);
+    expect(candidates).toHaveLength(160);
     const stagedMonths = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/');
     expect(stagedMonths).toHaveLength(1);
     expect(stagedMonths[0].data).toMatchObject({
@@ -669,7 +676,7 @@ describe('cashflow sheet lab route', () => {
       yearMonth: '2026-01',
       sourceRevision: mirror.body.sourceRevision,
     });
-    expect(stagedMonths[0].data.cells).toHaveLength(32);
+    expect(stagedMonths[0].data.cells).toHaveLength(160);
     expect(candidates.find((candidate) => candidate.data.mode === 'projection' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data).toMatchObject({
       projectId: 'project-a',
       status: 'pending_review',
@@ -724,7 +731,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-1',
+          endWeek: '26-1-5',
         },
       },
     });
@@ -732,7 +739,7 @@ describe('cashflow sheet lab route', () => {
       spreadsheetId: 'spreadsheet-a',
       selectedSheetName: 'cashflow(사용내역 연동)',
       availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-      matrix: buildMatrix(),
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
     }));
     const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
     const mirror = await request(app)
@@ -755,7 +762,7 @@ describe('cashflow sheet lab route', () => {
 
     expect(replay.body.runId).toBe(first.body.runId);
     expect(replay.body.lastStagedAt).toBe(first.body.lastStagedAt);
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(32);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(160);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(1);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
@@ -769,11 +776,21 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-1',
+          endWeek: '26-1-5',
         },
       },
     });
-    const app = createApp({ db });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+    });
     const mirror = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'refresh-stage-overlap' })
@@ -797,7 +814,7 @@ describe('cashflow sheet lab route', () => {
       toISOString.mockRestore();
     }
 
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(32);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(160);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
   });
 
@@ -845,7 +862,7 @@ describe('cashflow sheet lab route', () => {
   });
 
   it('preserves an EMPTY pinned cell as an authoritative removal candidate', async () => {
-    const matrix = buildMatrix();
+    const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
     matrix[3][3] = '-';
     const db = createDb({
       project: {
@@ -854,7 +871,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-1',
+          endWeek: '26-1-5',
         },
       },
       weeks: [{
@@ -894,6 +911,165 @@ describe('cashflow sheet lab route', () => {
       proposedAmount: null,
       cellState: 'EMPTY',
     });
+  });
+
+  it('compares Actual against the cashflow-sheet-lab source contribution instead of the aggregate', async () => {
+    const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
+    matrix[28][3] = '600';
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        actual: { SALES_IN: 600 },
+        weeklyExpenseActualBySheet: {
+          bank: { SALES_IN: 500 },
+          'cashflow-sheet-lab': { SALES_IN: 100 },
+        },
+      }],
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-source-specific-actual' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-source-specific-actual' })
+      .expect(200);
+
+    expect(stage.body.candidates).toContainEqual(expect.objectContaining({
+      mode: 'actual',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      lineId: 'SALES_IN',
+      beforeHadValue: true,
+      beforeAmount: 100,
+      proposedHadValue: true,
+      proposedAmount: 600,
+    }));
+  });
+
+  it('shows legacy aggregate Actual removals for human review before the one-time sheet overwrite', async () => {
+    const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
+    matrix[28][3] = '-';
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        actual: { SALES_IN: 123 },
+      }],
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-legacy-actual' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-legacy-actual' })
+      .expect(200);
+
+    expect(stage.body.candidates).toContainEqual(expect.objectContaining({
+      mode: 'actual',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      lineId: 'SALES_IN',
+      beforeHadValue: true,
+      beforeAmount: 123,
+      proposedHadValue: false,
+      proposedAmount: null,
+    }));
+  });
+
+  it('blocks the whole month when any canonical week is closed', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        adminClosed: true,
+      }],
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-closed-month' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-closed-month' })
+      .expect(200);
+
+    expect(stage.body).toMatchObject({
+      status: 'BLOCKED',
+      blockedMonths: ['2026-01'],
+      stagedLineCount: 0,
+      riskLineCount: 160,
+    });
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(0);
   });
 
   it('rejects stage when canonical cashflow changed after the explicit refresh', async () => {
@@ -940,7 +1116,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-1',
+          endWeek: '26-1-5',
         },
       },
       weeks: [{
@@ -957,7 +1133,7 @@ describe('cashflow sheet lab route', () => {
       previewSpreadsheet: vi.fn(async () => {
         previewCalls += 1;
         if (previewCalls > 1) throw new Error('apply must use staged candidates');
-        const matrix = buildMatrix();
+        const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
         matrix[4][3] = '';
         return {
           spreadsheetId: 'spreadsheet-a',
@@ -1022,9 +1198,9 @@ describe('cashflow sheet lab route', () => {
 
     expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(apply.body).toMatchObject({
-      appliedLineCount: 32,
-      projectionLineCount: 16,
-      actualLineCount: 16,
+      appliedLineCount: 160,
+      projectionLineCount: 80,
+      actualLineCount: 80,
       skippedRiskLineCount: 0,
       stagedRunId: stage.body.runId,
     });
@@ -1051,7 +1227,13 @@ describe('cashflow sheet lab route', () => {
         }),
       ]),
     }));
-    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells).toHaveLength(32);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells).toHaveLength(160);
+    expect(db.__getQueries()).toContainEqual({
+      path: 'orgs/tenant-a/cashflow_change_candidates',
+      field: 'runId',
+      op: '==',
+      value: stage.body.runId,
+    });
     const emptyCell = javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells.find((cell) => (
       cell.mode === 'projection' && cell.cashflowLine === 'MYSC_PREPAY_LABOR_IN'
     ));
@@ -1064,7 +1246,7 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
-  it('chains monthly target revisions and finalizes the lease only on the last month', async () => {
+  it('rejects a multi-month mirror before staging any authoritative write', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1072,31 +1254,24 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-2-1',
+          endWeek: '26-2-5',
         },
       },
     });
+    const twoFullMonths = [
+      ...JANUARY_FINANCE_WEEKS,
+      '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
+    ];
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
         spreadsheetTitle: 'Cashflow workbook',
         selectedSheetName: 'cashflow(사용내역 연동)',
         availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-        matrix: buildMatrixWithWeekLabels(['26-1-1', '26-2-1']),
+        matrix: buildMatrixWithWeekLabels(twoFullMonths),
       })),
     };
-    const januaryRevision = `sha256:${'1'.repeat(64)}`;
-    const februaryRevision = `sha256:${'2'.repeat(64)}`;
-    const javaWeeklyClient = {
-      applyCashflowSheetLab: vi.fn(async ({ projectId, yearMonth, sourceRevision, targetRevision }) => ({
-        ok: true,
-        projectId,
-        yearMonth,
-        sourceRevision,
-        targetRevision,
-        resultingTargetRevision: yearMonth === '2026-01' ? januaryRevision : februaryRevision,
-      })),
-    };
+    const javaWeeklyClient = { applyCashflowSheetLab: vi.fn() };
     const app = createApp({
       db,
       googleSheetsService,
@@ -1107,45 +1282,21 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'refresh-two-months' })
       .expect(200);
-    const stage = await request(app)
+    await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-two-months' })
-      .expect(200);
-    const response = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-        'x-edit-finalize': 'true',
-      })
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-two-months' })
-      .expect(200);
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_stage_single_month_required');
+      });
 
-    expect(response.body).toMatchObject({
-      appliedMonths: ['2026-01', '2026-02'],
-      appliedLineCount: 64,
-      resultingTargetRevision: februaryRevision,
-    });
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
-    const january = javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0];
-    const february = javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0];
-    expect(january).toMatchObject({
-      yearMonth: '2026-01',
-      targetRevision: mirror.body.targetRevisionAtFetch,
-      editSession: expect.objectContaining({ finalize: false }),
-    });
-    expect(january.cells).toHaveLength(32);
-    expect(february).toMatchObject({
-      yearMonth: '2026-02',
-      targetRevision: januaryRevision,
-      editSession: expect.objectContaining({ finalize: true }),
-    });
-    expect(february.cells).toHaveLength(32);
-    expect(january.idempotencyKey).not.toBe(february.idempotencyKey);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(0);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(0);
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
-  it('resumes a partially completed multi-month apply with the same monthly idempotency keys', async () => {
+  it('resumes an uncertain single-month apply with the server-pinned idempotency key', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1153,7 +1304,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-2-1',
+          endWeek: '26-1-5',
         },
       },
     });
@@ -1161,14 +1312,13 @@ describe('cashflow sheet lab route', () => {
       spreadsheetId: 'spreadsheet-a',
       selectedSheetName: 'cashflow(사용내역 연동)',
       availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-      matrix: buildMatrixWithWeekLabels(['26-1-1', '26-2-1']),
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
     }));
-    const januaryRevision = `sha256:${'3'.repeat(64)}`;
-    const februaryRevision = `sha256:${'4'.repeat(64)}`;
-    let februaryAttempts = 0;
+    const resultingTargetRevision = `sha256:${'3'.repeat(64)}`;
+    let attempts = 0;
     const javaWeeklyClient = {
       applyCashflowSheetLab: vi.fn(async ({ projectId, yearMonth, sourceRevision, targetRevision }) => {
-        if (yearMonth === '2026-02' && februaryAttempts++ === 0) {
+        if (attempts++ === 0) {
           throw Object.assign(new Error('temporary JVM failure'), {
             statusCode: 503,
             code: 'weekly_api_unavailable',
@@ -1180,7 +1330,7 @@ describe('cashflow sheet lab route', () => {
           yearMonth,
           sourceRevision,
           targetRevision,
-          resultingTargetRevision: yearMonth === '2026-01' ? januaryRevision : februaryRevision,
+          resultingTargetRevision,
         };
       }),
     };
@@ -1203,29 +1353,28 @@ describe('cashflow sheet lab route', () => {
       'x-edit-fence': '7',
       'x-edit-finalize': 'true',
     };
-    const payload = { stageRunId: stage.body.runId, idempotencyKey: 'apply-resume-months' };
+    const firstPayload = { stageRunId: stage.body.runId, idempotencyKey: 'apply-resume-first' };
 
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set(headers)
-      .send(payload)
+      .send(firstPayload)
       .expect(503);
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('APPLYING');
 
     const retry = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set(headers)
-      .send(payload)
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-resume-after-reload' })
       .expect(200);
 
-    expect(retry.body.resultingTargetRevision).toBe(februaryRevision);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(4);
+    expect(retry.body.resultingTargetRevision).toBe(resultingTargetRevision);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
     const calls = javaWeeklyClient.applyCashflowSheetLab.mock.calls.map(([call]) => call);
-    expect(calls.map((call) => call.yearMonth)).toEqual(['2026-01', '2026-02', '2026-01', '2026-02']);
-    expect(calls[0].idempotencyKey).toBe(calls[2].idempotencyKey);
-    expect(calls[1].idempotencyKey).toBe(calls[3].idempotencyKey);
-    expect(calls[1].targetRevision).toBe(januaryRevision);
-    expect(calls[3].targetRevision).toBe(januaryRevision);
+    expect(calls.map((call) => call.yearMonth)).toEqual(['2026-01', '2026-01']);
+    expect(calls[0].idempotencyKey).toBe(calls[1].idempotencyKey);
+    expect(calls[0].targetRevision).toBe(mirror.body.targetRevisionAtFetch);
+    expect(calls[1].targetRevision).toBe(mirror.body.targetRevisionAtFetch);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 
@@ -1284,6 +1433,46 @@ describe('cashflow sheet lab route', () => {
       });
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w4')).toBeUndefined();
+  });
+
+  it('blocks weeks 1 and 2 because they are not a complete five-week finance month', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(['26-1-1', '26-1-2']),
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-partial-leading-weeks' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-partial-leading-weeks' })
+      .expect(200);
+
+    expect(stage.body).toMatchObject({
+      status: 'BLOCKED',
+      blockedMonths: ['2026-01'],
+      stagedLineCount: 0,
+    });
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(0);
   });
 
   it('retires both sheet write-back routes for inbound-only finance sync', async () => {

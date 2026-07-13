@@ -439,6 +439,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             week.put("adminClosed", revisionBoolean(document.get("adminClosed")));
             week.put("projection", revisionAmounts(document.get("projection")));
             week.put("weekNo", normalizedRevisionNumber(weekNumber));
+            week.put("weeklyExpenseActualBySheet", revisionAmountSources(document.get("weeklyExpenseActualBySheet")));
             week.put("yearMonth", yearMonth);
             weeks.add(week);
         }
@@ -462,6 +463,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         for (Map.Entry<?, ?> entry : amounts.entrySet()) {
             if (entry.getValue() instanceof Number number && isFinite(number)) {
                 normalized.put(String.valueOf(entry.getKey()), normalizedRevisionNumber(number));
+            }
+        }
+        return normalized;
+    }
+
+    private static Map<String, Object> revisionAmountSources(Object value) {
+        Map<String, Object> normalized = new TreeMap<>();
+        if (!(value instanceof Map<?, ?> sources)) return normalized;
+        for (Map.Entry<?, ?> entry : sources.entrySet()) {
+            Map<String, Object> amounts = revisionAmounts(entry.getValue());
+            if (!amounts.isEmpty()) {
+                normalized.put(String.valueOf(entry.getKey()), amounts);
             }
         }
         return normalized;

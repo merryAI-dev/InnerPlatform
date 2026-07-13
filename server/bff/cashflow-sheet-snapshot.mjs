@@ -18,6 +18,12 @@ function normalizedText(value) {
   return String(value ?? '').normalize('NFKC').trim();
 }
 
+function compareCodeUnits(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 export function classifyCashflowSheetCell(value) {
   const rawValue = normalizedText(value);
   if (!rawValue || /^[-–—―]+$/.test(rawValue)) return { state: 'EMPTY' };
@@ -48,7 +54,15 @@ function normalizedAmounts(value) {
   if (!value || typeof value !== 'object') return {};
   return Object.fromEntries(Object.entries(value)
     .filter(([, amount]) => typeof amount === 'number' && Number.isFinite(amount))
-    .sort(([left], [right]) => left.localeCompare(right)));
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
+}
+
+function normalizedAmountSources(value) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([sourceKey, amounts]) => [sourceKey, normalizedAmounts(amounts)])
+    .filter(([, amounts]) => Object.keys(amounts).length > 0)
+    .sort(([left], [right]) => compareCodeUnits(left, right)));
 }
 
 export function computeCashflowTargetRevision(snapshot = {}) {
@@ -58,6 +72,7 @@ export function computeCashflowTargetRevision(snapshot = {}) {
       weekNo: Number(week?.weekNo),
       projection: normalizedAmounts(week?.projection),
       actual: normalizedAmounts(week?.actual),
+      weeklyExpenseActualBySheet: normalizedAmountSources(week?.weeklyExpenseActualBySheet),
       adminClosed: Boolean(week?.adminClosed),
     }))
     .filter((week) => week.yearMonth && Number.isFinite(week.weekNo))

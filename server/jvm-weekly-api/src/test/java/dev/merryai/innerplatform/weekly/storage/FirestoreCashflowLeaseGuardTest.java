@@ -403,9 +403,34 @@ class FirestoreCashflowLeaseGuardTest {
             "yearMonth", "2026-07",
             "weekNo", 1,
             "projection", Map.of("SALES_IN", 100L),
-            "actual", Map.of("DIRECT_COST_OUT", 50L),
+            "actual", Map.of("DIRECT_COST_OUT", 60L),
+            "weeklyExpenseActualBySheet", Map.of(
+                "z-source", Map.of("DIRECT_COST_OUT", 10L),
+                "A_source", Map.of("DIRECT_COST_OUT", 20L),
+                "_source", Map.of("DIRECT_COST_OUT", 30L)
+            ),
             "adminClosed", false
-        )))).isEqualTo("sha256:d0c7ee8769c18ba5371ae978e55eef55fd341df5aea288a298964fd06ced53f7");
+        )))).isEqualTo("sha256:013247d9be20befa6593d6a8dc9c39d3a39456651513458be7391d3aafc5383f");
+    }
+
+    @Test
+    void targetRevisionChangesWhenActualSourceProvenanceChangesButAggregateDoesNot() {
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("yearMonth", "2026-07");
+        first.put("weekNo", 1);
+        first.put("actual", Map.of("SALES_IN", 600L));
+        first.put("weeklyExpenseActualBySheet", Map.of(
+            "bank", Map.of("SALES_IN", 500L),
+            "cashflow-sheet-lab", Map.of("SALES_IN", 100L)
+        ));
+        Map<String, Object> second = new LinkedHashMap<>(first);
+        second.put("weeklyExpenseActualBySheet", Map.of(
+            "bank", Map.of("SALES_IN", 400L),
+            "cashflow-sheet-lab", Map.of("SALES_IN", 200L)
+        ));
+
+        assertThat(FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of(first)))
+            .isNotEqualTo(FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of(second)));
     }
 
     @Test

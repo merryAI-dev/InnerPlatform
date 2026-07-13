@@ -96,6 +96,50 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(new Set([missing, zero, closed])).toHaveLength(3);
   });
 
+  it('changes the target revision when Actual source provenance changes but the aggregate stays equal', () => {
+    const first = computeCashflowTargetRevision({
+      weeks: [{
+        yearMonth: '2026-01',
+        weekNo: 1,
+        actual: { SALES_IN: 600 },
+        weeklyExpenseActualBySheet: {
+          bank: { SALES_IN: 500 },
+          'cashflow-sheet-lab': { SALES_IN: 100 },
+        },
+      }],
+    });
+    const second = computeCashflowTargetRevision({
+      weeks: [{
+        yearMonth: '2026-01',
+        weekNo: 1,
+        actual: { SALES_IN: 600 },
+        weeklyExpenseActualBySheet: {
+          bank: { SALES_IN: 400 },
+          'cashflow-sheet-lab': { SALES_IN: 200 },
+        },
+      }],
+    });
+
+    expect(first).not.toBe(second);
+  });
+
+  it('uses the JVM-compatible canonical source-key order for target revisions', () => {
+    expect(computeCashflowTargetRevision({
+      weeks: [{
+        yearMonth: '2026-07',
+        weekNo: 1,
+        projection: { SALES_IN: 100 },
+        actual: { DIRECT_COST_OUT: 60 },
+        weeklyExpenseActualBySheet: {
+          'z-source': { DIRECT_COST_OUT: 10 },
+          A_source: { DIRECT_COST_OUT: 20 },
+          _source: { DIRECT_COST_OUT: 30 },
+        },
+        adminClosed: false,
+      }],
+    })).toBe('sha256:013247d9be20befa6593d6a8dc9c39d3a39456651513458be7391d3aafc5383f');
+  });
+
   it('keeps a full 60-week normalized mirror below the Firestore safety budget', () => {
     const mappings = [];
     const matrix = [];
