@@ -3,6 +3,8 @@ import type { Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
   aggregateTransactionsToActual,
+  CASHFLOW_IN_LINES,
+  CASHFLOW_OUT_LINES,
   computeCashflowDerivedTotals,
   computeOpeningCashflowTotals,
   computeCashflowTotals,
@@ -49,6 +51,31 @@ function makeWeek(weekNo: number, start: string, end: string): MonthMondayWeek {
   return { yearMonth: '2026-01', weekNo, weekStart: start, weekEnd: end, label: `26-1-${weekNo}` };
 }
 
+describe('cashflow line catalog', () => {
+  it('keeps the approved IN and OUT line order', () => {
+    expect(CASHFLOW_IN_LINES).toEqual([
+      'MYSC_PREPAY_IN',
+      'MYSC_PREPAY_LABOR_IN',
+      'MYSC_PREPAY_INPUT_VAT_IN',
+      'SALES_IN',
+      'SALES_VAT_IN',
+      'TEAM_SUPPORT_IN',
+      'BANK_INTEREST_IN',
+    ]);
+    expect(CASHFLOW_OUT_LINES).toEqual([
+      'MYSC_PREPAY_DIRECT_OUT',
+      'MYSC_PREPAY_LABOR_OUT',
+      'DIRECT_COST_OUT',
+      'INPUT_VAT_OUT',
+      'MYSC_LABOR_OUT',
+      'MYSC_PROFIT_OUT',
+      'SALES_VAT_OUT',
+      'TEAM_SUPPORT_OUT',
+      'BANK_INTEREST_OUT',
+    ]);
+  });
+});
+
 // ── computeCashflowTotals ──
 
 describe('computeCashflowTotals', () => {
@@ -76,21 +103,25 @@ describe('computeCashflowTotals', () => {
     });
   });
 
-  it('sums all five IN lines', () => {
+  it('sums all seven IN lines', () => {
     const result = computeCashflowTotals({
       MYSC_PREPAY_IN: 2_000_000,
+      MYSC_PREPAY_LABOR_IN: 400_000,
+      MYSC_PREPAY_INPUT_VAT_IN: 40_000,
       SALES_IN: 3_000_000,
       SALES_VAT_IN: 300_000,
       TEAM_SUPPORT_IN: 100_000,
       BANK_INTEREST_IN: 50_000,
     });
-    expect(result.totalIn).toBe(5_450_000);
+    expect(result.totalIn).toBe(5_890_000);
     expect(result.totalOut).toBe(0);
-    expect(result.net).toBe(5_450_000);
+    expect(result.net).toBe(5_890_000);
   });
 
-  it('sums all seven OUT lines', () => {
+  it('sums all nine OUT lines', () => {
     const result = computeCashflowTotals({
+      MYSC_PREPAY_DIRECT_OUT: 400_000,
+      MYSC_PREPAY_LABOR_OUT: 250_000,
       DIRECT_COST_OUT: 1_000_000,
       INPUT_VAT_OUT: 100_000,
       MYSC_LABOR_OUT: 500_000,
@@ -99,9 +130,9 @@ describe('computeCashflowTotals', () => {
       TEAM_SUPPORT_OUT: 50_000,
       BANK_INTEREST_OUT: 10_000,
     });
-    expect(result.totalOut).toBe(2_160_000);
+    expect(result.totalOut).toBe(2_810_000);
     expect(result.totalIn).toBe(0);
-    expect(result.net).toBe(-2_160_000);
+    expect(result.net).toBe(-2_810_000);
   });
 
   it('computes net = totalIn - totalOut for mixed sheet', () => {

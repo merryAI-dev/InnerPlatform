@@ -3,6 +3,8 @@ import type { MonthMondayWeek } from './cashflow-weeks';
 
 export const CASHFLOW_IN_LINES: CashflowSheetLineId[] = [
   'MYSC_PREPAY_IN',
+  'MYSC_PREPAY_LABOR_IN',
+  'MYSC_PREPAY_INPUT_VAT_IN',
   'SALES_IN',
   'SALES_VAT_IN',
   'TEAM_SUPPORT_IN',
@@ -10,6 +12,8 @@ export const CASHFLOW_IN_LINES: CashflowSheetLineId[] = [
 ];
 
 export const CASHFLOW_OUT_LINES: CashflowSheetLineId[] = [
+  'MYSC_PREPAY_DIRECT_OUT',
+  'MYSC_PREPAY_LABOR_OUT',
   'DIRECT_COST_OUT',
   'INPUT_VAT_OUT',
   'MYSC_LABOR_OUT',

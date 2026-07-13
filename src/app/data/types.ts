@@ -1200,11 +1200,15 @@ export interface MonthlyClose {
 export type CashflowSheetLineId =
   // IN
   | 'MYSC_PREPAY_IN'        // MYSC 선입금(필요 시 - 금액)
+  | 'MYSC_PREPAY_LABOR_IN'  // MYSC 선입금 - MYSC 인건비
+  | 'MYSC_PREPAY_INPUT_VAT_IN' // MYSC 선입금 - 매입부가세
   | 'SALES_IN'              // 매출액(입금)
   | 'SALES_VAT_IN'          // 매출부가세(입금)
   | 'TEAM_SUPPORT_IN'       // 팀지원금(입금)
   | 'BANK_INTEREST_IN'      // 은행이자(입금)
   // OUT
+  | 'MYSC_PREPAY_DIRECT_OUT' // MYSC 선입금 - 직접사업비 등
+  | 'MYSC_PREPAY_LABOR_OUT' // MYSC 선입금 - MYSC 인건비
   | 'DIRECT_COST_OUT'       // 직접사업비(공급가액/공급대가)
   | 'INPUT_VAT_OUT'         // 매입부가세(출금)
   | 'MYSC_LABOR_OUT'        // MYSC 인건비
