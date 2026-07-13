@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-07-13] patch-note | cashflow-safe-exit | 캐시플로 임시저장 후 이탈
+- pages: [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
+- summary: 캐시플로 상세에서 화면을 떠날 때 남은 입력을 작성자 전용 임시저장본에 보관하고 lease를 해제한 뒤 이동한다. 저장 실패 시 이동하지 않는다.
+
 ## [2026-07-13] patch-note | edit-lease-session-handoff | 동일 사용자 수정 세션 이어쓰기
 - pages: [portal-bank-statement](./pages/portal-bank-statement.md), [portal-submissions](./pages/portal-submissions.md), [portal-weekly-expense](./pages/portal-weekly-expense.md)
 - summary: 수정 중인 사람의 이름과 읽기 전용 안내를 표시하고, 같은 계정은 명시적으로 이전 수정 세션을 이어 받을 수 있게 했다. 새 session은 새 lease ID와 fence를 받아 이전 탭의 저장을 차단한다.

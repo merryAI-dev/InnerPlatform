@@ -501,6 +501,7 @@ export function CashflowProjectSheet({
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
   const [projectionCompleteWeek, setProjectionCompleteWeek] = useState<number | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeDialog, setCloseDialog] = useState<{
@@ -625,6 +626,20 @@ export function CashflowProjectSheet({
     weekSaveState,
     yearMonth,
   ]);
+
+  const savePrivateDraftAndLeave = useCallback(async (): Promise<void> => {
+    if (blocker.state !== 'blocked') return;
+    setExitBusy(true);
+    try {
+      await savePrivateCashflowDraft();
+      await cashflowLease.release();
+      blocker.proceed?.();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '임시저장 후 이동하지 못했습니다. 현재 화면에서 다시 시도해 주세요.'));
+    } finally {
+      setExitBusy(false);
+    }
+  }, [blocker, cashflowLease.release, savePrivateCashflowDraft]);
 
   const completePrivateCashflowDraft = useCallback(async (mutationLease: CashflowMutationLease): Promise<void> => {
     if (!cashflowPrivateDraftClient || privateDraftRevision === null) return;
@@ -3650,7 +3665,7 @@ export function CashflowProjectSheet({
       <AlertDialog
         open={blocker.state === 'blocked'}
         onOpenChange={(open) => {
-          if (!open && blocker.state === 'blocked') {
+          if (!open && !exitBusy && blocker.state === 'blocked') {
             blocker.reset();
           }
         }}
@@ -3663,8 +3678,16 @@ export function CashflowProjectSheet({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
-            <AlertDialogAction onClick={() => blocker.proceed?.()}>나가기</AlertDialogAction>
+            <AlertDialogCancel disabled={exitBusy} onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={exitBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                void savePrivateDraftAndLeave();
+              }}
+            >
+              임시저장 후 나가기
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

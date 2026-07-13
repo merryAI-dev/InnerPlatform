@@ -26,6 +26,7 @@
 
 ## Recent Changes
 
+- [2026-07-13] 화면 내부 이동 시 남은 캐시플로 입력을 개인 임시저장본에 저장한 뒤 수정 lease를 해제하도록 바꿨다. 저장에 실패하면 현재 화면에 남아 다시 시도한다.
 - [2026-04-09] admin export 흐름과 project sheet의 workbook contract를 더 밀접하게 맞췄다.
 - [2026-04-05] lazy heavy module 로딩 안정화를 넣었다.
 - [2026-04-04] compare mode, guide preview, weekly accounting snapshot, audit trail, soft gate를 강화했다.
