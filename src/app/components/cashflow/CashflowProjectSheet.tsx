@@ -585,9 +585,9 @@ export function CashflowProjectSheet({
     });
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateCashflowPrivateDraft]);
 
-  const beginCashflowEditing = useCallback(async (): Promise<boolean> => {
+  const beginCashflowEditing = useCallback(async (resumePrevious = false): Promise<boolean> => {
     if (!cashflowPrivateDraftClient) return false;
-    const ownership = await cashflowLease.acquire();
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return false;
     try {
       await hydrateCashflowPrivateDraft(ownership);
@@ -597,7 +597,7 @@ export function CashflowProjectSheet({
       toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
       return false;
     }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
 
   const savePrivateCashflowDraft = useCallback(async (): Promise<void> => {
     if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
@@ -3765,6 +3765,7 @@ export function CashflowProjectSheet({
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginCashflowEditing(); }}
+        onTakeover={() => { void beginCashflowEditing(true); }}
       />
     </div>
   );

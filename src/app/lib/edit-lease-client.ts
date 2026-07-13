@@ -56,6 +56,7 @@ export interface EditLeaseApiClient {
 export interface EditLeaseClient {
   getStatus(): Promise<EditLeaseStatus>;
   acquire(): Promise<EditLeaseOwnership>;
+  takeover(): Promise<EditLeaseOwnership>;
   extend(ownership: Pick<EditLeaseOwnership, 'leaseId' | 'fence'>): Promise<EditLeaseOwnership>;
   release(ownership: Pick<EditLeaseOwnership, 'leaseId' | 'fence'>): Promise<EditLeaseUnavailableStatus>;
 }
@@ -258,6 +259,7 @@ export function createEditLeaseClient(options: {
       parseStatus,
     ),
     acquire: () => post('acquire', sessionHeaders, requireOwnership),
+    takeover: () => post('takeover', sessionHeaders, requireOwnership),
     extend: (ownership) => post('extend', ownershipHeaders(ownership), requireOwnership),
     release: (ownership) => post('release', ownershipHeaders(ownership), (value) => {
       const status = parseStatus(value);

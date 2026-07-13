@@ -359,6 +359,7 @@ function ProjectInfoEditor({
         onExtend={() => { void lease.extend(); }}
         onContinueReadOnly={lease.continueReadOnly}
         onReacquire={() => { void startEditing(); }}
+        onTakeover={() => { void lease.takeover(); }}
       />
       <AlertDialog open={saveSuccessDialogOpen} onOpenChange={setSaveSuccessDialogOpen}>
         <AlertDialogContent className="max-w-md border border-slate-200 bg-white">

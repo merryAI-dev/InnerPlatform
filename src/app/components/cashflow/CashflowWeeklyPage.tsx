@@ -253,6 +253,7 @@ export function CashflowWeeklyPage() {
         onExtend={() => { void varianceLease.extend(); }}
         onContinueReadOnly={varianceLease.continueReadOnly}
         onReacquire={() => { void varianceLease.acquire(); }}
+        onTakeover={() => { void varianceLease.takeover(); }}
       />
     </div>
   );

@@ -223,6 +223,7 @@ function RegistrationEditor({
         onExtend={() => { void lease.extend(); }}
         onContinueReadOnly={lease.continueReadOnly}
         onReacquire={() => { void lease.acquire(); }}
+        onTakeover={() => { void lease.takeover(); }}
       />
     </>
   );

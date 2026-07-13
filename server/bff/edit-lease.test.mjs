@@ -366,6 +366,24 @@ describe('edit lease service', () => {
     expect(JSON.stringify(error.publicDetails)).not.toMatch(/actor-a|session-a|lease-1|fence/i);
   });
 
+  it('lets the same user continue an earlier edit session with a new lease fence', async () => {
+    const { service, base } = createHarness();
+    const first = await command(service.acquire(base));
+
+    const resumed = await command(service.takeover({
+      ...base,
+      sessionId: 'session-b',
+      idempotencyKey: 'idem-takeover-session-b',
+    }));
+
+    expect(resumed).toMatchObject({ state: 'ACTIVE', canEdit: true, leaseId: 'lease-2', fence: first.fence + 1 });
+    await expectHttpError(
+      service.extend({ ...base, leaseId: first.leaseId, fence: first.fence }),
+      423,
+      'edit_lease_held',
+    );
+  });
+
   it('treats now equal to expiresAt as expired and reacquires with a new lease and fence', async () => {
     const { service, base, advance } = createHarness();
     const first = await command(service.acquire(base));

@@ -15,6 +15,7 @@ import { useEditLease } from '../editing/useEditLease';
 const UNAVAILABLE_CLIENT: EditLeaseClient = {
   getStatus: async () => { throw new Error('수정 세션을 준비하고 있습니다.'); },
   acquire: async () => { throw new Error('수정 세션을 준비하고 있습니다.'); },
+  takeover: async () => { throw new Error('수정 세션을 준비하고 있습니다.'); },
   extend: async () => { throw new Error('수정 세션을 준비하고 있습니다.'); },
   release: async () => { throw new Error('수정 세션을 준비하고 있습니다.'); },
 };

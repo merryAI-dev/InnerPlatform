@@ -683,6 +683,7 @@ export function PortalSubmissionsPage() {
         onExtend={() => { void statusLease.extend(); }}
         onContinueReadOnly={statusLease.continueReadOnly}
         onReacquire={() => { void statusLease.acquire(); }}
+        onTakeover={() => { void statusLease.takeover(); }}
       />
     </div>
   );

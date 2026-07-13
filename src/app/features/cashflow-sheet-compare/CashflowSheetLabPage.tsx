@@ -413,9 +413,9 @@ export function CashflowSheetLabPage({
     if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
     void hydrateSheetPrivateDraft(cashflowLease.ownership).catch((error) => setErrorMessage(formatError(error)));
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateSheetPrivateDraft]);
-  const beginSheetEditing = useCallback(async () => {
+  const beginSheetEditing = useCallback(async (resumePrevious = false) => {
     if (!cashflowPrivateDraftClient) return null;
-    const ownership = await cashflowLease.acquire();
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return null;
     try {
       await hydrateSheetPrivateDraft(ownership);
@@ -425,7 +425,7 @@ export function CashflowSheetLabPage({
       setErrorMessage(formatError(error));
       return null;
     }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowPrivateDraftClient, hydrateSheetPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateSheetPrivateDraft]);
   const requestLoginFlow = useCallback(async () => {
     logCashflowLab('auth.popup.start', {
       projectId,
@@ -1274,6 +1274,7 @@ export function CashflowSheetLabPage({
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginSheetEditing(); }}
+        onTakeover={() => { void beginSheetEditing(true); }}
       />
     </div>
   );

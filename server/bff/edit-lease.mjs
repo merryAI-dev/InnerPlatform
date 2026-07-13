@@ -491,12 +491,14 @@ export function createEditLeaseService({
 
   async function runCommand(command, input) {
     const current = context(input);
-    const acquireLeaseId = command === 'acquire' ? requiredText(createLeaseId(), 'leaseId') : null;
+    const acquireLeaseId = command === 'acquire' || command === 'takeover'
+      ? requiredText(createLeaseId(), 'leaseId')
+      : null;
     const outcome = await db.runTransaction(async (tx) => {
       const nowMs = serverNow(now);
       const timestamp = asIso(nowMs);
       const actorRole = await assertResourceAccessInTransaction(tx, current, {
-        requireActiveRegistrationDraft: command === 'acquire',
+        requireActiveRegistrationDraft: command === 'acquire' || command === 'takeover',
       });
       const lock = await checkIdempotency(tx, current, command, input, nowMs);
       if (lock.mode === 'replay') {
@@ -508,16 +510,37 @@ export function createEditLeaseService({
       const snap = await tx.get(current.leaseRef);
       const existing = snap.exists ? (snap.data() || {}) : null;
 
-      if (command === 'acquire') {
+      if (command === 'acquire' || command === 'takeover') {
         if (activeAt(existing, nowMs)) {
-          if (existing.holderUid === current.actorId && existing.sessionId === current.sessionId) {
+          const sameActor = existing.holderUid === current.actorId;
+          const sameSession = sameActor && existing.sessionId === current.sessionId;
+          if (sameSession) {
             const body = ownedStatus(existing, nowMs);
-            await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'acquire', {
+            await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, command, {
               state: body.state,
               fence: body.fence,
-              resultCode: 'edit_lease_acquired',
+              resultCode: command === 'takeover' ? 'edit_lease_taken_over' : 'edit_lease_acquired',
               timestamp,
             })]);
+            completeIdempotency(tx, current, command, lock, body, nowMs);
+            return { status: 200, body, replayed: false };
+          }
+
+          if (command === 'takeover' && sameActor) {
+            const lease = buildActiveEditLeaseDocument({
+              ...current,
+              leaseId: acquireLeaseId,
+              serverNow: nowMs,
+              existing,
+            });
+            const body = ownedStatus(lease, nowMs);
+            await auditChainService.appendManyInTransaction(tx, [auditEntry(current, actorRole, 'takeover', {
+              state: body.state,
+              fence: body.fence,
+              resultCode: 'edit_lease_taken_over',
+              timestamp,
+            })]);
+            tx.set(current.leaseRef, lease);
             completeIdempotency(tx, current, command, lock, body, nowMs);
             return { status: 200, body, replayed: false };
           }
@@ -536,6 +559,10 @@ export function createEditLeaseService({
             timestamp,
           })]);
           return { error };
+        }
+
+        if (command === 'takeover') {
+          return { error: expiredLeaseError(existing, nowMs) };
         }
 
         const expiredFence = requiresExpiryTransition(existing, nowMs) ? auditFence(existing) : null;
@@ -688,6 +715,7 @@ export function createEditLeaseService({
     },
 
     acquire: (input) => runCommand('acquire', input),
+    takeover: (input) => runCommand('takeover', input),
     extend: (input) => runCommand('extend', input),
     release: (input) => runCommand('release', input),
   };

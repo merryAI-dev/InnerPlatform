@@ -46,6 +46,7 @@ function mockClient(overrides: Partial<EditLeaseClient> = {}) {
   return {
     getStatus: vi.fn(async (): Promise<EditLeaseStatus> => OWNED),
     acquire: vi.fn(async () => OWNED),
+    takeover: vi.fn(async () => OWNED),
     extend: vi.fn(async () => OWNED),
     release: vi.fn(async () => ({
       serverNow: '2026-07-10T00:01:00.000Z',
@@ -173,6 +174,34 @@ describe('createEditLeaseController', () => {
       expiredOpen: true,
       ownership: null,
     });
+  });
+
+  it('does not reopen a held dialog after the user chooses read-only mode', async () => {
+    const windowTarget = new FakeEventTarget();
+    const documentTarget = new FakeDocumentTarget();
+    const held: EditLeaseStatus = {
+      serverNow: '2026-07-10T00:00:00.000Z',
+      state: 'ACTIVE',
+      canEdit: false,
+      expiresAt: OWNED.expiresAt,
+      holderDisplayName: '변민욱(보람)',
+      sameActor: true,
+    };
+    const client = mockClient({ getStatus: vi.fn(async () => held) });
+    const controller = createEditLeaseController({ client, windowTarget, documentTarget });
+    controller.start();
+
+    await controller.checkStatus();
+    expect(controller.getState()).toMatchObject({ mode: 'held', conflictOpen: true });
+
+    controller.continueReadOnly();
+    windowTarget.dispatch('focus');
+    windowTarget.dispatch('pageshow');
+    documentTarget.dispatch('visibilitychange');
+    await flush();
+
+    expect(controller.getState()).toMatchObject({ mode: 'read-only', conflictOpen: false, canEdit: false });
+    controller.dispose();
   });
 
   it('exposes a pre-save status check and never releases on unload or dispose', async () => {
