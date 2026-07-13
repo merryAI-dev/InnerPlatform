@@ -198,6 +198,7 @@ describe('firestore rules policy alignment', () => {
       'cashflowEditLocks',
       'cashflow_edit_locks',
       'cashflow_sheet_mirrors',
+      'cashflow_sheet_refresh_runs',
       'cashflow_sheet_stage_runs',
       'cashflow_sheet_stage_months',
       'cashflow_change_candidates',

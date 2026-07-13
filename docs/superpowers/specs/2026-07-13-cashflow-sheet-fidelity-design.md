@@ -100,6 +100,9 @@ Projection과 ACTUAL은 같은 line ID를 사용하고 표시 문구만 mode별�
 - Google Sheet 읽기는 `시트 연동하기` 또는 `최신값 다시 가져오기`를 명시적으로 누를 때만 실행한다.
 - 자동 polling, 탭 focus 복귀 refresh, background canonical apply는 하지 않는다.
 - 성공한 조회 결과는 `sourceRevision`이 붙은 last-good snapshot으로 고정한다. 다음 명시적 조회 전까지 화면 비교와 검토는 같은 revision만 사용한다.
+- 고정본은 명시적 연동 요청의 URL에서 정규화한 spreadsheet ID, 탭, 시작·종료 주차의 `configRevision`과 결합한다. 작성자 비공개 임시설정은 기존 공유 project 설정과 달라도 그 요청 자체로 고정할 수 있고, 임시설정을 project 설정으로 공개 승격하지 않는다.
+- 공유 project 설정이 고정본과 다르게 변경되면 마지막 정상값은 보존하되 `STALE`로 바꾸고 이전 검토본을 반영하지 않는다. 최종 반영 예약 transaction도 mirror의 `FRESH`, config/source/target revision을 다시 검증한다.
+- 동시에 여러 번 연동하면 서버가 부여한 refresh generation이 가장 큰 명시적 요청만 고정본을 갱신한다. 진행 중인 연동과 다른 공유 설정을 저장해도 generation을 올려 이전 요청을 무효화하며, 늦게 끝난 과거 요청은 최신 고정본을 덮어쓰지 않는다.
 - 조회 실패 시 last-good snapshot을 지우지 않고 `STALE`로 표시한다. last-good도 없으면 `ERROR`다.
 - `sourceRevision`은 정규화한 시트 snapshot만으로 계산하고, 조회 당시 canonical 상태는 별도 `targetRevision`으로 기록한다.
 - `targetRevision`은 Projection, Actual 합계, `weeklyExpenseActualBySheet` 원천별 기여, 결산 flag를 함께 포함한다. 합계가 같아도 원천 구성이 달라지면 다른 revision이다.
@@ -109,12 +112,14 @@ Projection과 ACTUAL은 같은 line ID를 사용하고 표시 문구만 mode별�
 - 대상 월의 Projection과 해당 시트 Actual 기여를 전체 교체하고 다른 Actual 원천과 다른 월은 보존한다. 원천별 원장이 없던 legacy Actual은 기존 합계값을 검토 전 값으로 노출해 삭제·변경 후보도 사람이 확인한 뒤 현재 시트 기준으로 덮어쓴다.
 - 대상 월의 canonical 주차 중 하나라도 결산 상태면 월 전체를 `BLOCKED`로 표시하고 저장하지 않는다.
 - Apply 시 pinned `sourceRevision`과 현재 `targetRevision`이 다르면 409로 중단하고 다시 검토한다.
+- JVM 결과가 불확실한 5xx 재시도는 최초 서버 고정 idempotency key로 이어가고, 쓰기 전 거절된 4xx는 `READY`로 돌린 뒤 새 요청 key를 사용한다.
 
 ## Error and Compatibility
 
 - 기존 `MYSC_PREPAY_IN` 값은 그대로 읽고 저장한다.
 - 새 항목이 없는 과거 문서는 0이 아니라 미작성 상태를 보존한다.
 - 시트에서 같은 라벨의 방향을 판정할 수 없으면 임의 매핑하지 않고 unsupported reason을 반환한다.
+- 대상 월 canonical 문서의 project/month/week 메타데이터가 다르거나 기존 금액이 숫자형이 아니면 조용히 변환하지 않고 migration conflict로 차단한다.
 - 서버 snapshot을 읽지 못하면 오래된 클라이언트 계산으로 대체하지 않고 차이 영역을 오류 상태로 표시한다.
 
 ## Verification

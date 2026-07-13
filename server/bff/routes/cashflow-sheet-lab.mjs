@@ -282,6 +282,34 @@ function normalizeWeekRange({ startWeek, endWeek }) {
   };
 }
 
+function computeCashflowSheetConfigRevision(config = {}) {
+  const weekRange = normalizeWeekRange(config);
+  const rawValue = readOptionalText(config?.value);
+  return `sha256:${stableHash({
+    spreadsheetId: extractSpreadsheetId(rawValue) || rawValue,
+    sheetName: readOptionalText(config?.sheetName),
+    startWeek: weekRange.startWeek,
+    endWeek: weekRange.endWeek,
+  })}`;
+}
+
+function assertFreshCashflowSheetMirror(mirror) {
+  if (readOptionalText(mirror?.status) === 'FRESH' && readOptionalText(mirror?.configRevision)) return;
+  if (readOptionalText(mirror?.lastRefreshError?.code) === 'cashflow_sheet_config_changed'
+    || (readOptionalText(mirror?.status) === 'FRESH' && !readOptionalText(mirror?.configRevision))) {
+    throw createHttpError(
+      409,
+      '시트 설정이 변경되었습니다. 최신값을 다시 가져온 뒤 검토해 주세요.',
+      'cashflow_sheet_config_changed',
+    );
+  }
+  throw createHttpError(
+    409,
+    '최근 시트 연동이 실패했습니다. 최신값을 다시 가져온 뒤 검토해 주세요.',
+    'cashflow_sheet_mirror_stale',
+  );
+}
+
 function isInWeekRange(value, range) {
   if (!range?.startKey && !range?.endKey) return true;
   const key = weekSortKey({
@@ -344,10 +372,43 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, con
       role: 'workspace_user',
     },
   };
-  await db.doc(projectDocPath(tenantId, projectId)).set(stripUndefinedDeep({
-    cashflowSheetLab: config,
-    updatedAt: now,
-  }), { merge: true });
+  const configRevision = computeCashflowSheetConfigRevision(config);
+  const projectRef = db.doc(projectDocPath(tenantId, projectId));
+  const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+  await db.runTransaction(async (transaction) => {
+    const mirrorSnap = await transaction.get(mirrorRef);
+    const mirror = mirrorSnap.exists ? mirrorSnap.data() || {} : null;
+    transaction.set(projectRef, stripUndefinedDeep({
+      cashflowSheetLab: config,
+      updatedAt: now,
+    }), { merge: true });
+    const hasInstalledSource = Boolean(readOptionalText(mirror?.sourceRevision));
+    const installedConfigMismatch = hasInstalledSource
+      && readOptionalText(mirror?.configRevision) !== configRevision;
+    const pendingConfigRevision = readOptionalText(mirror?.pendingRefreshConfigRevision);
+    const pendingConfigMismatch = Boolean(pendingConfigRevision)
+      && pendingConfigRevision !== configRevision;
+    if (installedConfigMismatch || pendingConfigMismatch) {
+      const latestRefreshGeneration = Math.max(0, Number(mirror.latestRefreshGeneration) || 0) + 1;
+      const invalidation = {
+        status: hasInstalledSource
+          ? (installedConfigMismatch ? 'STALE' : readOptionalText(mirror.status) || 'STALE')
+          : 'EMPTY',
+        latestRefreshGeneration,
+        pendingRefreshConfigRevision: null,
+        lastRefreshAttemptAt: now,
+      };
+      if (installedConfigMismatch || !hasInstalledSource) {
+        invalidation.lastRefreshError = {
+          code: 'cashflow_sheet_config_changed',
+          message: '시트 설정이 변경되었습니다. 최신값을 다시 가져와 주세요.',
+          statusCode: 409,
+          at: now,
+        };
+      }
+      transaction.set(mirrorRef, stripUndefinedDeep(invalidation), { merge: true });
+    }
+  });
   return config;
 }
 
@@ -465,11 +526,13 @@ async function beginCashflowSheetRefreshRun({
   projectId,
   idempotencyKey,
   requestHash,
+  configRevision,
   attemptedAt,
   context,
 }) {
   const runRef = db.doc(cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey));
-  const replay = await db.runTransaction(async (transaction) => {
+  const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+  const result = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(runRef);
     if (snap.exists) {
       const run = snap.data() || {};
@@ -480,18 +543,31 @@ async function beginCashflowSheetRefreshRun({
           'idempotency_key_reused',
         );
       }
-      if (run.response) return run.response;
+      if (run.response) return { replay: run.response, generation: null };
       throw createHttpError(
         409,
         '같은 시트 연동 요청이 이미 처리 중입니다.',
         'idempotency_request_in_progress',
       );
     }
+    const mirrorSnap = await transaction.get(mirrorRef);
+    const mirror = mirrorSnap.exists ? mirrorSnap.data() || {} : {};
+    const generation = Math.max(0, Number(mirror.latestRefreshGeneration) || 0) + 1;
+    transaction.set(mirrorRef, stripUndefinedDeep({
+      schemaVersion: Number(mirror.schemaVersion) || 1,
+      projectId,
+      status: readOptionalText(mirror.status) || 'EMPTY',
+      latestRefreshGeneration: generation,
+      pendingRefreshConfigRevision: configRevision,
+      lastRefreshAttemptAt: attemptedAt,
+    }), { merge: true });
     transaction.set(runRef, stripUndefinedDeep({
       tenantId,
       projectId,
       idempotencyKey,
       requestHash,
+      configRevision,
+      generation,
       status: 'IN_PROGRESS',
       createdAt: attemptedAt,
       createdBy: {
@@ -500,9 +576,9 @@ async function beginCashflowSheetRefreshRun({
         role: readOptionalText(context?.actorRole) || 'workspace_user',
       },
     }));
-    return null;
+    return { replay: null, generation };
   });
-  return { runRef, replay };
+  return { runRef, ...result };
 }
 
 async function completeCashflowSheetRefreshRun({
@@ -511,12 +587,14 @@ async function completeCashflowSheetRefreshRun({
   projectId,
   runRef,
   requestHash,
+  generation,
   response,
   completedAt,
 }) {
   const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
-  await db.runTransaction(async (transaction) => {
+  return db.runTransaction(async (transaction) => {
     const runSnap = await transaction.get(runRef);
+    const mirrorSnap = await transaction.get(mirrorRef);
     const run = runSnap.exists ? runSnap.data() || {} : {};
     if (readOptionalText(run.requestHash) !== requestHash) {
       throw createHttpError(
@@ -525,14 +603,29 @@ async function completeCashflowSheetRefreshRun({
         'idempotency_key_reused',
       );
     }
-    transaction.set(mirrorRef, stripUndefinedDeep(response));
+    const runGeneration = Number(run.generation);
+    if (!Number.isSafeInteger(runGeneration) || runGeneration !== Number(generation)) {
+      throw createHttpError(409, '시트 연동 순서 정보가 변경되었습니다.', 'cashflow_sheet_refresh_generation_conflict');
+    }
+    const currentMirror = mirrorSnap.exists ? mirrorSnap.data() || {} : {};
+    const currentGeneration = Math.max(0, Number(currentMirror.latestRefreshGeneration) || 0);
+    const superseded = currentGeneration > runGeneration;
+    const installedResponse = superseded
+      ? currentMirror
+      : stripUndefinedDeep({
+        ...response,
+        latestRefreshGeneration: runGeneration,
+        pendingRefreshConfigRevision: null,
+      });
+    if (!superseded) transaction.set(mirrorRef, installedResponse);
     transaction.set(runRef, stripUndefinedDeep({
       status: 'COMPLETED',
       completedAt,
-      response,
+      superseded,
+      response: installedResponse,
     }), { merge: true });
+    return installedResponse;
   });
-  return response;
 }
 
 function setFiniteAmount(index, mapping, amount) {
@@ -667,6 +760,7 @@ function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMo
     projectId,
     runId,
     yearMonth,
+    configRevision: mirror.configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
     cells,
@@ -781,6 +875,7 @@ function assertApplyRequestMatches(stageRun, applyRequestHash) {
 
 async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId, idempotencyKey, applyRequestHash, now }) {
   const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`);
+  const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
   const result = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(runRef);
     if (!snap.exists) {
@@ -803,13 +898,36 @@ async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId,
     if (status !== 'READY') {
       throw createHttpError(409, '반영 가능한 상태의 시트 검토 run이 아닙니다.', 'cashflow_sheet_stage_run_blocked');
     }
+    const mirrorSnap = await transaction.get(mirrorRef);
+    if (!mirrorSnap.exists) {
+      throw createHttpError(409, '시트 고정본을 찾을 수 없습니다. 최신값을 다시 가져와 주세요.', 'cashflow_sheet_mirror_required');
+    }
+    const mirror = mirrorSnap.data() || {};
+    assertFreshCashflowSheetMirror(mirror);
+    if (
+      readOptionalText(mirror.configRevision) !== readOptionalText(stageRun.configRevision)
+      || readOptionalText(mirror.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+      || readOptionalText(mirror.targetRevisionAtFetch) !== readOptionalText(stageRun.targetRevisionAtFetch)
+    ) {
+      throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
+    }
     transaction.set(runRef, stripUndefinedDeep({
       status: 'APPLYING',
       applyStartedAt: now,
       appliedIdempotencyKey: idempotencyKey,
       applyRequestHash,
     }), { merge: true });
-    return { replay: null, resume: false, stageRun };
+    return {
+      replay: null,
+      resume: false,
+      stageRun: {
+        ...stageRun,
+        status: 'APPLYING',
+        applyStartedAt: now,
+        appliedIdempotencyKey: idempotencyKey,
+        applyRequestHash,
+      },
+    };
   });
   return { ...result, runRef };
 }
@@ -832,6 +950,8 @@ async function restoreCashflowSheetApplyReady({
     ) return;
     transaction.set(runRef, stripUndefinedDeep({
       status: 'READY',
+      appliedIdempotencyKey: null,
+      applyRequestHash: null,
       applyFailedAt: new Date().toISOString(),
       applyFailure: routeErrorDetails(error),
     }), { merge: true });
@@ -931,7 +1051,8 @@ async function applyStagedCashflowSheetLab({
   const stagedMonths = await Promise.all(selectedMonths.map(async (yearMonth) => {
     const stagedMonth = await readCashflowSheetStageMonth({ db, tenantId, projectId, runId: stagedRunId, yearMonth });
     if (
-      readOptionalText(stagedMonth.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+      readOptionalText(stagedMonth.configRevision) !== readOptionalText(stageRun.configRevision)
+      || readOptionalText(stagedMonth.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
       || readOptionalText(stagedMonth.targetRevisionAtFetch) !== readOptionalText(stageRun.targetRevisionAtFetch)
     ) {
       throw createHttpError(409, '검토 당시 고정한 월 시트 revision이 일치하지 않습니다.', 'cashflow_sheet_stage_month_revision_conflict');
@@ -954,7 +1075,11 @@ async function applyStagedCashflowSheetLab({
 
   if (!resuming) {
     const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-    if (readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)) {
+    assertFreshCashflowSheetMirror(mirror);
+    if (
+      readOptionalText(mirror?.configRevision) !== readOptionalText(stageRun.configRevision)
+      || readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+    ) {
       throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
     }
     const currentTargetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
@@ -974,7 +1099,12 @@ async function applyStagedCashflowSheetLab({
   });
   if (reservation.replay) return reservation.replay;
   stageRun = reservation.stageRun;
-  const effectiveIdempotencyKey = readOptionalText(stageRun.appliedIdempotencyKey) || idempotencyKey;
+  const effectiveIdempotencyKey = reservation.resume
+    ? readOptionalText(stageRun.appliedIdempotencyKey)
+    : idempotencyKey;
+  if (!effectiveIdempotencyKey) {
+    throw createHttpError(409, '최종 반영 재시도 키를 확인할 수 없습니다.', 'cashflow_sheet_apply_resume_invalid');
+  }
 
   const javaResults = [];
   let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
@@ -1094,6 +1224,15 @@ async function stagePinnedCashflowSheetLab({
   const requestHash = stableHash({ expectedMirrorRevision: parsed.expectedMirrorRevision });
   const runId = `cfstage_${stableHash({ tenantId, projectId, idempotencyKey: parsed.idempotencyKey }).slice(0, 32)}`;
   const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${runId}`);
+  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+  if (!mirror?.sourceRevision) {
+    throw createHttpError(409, '먼저 시트 연동하기를 실행해 주세요.', 'cashflow_sheet_mirror_required');
+  }
+  if (readOptionalText(mirror.sourceRevision) !== readOptionalText(parsed.expectedMirrorRevision)) {
+    throw createHttpError(409, '검토 중인 시트 revision이 최신 고정본과 다릅니다.', 'cashflow_sheet_mirror_revision_conflict');
+  }
+  assertFreshCashflowSheetMirror(mirror);
+  const configRevision = readOptionalText(mirror.configRevision);
   const existingRunSnap = await runRef.get();
   if (existingRunSnap.exists) {
     const existingRun = existingRunSnap.data() || {};
@@ -1103,17 +1242,6 @@ async function stagePinnedCashflowSheetLab({
     if (readOptionalText(existingRun.status) === 'STAGING' && reservationExpiresAt > Date.now()) {
       throw stageRunInProgressError();
     }
-  }
-
-  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-  if (!mirror?.sourceRevision) {
-    throw createHttpError(409, '먼저 시트 연동하기를 실행해 주세요.', 'cashflow_sheet_mirror_required');
-  }
-  if (readOptionalText(mirror.sourceRevision) !== readOptionalText(parsed.expectedMirrorRevision)) {
-    throw createHttpError(409, '검토 중인 시트 revision이 최신 고정본과 다릅니다.', 'cashflow_sheet_mirror_revision_conflict');
-  }
-  if (readOptionalText(mirror.status) !== 'FRESH') {
-    throw createHttpError(409, '최근 시트 연동이 실패했습니다. 최신값을 다시 가져온 뒤 검토해 주세요.', 'cashflow_sheet_mirror_stale');
   }
 
   const pinnedMonths = [...groupPinnedCellsByMonth(mirror.cells || []).keys()].sort();
@@ -1171,6 +1299,7 @@ async function stagePinnedCashflowSheetLab({
     spreadsheetId: mirror.spreadsheetId,
     spreadsheetTitle: mirror.spreadsheetTitle,
     selectedSheetName: mirror.selectedSheetName,
+    configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
     activeWeekRange: mirror.activeWeekRange,
@@ -1197,6 +1326,7 @@ async function stagePinnedCashflowSheetLab({
     projectId,
     idempotencyKey: parsed.idempotencyKey,
     requestHash,
+    configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
     status: response.status,
@@ -1370,6 +1500,7 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
     const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
     const weekRange = normalizeWeekRange(source);
+    const configRevision = computeCashflowSheetConfigRevision({ ...source, ...weekRange });
     const previousMirror = await readCashflowSheetMirror(db, tenantId, projectId);
     const refreshRequestHash = stableHash({
       value: source.value,
@@ -1390,6 +1521,7 @@ export function mountCashflowSheetLabRoutes(app, {
       projectId,
       idempotencyKey: parsed.idempotencyKey,
       requestHash: refreshRequestHash,
+      configRevision,
       attemptedAt,
       context: req.context,
     });
@@ -1398,16 +1530,17 @@ export function mountCashflowSheetLabRoutes(app, {
       return;
     }
     if (readOptionalText(previousMirror?.lastRefreshIdempotencyKey) === parsed.idempotencyKey) {
-      await completeCashflowSheetRefreshRun({
+      const completedMirror = await completeCashflowSheetRefreshRun({
         db,
         tenantId,
         projectId,
         runRef: refreshRun.runRef,
         requestHash: refreshRequestHash,
+        generation: refreshRun.generation,
         response: previousMirror,
         completedAt: attemptedAt,
       });
-      res.status(200).json(previousMirror);
+      res.status(200).json(completedMirror);
       return;
     }
 
@@ -1461,25 +1594,27 @@ export function mountCashflowSheetLabRoutes(app, {
         totalBasis: CASHFLOW_WEEK_BASIS,
         activeWeeks: buildActiveWeeksFromTemplate(template, weekRange),
       };
+      mirror.configRevision = configRevision;
       mirror.lastRefreshAttemptAt = attemptedAt;
       mirror.lastRefreshIdempotencyKey = parsed.idempotencyKey;
       mirror.lastRefreshRequestHash = refreshRequestHash;
-      await completeCashflowSheetRefreshRun({
+      const completedMirror = await completeCashflowSheetRefreshRun({
         db,
         tenantId,
         projectId,
         runRef: refreshRun.runRef,
         requestHash: refreshRequestHash,
+        generation: refreshRun.generation,
         response: mirror,
         completedAt: new Date().toISOString(),
       });
       logCashflowSheetLab('mirror.refresh.ok', req, {
         projectId,
-        sourceRevision: mirror.sourceRevision,
-        targetRevisionAtFetch: mirror.targetRevisionAtFetch,
-        ...mirror.summary,
+        sourceRevision: completedMirror.sourceRevision,
+        targetRevisionAtFetch: completedMirror.targetRevisionAtFetch,
+        ...completedMirror.summary,
       });
-      res.status(200).json(mirror);
+      res.status(200).json(completedMirror);
     } catch (error) {
       const normalized = normalizeRouteError(error);
       const lastRefreshError = {
@@ -1506,21 +1641,22 @@ export function mountCashflowSheetLabRoutes(app, {
           lastRefreshIdempotencyKey: parsed.idempotencyKey,
           lastRefreshRequestHash: refreshRequestHash,
         };
-      await completeCashflowSheetRefreshRun({
+      const completedMirror = await completeCashflowSheetRefreshRun({
         db,
         tenantId,
         projectId,
         runRef: refreshRun.runRef,
         requestHash: refreshRequestHash,
+        generation: refreshRun.generation,
         response: mirror,
         completedAt: new Date().toISOString(),
       });
       logCashflowSheetLab('mirror.refresh.failed', req, {
         projectId,
-        mirrorStatus: mirror.status,
+        mirrorStatus: completedMirror.status,
         ...routeErrorDetails(normalized),
       }, 'warn');
-      res.status(200).json(mirror);
+      res.status(200).json(completedMirror);
     }
   }));
 

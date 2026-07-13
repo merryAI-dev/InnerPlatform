@@ -639,6 +639,104 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthlyApplyRejectsCanonicalIdsWithMissingOrMismatchedProjectMetadata() {
+        List<Map<String, Object>> malformedWeeks = new ArrayList<>();
+        Map<String, Object> missingProject = draftWeek();
+        missingProject.remove("projectId");
+        malformedWeeks.add(missingProject);
+        Map<String, Object> mismatchedProject = draftWeek();
+        mismatchedProject.put("projectId", "project-b");
+        malformedWeeks.add(mismatchedProject);
+
+        for (int index = 0; index < malformedWeeks.size(); index += 1) {
+            Fixture fixture = fixture(activeMember(), activeLease());
+            Map<String, Object> malformedWeek = malformedWeeks.get(index);
+            String idempotencyKey = "monthly-project-metadata-" + index;
+            fixture.documents.put(weekPath(), malformedWeek);
+
+            assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+                fixture.persistence
+            ).applyCashflowSheetLab(
+                ACTOR,
+                "project-a",
+                SESSION,
+                monthlyRequest(
+                    idempotencyKey,
+                    "sha256:298012959db83e193536ff7f60735889252ceaa4325de6944465e2dd197fcb44",
+                    ""
+                )
+            )))
+                .isInstanceOf(WeeklyExpenseConflictException.class)
+                .hasMessageContaining("migration");
+
+            assertThat(fixture.documents.get(weekPath())).isEqualTo(malformedWeek);
+        }
+    }
+
+    @Test
+    void monthlyApplyRejectsCanonicalIdsWithFractionalWeekNumbers() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> malformedWeek = draftWeek();
+        malformedWeek.put("weekNo", 1.5d);
+        fixture.documents.put(weekPath(), malformedWeek);
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            List.of(malformedWeek)
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest("monthly-fractional-week", targetRevision, "")
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("migration");
+
+        assertThat(fixture.documents.get(weekPath())).isEqualTo(malformedWeek);
+    }
+
+    @Test
+    void monthlyApplyRejectsExistingNonNumericCashflowAmounts() {
+        List<Map<String, Object>> malformedWeeks = new ArrayList<>();
+        Map<String, Object> stringProjection = draftWeek();
+        stringProjection.put("projection", Map.of("SALES_IN", "100"));
+        malformedWeeks.add(stringProjection);
+        Map<String, Object> stringActual = draftWeek();
+        stringActual.put("actual", Map.of("SALES_IN", "100"));
+        malformedWeeks.add(stringActual);
+        Map<String, Object> stringActualSource = draftWeek();
+        stringActualSource.put("weeklyExpenseActualBySheet", Map.of(
+            "bank-import", Map.of("SALES_IN", "100")
+        ));
+        malformedWeeks.add(stringActualSource);
+
+        for (int index = 0; index < malformedWeeks.size(); index += 1) {
+            Fixture fixture = fixture(activeMember(), activeLease());
+            Map<String, Object> malformedWeek = malformedWeeks.get(index);
+            String idempotencyKey = "monthly-non-numeric-" + index;
+            fixture.documents.put(weekPath(), malformedWeek);
+            String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+                List.of(malformedWeek)
+            );
+
+            assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+                fixture.persistence
+            ).applyCashflowSheetLab(
+                ACTOR,
+                "project-a",
+                SESSION,
+                monthlyRequest(idempotencyKey, targetRevision, "")
+            )))
+                .isInstanceOf(WeeklyExpenseConflictException.class)
+                .hasMessageContaining("migration");
+
+            assertThat(fixture.documents.get(weekPath())).isEqualTo(malformedWeek);
+        }
+    }
+
+    @Test
     void exactReplayReturnsAfterFinalApplyReleasedTheLease() {
         Fixture fixture = fixture(activeMember(), activeLease());
         CashflowSheetLabApplyRequest request = monthlyRequest(

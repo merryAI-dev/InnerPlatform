@@ -290,12 +290,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
         cells = CashflowSheetLabApplyRequest.requireCompleteMonth(cells);
+        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
+        for (int weekNo = 1; weekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT; weekNo += 1) {
+            String docId = cashflowWeekId(projectId, yearMonth, weekNo);
+            DocumentSnapshot snap = get(cashflowWeekRef(tenantId, docId));
+            if (!snap.exists()) continue;
+            Map<String, Object> document = data(snap);
+            requireCanonicalCashflowMonthDocument(projectId, yearMonth, weekNo, docId, document);
+            targetMonthDocs.put(docId, document);
+        }
         QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
         for (DocumentSnapshot doc : existingSnapshot.getDocuments()) {
             allProjectWeeks.put(doc.getId(), data(doc));
         }
-        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
         for (Map.Entry<String, Map<String, Object>> entry : allProjectWeeks.entrySet()) {
             Map<String, Object> document = entry.getValue();
             String storedYearMonth = text(document.get("yearMonth"), "");
@@ -303,24 +311,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             if (!yearMonth.equals(storedYearMonth) && !yearMonth.equals(parts.yearMonth())) {
                 continue;
             }
-            Object storedWeekValue = document.get("weekNo");
-            int storedWeekNo = storedWeekValue instanceof Number ? intValue(storedWeekValue, 0) : 0;
-            boolean canonical = yearMonth.equals(storedYearMonth)
-                && storedWeekNo >= 1
-                && storedWeekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
-                && entry.getKey().equals(cashflowWeekId(projectId, yearMonth, storedWeekNo));
-            if (!canonical) {
-                throw new WeeklyExpenseConflictException(
-                    "Cashflow month contains malformed or non-canonical week documents; "
-                        + "migration is required before applying."
-                );
-            }
+            requireCanonicalCashflowMonthDocument(
+                projectId,
+                yearMonth,
+                parts.weekNo(),
+                entry.getKey(),
+                document
+            );
             if (bool(document.get("adminClosed"))
                 || "closed".equals(text(document.get("weeklyStatusState"), "").toLowerCase(Locale.ROOT))) {
                 throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
             }
             targetMonthDocs.put(entry.getKey(), document);
         }
+        allProjectWeeks.putAll(targetMonthDocs);
         String currentRevision = computeCashflowTargetRevision(allProjectWeeks.values());
         if (!currentRevision.equals(targetRevision)) {
             throw new WeeklyExpenseConflictException("Cashflow target revision changed. Refresh the sheet before applying.");
@@ -478,6 +482,61 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             }
         }
         return normalized;
+    }
+
+    private void requireCanonicalCashflowMonthDocument(
+        String projectId,
+        String yearMonth,
+        int expectedWeekNo,
+        String docId,
+        Map<String, Object> document
+    ) {
+        if (!projectId.equals(text(document.get("projectId"), ""))
+            || !yearMonth.equals(text(document.get("yearMonth"), ""))
+            || expectedWeekNo < 1
+            || expectedWeekNo > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
+            || exactInteger(document.get("weekNo")) != expectedWeekNo
+            || !docId.equals(cashflowWeekId(projectId, yearMonth, expectedWeekNo))) {
+            throw malformedCashflowMonth();
+        }
+        requireNumericAmountField(document, "projection");
+        requireNumericAmountField(document, "actual");
+        if (document.containsKey("weeklyExpenseActualBySheet")) {
+            Object value = document.get("weeklyExpenseActualBySheet");
+            if (!(value instanceof Map<?, ?> sources)) throw malformedCashflowMonth();
+            for (Object amounts : sources.values()) {
+                requireNumericAmounts(amounts);
+            }
+        }
+    }
+
+    private void requireNumericAmountField(Map<String, Object> document, String field) {
+        if (document.containsKey(field)) requireNumericAmounts(document.get(field));
+    }
+
+    private void requireNumericAmounts(Object value) {
+        if (!(value instanceof Map<?, ?> amounts)) throw malformedCashflowMonth();
+        for (Object amount : amounts.values()) {
+            if (!(amount instanceof Number number) || !isFinite(number)) {
+                throw malformedCashflowMonth();
+            }
+        }
+    }
+
+    private int exactInteger(Object value) {
+        if (!(value instanceof Number number) || !isFinite(number)) return 0;
+        try {
+            return new BigDecimal(number.toString()).intValueExact();
+        } catch (ArithmeticException | NumberFormatException error) {
+            return 0;
+        }
+    }
+
+    private WeeklyExpenseConflictException malformedCashflowMonth() {
+        return new WeeklyExpenseConflictException(
+            "Cashflow month contains malformed or non-canonical week documents; "
+                + "migration is required before applying."
+        );
     }
 
     private static Object normalizedRevisionNumber(Number number) {
