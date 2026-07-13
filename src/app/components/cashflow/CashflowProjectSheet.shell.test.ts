@@ -100,10 +100,52 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('/portal/cashflow/sheets-lab?projectId=');
   });
 
-  it('replaces the empty-row toggle with an explicit sheet refresh action', () => {
+  it('renders the approved fixed blocks in projection-minus-actual order', () => {
+    expect(cashflowProjectSheetSource).toMatch(
+      /\{renderProjectionActualDiffTable\(\)\}[\s\S]*\{renderUnifiedMonthlyBoard\(\)\}/,
+    );
+    expect(cashflowProjectSheetSource.indexOf('data-cashflow-block="projection"')).toBeLessThan(
+      cashflowProjectSheetSource.indexOf('data-cashflow-block="actual"'),
+    );
+    expect(cashflowProjectSheetSource).toContain('data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}');
+    expect(cashflowProjectSheetSource).toContain('getCashflowModeLineLabel(lineId, mode)');
+    expect(cashflowProjectSheetSource).toContain('Projection - Actual 차이');
+    expect(cashflowProjectSheetSource).not.toContain('Actual - Projection');
+    expect(cashflowProjectSheetSource).not.toContain('actual - projection');
+    expect(cashflowProjectSheetSource).not.toContain('projectionActualDiff');
+    expect(cashflowProjectSheetSource).not.toContain('projectionActualYearDiff');
+  });
+
+  it('loads the comparison read model from the BFF without a client-side fallback', () => {
+    expect(cashflowProjectSheetSource).toContain('fetchCashflowSnapshotViaBff');
+    expect(cashflowProjectSheetSource).toContain('cashflowSnapshot.readModel.months');
+    expect(cashflowProjectSheetSource).toContain('cashflowComparisonError');
+    expect(cashflowProjectSheetSource).not.toContain('computeProjectionActualComparison');
+  });
+
+  it('shows weeks excluded by the BFF as unavailable instead of a computed zero', () => {
+    expect(cashflowProjectSheetSource).toContain('difference: comparisonWeek ? (comparisonWeek.amounts[lineId] ?? 0) : null');
+    expect(cashflowProjectSheetSource).toContain('cell.difference === null');
+  });
+
+  it('separates explicit sheet refresh from pinned-revision review', () => {
+    expect(cashflowProjectSheetSource).toContain('getCashflowSheetLabMirrorViaBff');
+    expect(cashflowProjectSheetSource).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(cashflowProjectSheetSource).toContain('stageCashflowSheetLabViaBff');
-    expect(cashflowProjectSheetSource).toContain('handleRefreshSheetValues');
-    expect(cashflowProjectSheetSource).toContain('시트 변경 값을 불러왔습니다.');
+    expect(cashflowProjectSheetSource).toContain('handleRefreshSheetMirror');
+    expect(cashflowProjectSheetSource).toContain('expectedMirrorRevision: cashflowSheetMirror.sourceRevision');
+    expect(cashflowProjectSheetSource).toContain('const refreshIdempotencyKey =');
+    expect(cashflowProjectSheetSource).toContain('const stageIdempotencyKey =');
+    expect(cashflowProjectSheetSource).toContain('const applyIdempotencyKey =');
+    expect(cashflowProjectSheetSource.indexOf('const refreshIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const refreshMirror ='));
+    expect(cashflowProjectSheetSource.indexOf('const stageIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const stageMirror ='));
+    expect(cashflowProjectSheetSource.indexOf('const applyIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const apply = async'));
+    expect(cashflowProjectSheetSource).toContain('시트 연동하기');
+    expect(cashflowProjectSheetSource).toContain('최신값 다시 가져오기');
+    expect(cashflowProjectSheetSource).toContain('FRESH');
+    expect(cashflowProjectSheetSource).toContain('STALE');
+    expect(cashflowProjectSheetSource).toContain('ERROR');
+    expect(cashflowProjectSheetSource).toContain('capturedAt');
     expect(cashflowProjectSheetSource).toContain('비교 결과');
     expect(cashflowProjectSheetSource).toContain('sheetStageDialog');
     expect(cashflowProjectSheetSource).toContain('원장은 아직 변경되지 않았습니다.');
@@ -115,17 +157,19 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).toContain('renderSheetStageCandidateCell');
     expect(cashflowProjectSheetSource).toContain('검토한 값');
     expect(cashflowProjectSheetSource).toContain('시트에서 가져오기');
-    expect(cashflowProjectSheetSource).toContain('시트로 내보내기');
-    expect(cashflowProjectSheetSource).toContain('시트 값 비교하기');
-    expect(cashflowProjectSheetSource).toContain('시트에 쓸 값 미리보기');
-    expect(cashflowProjectSheetSource).toContain('Actual은 이 방향에서 수정하지 않습니다.');
-    expect(cashflowProjectSheetSource).toContain('direction=platform-to-sheet');
+    expect(cashflowProjectSheetSource).toContain('고정값 비교하기');
+    expect(cashflowProjectSheetSource).not.toContain('시트로 내보내기');
+    expect(cashflowProjectSheetSource).not.toContain('시트에 쓸 값 미리보기');
+    expect(cashflowProjectSheetSource).not.toContain('direction=platform-to-sheet');
+    expect(cashflowProjectSheetSource).not.toContain('sheetReviewDirection');
+    expect(cashflowProjectSheetSource).not.toContain('role="tablist"');
     expect(cashflowProjectSheetSource.indexOf('const sheetRangeLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
     expect(cashflowProjectSheetSource.indexOf('const sheetIdentityLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
     expect(cashflowProjectSheetSource).not.toContain('시트에서 플랫폼으로');
     expect(cashflowProjectSheetSource).not.toContain('플랫폼에서 시트로');
     expect(cashflowProjectSheetSource).not.toContain('플랫폼 값을 시트로 내보내기');
     expect(cashflowProjectSheetSource).not.toContain('0원 포함');
+    expect(cashflowProjectSheetSource).not.toContain('setInterval');
   });
 
   it('shows cashflow event load failures instead of silently rendering an empty history', () => {

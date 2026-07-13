@@ -46,11 +46,14 @@ export function resolveBankImportCashflowSelection(
   entryKind?: SettlementEntryKind,
 ): Pick<BankImportManualFields, 'cashflowLineId' | 'cashflowCategory'> {
   const direction = resolveDirectionForAmount(signedAmount, entryKind);
-  const category = isCashflowCategory(lineIdOrCategory)
+  const categorySelected = isCashflowCategory(lineIdOrCategory);
+  const category = categorySelected
     ? lineIdOrCategory
     : mapCashflowLineToCategory(lineIdOrCategory, direction);
   return {
-    cashflowLineId: getCashflowSheetLineIdFromCategory(category, direction),
+    cashflowLineId: categorySelected
+      ? getCashflowSheetLineIdFromCategory(category, direction)
+      : lineIdOrCategory,
     cashflowCategory: category,
   };
 }

@@ -6,6 +6,10 @@ import {
   ROUTE_ROLES,
 } from '../bff-utils.mjs';
 import { GoogleAuth } from 'google-auth-library';
+import {
+  buildCashflowProjectionActualComparison,
+  resolveCashflowComparisonAsOf,
+} from '../cashflow-comparison.mjs';
 
 function resolveJavaWeeklyApiBaseUrl(options = {}, env = process.env) {
   return readOptionalText(options.jvmWeeklyApiBaseUrl)
@@ -270,6 +274,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   jvmWeeklyAuthMode,
   jvmWeeklyWorkspaceEmailDomain,
   jvmWeeklyFirestoreProjectId,
+  now = () => new Date(),
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
@@ -461,12 +466,48 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.get('/api/v1/cashflow/:projectId', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read Java weekly cashflow snapshot', authMode, workspaceEmailDomain);
+    let comparisonBoundary;
+    try {
+      comparisonBoundary = resolveCashflowComparisonAsOf(readOptionalText(req.query.asOf), now());
+    } catch {
+      throw createHttpError(400, 'Cashflow comparison asOf must be a valid YYYY-MM-DD date.', 'cashflow_comparison_as_of_invalid');
+    }
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
       path: `/api/v1/cashflow/${projectId}`,
     });
-    res.status(200).json(result);
+    if (readOptionalText(result?.projectId) !== readOptionalText(req.params.projectId)) {
+      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+    }
+    const comparison = buildCashflowProjectionActualComparison(result, comparisonBoundary);
+    const comparisonByMonth = new Map(comparison.months.map((month) => [month.yearMonth, month]));
+    res.status(200).json({
+      ...result,
+      readModel: {
+        ...(result?.readModel || {}),
+        months: (Array.isArray(result?.readModel?.months) ? result.readModel.months : []).map((month) => {
+          const monthComparison = comparisonByMonth.get(String(month?.yearMonth || ''));
+          return {
+            ...month,
+            comparison: {
+              weeks: monthComparison?.weeks.map(({ weekNo, amounts, totalIn, totalOut, net }) => ({
+                weekNo,
+                amounts,
+                totalIn,
+                totalOut,
+                net,
+              })) || [],
+              rowTotals: monthComparison?.rowTotals || {},
+              totalIn: monthComparison?.totalIn || 0,
+              totalOut: monthComparison?.totalOut || 0,
+              net: monthComparison?.net || 0,
+            },
+          };
+        }),
+      },
+      comparison,
+    });
   }));
 }

@@ -248,6 +248,44 @@ describe('platform-bff-client', () => {
       cleared: [],
     });
   });
+
+  it('reads the BFF projection-minus-actual comparison for the requested as-of date', async () => {
+    const module = await import('./platform-bff-client') as unknown as {
+      fetchCashflowSnapshotViaBff?: (params: Record<string, unknown>) => Promise<{
+        comparison: { direction: string; asOfDate: string };
+        readModel: { months: Array<{ comparison: { totalIn: number } }> };
+      }>;
+    };
+    expect(typeof module.fetchCashflowSnapshotViaBff).toBe('function');
+    if (!module.fetchCashflowSnapshotViaBff) return;
+
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: {
+        projectId: 'p001',
+        projection: [],
+        actual: [],
+        comparison: {
+          projectId: 'p001', direction: 'projection_minus_actual', asOfDate: '2026-07-13',
+          asOfWeek: { yearMonth: '2026-07', weekNo: 3 }, timeZone: 'Asia/Seoul', lineOrder: [], months: [], ignoredLineIds: [],
+        },
+        readModel: { months: [{
+          yearMonth: '2026-07',
+          projection: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
+          actual: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
+          comparison: { weeks: [], rowTotals: {}, totalIn: 300, totalOut: 0, net: 300, totals: {} },
+        }] },
+      } })),
+      post: vi.fn(), request: vi.fn(),
+    });
+
+    const result = await module.fetchCashflowSnapshotViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', asOf: '2026-07-13', client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001?asOf=2026-07-13', expect.any(Object));
+    expect(result.comparison).toMatchObject({ direction: 'projection_minus_actual', asOfDate: '2026-07-13' });
+    expect(result.readModel.months[0]?.comparison.totalIn).toBe(300);
+  });
   it('reads runtime config with defaults', () => {
     expect(readPlatformApiRuntimeConfig({})).toEqual({
       enabled: false,

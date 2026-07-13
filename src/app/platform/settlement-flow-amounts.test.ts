@@ -82,6 +82,24 @@ describe('resolveSettlementFlowSnapshot', () => {
     expect(snapshot.budgetActualAmount).toBe(0);
   });
 
+  it.each([
+    ['MYSC 선입금 - MYSC 인건비(입금)', 'MYSC_PREPAY_LABOR_IN'],
+    ['MYSC 선입금 - 매입부가세(입금)', 'MYSC_PREPAY_INPUT_VAT_IN'],
+  ])('keeps %s on the inflow side without manual outflow review', (label, lineId) => {
+    const cells = createEmptyCells();
+    cells[8] = label;
+    cells[10] = '200,000';
+    cells[11] = '200,000';
+    const snapshot = resolveSettlementFlowSnapshot(createRow(cells, {
+      sourceTxId: `bank:${lineId}`,
+      entryKind: 'EXPENSE',
+    }), indexes);
+
+    expect(snapshot.manualOutflowPending).toBe(false);
+    expect(snapshot.cashflowActualLineAmounts).toEqual({ [lineId]: 200000 });
+    expect(snapshot.budgetActualAmount).toBe(0);
+  });
+
   it('keeps bank outflows on inflow-labeled lines as negative actual adjustments', () => {
     const cells = createEmptyCells();
     cells[8] = 'MYSC 선입금(잔금 등 입금 필요 시)';

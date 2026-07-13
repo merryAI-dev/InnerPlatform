@@ -26,10 +26,18 @@ const tenantId = 'firestore-rules-private-edit-it';
 const protectedCollections = [
   'editLeases',
   'idempotency_keys',
+  'weekly_api_idempotency',
+  'weekly_api_audit_events',
+  'weekly_api_audit_exports',
   'projectRequestDrafts',
   'privateEditDrafts',
   'cashflowEditLocks',
   'cashflow_edit_locks',
+  'cashflow_sheet_mirrors',
+  'cashflow_sheet_refresh_runs',
+  'cashflow_sheet_stage_runs',
+  'cashflow_sheet_stage_months',
+  'cashflow_change_candidates',
 ] as const;
 const canonicalRootCollections = [
   'projects',

@@ -10,6 +10,8 @@ type CategoryEntry = {
 type LineEntry = {
   lineId: CashflowSheetLineId;
   label: string;
+  projectionLabel?: string;
+  actualLabel?: string;
   direction: Direction;
   defaultCategory: CashflowCategory;
   aliases?: string[];
@@ -66,6 +68,14 @@ export function parseCashflowCategoryLabel(raw: string): CashflowCategory | unde
 
 export function getCashflowLineLabel(lineId: CashflowSheetLineId): string {
   return LINE_LABELS[lineId] || lineId;
+}
+
+export function getCashflowModeLineLabel(
+  lineId: CashflowSheetLineId,
+  mode: 'projection' | 'actual',
+): string {
+  const entry = LINE_ENTRY_BY_ID.get(lineId);
+  return (mode === 'projection' ? entry?.projectionLabel : entry?.actualLabel) || getCashflowLineLabel(lineId);
 }
 
 export function parseCashflowLineLabelAlias(raw: string): CashflowSheetLineId | undefined {

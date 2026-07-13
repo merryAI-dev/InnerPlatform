@@ -1,14 +1,9 @@
 import { parseNumber } from './csv-utils';
 import { buildBudgetLabelKey } from './budget-labels';
 import { parseCashflowLineLabel, SETTLEMENT_COLUMNS, type ImportRow } from './settlement-csv';
+import { CASHFLOW_IN_LINE_IDS as POLICY_IN_LINE_IDS } from './policies/cashflow-policy';
 
-const CASHFLOW_IN_LINE_IDS = new Set<string>([
-  'MYSC_PREPAY_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-]);
+const CASHFLOW_IN_LINE_IDS = new Set<string>(POLICY_IN_LINE_IDS);
 
 export interface SettlementFlowAmountIndexes {
   cashflowIdx: number;

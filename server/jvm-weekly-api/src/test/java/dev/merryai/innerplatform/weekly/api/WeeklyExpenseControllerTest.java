@@ -2,6 +2,7 @@ package dev.merryai.innerplatform.weekly.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseActualRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditEventRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseAuditExportRepository;
@@ -812,22 +813,33 @@ class WeeklyExpenseControllerTest {
 
     @Test
     void cashflowSheetLabApplyFailsClosedWithoutFirestoreAtomicPlanner() throws Exception {
-        String body = """
-            {
-              "idempotencyKey": "sheet-lab-apply-001",
-              "lines": [
-                {"mode": "projection", "yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "매출액(입금)", "amount": 5000000, "sourceCell": "D15", "sourceLabel": "매출액(입금)"},
-                {"mode": "projection", "yearMonth": "2026-06", "weekNo": 2, "cashflowLine": "매출부가세(입금)", "amount": 500000, "sourceCell": "E16", "sourceLabel": "매출부가세(입금)"},
-                {"mode": "actual", "yearMonth": "2026-06", "weekNo": 1, "cashflowLine": "직접사업비(공급가액)", "amount": 1200000, "sourceCell": "D39", "sourceLabel": "직접사업비(공급가액)"}
-              ]
+        List<Map<String, Object>> cells = new ArrayList<>();
+        for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    cells.add(Map.of(
+                        "mode", mode,
+                        "weekNo", weekNo,
+                        "cashflowLine", lineId,
+                        "cellState", "VALUE",
+                        "amount", 1000
+                    ));
+                }
             }
-            """;
+        }
+        String body = objectMapper.writeValueAsString(Map.of(
+            "idempotencyKey", "sheet-lab-apply-001",
+            "sourceRevision", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "targetRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "yearMonth", "2026-06",
+            "cells", cells
+        ));
 
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isServiceUnavailable())
-            .andExpect(jsonPath("$.code").value("cashflow_atomic_plan_backend_unavailable"));
+            .andExpect(jsonPath("$.code").value("cashflow_write_permission_backend_unavailable"));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();

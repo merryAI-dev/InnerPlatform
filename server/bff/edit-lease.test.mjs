@@ -157,6 +157,48 @@ describe('edit lease service', () => {
     expect(acquired).toMatchObject({ leaseId: 'lease-retry-stable', fence: 1, state: 'ACTIVE' });
   });
 
+  it('retries an invalid-or-closed transaction without duplicating a committed acquire', async () => {
+    const { db, base, now } = createHarness();
+    let transactionCalls = 0;
+    let uuidCalls = 0;
+    const flakyDb = {
+      ...db,
+      runTransaction: async (callback) => {
+        transactionCalls += 1;
+        const result = await db.runTransaction(callback);
+        if (transactionCalls === 1) {
+          throw Object.assign(new Error('3 INVALID_ARGUMENT: Transaction is invalid or closed.'), {
+            code: 3,
+            details: 'Transaction is invalid or closed.',
+          });
+        }
+        return result;
+      },
+    };
+    const service = createEditLeaseService({
+      db: flakyDb,
+      now,
+      createLeaseId: () => {
+        uuidCalls += 1;
+        return 'lease-closed-retry';
+      },
+      auditChainService: createAuditChainService(flakyDb, { now: () => new Date(now()).toISOString() }),
+      idempotencyService: createIdempotencyService(flakyDb, { now: () => new Date(now()) }),
+      rbacPolicy: loadRbacPolicy(),
+    });
+
+    const outcome = await service.acquire({ ...base, idempotencyKey: 'idem-closed-retry' });
+
+    expect(outcome).toMatchObject({
+      status: 200,
+      replayed: true,
+      body: { leaseId: 'lease-closed-retry', fence: 1, state: 'ACTIVE' },
+    });
+    expect(transactionCalls).toBe(2);
+    expect(uuidCalls).toBe(1);
+    expect([...db.__documents.values()].filter((entry) => entry.action === 'EDIT_LEASE_ACQUIRE')).toHaveLength(1);
+  });
+
   it('rolls back lease and idempotency writes when audit append fails', async () => {
     const { db, base, now } = createHarness();
     const service = createEditLeaseService({

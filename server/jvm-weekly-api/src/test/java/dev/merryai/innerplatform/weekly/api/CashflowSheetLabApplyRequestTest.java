@@ -12,13 +12,16 @@ class CashflowSheetLabApplyRequestTest {
         String json = """
             {
               "idempotencyKey": "apply-1",
+              "sourceRevision": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "targetRevision": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "yearMonth": "2026-07",
               "sourceSheetKey": "caller-controlled",
-              "lines": [
+              "cells": [
                 {
                   "mode": "actual",
-                  "yearMonth": "2026-07",
                   "weekNo": 1,
                   "cashflowLine": "DIRECT_COST_OUT",
+                  "cellState": "VALUE",
                   "amount": 1000
                 }
               ]

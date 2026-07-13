@@ -1,14 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
-  previewCashflowSheetLabViaBff,
+  refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
 
 const lease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
+const clientSource = readFileSync(resolve(import.meta.dirname, 'sheets-cashflow-readonly-client.ts'), 'utf8');
 
 function asMockClient(client: {
   post?: ReturnType<typeof vi.fn>;
@@ -25,85 +29,16 @@ function asMockClient(client: {
 }
 
 describe('sheets cashflow readonly client', () => {
+  it('has no retired direct preview or sheet writeback client path', () => {
+    expect(clientSource).not.toContain('previewCashflowSheetLabViaBff');
+    expect(clientSource).not.toContain('/cashflow-sheet-lab/preview');
+    expect(clientSource).not.toContain('writeback');
+  });
   it('extracts spreadsheet ids for immediate input feedback', () => {
     expect(extractSpreadsheetIdFromSheetInput('https://docs.google.com/spreadsheets/d/sheet_12345678901234567890/edit#gid=1')).toBe('sheet_12345678901234567890');
     expect(extractSpreadsheetIdFromSheetInput('https://drive.google.com/open?id=sheet-12345678901234567890')).toBe('sheet-12345678901234567890');
     expect(extractSpreadsheetIdFromSheetInput('sheet_12345678901234567890')).toBe('sheet_12345678901234567890');
     expect(extractSpreadsheetIdFromSheetInput('not a sheet')).toBe('');
-  });
-
-  it('uses the service-account lab preview endpoint without Google OAuth token headers', async () => {
-    const client = asMockClient({
-      post: vi.fn(async () => ({
-        data: {
-          projectId: 'p001',
-          spreadsheetId: 'sheet-001',
-          spreadsheetTitle: 'cashflow',
-          selectedSheetName: 'cashflow(사용내역 연동)',
-          availableSheets: [],
-          matrix: [],
-          accessPolicy: {
-            googleAuth: 'service_account',
-            googleScope: 'spreadsheets.readonly',
-            sheetPermission: 'shared_with_mysc_system_account',
-            layoutSource: 'google_sheet_formatted_values',
-            valueSource: 'firebase_cashflow_weeks',
-            actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
-            sheetReadRange: 'A1:ZZ220',
-            sheetPreviewCache: 'miss',
-            sheetNamePolicy: 'cashflow_usage_linked_only',
-          },
-          template: {
-            supported: true,
-            policyVersion: 'cashflow-policy-v1',
-            sectionOrder: ['projection', 'actual'],
-            sections: [],
-            mappingCandidates: [],
-            derivedRows: [],
-            ignoredRows: [],
-            reasons: [],
-            stats: { rowCount: 0, maxColumnCount: 0, sectionCount: 0, mappingCount: 0 },
-          },
-          previewValues: [{ mode: 'actual', lineId: 'SALES_IN', direction: 'IN', yearMonth: '2026-01', weekNo: 1, rowIndex: 1, columnIndex: 2, a1: 'C2', sheetValue: '원본', amount: 1000, source: 'firebase_cashflow_weeks' }],
-          cashflowSnapshotStatus: 'pending',
-          cashflowSnapshotError: null,
-        },
-      })),
-    });
-
-    await previewCashflowSheetLabViaBff({
-      tenantId: 'mysc',
-      actor: {
-        uid: 'user-1',
-        role: 'workspace_user',
-        email: 'user@mysc.co.kr',
-        idToken: 'firebase-token',
-      },
-      projectId: 'p001',
-      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-      sheetName: 'cashflow(사용내역 연동)',
-      includeValues: false,
-      client,
-    });
-
-    expect(client.post).toHaveBeenCalledWith(
-      '/api/v1/projects/p001/cashflow-sheet-lab/preview',
-      expect.objectContaining({
-        tenantId: 'mysc',
-        actor: expect.objectContaining({
-          id: 'user-1',
-          email: 'user@mysc.co.kr',
-          role: 'workspace_user',
-          idToken: 'firebase-token',
-        }),
-        body: {
-          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-          sheetName: 'cashflow(사용내역 연동)',
-          includeValues: false,
-        },
-      }),
-    );
-    expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
   it('saves sheet lab config through same-origin BFF', async () => {
@@ -216,7 +151,90 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
-  it('stages explicitly provided sheet values through the review endpoint', async () => {
+  it('reads only the pinned mirror without contacting Google Sheets', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'FRESH',
+          sourceRevision: 'sha256:source-001',
+          targetRevisionAtFetch: 'sha256:target-001',
+          capturedAt: '2026-07-13T01:00:00.000Z',
+          summary: { cellCount: 1920, valueCount: 20, emptyCount: 1900, invalidCount: 0 },
+          cells: [],
+        },
+      })),
+    });
+
+    const result = await getCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      client,
+    });
+
+    expect(result.status).toBe('FRESH');
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/mirror',
+      expect.objectContaining({ tenantId: 'mysc' }),
+    );
+    expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the mirror only on an explicit request and retains a stale last-good snapshot', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'STALE',
+          sourceRevision: 'sha256:last-good',
+          targetRevisionAtFetch: 'sha256:target-001',
+          capturedAt: '2026-07-13T01:00:00.000Z',
+          summary: { cellCount: 1, valueCount: 1, emptyCount: 0, invalidCount: 0 },
+          cells: [{
+            mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN',
+            direction: 'IN', sourceCell: 'D14', sourceLabel: '매출액(입금)', state: 'VALUE', amount: 1000,
+          }],
+          lastRefreshError: { code: 'sheet_unavailable', message: '시트를 읽지 못했습니다.', at: '2026-07-13T02:00:00.000Z' },
+        },
+      })),
+    });
+
+    const result = await refreshCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-6-5',
+      idempotencyKey: 'refresh-001',
+      client,
+    });
+
+    expect(result).toMatchObject({
+      status: 'STALE',
+      sourceRevision: 'sha256:last-good',
+      capturedAt: '2026-07-13T01:00:00.000Z',
+      cells: [expect.objectContaining({ amount: 1000 })],
+    });
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/mirror/refresh',
+      expect.objectContaining({
+        tenantId: 'mysc',
+        body: {
+          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-6-5',
+          idempotencyKey: 'refresh-001',
+        },
+        idempotencyKey: 'refresh-001',
+      }),
+    );
+  });
+
+  it('stages the explicitly selected pinned revision through the review endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -237,10 +255,7 @@ describe('sheets cashflow readonly client', () => {
       tenantId: 'mysc',
       actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
       projectId: 'p001',
-      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-      sheetName: 'cashflow(사용내역 연동)',
-      startWeek: '26-1-1',
-      endWeek: '26-6-5',
+      expectedMirrorRevision: 'sha256:source-001',
       idempotencyKey: 'stage-001',
       client,
     });
@@ -251,10 +266,7 @@ describe('sheets cashflow readonly client', () => {
       expect.objectContaining({
         tenantId: 'mysc',
         body: {
-          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-6-5',
+          expectedMirrorRevision: 'sha256:source-001',
           idempotencyKey: 'stage-001',
         },
         idempotencyKey: 'stage-001',
@@ -308,59 +320,4 @@ describe('sheets cashflow readonly client', () => {
     expect(client.get.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
-  it('uses same-origin BFF instead of the global Java API base URL', async () => {
-    const originalFetch = globalThis.fetch;
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      projectId: 'p001',
-      spreadsheetId: 'sheet-001',
-      spreadsheetTitle: 'cashflow',
-      selectedSheetName: 'cashflow(사용내역 연동)',
-      availableSheets: [],
-      matrix: [],
-      accessPolicy: {
-        googleAuth: 'service_account',
-        googleScope: 'spreadsheets.readonly',
-        sheetPermission: 'shared_with_mysc_system_account',
-        layoutSource: 'google_sheet_formatted_values',
-        valueSource: 'firebase_cashflow_weeks',
-        actorRolePolicy: 'mysc_email_maps_to_workspace_user_for_read',
-        sheetReadRange: 'A1:ZZ220',
-        sheetPreviewCache: 'miss',
-        sheetNamePolicy: 'cashflow_usage_linked_only',
-      },
-      template: {
-        supported: true,
-        policyVersion: 'cashflow-policy-v1',
-        sectionOrder: ['projection', 'actual'],
-        sections: [],
-        mappingCandidates: [],
-        derivedRows: [],
-        ignoredRows: [],
-        reasons: [],
-        stats: { rowCount: 0, maxColumnCount: 0, sectionCount: 0, mappingCount: 0 },
-      },
-      previewValues: [],
-      cashflowSnapshotStatus: 'pending',
-      cashflowSnapshotError: null,
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
-    vi.stubGlobal('fetch', fetchImpl);
-
-    try {
-      await previewCashflowSheetLabViaBff({
-        tenantId: 'mysc',
-        actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
-        projectId: 'p001',
-        value: 'sheet-001',
-        includeValues: false,
-      });
-    } finally {
-      vi.stubGlobal('fetch', originalFetch);
-    }
-
-    const firstCall = fetchImpl.mock.calls.at(0) as unknown[] | undefined;
-    expect(firstCall?.[0]).toBe('/api/v1/projects/p001/cashflow-sheet-lab/preview');
-  });
 });

@@ -423,23 +423,65 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
-  it('proxies cashflow snapshot reads with trusted tenant context', async () => {
+  it('proxies cashflow snapshot reads with trusted tenant context and embeds the binding comparison read model', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {
       calls.push({ url, init });
       return {
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ projectId: 'project-a', projection: [], actual: [] }),
+        text: async () => JSON.stringify({
+          projectId: 'project-a',
+          projection: [],
+          actual: [],
+          readModel: {
+            months: [{
+              yearMonth: '2026-01',
+              projection: { weeks: [{ weekNo: 1, amounts: { SALES_IN: 1000 } }] },
+              actual: { weeks: [{ weekNo: 1, amounts: { SALES_IN: 700 } }] },
+            }],
+          },
+        }),
       };
     });
     const { app } = createApp(fetchImpl);
 
     await request(app)
-      .get('/api/v1/cashflow/project-a')
+      .get('/api/v1/cashflow/project-a?asOf=2026-01-31')
       .expect(200)
       .expect((response) => {
         expect(response.body).toMatchObject({ projectId: 'project-a' });
+        expect(response.body.comparison).toMatchObject({
+          direction: 'projection_minus_actual',
+          asOfDate: '2026-01-31',
+          asOfWeek: { yearMonth: '2026-01', weekNo: 5 },
+          months: [{
+            yearMonth: '2026-01',
+            weeks: [{
+              weekNo: 1,
+              amounts: { SALES_IN: 300 },
+              totalIn: 300,
+              totalOut: 0,
+              net: 300,
+              lines: expect.arrayContaining([
+                expect.objectContaining({ lineId: 'SALES_IN', projection: 1000, actual: 700, difference: 300 }),
+              ]),
+            }],
+          }],
+        });
+        expect(response.body.readModel.months[0].comparison).toMatchObject({
+          weeks: [{
+            weekNo: 1,
+            amounts: { SALES_IN: 300 },
+            totalIn: 300,
+            totalOut: 0,
+            net: 300,
+          }],
+          rowTotals: { SALES_IN: 300 },
+          totalIn: 300,
+          totalOut: 0,
+          net: 300,
+        });
       });
 
     expect(calls).toHaveLength(1);
@@ -447,6 +489,75 @@ describe('JVM weekly API BFF proxy', () => {
     expect(calls[0].init.headers['x-inner-platform-service-token']).toBe('test-service-token');
     expect(calls[0].init.headers['x-tenant-id']).toBe('tenant-a');
     expect(calls[0].init.body).toBeUndefined();
+  });
+
+  it('rejects a mismatched JVM cashflow snapshot project before returning data', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        projectId: 'project-b',
+        readModel: { months: [] },
+      }),
+    }));
+    const { app } = createApp(fetchImpl);
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a?asOf=2026-01-31')
+      .expect(502)
+      .expect((response) => {
+        expect(response.body.code).toBe('jvm_weekly_project_mismatch');
+      });
+  });
+
+  it('rejects an invalid cashflow comparison as-of date before calling the JVM', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl);
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a?asOf=2026-02-30')
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_comparison_as_of_invalid');
+      });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('defaults cashflow comparison as-of to the current Seoul date', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        projectId: 'project-a',
+        readModel: {
+          months: [{
+            yearMonth: '2026-06',
+            projection: {
+              weeks: [
+                { weekNo: 3, amounts: { SALES_IN: 30 } },
+                { weekNo: 4, amounts: { SALES_IN: 40 } },
+              ],
+            },
+            actual: { weeks: [] },
+          }],
+        },
+      }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      now: () => new Date('2026-06-14T15:30:00.000Z'),
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.comparison).toMatchObject({
+          asOfDate: '2026-06-15',
+          asOfWeek: { yearMonth: '2026-06', weekNo: 3 },
+        });
+        expect(response.body.readModel.months[0].comparison.weeks.map((week) => week.weekNo)).toEqual([3]);
+      });
   });
 
   it('proxies weekly expense sheet read-back through trusted Java context', async () => {

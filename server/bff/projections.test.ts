@@ -14,6 +14,7 @@ class FakeCollection {
   constructor(private db: FakeDb, private path: string) {}
 
   async get() {
+    this.db.readCollections.push(this.path);
     const prefix = `${this.path}/`;
     const docs = Array.from(this.db.data.entries())
       .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
@@ -25,22 +26,9 @@ class FakeCollection {
   }
 }
 
-class FakeBatch {
-  private writes: Array<{ ref: FakeDoc; data: Record<string, unknown>; options?: { merge?: boolean } }> = [];
-
-  set(ref: FakeDoc, data: Record<string, unknown>, options?: { merge?: boolean }) {
-    this.writes.push({ ref, data, options });
-  }
-
-  async commit() {
-    for (const write of this.writes) {
-      await write.ref.set(write.data, write.options);
-    }
-  }
-}
-
 class FakeDb {
   data = new Map<string, Record<string, any>>();
+  readCollections: string[] = [];
 
   collection(path: string) {
     return new FakeCollection(this, path);
@@ -49,45 +37,12 @@ class FakeDb {
   doc(path: string) {
     return new FakeDoc(this, path);
   }
-
-  batch() {
-    return new FakeBatch();
-  }
 }
 
 describe('cashflow week projection', () => {
-  it('syncs approved transactions into weekly actual amounts', async () => {
+  it('observes canonical JVM weeks without deriving or mutating them from transactions', async () => {
     const db = new FakeDb();
-    db.data.set('orgs/mysc/transactions/tx001', {
-      id: 'tx001',
-      projectId: 'p001',
-      dateTime: '2026-02-16',
-      direction: 'IN',
-      state: 'APPROVED',
-      cashflowCategory: 'CONTRACT_PAYMENT',
-      amounts: { bankAmount: 1000 },
-    });
-    db.data.set('orgs/mysc/transactions/tx002', {
-      id: 'tx002',
-      projectId: 'p001',
-      dateTime: '2026-02-17',
-      direction: 'OUT',
-      state: 'APPROVED',
-      cashflowCategory: 'LABOR_COST',
-      amounts: { bankAmount: 300 },
-    });
-
-    await recomputeCashflowWeeks(db as any, 'mysc', '2026-02-20T00:00:00.000Z');
-
-    expect(db.data.get('orgs/mysc/cashflow_weeks/p001-2026-02-w3')?.actual).toEqual({
-      SALES_IN: 1000,
-      MYSC_LABOR_OUT: 300,
-    });
-  });
-
-  it('clears stale actual amounts when no approved transaction remains', async () => {
-    const db = new FakeDb();
-    db.data.set('orgs/mysc/cashflow_weeks/p001-2026-02-w3', {
+    const canonicalWeek = {
       id: 'p001-2026-02-w3',
       tenantId: 'mysc',
       projectId: 'p001',
@@ -95,15 +50,54 @@ describe('cashflow week projection', () => {
       weekNo: 3,
       weekStart: '2026-02-16',
       weekEnd: '2026-02-22',
-      projection: { SALES_IN: 5000 },
-      actual: { SALES_IN: 1000 },
+      projection: {
+        MYSC_PREPAY_IN: 1000,
+        MYSC_PREPAY_LABOR_IN: 2000,
+        MYSC_PREPAY_INPUT_VAT_IN: 300,
+      },
+      actual: {
+        MYSC_PREPAY_IN: 900,
+        MYSC_PREPAY_LABOR_IN: 1800,
+        MYSC_PREPAY_INPUT_VAT_IN: 270,
+        MYSC_PREPAY_DIRECT_OUT: 700,
+        MYSC_PREPAY_LABOR_OUT: 600,
+      },
+      weeklyExpenseActualBySheet: {
+        'sheet-001': { DIRECT_COST_OUT: 420 },
+      },
+      actualTotals: {
+        totalIn: 2970,
+        totalOut: 1720,
+        balance: 1250,
+      },
+      updatedAt: '2026-02-19T00:00:00.000Z',
+      updatedByUid: 'jvm-weekly-api',
+    };
+    db.data.set('orgs/mysc/cashflow_weeks/p001-2026-02-w3', canonicalWeek);
+    db.data.set('orgs/mysc/transactions/tx001', {
+      id: 'tx001',
+      projectId: 'p002',
+      dateTime: '2026-02-16',
+      direction: 'IN',
+      state: 'APPROVED',
+      cashflowCategory: 'CONTRACT_PAYMENT',
+      amounts: { bankAmount: 1000 },
     });
 
-    await recomputeCashflowWeeks(db as any, 'mysc', '2026-02-20T00:00:00.000Z');
+    const payload = await recomputeCashflowWeeks(db as any, 'mysc', '2026-02-20T00:00:00.000Z');
 
-    expect(db.data.get('orgs/mysc/cashflow_weeks/p001-2026-02-w3')).toMatchObject({
-      projection: { SALES_IN: 5000 },
-      actual: {},
+    expect(db.readCollections).toEqual(['orgs/mysc/cashflow_weeks']);
+    expect(db.data.get('orgs/mysc/cashflow_weeks/p001-2026-02-w3')).toEqual(canonicalWeek);
+    expect(db.data.has('orgs/mysc/cashflow_weeks/p002-2026-02-w3')).toBe(false);
+    expect(payload).toEqual({
+      tenantId: 'mysc',
+      view: 'cashflow_weeks',
+      updatedAt: '2026-02-20T00:00:00.000Z',
+      observedWeeks: 1,
+      syncedWeeks: 0,
+      canonicalWriter: 'jvm_weekly_api',
+      writeMode: 'metadata_only',
     });
+    expect(db.data.get('orgs/mysc/views/cashflow_weeks')).toEqual(payload);
   });
 });

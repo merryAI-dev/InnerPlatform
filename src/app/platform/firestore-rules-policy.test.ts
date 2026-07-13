@@ -197,6 +197,11 @@ describe('firestore rules policy alignment', () => {
       'privateEditDrafts',
       'cashflowEditLocks',
       'cashflow_edit_locks',
+      'cashflow_sheet_mirrors',
+      'cashflow_sheet_refresh_runs',
+      'cashflow_sheet_stage_runs',
+      'cashflow_sheet_stage_months',
+      'cashflow_change_candidates',
     ]) {
       expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
       expect(firestoreRulesText).toMatch(
@@ -249,6 +254,22 @@ describe('firestore rules policy alignment', () => {
     expect(firestoreRulesText).toMatch(
       /match \/orgs\/\{orgId\}\/idempotency_keys\/\{keyId\} \{\s*allow read, write: if false;\s*\}/,
     );
+  });
+
+  it('keeps weekly API idempotency and audit records behind server-only Firestore rules', () => {
+    const catchallExclusionRule = firestoreRulesText.match(
+      /function isCatchallExcludedCollection\(collection\) \{[\s\S]*?\n    \}/,
+    )?.[0] || '';
+    for (const collection of [
+      'weekly_api_idempotency',
+      'weekly_api_audit_events',
+      'weekly_api_audit_exports',
+    ]) {
+      expect(catchallExclusionRule).toContain(`collection in ['${collection}']`);
+      expect(firestoreRulesText).toMatch(
+        new RegExp(`match /orgs/\\{orgId\\}/${collection}/\\{[^}]+\\} \\{\\s*allow read, write: if false;\\s*\\}`),
+      );
+    }
   });
 
   it('keeps project option settings admin-managed', () => {

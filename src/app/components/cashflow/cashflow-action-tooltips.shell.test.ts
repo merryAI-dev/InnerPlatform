@@ -14,19 +14,14 @@ const importEditorSource = readFileSync(
 
 describe('cashflow action chrome', () => {
   it('removes secondary cashflow toolbar actions and explanatory chrome', () => {
-    expect(cashflowProjectSheetSource).toContain('Projection / Actual 차이');
-    expect(cashflowProjectSheetSource).toContain('차이 = Actual - Projection');
-    expect(cashflowProjectSheetSource).toContain('Actual에서 Projection을 뺀 값');
-    expect(cashflowProjectSheetSource).toContain('입금은 실제가 계획보다 많으면 초록색');
-    expect(cashflowProjectSheetSource).toContain('출금은 실제가 계획보다 적으면 초록색');
-    expect(cashflowProjectSheetSource).toContain('실제 입금이 계획보다 많습니다.');
-    expect(cashflowProjectSheetSource).toContain('실제 출금이 계획보다 적습니다.');
+    expect(cashflowProjectSheetSource).toContain('Projection - Actual 차이');
+    expect(cashflowProjectSheetSource).toContain('차이 = Projection - Actual');
+    expect(cashflowProjectSheetSource).not.toContain('Actual - Projection');
+    expect(cashflowProjectSheetSource).not.toContain('Actual에서 Projection을 뺀 값');
+    expect(cashflowProjectSheetSource).not.toContain('actual - projection');
     expect(cashflowProjectSheetSource).toContain('diffColorExplanation');
-    expect(cashflowProjectSheetSource).toContain('DiffMetricCard');
     expect(cashflowProjectSheetSource).toContain('차이만');
-    expect(cashflowProjectSheetSource).toContain('renderAnnualSheetMatrix');
-    expect(cashflowProjectSheetSource).toContain('저장된');
-    expect(cashflowProjectSheetSource).toContain('범위 합계');
+    expect(cashflowProjectSheetSource).toContain('BFF 기준일');
     expect(cashflowProjectSheetSource).not.toContain('엑셀 다운로드');
     expect(cashflowProjectSheetSource).not.toContain('Actual 불러오기');
     expect(cashflowProjectSheetSource).not.toContain('Actual 저장');

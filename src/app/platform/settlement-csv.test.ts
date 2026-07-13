@@ -461,6 +461,31 @@ describe('importRowToTransaction', () => {
     expect(result.transaction?.direction).toBe('IN');
   });
 
+  it.each([
+    ['MYSC 선입금 - MYSC 인건비(입금)', 'MYSC_PREPAY_LABOR_IN', 'IN', 'CONTRACT_PAYMENT'],
+    ['MYSC 선입금 - 매입부가세(입금)', 'MYSC_PREPAY_INPUT_VAT_IN', 'IN', 'VAT_REFUND'],
+    ['MYSC 선입금 - 직접사업비 등(출금)', 'MYSC_PREPAY_DIRECT_OUT', 'OUT', 'OUTSOURCING'],
+    ['MYSC 선입금 - MYSC 인건비(출금)', 'MYSC_PREPAY_LABOR_OUT', 'OUT', 'LABOR_COST'],
+  ] as const)('preserves %s as %s with its direction and compatibility category', (
+    label,
+    lineId,
+    direction,
+    category,
+  ) => {
+    expect(parseCashflowLineLabel(label)).toBe(lineId);
+    const row = makeImportRow({
+      '거래일시': '2026-03-05',
+      'cashflow항목': label,
+      '통장에 찍힌 입/출금액': '100,000',
+    });
+
+    const result = importRowToTransaction(row, 'p-001', 'l-001', 0);
+
+    expect(result.transaction?.direction).toBe(direction);
+    expect(result.transaction?.cashflowCategory).toBe(category);
+    expect(result.transaction?.cashflowLabel).toBe(label);
+  });
+
   it('maps card payment method from label', () => {
     const row = makeImportRow({
       '거래일시': '2026-03-05',

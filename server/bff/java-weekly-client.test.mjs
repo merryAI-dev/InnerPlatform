@@ -20,8 +20,15 @@ const context = {
   actorEmail: 'pm@example.com',
 };
 
+const monthlyContract = {
+  sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  targetRevision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  yearMonth: '2026-07',
+  cells: [{ mode: 'projection', weekNo: 1, cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 }],
+};
+
 describe('Java weekly cashflow client', () => {
-  it('forwards trusted edit-session context and never sends caller sourceSheetKey', async () => {
+  it('forwards the pinned monthly contract and never sends caller sourceSheetKey', async () => {
     const fetchImpl = vi.fn(async (_url, init) => ({
       ok: true,
       status: 200,
@@ -34,9 +41,12 @@ describe('Java weekly cashflow client', () => {
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-1',
+      sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      targetRevision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      yearMonth: '2026-07',
       sourceSheetKey: 'caller-controlled',
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
-      lines: [{ mode: 'actual', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', amount: 1000 }],
+      cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
     });
 
     const [, init] = fetchImpl.mock.calls[0];
@@ -49,7 +59,10 @@ describe('Java weekly cashflow client', () => {
     });
     expect(JSON.parse(init.body)).toEqual({
       idempotencyKey: 'apply-1',
-      lines: [{ mode: 'actual', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', amount: 1000 }],
+      sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      targetRevision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      yearMonth: '2026-07',
+      cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
     });
   });
 
@@ -64,8 +77,8 @@ describe('Java weekly cashflow client', () => {
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-2',
+      ...monthlyContract,
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
-      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
     })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_data_project_mismatch' });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -82,8 +95,8 @@ describe('Java weekly cashflow client', () => {
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-3',
+      ...monthlyContract,
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
-      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
     })).rejects.toMatchObject({ statusCode: 502, code: 'jvm_weekly_project_mismatch' });
   });
 
@@ -103,8 +116,8 @@ describe('Java weekly cashflow client', () => {
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-vite-project',
+      ...monthlyContract,
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
-      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
     });
 
     expect(fetchImpl.mock.calls[0][1].headers['x-data-project-id']).toBe('stage-data-project');
@@ -120,8 +133,8 @@ describe('Java weekly cashflow client', () => {
         context,
         projectId: 'project-a',
         idempotencyKey: `apply-bad-fence-${fence}`,
+        ...monthlyContract,
         editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence },
-        lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
       })).rejects.toMatchObject({ statusCode: 400, code: 'cashflow_edit_lease_request_invalid' });
       expect(fetchImpl).not.toHaveBeenCalled();
     },
@@ -143,8 +156,8 @@ describe('Java weekly cashflow client', () => {
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-atomic-limit',
+      ...monthlyContract,
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
-      lines: [{ mode: 'projection', yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
     })).rejects.toMatchObject({
       statusCode: 422,
       code: 'atomic_write_limit_exceeded',
