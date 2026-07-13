@@ -93,6 +93,19 @@ Projection과 ACTUAL은 같은 line ID를 사용하고 표시 문구만 mode별�
 - 가로 주차 스크롤과 고정 항목 열은 기존 동작을 유지
 - 별도 탭, 새 카드 그리드, 애니메이션, 새 UI 라이브러리는 추가하지 않음
 
+## Sheet Link and Pinned Snapshot
+
+- 사용자는 spreadsheet ID를 직접 다루지 않고 Google Sheet URL만 등록한다. ID와 탭 식별은 BFF가 추출한다.
+- Google Sheet 읽기는 `시트 연동하기` 또는 `최신값 다시 가져오기`를 명시적으로 누를 때만 실행한다.
+- 자동 polling, 탭 focus 복귀 refresh, background canonical apply는 하지 않는다.
+- 성공한 조회 결과는 `sourceRevision`이 붙은 last-good snapshot으로 고정한다. 다음 명시적 조회 전까지 화면 비교와 검토는 같은 revision만 사용한다.
+- 조회 실패 시 last-good snapshot을 지우지 않고 `STALE`로 표시한다. last-good도 없으면 `ERROR`다.
+- `sourceRevision`은 정규화한 시트 snapshot만으로 계산하고, 조회 당시 canonical 상태는 별도 `targetRevision`으로 기록한다.
+- 셀은 `VALUE`, `EMPTY`, `INVALID`로 구분한다. 명시적 `0`은 VALUE이며, 빈칸과 `-`는 EMPTY다. INVALID가 있으면 해당 월 반영을 차단한다.
+- 시트 조회와 검토 stage는 canonical cashflow를 쓰지 않는다. 최종 반영만 project lease와 JVM 권한 검증을 거친다.
+- 최종 반영 단위는 `projectId + yearMonth`다. 대상 월의 Projection과 해당 시트 Actual 기여를 전체 교체하고 다른 Actual 원천과 다른 월은 보존한다.
+- Apply 시 pinned `sourceRevision`과 현재 `targetRevision`이 다르면 409로 중단하고 다시 검토한다.
+
 ## Error and Compatibility
 
 - 기존 `MYSC_PREPAY_IN` 값은 그대로 읽고 저장한다.

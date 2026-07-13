@@ -126,6 +126,8 @@ git commit -m "fix(cashflow): map repeated sheet labels by direction"
 **Files:**
 - Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/domain/CashflowLineCatalog.java`
 - Test: `server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/CashflowLineCatalogTest.java`
+- Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreCashflowWeekActualMerge.java`
+- Test: `server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/storage/FirestoreCashflowWeekActualMergeTest.java`
 - Modify: `rust/spreadsheet-calculation-core/src/lib.rs`
 
 - [ ] **Step 1: JVM/Rust 누락을 드러내는 테스트 작성**
@@ -148,6 +150,8 @@ Expected: FAIL — 새 IDs/aliases가 catalog에 없음
 
 JVM `IN_LINES`, `OUT_LINES`, `ALIASES`와 Rust `cashflow_in_line_ids`, `cashflow_all_line_ids`, label parser에 같은 네 ID를 추가한다. 문맥 없는 과거 `MYSC선입금` alias는 계속 `MYSC_PREPAY_IN`으로 둔다.
 
+Firestore Actual 합계는 별도 하드코딩 목록을 두지 않고 JVM catalog를 재사용한다.
+
 - [ ] **Step 4: JVM/Rust 테스트 통과 확인**
 
 Run: `mvn -f server/jvm-weekly-api/pom.xml -Dtest=CashflowLineCatalogTest test && cargo test --manifest-path rust/spreadsheet-calculation-core/Cargo.toml`
@@ -159,6 +163,51 @@ Expected: PASS
 git add server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/domain/CashflowLineCatalog.java server/jvm-weekly-api/src/test/java/dev/merryai/innerplatform/weekly/domain/CashflowLineCatalogTest.java rust/spreadsheet-calculation-core/src/lib.rs
 git commit -m "feat(cashflow): validate detailed prepayment lines"
 ```
+
+### Task 3A: 구형 BFF canonical writer 차단
+
+**Files:**
+- Modify: `server/bff/projections.mjs`
+- Test: `server/bff/projections.test.ts`
+- Modify: `policies/relation-rules.json`
+- Test: `server/bff/app.integration.test.ts`
+
+- [ ] transaction rule에서 `cashflow_weeks` affected view를 제거한다.
+- [ ] 이미 대기 중인 queue job을 위해 handler는 유지하되 metadata만 갱신하고 canonical week는 쓰지 않는다.
+- [ ] JVM이 저장한 `weeklyExpenseActualBySheet`, `actual`, `actualTotals`가 그대로 보존되는 실패-후-성공 테스트를 둔다.
+- [ ] writer 전용 date/category helper는 제거하고 focused/integration suite를 통과시킨다.
+
+### Task 3B: 명시적 시트 연동과 pinned snapshot
+
+**Files:**
+- Create: `server/bff/cashflow-sheet-snapshot.mjs`
+- Test: `server/bff/cashflow-sheet-snapshot.test.mjs`
+- Modify: `server/bff/routes/cashflow-sheet-lab.mjs`
+- Test: `server/bff/routes/cashflow-sheet-lab.test.mjs`
+- Modify: `server/bff/schemas.mjs`
+
+- [ ] Google Sheet는 `시트 연동하기` 또는 `최신값 다시 가져오기` 요청에서만 읽는다.
+- [ ] `sourceRevision`은 정규화 snapshot만으로 계산하고 `targetRevision`은 별도 보관한다.
+- [ ] `VALUE`, `EMPTY`, `INVALID`를 구분하고 invalid A1이 있는 월은 차단한다.
+- [ ] 조회 실패 시 last-good revision을 유지해 `STALE`, last-good도 없으면 `ERROR`를 반환한다.
+- [ ] stage는 `expectedMirrorRevision`의 frozen snapshot만 사용하고 canonical/project config는 쓰지 않는다.
+
+### Task 3C: 월별 authoritative JVM apply
+
+**Files:**
+- Modify: `server/bff/java-weekly-client.mjs`
+- Test: `server/bff/java-weekly-client.test.mjs`
+- Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/api/CashflowSheetLabApplyRequest.java`
+- Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseCommandService.java`
+- Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/storage/WeeklyExpensePersistence.java`
+- Modify: `server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java`
+- Test: matching JVM command/persistence tests
+
+- [ ] 권위 단위는 `projectId + yearMonth`; 월 안의 모든 주차·16 line·두 mode coverage를 요구한다.
+- [ ] Projection은 대상 월 전체 교체, Actual은 `cashflow-sheet-lab` source 기여만 교체한다.
+- [ ] 다른 월과 다른 Actual source는 보존하고 주차별 actual/actualTotals를 같은 transaction에서 재계산한다.
+- [ ] 월 결산·revision 충돌은 409로 차단한다.
+- [ ] 같은 body의 idempotency replay는 성공 뒤 lease가 종료돼도 기존 결과를 반환한다.
 
 ### Task 4: BFF `Projection - Actual` comparison read model
 
