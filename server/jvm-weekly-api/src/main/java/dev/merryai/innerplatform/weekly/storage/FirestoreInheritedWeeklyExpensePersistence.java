@@ -289,10 +289,37 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CashflowSheetLabApplyRequest.Cell> cells
     ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
+        cells = CashflowSheetLabApplyRequest.requireCompleteMonth(cells);
         QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
         for (DocumentSnapshot doc : existingSnapshot.getDocuments()) {
             allProjectWeeks.put(doc.getId(), data(doc));
+        }
+        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
+        for (Map.Entry<String, Map<String, Object>> entry : allProjectWeeks.entrySet()) {
+            Map<String, Object> document = entry.getValue();
+            String storedYearMonth = text(document.get("yearMonth"), "");
+            WeekDocParts parts = parseCashflowWeekId(projectId, entry.getKey());
+            if (!yearMonth.equals(storedYearMonth) && !yearMonth.equals(parts.yearMonth())) {
+                continue;
+            }
+            Object storedWeekValue = document.get("weekNo");
+            int storedWeekNo = storedWeekValue instanceof Number ? intValue(storedWeekValue, 0) : 0;
+            boolean canonical = yearMonth.equals(storedYearMonth)
+                && storedWeekNo >= 1
+                && storedWeekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
+                && entry.getKey().equals(cashflowWeekId(projectId, yearMonth, storedWeekNo));
+            if (!canonical) {
+                throw new WeeklyExpenseConflictException(
+                    "Cashflow month contains malformed or non-canonical week documents; "
+                        + "migration is required before applying."
+                );
+            }
+            if (bool(document.get("adminClosed"))
+                || "closed".equals(text(document.get("weeklyStatusState"), "").toLowerCase(Locale.ROOT))) {
+                throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
+            }
+            targetMonthDocs.put(entry.getKey(), document);
         }
         String currentRevision = computeCashflowTargetRevision(allProjectWeeks.values());
         if (!currentRevision.equals(targetRevision)) {
@@ -310,16 +337,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<Integer, List<CashflowSheetLabApplyRequest.Cell>> cellsByWeek = new LinkedHashMap<>();
         for (CashflowSheetLabApplyRequest.Cell cell : cells) {
             cellsByWeek.computeIfAbsent(cell.weekNo(), ignored -> new ArrayList<>()).add(cell);
-        }
-        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
-        for (Map.Entry<String, Map<String, Object>> entry : allProjectWeeks.entrySet()) {
-            if (yearMonth.equals(text(entry.getValue().get("yearMonth"), ""))) {
-                if (bool(entry.getValue().get("adminClosed"))
-                    || "closed".equals(text(entry.getValue().get("weeklyStatusState"), "").toLowerCase(Locale.ROOT))) {
-                    throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
-                }
-                targetMonthDocs.put(entry.getKey(), entry.getValue());
-            }
         }
         for (Integer weekNo : cellsByWeek.keySet()) {
             String docId = cashflowWeekId(projectId, yearMonth, weekNo);

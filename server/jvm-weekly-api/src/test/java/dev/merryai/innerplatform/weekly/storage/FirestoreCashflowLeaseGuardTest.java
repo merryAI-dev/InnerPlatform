@@ -443,8 +443,8 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Object> projection = (Map<String, Object>) saved.get("projection");
         Map<String, Object> bySheet = (Map<String, Object>) saved.get("weeklyExpenseActualBySheet");
         Map<String, Object> actual = (Map<String, Object>) saved.get("actual");
-        assertThat(response.savedProjectionLineCount()).isEqualTo(15);
-        assertThat(response.savedActualLineCount()).isEqualTo(16);
+        assertThat(response.savedProjectionLineCount()).isEqualTo(79);
+        assertThat(response.savedActualLineCount()).isEqualTo(80);
         assertThat(projection)
             .doesNotContainKeys("SALES_IN", "STALE_LINE")
             .containsEntry("DIRECT_COST_OUT", 100L);
@@ -496,6 +496,121 @@ class FirestoreCashflowLeaseGuardTest {
             )
         ))).isInstanceOf(WeeklyExpenseConflictException.class).hasMessageContaining("closed");
         assertThat(closed.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
+    }
+
+    @Test
+    void monthlyPersistenceRejectsOmittedWeeksBeforeReplacingExistingValues() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> existingWeekFive = new LinkedHashMap<>(draftWeek());
+        existingWeekFive.put("weekNo", 5);
+        existingWeekFive.put("projection", Map.of("SALES_IN", 555L));
+        String weekFivePath = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w5";
+        fixture.documents.put(weekFivePath, existingWeekFive);
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            List.of(existingWeekFive)
+        );
+        List<CashflowSheetLabApplyRequest.Cell> firstFourWeeks = monthlyRequest(
+            "direct-persistence-incomplete",
+            targetRevision,
+            ""
+        ).cells().stream().filter(cell -> cell.weekNo() <= 4).toList();
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION);
+            return fixture.persistence.replaceCashflowSheetMonth(
+                "tenant-a",
+                "project-a",
+                "cashflow-sheet-lab",
+                "2026-07",
+                targetRevision,
+                firstFourWeeks
+            );
+        }))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("five weeks");
+
+        assertThat(fixture.documents.get(weekFivePath)).isEqualTo(existingWeekFive);
+    }
+
+    @Test
+    void monthlyApplyRejectsLegacySixthWeekUntilItIsMigrated() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> legacyWeekSix = new LinkedHashMap<>(draftWeek());
+        legacyWeekSix.put("weekNo", 6);
+        legacyWeekSix.put("projection", Map.of("SALES_IN", 666L));
+        String weekSixPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w6";
+        fixture.documents.put(weekSixPath, legacyWeekSix);
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest(
+                "monthly-legacy-week-six",
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                ""
+            )
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("migration");
+
+        assertThat(fixture.documents.get(weekSixPath)).isEqualTo(legacyWeekSix);
+        assertThat(fixture.documents.keySet())
+            .noneMatch(path -> path.matches(".*/project-a-2026-07-w[1-5]$"));
+    }
+
+    @Test
+    void monthlyApplyRejectsNonCanonicalWeekDocumentIdsUntilTheyAreMigrated() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> legacyWeekOne = draftWeek();
+        String legacyPath = "orgs/tenant-a/cashflow_weeks/legacy-july-week-one";
+        fixture.documents.put(legacyPath, legacyWeekOne);
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(
+            List.of(legacyWeekOne)
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest("monthly-noncanonical-id", targetRevision, "")
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("migration");
+
+        assertThat(fixture.documents.get(legacyPath)).isEqualTo(legacyWeekOne);
+        assertThat(fixture.documents.keySet())
+            .noneMatch(path -> path.matches(".*/project-a-2026-07-w[1-5]$"));
+    }
+
+    @Test
+    void monthlyApplyRejectsCanonicalIdsWithMissingMonthMetadataUntilTheyAreMigrated() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        Map<String, Object> malformedWeekOne = draftWeek();
+        malformedWeekOne.remove("yearMonth");
+        fixture.documents.put(weekPath(), malformedWeekOne);
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest(
+                "monthly-missing-month-metadata",
+                "sha256:298012959db83e193536ff7f60735889252ceaa4325de6944465e2dd197fcb44",
+                ""
+            )
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("migration");
+
+        assertThat(fixture.documents.get(weekPath())).isEqualTo(malformedWeekOne);
+        assertThat(fixture.documents.keySet())
+            .noneMatch(path -> path.matches(".*/project-a-2026-07-w[2-5]$"));
     }
 
     @Test
@@ -618,18 +733,20 @@ class FirestoreCashflowLeaseGuardTest {
         String emptyCellKey
     ) {
         List<CashflowSheetLabApplyRequest.Cell> cells = new ArrayList<>();
-        for (String mode : List.of("projection", "actual")) {
-            for (String lineId : CashflowLineCatalog.ALL_LINES.stream().sorted(Comparator.naturalOrder()).toList()) {
-                boolean empty = (mode + ":" + lineId).equals(emptyCellKey);
-                cells.add(new CashflowSheetLabApplyRequest.Cell(
-                    mode,
-                    1,
-                    lineId,
-                    empty ? "EMPTY" : "VALUE",
-                    empty ? null : BigDecimal.valueOf(100),
-                    "D1",
-                    lineId
-                ));
+        for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES.stream().sorted(Comparator.naturalOrder()).toList()) {
+                    boolean empty = weekNo == 1 && (mode + ":" + lineId).equals(emptyCellKey);
+                    cells.add(new CashflowSheetLabApplyRequest.Cell(
+                        mode,
+                        weekNo,
+                        lineId,
+                        empty ? "EMPTY" : "VALUE",
+                        empty ? null : BigDecimal.valueOf(100),
+                        "D" + weekNo,
+                        lineId
+                    ));
+                }
             }
         }
         return new CashflowSheetLabApplyRequest(

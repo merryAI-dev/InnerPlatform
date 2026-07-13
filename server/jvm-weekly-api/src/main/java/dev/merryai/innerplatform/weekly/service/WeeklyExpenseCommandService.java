@@ -2278,62 +2278,7 @@ public class WeeklyExpenseCommandService {
     private List<CashflowSheetLabApplyRequest.Cell> requireCompleteCashflowSheetMonth(
         CashflowSheetLabApplyRequest request
     ) {
-        Map<String, CashflowSheetLabApplyRequest.Cell> cellsByKey = new LinkedHashMap<>();
-        Set<Integer> weekNumbers = new LinkedHashSet<>();
-        for (CashflowSheetLabApplyRequest.Cell cell : request.cells()) {
-            if (cell.weekNo() < 1 || cell.weekNo() > 6) {
-                throw new IllegalArgumentException("Cashflow sheet month must use weeks 1 through 6.");
-            }
-            String lineId = requireKnownCashflowLine(cell.cashflowLine());
-            String state = text(cell.cellState()).trim().toUpperCase(Locale.ROOT);
-            if ("VALUE".equals(state) && cell.amount() == null) {
-                throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
-            }
-            if ("VALUE".equals(state)) {
-                try {
-                    cell.amount().longValueExact();
-                } catch (ArithmeticException error) {
-                    throw new IllegalArgumentException("Cashflow amounts must be whole won values in the supported range.");
-                }
-            }
-            if ("EMPTY".equals(state) && cell.amount() != null) {
-                throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");
-            }
-            if (!"VALUE".equals(state) && !"EMPTY".equals(state)) {
-                throw new IllegalArgumentException("Cashflow cellState must be VALUE or EMPTY.");
-            }
-            CashflowSheetLabApplyRequest.Cell canonical = new CashflowSheetLabApplyRequest.Cell(
-                cell.mode(),
-                cell.weekNo(),
-                lineId,
-                state,
-                cell.amount(),
-                cell.sourceCell(),
-                cell.sourceLabel()
-            );
-            String key = canonical.mode() + ":" + canonical.weekNo() + ":" + canonical.cashflowLine();
-            if (cellsByKey.putIfAbsent(key, canonical) != null) {
-                throw new IllegalArgumentException("Cashflow sheet month contains duplicate cells.");
-            }
-            weekNumbers.add(canonical.weekNo());
-        }
-        int lastWeek = weekNumbers.stream().mapToInt(Integer::intValue).max().orElse(0);
-        for (int weekNo = 1; weekNo <= lastWeek; weekNo += 1) {
-            if (!weekNumbers.contains(weekNo)) {
-                throw new IllegalArgumentException("Cashflow sheet month must contain complete consecutive weeks.");
-            }
-            for (String mode : List.of("projection", "actual")) {
-                for (String lineId : CashflowLineCatalog.ALL_LINES) {
-                    if (!cellsByKey.containsKey(mode + ":" + weekNo + ":" + lineId)) {
-                        throw new IllegalArgumentException("Cashflow sheet month must contain complete cells for both modes.");
-                    }
-                }
-            }
-        }
-        if (lastWeek == 0 || cellsByKey.size() != lastWeek * CashflowLineCatalog.ALL_LINES.size() * 2) {
-            throw new IllegalArgumentException("Cashflow sheet month must contain complete cells for every week.");
-        }
-        return List.copyOf(cellsByKey.values());
+        return CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
     }
 
     private String requireKnownCashflowLine(String value) {

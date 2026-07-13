@@ -60,7 +60,7 @@ class CashflowSheetMonthlyApplyServiceTest {
         when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
         WeeklyExpenseCommandService service = service(persistence);
-        CashflowSheetLabApplyRequest request = request("apply-month-1", completeCells(1));
+        CashflowSheetLabApplyRequest request = request("apply-month-1", completeCells(5));
 
         CashflowSheetLabApplyResponse response = service.applyCashflowSheetLab(
             ACTOR,
@@ -93,7 +93,7 @@ class CashflowSheetMonthlyApplyServiceTest {
     void replaysAnExactFinalSaveAfterItsLeaseWasReleased() throws Exception {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         ObjectMapper objectMapper = new ObjectMapper();
-        CashflowSheetLabApplyRequest request = request("apply-replay", completeCells(1));
+        CashflowSheetLabApplyRequest request = request("apply-replay", completeCells(5));
         CashflowSheetLabApplyResponse savedResponse = new CashflowSheetLabApplyResponse(
             true,
             WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
@@ -141,7 +141,7 @@ class CashflowSheetMonthlyApplyServiceTest {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
         when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
-        List<CashflowSheetLabApplyRequest.Cell> incomplete = new ArrayList<>(completeCells(1));
+        List<CashflowSheetLabApplyRequest.Cell> incomplete = new ArrayList<>(completeCells(5));
         incomplete.remove(incomplete.size() - 1);
 
         assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(
@@ -152,6 +152,48 @@ class CashflowSheetMonthlyApplyServiceTest {
         ))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("complete");
+
+        verify(persistence, never()).requireCashflowWriteLease(any(), any(), any());
+        verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsAnyMonthOtherThanExactlyFiveWeeksBeforeLeaseOrCanonicalWrites() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        for (int weekCount : List.of(1, 2, 4, 6)) {
+            assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(
+                ACTOR,
+                "project-a",
+                SESSION,
+                request("apply-" + weekCount + "-weeks", completeCells(weekCount))
+            ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("five weeks");
+        }
+
+        verify(persistence, never()).requireCashflowWriteLease(any(), any(), any());
+        verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsDuplicateCellsBeforeLeaseOrCanonicalWrites() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+        List<CashflowSheetLabApplyRequest.Cell> duplicate = new ArrayList<>(completeCells(5));
+        duplicate.set(duplicate.size() - 1, duplicate.get(0));
+
+        assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            request("apply-duplicate", duplicate)
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("duplicate");
 
         verify(persistence, never()).requireCashflowWriteLease(any(), any(), any());
         verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
@@ -243,7 +285,7 @@ class CashflowSheetMonthlyApplyServiceTest {
     }
 
     private static List<CashflowSheetLabApplyRequest.Cell> cellsWithFirstAmount(BigDecimal amount) {
-        List<CashflowSheetLabApplyRequest.Cell> cells = new ArrayList<>(completeCells(1));
+        List<CashflowSheetLabApplyRequest.Cell> cells = new ArrayList<>(completeCells(5));
         CashflowSheetLabApplyRequest.Cell first = cells.get(0);
         cells.set(0, new CashflowSheetLabApplyRequest.Cell(
             first.mode(),

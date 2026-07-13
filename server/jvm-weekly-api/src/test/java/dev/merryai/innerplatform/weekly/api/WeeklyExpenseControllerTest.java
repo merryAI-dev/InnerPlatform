@@ -814,15 +814,17 @@ class WeeklyExpenseControllerTest {
     @Test
     void cashflowSheetLabApplyFailsClosedWithoutFirestoreAtomicPlanner() throws Exception {
         List<Map<String, Object>> cells = new ArrayList<>();
-        for (String mode : List.of("projection", "actual")) {
-            for (String lineId : CashflowLineCatalog.ALL_LINES) {
-                cells.add(Map.of(
-                    "mode", mode,
-                    "weekNo", 1,
-                    "cashflowLine", lineId,
-                    "cellState", "VALUE",
-                    "amount", 1000
-                ));
+        for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    cells.add(Map.of(
+                        "mode", mode,
+                        "weekNo", weekNo,
+                        "cashflowLine", lineId,
+                        "cellState", "VALUE",
+                        "amount", 1000
+                    ));
+                }
             }
         }
         String body = objectMapper.writeValueAsString(Map.of(
