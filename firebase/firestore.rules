@@ -110,6 +110,7 @@ service cloud.firestore {
         || collection in ['cashflow_edit_locks']
         || collection in ['editLeases']
         || collection in ['cashflow_sheet_mirrors']
+        || collection in ['cashflow_sheet_refresh_runs']
         || collection in ['cashflow_sheet_stage_runs']
         || collection in ['cashflow_change_candidates']
         || collection in ['idempotency_keys'];
@@ -228,6 +229,10 @@ service cloud.firestore {
 
     // ── 캐시플로 시트 고정본/검토 run: BFF API로만 접근 ──
     match /orgs/{orgId}/cashflow_sheet_mirrors/{mirrorId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_refresh_runs/{runId} {
       allow read, write: if false;
     }
 

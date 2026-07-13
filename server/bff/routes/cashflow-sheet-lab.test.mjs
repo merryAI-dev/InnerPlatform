@@ -347,6 +347,82 @@ describe('cashflow sheet lab route', () => {
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 
+  it('replays an older refresh key without rereading Google or replacing the latest pinned mirror', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => {
+      const matrix = buildMatrix();
+      matrix[3][3] = previewSpreadsheet.mock.calls.length === 1 ? '111' : '222';
+      return {
+        spreadsheetId: 'spreadsheet-a',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix,
+      };
+    });
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-old-key-a' })
+      .expect(200);
+    const second = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-new-key-b' })
+      .expect(200);
+    const firstReplay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-old-key-a' })
+      .expect(200);
+    const pinned = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+
+    expect(first.body.sourceRevision).not.toBe(second.body.sourceRevision);
+    expect(firstReplay.body.sourceRevision).toBe(first.body.sourceRevision);
+    expect(firstReplay.body.cells).toEqual(first.body.cells);
+    expect(pinned.body.sourceRevision).toBe(second.body.sourceRevision);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects reuse of an older refresh key with a different source request', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-reused-old-key' })
+      .expect(200);
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-next-key' })
+      .expect(200);
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-reused-old-key', value: 'spreadsheet-b' })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('idempotency_key_reused');
+      });
+
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(2);
+  });
+
   it('saves the cashflow sheet config without reading Google Sheets', async () => {
     const db = createDb();
     const previewSpreadsheet = vi.fn();
@@ -741,6 +817,46 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(32);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses deterministic candidate identities when the same stage request overlaps', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const app = createApp({ db });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-overlap' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-overlap-001',
+    };
+    let tick = 0;
+    const toISOString = vi.spyOn(Date.prototype, 'toISOString').mockImplementation(() => (
+      `2026-07-13T00:00:00.${String(tick++).padStart(3, '0')}Z`
+    ));
+
+    try {
+      const responses = await Promise.all([
+        request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage').send(payload),
+        request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage').send(payload),
+      ]);
+      expect(responses.every((response) => [200, 409].includes(response.status))).toBe(true);
+    } finally {
+      toISOString.mockRestore();
+    }
+
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(32);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
   });
 
   it('blocks only a month containing an invalid pinned cell', async () => {

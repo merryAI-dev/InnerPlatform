@@ -30,6 +30,7 @@ const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_EVENTS_COLLECTION_ID = 'cashflow_events';
 const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_SHEET_MIRRORS_COLLECTION_ID = 'cashflow_sheet_mirrors';
+const CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID = 'cashflow_sheet_refresh_runs';
 const CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID = 'cashflow_sheet_stage_runs';
 const CASHFLOW_PROJECTION_SYNC_JOBS_COLLECTION_ID = 'cashflow_projection_sync_jobs';
 
@@ -155,6 +156,11 @@ function projectDocPath(tenantId, projectId) {
 
 function cashflowSheetMirrorDocPath(tenantId, projectId) {
   return `orgs/${tenantId}/${CASHFLOW_SHEET_MIRRORS_COLLECTION_ID}/${projectId}`;
+}
+
+function cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey) {
+  const runId = `cfrefresh_${stableHash({ tenantId, projectId, idempotencyKey }).slice(0, 32)}`;
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID}/${runId}`;
 }
 
 async function readProjectDocument(db, tenantId, projectId) {
@@ -416,7 +422,14 @@ async function saveCashflowChangeCandidates({ db, tenantId, candidates }) {
   if (!db || candidates.length === 0) return;
   for (let offset = 0; offset < candidates.length; offset += 450) {
     await Promise.all(candidates.slice(offset, offset + 450).map((candidate) => {
-      const id = `cfc_${stableHash(candidate).slice(0, 32)}`;
+      const id = `cfc_${stableHash({
+        runId: candidate.runId,
+        projectId: candidate.projectId,
+        mode: candidate.mode,
+        yearMonth: candidate.yearMonth,
+        weekNo: candidate.weekNo,
+        lineId: candidate.lineId,
+      }).slice(0, 32)}`;
       return db.doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${id}`).set(stripUndefinedDeep({ ...candidate, id }));
     }));
   }
@@ -479,12 +492,112 @@ async function readCashflowSheetStageRun(db, tenantId, projectId, runId) {
   return run;
 }
 
-async function saveCashflowSheetMirror(db, tenantId, projectId, mirror) {
-  if (!db) {
-    throw createHttpError(503, 'Firestore is required to save the cashflow sheet mirror.', 'firestore_unconfigured');
+function assertStageRunRequestMatches(run, requestHash) {
+  if (readOptionalText(run?.requestHash) !== requestHash) {
+    throw createHttpError(409, '같은 idempotencyKey에 다른 검토 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
   }
-  await db.doc(cashflowSheetMirrorDocPath(tenantId, projectId)).set(stripUndefinedDeep(mirror));
-  return mirror;
+}
+
+function stageRunInProgressError() {
+  return createHttpError(409, '같은 시트 검토 요청이 이미 처리 중입니다.', 'idempotency_request_in_progress');
+}
+
+async function reserveCashflowSheetStageRun({ db, runRef, requestHash, reservation }) {
+  return db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(runRef);
+    if (snap.exists) {
+      const run = snap.data() || {};
+      assertStageRunRequestMatches(run, requestHash);
+      if (run.response) return run.response;
+      const reservationExpiresAt = Date.parse(readOptionalText(run.reservationExpiresAt));
+      if (readOptionalText(run.status) === 'STAGING' && reservationExpiresAt > Date.now()) {
+        throw stageRunInProgressError();
+      }
+    }
+    transaction.set(runRef, stripUndefinedDeep({
+      ...reservation,
+      requestHash,
+      status: 'STAGING',
+      reservationExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }), { merge: true });
+    return null;
+  });
+}
+
+async function beginCashflowSheetRefreshRun({
+  db,
+  tenantId,
+  projectId,
+  idempotencyKey,
+  requestHash,
+  attemptedAt,
+  context,
+}) {
+  const runRef = db.doc(cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey));
+  const replay = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(runRef);
+    if (snap.exists) {
+      const run = snap.data() || {};
+      if (readOptionalText(run.requestHash) !== requestHash) {
+        throw createHttpError(
+          409,
+          '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.',
+          'idempotency_key_reused',
+        );
+      }
+      if (run.response) return run.response;
+      throw createHttpError(
+        409,
+        '같은 시트 연동 요청이 이미 처리 중입니다.',
+        'idempotency_request_in_progress',
+      );
+    }
+    transaction.set(runRef, stripUndefinedDeep({
+      tenantId,
+      projectId,
+      idempotencyKey,
+      requestHash,
+      status: 'IN_PROGRESS',
+      createdAt: attemptedAt,
+      createdBy: {
+        uid: readOptionalText(context?.actorId),
+        email: readOptionalText(context?.actorEmail),
+        role: readOptionalText(context?.actorRole) || 'workspace_user',
+      },
+    }));
+    return null;
+  });
+  return { runRef, replay };
+}
+
+async function completeCashflowSheetRefreshRun({
+  db,
+  tenantId,
+  projectId,
+  runRef,
+  requestHash,
+  response,
+  completedAt,
+}) {
+  const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+  await db.runTransaction(async (transaction) => {
+    const runSnap = await transaction.get(runRef);
+    const run = runSnap.exists ? runSnap.data() || {} : {};
+    if (readOptionalText(run.requestHash) !== requestHash) {
+      throw createHttpError(
+        409,
+        '시트 연동 멱등 실행 정보가 변경되었습니다.',
+        'idempotency_key_reused',
+      );
+    }
+    transaction.set(mirrorRef, stripUndefinedDeep(response));
+    transaction.set(runRef, stripUndefinedDeep({
+      status: 'COMPLETED',
+      completedAt,
+      response,
+    }), { merge: true });
+  });
+  return response;
 }
 
 function resolveCashflowWeekDocId(projectId, yearMonth, weekNo) {
@@ -1430,10 +1543,12 @@ async function stagePinnedCashflowSheetLab({
   const existingRunSnap = await runRef.get();
   if (existingRunSnap.exists) {
     const existingRun = existingRunSnap.data() || {};
-    if (readOptionalText(existingRun.requestHash) !== requestHash) {
-      throw createHttpError(409, '같은 idempotencyKey에 다른 검토 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
+    assertStageRunRequestMatches(existingRun, requestHash);
+    if (existingRun.response) return existingRun.response;
+    const reservationExpiresAt = Date.parse(readOptionalText(existingRun.reservationExpiresAt));
+    if (readOptionalText(existingRun.status) === 'STAGING' && reservationExpiresAt > Date.now()) {
+      throw stageRunInProgressError();
     }
-    return existingRun.response;
   }
 
   const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
@@ -1462,8 +1577,6 @@ async function stagePinnedCashflowSheetLab({
     context,
     now,
   });
-  await saveCashflowChangeCandidates({ db, tenantId, candidates });
-
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
   const actualLineCount = candidates.filter((candidate) => candidate.mode === 'actual').length;
   const responseCandidates = candidates.slice(0, 200);
@@ -1493,7 +1606,7 @@ async function stagePinnedCashflowSheetLab({
       role: readOptionalText(context?.actorRole) || 'workspace_user',
     },
   };
-  await runRef.set(stripUndefinedDeep({
+  const runDocument = stripUndefinedDeep({
     runId,
     tenantId,
     projectId,
@@ -1506,8 +1619,31 @@ async function stagePinnedCashflowSheetLab({
     blockedMonths,
     createdAt: now,
     createdBy: response.lastStagedBy,
-    response,
-  }));
+  });
+  const replay = await reserveCashflowSheetStageRun({
+    db,
+    runRef,
+    requestHash,
+    reservation: runDocument,
+  });
+  if (replay) return replay;
+  try {
+    await saveCashflowChangeCandidates({ db, tenantId, candidates });
+    await runRef.set(stripUndefinedDeep({
+      ...runDocument,
+      status: response.status,
+      reservationExpiresAt: null,
+      response,
+    }), { merge: true });
+  } catch (error) {
+    await runRef.set(stripUndefinedDeep({
+      status: 'STAGING_FAILED',
+      reservationExpiresAt: null,
+      failedAt: new Date().toISOString(),
+      failure: routeErrorDetails(error),
+    }), { merge: true }).catch(() => null);
+    throw error;
+  }
   logger('ok', {
     projectId,
     sourceRevision: mirror.sourceRevision,
@@ -1652,14 +1788,39 @@ export function mountCashflowSheetLabRoutes(app, {
       startWeek: weekRange.startWeek,
       endWeek: weekRange.endWeek,
     });
+    const attemptedAt = new Date().toISOString();
+    if (
+      readOptionalText(previousMirror?.lastRefreshIdempotencyKey) === parsed.idempotencyKey
+      && readOptionalText(previousMirror?.lastRefreshRequestHash) !== refreshRequestHash
+    ) {
+      throw createHttpError(409, '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
+    }
+    const refreshRun = await beginCashflowSheetRefreshRun({
+      db,
+      tenantId,
+      projectId,
+      idempotencyKey: parsed.idempotencyKey,
+      requestHash: refreshRequestHash,
+      attemptedAt,
+      context: req.context,
+    });
+    if (refreshRun.replay) {
+      res.status(200).json(refreshRun.replay);
+      return;
+    }
     if (readOptionalText(previousMirror?.lastRefreshIdempotencyKey) === parsed.idempotencyKey) {
-      if (readOptionalText(previousMirror?.lastRefreshRequestHash) !== refreshRequestHash) {
-        throw createHttpError(409, '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
-      }
+      await completeCashflowSheetRefreshRun({
+        db,
+        tenantId,
+        projectId,
+        runRef: refreshRun.runRef,
+        requestHash: refreshRequestHash,
+        response: previousMirror,
+        completedAt: attemptedAt,
+      });
       res.status(200).json(previousMirror);
       return;
     }
-    const attemptedAt = new Date().toISOString();
 
     logCashflowSheetLab('mirror.refresh.start', req, {
       projectId,
@@ -1714,7 +1875,15 @@ export function mountCashflowSheetLabRoutes(app, {
       mirror.lastRefreshAttemptAt = attemptedAt;
       mirror.lastRefreshIdempotencyKey = parsed.idempotencyKey;
       mirror.lastRefreshRequestHash = refreshRequestHash;
-      await saveCashflowSheetMirror(db, tenantId, projectId, mirror);
+      await completeCashflowSheetRefreshRun({
+        db,
+        tenantId,
+        projectId,
+        runRef: refreshRun.runRef,
+        requestHash: refreshRequestHash,
+        response: mirror,
+        completedAt: new Date().toISOString(),
+      });
       logCashflowSheetLab('mirror.refresh.ok', req, {
         projectId,
         sourceRevision: mirror.sourceRevision,
@@ -1748,7 +1917,15 @@ export function mountCashflowSheetLabRoutes(app, {
           lastRefreshIdempotencyKey: parsed.idempotencyKey,
           lastRefreshRequestHash: refreshRequestHash,
         };
-      await saveCashflowSheetMirror(db, tenantId, projectId, mirror);
+      await completeCashflowSheetRefreshRun({
+        db,
+        tenantId,
+        projectId,
+        runRef: refreshRun.runRef,
+        requestHash: refreshRequestHash,
+        response: mirror,
+        completedAt: new Date().toISOString(),
+      });
       logCashflowSheetLab('mirror.refresh.failed', req, {
         projectId,
         mirrorStatus: mirror.status,
