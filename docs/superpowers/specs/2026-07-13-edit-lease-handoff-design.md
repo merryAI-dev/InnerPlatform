@@ -104,6 +104,22 @@ controller는 사용자가 현재 화면 방문에서 충돌 안내를 확인했
 - 임시저장 성공 후 release가 실패하면 이동하지 않고 재시도 안내를 표시한다.
 - 최종저장 권한이 없으면 버튼을 숨기거나 비활성화하며, 직접 API 요청도 403으로 거부한다.
 
+## Stage Save Failure Findings
+
+### Projection final save 500
+
+2026-07-13 Stage 요청 `req_1783909261610_2ee96c6b1cff4df2`는 JVM 비즈니스 로직까지 도달하지 못했다. Cloud Run 로그는 같은 시각에 HTTP 403과 빈 Authorization header를 기록했다. Stage JVM service의 IAM invoker bindings도 비어 있다.
+
+BFF는 내부 서비스 토큰을 보내지만, Cloud Run IAM용 Google ID token은 보내지 못한다. Stage workflow에는 JVM URL과 내부 서비스 토큰만 있고 ID token audience 또는 BFF service-account credential이 없다. 또한 Cloud Run의 HTML/plain 403을 BFF가 `JSON.parse()`로 처리해 SyntaxError를 내므로, 사용자에게는 원래 403 대신 500으로 보인다.
+
+해결은 Stage 전용 BFF invoker service account에 해당 Cloud Run service의 `roles/run.invoker`만 부여하고, Vercel Stage server runtime이 이 계정의 credential로 audience-bound Google ID token을 생성하게 하는 것이다. BFF는 내부 서비스 토큰과 Google ID token을 모두 보낸다. 응답 본문이 JSON이 아니어도 원래 HTTP status를 보존한다.
+
+### Private draft save 409
+
+cashflow private draft는 서버가 `expectedDraftRevision`을 비교해 stale write를 409 `draft_version_conflict`로 거부한다. 이 방어 자체는 유지한다. 현재 화면은 409 발생 후 최신 owner private draft를 읽고, 화면이 소유하는 `sheetLab` payload만 최신 payload에 병합해 한 번 재시도하는 경로가 없다. 따라서 다른 cashflow 화면 또는 늦게 도착한 저장이 revision을 올리면 작성자는 수동 재시작을 해야 한다.
+
+해결은 private-draft mutation queue와 revision ref를 사용해 같은 화면의 저장을 직렬화하고, `draft_version_conflict`일 때만 최신 draft를 읽어 `sheetLab` namespace를 병합한 뒤 새 idempotency key로 한 번 재시도하는 것이다. 두 번째 충돌은 사용자에게 "다른 화면에서 임시저장이 갱신되었습니다"라고 알리고 읽기/재시도 선택을 제공한다. 서로 다른 payload namespace는 덮어쓰지 않는다.
+
 ## Test Coverage
 
 ### Controller tests
