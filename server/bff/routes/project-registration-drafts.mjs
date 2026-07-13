@@ -53,6 +53,11 @@ function positiveFence(value) {
   return fence;
 }
 
+function isFirestoreTransactionConflict(error) {
+  return error?.code === 10 || error?.code === '10' || error?.code === 'ABORTED'
+    || /transaction.*aborted|aborted.*transaction/i.test(String(error?.message || ''));
+}
+
 function clockDate(clock) {
   const date = new Date(clock());
   if (!Number.isFinite(date.getTime())) throw new Error('Project registration draft clock returned an invalid time');
@@ -676,7 +681,8 @@ export function createProjectRegistrationDraftService({
       const projectRequestRef = db.doc(`orgs/${current.tenantId}/project_requests/${projectRequestId}`);
       const outboxRef = db.doc(`outbox/${documentId(outboxTemplate?.id, 'outboxEvent.id')}`);
 
-      return db.runTransaction(async (tx) => {
+      try {
+        return await db.runTransaction(async (tx) => {
         const submissionDate = clockDate(now);
         const timestamp = submissionDate.toISOString();
         const { actorRole, member, ref, draft } = await ownedDraft(tx, current);
@@ -801,7 +807,13 @@ export function createProjectRegistrationDraftService({
           ttlSeconds: 86_400,
         }, submissionDate);
         return { status: 201, body, replayed: false };
-      });
+        });
+      } catch (error) {
+        if (isFirestoreTransactionConflict(error)) {
+          throw createHttpError(409, 'Another final submission won the project registration race.', 'canonical_submit_conflict');
+        }
+        throw error;
+      }
     },
 
     async addAttachment(input) {
