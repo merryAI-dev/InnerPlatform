@@ -52,7 +52,7 @@ export interface EditLeaseController {
   acquire(): Promise<EditLeaseOwnership | null>;
   takeover(): Promise<EditLeaseOwnership | null>;
   extend(): Promise<EditLeaseOwnership | null>;
-  release(): Promise<void>;
+  release(): Promise<boolean>;
   checkStatus(): Promise<EditLeaseViewState>;
   checkBeforeSave(): Promise<EditLeaseOwnership | null>;
   dismissWarning(): void;
@@ -354,12 +354,14 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
     },
     async release() {
       const ownership = state.ownership;
-      if (!ownership) return;
+      if (!ownership) return true;
       update({ ...state, busy: true, error: null });
       try {
         applyStatus(await options.client.release(ownership));
+        return true;
       } catch (error) {
         await failClosed(error);
+        return false;
       }
     },
     checkStatus,

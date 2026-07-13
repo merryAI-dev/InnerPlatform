@@ -3,7 +3,7 @@
 - route: `/portal/edit-project`
 - primary users: PM, 프로젝트 정보 수정 담당자
 - status: active
-- last updated: 2026-05-20
+- last updated: 2026-07-13
 
 ## Purpose
 
@@ -26,6 +26,7 @@
 
 ## Recent Changes
 
+- [2026-07-13] 화면 이탈 시 한 번 확인한 뒤 최신 입력을 임시저장하고 수정 lease를 해제하도록 연결했다. 저장 또는 해제 실패 시 현재 화면에 남아 재시도할 수 있다.
 - [2026-05-20] 팀원 선택을 긴 dropdown에서 검색형 picker로 바꾸고, 사내기업팀과 참여기업 조건 입력을 제거해 등록 화면과 수정 화면이 같은 간소화된 팀 입력 UX를 사용하게 했다.
 - [2026-04-14] `현재 프로젝트:` subtitle을 제거하고 프로젝트명만 남겨 헤더를 더 짧게 정리했다.
 

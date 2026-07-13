@@ -222,4 +222,17 @@ describe('createEditLeaseController', () => {
     expect(windowTarget.listeners.has('beforeunload')).toBe(false);
     expect(windowTarget.listeners.has('unload')).toBe(false);
   });
+
+  it('reports whether a manual release reached the server', async () => {
+    const releasedController = createEditLeaseController({ client: mockClient() });
+    await releasedController.acquire();
+    await expect(releasedController.release()).resolves.toBe(true);
+
+    const failedController = createEditLeaseController({
+      client: mockClient({ release: vi.fn(async () => { throw new Error('network unavailable'); }) }),
+    });
+    await failedController.acquire();
+    await expect(failedController.release()).resolves.toBe(false);
+    expect(failedController.getState()).toMatchObject({ mode: 'error', canEdit: false });
+  });
 });

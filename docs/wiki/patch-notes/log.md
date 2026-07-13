@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-07-13] patch-note | portal-project-safe-exit | 프로젝트 임시저장 후 이탈
+- pages: [portal-register-project](./pages/portal-register-project.md), [portal-edit-project](./pages/portal-edit-project.md)
+- summary: 프로젝트 등록·수정에서 화면을 떠날 때 최신 입력을 임시저장한 뒤 수정 lease를 해제한다. 저장 또는 해제에 실패하면 이동하지 않는다.
+
 ## [2026-07-13] patch-note | cashflow-safe-exit | 캐시플로 임시저장 후 이탈
 - pages: [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
 - summary: 캐시플로 상세에서 화면을 떠날 때 남은 입력을 작성자 전용 임시저장본에 보관하고 lease를 해제한 뒤 이동한다. 저장 실패 시 이동하지 않는다.

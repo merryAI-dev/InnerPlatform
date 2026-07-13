@@ -3,7 +3,7 @@
 - route: `/portal/register-project`
 - primary users: PM, 사업 등록 제안 담당자
 - status: active
-- last updated: 2026-05-20
+- last updated: 2026-07-13
 
 ## Purpose
 
@@ -32,6 +32,7 @@
 
 ## Recent Changes
 
+- [2026-07-13] 화면 이탈 시 한 번 확인한 뒤 최신 입력을 임시저장하고 수정 lease를 해제하도록 연결했다. 저장 또는 해제 실패 시 현재 화면에 남아 재시도할 수 있다.
 - [2026-05-20] 공통 프로젝트 에디터의 팀원 선택을 긴 dropdown에서 이름/닉네임 검색형 picker로 바꾸고, 팀/인력 단계에서 사내기업팀과 참여기업 조건 입력을 제거해 신규 등록과 수정 루프가 같은 간소화된 팀 입력 UX를 사용하게 했다.
 - [2026-04-14] review 단계의 최종 확인 경고 박스를 제거하고 요약 카드만 남겼다.
 - [2026-04-14] review/AI 초안 summary에서 `-` placeholder를 제거하고 빈 row는 숨기도록 바꿨다.

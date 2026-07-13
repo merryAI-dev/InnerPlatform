@@ -346,6 +346,9 @@ function ProjectInfoEditor({
           return { contractDocument: uploaded.document, contractAnalysis: uploaded.contractAnalysis };
         }}
         onProjectDocumentFileUpload={({ kind, file }) => uploadDocument(kind, file)}
+        onLeave={async () => {
+          if (!await lease.release()) throw new Error('edit lease release failed');
+        }}
         onCancel={() => navigate('/portal/project-select')}
         onSubmit={handleSubmit}
       />
