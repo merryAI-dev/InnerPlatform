@@ -6,6 +6,7 @@ import {
   ROUTE_ROLES,
 } from '../bff-utils.mjs';
 import { GoogleAuth } from 'google-auth-library';
+import { buildCashflowProjectionActualComparison } from '../cashflow-comparison.mjs';
 
 function resolveJavaWeeklyApiBaseUrl(options = {}, env = process.env) {
   return readOptionalText(options.jvmWeeklyApiBaseUrl)
@@ -467,6 +468,9 @@ export function mountJvmWeeklyApiRoutes(app, {
       method: 'GET',
       path: `/api/v1/cashflow/${projectId}`,
     });
-    res.status(200).json(result);
+    res.status(200).json({
+      ...result,
+      comparison: buildCashflowProjectionActualComparison(result),
+    });
   }));
 }

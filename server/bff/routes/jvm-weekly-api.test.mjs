@@ -430,7 +430,18 @@ describe('JVM weekly API BFF proxy', () => {
       return {
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ projectId: 'project-a', projection: [], actual: [] }),
+        text: async () => JSON.stringify({
+          projectId: 'project-a',
+          projection: [],
+          actual: [],
+          readModel: {
+            months: [{
+              yearMonth: '2026-01',
+              projection: { weeks: [{ weekNo: 1, amounts: { SALES_IN: 1000 } }] },
+              actual: { weeks: [{ weekNo: 1, amounts: { SALES_IN: 700 } }] },
+            }],
+          },
+        }),
       };
     });
     const { app } = createApp(fetchImpl);
@@ -440,6 +451,18 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body).toMatchObject({ projectId: 'project-a' });
+        expect(response.body.comparison).toMatchObject({
+          direction: 'projection_minus_actual',
+          months: [{
+            yearMonth: '2026-01',
+            weeks: [{
+              weekNo: 1,
+              lines: expect.arrayContaining([
+                expect.objectContaining({ lineId: 'SALES_IN', projection: 1000, actual: 700, difference: 300 }),
+              ]),
+            }],
+          }],
+        });
       });
 
     expect(calls).toHaveLength(1);
