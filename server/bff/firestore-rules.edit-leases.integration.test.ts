@@ -26,6 +26,9 @@ const tenantId = 'firestore-rules-private-edit-it';
 const protectedCollections = [
   'editLeases',
   'idempotency_keys',
+  'weekly_api_idempotency',
+  'weekly_api_audit_events',
+  'weekly_api_audit_exports',
   'projectRequestDrafts',
   'privateEditDrafts',
   'cashflowEditLocks',

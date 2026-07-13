@@ -114,6 +114,9 @@ service cloud.firestore {
         || collection in ['cashflow_sheet_stage_runs']
         || collection in ['cashflow_sheet_stage_months']
         || collection in ['cashflow_change_candidates']
+        || collection in ['weekly_api_idempotency']
+        || collection in ['weekly_api_audit_events']
+        || collection in ['weekly_api_audit_exports']
         || collection in ['idempotency_keys'];
     }
 
@@ -225,6 +228,19 @@ service cloud.firestore {
 
     // ── 멱등 replay 결과: BFF API로만 접근 ──
     match /orgs/{orgId}/idempotency_keys/{keyId} {
+      allow read, write: if false;
+    }
+
+    // ── 주간 API 멱등/감사 레코드: JVM/BFF API로만 접근 ──
+    match /orgs/{orgId}/weekly_api_idempotency/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_api_audit_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/weekly_api_audit_exports/{exportId} {
       allow read, write: if false;
     }
 
