@@ -2,21 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Loader2 } from 'lucide-react';
 import {
   collection,
-  doc,
   onSnapshot,
   orderBy,
   query,
-  setDoc,
 } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useAppStore } from '../../data/store';
-import type {
-  Project,
-  ProjectExecutiveReviewStatus,
-  ProjectRequest,
-} from '../../data/types';
-import { getOrgDocumentPath, getOrgRootPath } from '../../lib/firebase';
+import type { ProjectExecutiveReviewStatus, ProjectRequest } from '../../data/types';
+import { getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import { isPlatformApiEnabled, reviewProjectExecutiveStatusViaBff } from '../../lib/platform-bff-client';
 import { downloadProjectRequestAttachmentViaBff } from '../../lib/project-request-attachment-client';
@@ -29,7 +23,6 @@ import {
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
 import {
-  buildProjectPatchFromRequestPayload,
   resolveProjectRequestKind,
   resolveProjectRequestPayload,
 } from '../../platform/project-change-request';
@@ -84,57 +77,6 @@ function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus
   return 'DUPLICATE_DISCARDED';
 }
 
-function appendExecutiveReviewHistory(
-  project: Project,
-  input: {
-    nextStatus: ProjectExecutiveReviewStatus;
-    reviewerId: string;
-    reviewerName: string;
-    reviewComment: string;
-    reviewedAt: string;
-    previousStatus: ProjectExecutiveReviewStatus;
-  },
-) {
-  const currentHistory = Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : [];
-  return [
-    ...currentHistory,
-    {
-      status: input.nextStatus,
-      previousStatus: input.previousStatus,
-      reviewedAt: input.reviewedAt,
-      reviewedById: input.reviewerId,
-      reviewedByName: input.reviewerName,
-      reviewComment: input.reviewComment || undefined,
-    },
-  ];
-}
-
-function buildProjectRequestReviewPatch(input: {
-  projectId: string;
-  reviewerId: string;
-  reviewerName: string;
-  nextStatus: ProjectExecutiveReviewStatus;
-  reviewComment: string;
-  reviewedAt: string;
-  request?: ProjectRequest | null;
-  targetProjectVersion?: number;
-}) {
-  return {
-    status: input.nextStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
-    reviewOutcome: input.nextStatus === 'APPROVED' ? 'APPROVED' : input.nextStatus,
-    reviewedBy: input.reviewerId,
-    reviewedByName: input.reviewerName,
-    reviewedAt: input.reviewedAt,
-    reviewComment: input.reviewComment || null,
-    rejectedReason: input.nextStatus === 'APPROVED' ? null : (input.reviewComment || null),
-    approvedProjectId: input.projectId,
-    targetProjectId: input.projectId,
-    ...(input.nextStatus === 'APPROVED' && input.request?.payload ? { approvedSnapshot: input.request.payload } : {}),
-    ...(input.targetProjectVersion ? { targetProjectVersion: input.targetProjectVersion } : {}),
-    updatedAt: input.reviewedAt,
-  };
-}
-
 type ProjectMigrationAuditPageProps = {
   embedded?: boolean;
   reviewScope?: 'all' | 'pending';
@@ -145,7 +87,7 @@ export function ProjectMigrationAuditPage({
   reviewScope = 'all',
 }: ProjectMigrationAuditPageProps = {}) {
   const { user: authUser } = useAuth();
-  const { projects, currentUser, updateProject, trashProject } = useAppStore();
+  const { projects, currentUser } = useAppStore();
   const { db, isOnline, orgId } = useFirebase();
 
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
@@ -332,103 +274,37 @@ export function ProjectMigrationAuditPage({
     if (!activeRecord || !actionMode) return;
 
     const nextExecutiveStatus = toExecutiveStatus(actionMode);
-    const now = new Date().toISOString();
     const trimmedComment = reviewComment.trim();
     const reviewerName = currentUser?.name || authUser?.name || currentUser?.email || authUser?.email || '관리자';
-    const reviewerId = currentUser?.uid || authUser?.uid || '';
-    const shouldTrashProject = actionMode === 'discard';
-    const trashReason = trimmedComment || 'CIC 대표 검토 중복·폐기';
     if (nextExecutiveStatus !== 'APPROVED' && !trimmedComment) {
       toast.error(actionMode === 'reject' ? '반려 사유를 입력해 주세요.' : '폐기 사유를 입력해 주세요.');
+      return;
+    }
+    if (!isPlatformApiEnabled() || !authUser?.uid) {
+      toast.error('CIC 대표 검토 API가 연결되어 있지 않아 저장하지 않았습니다.');
       return;
     }
 
     setActing(true);
     try {
-      if (shouldTrashProject && isPlatformApiEnabled() && authUser?.uid) {
-        await trashProject(activeRecord.project.id, trashReason);
-      }
-
-      if (isPlatformApiEnabled() && authUser?.uid) {
-        const response = await reviewProjectExecutiveStatusViaBff({
-          tenantId: orgId,
-          actor: {
-            uid: authUser.uid,
-            email: authUser.email,
-            role: authUser.role,
-            idToken: authUser.idToken,
-          },
-          projectId: activeRecord.project.id,
-          review: {
-            requestId: activeRecord.request?.id,
-            reviewStatus: nextExecutiveStatus,
-            reviewComment: trimmedComment || undefined,
-            reviewerName,
-          },
-        });
-        if (response.slackDelivered === false && response.slackReason) {
-          console.warn('[ProjectMigrationAuditPage] executive review slack not delivered:', response.slackReason);
-        }
-      } else {
-        const requestCollectionName = (activeRecord.request as ProjectRequestWithSource | null)?.__collectionName || 'project_requests';
-        await updateProject(activeRecord.project.id, {
-          ...(nextExecutiveStatus === 'APPROVED'
-            && activeRecord.request
-            && resolveProjectRequestKind(activeRecord.request) === 'CHANGE'
-            ? buildProjectPatchFromRequestPayload(activeRecord.request.payload, {
-                baseProject: activeRecord.project,
-                approvedAt: now,
-                reviewerId,
-                reviewerName,
-                reviewComment: trimmedComment,
-                changedFields: activeRecord.request.changedFields,
-              })
-            : {
-                executiveReviewStatus: nextExecutiveStatus,
-                executiveReviewedAt: now,
-                executiveReviewedById: reviewerId,
-                executiveReviewedByName: reviewerName,
-                executiveReviewComment: trimmedComment || undefined,
-                executiveReviewHistory: appendExecutiveReviewHistory(activeRecord.project, {
-                  nextStatus: nextExecutiveStatus,
-                  reviewerId,
-                  reviewerName,
-                  reviewComment: trimmedComment,
-                  reviewedAt: now,
-                  previousStatus: activeRecord.status,
-                }),
-              }),
-          ...(shouldTrashProject
-            ? {
-              trashedAt: now,
-              trashedById: reviewerId,
-              trashedByEmail: currentUser?.email || authUser?.email || null,
-              trashedReason: trashReason,
-            }
-            : {}),
-          updatedAt: now,
-        });
-
-        if (db && activeRecord.request) {
-          await setDoc(
-            requestCollectionName === 'project_requests'
-              ? doc(db, getOrgDocumentPath(orgId, 'projectRequests', activeRecord.request.id))
-              : doc(db, `${getOrgRootPath(orgId)}/${requestCollectionName}/${activeRecord.request.id}`),
-            buildProjectRequestReviewPatch({
-              projectId: activeRecord.project.id,
-              reviewerId,
-              reviewerName,
-              nextStatus: nextExecutiveStatus,
-              reviewComment: trimmedComment,
-              reviewedAt: now,
-              request: activeRecord.request,
-              targetProjectVersion: nextExecutiveStatus === 'APPROVED'
-                ? Number(activeRecord.project.version || 1) + 1
-                : undefined,
-            }),
-            { merge: true },
-          );
-        }
+      const response = await reviewProjectExecutiveStatusViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken: authUser.idToken,
+        },
+        projectId: activeRecord.project.id,
+        review: {
+          requestId: activeRecord.request?.id,
+          reviewStatus: nextExecutiveStatus,
+          reviewComment: trimmedComment || undefined,
+          reviewerName,
+        },
+      });
+      if (response.slackDelivered === false && response.slackReason) {
+        console.warn('[ProjectMigrationAuditPage] executive review slack not delivered:', response.slackReason);
       }
 
       toast.success(

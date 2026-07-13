@@ -51,14 +51,15 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     }
   }
 
-  private handleReload = () => {
-    if (typeof window === 'undefined') return;
-    window.location.reload();
+  private handleRetry = () => {
+    this.setState({ hasError: false, error: undefined });
   };
 
   private handleGoHome = () => {
     if (typeof window === 'undefined') return;
-    window.location.assign(inferHomePath(this.props.homePath));
+    window.history.pushState({}, '', inferHomePath(this.props.homePath));
+    this.setState({ hasError: false, error: undefined });
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
   render() {
@@ -81,7 +82,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   예기치 못한 오류가 발생했습니다
                 </p>
                 <p className="text-[12px] text-muted-foreground mt-1">
-                  새로고침을 시도하거나 홈으로 이동해 주세요. 문제가 반복되면 관리자에게 알려주세요.
+                  입력 내용을 유지한 채 다시 시도하거나 홈으로 이동해 주세요. 문제가 반복되면 관리자에게 알려주세요.
                 </p>
                 {message && (
                   <p className="mt-2 text-[11px] text-rose-700 dark:text-rose-300 break-words">
@@ -89,8 +90,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   </p>
                 )}
                 <div className="mt-4 flex items-center gap-2">
-                  <Button variant="outline" className="gap-1.5" onClick={this.handleReload}>
-                    <RefreshCcw className="w-3.5 h-3.5" /> 새로고침
+                  <Button variant="outline" className="gap-1.5" onClick={this.handleRetry}>
+                    <RefreshCcw className="w-3.5 h-3.5" /> 다시 시도
                   </Button>
                   <Button className="gap-1.5" onClick={this.handleGoHome}>
                     <Home className="w-3.5 h-3.5" /> 홈으로 ({homePath})

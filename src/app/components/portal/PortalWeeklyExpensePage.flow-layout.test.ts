@@ -86,4 +86,15 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('hydrateWeeklyPrivateDraft');
     expect(weeklyExpenseSource).toContain('restoredExpenseRows || expenseSheetRows');
   });
+
+  it('uses the existing project lease for variance replies and weekly status metadata', () => {
+    expect(weeklyExpenseSource).toContain('updateVarianceFlagWithLease');
+    expect(weeklyExpenseSource).toContain('upsertWeeklySubmissionStatusWithLease');
+    expect(weeklyExpenseSource).toContain('cashflowLease: mutationLease');
+  });
+
+  it('checks the same project lease before saving the evidence-required map', () => {
+    expect(weeklyExpenseSource).toContain('saveEvidenceRequiredMapWithLease');
+    expect(weeklyExpenseSource).toContain('onSaveEvidenceRequiredMap={saveEvidenceRequiredMapWithLease}');
+  });
 });

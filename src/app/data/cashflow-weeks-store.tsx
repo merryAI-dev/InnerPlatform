@@ -9,26 +9,25 @@ import React, {
 } from 'react';
 import {
   collection,
-  doc,
   getDocs,
   limit,
   query,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
-import type { CashflowSheetLineId, CashflowWeekSheet, VarianceFlag, VarianceFlagEvent } from './types';
+import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
 import { filterCashflowWeeksThroughSelectedYear } from './cashflow-weeks.helpers';
 import { resolveWeekDocId } from './cashflow-weeks.persistence';
 import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
-import { getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
+import { getOrgCollectionPath } from '../lib/firebase';
 import {
   isPlatformApiEnabled,
   closeCashflowWeekViaBff,
   submitCashflowWeekViaBff,
   syncProjectCashflowActualsViaBff,
   upsertCashflowWeekAmountsViaBff,
+  applyCashflowVarianceIntentViaBff,
   type ProjectCashflowActualSyncResult,
   type WeeklyExpenseWeekPayload,
 } from '../lib/platform-bff-client';
@@ -76,8 +75,9 @@ interface CashflowWeekActions {
   }) => void;
   updateVarianceFlag: (input: {
     sheetId: string;
-    varianceFlag: VarianceFlag | undefined;
-    varianceHistory: VarianceFlagEvent[];
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    content?: string;
+    cashflowLease?: CashflowMutationLease;
   }) => Promise<void>;
   getWeeksForProject: (projectId: string) => CashflowWeekSheet[];
 }
@@ -598,26 +598,67 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   }, [orgId, user]);
   const updateVarianceFlag = useCallback(async (input: {
     sheetId: string;
-    varianceFlag: VarianceFlag | undefined;
-    varianceHistory: VarianceFlagEvent[];
+    action: 'FLAG' | 'REPLY' | 'RESOLVE';
+    content?: string;
+    cashflowLease?: CashflowMutationLease;
   }): Promise<void> => {
-    if (!db) return;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'cashflowWeeks', input.sheetId));
-    const now = new Date().toISOString();
-    const firestorePatch = {
-      varianceFlag: input.varianceFlag ?? null,
-      varianceHistory: input.varianceHistory,
-      updatedAt: now,
+    const actor = user;
+    const current = weeks.find((week) => week.id === input.sheetId);
+    if (!actor || !current) throw new Error('편차 확인 대상 또는 권한 정보를 찾을 수 없습니다.');
+    if (actor.source === 'dev_harness') {
+      const now = new Date().toISOString();
+      const revision = (current.varianceRevision || 0) + 1;
+      const previous = current.varianceFlag;
+      const varianceFlag = input.action === 'FLAG'
+        ? { status: 'OPEN' as const, reason: input.content || '', flaggedBy: actor.name, flaggedByUid: actor.uid, flaggedAt: now }
+        : input.action === 'REPLY'
+          ? { ...previous!, status: 'REPLIED' as const, pmReply: input.content || '', pmRepliedBy: actor.name, pmRepliedByUid: actor.uid, pmRepliedAt: now }
+          : { ...previous!, status: 'RESOLVED' as const, resolvedBy: actor.name, resolvedByUid: actor.uid, resolvedAt: now };
+      setWeeks((prev) => patchCashflowWeekLocally(prev, input.sheetId, {
+        varianceFlag,
+        varianceHistory: [...(current.varianceHistory || []), {
+          id: `vf-${revision}`,
+          action: input.action,
+          actor: actor.name,
+          actorUid: actor.uid,
+          content: input.action === 'RESOLVE' ? (input.content || '해결 처리') : (input.content || ''),
+          timestamp: now,
+        }],
+        varianceRevision: revision,
+        updatedAt: now,
+      }));
+      return;
+    }
+    if (!isPlatformApiEnabled()) {
+      throw new Error('편차 확인 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!input.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const result = await applyCashflowVarianceIntentViaBff({
       tenantId: orgId,
-    };
-    await updateDoc(ref, firestorePatch as any);
+      actor: {
+        uid: actor.uid,
+        email: actor.email,
+        role: actor.role,
+        idToken: actor.idToken,
+        googleAccessToken: actor.googleAccessToken,
+      },
+      projectId: current.projectId,
+      lease: input.cashflowLease,
+      idempotencyKey: `cashflow-variance:${input.sheetId}:${input.action}:${Date.now()}`,
+      intent: {
+        sheetId: input.sheetId,
+        action: input.action,
+        content: input.content,
+        expectedRevision: current.varianceRevision || 0,
+      },
+    });
     setWeeks((prev) => patchCashflowWeekLocally(prev, input.sheetId, {
-      varianceFlag: input.varianceFlag,
-      varianceHistory: input.varianceHistory,
-      updatedAt: now,
-      tenantId: orgId,
+      varianceFlag: result.week.varianceFlag,
+      varianceHistory: result.week.varianceHistory,
+      varianceRevision: result.week.varianceRevision,
+      updatedAt: result.week.updatedAt,
     }));
-  }, [db, orgId]);
+  }, [orgId, user, weeks]);
 
   const getWeeksForProject = useCallback((projectId: string): CashflowWeekSheet[] => {
     const pid = projectId.trim();

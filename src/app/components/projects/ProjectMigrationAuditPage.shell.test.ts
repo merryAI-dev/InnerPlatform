@@ -55,12 +55,12 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).not.toContain("{isPmPortalProject ? 'PM 등록' : '기존 등록'}");
   });
 
-  it('routes duplicate-discard decisions through the project trash flow', () => {
-    expect(pageSource).toContain('trashProject');
-    expect(pageSource).toContain("const shouldTrashProject = actionMode === 'discard'");
-    expect(pageSource).toContain('await trashProject(activeRecord.project.id, trashReason)');
-    expect(pageSource).toContain('trashedAt: now');
-    expect(pageSource).toContain('trashedReason: trashReason');
+  it('routes every decision through one fail-closed BFF command', () => {
+    expect(pageSource).toContain('reviewProjectExecutiveStatusViaBff');
+    expect(pageSource).toContain('if (!isPlatformApiEnabled() || !authUser?.uid)');
+    expect(pageSource).not.toContain('trashProject');
+    expect(pageSource).not.toContain('updateProject');
+    expect(pageSource).not.toContain('setDoc(');
   });
 
   it('listens to both canonical and legacy project request collections', () => {

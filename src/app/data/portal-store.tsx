@@ -96,13 +96,18 @@ import { useAuth } from './auth-store';
 import { useFirebase } from '../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../lib/firebase';
 import {
+  addCommentViaBff,
   applyBankStatementItemsViaBff,
+  applyEvidenceRequiredMapIntentViaBff,
+  applyWeeklySubmissionStatusIntentViaBff,
+  changeTransactionStateViaBff,
   importBankStatementBatchViaBff,
   isPlatformApiEnabled,
   readWeeklyExpenseSheetViaBff,
   saveWeeklyExpenseDraftViaBff,
   type UpsertProjectPayload,
   upsertProjectViaBff,
+  upsertTransactionViaBff,
 } from '../lib/platform-bff-client';
 import type { CashflowMutationLease } from '../lib/cashflow-edit-lease';
 import { createCashflowPrivateDraftClient } from '../lib/cashflow-private-draft-client';
@@ -525,11 +530,12 @@ interface PortalActions {
   duplicateExpenseSet: (setId: string) => void;
   addChangeRequest: (req: ChangeRequest) => void;
   submitChangeRequest: (id: string) => Promise<boolean>;
-  addTransaction: (tx: Transaction) => Promise<void>;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
-  changeTransactionState: (id: string, newState: TransactionState, reason?: string) => Promise<void>;
-  addComment: (comment: Comment) => Promise<void>;
-  saveEvidenceRequiredMap: (map: Record<string, string>) => Promise<void>;
+  addTransaction: (tx: Transaction, options?: CashflowMutationOptions) => Promise<void>;
+  updateTransaction: (id: string, updates: Partial<Transaction>, options?: CashflowMutationOptions) => Promise<void>;
+  patchTransactionSnapshot: (id: string, updates: Partial<Transaction>) => void;
+  changeTransactionState: (id: string, newState: TransactionState, reason?: string, options?: CashflowMutationOptions) => Promise<void>;
+  addComment: (comment: Comment, options?: CashflowMutationOptions) => Promise<void>;
+  saveEvidenceRequiredMap: (map: Record<string, string>, options?: { cashflowLease?: CashflowMutationLease }) => Promise<void>;
   markSheetSourceApplied: (input: { sourceType: ProjectSheetSourceType; applyTarget: string }) => Promise<void>;
   upsertExpenseIntakeItems: (items: BankImportIntakeItem[]) => Promise<void>;
   saveExpenseIntakeDraft: (id: string, updates: Partial<BankImportIntakeItem>) => Promise<void>;
@@ -557,6 +563,7 @@ interface PortalActions {
     expenseUpdated?: boolean;
     expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
     expenseReviewPendingCount?: number;
+    cashflowLease?: CashflowMutationLease;
   }) => Promise<void>;
   createProjectRequest: (payload: ProjectRequestPayload) => Promise<string | null>;
 }
@@ -707,6 +714,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [evidenceRequiredMap, setEvidenceRequiredMap] = useState<Record<string, string>>({});
+  const evidenceRequiredMapRevisionRef = useRef(0);
   const [sheetSources, setSheetSources] = useState<ProjectSheetSourceSnapshot[]>([]);
   const [expenseIntakeItems, setExpenseIntakeItems] = useState<BankImportIntakeItem[]>([]);
   const [expenseSheets, setExpenseSheets] = useState<ExpenseSheetTab[]>([]);
@@ -1114,6 +1122,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     projectScopeUnsubsRef.current.forEach((unsub) => unsub());
     projectScopeUnsubsRef.current = [];
     let cancelled = false;
+    evidenceRequiredMapRevisionRef.current = 0;
 
     if ((authLoading || isMemberLoading) && hasHydratedPortalSession) {
       setProjectScopeLoading(false);
@@ -1421,10 +1430,14 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       ifActive(() => {
         if (!snap.exists()) {
           setEvidenceRequiredMap({});
+          evidenceRequiredMapRevisionRef.current = 0;
           return;
         }
-        const data = snap.data() as { map?: Record<string, string> };
+        const data = snap.data() as { map?: Record<string, string>; evidenceMapRevision?: number };
         setEvidenceRequiredMap(data?.map || {});
+        evidenceRequiredMapRevisionRef.current = Number.isInteger(data?.evidenceMapRevision)
+          ? Number(data.evidenceMapRevision)
+          : 0;
       });
     };
     const handleEvidenceMapError = (err: unknown) => {
@@ -1960,29 +1973,35 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return true;
   }, [currentProjectId, db, orgId, expenseSheets, activeExpenseSheetId, isDevHarnessUser]);
 
-  const saveEvidenceRequiredMap = useCallback(async (map: Record<string, string>) => {
+  const saveEvidenceRequiredMap = useCallback(async (
+    map: Record<string, string>,
+    options: { cashflowLease?: CashflowMutationLease } = {},
+  ) => {
     if (isDevHarnessUser) {
       setEvidenceRequiredMap(map);
       return;
     }
-    if (!db || !currentProjectId) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
+    if (!currentProjectId || !authUser || !isPlatformApiEnabled()) {
+      throw new Error('증빙 필수항목 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
     }
-    const now = new Date().toISOString();
-    const payload = withTenantScope(orgId, {
+    if (!options.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const result = await applyEvidenceRequiredMapIntentViaBff({
+      tenantId: orgId,
+      actor: {
+        uid: authUser.uid,
+        email: authUser.email,
+        role: authUser.role,
+        idToken: authUser.idToken,
+        googleAccessToken: authUser.googleAccessToken,
+      },
       projectId: currentProjectId,
-      map,
-      updatedAt: now,
-      updatedBy: portalUser?.name || authUser?.name || '',
+      lease: options.cashflowLease,
+      idempotencyKey: `cashflow-evidence-required-map:${currentProjectId}:${Date.now()}`,
+      intent: { expectedRevision: evidenceRequiredMapRevisionRef.current, map },
     });
-    await setDoc(
-      doc(db, getOrgDocumentPath(orgId, 'budgetEvidenceMaps', currentProjectId)),
-      payload,
-      { merge: true },
-    );
-    setEvidenceRequiredMap(map);
-  }, [currentProjectId, db, orgId, portalUser?.name, authUser?.name, expenseSheetRows, isDevHarnessUser]);
+    evidenceRequiredMapRevisionRef.current = result.evidenceRequiredMap.evidenceMapRevision;
+    setEvidenceRequiredMap(result.evidenceRequiredMap.map);
+  }, [authUser, currentProjectId, isDevHarnessUser, orgId]);
 
   const markSheetSourceApplied = useCallback(async (input: {
     sourceType: ProjectSheetSourceType;
@@ -2401,42 +2420,74 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseUpdated?: boolean;
     expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
     expenseReviewPendingCount?: number;
+    cashflowLease?: CashflowMutationLease;
   }) => {
-    if (!db) {
-      toast.error('Firestore 연결이 필요합니다. 관리자에게 문의해 주세요.');
-      return;
-    }
+    if (!authUser) throw new Error('주간 제출 상태 저장 권한 정보가 없습니다.');
     const projectId = input.projectId?.trim();
     const yearMonth = input.yearMonth?.trim();
     const weekNo = Math.max(1, Math.min(5, Math.trunc(input.weekNo)));
     if (!projectId || !/^\d{4}-\d{2}$/.test(yearMonth)) return;
 
-    const now = new Date().toISOString();
-    const updatedBy = portalUser?.name || authUser?.name || '';
     const id = `${projectId}-${yearMonth}-w${weekNo}`;
-    const ref = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', id));
-    const patch: WeeklySubmissionStatus = buildWeeklySubmissionStatusPatch({
-      orgId,
-      projectId,
-      yearMonth,
-      weekNo,
-      updatedBy,
-      now,
+    const changes = {
       projectionEdited: input.projectionEdited,
       projectionUpdated: input.projectionUpdated,
       expenseEdited: input.expenseEdited,
       expenseUpdated: input.expenseUpdated,
       expenseSyncState: input.expenseSyncState,
       expenseReviewPendingCount: input.expenseReviewPendingCount,
-    });
+    };
+    const compactChanges = Object.fromEntries(
+      Object.entries(changes).filter(([, value]) => value !== undefined),
+    ) as typeof changes;
+    if (isDevHarnessUser) {
+      const patch = buildWeeklySubmissionStatusPatch({
+        orgId, projectId, yearMonth, weekNo,
+        updatedBy: portalUser?.name || authUser.name || '',
+        now: new Date().toISOString(),
+        ...compactChanges,
+      });
+      setWeeklySubmissionStatuses((prev) => [
+        ...prev.filter((item) => item.id !== id),
+        { ...prev.find((item) => item.id === id), ...patch },
+      ]);
+      return;
+    }
+    if (!isPlatformApiEnabled()) {
+      throw new Error('주간 제출 상태 API가 연결되어 있지 않아 읽기 전용으로 유지됩니다.');
+    }
+    if (!input.cashflowLease) throw new Error('수정 세션을 먼저 시작해 주세요.');
+    const current = weeklySubmissionStatuses.find((item) => item.id === id);
     try {
-      await setDoc(ref, patch, { merge: true });
+      const result = await applyWeeklySubmissionStatusIntentViaBff({
+        tenantId: orgId,
+        actor: {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken: authUser.idToken,
+          googleAccessToken: authUser.googleAccessToken,
+        },
+        projectId,
+        lease: input.cashflowLease,
+        idempotencyKey: `cashflow-weekly-status:${id}:${Date.now()}`,
+        intent: {
+          yearMonth,
+          weekNo,
+          expectedRevision: current?.statusRevision || 0,
+          changes: compactChanges,
+        },
+      });
+      setWeeklySubmissionStatuses((prev) => [
+        ...prev.filter((item) => item.id !== id),
+        result.status,
+      ]);
     } catch (err) {
       console.error('[PortalStore] weeklySubmissionStatus save failed:', err);
       toast.error('주간 제출 상태 저장에 실패했습니다.');
       throw err;
     }
-  }, [db, orgId, portalUser?.name, authUser?.name]);
+  }, [authUser, isDevHarnessUser, orgId, portalUser?.name, weeklySubmissionStatuses]);
 
   const createProjectRequest = useCallback(async (payload: ProjectRequestPayload): Promise<string | null> => {
     if (!db || !authUser) {
@@ -3120,14 +3171,26 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setExpenseIntakeItems(nextItems);
   }, [authUser?.name, currentProjectId, db, evidenceRequiredMap, isDevHarnessUser, orgId, portalUser?.name]);
 
-  const persistTransaction = useCallback(async (txData: Transaction) => {
-    if (!db) return;
-    await setDoc(
-      doc(db, getOrgDocumentPath(orgId, 'transactions', txData.id)),
-      stripUndefinedDeep(withTenantScope(orgId, txData)),
-      { merge: true },
-    );
-  }, [db, orgId]);
+  const persistTransaction = useCallback(async (txData: Transaction, cashflowLease?: CashflowMutationLease) => {
+    if (!authUser || !isPlatformApiEnabled()) {
+      throw new Error('거래 저장 API가 연결되어 있지 않아 저장하지 않았습니다.');
+    }
+    const result = await upsertTransactionViaBff({
+      tenantId: orgId,
+      actor: authUser,
+      transaction: {
+        ...txData,
+        ...(Number.isFinite(txData.version) ? { expectedVersion: txData.version } : {}),
+      },
+      lease: cashflowLease,
+    });
+    return {
+      ...txData,
+      version: result.version,
+      updatedAt: result.updatedAt,
+      state: result.state as TransactionState,
+    };
+  }, [authUser, orgId]);
 
   const register = useCallback(async (
     user: Omit<PortalUser, 'id' | 'registeredAt' | 'projectId' | 'projectIds'> & {
@@ -3532,10 +3595,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
   }, [firestoreEnabled, db, portalUser?.name, persistChangeRequest]);
 
-  const addTransaction = useCallback(async (txData: Transaction) => {
+  const addTransaction = useCallback(async (txData: Transaction, options?: CashflowMutationOptions) => {
+    let nextTx = txData;
     if (firestoreEnabled) {
       try {
-        await persistTransaction(txData);
+        nextTx = await persistTransaction(txData, options?.cashflowLease);
       } catch (err) {
         console.error('[PortalStore] persistTransaction error:', err);
         toast.error('거래 저장에 실패했습니다');
@@ -3543,18 +3607,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    setTransactions((prev) => [txData, ...prev.filter((tx) => tx.id !== txData.id)]);
+    setTransactions((prev) => [nextTx, ...prev.filter((tx) => tx.id !== nextTx.id)]);
   }, [firestoreEnabled, persistTransaction]);
 
-  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>) => {
+  const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>, options?: CashflowMutationOptions) => {
     const now = new Date().toISOString();
     const currentTx = transactions.find((t) => t.id === id);
     if (!currentTx) return;
-    const nextTx: Transaction = { ...currentTx, ...updates, updatedAt: now };
+    let nextTx: Transaction = { ...currentTx, ...updates, updatedAt: now };
 
     if (firestoreEnabled) {
       try {
-        await persistTransaction(nextTx);
+        nextTx = await persistTransaction(nextTx, options?.cashflowLease);
       } catch (err) {
         console.error('[PortalStore] updateTransaction error:', err);
         toast.error('거래 수정에 실패했습니다');
@@ -3565,7 +3629,13 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     setTransactions((prev) => prev.map((t) => (t.id === id ? nextTx : t)));
   }, [firestoreEnabled, persistTransaction, transactions]);
 
-  const changeTransactionState = useCallback(async (id: string, newState: TransactionState, reason?: string) => {
+  const patchTransactionSnapshot = useCallback((id: string, updates: Partial<Transaction>) => {
+    setTransactions((prev) => prev.map((transaction) => (
+      transaction.id === id ? { ...transaction, ...updates } : transaction
+    )));
+  }, []);
+
+  const changeTransactionState = useCallback(async (id: string, newState: TransactionState, reason?: string, options?: CashflowMutationOptions) => {
     const now = new Date().toISOString();
     const currentTx = transactions.find((t) => t.id === id);
     if (!currentTx) return;
@@ -3583,11 +3653,29 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     } else if (newState === 'REJECTED' && reason) {
       stateUpdates.rejectedReason = reason;
     }
-    const nextTx: Transaction = { ...currentTx, ...stateUpdates };
+    let nextTx: Transaction = { ...currentTx, ...stateUpdates };
 
     if (firestoreEnabled) {
       try {
-        await persistTransaction(nextTx);
+        if (!authUser || !isPlatformApiEnabled()) {
+          throw new Error('거래 상태 변경 API가 연결되어 있지 않아 저장하지 않았습니다.');
+        }
+        const result = await changeTransactionStateViaBff({
+          tenantId: orgId,
+          actor: authUser,
+          transactionId: id,
+          newState,
+          expectedVersion: currentTx.version ?? 1,
+          reason,
+          lease: options?.cashflowLease,
+        });
+        nextTx = {
+          ...nextTx,
+          state: result.state as TransactionState,
+          version: result.version,
+          updatedAt: result.updatedAt,
+          ...(result.rejectedReason ? { rejectedReason: result.rejectedReason } : {}),
+        };
       } catch (err) {
         console.error('[PortalStore] changeTransactionState error:', err);
         toast.error('거래 상태 변경에 실패했습니다');
@@ -3596,9 +3684,9 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     }
 
     setTransactions((prev) => prev.map((t) => (t.id === id ? nextTx : t)));
-  }, [firestoreEnabled, persistTransaction, portalUser?.id, portalUser?.name, transactions]);
+  }, [authUser, firestoreEnabled, orgId, portalUser?.id, portalUser?.name, transactions]);
 
-  const addComment = useCallback(async (comment: Comment) => {
+  const addComment = useCallback(async (comment: Comment, options?: CashflowMutationOptions) => {
     if (!currentProjectId) {
       toast.error('사업 정보가 없어 메모를 저장할 수 없습니다.');
       return;
@@ -3607,24 +3695,42 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const isSheetRowComment = (comment.targetType === 'expense_sheet_row')
       || comment.transactionId.startsWith('sheet-row:')
       || comment.sheetRowId?.startsWith('sheet-row:');
-    const payload = withTenantScope(orgId, {
+    const payload = {
       ...comment,
       projectId: comment.projectId || currentProjectId,
       targetType: isSheetRowComment ? 'expense_sheet_row' : (comment.targetType || 'transaction'),
       ...(isSheetRowComment ? { sheetRowId: comment.sheetRowId || comment.transactionId } : {}),
-    });
+    };
 
-    if (firestoreEnabled && db) {
-      await setDoc(
-        doc(db, getOrgDocumentPath(orgId, 'comments', comment.id)),
-        payload,
-        { merge: true },
-      );
+    if (firestoreEnabled) {
+      if (!authUser || !isPlatformApiEnabled()) {
+        throw new Error('메모 저장 API가 연결되어 있지 않아 저장하지 않았습니다.');
+      }
+      const result = await addCommentViaBff({
+        tenantId: orgId,
+        actor: authUser,
+        transactionId: comment.transactionId,
+        comment: {
+          id: comment.id,
+          content: comment.content,
+          authorName: comment.authorName,
+          projectId: payload.projectId,
+          targetType: payload.targetType,
+          sheetRowId: payload.sheetRowId,
+          fieldKey: payload.fieldKey,
+          fieldLabel: payload.fieldLabel,
+        },
+        lease: options?.cashflowLease,
+      });
+      setComments((prev) => [
+        ...prev.filter((item) => item.id !== result.id),
+        { ...payload, id: result.id, version: result.version, createdAt: result.createdAt } as Comment,
+      ]);
       return;
     }
 
     setComments((prev) => [...prev, payload as Comment]);
-  }, [currentProjectId, db, firestoreEnabled, orgId]);
+  }, [authUser, currentProjectId, firestoreEnabled, orgId]);
 
   const value: PortalState & PortalActions = {
     isRegistered: !!portalUser,
@@ -3667,6 +3773,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     submitChangeRequest,
     addTransaction,
     updateTransaction,
+    patchTransactionSnapshot,
     changeTransactionState,
     addComment,
     saveEvidenceRequiredMap,

@@ -62,6 +62,11 @@ export interface CreateCommentPayload {
   id?: string;
   content: string;
   authorName?: string;
+  projectId?: string;
+  targetType?: 'transaction' | 'expense_sheet_row';
+  sheetRowId?: string;
+  fieldKey?: string;
+  fieldLabel?: string;
 }
 
 export interface CreateEvidencePayload {
@@ -903,6 +908,58 @@ export interface WeeklyExpenseWeekResult {
   auditId: string;
 }
 
+export interface CashflowVarianceIntent {
+  sheetId: string;
+  expectedRevision: number;
+  action: 'FLAG' | 'REPLY' | 'RESOLVE';
+  content?: string;
+}
+
+export interface CashflowVarianceMetadataResult {
+  week: {
+    id: string;
+    projectId: string;
+    varianceFlag: import('../data/types').VarianceFlag;
+    varianceHistory: import('../data/types').VarianceFlagEvent[];
+    varianceRevision: number;
+    updatedAt: string;
+  };
+}
+
+export interface WeeklySubmissionStatusIntent {
+  yearMonth: string;
+  weekNo: number;
+  expectedRevision: number;
+  changes: {
+    projectionEdited?: boolean;
+    projectionUpdated?: boolean;
+    expenseEdited?: boolean;
+    expenseUpdated?: boolean;
+    expenseSyncState?: 'pending' | 'review_required' | 'synced' | 'sync_failed';
+    expenseReviewPendingCount?: number;
+  };
+}
+
+export interface WeeklySubmissionStatusMetadataResult {
+  status: import('../data/types').WeeklySubmissionStatus;
+}
+
+export interface EvidenceRequiredMapIntent {
+  expectedRevision: number;
+  map: Record<string, string>;
+}
+
+export interface EvidenceRequiredMapMetadataResult {
+  evidenceRequiredMap: {
+    tenantId: string;
+    projectId: string;
+    map: Record<string, string>;
+    evidenceMapRevision: number;
+    updatedAt: string;
+    updatedBy: string;
+  };
+}
+
 export interface PlatformApiClientLike {
   get<T>(path: string, options: {
     tenantId: string;
@@ -1093,6 +1150,7 @@ export async function upsertTransactionViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transaction: UpsertTransactionPayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; tenantId: string; version: number; updatedAt: string; state: string }> {
   const apiClient = resolveClient(params.client);
@@ -1100,6 +1158,7 @@ export async function upsertTransactionViaBff(params: {
     tenantId: params.tenantId,
     actor: toRequestActor(params.actor),
     body: params.transaction,
+    ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
   });
   return response.data;
 }
@@ -1111,6 +1170,7 @@ export async function changeTransactionStateViaBff(params: {
   newState: TransactionState;
   expectedVersion: number;
   reason?: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; state: string; rejectedReason: string | null; version: number; updatedAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1125,6 +1185,7 @@ export async function changeTransactionStateViaBff(params: {
         expectedVersion: params.expectedVersion,
         reason: params.reason,
       },
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
 
@@ -1136,6 +1197,7 @@ export async function addCommentViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   comment: CreateCommentPayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; transactionId: string; version: number; createdAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1145,6 +1207,7 @@ export async function addCommentViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.comment,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1155,6 +1218,7 @@ export async function addEvidenceViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   evidence: CreateEvidencePayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<{ id: string; transactionId: string; version: number; uploadedAt: string }> {
   const apiClient = resolveClient(params.client);
@@ -1164,6 +1228,7 @@ export async function addEvidenceViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.evidence,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1485,6 +1550,7 @@ export async function provisionTransactionEvidenceDriveViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transactionId: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<ProvisionTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1496,6 +1562,7 @@ export async function provisionTransactionEvidenceDriveViaBff(params: {
       actor: toRequestActor(params.actor),
       retries: 0,
       timeoutMs: 15000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1505,6 +1572,7 @@ export async function syncTransactionEvidenceDriveViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   transactionId: string;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<SyncTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1516,6 +1584,7 @@ export async function syncTransactionEvidenceDriveViaBff(params: {
       actor: toRequestActor(params.actor),
       retries: 0,
       timeoutMs: 20000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1526,6 +1595,7 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
   actor: ActorLike;
   transactionId: string;
   upload: UploadTransactionEvidenceDrivePayload;
+  lease?: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<UploadTransactionEvidenceDriveResult> {
   const apiClient = resolveClient(params.client);
@@ -1538,6 +1608,7 @@ export async function uploadTransactionEvidenceDriveViaBff(params: {
       body: params.upload,
       retries: 0,
       timeoutMs: 30000,
+      ...(params.lease ? { headers: cashflowMutationHeaders(params.lease) } : {}),
     },
   );
   return response.data;
@@ -1704,6 +1775,78 @@ export async function upsertCashflowWeekAmountsViaBff(params: {
       amount,
     })),
   });
+}
+
+export async function applyCashflowVarianceIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: CashflowVarianceIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowVarianceMetadataResult> {
+  const response = await resolveClient(params.client).post<CashflowVarianceMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/variance`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyWeeklySubmissionStatusIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: WeeklySubmissionStatusIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<WeeklySubmissionStatusMetadataResult> {
+  const response = await resolveClient(params.client).post<WeeklySubmissionStatusMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/weekly-submission-status`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
+}
+
+export async function applyEvidenceRequiredMapIntentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  intent: EvidenceRequiredMapIntent;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<EvidenceRequiredMapMetadataResult> {
+  const response = await resolveClient(params.client).post<EvidenceRequiredMapMetadataResult>(
+    `/api/v1/cashflow-metadata/${encodeURIComponent(params.projectId)}/evidence-required-map`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.intent,
+      headers: cashflowMutationHeaders(params.lease),
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12_000,
+    },
+  );
+  return response.data;
 }
 
 export async function saveCashflowProjectionBatchViaBff(params: {

@@ -37,6 +37,9 @@ import {
   importBankStatementBatchViaBff,
   applyBankStatementItemsViaBff,
   syncProjectCashflowActualsViaBff,
+  applyCashflowVarianceIntentViaBff,
+  applyWeeklySubmissionStatusIntentViaBff,
+  applyEvidenceRequiredMapIntentViaBff,
 } from './platform-bff-client';
 
 const cashflowLease = { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 };
@@ -51,6 +54,47 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('sends cashflow metadata intents with the exact project lease and no client audit fields', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { ok: true } })), get: vi.fn(), request: vi.fn(),
+    });
+    const actor = { uid: 'u001', role: 'pm' };
+    await applyCashflowVarianceIntentViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', lease: cashflowLease,
+      idempotencyKey: 'variance-1',
+      intent: { sheetId: 'p001-2026-07-w1', expectedRevision: 2, action: 'REPLY', content: '확인했습니다' },
+      client,
+    });
+    await applyWeeklySubmissionStatusIntentViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', lease: cashflowLease,
+      idempotencyKey: 'status-1',
+      intent: { yearMonth: '2026-07', weekNo: 1, expectedRevision: 3, changes: { expenseUpdated: true } },
+      client,
+    });
+    await applyEvidenceRequiredMapIntentViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', lease: cashflowLease,
+      idempotencyKey: 'evidence-map-1',
+      intent: { expectedRevision: 4, map: { '사업비|교통비': '영수증' } },
+      client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow-metadata/p001/variance', expect.objectContaining({
+      body: { sheetId: 'p001-2026-07-w1', expectedRevision: 2, action: 'REPLY', content: '확인했습니다' },
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-fence': '7' }),
+      idempotencyKey: 'variance-1',
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow-metadata/p001/weekly-submission-status', expect.objectContaining({
+      body: { yearMonth: '2026-07', weekNo: 1, expectedRevision: 3, changes: { expenseUpdated: true } },
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-fence': '7' }),
+      idempotencyKey: 'status-1',
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/cashflow-metadata/p001/evidence-required-map', expect.objectContaining({
+      body: { expectedRevision: 4, map: { '사업비|교통비': '영수증' } },
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-fence': '7' }),
+      idempotencyKey: 'evidence-map-1',
+    }));
+  });
+
   it('final-saves all projection lines in one fenced JVM command', async () => {
     const client = asMockClient({ post: vi.fn(async () => ({ data: { ok: true } })), get: vi.fn(), request: vi.fn() });
     const lines = [
@@ -376,11 +420,15 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc',
       actor: { uid: 'u001', role: 'admin' },
       transaction: { id: 'tx001', projectId: 'p001', ledgerId: 'l001', counterparty: 'vendor' },
+      lease: cashflowLease,
       client,
     });
 
     expect(ledger.id).toBe('l001');
     expect(tx.state).toBe('DRAFT');
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/transactions', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
+    }));
   });
 
   it('calls transaction state endpoint with expected version', async () => {
@@ -398,6 +446,7 @@ describe('platform-bff-client', () => {
       transactionId: 'tx001',
       newState: 'APPROVED',
       expectedVersion: 1,
+      lease: cashflowLease,
       client,
     });
 
@@ -405,6 +454,7 @@ describe('platform-bff-client', () => {
       method: 'PATCH',
       tenantId: 'mysc',
       body: { newState: 'APPROVED', expectedVersion: 1, reason: undefined },
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
     }));
     expect(result.state).toBe('APPROVED');
   });
@@ -424,6 +474,7 @@ describe('platform-bff-client', () => {
       actor: { uid: 'u001', role: 'admin' },
       transactionId: 'tx001',
       comment: { content: 'hello' },
+      lease: cashflowLease,
       client,
     });
 
@@ -437,9 +488,16 @@ describe('platform-bff-client', () => {
         fileSize: 123,
         category: '세금계산서',
       },
+      lease: cashflowLease,
       client,
     });
 
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/transactions/tx001/comments', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/transactions/tx001/evidences', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
+    }));
     expect(comment.id).toBe('c001');
     expect(evidence.id).toBe('ev001');
   });
@@ -937,6 +995,7 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc',
       actor: { uid: 'u001', role: 'admin' },
       transactionId: 'tx001',
+      lease: cashflowLease,
       client,
     });
 
@@ -952,6 +1011,7 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc',
       actor: { uid: 'u001', role: 'admin' },
       transactionId: 'tx001',
+      lease: cashflowLease,
       client,
     });
 
@@ -963,6 +1023,7 @@ describe('platform-bff-client', () => {
       method: 'POST',
       retries: 0,
       timeoutMs: 15000,
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/projects/p001/evidence-drive/root/link', expect.objectContaining({
       tenantId: 'mysc',
@@ -973,6 +1034,7 @@ describe('platform-bff-client', () => {
       method: 'POST',
       retries: 0,
       timeoutMs: 20000,
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
     }));
     expect(projectRoot.folderId).toBe('fld-project');
     expect(txFolder.syncStatus).toBe('LINKED');
@@ -1022,6 +1084,7 @@ describe('platform-bff-client', () => {
         contentBase64: 'ZmFrZS1wZGY=',
         category: 'ZOOM invoice',
       },
+      lease: cashflowLease,
       client,
     });
 
@@ -1030,6 +1093,7 @@ describe('platform-bff-client', () => {
       method: 'POST',
       retries: 0,
       timeoutMs: 30000,
+      headers: expect.objectContaining({ 'x-edit-session-id': 'session-a', 'x-edit-lease-id': 'lease-a', 'x-edit-fence': '7' }),
       body: expect.objectContaining({
         fileName: 'ZOOM invoice March.pdf',
         originalFileName: 'zoom_3month_raw.pdf',

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'routes.tsx'), 'utf8');
 const cashflowSource = readFileSync(resolve(import.meta.dirname, 'components/portal/PortalCashflowPage.tsx'), 'utf8');
 const projectEditSource = readFileSync(resolve(import.meta.dirname, 'components/portal/PortalProjectEdit.tsx'), 'utf8');
+const legacyProjectEditSource = readFileSync(resolve(import.meta.dirname, 'components/projects/ProjectWizardPage.tsx'), 'utf8');
 const sheetLabSource = readFileSync(resolve(import.meta.dirname, 'features/cashflow-sheet-compare/CashflowSheetLabPage.tsx'), 'utf8');
 
 describe('portal canonical edit resource routes', () => {
@@ -36,6 +37,13 @@ describe('portal canonical edit resource routes', () => {
     expect(projectEditSource).toContain('myProject: sessionProject');
     expect(projectEditSource).toContain('projects.find((project) => project.id === routeProjectId)');
     expect(projectEditSource).toContain('routeProjectId ? routeProject : fallbackProject');
-    expect(projectEditSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, myProject.id), { replace: true })");
+    expect(projectEditSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, project.id), { replace: true })");
+  });
+
+  it('redirects the legacy admin edit URL to the lease-protected canonical editor', () => {
+    expect(legacyProjectEditSource).toContain('Navigate');
+    expect(legacyProjectEditSource).toContain('/portal/edit-project/');
+    expect(legacyProjectEditSource).not.toContain('<ProjectWizard');
+    expect(legacyProjectEditSource).not.toContain('getProjectById');
   });
 });

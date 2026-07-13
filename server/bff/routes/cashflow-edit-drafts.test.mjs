@@ -54,13 +54,13 @@ function harness() {
   const leasePath = `orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('cashflow', 'project-a')}`;
   const db = createDb({
     'orgs/tenant-a/members/actor-a': {
-      uid: 'actor-a', role: 'pm', status: 'ACTIVE', projectIds: ['project-a'],
+      uid: 'actor-a', name: 'Actor A', role: 'pm', status: 'ACTIVE', projectIds: ['project-a'],
     },
     'orgs/tenant-a/members/actor-b': {
       uid: 'actor-b', role: 'pm', status: 'ACTIVE', projectIds: ['project-a'],
     },
     'orgs/tenant-a/members/actor-admin': {
-      uid: 'actor-admin', role: 'admin', status: 'ACTIVE', projectIds: [],
+      uid: 'actor-admin', name: 'Finance Admin', role: 'admin', status: 'ACTIVE', projectIds: [],
     },
     'orgs/tenant-a/projects/project-a': { id: 'project-a', name: 'Project A', version: 3 },
     'orgs/tenant-a/cashflow_weeks/week-a': {
@@ -232,6 +232,93 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 413, code: 'draft_payload_too_large' });
   });
 
+  it('applies variance intents with server identity, append-only history, and revision fencing', async () => {
+    const h = harness();
+    h.db.documents.set(h.leasePath, buildActiveEditLeaseDocument({
+      tenantId: 'tenant-a', resourceType: 'cashflow', resourceId: 'project-a',
+      actorId: 'actor-admin', actorDisplayName: 'Finance Admin', sessionId: 'session-admin',
+      leaseId: 'lease-admin', serverNow: Date.parse('2026-07-12T00:00:00.000Z'),
+    }));
+    const admin = {
+      ...h.base, actorId: 'actor-admin', sessionId: 'session-admin', leaseId: 'lease-admin',
+    };
+
+    const flagged = await h.service.applyVarianceIntent({
+      ...admin, idempotencyKey: 'variance-flag', sheetId: 'week-a',
+      expectedRevision: 0, action: 'FLAG', content: '입금 편차 확인',
+    });
+
+    expect(flagged.body.week).toMatchObject({
+      id: 'week-a', projectId: 'project-a', varianceRevision: 1,
+      varianceFlag: {
+        status: 'OPEN', reason: '입금 편차 확인', flaggedBy: 'Finance Admin',
+        flaggedByUid: 'actor-admin', flaggedAt: '2026-07-12T00:00:00.000Z',
+      },
+      varianceHistory: [{
+        action: 'FLAG', actor: 'Finance Admin', actorUid: 'actor-admin',
+        content: '입금 편차 확인', timestamp: '2026-07-12T00:00:00.000Z',
+      }],
+    });
+    expect(h.db.documents.get('orgs/tenant-a/cashflow_weeks/week-a')).toMatchObject({
+      projection: { SALES_IN: 1000 },
+      varianceRevision: 1,
+    });
+    await expect(h.service.applyVarianceIntent({
+      ...admin, idempotencyKey: 'variance-stale', sheetId: 'week-a',
+      expectedRevision: 0, action: 'FLAG', content: 'stale',
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
+  });
+
+  it('merges only whitelisted weekly status intent fields under the project lease', async () => {
+    const h = harness();
+    const saved = await h.service.applyWeeklySubmissionStatusIntent({
+      ...h.base, idempotencyKey: 'weekly-status-1', yearMonth: '2026-07', weekNo: 1,
+      expectedRevision: 0,
+      changes: { projectionUpdated: true, expenseSyncState: 'review_required', expenseReviewPendingCount: 2 },
+    });
+
+    expect(saved.body.status).toMatchObject({
+      id: 'project-a-2026-07-w1', tenantId: 'tenant-a', projectId: 'project-a',
+      yearMonth: '2026-07', weekNo: 1, statusRevision: 1,
+      projectionUpdated: true,
+      projectionUpdatedAt: '2026-07-12T00:00:00.000Z',
+      projectionUpdatedByName: 'Actor A',
+      expenseSyncState: 'review_required',
+      expenseReviewPendingCount: 2,
+    });
+    const stored = h.db.documents.get('orgs/tenant-a/weekly_submission_status/project-a-2026-07-w1');
+    expect(stored).toEqual(saved.body.status);
+    expect(stored).not.toHaveProperty('amounts');
+    await expect(h.service.applyWeeklySubmissionStatusIntent({
+      ...h.base, idempotencyKey: 'weekly-status-stale', yearMonth: '2026-07', weekNo: 1,
+      expectedRevision: 0, changes: { projectionUpdated: false },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
+  });
+
+  it('replaces the project evidence-required map with revision fencing and server audit metadata', async () => {
+    const h = harness();
+    h.db.documents.set('orgs/tenant-a/budget_evidence_maps/project-a', {
+      tenantId: 'tenant-a', projectId: 'project-a', map: { '기존|항목': '영수증' }, evidenceMapRevision: 2,
+    });
+
+    const saved = await h.service.applyEvidenceRequiredMapIntent({
+      ...h.base, idempotencyKey: 'evidence-map-1', expectedRevision: 2,
+      map: { '사업비|교통비': '카드 영수증', '인건비|급여': '급여대장' },
+    });
+
+    expect(saved.body.evidenceRequiredMap).toEqual({
+      tenantId: 'tenant-a', projectId: 'project-a',
+      map: { '사업비|교통비': '카드 영수증', '인건비|급여': '급여대장' },
+      evidenceMapRevision: 3,
+      updatedAt: '2026-07-12T00:00:00.000Z',
+      updatedBy: 'Actor A',
+    });
+    expect(h.db.documents.get('orgs/tenant-a/budget_evidence_maps/project-a')).toEqual(saved.body.evidenceRequiredMap);
+    await expect(h.service.applyEvidenceRequiredMapIntent({
+      ...h.base, idempotencyKey: 'evidence-map-stale', expectedRevision: 2, map: {},
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
+  });
+
   it('mounts the local-schema routes and forwards exact edit headers', async () => {
     const routes = [];
     const app = {
@@ -244,6 +331,9 @@ describe('cashflow private edit drafts', () => {
       open: vi.fn(async () => ({ status: 200, body: { draft: {} }, replayed: false })),
       update: vi.fn(),
       complete: vi.fn(),
+      applyVarianceIntent: vi.fn(),
+      applyWeeklySubmissionStatusIntent: vi.fn(),
+      applyEvidenceRequiredMapIntent: vi.fn(),
     };
     mountCashflowEditDraftRoutes(app, { enabled: true, cashflowEditDraftService: service });
 
@@ -252,6 +342,9 @@ describe('cashflow private edit drafts', () => {
       'POST /api/v1/cashflow-edit-drafts/:projectId/open',
       'PATCH /api/v1/cashflow-edit-drafts/:projectId',
       'POST /api/v1/cashflow-edit-drafts/:projectId/complete',
+      'POST /api/v1/cashflow-metadata/:projectId/variance',
+      'POST /api/v1/cashflow-metadata/:projectId/weekly-submission-status',
+      'POST /api/v1/cashflow-metadata/:projectId/evidence-required-map',
     ]);
     const route = routes[1];
     const req = {

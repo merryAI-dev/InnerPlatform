@@ -15,6 +15,14 @@ const bankApply = source.slice(
   source.indexOf('const applyBankStatementRowsToExpenseSheet ='),
   source.indexOf('const refreshBankStatementRows ='),
 );
+const weeklyStatus = source.slice(
+  source.indexOf('const upsertWeeklySubmissionStatus ='),
+  source.indexOf('const createProjectRequest ='),
+);
+const evidenceRequiredMapSave = source.slice(
+  source.indexOf('const saveEvidenceRequiredMap ='),
+  source.indexOf('const markSheetSourceApplied ='),
+);
 
 describe('portal store cashflow mutation boundary', () => {
   it('keeps ordinary weekly and bank saves in the owner private draft', () => {
@@ -33,5 +41,19 @@ describe('portal store cashflow mutation boundary', () => {
     expect(bankApply).toContain('applyBankStatementItemsViaBff');
     expect(bankApply).toContain('finalize: true');
     expect(bankApply).not.toContain('setDoc(');
+  });
+
+  it('sends weekly status intent to the BFF without a direct Firestore mutation', () => {
+    expect(weeklyStatus).toContain('applyWeeklySubmissionStatusIntentViaBff');
+    expect(weeklyStatus).toContain('cashflowLease');
+    expect(weeklyStatus).not.toContain('setDoc(');
+    expect(weeklyStatus).not.toContain('updateDoc(');
+  });
+
+  it('sends evidence-required maps through the fenced BFF command', () => {
+    expect(evidenceRequiredMapSave).toContain('applyEvidenceRequiredMapIntentViaBff');
+    expect(evidenceRequiredMapSave).toContain('cashflowLease');
+    expect(evidenceRequiredMapSave).not.toContain('setDoc(');
+    expect(evidenceRequiredMapSave).not.toContain('updateDoc(');
   });
 });

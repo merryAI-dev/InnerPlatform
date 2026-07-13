@@ -47,4 +47,12 @@ describe('CashflowWeeklyPage status semantics', () => {
     expect(cashflowWeeklyPageSource).toContain('프로젝션 바로가기');
     expect(cashflowWeeklyPageSource).toContain('프로젝션 열기');
   });
+
+  it('requires a project-scoped cashflow lease before variance intent mutations', () => {
+    expect(cashflowWeeklyPageSource).toContain('useCashflowEditLease');
+    expect(cashflowWeeklyPageSource).toContain('varianceLeaseProjectId');
+    expect(cashflowWeeklyPageSource).toContain('checkBeforeMutation');
+    expect(cashflowWeeklyPageSource).toContain('EditLeaseDialogs');
+    expect(cashflowWeeklyPageSource).toContain('30분 연장');
+  });
 });

@@ -2107,6 +2107,12 @@ export function mountProjectRoutes(app, {
               ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],
+          ...(parsed.reviewStatus === 'DUPLICATE_DISCARDED' ? {
+            trashedAt: now,
+            trashedById: actorId,
+            trashedByEmail: readOptionalText(actorEmail) || null,
+            trashedReason: readOptionalText(parsed.reviewComment),
+          } : {}),
         };
       },
       buildRequestPatch: (_currentProject, currentRequest, nextVersion) => resolvedRequestId ? ({

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  CORE_WRITE_ROUTE_ROLES,
   PROJECT_REQUEST_ROUTE_ROLES,
   assertActorRoleAllowed,
   asyncHandler,
@@ -31,6 +32,35 @@ const patchSchema = z.object({
 const completeSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
 }).strict();
+const varianceIntentSchema = z.object({
+  sheetId: z.string().trim().min(1).max(512),
+  expectedRevision: z.number().int().nonnegative(),
+  action: z.enum(['FLAG', 'REPLY', 'RESOLVE']),
+  content: z.string().trim().max(2_000).optional(),
+}).strict().superRefine((value, ctx) => {
+  if ((value.action === 'FLAG' || value.action === 'REPLY') && !value.content) {
+    ctx.addIssue({ code: 'custom', path: ['content'], message: 'content is required' });
+  }
+});
+const weeklySubmissionStatusIntentSchema = z.object({
+  yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  weekNo: z.number().int().min(1).max(5),
+  expectedRevision: z.number().int().nonnegative(),
+  changes: z.object({
+    projectionEdited: z.boolean().optional(),
+    projectionUpdated: z.boolean().optional(),
+    expenseEdited: z.boolean().optional(),
+    expenseUpdated: z.boolean().optional(),
+    expenseSyncState: z.enum(['pending', 'review_required', 'synced', 'sync_failed']).optional(),
+    expenseReviewPendingCount: z.number().int().nonnegative().max(1_000_000).optional(),
+  }).strict().refine((value) => Object.keys(value).length > 0, 'At least one status change is required'),
+}).strict();
+const evidenceRequiredMapIntentSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  map: z.record(z.string().max(500), z.string().max(4_000)),
+}).strict();
+
+const VARIANCE_REVIEW_ROLES = new Set(['admin', 'finance', 'tenant_admin']);
 
 function requiredText(value, fieldName) {
   const normalized = readOptionalText(value);
@@ -148,6 +178,48 @@ function assertRevision(draft, expected) {
   return actual;
 }
 
+function assertMetadataRevision(document, fieldName, expected) {
+  const actual = Number.isInteger(document?.[fieldName]) ? document[fieldName] : 0;
+  if (actual !== expected) {
+    throw createHttpError(
+      409,
+      `Cashflow metadata revision mismatch: expected ${expected}, actual ${actual}`,
+      'cashflow_metadata_version_conflict',
+    );
+  }
+  return actual;
+}
+
+function actorDisplayName(member, actorId) {
+  return readOptionalText(member?.name)
+    || readOptionalText(member?.displayName)
+    || readOptionalText(member?.fullName)
+    || actorId;
+}
+
+function metadataAuditEntry(current, actorRole, { entityType, entityId, action, revision, timestamp }) {
+  return {
+    tenantId: current.tenantId,
+    entityType,
+    entityId,
+    action,
+    actorId: current.actorId,
+    actorRole,
+    actorEmailEnc: current.actorEmailEnc,
+    requestId: current.requestId,
+    details: `Cashflow metadata: ${action}`,
+    metadata: {
+      source: 'bff',
+      resourceType: RESOURCE_TYPE,
+      resourceId: current.projectId,
+      sessionIdHash: sha256(`${current.tenantId}:${current.sessionId}`),
+      revision,
+      fence: current.fence,
+    },
+    timestamp,
+  };
+}
+
 function draftContract(draft) {
   return {
     projectId: readOptionalText(draft.resourceId),
@@ -246,7 +318,7 @@ export function createCashflowEditDraftService({
     })) {
       throw createHttpError(403, 'Project assignment is required', 'forbidden');
     }
-    return { actorRole };
+    return { actorRole, member };
   }
 
   async function ownedDraft(tx, current) {
@@ -502,6 +574,282 @@ export function createCashflowEditDraftService({
         return { status: 200, body, replayed: false };
       });
     },
+
+    async applyVarianceIntent(input) {
+      const current = context(input);
+      const sheetId = documentId(input?.sheetId, 'sheetId');
+      const expectedRevision = Number(input?.expectedRevision);
+      const action = readOptionalText(input?.action).toUpperCase();
+      const content = readOptionalText(input?.content);
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw createHttpError(400, 'expectedRevision is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (!['FLAG', 'REPLY', 'RESOLVE'].includes(action)) {
+        throw createHttpError(400, 'Variance action is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if ((action === 'FLAG' || action === 'REPLY') && !content) {
+        throw createHttpError(400, 'Variance content is required', 'cashflow_metadata_request_invalid');
+      }
+      if (Buffer.byteLength(content, 'utf8') > 2_000) {
+        throw createHttpError(400, 'Variance content is too long', 'cashflow_metadata_request_invalid');
+      }
+      const method = 'POST';
+      const path = `/api/v1/cashflow-metadata/${current.projectId}/variance`;
+      const fingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId, sessionId: current.sessionId, leaseId: current.leaseId,
+          fence: current.fence, sheetId, expectedRevision, action, content,
+        },
+      });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, member } = await accessProject(tx, current);
+        if ((action === 'FLAG' || action === 'RESOLVE') && !VARIANCE_REVIEW_ROLES.has(actorRole)) {
+          throw createHttpError(403, 'Finance review role is required', 'forbidden');
+        }
+        if (action === 'REPLY' && actorRole !== 'pm') {
+          throw createHttpError(403, 'Project manager role is required', 'forbidden');
+        }
+        const weekRef = db.doc(`orgs/${current.tenantId}/cashflow_weeks/${sheetId}`);
+        const weekSnap = await tx.get(weekRef);
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        await assertLease(tx, current, nowDate);
+        if (!weekSnap.exists || readOptionalText(weekSnap.data()?.projectId) !== current.projectId) {
+          throw createHttpError(404, 'Cashflow week not found for this project', 'not_found');
+        }
+        const week = weekSnap.data() || {};
+        const revision = assertMetadataRevision(week, 'varianceRevision', expectedRevision) + 1;
+        const previousFlag = week.varianceFlag && typeof week.varianceFlag === 'object'
+          ? week.varianceFlag
+          : null;
+        if (action === 'FLAG' && previousFlag && previousFlag.status !== 'RESOLVED') {
+          throw createHttpError(409, 'An unresolved variance review already exists', 'cashflow_variance_state_conflict');
+        }
+        if (action === 'REPLY' && previousFlag?.status !== 'OPEN') {
+          throw createHttpError(409, 'Only an open variance review can be replied to', 'cashflow_variance_state_conflict');
+        }
+        if (action === 'RESOLVE' && previousFlag?.status !== 'REPLIED') {
+          throw createHttpError(409, 'Only a replied variance review can be resolved', 'cashflow_variance_state_conflict');
+        }
+        const displayName = actorDisplayName(member, current.actorId);
+        const varianceFlag = action === 'FLAG'
+          ? {
+              status: 'OPEN', reason: content, flaggedBy: displayName,
+              flaggedByUid: current.actorId, flaggedAt: timestamp,
+            }
+          : action === 'REPLY'
+            ? {
+                ...previousFlag, status: 'REPLIED', pmReply: content,
+                pmRepliedBy: displayName, pmRepliedByUid: current.actorId, pmRepliedAt: timestamp,
+              }
+            : {
+                ...previousFlag, status: 'RESOLVED', resolvedBy: displayName,
+                resolvedByUid: current.actorId, resolvedAt: timestamp,
+              };
+        const event = {
+          id: `vf-${revision}`,
+          action,
+          actor: displayName,
+          actorUid: current.actorId,
+          content: action === 'RESOLVE' ? (content || '해결 처리') : content,
+          timestamp,
+        };
+        const patch = {
+          tenantId: current.tenantId,
+          varianceFlag,
+          varianceHistory: [...(Array.isArray(week.varianceHistory) ? week.varianceHistory : []), event],
+          varianceRevision: revision,
+          updatedAt: timestamp,
+          updatedByUid: current.actorId,
+          updatedByName: displayName,
+        };
+        const body = { week: { id: sheetId, projectId: current.projectId, ...patch } };
+        await auditChainService.appendManyInTransaction(tx, [metadataAuditEntry(current, actorRole, {
+          entityType: 'cashflow_week', entityId: sheetId,
+          action: `CASHFLOW_VARIANCE_${action}`, revision, timestamp,
+        })]);
+        tx.set(weekRef, patch, { merge: true });
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        return { status: 200, body, replayed: false };
+      });
+    },
+
+    async applyWeeklySubmissionStatusIntent(input) {
+      const current = context(input);
+      const yearMonth = readOptionalText(input?.yearMonth);
+      const weekNo = Number(input?.weekNo);
+      const expectedRevision = Number(input?.expectedRevision);
+      const changes = input?.changes;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth) || !Number.isInteger(weekNo) || weekNo < 1 || weekNo > 5) {
+        throw createHttpError(400, 'Weekly status scope is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw createHttpError(400, 'expectedRevision is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (!changes || typeof changes !== 'object' || Array.isArray(changes) || Object.keys(changes).length === 0) {
+        throw createHttpError(400, 'Weekly status changes are required', 'cashflow_metadata_request_invalid');
+      }
+      const allowed = new Set([
+        'projectionEdited', 'projectionUpdated', 'expenseEdited', 'expenseUpdated',
+        'expenseSyncState', 'expenseReviewPendingCount',
+      ]);
+      if (Object.keys(changes).some((key) => !allowed.has(key))) {
+        throw createHttpError(400, 'Weekly status change is invalid', 'cashflow_metadata_request_invalid');
+      }
+      for (const key of ['projectionEdited', 'projectionUpdated', 'expenseEdited', 'expenseUpdated']) {
+        if (Object.hasOwn(changes, key) && typeof changes[key] !== 'boolean') {
+          throw createHttpError(400, 'Weekly status change is invalid', 'cashflow_metadata_request_invalid');
+        }
+      }
+      if (Object.hasOwn(changes, 'expenseSyncState')
+        && !['pending', 'review_required', 'synced', 'sync_failed'].includes(changes.expenseSyncState)) {
+        throw createHttpError(400, 'Weekly status change is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (Object.hasOwn(changes, 'expenseReviewPendingCount')
+        && (!Number.isInteger(changes.expenseReviewPendingCount)
+          || changes.expenseReviewPendingCount < 0
+          || changes.expenseReviewPendingCount > 1_000_000)) {
+        throw createHttpError(400, 'Weekly status change is invalid', 'cashflow_metadata_request_invalid');
+      }
+      const statusId = `${current.projectId}-${yearMonth}-w${weekNo}`;
+      const method = 'POST';
+      const path = `/api/v1/cashflow-metadata/${current.projectId}/weekly-submission-status`;
+      const fingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId, sessionId: current.sessionId, leaseId: current.leaseId,
+          fence: current.fence, yearMonth, weekNo, expectedRevision, changes,
+        },
+      });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, member } = await accessProject(tx, current);
+        const statusRef = db.doc(`orgs/${current.tenantId}/weekly_submission_status/${statusId}`);
+        const statusSnap = await tx.get(statusRef);
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        await assertLease(tx, current, nowDate);
+        const existing = statusSnap.exists ? (statusSnap.data() || {}) : {};
+        if (statusSnap.exists && (
+          readOptionalText(existing.projectId) !== current.projectId
+          || readOptionalText(existing.yearMonth) !== yearMonth
+          || Number(existing.weekNo) !== weekNo
+        )) {
+          throw createHttpError(409, 'Weekly status identity does not match the project scope', 'cashflow_metadata_identity_conflict');
+        }
+        const revision = assertMetadataRevision(existing, 'statusRevision', expectedRevision) + 1;
+        const displayName = actorDisplayName(member, current.actorId);
+        const patch = {
+          id: statusId,
+          tenantId: current.tenantId,
+          projectId: current.projectId,
+          yearMonth,
+          weekNo,
+          statusRevision: revision,
+          updatedAt: timestamp,
+          updatedByName: displayName,
+        };
+        for (const key of ['projectionEdited', 'projectionUpdated', 'expenseEdited', 'expenseUpdated']) {
+          if (!Object.hasOwn(changes, key)) continue;
+          patch[key] = changes[key];
+          patch[`${key}At`] = timestamp;
+          patch[`${key}ByName`] = displayName;
+        }
+        if (Object.hasOwn(changes, 'expenseSyncState')) {
+          patch.expenseSyncState = changes.expenseSyncState;
+          patch.expenseSyncUpdatedAt = timestamp;
+          patch.expenseSyncUpdatedByName = displayName;
+        }
+        if (Object.hasOwn(changes, 'expenseReviewPendingCount')) {
+          patch.expenseReviewPendingCount = changes.expenseReviewPendingCount;
+        }
+        const body = { status: { ...existing, ...patch } };
+        await auditChainService.appendManyInTransaction(tx, [metadataAuditEntry(current, actorRole, {
+          entityType: 'weekly_submission_status', entityId: statusId,
+          action: 'CASHFLOW_WEEKLY_STATUS_UPDATE', revision, timestamp,
+        })]);
+        tx.set(statusRef, patch, { merge: true });
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        return { status: 200, body, replayed: false };
+      });
+    },
+
+    async applyEvidenceRequiredMapIntent(input) {
+      const current = context(input);
+      const expectedRevision = Number(input?.expectedRevision);
+      const map = input?.map;
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw createHttpError(400, 'expectedRevision is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (!map || typeof map !== 'object' || Array.isArray(map) || Object.getPrototypeOf(map) !== Object.prototype) {
+        throw createHttpError(400, 'Evidence-required map is invalid', 'cashflow_metadata_request_invalid');
+      }
+      const entries = Object.entries(map);
+      if (entries.length > 2_000 || entries.some(([key, value]) => (
+        !key.trim()
+        || Buffer.byteLength(key, 'utf8') > 500
+        || typeof value !== 'string'
+        || Buffer.byteLength(value, 'utf8') > 4_000
+      ))) {
+        throw createHttpError(400, 'Evidence-required map is invalid', 'cashflow_metadata_request_invalid');
+      }
+      if (Buffer.byteLength(JSON.stringify(map), 'utf8') > 250 * 1024) {
+        throw createHttpError(413, 'Evidence-required map is too large', 'cashflow_metadata_payload_too_large');
+      }
+      const method = 'POST';
+      const path = `/api/v1/cashflow-metadata/${current.projectId}/evidence-required-map`;
+      const fingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId, sessionId: current.sessionId, leaseId: current.leaseId,
+          fence: current.fence, expectedRevision, map,
+        },
+      });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, member } = await accessProject(tx, current);
+        const mapRef = db.doc(`orgs/${current.tenantId}/budget_evidence_maps/${current.projectId}`);
+        const mapSnap = await tx.get(mapRef);
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        await assertLease(tx, current, nowDate);
+        const existing = mapSnap.exists ? (mapSnap.data() || {}) : {};
+        if (mapSnap.exists && readOptionalText(existing.projectId) !== current.projectId) {
+          throw createHttpError(409, 'Evidence-required map identity does not match the project scope', 'cashflow_metadata_identity_conflict');
+        }
+        const revision = assertMetadataRevision(existing, 'evidenceMapRevision', expectedRevision) + 1;
+        const next = {
+          tenantId: current.tenantId,
+          projectId: current.projectId,
+          map,
+          evidenceMapRevision: revision,
+          updatedAt: timestamp,
+          updatedBy: actorDisplayName(member, current.actorId),
+        };
+        const body = { evidenceRequiredMap: next };
+        await auditChainService.appendManyInTransaction(tx, [metadataAuditEntry(current, actorRole, {
+          entityType: 'budget_evidence_map', entityId: current.projectId,
+          action: 'CASHFLOW_EVIDENCE_REQUIRED_MAP_UPDATE', revision, timestamp,
+        })]);
+        tx.set(mapRef, next);
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        return { status: 200, body, replayed: false };
+      });
+    },
   };
 }
 
@@ -577,6 +925,33 @@ export function mountCashflowEditDraftRoutes(app, {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'complete a cashflow edit draft');
     const parsed = parseWithSchema(completeSchema, req.body);
     sendOutcome(res, await cashflowEditDraftService.complete({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req),
+      projectId: routeProjectId(req), ...parsed,
+    }));
+  }));
+
+  app.post('/api/v1/cashflow-metadata/:projectId/variance', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, CORE_WRITE_ROUTE_ROLES, 'update cashflow variance metadata');
+    const parsed = parseWithSchema(varianceIntentSchema, req.body);
+    sendOutcome(res, await cashflowEditDraftService.applyVarianceIntent({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req),
+      projectId: routeProjectId(req), ...parsed,
+    }));
+  }));
+
+  app.post('/api/v1/cashflow-metadata/:projectId/weekly-submission-status', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, CORE_WRITE_ROUTE_ROLES, 'update weekly submission metadata');
+    const parsed = parseWithSchema(weeklySubmissionStatusIntentSchema, req.body);
+    sendOutcome(res, await cashflowEditDraftService.applyWeeklySubmissionStatusIntent({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req),
+      projectId: routeProjectId(req), ...parsed,
+    }));
+  }));
+
+  app.post('/api/v1/cashflow-metadata/:projectId/evidence-required-map', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, CORE_WRITE_ROUTE_ROLES, 'update evidence-required metadata');
+    const parsed = parseWithSchema(evidenceRequiredMapIntentSchema, req.body);
+    sendOutcome(res, await cashflowEditDraftService.applyEvidenceRequiredMapIntent({
       ...await routeContext(req, piiProtector), ...routeOwnership(req),
       projectId: routeProjectId(req), ...parsed,
     }));

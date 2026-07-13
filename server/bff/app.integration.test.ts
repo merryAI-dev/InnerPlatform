@@ -333,6 +333,40 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.message).toMatch(/reviewComment/i);
   });
 
+  it('atomically trashes a project with its duplicate-discard review', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    const projectRef = db.doc(`orgs/${tenantId}/projects/p_exec_discard_001`);
+    await projectRef.set({
+      id: 'p_exec_discard_001',
+      tenantId,
+      name: '중복 폐기 테스트',
+      version: 1,
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'PENDING',
+      createdAt: '2026-07-12T00:00:00.000Z',
+      updatedAt: '2026-07-12T00:00:00.000Z',
+    });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_discard_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-discard-001' })
+      .send({
+        reviewStatus: 'DUPLICATE_DISCARDED',
+        reviewComment: '동일 계약 프로젝트가 이미 등록되어 있습니다.',
+        reviewerName: '임원B',
+      });
+
+    expect(response.status).toBe(200);
+    expect((await projectRef.get()).data()).toMatchObject({
+      version: 2,
+      executiveReviewStatus: 'DUPLICATE_DISCARDED',
+      trashedById: actorId,
+      trashedByEmail: null,
+      trashedReason: '동일 계약 프로젝트가 이미 등록되어 있습니다.',
+    });
+    expect((await projectRef.get()).data()?.trashedAt).toEqual(expect.any(String));
+  });
+
   it('resubmits an executive-rejected pm portal project back to pending', async () => {
     const reviewApi = request(createBffApp({
       projectId,
@@ -1369,6 +1403,35 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .send({ content: '검토 요청', authorName: '관리자' });
 
     expect(comment.status).toBe(201);
+    const transactionComment = await db.doc(`orgs/${tenantId}/comments/${comment.body.id}`).get();
+    expect(transactionComment.data()).toMatchObject({
+      projectId: 'p-bff-004',
+      targetType: 'transaction',
+    });
+
+    const sheetRowComment = await api
+      .post('/api/v1/transactions/sheet-row:row-004/comments')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-sheet-row-comment-004' })
+      .send({
+        content: '금액 확인',
+        authorName: '관리자',
+        projectId: 'p-bff-004',
+        targetType: 'expense_sheet_row',
+        sheetRowId: 'sheet-row:row-004',
+        fieldKey: 'amount',
+        fieldLabel: '금액',
+      });
+
+    expect(sheetRowComment.status).toBe(201);
+    const savedSheetRowComment = await db.doc(`orgs/${tenantId}/comments/${sheetRowComment.body.id}`).get();
+    expect(savedSheetRowComment.data()).toMatchObject({
+      transactionId: 'sheet-row:row-004',
+      projectId: 'p-bff-004',
+      targetType: 'expense_sheet_row',
+      sheetRowId: 'sheet-row:row-004',
+      fieldKey: 'amount',
+      fieldLabel: '금액',
+    });
 
     const evidence = await api
       .post('/api/v1/transactions/tx004/evidences')

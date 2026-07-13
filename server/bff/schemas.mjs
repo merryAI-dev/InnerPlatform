@@ -79,6 +79,11 @@ export const commentCreateSchema = z.object({
   id: NON_EMPTY_STRING.optional(),
   content: NON_EMPTY_STRING,
   authorName: NON_EMPTY_STRING.optional(),
+  projectId: NON_EMPTY_STRING.optional(),
+  targetType: z.enum(['transaction', 'expense_sheet_row']).optional(),
+  sheetRowId: NON_EMPTY_STRING.optional(),
+  fieldKey: NON_EMPTY_STRING.optional(),
+  fieldLabel: NON_EMPTY_STRING.optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
 }).strict();
 

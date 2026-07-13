@@ -18,6 +18,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePortalStore } from '../../data/portal-store';
 import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-change-data';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useAuth } from '../../data/auth-store';
+import { useFirebase } from '../../lib/firebase-context';
+import { useCashflowEditLease } from '../cashflow/useCashflowEditLease';
+import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
 import {
@@ -119,6 +123,8 @@ const tableHeadCellClassName = 'px-3 py-2 text-[10px] uppercase tracking-[0.08em
 
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const {
     activeProjectId,
     isLoading,
@@ -152,6 +158,21 @@ export function PortalSubmissionsPage() {
   const [yearMonth, setYearMonth] = useState(() => todayIso.slice(0, 7));
   const todayYearMonth = todayIso.slice(0, 7);
   const projectId = activeProjectId || myProject?.id || '';
+  const [statusLeaseProjectId, setStatusLeaseProjectId] = useState('');
+  useEffect(() => {
+    if (!statusLeaseProjectId && projectId) setStatusLeaseProjectId(projectId);
+  }, [projectId, statusLeaseProjectId]);
+  const statusLease = useCashflowEditLease({
+    tenantId: orgId,
+    projectId: statusLeaseProjectId,
+    actor: {
+      uid: authUser?.uid || portalUser?.id || 'portal-user',
+      email: authUser?.email || portalUser?.email || '',
+      role: authUser?.role || portalUser?.role || 'pm',
+      idToken: authUser?.idToken,
+      googleAccessToken: authUser?.googleAccessToken,
+    },
+  });
 
   const myChanges = useMemo(() => {
     if (!projectId) return [];
@@ -227,6 +248,10 @@ export function PortalSubmissionsPage() {
     if (!confirmState.projectId || !selectedWeek) return;
     setConfirmSaving(true);
     try {
+      if (statusLeaseProjectId !== confirmState.projectId) {
+        throw new Error('해당 프로젝트 수정 세션을 먼저 시작해 주세요.');
+      }
+      const cashflowLease = await statusLease.checkBeforeMutation();
       await upsertWeeklySubmissionStatus({
         projectId: confirmState.projectId,
         yearMonth,
@@ -234,6 +259,7 @@ export function PortalSubmissionsPage() {
         ...(confirmState.field === 'projection'
           ? { projectionUpdated: confirmState.nextValue }
           : { expenseUpdated: confirmState.nextValue }),
+        cashflowLease,
       });
       setConfirmState((prev) => ({ ...prev, open: false }));
     } catch (err) {
@@ -241,7 +267,7 @@ export function PortalSubmissionsPage() {
     } finally {
       setConfirmSaving(false);
     }
-  }, [confirmState, selectedWeek, upsertWeeklySubmissionStatus, yearMonth]);
+  }, [confirmState, selectedWeek, statusLease.checkBeforeMutation, statusLeaseProjectId, upsertWeeklySubmissionStatus, yearMonth]);
 
   if (isLoading) {
     return (
@@ -299,6 +325,40 @@ export function PortalSubmissionsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2">
+            <select
+              aria-label="상태 보정 프로젝트"
+              value={statusLeaseProjectId}
+              disabled={statusLease.canEdit}
+              onChange={(event) => setStatusLeaseProjectId(event.target.value)}
+              className="h-8 max-w-56 rounded-md border border-slate-300 bg-white px-2 text-[11px]"
+            >
+              <option value="">프로젝트 선택</option>
+              {assignedProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              className={outlineActionButtonClassName}
+              disabled={!statusLeaseProjectId || !statusLease.sessionId || statusLease.busy || statusLease.canEdit}
+              onClick={() => void statusLease.acquire()}
+            >
+              {statusLease.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {statusLease.canEdit ? '수정 중' : '수정 시작'}
+            </Button>
+            {statusLease.canEdit ? (
+              <>
+                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void statusLease.extend()}>
+                  {statusLease.remainingLabel} · 30분 연장
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void statusLease.release()}>
+                  수정 종료
+                </Button>
+              </>
+            ) : (
+              <span className="text-[10px] text-slate-500">선택한 프로젝트만 수정되며, 그 전에는 읽기 전용입니다.</span>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
             <span className="text-[11px] font-semibold text-slate-600">{yearMonth}</span>
             <div className="flex flex-wrap gap-1.5">
@@ -384,7 +444,7 @@ export function PortalSubmissionsPage() {
                             variant="outline"
                             size="sm"
                             className={projectionDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
-                            disabled={confirmSaving}
+                            disabled={confirmSaving || !statusLease.canEdit || statusLeaseProjectId !== p.id}
                             onClick={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
@@ -420,7 +480,7 @@ export function PortalSubmissionsPage() {
                             variant="outline"
                             size="sm"
                             className={expenseDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
-                            disabled={confirmSaving}
+                            disabled={confirmSaving || !statusLease.canEdit || statusLeaseProjectId !== p.id}
                             onClick={() => openConfirm({
                               projectId: p.id,
                               projectName: p.name,
@@ -613,6 +673,17 @@ export function PortalSubmissionsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <EditLeaseDialogs
+        warningOpen={statusLease.warningOpen}
+        expiredOpen={statusLease.expiredOpen}
+        conflictOpen={statusLease.conflictOpen}
+        holder={statusLease.holder}
+        busy={statusLease.busy}
+        onDismissWarning={statusLease.dismissWarning}
+        onExtend={() => { void statusLease.extend(); }}
+        onContinueReadOnly={statusLease.continueReadOnly}
+        onReacquire={() => { void statusLease.acquire(); }}
+      />
     </div>
   );
 }
