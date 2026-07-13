@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyCashflowSheetLabViaBff,
   extractSpreadsheetIdFromSheetInput,
+  getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
   previewCashflowSheetLabViaBff,
+  refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
 } from './sheets-cashflow-readonly-client';
@@ -216,7 +218,90 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
-  it('stages explicitly provided sheet values through the review endpoint', async () => {
+  it('reads only the pinned mirror without contacting Google Sheets', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'FRESH',
+          sourceRevision: 'sha256:source-001',
+          targetRevisionAtFetch: 'sha256:target-001',
+          capturedAt: '2026-07-13T01:00:00.000Z',
+          summary: { cellCount: 1920, valueCount: 20, emptyCount: 1900, invalidCount: 0 },
+          cells: [],
+        },
+      })),
+    });
+
+    const result = await getCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      client,
+    });
+
+    expect(result.status).toBe('FRESH');
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/mirror',
+      expect.objectContaining({ tenantId: 'mysc' }),
+    );
+    expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the mirror only on an explicit request and retains a stale last-good snapshot', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'STALE',
+          sourceRevision: 'sha256:last-good',
+          targetRevisionAtFetch: 'sha256:target-001',
+          capturedAt: '2026-07-13T01:00:00.000Z',
+          summary: { cellCount: 1, valueCount: 1, emptyCount: 0, invalidCount: 0 },
+          cells: [{
+            mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN',
+            direction: 'IN', sourceCell: 'D14', sourceLabel: '매출액(입금)', state: 'VALUE', amount: 1000,
+          }],
+          lastRefreshError: { code: 'sheet_unavailable', message: '시트를 읽지 못했습니다.', at: '2026-07-13T02:00:00.000Z' },
+        },
+      })),
+    });
+
+    const result = await refreshCashflowSheetLabMirrorViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+      sheetName: 'cashflow(사용내역 연동)',
+      startWeek: '26-1-1',
+      endWeek: '26-6-5',
+      idempotencyKey: 'refresh-001',
+      client,
+    });
+
+    expect(result).toMatchObject({
+      status: 'STALE',
+      sourceRevision: 'sha256:last-good',
+      capturedAt: '2026-07-13T01:00:00.000Z',
+      cells: [expect.objectContaining({ amount: 1000 })],
+    });
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/mirror/refresh',
+      expect.objectContaining({
+        tenantId: 'mysc',
+        body: {
+          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-6-5',
+          idempotencyKey: 'refresh-001',
+        },
+        idempotencyKey: 'refresh-001',
+      }),
+    );
+  });
+
+  it('stages the explicitly selected pinned revision through the review endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({
         data: {
@@ -237,10 +322,7 @@ describe('sheets cashflow readonly client', () => {
       tenantId: 'mysc',
       actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
       projectId: 'p001',
-      value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-      sheetName: 'cashflow(사용내역 연동)',
-      startWeek: '26-1-1',
-      endWeek: '26-6-5',
+      expectedMirrorRevision: 'sha256:source-001',
       idempotencyKey: 'stage-001',
       client,
     });
@@ -251,10 +333,7 @@ describe('sheets cashflow readonly client', () => {
       expect.objectContaining({
         tenantId: 'mysc',
         body: {
-          value: 'https://docs.google.com/spreadsheets/d/sheet-001/edit',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-6-5',
+          expectedMirrorRevision: 'sha256:source-001',
           idempotencyKey: 'stage-001',
         },
         idempotencyKey: 'stage-001',

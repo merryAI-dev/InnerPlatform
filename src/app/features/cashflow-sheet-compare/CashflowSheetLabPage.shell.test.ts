@@ -44,7 +44,9 @@ describe('CashflowSheetLabPage shell', () => {
   });
 
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
-    expect(pageSource).toContain('previewCashflowSheetLabViaBff');
+    expect(pageSource).toContain('getCashflowSheetLabMirrorViaBff');
+    expect(pageSource).toContain('refreshCashflowSheetLabMirrorViaBff');
+    expect(pageSource).not.toContain('previewCashflowSheetLabViaBff');
     expect(pageSource).toContain('createCashflowPrivateDraftClient');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
@@ -70,12 +72,18 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('handleReflectSheetValues');
     expect(pageSource).toContain('handleSaveSheetConfig');
     expect(pageSource).toContain('handleLoadShareAccount');
-    expect(pageSource).toContain('canPreview');
+    expect(pageSource).toContain('canRefresh');
     expect(pageSource).toContain('stageResult');
     expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
-    expect(pageSource).toContain('setReviewedSourceKey(sourceKey)');
+    expect(pageSource).toContain('expectedMirrorRevision: mirror.sourceRevision');
+    expect(pageSource).toContain('const refreshIdempotencyKey =');
+    expect(pageSource).toContain('const stageIdempotencyKey =');
+    expect(pageSource).toContain('const applyIdempotencyKey =');
+    expect(pageSource.indexOf('const refreshIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('mirror.refresh'"));
+    expect(pageSource.indexOf('const stageIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('stage.sheet_values'"));
+    expect(pageSource.indexOf('const applyIdempotencyKey =')).toBeLessThan(pageSource.indexOf("runWithBffAuthRetry('apply.sheet_values'"));
     expect(pageSource).toContain('CashflowSheetHeroAnimation');
     expect(pageSource).toContain('cashflow-tile-float');
     expect(pageSource).not.toContain('motion/react');
@@ -111,8 +119,14 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('result.config?.value && !hasSheetDraft');
     expect(pageSource).not.toContain('캐시플로우 값은 바뀌지 않습니다.');
     expect(pageSource).toContain('시트에서 플랫폼에 저장할 값을 검토해주세요.');
+    expect(pageSource).toContain('시트 연동하기');
+    expect(pageSource).toContain('최신값 다시 가져오기');
+    expect(pageSource).toContain('FRESH');
+    expect(pageSource).toContain('STALE');
+    expect(pageSource).toContain('ERROR');
+    expect(pageSource).toContain('capturedAt');
     expect(pageSource).toContain('MYSCube에 값 저장');
-    expect(pageSource).toContain('전체 MYSCube에 저장하기');
+    expect(pageSource).toContain('변경 내용 검토');
     expect(pageSource).toContain('전체 MYSCube에 저장할까요?');
     expect(pageSource).toContain('applyDialogOpen');
     expect(pageSource).toContain('아래 주차별 차이를 확인한 뒤 저장합니다.');
@@ -125,7 +139,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('저장 여부');
     expect(pageSource).toContain('저장 대상');
     expect(pageSource).toContain('저장 완료');
-    expect(pageSource).toContain('시트 검토 완료');
+    expect(pageSource).toContain('시트 고정본');
     expect(pageSource).toContain('검토 범위');
     expect(pageSource).not.toContain('입금 합계');
     expect(pageSource).not.toContain('출금 합계');

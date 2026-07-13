@@ -43,7 +43,14 @@ import {
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
-import { applyCashflowSheetLabViaBff, stageCashflowSheetLabViaBff, type CashflowSheetLabChangeCandidate } from '../../lib/sheets-cashflow-readonly-client';
+import {
+  applyCashflowSheetLabViaBff,
+  getCashflowSheetLabMirrorViaBff,
+  refreshCashflowSheetLabMirrorViaBff,
+  stageCashflowSheetLabViaBff,
+  type CashflowSheetLabChangeCandidate,
+  type CashflowSheetLabMirrorResult,
+} from '../../lib/sheets-cashflow-readonly-client';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { useCashflowEditLease } from './useCashflowEditLease';
@@ -367,6 +374,7 @@ export function CashflowProjectSheet({
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
+  const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
   const [sheetRefreshResult, setSheetRefreshResult] = useState<{
     runId: string;
@@ -735,6 +743,36 @@ export function CashflowProjectSheet({
     };
   }, [db, orgId, projectId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setCashflowSheetMirror(null);
+    if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
+
+    const readMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
+      getCashflowSheetLabMirrorViaBff({ tenantId: orgId, actor, projectId })
+    );
+    const loadPinnedMirror = async (): Promise<void> => {
+      try {
+        const actor = await resolveBffActor();
+        if (!actor?.idToken) return;
+        let mirror: CashflowSheetLabMirrorResult;
+        try {
+          mirror = await readMirror(actor);
+        } catch (error) {
+          if (!isBffAuthRejection(error)) throw error;
+          const refreshedActor = await resolveBffActor({ forceRefresh: true });
+          if (!refreshedActor?.idToken) throw error;
+          mirror = await readMirror(refreshedActor);
+        }
+        if (!cancelled) setCashflowSheetMirror(mirror);
+      } catch {
+        if (!cancelled) setCashflowSheetMirror(null);
+      }
+    };
+    void loadPinnedMirror();
+    return () => { cancelled = true; };
+  }, [orgId, projectId, resolveBffActor, user?.uid]);
+
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
     if (!db || !cashflowSheetRange) {
       setRangeLoadedWeeks([]);
@@ -866,14 +904,14 @@ export function CashflowProjectSheet({
     void handleRefreshLaborRisk();
   }, [handleRefreshLaborRisk, orgId, projectId, user?.uid]);
 
-  const handleRefreshSheetValues = useCallback(async (): Promise<void> => {
+  const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
       toast.error('연결된 Google Sheet가 없습니다.');
       return;
     }
-    const apply = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
-      const idempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-      return stageCashflowSheetLabViaBff({
+    const refreshIdempotencyKey = `cashflow-sheet-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const refreshMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
+      refreshCashflowSheetLabMirrorViaBff({
         tenantId: orgId,
         actor,
         projectId,
@@ -881,10 +919,72 @@ export function CashflowProjectSheet({
         sheetName: cashflowSheetConfig.sheetName || undefined,
         startWeek: cashflowSheetConfig.startWeek || undefined,
         endWeek: cashflowSheetConfig.endWeek || undefined,
-        idempotencyKey,
-      });
+        idempotencyKey: refreshIdempotencyKey,
+      })
+    );
+    const rememberMirror = (mirror: CashflowSheetLabMirrorResult) => {
+      setCashflowSheetMirror((current) => mirror.status === 'STALE' && current?.sourceRevision
+        ? {
+            ...current,
+            ...mirror,
+            sourceRevision: mirror.sourceRevision || current.sourceRevision,
+            capturedAt: mirror.capturedAt || current.capturedAt,
+            summary: mirror.summary || current.summary,
+            cells: mirror.cells || current.cells,
+          }
+        : mirror);
+      setSheetRefreshResult(null);
+      setSheetStageDialog(null);
+      if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+        toast.success('시트 최신값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
+      } else if (mirror.status === 'STALE') {
+        toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
+      } else {
+        toast.error(mirror.lastRefreshError?.message || '시트 연동에 실패했습니다.');
+      }
     };
-    const rememberResult = (result: Awaited<ReturnType<typeof apply>>) => {
+    setSheetRefreshLoading(true);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) {
+        toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+        return;
+      }
+      rememberMirror(await refreshMirror(actor));
+    } catch (error) {
+      if (isBffAuthRejection(error)) {
+        try {
+          const actor = await resolveBffActor({ forceRefresh: true });
+          if (!actor?.idToken) throw error;
+          rememberMirror(await refreshMirror(actor));
+          return;
+        } catch (retryError) {
+          toast.error(resolveApiErrorMessage(retryError, '시트 최신값을 가져오지 못했습니다.'));
+          return;
+        }
+      }
+      toast.error(resolveApiErrorMessage(error, '시트 최신값을 가져오지 못했습니다.'));
+    } finally {
+      setSheetRefreshLoading(false);
+    }
+  }, [cashflowSheetConfig, orgId, projectId, resolveBffActor]);
+
+  const handleStagePinnedSheetValues = useCallback(async (): Promise<void> => {
+    if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
+      toast.error('먼저 시트 최신값을 가져와 고정해 주세요.');
+      return;
+    }
+    const stageIdempotencyKey = `cashflow-sheet-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const stageMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
+      stageCashflowSheetLabViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        expectedMirrorRevision: cashflowSheetMirror.sourceRevision,
+        idempotencyKey: stageIdempotencyKey,
+      })
+    );
+    const rememberResult = (result: Awaited<ReturnType<typeof stageMirror>>) => {
       setSheetRefreshResult({
         runId: result.runId,
         stagedLineCount: result.stagedLineCount,
@@ -901,6 +1001,8 @@ export function CashflowProjectSheet({
         candidates: result.candidates || [],
         omittedCandidateCount: result.omittedCandidateCount || 0,
       });
+      if (result.status === 'BLOCKED') toast.warning('검토가 필요한 월이 있어 바로 저장할 수 없습니다.');
+      else toast.success('고정된 시트 값과 원장 값을 비교했습니다.');
     };
     setSheetRefreshLoading(true);
     setSheetRefreshResult(null);
@@ -910,32 +1012,24 @@ export function CashflowProjectSheet({
         toast.error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
         return;
       }
-      const result = await apply(actor);
-      await loadCashflowSheetRangeWeeks();
-      await loadCashflowEvents();
-      rememberResult(result);
-      toast.success('시트 변경 값을 불러왔습니다.');
+      rememberResult(await stageMirror(actor));
     } catch (error) {
       if (isBffAuthRejection(error)) {
         try {
           const actor = await resolveBffActor({ forceRefresh: true });
           if (!actor?.idToken) throw error;
-          const result = await apply(actor);
-          await loadCashflowSheetRangeWeeks();
-          await loadCashflowEvents();
-          rememberResult(result);
-          toast.success('시트 변경 값을 불러왔습니다.');
+          rememberResult(await stageMirror(actor));
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '시트 변경 값을 불러오지 못했습니다.'));
+          toast.error(resolveApiErrorMessage(retryError, '고정된 시트 값을 비교하지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '시트 변경 값을 불러오지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(error, '고정된 시트 값을 비교하지 못했습니다.'));
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetConfig, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, projectId, resolveBffActor]);
+  }, [cashflowSheetMirror, orgId, projectId, resolveBffActor]);
 
   const handleApplyStagedSheetValues = useCallback(async (): Promise<void> => {
     if (!sheetStageDialog?.runId) {
@@ -947,18 +1041,18 @@ export function CashflowProjectSheet({
       toast.error('바로 저장할 수 있는 값이 없습니다. 확인 필요 항목을 먼저 검토해 주세요.');
       return;
     }
+    const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     let finalMutationLease: Awaited<ReturnType<typeof cashflowLease.checkBeforeMutation>> | null = null;
     const apply = async (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
-      const mutationLease = await cashflowLease.checkBeforeMutation();
+      const mutationLease = finalMutationLease || await cashflowLease.checkBeforeMutation();
       finalMutationLease = mutationLease;
-      const idempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
       return applyCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
         projectId,
         stageRunId: sheetStageDialog.runId,
         applyRiskCandidates: false,
-        idempotencyKey,
+        idempotencyKey: applyIdempotencyKey,
         lease: mutationLease,
         finalize: true,
       });
@@ -1015,14 +1109,18 @@ export function CashflowProjectSheet({
   }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, privateDraftRevision, projectId, resolveBffActor, sheetStageDialog]);
 
   const handleOpenSheetReviewDialog = useCallback(() => {
+    if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
+      toast.info('먼저 시트 연동하기를 눌러 최신값을 고정해 주세요.');
+      return;
+    }
     setSheetReviewDirection('sheet-to-cashflow');
     setSheetReviewDialogOpen(true);
-  }, []);
+  }, [cashflowSheetMirror]);
 
   const handleStartSheetChangeReview = useCallback(async (): Promise<void> => {
     setSheetReviewDialogOpen(false);
-    await handleRefreshSheetValues();
-  }, [handleRefreshSheetValues]);
+    await handleStagePinnedSheetValues();
+  }, [handleStagePinnedSheetValues]);
 
   const handleStartProjectionSheetWrite = useCallback(() => {
     setSheetReviewDialogOpen(false);
@@ -1377,6 +1475,10 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
+  const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
+  const sheetMirrorCapturedAt = formatSheetAppliedAt(cashflowSheetMirror?.capturedAt)
+    || cashflowSheetMirror?.capturedAt
+    || '';
 
   const opsSummary = useMemo(() => {
     return buildCashflowOpsSummary({
@@ -2999,9 +3101,37 @@ export function CashflowProjectSheet({
                   </div>
                   <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
                     {cashflowSheetConfig
-                      ? '시트에서 수정한 값을 팝업에서 비교한 뒤 검토한 값만 원장에 저장합니다.'
-                      : '처음 설정하면 이후에는 이 영역에서 시트 변경 값을 바로 불러올 수 있습니다.'}
+                      ? '버튼을 눌렀을 때만 시트 최신값을 가져와 고정하며, 검토와 원장 저장은 별도 단계입니다.'
+                      : '처음 설정한 뒤 이 영역에서 시트 연동하기를 직접 실행합니다.'}
                   </div>
+                  {cashflowSheetConfig ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                      <Badge className={`rounded-full border-0 px-2 py-0.5 text-[9px] ${
+                        sheetMirrorStatus === 'FRESH'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : sheetMirrorStatus === 'STALE'
+                            ? 'bg-amber-100 text-amber-800'
+                            : sheetMirrorStatus === 'ERROR'
+                              ? 'bg-rose-100 text-rose-800'
+                              : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {sheetMirrorStatus}
+                      </Badge>
+                      {sheetMirrorCapturedAt ? (
+                        <span className={sheetMirrorStatus === 'STALE' ? 'text-amber-800' : 'text-blue-800'}>
+                          {sheetMirrorStatus === 'STALE' ? '마지막 정상 고정' : '고정'} {sheetMirrorCapturedAt}
+                        </span>
+                      ) : null}
+                      {cashflowSheetMirror?.summary ? (
+                        <span className="text-blue-700">값 {cashflowSheetMirror.summary.valueCount.toLocaleString()}건</span>
+                      ) : null}
+                      {cashflowSheetMirror?.lastRefreshError?.message ? (
+                        <span className={sheetMirrorStatus === 'ERROR' ? 'text-rose-700' : 'text-amber-800'}>
+                          {cashflowSheetMirror.lastRefreshError.message}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {sheetRefreshResult ? (
                     <div className="mt-1 font-semibold text-emerald-800">
                       비교 결과 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
@@ -3017,6 +3147,17 @@ export function CashflowProjectSheet({
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className={`h-7 rounded-full px-2.5 text-[10px] font-semibold transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
+                  onClick={() => void handleRefreshSheetMirror()}
+                  disabled={!cashflowSheetConfig?.value || sheetRefreshLoading}
+                >
+                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                  {cashflowSheetMirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기'}
+                </Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -3025,14 +3166,14 @@ export function CashflowProjectSheet({
                       variant="outline"
                       className={`h-7 rounded-full px-2.5 text-[10px] font-semibold transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
                       onClick={handleOpenSheetReviewDialog}
+                      disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'}
                     >
-                      <span className="mr-1 h-1.5 w-1.5 rounded-full bg-blue-500 motion-safe:animate-pulse" aria-hidden="true" />
                       <ClipboardCheck className="mr-1 h-3 w-3" />
-                      시트 업데이트 반영
+                      변경 내용 검토
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[280px] bg-slate-950 text-[11px] leading-relaxed text-white">
-                    시트 값을 바로 덮어쓰지 않습니다. 팝업에서 변경 범위를 확인한 뒤 저장 버튼을 누를 때만 원장에 반영됩니다.
+                    고정된 시트 값만 원장과 비교합니다. 저장 버튼을 누르기 전에는 원장이 바뀌지 않습니다.
                   </TooltipContent>
                 </Tooltip>
                 <Button
@@ -3374,7 +3515,7 @@ export function CashflowProjectSheet({
           <AlertDialogHeader>
             <AlertDialogTitle>시트 업데이트 반영</AlertDialogTitle>
             <AlertDialogDescription>
-              어느 쪽 값을 기준으로 검토할지 선택합니다. 저장 버튼을 누르기 전까지 원장과 시트 값은 바뀌지 않습니다.
+              고정해 둔 시트 값을 원장과 비교합니다. 저장 버튼을 누르기 전까지 원장은 바뀌지 않습니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -3384,7 +3525,7 @@ export function CashflowProjectSheet({
                 type="button"
                 role="tab"
                 aria-selected={sheetReviewDirection === 'sheet-to-cashflow'}
-                title="Google Sheet에서 바뀐 값을 읽고 팝업에서 비교합니다."
+                title="마지막으로 고정한 Google Sheet 값을 팝업에서 비교합니다."
                 className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 onClick={() => setSheetReviewDirection('sheet-to-cashflow')}
               >
@@ -3422,12 +3563,12 @@ export function CashflowProjectSheet({
                   </div>
                   <div className="mt-1 text-[11px] leading-5 text-slate-600">
                     {sheetReviewDirection === 'sheet-to-cashflow'
-                      ? 'Google Sheet에서 바뀐 Projection/Actual 값을 불러와 팝업에서 원장 값과 비교합니다.'
+                      ? '마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
                       : '캐시플로우 화면의 Projection 값을 Google Sheet에 쓰기 전 셀 단위 차이를 확인합니다. Actual은 이 방향에서 수정하지 않습니다.'}
                   </div>
                 </div>
-                <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${cashflowSheetConfig ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>
-                  {cashflowSheetConfig ? 'Google Sheet 연결됨' : '연결 필요'}
+                <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                  {sheetMirrorStatus}
                 </Badge>
               </div>
 
@@ -3435,7 +3576,7 @@ export function CashflowProjectSheet({
                 <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-blue-500 motion-safe:animate-pulse' : 'bg-slate-500'}`} aria-hidden="true" />
                 <div>
                   {sheetReviewDirection === 'sheet-to-cashflow'
-                    ? '현재 선택: 시트 값을 읽어 다음 팝업에서 원장 값과 나란히 확인합니다.'
+                    ? `현재 선택: ${sheetMirrorCapturedAt || '최근'} 고정본을 원장 값과 나란히 확인합니다.`
                     : '현재 선택: 캐시플로우 Projection을 시트에 쓸 값으로 비교합니다. Actual은 이 방향에서 쓰지 않습니다.'}
                 </div>
               </div>
@@ -3443,7 +3584,7 @@ export function CashflowProjectSheet({
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
                 {(sheetReviewDirection === 'sheet-to-cashflow'
                   ? [
-                        ['1', '시트 값 읽기', '공유된 Google Sheet 값을 읽습니다.'],
+                        ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
                         ['2', '값 비교', '원장과 다른 셀을 모두 보여줍니다.'],
                         ['3', '검토 후 저장', '팝업에서 확정하면 원장에 저장합니다.'],
                     ]
@@ -3477,9 +3618,9 @@ export function CashflowProjectSheet({
                 시트 연동 설정
               </AlertDialogAction>
             ) : sheetReviewDirection === 'sheet-to-cashflow' ? (
-              <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading} className="transition-transform hover:-translate-y-0.5">
+              <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'} className="transition-transform hover:-translate-y-0.5">
                 {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-                시트 값 비교하기
+                고정값 비교하기
               </AlertDialogAction>
             ) : (
               <AlertDialogAction onClick={handleStartProjectionSheetWrite} className="transition-transform hover:-translate-y-0.5">

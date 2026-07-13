@@ -213,6 +213,38 @@ export interface CashflowSheetLabChangeCandidate {
   updatedAt: string;
 }
 
+export interface CashflowSheetLabMirrorCell {
+  mode: 'projection' | 'actual';
+  yearMonth: string;
+  weekNo: number;
+  lineId: string;
+  direction: 'IN' | 'OUT';
+  sourceCell: string;
+  sourceLabel: string;
+  state: 'VALUE' | 'EMPTY' | 'INVALID';
+  amount?: number;
+  rawValue?: string;
+}
+
+export interface CashflowSheetLabMirrorResult {
+  schemaVersion?: number;
+  projectId: string;
+  status: 'EMPTY' | 'FRESH' | 'STALE' | 'ERROR';
+  spreadsheetId?: string;
+  spreadsheetTitle?: string;
+  selectedSheetName?: string;
+  sourceRevision?: string;
+  targetRevisionAtFetch?: string;
+  capturedAt?: string;
+  capturedBy?: { uid?: string; email?: string; role?: string };
+  yearMonths?: string[];
+  summary?: { cellCount: number; valueCount: number; emptyCount: number; invalidCount: number };
+  cells?: CashflowSheetLabMirrorCell[];
+  activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
+  lastRefreshAttemptAt?: string;
+  lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
+}
+
 export interface CashflowSheetLabStageResult {
   ok: boolean;
   commandName: 'cashflowSheetLab.stage.firebase';
@@ -221,13 +253,17 @@ export interface CashflowSheetLabStageResult {
   spreadsheetTitle?: string;
   selectedSheetName?: string;
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'];
+  sourceRevision?: string;
+  targetRevisionAtFetch?: string;
   runId: string;
+  status?: 'READY' | 'BLOCKED';
   stagedLineCount: number;
   projectionLineCount: number;
   actualLineCount: number;
   riskLineCount: number;
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
+  blockedMonths?: string[];
   candidates?: CashflowSheetLabChangeCandidate[];
   omittedCandidateCount?: number;
   lastStagedAt?: string;
@@ -385,16 +421,61 @@ export async function stageCashflowSheetLabViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
-  value?: string;
-  sheetName?: string;
-  startWeek?: string;
-  endWeek?: string;
+  expectedMirrorRevision: string;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabStageResult> {
   const apiClient = params.client || createSameOriginBffClient();
   const response = await apiClient.post<CashflowSheetLabStageResult>(
     `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/stage`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        expectedMirrorRevision: params.expectedMirrorRevision,
+        idempotencyKey: params.idempotencyKey,
+      },
+      idempotencyKey: params.idempotencyKey,
+      timeoutMs: 30000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function getCashflowSheetLabMirrorViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabMirrorResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.get<CashflowSheetLabMirrorResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/mirror`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function refreshCashflowSheetLabMirrorViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  value?: string;
+  sheetName?: string;
+  startWeek?: string;
+  endWeek?: string;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabMirrorResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.post<CashflowSheetLabMirrorResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/mirror/refresh`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

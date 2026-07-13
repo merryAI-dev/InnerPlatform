@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, Save, Search, UserPlus } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, RefreshCw, Save, Search, UserPlus } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
@@ -9,12 +9,13 @@ import { getAuthInstance } from '../../lib/firebase';
 import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
+  getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
-  previewCashflowSheetLabViaBff,
+  refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
-  type CashflowSheetLabPreviewResult,
   type CashflowSheetLabChangeCandidate,
+  type CashflowSheetLabMirrorResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -53,7 +54,7 @@ function formatError(error: unknown) {
     return '서버의 Google Sheets 서비스 계정이 설정되지 않았습니다. 관리자에게 환경 변수 설정을 요청하세요.';
   }
   if (code === 'google_sheet_service_account_forbidden') {
-    return '시트를 시스템 계정에 공유해 주세요. 공유 후 다시 검토하면 됩니다.';
+    return '시트를 시스템 계정에 공유해 주세요. 공유 후 다시 연동하면 됩니다.';
   }
   const bodyMessage = apiError?.body?.message;
   if (bodyMessage) {
@@ -145,7 +146,7 @@ function CashflowSheetHeroAnimation() {
         사업비 관리시트 연동
       </div>
       <div className="mt-2 motion-safe:animate-[cashflow-hero-fade_0.45s_ease-out_0.12s_both] text-[14px] leading-relaxed text-slate-500">
-        사업비 관리시트를<br />MYSCube 대시보드에 실시간 반영
+        사업비 관리시트를<br />필요할 때 가져와 검토 후 반영
       </div>
       <div className="relative mx-auto mt-12 h-[330px] w-[330px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
         <div className="absolute left-1/2 top-1/2 flex h-[188px] w-[188px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-[#4f7cff] to-[#00c4a0] shadow-[0_24px_64px_rgba(79,124,255,0.42),0_6px_20px_rgba(15,23,42,0.16)] motion-safe:animate-[spin_6s_linear_infinite]">
@@ -289,7 +290,7 @@ export function CashflowSheetLabPage({
   const [sheetName, setSheetName] = useState('');
   const [startWeek, setStartWeek] = useState('');
   const [endWeek, setEndWeek] = useState('');
-  const [preview, setPreview] = useState<CashflowSheetLabPreviewResult | null>(null);
+  const [mirror, setMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
@@ -314,7 +315,6 @@ export function CashflowSheetLabPage({
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
-  const previewRequestRef = useRef(0);
   const loadedPrivateDraftKeyRef = useRef('');
   const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const privateDraftRevisionRef = useRef<number | null>(null);
@@ -583,6 +583,10 @@ export function CashflowSheetLabPage({
         setStartWeek(result.config.startWeek || '');
         setEndWeek(result.config.endWeek || '');
       }
+      const pinnedMirror = await runWithBffAuthRetry('mirror.read', (requestActor) => (
+        getCashflowSheetLabMirrorViaBff({ tenantId: orgId, actor: requestActor, projectId })
+      ));
+      if (pinnedMirror) setMirror(pinnedMirror);
       if (!result.config?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
         projectId,
@@ -654,10 +658,9 @@ export function CashflowSheetLabPage({
       setLoading(false);
     }
   }
-  async function handlePreview() {
+  async function handleRefreshSheetMirror() {
     if (!projectId || loading || !spreadsheetId) return;
-    const requestId = previewRequestRef.current + 1;
-    previewRequestRef.current = requestId;
+    const refreshIdempotencyKey = `cashflow-sheet-lab-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
@@ -665,51 +668,56 @@ export function CashflowSheetLabPage({
     setStageResult(null);
     setReflectResult(null);
     try {
-      const previewSource = {
-        value: sheetLink,
-        sheetName: sheetName || undefined,
-        startWeek: startWeek || undefined,
-        endWeek: endWeek || undefined,
-      };
-      logCashflowLab('preview.start', {
+      logCashflowLab('mirror.refresh.start', {
         projectId,
         spreadsheetId,
-        sheetName: previewSource.sheetName || null,
+        sheetName: sheetName || null,
       });
-      const result = await runWithBffAuthRetry('preview.values', (requestActor) => (
-        previewCashflowSheetLabViaBff({
+      const result = await runWithBffAuthRetry('mirror.refresh', (requestActor) => (
+        refreshCashflowSheetLabMirrorViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          ...previewSource,
-          includeValues: true,
+          value: sheetLink,
+          sheetName: sheetName || undefined,
+          startWeek: startWeek || undefined,
+          endWeek: endWeek || undefined,
+          idempotencyKey: refreshIdempotencyKey,
         })
       ));
       if (!result) return;
-      if (previewRequestRef.current !== requestId) return;
       const nextSheetName = sheetName || result.selectedSheetName || '';
-      setPreview(result);
-      setReviewedSourceKey(buildSourceKey({
-        projectId,
-        value: sheetLink,
-        sheetName: nextSheetName,
-        startWeek,
-        endWeek,
-      }));
-      setStatusMessage('검토가 완료되었습니다.');
-      logCashflowLab('preview.values.ok', {
+      setMirror((current) => result.status === 'STALE' && current?.sourceRevision
+        ? {
+            ...current,
+            ...result,
+            sourceRevision: result.sourceRevision || current.sourceRevision,
+            capturedAt: result.capturedAt || current.capturedAt,
+            summary: result.summary || current.summary,
+            cells: result.cells || current.cells,
+          }
+        : result);
+      setReviewedSourceKey(result.status === 'FRESH' && result.sourceRevision
+        ? buildSourceKey({ projectId, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })
+        : '');
+      if (result.status === 'FRESH' && result.sourceRevision) {
+        setStatusMessage('시트 최신값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
+      } else if (result.status === 'STALE') {
+        setStatusMessage('');
+      } else {
+        setErrorMessage(result.lastRefreshError?.message || '시트 연동에 실패했습니다.');
+      }
+      logCashflowLab('mirror.refresh.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
         sheetName: result.selectedSheetName,
-        authMode: result.accessPolicy.googleAuth,
-        templateSupported: result.template.supported,
-        mappingCount: result.template.stats.mappingCount,
-        previewValueCount: result.previewValues.length,
+        mirrorStatus: result.status,
+        sourceRevision: result.sourceRevision,
+        cellCount: result.summary?.cellCount || 0,
       });
       if (!sheetName && result.selectedSheetName) setSheetName(result.selectedSheetName);
     } catch (error) {
-      logCashflowLab('preview.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
-      setPreview(null);
+      logCashflowLab('mirror.refresh.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
       if (getErrorCode(error) === 'google_sheet_service_account_forbidden') {
         void handleLoadShareAccount();
@@ -720,9 +728,9 @@ export function CashflowSheetLabPage({
   }
 
   async function handleStageSheetValues() {
-    if (!projectId || loading || !spreadsheetId || reviewedSourceKey !== sourceKey) return;
+    if (!projectId || loading || !spreadsheetId || mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
-    const idempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
@@ -736,11 +744,8 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          value: sheetLink,
-          sheetName: sheetName || undefined,
-          startWeek: startWeek || undefined,
-          endWeek: endWeek || undefined,
-          idempotencyKey,
+          expectedMirrorRevision: mirror.sourceRevision,
+          idempotencyKey: stageIdempotencyKey,
         })
       ));
       if (!result) return;
@@ -777,7 +782,7 @@ export function CashflowSheetLabPage({
   async function handleReflectSheetValues() {
     if (!projectId || loading || !spreadsheetId || !stageResult || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
-    const idempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     let finalMutationLease: CashflowMutationLease | null = null;
     setErrorMessage('');
@@ -791,7 +796,7 @@ export function CashflowSheetLabPage({
       });
     try {
       const result = await runWithBffAuthRetry('apply.sheet_values', async (requestActor) => {
-        const mutationLease = await cashflowLease.checkBeforeMutation();
+        const mutationLease = finalMutationLease || await cashflowLease.checkBeforeMutation();
         finalMutationLease = mutationLease;
         return applyCashflowSheetLabViaBff({
           tenantId: orgId,
@@ -799,7 +804,7 @@ export function CashflowSheetLabPage({
           projectId,
           stageRunId: stageResult.runId,
           applyRiskCandidates: false,
-          idempotencyKey,
+          idempotencyKey: applyIdempotencyKey,
           lease: mutationLease,
           finalize: true,
         });
@@ -838,12 +843,13 @@ export function CashflowSheetLabPage({
     }
   }
 
-  const totalBasisLabel = preview?.activeWeekRange?.startWeek || preview?.activeWeekRange?.endWeek
-    ? `${preview.activeWeekRange.startWeek || '전체'} ~ ${preview.activeWeekRange.endWeek || '전체'}`
+  const totalBasisLabel = mirror?.activeWeekRange?.startWeek || mirror?.activeWeekRange?.endWeek
+    ? `${mirror.activeWeekRange.startWeek || '전체'} ~ ${mirror.activeWeekRange.endWeek || '전체'}`
     : '전체';
-  const canPreview = Boolean(projectId && spreadsheetId && !loading);
+  const canRefresh = Boolean(projectId && spreadsheetId && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && cashflowLease.canEdit && !loading);
-  const canApply = Boolean(projectId && spreadsheetId && preview && reviewedSourceKey === sourceKey && !loading);
+  const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
+  const canStage = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !loading);
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
   const stageCandidates = useMemo(() => {
     if (!stageResult) return [];
@@ -859,31 +865,32 @@ export function CashflowSheetLabPage({
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = true;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
-  const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || preview?.spreadsheetTitle || '';
-  const activeStep = stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
-  const currentStep = reflectResult ? 5 : stageResult ? 5 : preview ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
+  const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || mirror?.spreadsheetTitle || '';
+  const mirrorCapturedAt = mirror?.capturedAt ? new Date(mirror.capturedAt).toLocaleString('ko-KR') : '';
+  const activeStep = stageResult ? 5 : hasCurrentFreshMirror ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
+  const currentStep = reflectResult ? 5 : stageResult ? 5 : hasCurrentFreshMirror ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-all duration-300 ${
       step <= activeStep
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
     } ${step === currentStep && !reflectResult ? 'ring-[6px] ring-blue-300 shadow-[0_0_0_8px_rgba(37,99,235,0.18)] motion-safe:animate-pulse' : ''}`;
-  const primaryCta = !preview && !isCurrentSheetConfigSaved && spreadsheetId
+  const primaryCta = !isCurrentSheetConfigSaved && spreadsheetId
     ? {
         label: '임시 저장',
         disabled: !canSaveConfig,
         action: () => void handleSaveSheetConfig(),
       }
-    : !preview
+    : !hasCurrentFreshMirror
     ? {
-        label: '시트 검토하기',
-        disabled: !canPreview,
-        action: () => void handlePreview(),
+        label: mirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기',
+        disabled: !canRefresh,
+        action: () => void handleRefreshSheetMirror(),
       }
     : !stageResult
       ? {
-        label: '전체 MYSCube에 저장하기',
-          disabled: !canApply,
+        label: '변경 내용 검토',
+          disabled: !canStage,
           action: () => void handleStageSheetValues(),
         }
       : {
@@ -926,7 +933,7 @@ export function CashflowSheetLabPage({
               {linkedSpreadsheetTitle || '파일 이름 확인 전'}
             </div>
             <div className="mt-1 text-[12px] text-blue-900">
-              {savedConfig?.sheetName || preview?.selectedSheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
+              {savedConfig?.sheetName || mirror?.selectedSheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
             </div>
           </div>
         )}
@@ -1034,18 +1041,34 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">시트에서 플랫폼에 저장할 값을 검토해주세요.</h2>
-                <HelpMemo>Google Sheet 값을 읽고 저장 전에 MYSCube값과 비교할 준비를 합니다. 아직 MYSCube에는 아무 값도 쓰지 않습니다.</HelpMemo>
+                <HelpMemo>이 버튼을 눌렀을 때만 Google Sheet 최신값을 읽어 서버 고정본으로 보관합니다. 아직 MYSCube에는 아무 값도 쓰지 않습니다.</HelpMemo>
               </div>
               <Button
                 type="button"
                 variant="outline"
-                className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canPreview)}`}
-                disabled={!canPreview}
-                onClick={() => void handlePreview()}
+                className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canRefresh)}`}
+                disabled={!canRefresh}
+                onClick={() => void handleRefreshSheetMirror()}
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                검토
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {mirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기'}
               </Button>
+              {mirror ? (
+                <div className={`border px-3 py-2 text-[12px] ${
+                  mirror.status === 'FRESH'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    : mirror.status === 'STALE'
+                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                      : mirror.status === 'ERROR'
+                        ? 'border-red-200 bg-red-50 text-red-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-600'
+                }`}>
+                  <span className="font-bold">{mirror.status}</span>
+                  {mirrorCapturedAt ? ` · ${mirror.status === 'STALE' ? '마지막 정상 고정' : '고정'} ${mirrorCapturedAt}` : ''}
+                  {mirror.summary ? ` · 값 ${mirror.summary.valueCount.toLocaleString()}건` : ''}
+                  {mirror.lastRefreshError?.message ? ` · ${mirror.lastRefreshError.message}` : ''}
+                </div>
+              ) : null}
             </div>
           </li>
 
@@ -1054,7 +1077,7 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">MYSCube에 값 저장</h2>
-                <HelpMemo>버튼을 누르면 시트와 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
+                <HelpMemo>고정된 시트 값과 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (
                 <div className="space-y-3">
@@ -1101,12 +1124,12 @@ export function CashflowSheetLabPage({
               ) : (
                 <Button
                   type="button"
-                  className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canApply)}`}
-                  disabled={!canApply}
+                  className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canStage)}`}
+                  disabled={!canStage}
                   onClick={() => void handleStageSheetValues()}
                 >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  전체 MYSCube에 저장하기
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  변경 내용 검토
                 </Button>
               )}
             </div>
@@ -1139,29 +1162,19 @@ export function CashflowSheetLabPage({
         </Button>
       </div>
 
-      {preview && (
+      {mirror?.sourceRevision && (
         <section className="mx-auto mt-4 max-w-[560px] space-y-3 border border-slate-200 bg-white px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-bold text-emerald-800">시트 검토 완료</div>
+              <div className="text-[12px] font-bold text-emerald-800">시트 고정본 · {mirror.status}</div>
               <div className="truncate text-[12px] font-medium text-slate-950">
-                {preview.selectedSheetName}
+                {mirror.selectedSheetName}
               </div>
               <div className="text-[11px] text-slate-500">
-                검토 범위 {totalBasisLabel}
+                검토 범위 {totalBasisLabel}{mirrorCapturedAt ? ` · 고정 ${mirrorCapturedAt}` : ''}
               </div>
             </div>
           </div>
-
-          {preview.template.reasons.length > 0 && (
-            <div className="border border-red-200 bg-red-50 p-3 text-[12px] text-red-800">
-              {preview.template.reasons.map((reason) => (
-                <div key={`${reason.code}-${reason.mode || 'sheet'}`}>
-                  {reason.message} {reason.lineIds?.length ? `(${reason.lineIds.join(', ')})` : ''}
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       )}
       <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
