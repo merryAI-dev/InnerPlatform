@@ -314,37 +314,6 @@ function createSameOriginBffClient(): PlatformApiClient {
   });
 }
 
-export async function previewCashflowSheetLabViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  value?: string;
-  sheetName?: string;
-  startWeek?: string;
-  endWeek?: string;
-  includeValues?: boolean;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowSheetLabPreviewResult> {
-  const apiClient = params.client || createSameOriginBffClient();
-  const response = await apiClient.post<CashflowSheetLabPreviewResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/preview`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: {
-        ...(params.value ? { value: params.value } : {}),
-        ...(params.sheetName ? { sheetName: params.sheetName } : {}),
-        ...(params.startWeek ? { startWeek: params.startWeek } : {}),
-        ...(params.endWeek ? { endWeek: params.endWeek } : {}),
-        ...(typeof params.includeValues === 'boolean' ? { includeValues: params.includeValues } : {}),
-      },
-      timeoutMs: 25000,
-      retries: 0,
-    },
-  );
-  return response.data;
-}
-
 export async function saveCashflowSheetLabConfigViaBff(params: {
   tenantId: string;
   actor: ActorLike;

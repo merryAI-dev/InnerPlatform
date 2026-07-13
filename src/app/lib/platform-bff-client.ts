@@ -618,15 +618,66 @@ export interface CashflowModeReadModel {
   monthTotals: { totalIn: number; totalOut: number; net: number };
 }
 
+export interface CashflowComparisonTotals {
+  totalIn: number;
+  totalOut: number;
+  balance: number;
+}
+
+export interface CashflowComparisonWeek {
+  weekNo: number;
+  amounts: Record<string, number>;
+  totalIn: number;
+  totalOut: number;
+  net: number;
+  lines: Array<{
+    lineId: string;
+    direction: 'IN' | 'OUT';
+    projection: number;
+    projectionHadValue: boolean;
+    actual: number;
+    actualHadValue: boolean;
+    difference: number;
+  }>;
+  totals: {
+    projection: CashflowComparisonTotals;
+    actual: CashflowComparisonTotals;
+    difference: CashflowComparisonTotals;
+  };
+}
+
+export interface CashflowComparisonMonth {
+  yearMonth: string;
+  weeks: CashflowComparisonWeek[];
+  rowTotals: Record<string, number>;
+  totalIn: number;
+  totalOut: number;
+  net: number;
+  totals: CashflowComparisonWeek['totals'];
+}
+
+export interface CashflowProjectionActualComparison {
+  projectId: string;
+  direction: 'projection_minus_actual';
+  asOfDate: string;
+  asOfWeek: { yearMonth: string; weekNo: number };
+  timeZone: 'Asia/Seoul';
+  lineOrder: string[];
+  months: CashflowComparisonMonth[];
+  ignoredLineIds: string[];
+}
+
 export interface CashflowSnapshotResult {
   projectId: string;
   projection: CashflowProjectionLine[];
   actual: CashflowActualLine[];
+  comparison: CashflowProjectionActualComparison;
   readModel: {
     months: Array<{
       yearMonth: string;
       projection: CashflowModeReadModel;
       actual: CashflowModeReadModel;
+      comparison: CashflowComparisonMonth;
     }>;
   };
 }
@@ -1878,15 +1929,17 @@ export async function saveCashflowProjectionBatchViaBff(params: {
   return response.data;
 }
 
-export async function syncProjectCashflowActualsViaBff(params: {
+export async function fetchCashflowSnapshotViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  asOf?: string;
   client?: PlatformApiClientLike;
-}): Promise<ProjectCashflowActualSyncResult> {
+}): Promise<CashflowSnapshotResult> {
   const apiClient = resolveClient(params.client);
+  const asOfQuery = params.asOf ? `?asOf=${encodeURIComponent(params.asOf)}` : '';
   const response = await apiClient.get<CashflowSnapshotResult>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}`,
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}${asOfQuery}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
@@ -1894,16 +1947,26 @@ export async function syncProjectCashflowActualsViaBff(params: {
       timeoutMs: 20000,
     },
   );
-  const weeks = response.data.readModel.months.flatMap((month) => month.actual.weeks.map((week) => ({
+  return response.data;
+}
+
+export async function syncProjectCashflowActualsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectCashflowActualSyncResult> {
+  const snapshot = await fetchCashflowSnapshotViaBff(params);
+  const weeks = snapshot.readModel.months.flatMap((month) => month.actual.weeks.map((week) => ({
     yearMonth: month.yearMonth,
     weekNo: week.weekNo,
     amounts: week.amounts,
   })));
   return {
     ok: true,
-    projectId: response.data.projectId,
-    sourceRows: response.data.actual.length,
-    sheetCount: new Set(response.data.actual.map((line) => line.sheetKey)).size,
+    projectId: snapshot.projectId,
+    sourceRows: snapshot.actual.length,
+    sheetCount: new Set(snapshot.actual.map((line) => line.sheetKey)).size,
     upsertedWeeks: weeks.length,
     clearedWeeks: 0,
     weeks,

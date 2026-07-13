@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
-import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, Database, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
+import { ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -36,10 +36,13 @@ import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../../lib/firebase';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
+  fetchCashflowSnapshotViaBff,
   fetchCashflowLaborRiskViaBff,
   saveCashflowProjectionBatchViaBff,
   type CashflowLaborRiskResult,
+  type CashflowSnapshotResult,
 } from '../../lib/platform-bff-client';
+import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
 import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
@@ -113,14 +116,10 @@ type CashflowEvent = {
 
 function diffColorExplanation(section: '입금' | '출금', diff: number): string {
   if (diff === 0) return '차이가 없습니다.';
-  if (section === '입금') {
-    return diff > 0
-      ? '초록색: 실제 입금이 계획보다 많습니다.'
-      : '빨간색: 실제 입금이 계획보다 적습니다. 확인이 필요합니다.';
-  }
+  const target = section === '입금' ? '입금' : '출금';
   return diff > 0
-    ? '빨간색: 실제 출금이 계획보다 많습니다. 확인이 필요합니다.'
-    : '초록색: 실제 출금이 계획보다 적습니다.';
+    ? `${target} Projection이 Actual보다 큽니다.`
+    : `${target} Projection이 Actual보다 작습니다.`;
 }
 
 function HoverExplain({
@@ -139,27 +138,6 @@ function HoverExplain({
         {message}
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-function DiffMetricCard({
-  label,
-  value,
-  className,
-  message,
-}: {
-  label: string;
-  value: string;
-  className: string;
-  message: ReactNode;
-}) {
-  return (
-    <div className="rounded-[16px] bg-white px-3 py-2 shadow-[0_6px_18px_rgba(15,23,42,0.05)]">
-      <div className="text-[10px] text-slate-500">
-        <HoverExplain message={message}>{label}</HoverExplain>
-      </div>
-      <div className={className}>{value}</div>
-    </div>
   );
 }
 
@@ -374,6 +352,9 @@ export function CashflowProjectSheet({
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
   const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
+  const [cashflowSnapshot, setCashflowSnapshot] = useState<CashflowSnapshotResult | null>(null);
+  const [cashflowComparisonLoading, setCashflowComparisonLoading] = useState(false);
+  const [cashflowComparisonError, setCashflowComparisonError] = useState<string | null>(null);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
   const [sheetRefreshResult, setSheetRefreshResult] = useState<{
@@ -384,7 +365,6 @@ export function CashflowProjectSheet({
     riskLineCount: number;
   } | null>(null);
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
-  const [sheetReviewDirection, setSheetReviewDirection] = useState<'sheet-to-cashflow' | 'cashflow-to-sheet'>('sheet-to-cashflow');
   const [sheetStageDialog, setSheetStageDialog] = useState<{
     runId: string;
     stagedLineCount: number;
@@ -773,6 +753,40 @@ export function CashflowProjectSheet({
     return () => { cancelled = true; };
   }, [orgId, projectId, resolveBffActor, user?.uid]);
 
+  const loadCashflowComparison = useCallback(async (): Promise<void> => {
+    if (!projectId || !orgId || !user?.uid) {
+      setCashflowSnapshot(null);
+      setCashflowComparisonError('로그인 세션이 만료되었습니다.');
+      return;
+    }
+    const readSnapshot = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
+      fetchCashflowSnapshotViaBff({ tenantId: orgId, actor, projectId, asOf: todayIso })
+    );
+    setCashflowComparisonLoading(true);
+    setCashflowComparisonError(null);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      try {
+        setCashflowSnapshot(await readSnapshot(actor));
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        const refreshedActor = await resolveBffActor({ forceRefresh: true });
+        if (!refreshedActor?.idToken) throw error;
+        setCashflowSnapshot(await readSnapshot(refreshedActor));
+      }
+    } catch (error) {
+      setCashflowSnapshot(null);
+      setCashflowComparisonError(resolveApiErrorMessage(error, 'Projection - Actual 차이를 불러오지 못했습니다.'));
+    } finally {
+      setCashflowComparisonLoading(false);
+    }
+  }, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);
+
+  useEffect(() => {
+    void loadCashflowComparison();
+  }, [loadCashflowComparison]);
+
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
     if (!db || !cashflowSheetRange) {
       setRangeLoadedWeeks([]);
@@ -1058,8 +1072,11 @@ export function CashflowProjectSheet({
       });
     };
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
-      await loadCashflowSheetRangeWeeks();
-      await loadCashflowEvents();
+      await Promise.all([
+        loadCashflowSheetRangeWeeks(),
+        loadCashflowEvents(),
+        loadCashflowComparison(),
+      ]);
       setCashflowSheetConfig((current) => current ? {
         ...current,
         lastAppliedAt: result.lastAppliedAt,
@@ -1106,14 +1123,13 @@ export function CashflowProjectSheet({
     } finally {
       setSheetStageApplyLoading(false);
     }
-  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, privateDraftRevision, projectId, resolveBffActor, sheetStageDialog]);
+  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, loadCashflowComparison, loadCashflowEvents, loadCashflowSheetRangeWeeks, orgId, privateDraftRevision, projectId, resolveBffActor, sheetStageDialog]);
 
   const handleOpenSheetReviewDialog = useCallback(() => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
       toast.info('먼저 시트 연동하기를 눌러 최신값을 고정해 주세요.');
       return;
     }
-    setSheetReviewDirection('sheet-to-cashflow');
     setSheetReviewDialogOpen(true);
   }, [cashflowSheetMirror]);
 
@@ -1121,11 +1137,6 @@ export function CashflowProjectSheet({
     setSheetReviewDialogOpen(false);
     await handleStagePinnedSheetValues();
   }, [handleStagePinnedSheetValues]);
-
-  const handleStartProjectionSheetWrite = useCallback(() => {
-    setSheetReviewDialogOpen(false);
-    navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab?direction=platform-to-sheet`);
-  }, [navigate, projectId]);
 
   const handleRevertCashflowRun = useCallback(async (_runId: string): Promise<void> => {
     toast.info('되돌리기는 서버 검증 경로가 준비될 때까지 읽기 전용입니다.');
@@ -1387,86 +1398,42 @@ export function CashflowProjectSheet({
     };
   }, [annualWeeks, getPersistedYearAmount, yearOpeningTotalsByMode]);
 
-  const projectionActualDiff = useMemo(() => {
-    const rows = [
-      ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
-      ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
-    ].flatMap(({ section, lineId }) => monthWeeks.map((week) => {
-      const projection = getEffectiveAmount({ yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-      const actual = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
-      return {
-        section,
-        lineId,
-        label: CASHFLOW_SHEET_LINE_LABELS[lineId],
-        weekNo: week.weekNo,
-        weekLabel: week.label,
-        weekRange: `${week.weekStart} ~ ${week.weekEnd}`,
-        projection,
-        actual,
-        diff: actual - projection,
-      };
-    }));
-    const incomeDiff = rows
-      .filter((row) => row.section === '입금')
-      .reduce((sum, row) => sum + row.diff, 0);
-    const expenseDiff = rows
-      .filter((row) => row.section === '출금')
-      .reduce((sum, row) => sum + row.diff, 0);
-    const changedRows = rows.filter((row) => row.diff !== 0);
-    return {
-      rows,
-      changedRows,
-      incomeDiff,
-      expenseDiff,
-      netDiff: incomeDiff - expenseDiff,
-    };
-  }, [getEffectiveAmount, monthWeeks, yearMonth]);
-
-  const projectionActualYearDiff = useMemo(() => {
+  const projectionActualComparison = useMemo(() => {
+    if (!cashflowSnapshot) return { rows: [], changedRows: [], changedCellCount: 0 };
+    const comparisonMonths = cashflowSnapshot.readModel.months;
+    const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month.comparison]));
     const lineDefs = [
       ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
       ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
     ];
     const rows = lineDefs.map(({ section, lineId }) => {
       const cells = annualWeeks.map((week) => {
-        const projection = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-        const actual = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
+        const comparisonWeek = comparisonByMonth.get(week.yearMonth)?.weeks.find((candidate) => candidate.weekNo === week.weekNo);
+        const comparisonLine = comparisonWeek?.lines.find((candidate) => candidate.lineId === lineId);
         return {
           yearMonth: week.yearMonth,
           weekNo: week.weekNo,
           weekLabel: week.label,
           weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
-          projection,
-          actual,
-          diff: actual - projection,
+          projection: comparisonLine?.projection ?? 0,
+          actual: comparisonLine?.actual ?? 0,
+          difference: comparisonWeek ? (comparisonWeek.amounts[lineId] ?? 0) : null,
         };
       });
       return {
         section,
         lineId,
-        label: CASHFLOW_SHEET_LINE_LABELS[lineId],
+        label: getCashflowModeLineLabel(lineId, 'projection'),
         cells,
-        changed: cells.some((cell) => cell.diff !== 0),
+        changed: cells.some((cell) => cell.difference !== null && cell.difference !== 0),
       };
     });
-    const incomeDiff = rows
-      .filter((row) => row.section === '입금')
-      .flatMap((row) => row.cells)
-      .reduce((sum, cell) => sum + cell.diff, 0);
-    const expenseDiff = rows
-      .filter((row) => row.section === '출금')
-      .flatMap((row) => row.cells)
-      .reduce((sum, cell) => sum + cell.diff, 0);
-    const changedCellCount = rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.diff !== 0).length, 0);
     return {
       rows,
       changedRows: rows.filter((row) => row.changed),
-      incomeDiff,
-      expenseDiff,
-      netDiff: incomeDiff - expenseDiff,
-      changedCellCount,
+      changedCellCount: rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.difference !== null && cell.difference !== 0).length, 0),
     };
-  }, [annualWeeks, getPersistedYearAmount]);
+  }, [annualWeeks, cashflowSnapshot]);
 
   const cashflowTotalPeriodLabel = cashflowSheetRange?.label || `${selectedYear}년`;
   const sheetRangeLabel = cashflowSheetConfig
@@ -1505,7 +1472,7 @@ export function CashflowProjectSheet({
           adminClosedByName: doc?.adminClosedByName,
         };
       }),
-      diffCellCount: projectionActualYearDiff.changedCellCount,
+      diffCellCount: projectionActualComparison.changedCellCount,
       labor: {
         nextMonthProjectionWritten: laborRisk ? laborRisk.labor.nextMonthProjection.isWritten : true,
         missingProjectionMonthCount: laborRisk ? laborRisk.labor.missingProjectionMonths.length : 0,
@@ -1514,7 +1481,7 @@ export function CashflowProjectSheet({
         shortageAmount: laborRisk?.shortage.shortageAmount || 0,
       },
     });
-  }, [annualWeeks, byYearMonthWeek, laborRisk, projectionActualYearDiff.changedCellCount, todayIso]);
+  }, [annualWeeks, byYearMonthWeek, laborRisk, projectionActualComparison.changedCellCount, todayIso]);
 
   const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
@@ -1759,11 +1726,10 @@ export function CashflowProjectSheet({
     const projectionValue = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const diff = actual - projection;
     const shouldHighlightMismatch = shouldHighlightProjectionAmountMismatch({ projection, actual });
     const isEditing = isWeekModeEditing({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo }) || raw !== undefined;
     const bgClass = input.isThisWeek ? 'bg-blue-50/70' : 'bg-white';
-    const isCollapsedEmpty = !showEmptyCashflowRows && !isEditing && projection === 0 && actual === 0 && diff === 0 && raw === undefined;
+    const isCollapsedEmpty = !showEmptyCashflowRows && !isEditing && projection === 0 && actual === 0 && raw === undefined;
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
@@ -1801,9 +1767,8 @@ export function CashflowProjectSheet({
     const persisted = getPersistedCell({ doc: actualDoc, mode: 'actual', lineId: input.lineId });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const diff = actual - projection;
     const bgClass = input.isThisWeek ? 'bg-blue-50/80' : 'bg-slate-50/80';
-    const isCollapsedEmpty = !showEmptyCashflowRows && projection === 0 && actual === 0 && diff === 0 && !persisted.hasValue;
+    const isCollapsedEmpty = !showEmptyCashflowRows && projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
@@ -1852,42 +1817,20 @@ export function CashflowProjectSheet({
 
   function renderUnifiedMonthlyBoard() {
     const visibleWeeks = annualWeeks;
-    function computeBoardDerived(mode: 'projection' | 'actual') {
-      const openingIn = mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn;
-      const openingOut = mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut;
-      return computeCashflowDerivedTotals({
-        openingIn,
-        openingOut,
-        weeks: visibleWeeks.map((def) => ({
-          weekNo: def.weekNo,
-          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-            lineId,
-            getBoardEffectiveAmount({ targetYearMonth: def.yearMonth, mode, weekNo: def.weekNo, lineId }),
-          ])) as Partial<Record<CashflowSheetLineId, number>>,
-        })),
-      });
-    }
-    const projection = computeBoardDerived('projection');
-    const actual = computeBoardDerived('actual');
-    const projectionWeeksByKey = new Map(projection.weekTotals.map((week, index) => [`${annualWeeks[index]?.yearMonth}:${annualWeeks[index]?.weekNo}`, week]));
-    const actualWeeksByKey = new Map(actual.weekTotals.map((week, index) => [`${annualWeeks[index]?.yearMonth}:${annualWeeks[index]?.weekNo}`, week]));
-    const weekCount = visibleWeeks.length;
-    const scrollBoard = (direction: -1 | 1) => {
-      const container = cashflowBoardScrollRef.current;
-      if (!container) return;
-      const weekColumn = container.querySelector<HTMLElement>('[data-cashflow-week-column="true"]');
-      const weekWidth = weekColumn?.getBoundingClientRect().width || 84;
-      const targetLeft = getSnappedWeekScrollLeft({
-        currentLeft: container.scrollLeft,
-        direction,
-        viewportWidth: container.clientWidth,
-        maxScrollLeft: container.scrollWidth - container.clientWidth,
-        weekWidth,
-      });
-      container.scrollTo({
-        left: targetLeft,
-        behavior: 'smooth',
-      });
+    const computeBoardDerived = (mode: 'projection' | 'actual') => computeCashflowDerivedTotals({
+      openingIn: mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn,
+      openingOut: mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut,
+      weeks: visibleWeeks.map((week) => ({
+        weekNo: week.weekNo,
+        amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+          lineId,
+          getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode, weekNo: week.weekNo, lineId }),
+        ])) as Partial<Record<CashflowSheetLineId, number>>,
+      })),
+    });
+    const derived = {
+      projection: computeBoardDerived('projection'),
+      actual: computeBoardDerived('actual'),
     };
     const dirtyBoardWeeks = visibleWeeks.filter((week) => (
       weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
@@ -1896,9 +1839,9 @@ export function CashflowProjectSheet({
       isWeekModeEditing({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })
     ));
     const setBoardEditing = (editing: boolean) => {
-      setShowEmptyCashflowRows((prev) => (editing ? true : prev));
-      setEditingWeekModes((prev) => {
-        const next = { ...prev };
+      setShowEmptyCashflowRows((current) => (editing ? true : current));
+      setEditingWeekModes((current) => {
+        const next = { ...current };
         for (const week of visibleWeeks) {
           next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] = editing;
           next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo })] = false;
@@ -1908,8 +1851,7 @@ export function CashflowProjectSheet({
     };
     const startBoardEditing = () => {
       void beginCashflowEditing().then((started) => {
-        if (!started) return;
-        setBoardEditing(true);
+        if (started) setBoardEditing(true);
       });
     };
     const saveBoardDrafts = async () => {
@@ -1951,19 +1893,12 @@ export function CashflowProjectSheet({
         }
         return next;
       });
-      await loadCashflowSheetRangeWeeks();
-      await loadCashflowEvents();
+      await Promise.all([
+        loadCashflowSheetRangeWeeks(),
+        loadCashflowEvents(),
+        loadCashflowComparison(),
+      ]);
       setBoardEditing(false);
-    };
-    const saveBoardFinal = () => {
-      void saveBoardDrafts()
-        .then(() => toast.success('최종저장했습니다.'))
-        .catch(() => toast.error('최종저장에 실패했습니다. 입력값은 임시저장본에 유지됩니다.'));
-    };
-    const saveBoardTemporary = () => {
-      void savePrivateCashflowDraft()
-        .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
-        .catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')));
     };
     const settleWeek = (week: MonthMondayWeek) => {
       void (async () => {
@@ -1991,59 +1926,126 @@ export function CashflowProjectSheet({
           projectionDone: true,
           expenseDone: true,
         });
-      })().catch((error) => {
-        if (error instanceof Error && error.message === 'cashflow_audit_validation_failed') return;
-        toast.error('결산 확인에 실패했습니다.');
+      })().catch(() => toast.error('결산 확인에 실패했습니다.'));
+    };
+    const scrollBoard = (direction: -1 | 1) => {
+      const container = cashflowBoardScrollRef.current;
+      if (!container) return;
+      const weekColumn = container.querySelector<HTMLElement>('[data-cashflow-week-column="true"]');
+      const weekWidth = weekColumn?.getBoundingClientRect().width || 84;
+      container.scrollTo({
+        left: getSnappedWeekScrollLeft({
+          currentLeft: container.scrollLeft,
+          direction,
+          viewportWidth: container.clientWidth,
+          maxScrollLeft: container.scrollWidth - container.clientWidth,
+          weekWidth,
+        }),
+        behavior: 'smooth',
       });
     };
-    const renderLineRows = (
+    const renderModeLineRows = (
+      mode: 'projection' | 'actual',
       lineIds: CashflowSheetLineId[],
-      sectionTone: 'income' | 'expense',
-    ) => lineIds.flatMap((lineId) => {
-      const sectionLabelToneClass = sectionTone === 'income'
-        ? 'bg-emerald-50/80 border-l-[3px] border-l-emerald-400'
-        : 'bg-rose-50/80 border-l-[3px] border-l-rose-400';
-      const projectionRow = (
-        <tr key={`${lineId}-projection`} className="border-t border-white">
-          <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[8px] font-semibold leading-4 text-slate-900 ${sectionLabelToneClass}`}>
-            <div className="flex items-start">
-              <span>{renderCashflowLineLabel(CASHFLOW_SHEET_LINE_LABELS[lineId])}</span>
-            </div>
-          </td>
-          <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">
-            Projection
+      rowTone: 'income' | 'expense',
+    ) => lineIds.map((lineId) => {
+      const emphasized = lineId === 'MYSC_PREPAY_IN' || lineId.startsWith('MYSC_PREPAY_');
+      return (
+        <tr key={`${mode}-${lineId}`} data-cashflow-row="line" className="border-t border-white">
+          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-1.5 text-[9px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
+            {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
-            return renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
+            return mode === 'projection'
+              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek })
+              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
           })}
           {renderSummaryCell({
-            keyName: `${lineId}-range-total-projection`,
-            value: projection.rowTotals[lineId] || 0,
-            mode: 'projection',
+            keyName: `${mode}-${lineId}-range`,
+            value: derived[mode].rowTotals[lineId] || 0,
+            mode,
             stickyRight: true,
           })}
         </tr>
       );
-      const actualRow = (
-        <tr key={`${lineId}-actual`} className="border-t border-white">
-          <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-slate-100/80 px-1 py-1 text-[8px] font-semibold text-slate-500">
-            Actual
-          </td>
-          {visibleWeeks.map((week) => {
-            const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
-            return renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
-          })}
-          {renderSummaryCell({
-            keyName: `${lineId}-range-total-actual`,
-            value: actual.rowTotals[lineId] || 0,
-            mode: 'actual',
-            stickyRight: true,
-          })}
-        </tr>
-      );
-      return [projectionRow, actualRow];
     });
+    const renderSummaryRow = (
+      mode: 'projection' | 'actual',
+      kind: 'totalIn' | 'totalOut' | 'net',
+    ) => {
+      const isIncome = kind === 'totalIn';
+      const isExpense = kind === 'totalOut';
+      const label = isIncome ? '입금 합계' : isExpense ? '출금 합계' : mode === 'projection' ? '잔액 (※ 중요)' : '잔액';
+      const rowTone = isIncome ? 'income' : isExpense ? 'expense' : undefined;
+      const emphasis = isIncome ? 'income' : isExpense ? 'expense' : 'balance';
+      return (
+        <tr key={`${mode}-${kind}`} data-cashflow-row={kind} className={`border-t-[6px] border-white ${isIncome ? 'bg-emerald-50/80' : isExpense ? 'bg-rose-50/80' : 'bg-slate-100/90'}`}>
+          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[9px] font-bold ${isIncome ? 'bg-emerald-50 text-emerald-950' : isExpense ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>
+            {label}
+          </td>
+          {visibleWeeks.map((week, index) => renderSummaryCell({
+            keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
+            value: derived[mode].weekTotals[index]?.[kind] || 0,
+            mode,
+            isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+            emphasis,
+            rowTone,
+          }))}
+          {renderSummaryCell({
+            keyName: `${mode}-${kind}-range`,
+            value: derived[mode].monthTotals[kind],
+            mode,
+            emphasis,
+            stickyRight: true,
+            rowTone,
+          })}
+        </tr>
+      );
+    };
+    const renderModeTable = (mode: 'projection' | 'actual') => (
+      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + visibleWeeks.length * 84 + 84}px` }}>
+        <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+          <tr>
+            <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[11px] font-bold text-slate-800">
+              항목
+            </th>
+            {visibleWeeks.map((week) => {
+              const saveState = weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode, weekNo: week.weekNo })];
+              const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+              const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
+              return (
+                <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
+                  <div className="relative min-h-5">
+                    <span className="block truncate text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
+                    {mode === 'projection' && canEdit ? (
+                      <Button size="sm" variant="outline" className="absolute right-0 top-0 h-5 w-5 rounded-full border-0 bg-white/95 p-0 shadow-sm" onClick={() => settleWeek(week)} disabled={closeBusy} aria-label={`${week.label} 결산`} title={`${week.label} 결산`}>
+                        <CheckCircle2 className="h-3 w-3" />
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="truncate text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
+                  <Badge className={`mt-1 h-3.5 w-full justify-center rounded-full border-0 px-1 text-[7px] ${mode === 'projection' ? (doc?.projectionUpdated ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700') : (doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700')}`}>
+                    {mode === 'projection' ? (doc?.projectionUpdated ? 'Prj 작성' : 'Prj 미작성') : (doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? 'Act 작성' : 'Act 미작성')}
+                  </Badge>
+                  {saveState === 'dirty' ? <Badge className="mt-0.5 h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">미저장</Badge> : null}
+                </th>
+              );
+            })}
+            <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
+              범위 합계
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {renderModeLineRows(mode, CASHFLOW_IN_LINES, 'income')}
+          {renderSummaryRow(mode, 'totalIn')}
+          {renderModeLineRows(mode, CASHFLOW_OUT_LINES, 'expense')}
+          {renderSummaryRow(mode, 'totalOut')}
+          {renderSummaryRow(mode, 'net')}
+        </tbody>
+      </table>
+    );
 
     return (
       <Card className="overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -2051,283 +2053,47 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
-                <span>기준 범위 {cashflowTotalPeriodLabel} · 항목별 Projection 입력 / Actual 확인</span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
-                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><Pencil className="h-3 w-3" />전체 수정</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><Save className="h-3 w-3" />전체 저장</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><CheckCircle2 className="h-3 w-3" />주차별 결산</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]"><ChevronLeft className="h-3 w-3" /><ChevronRight className="h-3 w-3" />주차 이동</span>
-              </div>
+              <div className="mt-1 text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · Projection 입력 / Actual 조회</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={boardIsEditing ? 'default' : 'outline'}
-                className="h-8 rounded-full px-3 text-[11px] shadow-sm"
-                onClick={startBoardEditing}
-                disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}
-                title="수정"
-              >
+              <Button type="button" size="sm" variant={boardIsEditing ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px] shadow-sm" onClick={startBoardEditing} disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}>
                 {cashflowLease.busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
                 수정 시작
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
-                onClick={saveBoardTemporary}
-                disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
-              >
+              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => void savePrivateCashflowDraft().then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.')).catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')))} disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}>
                 <Save className="mr-1 h-3 w-3" />
                 임시저장
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
-                onClick={saveBoardFinal}
-                disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}
-              >
+              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => void saveBoardDrafts().then(() => toast.success('최종저장했습니다.')).catch(() => toast.error('최종저장에 실패했습니다. 입력값은 임시저장본에 유지됩니다.'))} disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}>
                 <CheckCircle2 className="mr-1 h-3 w-3" />
                 최종저장
               </Button>
-              {cashflowLease.canEdit && (
+              {cashflowLease.canEdit ? (
                 <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-[10px]" onClick={() => void cashflowLease.extend()} disabled={cashflowLease.busy}>
                   {cashflowLease.remainingLabel} · 30분 연장
                 </Button>
-              )}
-              <Badge variant="outline" className="rounded-full border-0 bg-white px-2.5 py-1 text-[10px] text-slate-600 shadow-sm">
-                {weekCount.toLocaleString()}주
-              </Badge>
+              ) : null}
             </div>
           </div>
-
           <div className="relative bg-slate-50/80 px-4 pb-4">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)] backdrop-blur"
-              onClick={() => scrollBoard(-1)}
-              aria-label="왼쪽 주차로 이동"
-              title="왼쪽 주차로 이동"
-            >
+            <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)] backdrop-blur"
-              onClick={() => scrollBoard(1)}
-              aria-label="오른쪽 주차로 이동"
-              title="오른쪽 주차로 이동"
-            >
+            <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
               <ChevronRight className="h-4 w-4" />
             </Button>
-          <div ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth rounded-[20px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
-            <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + weekCount * 84 + 84}px` }}>
-              <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
-                <tr>
-                  <th className="sticky left-0 z-50 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-white px-2 py-2 text-left text-[11px] font-bold text-slate-800">
-                    항목
-                  </th>
-                  <th className="sticky left-[132px] z-50 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800">
-                    구분
-                  </th>
-                  {visibleWeeks.map((week) => {
-                    const projectionWeekKey = resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo });
-                    const actualWeekKey = resolveWeekKey({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo });
-                    const projectionSaveState = weekSaveState[projectionWeekKey];
-                    const actualSaveState = weekSaveState[actualWeekKey];
-                    const isSavingWeek = projectionSaveState === 'saving' || actualSaveState === 'saving';
-                    const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
-                    const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
-                    return (
-                      <th key={`${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-left align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
-                        <div className="flex min-h-[72px] flex-col gap-0.5">
-                          <div className="relative min-h-5 leading-4">
-                            <span className="block truncate text-center text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
-                            {canEdit && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="absolute right-0 top-0 h-5 w-5 shrink-0 rounded-full border-0 bg-white/95 p-0 shadow-sm"
-                                onClick={() => settleWeek(week)}
-                                disabled={closeBusy}
-                                aria-label={`${week.label} 결산`}
-                                title={`${week.label} 결산`}
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
-                          <div className="truncate text-center text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
-                          <div className="grid gap-0.5">
-                            {doc?.projectionUpdated ? (
-                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-white px-1 text-[7px] text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">Prj 작성</Badge>
-                            ) : (
-                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Prj 미작성</Badge>
-                            )}
-                            {doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? (
-                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-white px-1 text-[7px] text-slate-700 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">Act 작성</Badge>
-                            ) : (
-                              <Badge className="h-3.5 w-full justify-center rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">Act 미작성</Badge>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-0.5">
-                          {projectionSaveState === 'dirty' && (
-                            <Badge className="h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">Prj 미저장</Badge>
-                          )}
-                          {actualSaveState === 'dirty' && (
-                            <Badge className="h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">Act 미저장</Badge>
-                          )}
-                          {isSavingWeek && (
-                            <Badge className="h-3.5 rounded-full border-0 bg-slate-200 px-1 text-[7px] text-slate-600">저장중</Badge>
-                          )}
-                          {(projectionSaveState === 'error' || actualSaveState === 'error') && (
-                            <Badge className="h-3.5 rounded-full border-0 bg-rose-100 px-1 text-[7px] text-rose-700">오류</Badge>
-                          )}
-                          </div>
-                        </div>
-                      </th>
-                    );
-                  })}
-                  <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left align-top text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
-                    범위 합계
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {renderLineRows(CASHFLOW_IN_LINES, 'income')}
-                <tr className="border-t-[6px] border-white bg-emerald-50/80">
-                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-emerald-50 px-2.5 py-1.5 text-[8px] font-bold text-emerald-950">입금 합계</td>
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-emerald-50 px-1 py-1 text-[8px] font-semibold text-emerald-900">Projection</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `total-in-${week.yearMonth}-${week.weekNo}-projection`,
-                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalIn || 0,
-                    mode: 'projection',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'income',
-                    rowTone: 'income',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'total-in-range-projection',
-                    value: projection.monthTotals.totalIn,
-                    mode: 'projection',
-                    emphasis: 'income',
-                    stickyRight: true,
-                    rowTone: 'income',
-                  })}
-                </tr>
-                <tr className="border-t border-white bg-emerald-50/50">
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-emerald-50/70 px-1 py-1 text-[8px] font-semibold text-emerald-900">Actual</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `total-in-${week.yearMonth}-${week.weekNo}-actual`,
-                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalIn || 0,
-                    mode: 'actual',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'income',
-                    rowTone: 'income',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'total-in-range-actual',
-                    value: actual.monthTotals.totalIn,
-                    mode: 'actual',
-                    emphasis: 'income',
-                    stickyRight: true,
-                    rowTone: 'income',
-                  })}
-                </tr>
-
-                {renderLineRows(CASHFLOW_OUT_LINES, 'expense')}
-                <tr className="border-t-[6px] border-white bg-rose-50/80">
-                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-rose-50 px-2.5 py-1.5 text-[8px] font-bold text-rose-950">출금 합계</td>
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-rose-50 px-1 py-1 text-[8px] font-semibold text-rose-900">Projection</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `total-out-${week.yearMonth}-${week.weekNo}-projection`,
-                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalOut || 0,
-                    mode: 'projection',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'expense',
-                    rowTone: 'expense',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'total-out-range-projection',
-                    value: projection.monthTotals.totalOut,
-                    mode: 'projection',
-                    emphasis: 'expense',
-                    stickyRight: true,
-                    rowTone: 'expense',
-                  })}
-                </tr>
-                <tr className="border-t border-white bg-rose-50/50">
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-rose-50/70 px-1 py-1 text-[8px] font-semibold text-rose-900">Actual</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `total-out-${week.yearMonth}-${week.weekNo}-actual`,
-                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.totalOut || 0,
-                    mode: 'actual',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'expense',
-                    rowTone: 'expense',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'total-out-range-actual',
-                    value: actual.monthTotals.totalOut,
-                    mode: 'actual',
-                    emphasis: 'expense',
-                    stickyRight: true,
-                    rowTone: 'expense',
-                  })}
-                </tr>
-
-                <tr className="border-t-[6px] border-white bg-slate-100/90">
-                  <td rowSpan={2} className="sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-slate-100 px-2.5 py-1.5 text-[8px] font-bold text-slate-950">잔액</td>
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">Projection</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `net-${week.yearMonth}-${week.weekNo}-projection`,
-                    value: projectionWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.net || 0,
-                    mode: 'projection',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'balance',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'net-range-projection',
-                    value: projection.monthTotals.net,
-                    mode: 'projection',
-                    emphasis: 'balance',
-                    stickyRight: true,
-                  })}
-                </tr>
-                <tr className="border-t border-white bg-slate-100/90">
-                  <td className="sticky left-[132px] z-10 w-[60px] min-w-[60px] border-r-[6px] border-r-white bg-slate-100 px-1 py-1 text-[8px] font-semibold text-slate-600">Actual</td>
-                  {visibleWeeks.map((week) => renderSummaryCell({
-                    keyName: `net-${week.yearMonth}-${week.weekNo}-actual`,
-                    value: actualWeeksByKey.get(`${week.yearMonth}:${week.weekNo}`)?.net || 0,
-                    mode: 'actual',
-                    isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
-                    emphasis: 'balance',
-                  }))}
-                  {renderSummaryCell({
-                    keyName: 'net-range-actual',
-                    value: actual.monthTotals.net,
-                    mode: 'actual',
-                    emphasis: 'balance',
-                    stickyRight: true,
-                  })}
-                </tr>
-              </tbody>
-            </table>
+            <div ref={cashflowBoardScrollRef} className="space-y-4 overflow-x-auto scroll-smooth rounded-[20px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
+              <section data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
+                <h3 className="sticky left-0 z-30 w-fit px-3 py-2 text-[14px] font-bold text-slate-950">Projection</h3>
+                {renderModeTable('projection')}
+              </section>
+              <section data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
+                <h3 className="sticky left-0 z-30 w-fit px-3 py-2 text-[14px] font-bold text-slate-950">ACTUAL</h3>
+                {renderModeTable('actual')}
+              </section>
+            </div>
           </div>
-          </div>
-          {isLoading && (
-            <div className="px-3 py-2 text-[11px] text-slate-500">불러오는 중...</div>
-          )}
+          {isLoading ? <div className="px-3 py-2 text-[11px] text-slate-500">불러오는 중...</div> : null}
         </CardContent>
       </Card>
     );
@@ -2716,130 +2482,80 @@ export function CashflowProjectSheet({
   }
 
   function renderProjectionActualDiffTable() {
-    const rows = differenceViewMode === 'diff' ? projectionActualDiff.changedRows : projectionActualDiff.rows;
-    const yearRows = differenceViewMode === 'diff' ? projectionActualYearDiff.changedRows : projectionActualYearDiff.rows;
+    const rows = differenceViewMode === 'diff'
+      ? projectionActualComparison.changedRows
+      : projectionActualComparison.rows;
+    if (cashflowComparisonLoading) {
+      return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
+    }
+    if (cashflowComparisonError || !cashflowSnapshot) {
+      return (
+        <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-3 py-6 text-center text-[12px] text-rose-700">
+          {cashflowComparisonError || 'Projection - Actual 차이를 불러오지 못했습니다.'}
+        </div>
+      );
+    }
     return (
       <Card className="overflow-hidden border-slate-200">
         <CardContent className="space-y-3 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[12px] font-semibold text-slate-950">
-                <HoverExplain
-                  message={
-                    <span>
-                      Projection은 계획값, Actual은 실적값입니다. 모든 차이는 Actual에서 Projection을 뺀 값으로 표시합니다.
-                    </span>
-                  }
-                >
-                  Projection / Actual 차이
+                <HoverExplain message="BFF가 확정 원장의 Projection에서 Actual을 뺀 값을 반환합니다. 프론트는 계산하지 않고 표시만 합니다.">
+                  Projection - Actual 차이
                 </HoverExplain>
               </div>
               <div className="text-[10px] text-slate-500">
-                기준 범위 {cashflowTotalPeriodLabel} ·{' '}
-                <HoverExplain
-                  message={
-                    <span>
-                      차이 = Actual - Projection. 입금은 실제가 계획보다 많으면 초록색, 적으면 빨간색입니다. 출금은 실제가 계획보다 적으면 초록색, 많으면 빨간색입니다.
-                    </span>
-                  }
-                >
-                  차이 = Actual - Projection
-                </HoverExplain>
+                BFF 기준일 {cashflowSnapshot.comparison.asOfDate} · 차이 = Projection - Actual
               </div>
             </div>
             <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                size="sm"
-                variant={differenceViewMode === 'diff' ? 'default' : 'outline'}
-                className="h-8 rounded-full px-3 text-[11px]"
-                onClick={() => setDifferenceViewMode('diff')}
-              >
+              <Button type="button" size="sm" variant={differenceViewMode === 'diff' ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px]" onClick={() => setDifferenceViewMode('diff')}>
                 차이만
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={differenceViewMode === 'all' ? 'default' : 'outline'}
-                className="h-8 rounded-full px-3 text-[11px]"
-                onClick={() => setDifferenceViewMode('all')}
-              >
+              <Button type="button" size="sm" variant={differenceViewMode === 'all' ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px]" onClick={() => setDifferenceViewMode('all')}>
                 전체
               </Button>
             </div>
           </div>
-
-          <div className="grid gap-2 sm:grid-cols-4">
-            <DiffMetricCard
-              label="입금 차이"
-              value={fmtSigned(projectionActualYearDiff.incomeDiff)}
-              className={projectionActualYearDiff.incomeDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-emerald-700'}
-              message="기준 범위 전체의 입금 Actual - Projection 합계입니다. +는 Actual 입금이 Projection보다 큼, -는 Actual 입금이 Projection보다 작음을 의미합니다."
-            />
-            <DiffMetricCard
-              label="출금 차이"
-              value={fmtSigned(projectionActualYearDiff.expenseDiff)}
-              className={projectionActualYearDiff.expenseDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-rose-700'}
-              message="기준 범위 전체의 출금 Actual - Projection 합계입니다. +는 Actual 출금이 Projection보다 큼, -는 Actual 출금이 Projection보다 작음을 의미합니다."
-            />
-            <DiffMetricCard
-              label="순차이"
-              value={fmtSigned(projectionActualYearDiff.netDiff)}
-              className={projectionActualYearDiff.netDiff === 0 ? 'text-[13px] font-semibold text-slate-700' : 'text-[13px] font-semibold text-slate-950'}
-              message="입금 차이에서 출금 차이를 뺀 값입니다. +는 Actual 순잔액이 Projection보다 큼, -는 Actual 순잔액이 Projection보다 작음을 의미합니다."
-            />
-            <DiffMetricCard
-              label="차이 셀"
-              value={`${projectionActualYearDiff.changedCellCount.toLocaleString()}건`}
-              className="text-[13px] font-semibold text-slate-950"
-              message="Projection과 Actual이 서로 다른 주차별 항목 셀 개수입니다. 차이만 보기에서는 이 셀들이 있는 행만 남깁니다."
-            />
-          </div>
-
           <div className="overflow-x-auto rounded-[18px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
             <table className="border-separate border-spacing-0 text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
               <thead className="bg-white text-slate-500">
                 <tr>
-                  <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">
-                    항목
-                  </th>
+                  <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
                   {annualWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
-                      {formatShortWeekRange(week) ? (
-                        <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div>
-                      ) : null}
+                      {formatShortWeekRange(week) ? <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div> : null}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {yearRows.length === 0 ? (
+                {rows.length === 0 ? (
                   <tr>
                     <td colSpan={annualWeeks.length + 1} className="px-3 py-8 text-center text-[12px] text-slate-500">
                       Projection과 Actual 차이가 없습니다.
                     </td>
                   </tr>
-                ) : yearRows.map((row) => (
+                ) : rows.map((row) => (
                   <tr key={row.lineId} className="border-t-[6px] border-white">
                     <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${row.section === '입금' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'}`}>
-                      <div className="truncate text-slate-900">
-                        {row.label}
-                      </div>
+                      <div className="truncate text-slate-900">{row.label}</div>
                     </td>
                     {row.cells.map((cell) => {
-                      const diffClass = cell.diff === 0
+                      const differenceClass = cell.difference === null || cell.difference === 0
                         ? 'text-slate-300'
-                        : row.section === '입금'
-                          ? cell.diff > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                          : cell.diff > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700';
+                        : cell.difference > 0
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'bg-rose-50 text-rose-700';
                       return (
                         <td
                           key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
-                          className={`min-w-[96px] cursor-pointer border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${diffClass}`}
-                          title={`${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.diff)}\n${diffColorExplanation(row.section, cell.diff)}`}
+                          className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
+                          title={cell.difference === null ? `${cell.weekRange}\nBFF 비교 대상 기간 아님` : `${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}\n${diffColorExplanation(row.section, cell.difference)}`}
                         >
-                          {fmtSigned(cell.diff)}
+                          {cell.difference === null ? '-' : fmtSigned(cell.difference)}
                         </td>
                       );
                     })}
@@ -2848,52 +2564,6 @@ export function CashflowProjectSheet({
               </tbody>
             </table>
           </div>
-
-          {rows.length === 0 ? (
-            <div className="border border-slate-200 bg-slate-50 px-3 py-8 text-center text-[12px] text-slate-500">
-              Projection과 Actual 차이가 없습니다.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-[11px]">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">항목</th>
-                    <th className="px-3 py-2 text-left font-medium">주차</th>
-                    <th className="px-3 py-2 text-right font-medium">Projection</th>
-                    <th className="px-3 py-2 text-right font-medium">Actual</th>
-                    <th className="px-3 py-2 text-right font-medium">차이</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => {
-                    const diffClass = row.diff === 0
-                      ? 'text-slate-400'
-                      : row.section === '입금'
-                        ? row.diff > 0 ? 'text-emerald-700' : 'text-rose-700'
-                        : row.diff > 0 ? 'text-rose-700' : 'text-emerald-700';
-                    return (
-                      <tr key={`${row.section}-${row.lineId}-${row.weekNo}`} className={row.diff === 0 ? 'border-t border-slate-100 text-slate-400' : 'border-t border-slate-100'}>
-                        <td className={`px-3 py-2 text-slate-900 ${row.section === '입금' ? 'border-l-2 border-l-emerald-400 bg-emerald-50/70' : 'border-l-2 border-l-rose-400 bg-rose-50/70'}`}>{row.label}</td>
-                        <td className="px-3 py-2 text-slate-600">
-                          <div className="font-medium text-slate-800">{row.weekLabel}</div>
-                          <div className="text-[10px] text-slate-500">{row.weekRange}</div>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmt(row.projection)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmt(row.actual)}</td>
-                        <td
-                          className={`cursor-pointer px-3 py-2 text-right font-semibold tabular-nums ${diffClass}`}
-                          title={`Projection ${fmt(row.projection)} / Actual ${fmt(row.actual)} / 차이 ${fmtSigned(row.diff)}\n${diffColorExplanation(row.section, row.diff)}`}
-                        >
-                          {fmtSigned(row.diff)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </CardContent>
       </Card>
     );
@@ -3487,24 +3157,24 @@ export function CashflowProjectSheet({
 
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-        {renderOperationsPanel()}
-        {renderOpsTimeline()}
-      </section>
-
-      {renderUnifiedMonthlyBoard()}
-
-      <section className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+      <section data-cashflow-block="comparison" className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
             <Columns2 className="h-4 w-4 text-slate-600" />
           </span>
           <div>
-            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection / Actual 차이</div>
+            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection - Actual 차이</div>
             <div className="text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
           </div>
         </div>
         {renderProjectionActualDiffTable()}
+      </section>
+
+      {renderUnifiedMonthlyBoard()}
+
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {renderOperationsPanel()}
+        {renderOpsTimeline()}
       </section>
 
       <AlertDialog
@@ -3519,95 +3189,44 @@ export function CashflowProjectSheet({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="space-y-4">
-            <div className="grid rounded-[12px] border border-slate-200 bg-slate-100 p-1 sm:grid-cols-2" role="tablist" aria-label="검토 방향">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sheetReviewDirection === 'sheet-to-cashflow'}
-                title="마지막으로 고정한 Google Sheet 값을 팝업에서 비교합니다."
-                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                onClick={() => setSheetReviewDirection('sheet-to-cashflow')}
-              >
-                <ArrowDownToLine className="h-4 w-4" />
-                시트에서 가져오기
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={sheetReviewDirection === 'cashflow-to-sheet'}
-                title="캐시플로우 Projection을 Google Sheet에 쓰기 전 차이를 미리 봅니다."
-                className={`flex items-center justify-center gap-2 rounded-[9px] px-3 py-2 text-[12px] font-bold transition hover:-translate-y-0.5 ${sheetReviewDirection === 'cashflow-to-sheet' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                onClick={() => setSheetReviewDirection('cashflow-to-sheet')}
-              >
-                <ArrowUpFromLine className="h-4 w-4" />
-                시트로 내보내기
-              </button>
+          <div className="space-y-4 rounded-[16px] border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[13px] font-bold text-slate-950">
+                  <ArrowDownToLine className="h-4 w-4 text-blue-600" />
+                  시트에서 가져오기
+                </div>
+                <div className="mt-1 text-[11px] leading-5 text-slate-600">
+                  마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.
+                </div>
+              </div>
+              <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                {sheetMirrorStatus}
+              </Badge>
             </div>
-
-            <div className="rounded-[16px] border border-slate-200 bg-white p-4 transition-all duration-300">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-[13px] font-bold text-slate-950">
-                    {sheetReviewDirection === 'sheet-to-cashflow' ? (
-                      <>
-                        <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-                        시트에서 바뀐 값을 확인합니다
-                      </>
-                    ) : (
-                      <>
-                        <Database className="h-4 w-4 text-slate-700" />
-                        캐시플로우 Projection을 시트에 쓰기 전 확인합니다
-                      </>
-                    )}
+            <div className="flex items-start gap-2 rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-5 text-blue-900">
+              <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <div>현재 선택: {sheetMirrorCapturedAt || '최근'} 고정본을 원장 값과 나란히 확인합니다.</div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {[
+                ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
+                ['2', '값 비교', '원장과 다른 셀을 모두 보여줍니다.'],
+                ['3', '검토 후 저장', '팝업에서 확정하면 원장에 저장합니다.'],
+              ].map(([step, title, detail]) => (
+                <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{step}</span>
+                    <span className="text-[11px] font-bold text-slate-900">{title}</span>
                   </div>
-                  <div className="mt-1 text-[11px] leading-5 text-slate-600">
-                    {sheetReviewDirection === 'sheet-to-cashflow'
-                      ? '마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
-                      : '캐시플로우 화면의 Projection 값을 Google Sheet에 쓰기 전 셀 단위 차이를 확인합니다. Actual은 이 방향에서 수정하지 않습니다.'}
-                  </div>
+                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{detail}</div>
                 </div>
-                <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                  {sheetMirrorStatus}
-                </Badge>
-              </div>
-
-              <div className={`mt-3 flex items-start gap-2 rounded-[12px] border px-3 py-2 text-[11px] leading-5 ${sheetReviewDirection === 'sheet-to-cashflow' ? 'border-blue-100 bg-blue-50 text-blue-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${sheetReviewDirection === 'sheet-to-cashflow' ? 'bg-blue-500 motion-safe:animate-pulse' : 'bg-slate-500'}`} aria-hidden="true" />
-                <div>
-                  {sheetReviewDirection === 'sheet-to-cashflow'
-                    ? `현재 선택: ${sheetMirrorCapturedAt || '최근'} 고정본을 원장 값과 나란히 확인합니다.`
-                    : '현재 선택: 캐시플로우 Projection을 시트에 쓸 값으로 비교합니다. Actual은 이 방향에서 쓰지 않습니다.'}
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                {(sheetReviewDirection === 'sheet-to-cashflow'
-                  ? [
-                        ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
-                        ['2', '값 비교', '원장과 다른 셀을 모두 보여줍니다.'],
-                        ['3', '검토 후 저장', '팝업에서 확정하면 원장에 저장합니다.'],
-                    ]
-                  : [
-                      ['1', 'Projection 비교', '현재 시트 값과 캐시플로우 값을 비교합니다.'],
-                      ['2', '쓰기 후보 확인', '시트에 쓸 셀만 검토합니다.'],
-                      ['3', 'Actual 제외', 'Actual 값은 Google Sheet 입력만 기준으로 둡니다.'],
-                    ]).map(([step, title, detail]) => (
-                  <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5 hover:bg-white">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{step}</span>
-                      <span className="text-[11px] font-bold text-slate-900">{title}</span>
-                    </div>
-                    <div className="mt-1 text-[10px] leading-4 text-slate-500">{detail}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className={`mt-4 rounded-[12px] border px-3 py-2 text-[11px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-                {cashflowSheetConfig
-                  ? `${sheetIdentityLabel} · ${sheetRangeLabel}`
-                  : '먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.'}
-              </div>
+              ))}
+            </div>
+            <div className={`rounded-[12px] border px-3 py-2 text-[11px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+              {cashflowSheetConfig
+                ? `${sheetIdentityLabel} · ${sheetRangeLabel}`
+                : '먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.'}
             </div>
           </div>
 
@@ -3617,14 +3236,10 @@ export function CashflowProjectSheet({
               <AlertDialogAction onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}>
                 시트 연동 설정
               </AlertDialogAction>
-            ) : sheetReviewDirection === 'sheet-to-cashflow' ? (
+            ) : (
               <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'} className="transition-transform hover:-translate-y-0.5">
                 {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                 고정값 비교하기
-              </AlertDialogAction>
-            ) : (
-              <AlertDialogAction onClick={handleStartProjectionSheetWrite} className="transition-transform hover:-translate-y-0.5">
-                시트에 쓸 값 미리보기
               </AlertDialogAction>
             )}
           </AlertDialogFooter>
