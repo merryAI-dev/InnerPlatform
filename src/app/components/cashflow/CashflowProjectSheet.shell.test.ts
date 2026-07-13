@@ -47,6 +47,13 @@ describe('CashflowProjectSheet actual sync flow', () => {
     expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
   });
 
+  it('saves the private draft and releases the lease before a blocked in-app exit', () => {
+    expect(cashflowProjectSheetSource).toContain('임시저장 후 나가기');
+    expect(cashflowProjectSheetSource).toContain('await savePrivateCashflowDraft();');
+    expect(cashflowProjectSheetSource).toContain('await cashflowLease.release();');
+    expect(cashflowProjectSheetSource).toContain('blocker.proceed?.();');
+  });
+
   it('removes projection/actual copy buttons while keeping canonical week saves', () => {
     expect(cashflowProjectSheetSource).not.toContain('copyMonthValues');
     expect(cashflowProjectSheetSource).not.toContain('setCopyingMode(direction)');

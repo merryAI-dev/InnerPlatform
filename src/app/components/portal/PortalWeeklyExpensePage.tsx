@@ -387,8 +387,8 @@ export function PortalWeeklyExpensePage() {
       toast.error(resolveApiErrorMessage(error, '임시저장본을 복구하지 못했습니다.'));
     });
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateWeeklyPrivateDraft]);
-  const beginWeeklyEditing = useCallback(async () => {
-    const ownership = await cashflowLease.acquire();
+  const beginWeeklyEditing = useCallback(async (resumePrevious = false) => {
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return;
     try {
       await hydrateWeeklyPrivateDraft(ownership);
@@ -396,7 +396,7 @@ export function PortalWeeklyExpensePage() {
       await cashflowLease.release();
       toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
     }
-  }, [cashflowLease.acquire, cashflowLease.release, hydrateWeeklyPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, hydrateWeeklyPrivateDraft]);
   const deriveRowsWithLocalKernel = useCallback(async (
     rows: ImportRow[],
     context: Parameters<typeof deriveSettlementRowsLocally>[1],
@@ -1090,6 +1090,7 @@ export function PortalWeeklyExpensePage() {
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginWeeklyEditing(); }}
+        onTakeover={() => { void beginWeeklyEditing(true); }}
       />
 
     </div>

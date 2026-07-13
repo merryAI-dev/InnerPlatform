@@ -101,7 +101,6 @@ import {
   CommandSeparator,
 } from '../ui/command';
 import { cn } from '../ui/utils';
-import { usePortalNavigationGuard } from '../portal/PortalLayout';
 
 type ProjectEditorStep = 'basic' | 'financial' | 'team' | 'payment' | 'review';
 
@@ -143,7 +142,8 @@ interface ProjectEditorWizardProps {
     onSave?: (draft: ProjectEditorDraft, stepIndex: number) => void | Promise<void>;
     onDiscard?: () => void | Promise<void>;
   };
-  onCancel?: () => void;
+  onCancel?: () => void | Promise<void>;
+  onLeave?: () => void | Promise<void>;
   onSubmit: (draft: ProjectEditorDraft, actionId: string) => void | Promise<void>;
 }
 
@@ -461,6 +461,7 @@ export function ProjectEditorWizard({
   canRemoveProjectDocuments = true,
   autosave,
   onCancel,
+  onLeave,
   onSubmit,
 }: ProjectEditorWizardProps) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -484,7 +485,8 @@ export function ProjectEditorWizard({
   const proposalUploadInputRef = useRef<HTMLInputElement | null>(null);
   const retryDocumentFileRef = useRef<Partial<Record<ProjectRequestDocumentKind, File>>>({});
   const submitInFlightRef = useRef(false);
-  const portalNavigationConfirmedRef = useRef(false);
+  const exitInFlightRef = useRef(false);
+  const leaveApprovedRef = useRef(false);
   const draftRef = useRef(draft);
   const lastPersistedFingerprintRef = useRef(JSON.stringify(createProjectEditorDraft(initialDraft)));
   const lastResetKeyRef = useRef<string | null>(null);
@@ -504,20 +506,16 @@ export function ProjectEditorWizard({
     initial: initialContractDocument,
     canRemoveExistingContractDocument,
   });
-  const { registerNavigationHandler } = usePortalNavigationGuard();
   const currentDraftFingerprint = JSON.stringify(createProjectEditorDraft(draft));
   const uploadInProgress = Object.values(documentUploadState).some((state) => state === 'extracting');
   const hasPendingRetryFile = PROJECT_DOCUMENT_KINDS.some((kind) => Boolean(retryDocumentFileRef.current[kind]));
   const hasUnsavedInput = currentDraftFingerprint !== lastPersistedFingerprintRef.current;
   const shouldBlockNavigation = hasUnsavedInput || uploadInProgress || hasPendingRetryFile;
-  const blocker = useBlocker(shouldBlockNavigation);
-  const requestCancel = () => {
-    if (shouldBlockNavigation && typeof window !== 'undefined') {
-      if (!window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?')) return;
-      portalNavigationConfirmedRef.current = true;
-    }
-    onCancel?.();
-  };
+  const shouldConfirmExit = shouldBlockNavigation || (Boolean(onLeave) && !readOnly);
+  const exitPrompt = shouldBlockNavigation
+    ? '임시저장 후 수정 세션을 종료하고 나갈까요?'
+    : '수정 세션을 종료하고 나갈까요?';
+  const blocker = useBlocker(shouldConfirmExit);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -546,39 +544,6 @@ export function ProjectEditorWizard({
     setPreloadWarningVisible(false);
     setRestoreCandidate(autosave?.key ? readStoredProjectEditorDraft(autosave.key) : null);
   }, [autosave?.key, draftKey, initialDraft, initialDraftFingerprint]);
-
-  useEffect(() => {
-    if (!shouldBlockNavigation || typeof window === 'undefined') {
-      registerNavigationHandler(null);
-      return () => registerNavigationHandler(null);
-    }
-    const confirmLeave = () => {
-      const blocked = !window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?');
-      if (!blocked) portalNavigationConfirmedRef.current = true;
-      return blocked;
-    };
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    registerNavigationHandler(confirmLeave);
-    window.addEventListener('beforeunload', beforeUnload);
-    return () => {
-      registerNavigationHandler(null);
-      window.removeEventListener('beforeunload', beforeUnload);
-    };
-  }, [registerNavigationHandler, shouldBlockNavigation]);
-
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    if (portalNavigationConfirmedRef.current) {
-      portalNavigationConfirmedRef.current = false;
-      blocker.proceed();
-      return;
-    }
-    if (window.confirm('아직 저장되지 않은 입력 또는 업로드가 있습니다. 이 화면을 나갈까요?')) blocker.proceed();
-    else blocker.reset();
-  }, [blocker]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -615,6 +580,72 @@ export function ProjectEditorWizard({
       return false;
     }
   }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, readOnly]);
+
+  const saveDraftAndRelease = useCallback(async () => {
+    if (uploadInProgress || hasPendingRetryFile) {
+      toast.error('첨부파일 업로드를 완료한 뒤 나갈 수 있습니다.');
+      return false;
+    }
+    if (hasUnsavedInput && autosave?.key && !autosave.disabled && !readOnly) {
+      if (!await persistAutosaveSnapshot(draft, stepIndex)) {
+        toast.error('임시저장에 실패해 수정 세션을 종료하지 않았습니다.');
+        return false;
+      }
+    }
+    try {
+      await onLeave?.();
+      return true;
+    } catch (error) {
+      console.error('[ProjectEditorWizard] edit session release failed:', error);
+      toast.error('수정 세션을 종료하지 못했습니다. 현재 화면에서 다시 시도해 주세요.');
+      return false;
+    }
+  }, [autosave?.disabled, autosave?.key, draft, hasPendingRetryFile, hasUnsavedInput, onLeave, persistAutosaveSnapshot, readOnly, stepIndex, uploadInProgress]);
+
+  const requestCancel = () => {
+    if (exitInFlightRef.current) return;
+    if (shouldConfirmExit && typeof window !== 'undefined' && !window.confirm(exitPrompt)) return;
+    exitInFlightRef.current = true;
+    void (async () => {
+      try {
+        if (!await saveDraftAndRelease()) return;
+        leaveApprovedRef.current = true;
+        await onCancel?.();
+      } finally {
+        exitInFlightRef.current = false;
+      }
+    })();
+  };
+
+  useEffect(() => {
+    if (!shouldConfirmExit || typeof window === 'undefined') return undefined;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [shouldConfirmExit]);
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    if (leaveApprovedRef.current) {
+      leaveApprovedRef.current = false;
+      blocker.proceed();
+      return;
+    }
+    if (exitInFlightRef.current) return;
+    if (!window.confirm(exitPrompt)) {
+      blocker.reset();
+      return;
+    }
+    exitInFlightRef.current = true;
+    void saveDraftAndRelease().then((canLeave) => {
+      exitInFlightRef.current = false;
+      if (canLeave) blocker.proceed();
+      else blocker.reset();
+    });
+  }, [blocker, exitPrompt, saveDraftAndRelease]);
 
   useEffect(() => {
     if (readOnly || !autosave?.key || autosave.disabled || restoreCandidate) return undefined;

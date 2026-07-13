@@ -36,6 +36,10 @@ import { EditLeaseDialogs } from '../../components/editing/EditLeaseDialogs';
 import { useCashflowEditLease } from '../../components/cashflow/useCashflowEditLease';
 import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
 import type { CashflowMutationLease } from '../../lib/cashflow-edit-lease';
+import {
+  createPrivateDraftMutationQueue,
+  saveSheetLabDraftWithRecovery,
+} from './cashflow-private-draft-recovery';
 
 function formatAmount(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -64,8 +68,8 @@ function formatError(error: unknown) {
 }
 
 function getErrorCode(error: unknown) {
-  const apiError = error as { body?: { code?: string; error?: string } };
-  return apiError?.body?.code || apiError?.body?.error || '';
+  const apiError = error as { code?: string; body?: { code?: string; error?: string } };
+  return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
 }
 
 function logCashflowLab(event: string, details: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
@@ -310,11 +314,12 @@ export function CashflowSheetLabPage({
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
-  const [privateDraftRevision, setPrivateDraftRevision] = useState<number | null>(null);
-  const [privateDraftPayload, setPrivateDraftPayload] = useState<Record<string, unknown>>({});
   const previewRequestRef = useRef(0);
   const loadedPrivateDraftKeyRef = useRef('');
   const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const privateDraftRevisionRef = useRef<number | null>(null);
+  const privateDraftPayloadRef = useRef<Record<string, unknown>>({});
+  const privateDraftMutationQueueRef = useRef(createPrivateDraftMutationQueue());
 
   const projectId = projectIdInput.trim();
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
@@ -370,8 +375,8 @@ export function CashflowSheetLabPage({
         baseSnapshot: { savedConfig: savedConfig || {} },
         payload: { sheetLab: { value: sheetLink, sheetName, startWeek, endWeek } },
       });
-      setPrivateDraftRevision(opened.draft.draftRevision);
-      setPrivateDraftPayload(opened.draft.payload);
+      privateDraftRevisionRef.current = opened.draft.draftRevision;
+      privateDraftPayloadRef.current = opened.draft.payload;
       const sheetLab = opened.draft.payload.sheetLab;
       if (sheetLab && typeof sheetLab === 'object' && !Array.isArray(sheetLab)) {
         const draft = sheetLab as Record<string, unknown>;
@@ -400,16 +405,17 @@ export function CashflowSheetLabPage({
   useEffect(() => {
     loadedPrivateDraftKeyRef.current = '';
     privateDraftLoadRef.current = null;
-    setPrivateDraftRevision(null);
-    setPrivateDraftPayload({});
+    privateDraftRevisionRef.current = null;
+    privateDraftPayloadRef.current = {};
+    privateDraftMutationQueueRef.current = createPrivateDraftMutationQueue();
   }, [projectId]);
   useEffect(() => {
     if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
     void hydrateSheetPrivateDraft(cashflowLease.ownership).catch((error) => setErrorMessage(formatError(error)));
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateSheetPrivateDraft]);
-  const beginSheetEditing = useCallback(async () => {
+  const beginSheetEditing = useCallback(async (resumePrevious = false) => {
     if (!cashflowPrivateDraftClient) return null;
-    const ownership = await cashflowLease.acquire();
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return null;
     try {
       await hydrateSheetPrivateDraft(ownership);
@@ -419,7 +425,7 @@ export function CashflowSheetLabPage({
       setErrorMessage(formatError(error));
       return null;
     }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowPrivateDraftClient, hydrateSheetPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateSheetPrivateDraft]);
   const requestLoginFlow = useCallback(async () => {
     logCashflowLab('auth.popup.start', {
       projectId,
@@ -606,27 +612,31 @@ export function CashflowSheetLabPage({
     setStageResult(null);
     setReflectResult(null);
     try {
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      let revision = privateDraftRevision;
-      let payload = privateDraftPayload;
-      if (revision === null) {
-        const opened = await cashflowPrivateDraftClient.open(mutationLease, {
-          baseSnapshot: { savedConfig: savedConfig || {} },
-          payload: {},
+      const saved = await privateDraftMutationQueueRef.current(async () => {
+        const mutationLease = await cashflowLease.checkBeforeMutation();
+        let revision = privateDraftRevisionRef.current;
+        let payload = privateDraftPayloadRef.current;
+        if (revision === null) {
+          const opened = await cashflowPrivateDraftClient.open(mutationLease, {
+            baseSnapshot: { savedConfig: savedConfig || {} },
+            payload: {},
+          });
+          revision = opened.draft.draftRevision;
+          payload = opened.draft.payload;
+        }
+        const savedDraft = await saveSheetLabDraftWithRecovery({
+          client: cashflowPrivateDraftClient,
+          ownership: mutationLease,
+          expectedDraftRevision: revision,
+          payload: {
+            ...payload,
+            sheetLab: { value: sheetLink, sheetName, startWeek, endWeek },
+          },
         });
-        revision = opened.draft.draftRevision;
-        payload = opened.draft.payload;
-      }
-      const nextPayload = {
-        ...payload,
-        sheetLab: { value: sheetLink, sheetName, startWeek, endWeek },
-      };
-      const saved = await cashflowPrivateDraftClient.save(mutationLease, {
-        expectedDraftRevision: revision,
-        payload: nextPayload,
+        privateDraftRevisionRef.current = savedDraft.draft.draftRevision;
+        privateDraftPayloadRef.current = savedDraft.draft.payload;
+        return savedDraft;
       });
-      setPrivateDraftRevision(saved.draft.draftRevision);
-      setPrivateDraftPayload(saved.draft.payload);
       setSavedConfig((current) => ({
         ...(current || {}),
         value: sheetLink,
@@ -803,11 +813,11 @@ export function CashflowSheetLabPage({
         lastAppliedAt: result.lastAppliedAt,
       });
       setApplyDialogOpen(false);
-      if (cashflowPrivateDraftClient && privateDraftRevision !== null && finalMutationLease) {
+      if (cashflowPrivateDraftClient && privateDraftRevisionRef.current !== null && finalMutationLease) {
         await cashflowPrivateDraftClient.complete(finalMutationLease, {
-          expectedDraftRevision: privateDraftRevision,
+          expectedDraftRevision: privateDraftRevisionRef.current,
         });
-        setPrivateDraftRevision(null);
+        privateDraftRevisionRef.current = null;
       }
       await cashflowLease.checkStatus();
       setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 MYSCube에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
@@ -1264,6 +1274,7 @@ export function CashflowSheetLabPage({
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginSheetEditing(); }}
+        onTakeover={() => { void beginSheetEditing(true); }}
       />
     </div>
   );

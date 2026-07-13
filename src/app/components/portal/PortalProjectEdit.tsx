@@ -346,6 +346,9 @@ function ProjectInfoEditor({
           return { contractDocument: uploaded.document, contractAnalysis: uploaded.contractAnalysis };
         }}
         onProjectDocumentFileUpload={({ kind, file }) => uploadDocument(kind, file)}
+        onLeave={async () => {
+          if (!await lease.release()) throw new Error('edit lease release failed');
+        }}
         onCancel={() => navigate('/portal/project-select')}
         onSubmit={handleSubmit}
       />
@@ -359,6 +362,7 @@ function ProjectInfoEditor({
         onExtend={() => { void lease.extend(); }}
         onContinueReadOnly={lease.continueReadOnly}
         onReacquire={() => { void startEditing(); }}
+        onTakeover={() => { void lease.takeover(); }}
       />
       <AlertDialog open={saveSuccessDialogOpen} onOpenChange={setSaveSuccessDialogOpen}>
         <AlertDialogContent className="max-w-md border border-slate-200 bg-white">

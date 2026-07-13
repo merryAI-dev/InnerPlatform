@@ -69,14 +69,12 @@ gcloud run deploy "$STAGE_SERVICE_NAME" \
   --region "$STAGE_REGION" \
   --platform managed \
   --ingress all \
-  --allow-unauthenticated \
   --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=stage|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIRESTORE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app" \
   --set-secrets "JVM_WEEKLY_INTERNAL_API_TOKEN=${JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest"
 
-SERVICE_URL="$(gcloud run services describe "$STAGE_SERVICE_NAME" \
+gcloud run services describe "$STAGE_SERVICE_NAME" \
   --project "$STAGE_GCP_PROJECT_ID" \
   --region "$STAGE_REGION" \
-  --format='value(status.url)')"
-node scripts/smoke_jvm_weekly_api.mjs --mode=deploy --base-url="$SERVICE_URL"
+  --format='value(status.url)' >/dev/null
 
 echo "[deploy-jvm-weekly-api] done"

@@ -46,6 +46,7 @@ function mockClient(overrides: Partial<EditLeaseClient> = {}) {
   return {
     getStatus: vi.fn(async (): Promise<EditLeaseStatus> => OWNED),
     acquire: vi.fn(async () => OWNED),
+    takeover: vi.fn(async () => OWNED),
     extend: vi.fn(async () => OWNED),
     release: vi.fn(async () => ({
       serverNow: '2026-07-10T00:01:00.000Z',
@@ -175,6 +176,34 @@ describe('createEditLeaseController', () => {
     });
   });
 
+  it('does not reopen a held dialog after the user chooses read-only mode', async () => {
+    const windowTarget = new FakeEventTarget();
+    const documentTarget = new FakeDocumentTarget();
+    const held: EditLeaseStatus = {
+      serverNow: '2026-07-10T00:00:00.000Z',
+      state: 'ACTIVE',
+      canEdit: false,
+      expiresAt: OWNED.expiresAt,
+      holderDisplayName: '변민욱(보람)',
+      sameActor: true,
+    };
+    const client = mockClient({ getStatus: vi.fn(async () => held) });
+    const controller = createEditLeaseController({ client, windowTarget, documentTarget });
+    controller.start();
+
+    await controller.checkStatus();
+    expect(controller.getState()).toMatchObject({ mode: 'held', conflictOpen: true });
+
+    controller.continueReadOnly();
+    windowTarget.dispatch('focus');
+    windowTarget.dispatch('pageshow');
+    documentTarget.dispatch('visibilitychange');
+    await flush();
+
+    expect(controller.getState()).toMatchObject({ mode: 'read-only', conflictOpen: false, canEdit: false });
+    controller.dispose();
+  });
+
   it('exposes a pre-save status check and never releases on unload or dispose', async () => {
     const windowTarget = new FakeEventTarget();
     const client = mockClient();
@@ -192,5 +221,18 @@ describe('createEditLeaseController', () => {
     expect(client.release).not.toHaveBeenCalled();
     expect(windowTarget.listeners.has('beforeunload')).toBe(false);
     expect(windowTarget.listeners.has('unload')).toBe(false);
+  });
+
+  it('reports whether a manual release reached the server', async () => {
+    const releasedController = createEditLeaseController({ client: mockClient() });
+    await releasedController.acquire();
+    await expect(releasedController.release()).resolves.toBe(true);
+
+    const failedController = createEditLeaseController({
+      client: mockClient({ release: vi.fn(async () => { throw new Error('network unavailable'); }) }),
+    });
+    await failedController.acquire();
+    await expect(failedController.release()).resolves.toBe(false);
+    expect(failedController.getState()).toMatchObject({ mode: 'error', canEdit: false });
   });
 });

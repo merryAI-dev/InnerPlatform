@@ -501,6 +501,7 @@ export function CashflowProjectSheet({
 
   const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
   const [projectionCompleteWeek, setProjectionCompleteWeek] = useState<number | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeDialog, setCloseDialog] = useState<{
@@ -585,9 +586,9 @@ export function CashflowProjectSheet({
     });
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateCashflowPrivateDraft]);
 
-  const beginCashflowEditing = useCallback(async (): Promise<boolean> => {
+  const beginCashflowEditing = useCallback(async (resumePrevious = false): Promise<boolean> => {
     if (!cashflowPrivateDraftClient) return false;
-    const ownership = await cashflowLease.acquire();
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return false;
     try {
       await hydrateCashflowPrivateDraft(ownership);
@@ -597,7 +598,7 @@ export function CashflowProjectSheet({
       toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
       return false;
     }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
 
   const savePrivateCashflowDraft = useCallback(async (): Promise<void> => {
     if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
@@ -625,6 +626,20 @@ export function CashflowProjectSheet({
     weekSaveState,
     yearMonth,
   ]);
+
+  const savePrivateDraftAndLeave = useCallback(async (): Promise<void> => {
+    if (blocker.state !== 'blocked') return;
+    setExitBusy(true);
+    try {
+      await savePrivateCashflowDraft();
+      await cashflowLease.release();
+      blocker.proceed?.();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '임시저장 후 이동하지 못했습니다. 현재 화면에서 다시 시도해 주세요.'));
+    } finally {
+      setExitBusy(false);
+    }
+  }, [blocker, cashflowLease.release, savePrivateCashflowDraft]);
 
   const completePrivateCashflowDraft = useCallback(async (mutationLease: CashflowMutationLease): Promise<void> => {
     if (!cashflowPrivateDraftClient || privateDraftRevision === null) return;
@@ -3650,7 +3665,7 @@ export function CashflowProjectSheet({
       <AlertDialog
         open={blocker.state === 'blocked'}
         onOpenChange={(open) => {
-          if (!open && blocker.state === 'blocked') {
+          if (!open && !exitBusy && blocker.state === 'blocked') {
             blocker.reset();
           }
         }}
@@ -3663,8 +3678,16 @@ export function CashflowProjectSheet({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
-            <AlertDialogAction onClick={() => blocker.proceed?.()}>나가기</AlertDialogAction>
+            <AlertDialogCancel disabled={exitBusy} onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={exitBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                void savePrivateDraftAndLeave();
+              }}
+            >
+              임시저장 후 나가기
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -3765,6 +3788,7 @@ export function CashflowProjectSheet({
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginCashflowEditing(); }}
+        onTakeover={() => { void beginCashflowEditing(true); }}
       />
     </div>
   );

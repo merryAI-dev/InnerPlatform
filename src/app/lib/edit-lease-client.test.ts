@@ -35,11 +35,12 @@ function scopedClient(apiClient: EditLeaseApiClient) {
 }
 
 describe('edit lease client', () => {
-  it('calls status/acquire/extend/release with the exact session and ownership headers', async () => {
+  it('calls status/acquire/takeover/extend/release with the exact session and ownership headers', async () => {
     const apiClient = {
       get: vi.fn(async () => ({ data: OWNED })),
       post: vi.fn()
         .mockResolvedValueOnce({ data: OWNED })
+        .mockResolvedValueOnce({ data: { ...OWNED, leaseId: 'lease-b', fence: 8 } })
         .mockResolvedValueOnce({ data: OWNED })
         .mockResolvedValueOnce({ data: RELEASED }),
     } as unknown as EditLeaseApiClient;
@@ -47,6 +48,7 @@ describe('edit lease client', () => {
 
     await client.getStatus();
     const acquired = await client.acquire();
+    await client.takeover();
     await client.extend(acquired);
     await client.release(acquired);
 
@@ -57,14 +59,17 @@ describe('edit lease client', () => {
     expect(apiClient.post).toHaveBeenNthCalledWith(1, `${path}/acquire`, expect.objectContaining({
       headers: { 'x-edit-session-id': '11111111-1111-4111-8111-111111111111' },
     }));
-    expect(apiClient.post).toHaveBeenNthCalledWith(2, `${path}/extend`, expect.objectContaining({
+    expect(apiClient.post).toHaveBeenNthCalledWith(2, `${path}/takeover`, expect.objectContaining({
+      headers: { 'x-edit-session-id': '11111111-1111-4111-8111-111111111111' },
+    }));
+    expect(apiClient.post).toHaveBeenNthCalledWith(3, `${path}/extend`, expect.objectContaining({
       headers: {
         'x-edit-session-id': '11111111-1111-4111-8111-111111111111',
         'x-edit-lease-id': 'lease-a',
         'x-edit-fence': '7',
       },
     }));
-    expect(apiClient.post).toHaveBeenNthCalledWith(3, `${path}/release`, expect.objectContaining({
+    expect(apiClient.post).toHaveBeenNthCalledWith(4, `${path}/release`, expect.objectContaining({
       headers: {
         'x-edit-session-id': '11111111-1111-4111-8111-111111111111',
         'x-edit-lease-id': 'lease-a',

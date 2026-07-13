@@ -200,12 +200,12 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('finally {\n      input.value =');
   });
 
-  it('blocks unload, history, and portal navigation while input, upload, or a retry file is unsaved', () => {
-    expect(source).toContain('usePortalNavigationGuard');
-    expect(source).toContain('useBlocker(shouldBlockNavigation)');
+  it('blocks unload and navigation while input, upload, a retry file, or an active edit session remains', () => {
+    expect(source).not.toContain('usePortalNavigationGuard');
+    expect(source).toContain('useBlocker(shouldConfirmExit)');
     expect(source).toContain("window.addEventListener('beforeunload'");
-    expect(source).toContain('registerNavigationHandler(confirmLeave)');
     expect(source).toContain('hasUnsavedInput || uploadInProgress || hasPendingRetryFile');
+    expect(source).toContain('saveDraftAndRelease');
   });
 
   it('never double-submits or final-submits after the latest private draft save fails', () => {
@@ -219,5 +219,14 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('const canRemove = canRemoveProjectDocuments &&');
     expect(portalRegisterSource).toContain('canRemoveProjectDocuments={false}');
     expect(source).toContain("privateDraftAttachment={mode === 'portal-register'");
+  });
+});
+
+describe('ProjectEditorWizard safe exit contract', () => {
+  it('saves the private draft and releases the edit session before portal navigation', () => {
+    expect(source).toContain('onLeave?: () => void | Promise<void>;');
+    expect(source).toContain('임시저장 후 수정 세션을 종료하고 나갈까요?');
+    expect(source).toContain('await persistAutosaveSnapshot(draft, stepIndex)');
+    expect(source).toContain('await onLeave?.();');
   });
 });

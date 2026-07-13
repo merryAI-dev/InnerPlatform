@@ -51,7 +51,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild.indexOf('gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api-lease-stage:${_IMAGE_TAG}'))
       .toBeLessThan(cloudBuild.indexOf('gcloud run deploy innerplatform-jvm-weekly-api-lease-stage'));
     expect(cloudBuild).toContain('--ingress all');
-    expect(cloudBuild).toContain('--allow-unauthenticated');
+    expect(cloudBuild).not.toContain('--allow-unauthenticated');
     expect(cloudBuild).not.toContain('_JVM_WEEKLY_DATABASE_URL');
     expect(cloudBuild).not.toContain('_CLOUD_SQL_INSTANCE');
     expect(cloudBuild).not.toContain('_SERVERLESS_VPC_CONNECTOR');
@@ -66,7 +66,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).toContain('JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app');
     expect(cloudBuild).not.toContain('https://inner-platform.vercel.app');
     expect(cloudBuild).not.toContain('https://inner-platform-stage-merryai-devs-projects.vercel.app');
-    expect(cloudBuild).toContain('node scripts/smoke_jvm_weekly_api.mjs --mode=deploy');
+    expect(cloudBuild).not.toContain('node scripts/smoke_jvm_weekly_api.mjs --mode=deploy');
     expect(cloudBuild).not.toContain('gcloud auth print-identity-token');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest');
@@ -85,8 +85,8 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).not.toContain('CLOUD_SQL_INSTANCE');
     expect(deployScript).not.toContain('SERVERLESS_VPC_CONNECTOR');
     expect(deployScript).toContain('--ingress all');
-    expect(deployScript).toContain('--allow-unauthenticated');
-    expect(deployScript).toContain('node scripts/smoke_jvm_weekly_api.mjs --mode=deploy');
+    expect(deployScript).not.toContain('--allow-unauthenticated');
+    expect(deployScript).not.toContain('node scripts/smoke_jvm_weekly_api.mjs --mode=deploy');
     expect(deployScript).not.toContain('gcloud secrets versions access latest');
     expect(deployScript).not.toContain('gcloud auth print-identity-token');
     expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET');

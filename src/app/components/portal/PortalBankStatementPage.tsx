@@ -383,8 +383,8 @@ export function PortalBankStatementPage() {
       toast.error(error instanceof Error ? error.message : '임시저장본을 복구하지 못했습니다.');
     });
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateBankPrivateDraft]);
-  const beginBankEditing = useCallback(async () => {
-    const ownership = await cashflowLease.acquire();
+  const beginBankEditing = useCallback(async (resumePrevious = false) => {
+    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return;
     try {
       await hydrateBankPrivateDraft(ownership);
@@ -392,7 +392,7 @@ export function PortalBankStatementPage() {
       await cashflowLease.release();
       toast.error(error instanceof Error ? error.message : '임시저장본을 열지 못했습니다.');
     }
-  }, [cashflowLease.acquire, cashflowLease.release, hydrateBankPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, hydrateBankPrivateDraft]);
   const ready = useMemo(() => Boolean(activeProjectId || myProject?.id), [activeProjectId, myProject?.id]);
   const transactionAmountColIdxs = useMemo(() => getTransactionAmountColumnIndexes(columns), [columns]);
   const hasTransactionAmountColumns = transactionAmountColIdxs.size > 0;
@@ -1589,6 +1589,7 @@ export function PortalBankStatementPage() {
         onExtend={() => { void cashflowLease.extend(); }}
         onContinueReadOnly={cashflowLease.continueReadOnly}
         onReacquire={() => { void beginBankEditing(); }}
+        onTakeover={() => { void beginBankEditing(true); }}
       />
     </div>
   );

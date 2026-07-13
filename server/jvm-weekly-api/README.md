@@ -85,10 +85,11 @@ The command body does not define actor or tenant authority.
 `JVM_WEEKLY_FIRESTORE_PROJECT_ID` controls Firestore storage. Do not fix login by
 implicitly moving storage to a different Firebase project.
 
-The Java API should be deployable without the BFF. Stage/live Cloud Run uses
-public ingress and `--allow-unauthenticated`; Firebase token verification, CORS,
-command authorization, idempotency, validation, and JPA transactions are the
-runtime boundary.
+The Java API is deployed as a private Cloud Run service. Stage BFF calls carry
+an audience-bound Google ID token from the Stage-only invoker credential; the
+service account has only `roles/run.invoker` on this Stage service. Firebase token
+verification, CORS, command authorization, idempotency, validation, and JPA
+transactions remain the runtime boundary.
 
 Firebase custom claims are not a frontend or BFF dependency for weekly operation.
 Use `npm run firebase:sync-member-claims -- --uid <uid> --tenant-id <tenant> --role <role>`

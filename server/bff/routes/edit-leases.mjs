@@ -92,6 +92,13 @@ export function mountEditLeaseRoutes(app, {
     sendCommandOutcome(res, await editLeaseService.acquire(input));
   }));
 
+  app.post('/api/v1/edit-leases/:resourceType/:resourceId/takeover', asyncHandler(async (req, res) => {
+    const resource = readResource(req);
+    const sessionId = readSession(req);
+    const input = await serviceInput(req, resource, sessionId, piiProtector);
+    sendCommandOutcome(res, await editLeaseService.takeover(input));
+  }));
+
   for (const operation of ['extend', 'release']) {
     app.post(`/api/v1/edit-leases/:resourceType/:resourceId/${operation}`, asyncHandler(async (req, res) => {
       const resource = readResource(req);

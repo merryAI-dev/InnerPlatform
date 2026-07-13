@@ -22,6 +22,14 @@ function createService() {
       leaseId: 'lease-secret',
       fence: 4,
     })),
+    takeover: vi.fn(async () => ({
+      serverNow: '2026-07-10T00:00:00.000Z',
+      state: 'ACTIVE',
+      canEdit: true,
+      expiresAt: '2026-07-10T00:30:00.000Z',
+      leaseId: 'lease-takeover',
+      fence: 5,
+    })),
     extend: vi.fn(async () => ({
       serverNow: '2026-07-10T00:05:00.000Z',
       state: 'ACTIVE',
@@ -292,5 +300,23 @@ describe('edit lease routes', () => {
 
     expect(response.body).toMatchObject({ error: 'edit_lease_resource_invalid' });
     expect(service.getStatus).not.toHaveBeenCalled();
+  });
+
+  it('passes the session-only takeover command through the atomic service', async () => {
+    const { app, service } = createApp();
+
+    await request(app)
+      .post('/api/v1/edit-leases/project-info/project-a/takeover')
+      .set(leaseHeaders({ 'idempotency-key': 'idem-takeover-a' }))
+      .send({})
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ leaseId: 'lease-takeover', fence: 5 });
+      });
+
+    expect(service.takeover).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-a',
+      idempotencyKey: 'idem-takeover-a',
+    }));
   });
 });

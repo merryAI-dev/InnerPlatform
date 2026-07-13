@@ -11,8 +11,7 @@ import {
 } from '../ui/alert-dialog';
 
 export function editLeaseHolderMessage(holder: EditLeaseHolder | null): string {
-  if (holder?.sameActor) return '현재 계정의 다른 탭에서 수정 중입니다';
-  return `${holder?.holderDisplayName.trim() || '다른 사용자'}님이 이 프로젝트를 수정 중입니다`;
+  return `${holder?.holderDisplayName.trim() || '다른 사용자'}님이 수정 중입니다`;
 }
 
 export function EditLeaseDialogs({
@@ -25,6 +24,7 @@ export function EditLeaseDialogs({
   onExtend,
   onContinueReadOnly,
   onReacquire,
+  onTakeover,
 }: {
   warningOpen: boolean;
   expiredOpen: boolean;
@@ -35,6 +35,7 @@ export function EditLeaseDialogs({
   onExtend: () => void | Promise<void>;
   onContinueReadOnly: () => void;
   onReacquire: () => void | Promise<void>;
+  onTakeover?: () => void | Promise<void>;
 }) {
   return (
     <>
@@ -77,13 +78,18 @@ export function EditLeaseDialogs({
       <AlertDialog open={conflictOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>다른 수정 세션이 사용 중입니다</AlertDialogTitle>
-            <AlertDialogDescription>{editLeaseHolderMessage(holder)}</AlertDialogDescription>
+            <AlertDialogTitle>{editLeaseHolderMessage(holder)}</AlertDialogTitle>
+            <AlertDialogDescription>지금은 수정은 불가능하지만 읽기/조회는 가능해요!</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction disabled={busy} onClick={onContinueReadOnly}>
+            <AlertDialogCancel disabled={busy} onClick={onContinueReadOnly}>
               읽기 모드로 보기
-            </AlertDialogAction>
+            </AlertDialogCancel>
+            {holder?.sameActor && onTakeover ? (
+              <AlertDialogAction disabled={busy} onClick={() => void onTakeover()}>
+                이전 수정 이어서 하기
+              </AlertDialogAction>
+            ) : null}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
