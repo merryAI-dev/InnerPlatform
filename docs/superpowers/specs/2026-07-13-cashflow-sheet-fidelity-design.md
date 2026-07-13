@@ -83,6 +83,7 @@ Projection과 ACTUAL은 같은 line ID를 사용하고 표시 문구만 mode별�
 - 차이는 BFF가 JVM snapshot의 Projection/Actual을 조회·조합해 계산한다.
 - 프론트엔드는 받은 값을 포맷하고 표시만 한다.
 - 미래 주차는 차이 집계 대상에서 제외한다.
+- `GET /api/v1/cashflow/:projectId`의 선택적 `asOf=YYYY-MM-DD`를 기준일로 사용하고, 생략하면 서버의 서울 날짜를 사용한다. 응답은 `comparison.asOfDate`, `asOfWeek`, `timeZone`을 함께 반환한다.
 - 행 순서는 Projection/ACTUAL과 동일한 line order를 사용한다.
 
 ## Interaction
