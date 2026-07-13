@@ -6,6 +6,8 @@ import java.util.Set;
 public final class CashflowLineCatalog {
     public static final Set<String> IN_LINES = Set.of(
         "MYSC_PREPAY_IN",
+        "MYSC_PREPAY_LABOR_IN",
+        "MYSC_PREPAY_INPUT_VAT_IN",
         "SALES_IN",
         "SALES_VAT_IN",
         "TEAM_SUPPORT_IN",
@@ -13,6 +15,8 @@ public final class CashflowLineCatalog {
     );
 
     public static final Set<String> OUT_LINES = Set.of(
+        "MYSC_PREPAY_DIRECT_OUT",
+        "MYSC_PREPAY_LABOR_OUT",
         "DIRECT_COST_OUT",
         "INPUT_VAT_OUT",
         "MYSC_LABOR_OUT",
@@ -30,6 +34,12 @@ public final class CashflowLineCatalog {
         Map.entry("MYSC_PREPAY_IN", "MYSC_PREPAY_IN"),
         Map.entry("MYSC 선입금(잔금 등 입금 필요 시)", "MYSC_PREPAY_IN"),
         Map.entry("MYSC선입금", "MYSC_PREPAY_IN"),
+        Map.entry("MYSC 선입금 - 직접사업비 등(입금)", "MYSC_PREPAY_IN"),
+        Map.entry("MYSC_PREPAY_LABOR_IN", "MYSC_PREPAY_LABOR_IN"),
+        Map.entry("MYSC 선입금 - MYSC 인건비(입금)", "MYSC_PREPAY_LABOR_IN"),
+        Map.entry("MYSC_PREPAY_INPUT_VAT_IN", "MYSC_PREPAY_INPUT_VAT_IN"),
+        Map.entry("MYSC 선입금 - 매입부가세(입금)", "MYSC_PREPAY_INPUT_VAT_IN"),
+        Map.entry("MYSC 선입금 - 메입부가세", "MYSC_PREPAY_INPUT_VAT_IN"),
         Map.entry("SALES_IN", "SALES_IN"),
         Map.entry("매출액(입금)", "SALES_IN"),
         Map.entry("매출액", "SALES_IN"),
@@ -40,6 +50,10 @@ public final class CashflowLineCatalog {
         Map.entry("팀지원금(입금)", "TEAM_SUPPORT_IN"),
         Map.entry("BANK_INTEREST_IN", "BANK_INTEREST_IN"),
         Map.entry("은행이자(입금)", "BANK_INTEREST_IN"),
+        Map.entry("MYSC_PREPAY_DIRECT_OUT", "MYSC_PREPAY_DIRECT_OUT"),
+        Map.entry("MYSC 선입금 - 직접사업비 등(출금)", "MYSC_PREPAY_DIRECT_OUT"),
+        Map.entry("MYSC_PREPAY_LABOR_OUT", "MYSC_PREPAY_LABOR_OUT"),
+        Map.entry("MYSC 선입금 - MYSC 인건비(출금)", "MYSC_PREPAY_LABOR_OUT"),
         Map.entry("DIRECT_COST_OUT", "DIRECT_COST_OUT"),
         Map.entry("직접사업비", "DIRECT_COST_OUT"),
         Map.entry("사업비", "DIRECT_COST_OUT"),

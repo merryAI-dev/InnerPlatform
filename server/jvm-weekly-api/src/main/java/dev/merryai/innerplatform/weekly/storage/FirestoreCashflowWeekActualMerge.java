@@ -1,6 +1,7 @@
 package dev.merryai.innerplatform.weekly.storage;
 
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
+import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -53,24 +54,10 @@ final class FirestoreCashflowWeekActualMerge {
     }
 
     static Map<String, Object> cashflowTotals(Map<String, BigDecimal> amounts) {
-        BigDecimal in = List.of(
-            "MYSC_PREPAY_IN",
-            "SALES_IN",
-            "SALES_VAT_IN",
-            "TEAM_SUPPORT_IN",
-            "BANK_INTEREST_IN"
-        ).stream()
+        BigDecimal in = CashflowLineCatalog.IN_LINES.stream()
             .map(line -> amount(amounts.get(line)))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal out = List.of(
-            "DIRECT_COST_OUT",
-            "INPUT_VAT_OUT",
-            "MYSC_LABOR_OUT",
-            "MYSC_PROFIT_OUT",
-            "SALES_VAT_OUT",
-            "TEAM_SUPPORT_OUT",
-            "BANK_INTEREST_OUT"
-        ).stream()
+        BigDecimal out = CashflowLineCatalog.OUT_LINES.stream()
             .map(line -> amount(amounts.get(line)))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
         return Map.of(

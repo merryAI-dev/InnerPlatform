@@ -458,9 +458,11 @@ fn derive_week_label(raw_date: &str) -> String {
     find_week_for_date(date, &weeks).unwrap_or_default()
 }
 
-fn cashflow_in_line_ids() -> [&'static str; 5] {
+fn cashflow_in_line_ids() -> [&'static str; 7] {
     [
         "MYSC_PREPAY_IN",
+        "MYSC_PREPAY_LABOR_IN",
+        "MYSC_PREPAY_INPUT_VAT_IN",
         "SALES_IN",
         "SALES_VAT_IN",
         "TEAM_SUPPORT_IN",
@@ -468,13 +470,17 @@ fn cashflow_in_line_ids() -> [&'static str; 5] {
     ]
 }
 
-fn cashflow_all_line_ids() -> [&'static str; 12] {
+fn cashflow_all_line_ids() -> [&'static str; 16] {
     [
         "MYSC_PREPAY_IN",
+        "MYSC_PREPAY_LABOR_IN",
+        "MYSC_PREPAY_INPUT_VAT_IN",
         "SALES_IN",
         "SALES_VAT_IN",
         "TEAM_SUPPORT_IN",
         "BANK_INTEREST_IN",
+        "MYSC_PREPAY_DIRECT_OUT",
+        "MYSC_PREPAY_LABOR_OUT",
         "DIRECT_COST_OUT",
         "INPUT_VAT_OUT",
         "MYSC_LABOR_OUT",
@@ -599,11 +605,32 @@ fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
         return None;
     }
     match trimmed {
+        "MYSC_PREPAY_IN" => Some("MYSC_PREPAY_IN"),
+        "MYSC_PREPAY_LABOR_IN" => Some("MYSC_PREPAY_LABOR_IN"),
+        "MYSC_PREPAY_INPUT_VAT_IN" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
+        "SALES_IN" => Some("SALES_IN"),
+        "SALES_VAT_IN" => Some("SALES_VAT_IN"),
+        "TEAM_SUPPORT_IN" => Some("TEAM_SUPPORT_IN"),
+        "BANK_INTEREST_IN" => Some("BANK_INTEREST_IN"),
+        "MYSC_PREPAY_DIRECT_OUT" => Some("MYSC_PREPAY_DIRECT_OUT"),
+        "MYSC_PREPAY_LABOR_OUT" => Some("MYSC_PREPAY_LABOR_OUT"),
+        "DIRECT_COST_OUT" => Some("DIRECT_COST_OUT"),
+        "INPUT_VAT_OUT" => Some("INPUT_VAT_OUT"),
+        "MYSC_LABOR_OUT" => Some("MYSC_LABOR_OUT"),
+        "MYSC_PROFIT_OUT" => Some("MYSC_PROFIT_OUT"),
+        "SALES_VAT_OUT" => Some("SALES_VAT_OUT"),
+        "TEAM_SUPPORT_OUT" => Some("TEAM_SUPPORT_OUT"),
+        "BANK_INTEREST_OUT" => Some("BANK_INTEREST_OUT"),
         "MYSC선입금" | "MYSC선입금(입금필요시)" | "MYSC 선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
+        "MYSC 선입금 - 직접사업비 등(입금)" => Some("MYSC_PREPAY_IN"),
+        "MYSC 선입금 - MYSC 인건비(입금)" => Some("MYSC_PREPAY_LABOR_IN"),
+        "MYSC 선입금 - 매입부가세(입금)" | "MYSC 선입금 - 메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
         "매출액(입금)" | "매출액" => Some("SALES_IN"),
         "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
         "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
         "은행이자(입금)" => Some("BANK_INTEREST_IN"),
+        "MYSC 선입금 - 직접사업비 등(출금)" => Some("MYSC_PREPAY_DIRECT_OUT"),
+        "MYSC 선입금 - MYSC 인건비(출금)" => Some("MYSC_PREPAY_LABOR_OUT"),
         "직접사업비(공급가액)" | "직접사업비" | "직접사업비(공급가액)+매입부가세" => Some("DIRECT_COST_OUT"),
         "매입부가세" => Some("INPUT_VAT_OUT"),
         "MYSC인건비" | "MYSC 인건비" => Some("MYSC_LABOR_OUT"),
@@ -615,10 +642,15 @@ fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
             let stripped = trimmed.replace(' ', "");
             match stripped.as_str() {
                 "MYSC선입금" | "MYSC선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
+                "MYSC선입금-직접사업비등(입금)" => Some("MYSC_PREPAY_IN"),
+                "MYSC선입금-MYSC인건비(입금)" => Some("MYSC_PREPAY_LABOR_IN"),
+                "MYSC선입금-매입부가세(입금)" | "MYSC선입금-메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
                 "매출액(입금)" | "매출액" => Some("SALES_IN"),
                 "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
                 "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
                 "은행이자(입금)" => Some("BANK_INTEREST_IN"),
+                "MYSC선입금-직접사업비등(출금)" => Some("MYSC_PREPAY_DIRECT_OUT"),
+                "MYSC선입금-MYSC인건비(출금)" => Some("MYSC_PREPAY_LABOR_OUT"),
                 "직접사업비(공급가액)" | "직접사업비" | "직접사업비(공급가액)+매입부가세" => Some("DIRECT_COST_OUT"),
                 "매입부가세" => Some("INPUT_VAT_OUT"),
                 "MYSC인건비" => Some("MYSC_LABOR_OUT"),
@@ -1420,6 +1452,111 @@ mod tests {
         assert_eq!(response.weeks.len(), 1);
         assert_eq!(response.weeks[0].amounts.get("DIRECT_COST_OUT").copied(), Some(30000.0));
         assert_eq!(response.weeks[0].amounts.get("SALES_IN").copied(), Some(250000.0));
+    }
+
+    #[test]
+    fn parses_only_unambiguous_detailed_prepayment_lines() {
+        for line_id in [
+            "MYSC_PREPAY_IN",
+            "MYSC_PREPAY_LABOR_IN",
+            "MYSC_PREPAY_INPUT_VAT_IN",
+            "SALES_IN",
+            "SALES_VAT_IN",
+            "TEAM_SUPPORT_IN",
+            "BANK_INTEREST_IN",
+            "MYSC_PREPAY_DIRECT_OUT",
+            "MYSC_PREPAY_LABOR_OUT",
+            "DIRECT_COST_OUT",
+            "INPUT_VAT_OUT",
+            "MYSC_LABOR_OUT",
+            "MYSC_PROFIT_OUT",
+            "SALES_VAT_OUT",
+            "TEAM_SUPPORT_OUT",
+            "BANK_INTEREST_OUT",
+        ] {
+            assert_eq!(parse_cashflow_line_label(line_id), Some(line_id));
+        }
+
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 직접사업비 등(입금)"), Some("MYSC_PREPAY_IN"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - MYSC 인건비(입금)"), Some("MYSC_PREPAY_LABOR_IN"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 매입부가세(입금)"), Some("MYSC_PREPAY_INPUT_VAT_IN"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 메입부가세"), Some("MYSC_PREPAY_INPUT_VAT_IN"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 직접사업비 등(출금)"), Some("MYSC_PREPAY_DIRECT_OUT"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - MYSC 인건비(출금)"), Some("MYSC_PREPAY_LABOR_OUT"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 직접사업비 등"), None);
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - MYSC 인건비"), None);
+        assert_eq!(parse_cashflow_line_label("MYSC선입금"), Some("MYSC_PREPAY_IN"));
+    }
+
+    #[test]
+    fn routes_detailed_prepayment_lines_and_zero_fills_all_sixteen_lines() {
+        let row = |temp_id: &str, label: &str, bank: &str, deposit: &str, expense: &str| {
+            let mut cells = create_cells();
+            cells[2] = "2026-03-03".to_string();
+            cells[3] = "26-03-01".to_string();
+            cells[8] = label.to_string();
+            cells[10] = bank.to_string();
+            cells[11] = deposit.to_string();
+            cells[13] = expense.to_string();
+            KernelImportRow {
+                temp_id: temp_id.to_string(),
+                source_tx_id: None,
+                entry_kind: None,
+                cells,
+                error: None,
+                review_hints: None,
+                review_required_cell_indexes: None,
+                review_status: None,
+                review_fingerprint: None,
+                review_confirmed_at: None,
+                user_edited_cells: None,
+            }
+        };
+
+        let response = build_settlement_actual_sync_payload(KernelActualSyncRequest {
+            rows: vec![
+                row("labor-in", "MYSC_PREPAY_LABOR_IN", "100", "", ""),
+                row("vat-in", "MYSC 선입금 - 매입부가세(입금)", "", "200", ""),
+                row("direct-out", "MYSC 선입금 - 직접사업비 등(출금)", "", "", "30"),
+                row("labor-out", "MYSC_PREPAY_LABOR_OUT", "", "", "40"),
+            ],
+            year_weeks: vec![KernelYearWeek {
+                year_month: "2026-03".to_string(),
+                week_no: 1,
+                week_start: "2026-03-02".to_string(),
+                week_end: "2026-03-08".to_string(),
+                label: "26-03-01".to_string(),
+            }],
+            persisted_rows: None,
+        });
+
+        let amounts = &response.weeks[0].amounts;
+        assert_eq!(amounts.len(), 16);
+        for line_id in [
+            "MYSC_PREPAY_IN",
+            "MYSC_PREPAY_LABOR_IN",
+            "MYSC_PREPAY_INPUT_VAT_IN",
+            "SALES_IN",
+            "SALES_VAT_IN",
+            "TEAM_SUPPORT_IN",
+            "BANK_INTEREST_IN",
+            "MYSC_PREPAY_DIRECT_OUT",
+            "MYSC_PREPAY_LABOR_OUT",
+            "DIRECT_COST_OUT",
+            "INPUT_VAT_OUT",
+            "MYSC_LABOR_OUT",
+            "MYSC_PROFIT_OUT",
+            "SALES_VAT_OUT",
+            "TEAM_SUPPORT_OUT",
+            "BANK_INTEREST_OUT",
+        ] {
+            assert!(amounts.contains_key(line_id), "missing {line_id}");
+        }
+        assert_eq!(amounts.get("MYSC_PREPAY_LABOR_IN").copied(), Some(100.0));
+        assert_eq!(amounts.get("MYSC_PREPAY_INPUT_VAT_IN").copied(), Some(200.0));
+        assert_eq!(amounts.get("MYSC_PREPAY_DIRECT_OUT").copied(), Some(30.0));
+        assert_eq!(amounts.get("MYSC_PREPAY_LABOR_OUT").copied(), Some(40.0));
+        assert_eq!(amounts.get("SALES_IN").copied(), Some(0.0));
     }
 
     #[test]

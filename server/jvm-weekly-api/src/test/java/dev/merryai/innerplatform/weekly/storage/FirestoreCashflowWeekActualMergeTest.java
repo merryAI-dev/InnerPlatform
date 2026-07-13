@@ -12,6 +12,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FirestoreCashflowWeekActualMergeTest {
     @Test
+    void includesDetailedPrepaymentLinesInActualTotals() {
+        Map<String, Object> existing = Map.of(
+            "weeklyExpenseActualBySheet", Map.of(
+                "tab-2", Map.of("SALES_IN", 1000)
+            )
+        );
+
+        Map<String, Object> patch = FirestoreCashflowWeekActualMerge.buildPatch(
+            "mysc",
+            "project-a",
+            "default",
+            existing,
+            List.of(
+                new SaveDraftResponse.ActualDelta("2026-06", 1, "MYSC_PREPAY_LABOR_IN", new BigDecimal("100")),
+                new SaveDraftResponse.ActualDelta("2026-06", 1, "MYSC_PREPAY_INPUT_VAT_IN", new BigDecimal("200")),
+                new SaveDraftResponse.ActualDelta("2026-06", 1, "MYSC_PREPAY_DIRECT_OUT", new BigDecimal("30")),
+                new SaveDraftResponse.ActualDelta("2026-06", 1, "MYSC_PREPAY_LABOR_OUT", new BigDecimal("40"))
+            ),
+            Instant.parse("2026-06-08T00:00:00Z")
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> actual = (Map<String, Object>) patch.get("actual");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> bySheet = (Map<String, Object>) patch.get("weeklyExpenseActualBySheet");
+
+        assertThat(actual)
+            .containsEntry("MYSC_PREPAY_LABOR_IN", 100L)
+            .containsEntry("MYSC_PREPAY_INPUT_VAT_IN", 200L)
+            .containsEntry("MYSC_PREPAY_DIRECT_OUT", 30L)
+            .containsEntry("MYSC_PREPAY_LABOR_OUT", 40L)
+            .containsEntry("SALES_IN", 1000L);
+        assertThat(bySheet).containsKeys("default", "tab-2");
+        assertThat(patch.get("actualTotals")).isEqualTo(Map.of("totalIn", 1300L, "totalOut", 70L, "net", 1230L));
+    }
+
+    @Test
     void replacesOnlyCurrentSheetContributionAndKeepsOtherSheets() {
         Map<String, Object> existing = Map.of(
             "weeklyExpenseActualBySheet", Map.of(
