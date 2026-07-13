@@ -2114,7 +2114,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(viewerWrite.body.id).toBe('p-rbac-viewer-write');
   });
 
-  it('writes through generic pipeline and synchronizes projection views', async () => {
+  it('writes through generic pipeline without mutating canonical cashflow weeks', async () => {
     const createProject = await api
       .post('/api/v1/write')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-gw-project-001' })
@@ -2168,7 +2168,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(createTx.status).toBe(201);
     expect(createTx.body.affectedViews).toContain('approval_inbox');
-    expect(createTx.body.affectedViews).toContain('cashflow_weeks');
+    expect(createTx.body.affectedViews).not.toContain('cashflow_weeks');
 
     const createApprovedTx = await api
       .post('/api/v1/write')
@@ -2192,12 +2192,10 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       });
 
     expect(createApprovedTx.status).toBe(201);
-    expect(createApprovedTx.body.affectedViews).toContain('cashflow_weeks');
+    expect(createApprovedTx.body.affectedViews).not.toContain('cashflow_weeks');
 
     const cashflowWeek = await db.doc(`orgs/${tenantId}/cashflow_weeks/p-gw-001-2026-02-w3`).get();
-    expect(cashflowWeek.exists).toBe(true);
-    expect(cashflowWeek.data()?.actual?.SALES_IN).toBe(250000);
-    expect(cashflowWeek.data()?.syncedFromTransactionsAt).toBeTruthy();
+    expect(cashflowWeek.exists).toBe(false);
 
     const financials = await api
       .get('/api/v1/views/project_financials?projectId=p-gw-001')

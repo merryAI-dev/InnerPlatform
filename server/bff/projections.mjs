@@ -30,88 +30,6 @@ function readTransactionAmount(tx) {
   return toNumber(tx?.amounts?.bankAmount);
 }
 
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
-function formatIsoDate(year, month, day) {
-  return `${String(year)}-${pad2(month)}-${pad2(day)}`;
-}
-
-function addDaysUtc(isoDate, deltaDays) {
-  const [yRaw, mRaw, dRaw] = String(isoDate).split('-');
-  const year = Number.parseInt(yRaw, 10);
-  const month = Number.parseInt(mRaw, 10);
-  const day = Number.parseInt(dRaw, 10);
-  const base = Date.UTC(year, month - 1, day);
-  const next = new Date(base + deltaDays * 24 * 60 * 60 * 1000);
-  return formatIsoDate(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate());
-}
-
-function getMonthMondayWeeks(yearMonth) {
-  if (!/^\d{4}-\d{2}$/.test(String(yearMonth || ''))) return [];
-  const [yyyyRaw, mmRaw] = String(yearMonth).split('-');
-  const year = Number.parseInt(yyyyRaw, 10);
-  const month = Number.parseInt(mmRaw, 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return [];
-
-  let firstMondayDay = 0;
-  for (let d = 1; d <= 7; d += 1) {
-    if (new Date(Date.UTC(year, month - 1, d)).getUTCDay() === 1) {
-      firstMondayDay = d;
-      break;
-    }
-  }
-  if (!firstMondayDay) return [];
-
-  const weeks = [];
-  for (let i = 0, day = firstMondayDay; i < 6; i += 1, day += 7) {
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (date.getUTCMonth() + 1 !== month) break;
-    const weekNo = i + 1;
-    const weekStart = formatIsoDate(year, month, day);
-    weeks.push({
-      yearMonth,
-      weekNo,
-      weekStart,
-      weekEnd: addDaysUtc(weekStart, 6),
-    });
-  }
-  return weeks;
-}
-
-function resolveYearMonthFromDate(dateTime) {
-  const date = typeof dateTime === 'string' ? dateTime.slice(0, 10) : '';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
-  return date.slice(0, 7);
-}
-
-function findWeekForDate(dateIso, weeks) {
-  return weeks.find((week) => dateIso >= week.weekStart && dateIso <= week.weekEnd) || null;
-}
-
-function resolveCashflowLine(tx) {
-  const direction = normalizeDirection(tx.direction);
-  const category = normalizeStatus(tx.cashflowCategory);
-
-  if (direction === 'IN') {
-    if (category === 'VAT_REFUND') return 'SALES_VAT_IN';
-    if (category === 'BANK_INTEREST_IN') return 'BANK_INTEREST_IN';
-    if (category === 'MISC_INCOME') return 'TEAM_SUPPORT_IN';
-    return 'SALES_IN';
-  }
-
-  if (direction === 'OUT') {
-    if (category === 'LABOR_COST') return 'MYSC_LABOR_OUT';
-    if (category === 'TAX_PAYMENT') return 'SALES_VAT_OUT';
-    if (category === 'BANK_INTEREST_OUT') return 'BANK_INTEREST_OUT';
-    if (toNumber(tx?.amounts?.vatIn) > 0) return 'INPUT_VAT_OUT';
-    return 'DIRECT_COST_OUT';
-  }
-
-  return '';
-}
-
 export async function recomputeProjectFinancials(db, tenantId, nowIso) {
   const [projectSnap, txSnap, expenseSetSnap, changeReqSnap] = await Promise.all([
     db.collection(`orgs/${tenantId}/projects`).get(),
@@ -399,92 +317,16 @@ export async function recomputeAlerts(db, tenantId, nowIso) {
 }
 
 export async function recomputeCashflowWeeks(db, tenantId, nowIso) {
-  const [txSnap, weekSnap] = await Promise.all([
-    db.collection(`orgs/${tenantId}/transactions`).get(),
-    db.collection(`orgs/${tenantId}/cashflow_weeks`).get(),
-  ]);
-  const byWeek = new Map();
-
-  for (const tx of toArrayFromDocSnap(txSnap)) {
-    if (normalizeStatus(tx.state) !== 'APPROVED') continue;
-    const projectId = typeof tx.projectId === 'string' ? tx.projectId.trim() : '';
-    const dateIso = typeof tx.dateTime === 'string' ? tx.dateTime.slice(0, 10) : '';
-    const yearMonth = resolveYearMonthFromDate(tx.dateTime);
-    const lineId = resolveCashflowLine(tx);
-    if (!projectId || !yearMonth || !lineId || !/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) continue;
-
-    const week = findWeekForDate(dateIso, getMonthMondayWeeks(yearMonth));
-    if (!week) continue;
-
-    const id = `${projectId}-${yearMonth}-w${week.weekNo}`;
-    if (!byWeek.has(id)) {
-      byWeek.set(id, {
-        id,
-        tenantId,
-        projectId,
-        yearMonth,
-        weekNo: week.weekNo,
-        weekStart: week.weekStart,
-        weekEnd: week.weekEnd,
-        actual: {},
-      });
-    }
-
-    const amount = readTransactionAmount(tx);
-    const entry = byWeek.get(id);
-    entry.actual[lineId] = toNumber(entry.actual[lineId]) + amount;
-  }
-
-  const existingWeeks = toArrayFromDocSnap(weekSnap);
-  for (const week of existingWeeks) {
-    if (!week.id || !week.projectId || !week.yearMonth || !week.weekNo || !week.weekStart || !week.weekEnd) continue;
-    if (!byWeek.has(week.id)) {
-      byWeek.set(week.id, {
-        id: week.id,
-        tenantId,
-        projectId: week.projectId,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        weekStart: week.weekStart,
-        weekEnd: week.weekEnd,
-        actual: {},
-      });
-    }
-  }
-
-  let batch = db.batch();
-  let writes = 0;
-  const weeks = Array.from(byWeek.values());
-  for (const week of weeks) {
-    const ref = db.doc(`orgs/${tenantId}/cashflow_weeks/${week.id}`);
-    batch.set(ref, {
-      id: week.id,
-      tenantId,
-      projectId: week.projectId,
-      yearMonth: week.yearMonth,
-      weekNo: week.weekNo,
-      weekStart: week.weekStart,
-      weekEnd: week.weekEnd,
-      actual: week.actual || {},
-      syncedFromTransactionsAt: nowIso,
-      updatedAt: nowIso,
-      updatedByUid: 'system',
-      updatedByName: 'System',
-    }, { merge: true });
-    writes += 1;
-    if (writes >= 450) {
-      await batch.commit();
-      batch = db.batch();
-      writes = 0;
-    }
-  }
-  if (writes) await batch.commit();
+  const weekSnap = await db.collection(`orgs/${tenantId}/cashflow_weeks`).get();
 
   const payload = {
     tenantId,
     view: 'cashflow_weeks',
     updatedAt: nowIso,
-    syncedWeeks: weeks.length,
+    observedWeeks: weekSnap.docs.length,
+    syncedWeeks: 0,
+    canonicalWriter: 'jvm_weekly_api',
+    writeMode: 'metadata_only',
   };
   await db.doc(`orgs/${tenantId}/views/cashflow_weeks`).set(payload, { merge: true });
   return payload;
