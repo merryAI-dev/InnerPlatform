@@ -4,33 +4,53 @@ import { describe, expect, it, vi } from 'vitest';
 import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 
-const IN_LABELS = [
-  'MYSC 선입금(잔금 등 입금 필요 시)',
+const PROJECTION_IN_LABELS = [
+  'MYSC 선입금 - 직접사업비 등',
+  'MYSC 선입금 - MYSC 인건비',
+  'MYSC 선입금 - 메입부가세',
   '매출액(입금)',
   '매출부가세(입금)',
   '팀지원금(입금)',
   '은행이자(입금)',
 ];
 
-const OUT_LABELS = [
+const PROJECTION_OUT_LABELS = [
+  'MYSC 선입금 - 직접사업비 등',
+  'MYSC 선입금 - MYSC 인건비',
   '직접사업비(공급가액)',
   '매입부가세',
   'MYSC인건비',
-  'MYSC수익(간접비등)',
+  'MYSC수익',
   '매출부가세(출금)',
   '팀지원금(출금)',
   '은행이자(출금)',
 ];
 
+const ACTUAL_IN_LABELS = [
+  'MYSC 선입금 - 직접사업비 등(입금)',
+  'MYSC 선입금 - MYSC 인건비(입금)',
+  'MYSC 선입금 - 매입부가세(입금)',
+  ...PROJECTION_IN_LABELS.slice(3),
+];
+
+const ACTUAL_OUT_LABELS = [
+  'MYSC 선입금 - 직접사업비 등(출금)',
+  'MYSC 선입금 - MYSC 인건비(출금)',
+  ...PROJECTION_OUT_LABELS.slice(2),
+];
+
 function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3']) {
   const weekRow = ['', '', '', ...weekLabels];
   const valueCells = weekLabels.map(() => '999');
+  const inLabels = actual ? ACTUAL_IN_LABELS : PROJECTION_IN_LABELS;
+  const outLabels = actual ? ACTUAL_OUT_LABELS : PROJECTION_OUT_LABELS;
   return [
     [actual ? 'ACTUAL' : 'Projection'],
     weekRow,
-    ...IN_LABELS.map((label) => [label, '', '', ...valueCells]),
+    ...inLabels.map((label) => [label, '', '', ...valueCells]),
     ['입금 합계', '', '', ...valueCells],
-    ...OUT_LABELS.map((label) => [label, '', '', ...valueCells]),
+    ...outLabels.map((label) => [label, '', '', ...valueCells]),
+    ['출금 합계', '', '', ...valueCells],
     [actual ? '잔액' : '잔액 (※ 중요)', '', '', ...valueCells],
   ];
 }
@@ -459,16 +479,16 @@ describe('cashflow sheet lab route', () => {
     expect(response.body).toMatchObject({
       ok: true,
       commandName: 'cashflowSheetLab.stage.firebase',
-      stagedLineCount: 24,
-      projectionLineCount: 12,
-      actualLineCount: 12,
+      stagedLineCount: 32,
+      projectionLineCount: 16,
+      actualLineCount: 16,
     });
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 100 },
       actual: { MYSC_PREPAY_IN: 200 },
     });
     const candidates = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/');
-    expect(candidates).toHaveLength(24);
+    expect(candidates).toHaveLength(32);
     expect(candidates.find((candidate) => candidate.data.mode === 'projection' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data).toMatchObject({
       projectId: 'project-a',
       status: 'pending_review',
@@ -549,9 +569,9 @@ describe('cashflow sheet lab route', () => {
 
     expect(googleSheetsService.previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(apply.body).toMatchObject({
-      appliedLineCount: 24,
-      projectionLineCount: 12,
-      actualLineCount: 12,
+      appliedLineCount: 32,
+      projectionLineCount: 16,
+      actualLineCount: 16,
       skippedRiskLineCount: 0,
       stagedRunId: stage.body.runId,
     });
@@ -639,7 +659,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(response.body).toMatchObject({
-      appliedLineCount: 48,
+      appliedLineCount: 64,
       skippedInvalidWeekCount: 0,
       skippedInvalidWeeks: [],
     });
@@ -711,7 +731,7 @@ describe('cashflow sheet lab route', () => {
         actual: { MYSC_PREPAY_IN: 456 },
       }],
     });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 12, responses: [] }));
+    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
@@ -747,7 +767,7 @@ describe('cashflow sheet lab route', () => {
       status: 'DONE',
       projectId: 'project-a',
       changeCount: expect.any(Number),
-      updatedCellCount: 12,
+      updatedCellCount: 16,
     });
     expect(db.__getDocument('outbox/writeback-001')).toMatchObject({
       eventType: 'cashflow.projection_sheet_writeback.done',
@@ -776,7 +796,7 @@ describe('cashflow sheet lab route', () => {
         actual: { MYSC_PREPAY_IN: 456 },
       }],
     });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 12, responses: [] }));
+    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
@@ -830,7 +850,7 @@ describe('cashflow sheet lab route', () => {
         projection: { MYSC_PREPAY_IN: 123 },
       }],
     });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 12, responses: [] }));
+    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
     const googleSheetsService = {
       previewSpreadsheet: vi
         .fn()

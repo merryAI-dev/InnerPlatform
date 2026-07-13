@@ -14,15 +14,18 @@ function normalizeLabelKey(value) {
   return normalizeText(value).replace(/\s+/g, '');
 }
 
-const LINE_BY_LABEL = new Map();
+const LINE_BY_MODE_DIRECTION_LABEL = new Map();
 const LINE_ENTRY_BY_ID = new Map();
 for (const entry of LINE_ENTRIES) {
   LINE_ENTRY_BY_ID.set(entry.lineId, entry);
-  for (const label of [entry.lineId, entry.label, ...(entry.aliases || [])]) {
-    const normalized = normalizeText(label);
-    if (normalized) LINE_BY_LABEL.set(normalized, entry);
-    const stripped = normalizeLabelKey(label);
-    if (stripped) LINE_BY_LABEL.set(stripped, entry);
+  for (const mode of SUPPORTED_MODES) {
+    const modeLabel = mode === 'projection' ? entry.projectionLabel : entry.actualLabel;
+    for (const label of [entry.lineId, entry.label, ...(entry.aliases || []), modeLabel]) {
+      const normalized = normalizeText(label);
+      if (normalized) LINE_BY_MODE_DIRECTION_LABEL.set(`${mode}|${entry.direction}|${normalized}`, entry);
+      const stripped = normalizeLabelKey(label);
+      if (stripped) LINE_BY_MODE_DIRECTION_LABEL.set(`${mode}|${entry.direction}|${stripped}`, entry);
+    }
   }
 }
 
@@ -85,10 +88,13 @@ function readRowLabel(row) {
   return { label: '', columnIndex: -1 };
 }
 
-function resolveLineEntry(label) {
+function resolveLineEntry(label, mode, direction) {
   const normalized = normalizeText(label);
   if (!normalized) return null;
-  return LINE_BY_LABEL.get(normalized) || LINE_BY_LABEL.get(normalizeLabelKey(normalized)) || null;
+  const prefix = `${mode}|${direction}|`;
+  return LINE_BY_MODE_DIRECTION_LABEL.get(`${prefix}${normalized}`)
+    || LINE_BY_MODE_DIRECTION_LABEL.get(`${prefix}${normalizeLabelKey(normalized)}`)
+    || null;
 }
 
 function resolveDerivedKind(label) {
@@ -168,13 +174,27 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
   const duplicateLineIds = new Set();
   const seenLineIds = new Set();
   const endRowIndex = nextCandidate?.headerRowIndex ?? rows.length;
+  let direction = 'IN';
 
   for (let rowIndex = candidate.rowIndex + 1; rowIndex < endRowIndex; rowIndex += 1) {
     const row = rows[rowIndex] || [];
     const { label, columnIndex } = readRowLabel(row);
     if (!label) continue;
 
-    const lineEntry = resolveLineEntry(label);
+    const derivedKind = resolveDerivedKind(label);
+    if (derivedKind) {
+      derivedRows.push({
+        rowIndex,
+        label,
+        labelColumnIndex: columnIndex,
+        a1: toA1(rowIndex, columnIndex),
+        kind: derivedKind,
+      });
+      if (derivedKind === 'deposit_total') direction = 'OUT';
+      continue;
+    }
+
+    const lineEntry = resolveLineEntry(label, mode, direction);
     if (lineEntry) {
       if (seenLineIds.has(lineEntry.lineId)) duplicateLineIds.add(lineEntry.lineId);
       seenLineIds.add(lineEntry.lineId);
@@ -186,18 +206,6 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
         lineId: lineEntry.lineId,
         canonicalLabel: lineEntry.label,
         direction: lineEntry.direction,
-      });
-      continue;
-    }
-
-    const derivedKind = resolveDerivedKind(label);
-    if (derivedKind) {
-      derivedRows.push({
-        rowIndex,
-        label,
-        labelColumnIndex: columnIndex,
-        a1: toA1(rowIndex, columnIndex),
-        kind: derivedKind,
       });
       continue;
     }
