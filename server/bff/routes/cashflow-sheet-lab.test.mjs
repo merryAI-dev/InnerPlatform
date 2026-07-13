@@ -509,85 +509,18 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
   });
 
-  it('rejects preview ranges that are not present in the sheet headers', async () => {
-    await request(createApp())
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
-      .send({
-        value: 'spreadsheet-a',
-        sheetName: 'cashflow(사용내역 연동)',
-        startWeek: '26-1-1',
-        endWeek: '26-1-4',
-      })
-      .expect(400)
-      .expect((response) => {
-        expect(response.body.code).toBe('cashflow_week_range_not_in_sheet');
-      });
-  });
-
-  it('previews current values from Firebase cashflow_weeks', async () => {
-    const db = createDb({
-      weeks: [{
-        id: 'project-a-2026-01-w1',
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        weekNo: 1,
-        projection: { SALES_IN: 123 },
-        actual: { SALES_IN: 456 },
-      }],
-    });
-
-    const response = await request(createApp({ db }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
-      .send({ value: 'spreadsheet-a' })
-      .expect(200);
-
-    expect(response.body.accessPolicy.valueSource).toBe('firebase_cashflow_weeks');
-    expect(response.body.previewValues).toEqual(expect.arrayContaining([
-      expect.objectContaining({ mode: 'projection', lineId: 'SALES_IN', amount: 123, source: 'firebase_cashflow_weeks' }),
-      expect.objectContaining({ mode: 'actual', lineId: 'SALES_IN', amount: 456, source: 'firebase_cashflow_weeks' }),
-    ]));
-  });
-
-  it('ignores deprecated Google access tokens for sheet reads', async () => {
-    const previewSpreadsheet = vi.fn(async () => ({
-      spreadsheetId: 'spreadsheet-a',
-      spreadsheetTitle: 'Cashflow workbook',
-      selectedSheetName: 'cashflow(사용내역 연동)',
-      availableSheets: [],
-      matrix: buildMatrix(),
-    }));
-
-    const response = await request(createApp({ googleSheetsService: { previewSpreadsheet } }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
-      .set('x-google-access-token', 'google-token')
-      .send({ value: 'spreadsheet-a' })
-      .expect(200);
-
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
-    expect(previewSpreadsheet).toHaveBeenCalledWith(expect.not.objectContaining({ accessToken: expect.any(String) }));
-    expect(response.body.accessPolicy.googleAuth).toBe('service_account');
-  });
-
-  it('normalizes service account sheet permission failures', async () => {
-    const previewSpreadsheet = vi.fn(async () => {
-      throw new GoogleSheetsServiceError('Google Sheets API request failed', {
-        code: 'google_sheets_api_error',
-        statusCode: 403,
-      });
-    });
+  it('retires direct live preview so only explicit pinned refresh can read Google', async () => {
+    const previewSpreadsheet = vi.fn();
 
     await request(createApp({ googleSheetsService: { previewSpreadsheet } }))
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/preview')
-      .set('x-google-access-token', 'expired-or-forbidden-token')
       .send({ value: 'spreadsheet-a' })
-      .expect(403)
+      .expect(410)
       .expect((response) => {
-        expect(response.body.code).toBe('google_sheet_service_account_forbidden');
-        expect(response.body.message).toContain('시스템 서비스 계정');
+        expect(response.body.code).toBe('cashflow_sheet_direct_preview_retired');
       });
 
-    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
-    expect(previewSpreadsheet).toHaveBeenCalledWith(expect.not.objectContaining({ accessToken: expect.any(String) }));
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
   });
 
   it('fails closed instead of using the legacy Node multi-transaction apply path', async () => {
@@ -1152,227 +1085,26 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w4')).toBeUndefined();
   });
 
-  it('previews Projection to Google Sheet write-back without including Actual writes', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'saved-spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-      weeks: [{
-        id: 'project-a-2026-01-w1',
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        weekNo: 1,
-        projection: { MYSC_PREPAY_IN: 123 },
-        actual: { MYSC_PREPAY_IN: 456 },
-      }],
-    });
+  it('retires both sheet write-back routes for inbound-only finance sync', async () => {
+    const previewSpreadsheet = vi.fn();
+    const batchUpdateValues = vi.fn();
+    const app = createApp({ googleSheetsService: { previewSpreadsheet, batchUpdateValues } });
 
-    const response = await request(createApp({ db }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview')
-      .send({})
-      .expect(200);
+    for (const path of [
+      '/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview',
+      '/api/v1/projects/project-a/cashflow-sheet-lab/writeback/apply',
+    ]) {
+      await request(app)
+        .post(path)
+        .send({})
+        .expect(410)
+        .expect((response) => {
+          expect(response.body.code).toBe('cashflow_sheet_writeback_retired');
+        });
+    }
 
-    expect(response.body.accessPolicy.writePolicy).toBe('projection_only');
-    expect(response.body.plan.hasChanges).toBe(true);
-    expect(response.body.plan.changedCells).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        mode: 'projection',
-        lineId: 'MYSC_PREPAY_IN',
-        sheetAmount: 999,
-        platformAmount: 123,
-      }),
-    ]));
-    expect(response.body.plan.changedCells.some((cell) => cell.mode === 'actual')).toBe(false);
-  });
-
-  it('writes platform Projection values back to Google Sheet and records a sync job', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'saved-spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-      weeks: [{
-        id: 'project-a-2026-01-w1',
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        weekNo: 1,
-        projection: { MYSC_PREPAY_IN: 123 },
-        actual: { MYSC_PREPAY_IN: 456 },
-      }],
-    });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
-    const googleSheetsService = {
-      previewSpreadsheet: vi.fn(async () => ({
-        spreadsheetId: 'spreadsheet-a',
-        spreadsheetTitle: 'Cashflow workbook',
-        selectedSheetName: 'cashflow(사용내역 연동)',
-        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-        matrix: buildMatrix(),
-      })),
-      batchUpdateValues,
-    };
-
-    const previewResponse = await request(createApp({ db, googleSheetsService }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview')
-      .send({})
-      .expect(200);
-    const response = await request(createApp({ db, googleSheetsService }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/apply')
-      .send({
-        baselineHash: previewResponse.body.plan.baselineHash,
-        idempotencyKey: 'writeback-001',
-      })
-      .expect(200);
-
-    expect(response.body.ok).toBe(true);
-    expect(batchUpdateValues).toHaveBeenCalledWith(expect.objectContaining({
-      spreadsheetId: 'spreadsheet-a',
-      sheetName: 'cashflow(사용내역 연동)',
-      updates: expect.arrayContaining([
-        expect.objectContaining({ rangeA1: 'D4', value: 123 }),
-      ]),
-    }));
-    expect(db.__getDocument('orgs/tenant-a/cashflow_projection_sync_jobs/writeback-001')).toMatchObject({
-      status: 'DONE',
-      projectId: 'project-a',
-      changeCount: expect.any(Number),
-      updatedCellCount: 16,
-    });
-    expect(db.__getDocument('outbox/writeback-001')).toMatchObject({
-      eventType: 'cashflow.projection_sheet_writeback.done',
-      entityType: 'cashflow_projection_sync_job',
-      status: 'PENDING',
-    });
-  });
-
-  it('ignores deprecated Google access tokens for Projection write-back', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'saved-spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-      weeks: [{
-        id: 'project-a-2026-01-w1',
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        weekNo: 1,
-        projection: { MYSC_PREPAY_IN: 123 },
-        actual: { MYSC_PREPAY_IN: 456 },
-      }],
-    });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
-    const googleSheetsService = {
-      previewSpreadsheet: vi.fn(async () => ({
-        spreadsheetId: 'spreadsheet-a',
-        spreadsheetTitle: 'Cashflow workbook',
-        selectedSheetName: 'cashflow(사용내역 연동)',
-        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-        matrix: buildMatrix(),
-      })),
-      batchUpdateValues,
-    };
-
-    const previewResponse = await request(createApp({ db, googleSheetsService }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview')
-      .set('x-google-access-token', 'google-token')
-      .send({})
-      .expect(200);
-    const response = await request(createApp({ db, googleSheetsService }))
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/apply')
-      .set('x-google-access-token', 'google-token')
-      .send({
-        baselineHash: previewResponse.body.plan.baselineHash,
-        idempotencyKey: 'writeback-fallback-001',
-      })
-      .expect(200);
-
-    expect(batchUpdateValues).toHaveBeenCalledTimes(1);
-    expect(batchUpdateValues).toHaveBeenCalledWith(expect.not.objectContaining({ accessToken: expect.any(String) }));
-    expect(response.body.accessPolicy.googleAuth).toBe('service_account');
-    expect(response.body.accessPolicy.sheetPermission).toBe('shared_with_mysc_system_account');
-    expect(response.body.ok).toBe(true);
-  });
-
-  it('blocks Projection write-back when the sheet changed after preview', async () => {
-    const changedMatrix = buildMatrix();
-    changedMatrix[3][3] = '1,111';
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'saved-spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-      weeks: [{
-        id: 'project-a-2026-01-w1',
-        projectId: 'project-a',
-        yearMonth: '2026-01',
-        weekNo: 1,
-        projection: { MYSC_PREPAY_IN: 123 },
-      }],
-    });
-    const batchUpdateValues = vi.fn(async () => ({ totalUpdatedCells: 16, responses: [] }));
-    const googleSheetsService = {
-      previewSpreadsheet: vi
-        .fn()
-        .mockResolvedValueOnce({
-          spreadsheetId: 'spreadsheet-a',
-          spreadsheetTitle: 'Cashflow workbook',
-          selectedSheetName: 'cashflow(사용내역 연동)',
-          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-          matrix: buildMatrix(),
-        })
-        .mockResolvedValueOnce({
-          spreadsheetId: 'spreadsheet-a',
-          spreadsheetTitle: 'Cashflow workbook',
-          selectedSheetName: 'cashflow(사용내역 연동)',
-          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-          matrix: changedMatrix,
-        }),
-      batchUpdateValues,
-    };
-    const app = createApp({ db, googleSheetsService });
-
-    const previewResponse = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/preview')
-      .send({})
-      .expect(200);
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/writeback/apply')
-      .send({
-        baselineHash: previewResponse.body.plan.baselineHash,
-        idempotencyKey: 'writeback-conflict-001',
-      })
-      .expect(409)
-      .expect((response) => {
-        expect(response.body.code || response.body.error).toBe('cashflow_projection_sheet_conflict');
-      });
-
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
     expect(batchUpdateValues).not.toHaveBeenCalled();
-    expect(db.__getDocument('orgs/tenant-a/cashflow_projection_sync_jobs/writeback-conflict-001')).toMatchObject({
-      status: 'CONFLICT',
-      projectId: 'project-a',
-      conflict: expect.objectContaining({ reason: 'sheet_changed_after_preview' }),
-    });
   });
 
   it('denies external emails', async () => {
