@@ -104,6 +104,28 @@ describe('cashflow labor risk', () => {
     expect(result.shortage.week).toMatchObject({ yearMonth: '2026-06', weekNo: 4, label: '26-6-4' });
   });
 
+  it('includes every detailed MYSC prepayment line in the net balance', () => {
+    const activeWeeks = [
+      activeWeek('2026-06', 3, '2026-06-17', '2026-06-23'),
+    ];
+    const result = buildCashflowLaborRisk('project-a', projectWithWeeks(activeWeeks), [
+      weekDoc({
+        yearMonth: '2026-06',
+        weekNo: 3,
+        weekStart: '2026-06-17',
+        weekEnd: '2026-06-23',
+        actual: {
+          MYSC_PREPAY_LABOR_IN: 100,
+          MYSC_PREPAY_INPUT_VAT_IN: 80,
+          MYSC_PREPAY_DIRECT_OUT: 30,
+          MYSC_PREPAY_LABOR_OUT: 20,
+        },
+      }),
+    ], { todayIso: '2026-06-17' });
+
+    expect(result.current.balance).toBe(130);
+  });
+
   it('keeps the next month labor Projection authored status as static data', () => {
     const activeWeeks = [
       activeWeek('2026-05', 4, '2026-05-20', '2026-05-26'),

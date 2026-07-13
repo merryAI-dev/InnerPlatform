@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../data/types';
 import {
+  CASHFLOW_IN_LINE_IDS,
   buildTransactionEditHistoryEntries,
   findLatestFieldEdit,
 } from './settlement-grid-helpers';
@@ -40,6 +41,18 @@ function makeTransaction(): Transaction {
 }
 
 describe('settlement-grid-helpers', () => {
+  it('exposes all seven inflow sheet lines in policy order', () => {
+    expect([...CASHFLOW_IN_LINE_IDS]).toEqual([
+      'MYSC_PREPAY_IN',
+      'MYSC_PREPAY_LABOR_IN',
+      'MYSC_PREPAY_INPUT_VAT_IN',
+      'SALES_IN',
+      'SALES_VAT_IN',
+      'TEAM_SUPPORT_IN',
+      'BANK_INTEREST_IN',
+    ]);
+  });
+
   it('builds nested audit entries for expense amount changes', () => {
     const existing = makeTransaction();
 

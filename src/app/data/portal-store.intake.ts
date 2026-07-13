@@ -1,5 +1,11 @@
 import { resolveBankImportProjectionStatus } from '../platform/bank-import-triage';
-import type { BankImportIntakeItem, BankImportManualFields, BankImportSnapshot } from './types';
+import {
+  CASHFLOW_SHEET_LINE_LABELS,
+  type BankImportIntakeItem,
+  type BankImportManualFields,
+  type BankImportSnapshot,
+  type CashflowSheetLineId,
+} from './types';
 
 function normalizeString(value: unknown): string {
   return String(value || '').trim();
@@ -15,21 +21,9 @@ function normalizeManualFields(value: unknown): BankImportManualFields {
   if (Number.isFinite(candidate.expenseAmount)) next.expenseAmount = Number(candidate.expenseAmount);
   if (normalizeString(candidate.budgetCategory)) next.budgetCategory = normalizeString(candidate.budgetCategory);
   if (normalizeString(candidate.budgetSubCategory)) next.budgetSubCategory = normalizeString(candidate.budgetSubCategory);
-  if (
-    candidate.cashflowLineId === 'MYSC_PREPAY_IN'
-    || candidate.cashflowLineId === 'SALES_IN'
-    || candidate.cashflowLineId === 'SALES_VAT_IN'
-    || candidate.cashflowLineId === 'TEAM_SUPPORT_IN'
-    || candidate.cashflowLineId === 'BANK_INTEREST_IN'
-    || candidate.cashflowLineId === 'DIRECT_COST_OUT'
-    || candidate.cashflowLineId === 'INPUT_VAT_OUT'
-    || candidate.cashflowLineId === 'MYSC_LABOR_OUT'
-    || candidate.cashflowLineId === 'MYSC_PROFIT_OUT'
-    || candidate.cashflowLineId === 'SALES_VAT_OUT'
-    || candidate.cashflowLineId === 'TEAM_SUPPORT_OUT'
-    || candidate.cashflowLineId === 'BANK_INTEREST_OUT'
-  ) {
-    next.cashflowLineId = candidate.cashflowLineId;
+  const cashflowLineId = normalizeString(candidate.cashflowLineId);
+  if (Object.hasOwn(CASHFLOW_SHEET_LINE_LABELS, cashflowLineId)) {
+    next.cashflowLineId = cashflowLineId as CashflowSheetLineId;
   }
   if (
     candidate.cashflowCategory === 'CONTRACT_PAYMENT'

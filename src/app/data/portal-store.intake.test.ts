@@ -46,6 +46,19 @@ function makeItem(overrides: Partial<BankImportIntakeItem> = {}): BankImportInta
 }
 
 describe('portal-store intake persistence', () => {
+  it.each([
+    'MYSC_PREPAY_LABOR_IN',
+    'MYSC_PREPAY_INPUT_VAT_IN',
+    'MYSC_PREPAY_DIRECT_OUT',
+    'MYSC_PREPAY_LABOR_OUT',
+  ] as const)('preserves the detailed cashflow line %s when normalizing persistence', (cashflowLineId) => {
+    const normalized = normalizeBankImportIntakeItem(makeItem({
+      manualFields: { cashflowLineId },
+    }));
+
+    expect(normalized?.manualFields.cashflowLineId).toBe(cashflowLineId);
+  });
+
   it('serializes intake items without losing manual fields', () => {
     const serialized = serializeBankImportIntakeItemForPersistence(makeItem());
 

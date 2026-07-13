@@ -1,6 +1,7 @@
 import type { Transaction, TransactionState } from '../data/types';
 import { getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 import { resolveEvidenceChecklist } from './evidence-helpers';
+import { CASHFLOW_IN_LINE_IDS as POLICY_IN_LINE_IDS } from './policies/cashflow-policy';
 export { normalizeBudgetLabel, buildBudgetLabelKey } from './budget-labels';
 
 // ── Number formatting ──
@@ -19,13 +20,7 @@ export const METHOD_LABELS: Record<string, string> = {
 
 export const METHOD_OPTIONS = Object.entries(METHOD_LABELS).map(([v, l]) => ({ value: v, label: l }));
 
-export const CASHFLOW_IN_LINE_IDS = new Set([
-  'MYSC_PREPAY_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-]);
+export const CASHFLOW_IN_LINE_IDS = new Set(POLICY_IN_LINE_IDS);
 
 // ── Budget label helpers ──
 

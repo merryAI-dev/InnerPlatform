@@ -10,6 +10,8 @@ describe('bank-import-cashflow helpers', () => {
     const options = resolveBankImportCashflowOptionsForAmount(15000, 'EXPENSE');
 
     expect(options.map((option) => option.value)).toEqual([
+      'MYSC_PREPAY_DIRECT_OUT',
+      'MYSC_PREPAY_LABOR_OUT',
       'DIRECT_COST_OUT',
       'INPUT_VAT_OUT',
       'MYSC_LABOR_OUT',
@@ -24,6 +26,23 @@ describe('bank-import-cashflow helpers', () => {
     expect(resolveBankImportCashflowSelection('MYSC_LABOR_OUT', 120000, 'EXPENSE')).toEqual({
       cashflowLineId: 'MYSC_LABOR_OUT',
       cashflowCategory: 'LABOR_COST',
+    });
+  });
+
+  it.each([
+    ['MYSC_PREPAY_LABOR_IN', 120000, 'DEPOSIT', 'CONTRACT_PAYMENT'],
+    ['MYSC_PREPAY_INPUT_VAT_IN', 120000, 'DEPOSIT', 'VAT_REFUND'],
+    ['MYSC_PREPAY_DIRECT_OUT', 120000, 'EXPENSE', 'OUTSOURCING'],
+    ['MYSC_PREPAY_LABOR_OUT', 120000, 'EXPENSE', 'LABOR_COST'],
+  ] as const)('does not collapse explicit line %s to its category default', (
+    cashflowLineId,
+    signedAmount,
+    entryKind,
+    cashflowCategory,
+  ) => {
+    expect(resolveBankImportCashflowSelection(cashflowLineId, signedAmount, entryKind)).toEqual({
+      cashflowLineId,
+      cashflowCategory,
     });
   });
 

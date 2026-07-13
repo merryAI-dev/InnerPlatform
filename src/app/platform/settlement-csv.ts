@@ -11,7 +11,13 @@ import type {
 import type { MonthMondayWeek } from './cashflow-weeks';
 import { findWeekForDate, getYearMondayWeeks } from './cashflow-weeks';
 import { pickExactValue, pickValue, parseNumber, parseDate, stableHash, normalizeSpace, normalizeKey } from './csv-utils';
-import { getCashflowLineLabel, listCashflowLineOptions, parseCashflowLineLabelAlias } from './policies/cashflow-policy';
+import {
+  CASHFLOW_IN_LINE_IDS as POLICY_IN_LINE_IDS,
+  getCashflowCategoryFromSheetLineId,
+  getCashflowLineLabel,
+  listCashflowLineOptions,
+  parseCashflowLineLabelAlias,
+} from './policies/cashflow-policy';
 
 // ── Cashflow line label ↔ id mapping ──
 
@@ -111,9 +117,7 @@ function labelToMethod(raw: string): PaymentMethod {
 
 // ── Direction inference from cashflow line ──
 
-const IN_LINE_IDS = new Set<string>([
-  'MYSC_PREPAY_IN', 'SALES_IN', 'SALES_VAT_IN', 'TEAM_SUPPORT_IN', 'BANK_INTEREST_IN',
-]);
+const IN_LINE_IDS = new Set(POLICY_IN_LINE_IDS);
 
 function inferDirection(lineId: CashflowSheetLineId | undefined): Direction {
   if (lineId && IN_LINE_IDS.has(lineId)) return 'IN';
@@ -910,22 +914,7 @@ function inferCashflowCategory(
   lineId: CashflowSheetLineId | undefined,
   direction: Direction,
 ): Transaction['cashflowCategory'] {
-  if (!lineId) return direction === 'IN' ? 'MISC_INCOME' : 'MISC_EXPENSE';
-  switch (lineId) {
-    case 'MYSC_PREPAY_IN': return 'CONTRACT_PAYMENT';
-    case 'SALES_IN': return 'CONTRACT_PAYMENT';
-    case 'SALES_VAT_IN': return 'VAT_REFUND';
-    case 'TEAM_SUPPORT_IN': return 'MISC_INCOME';
-    case 'BANK_INTEREST_IN': return 'MISC_INCOME';
-    case 'DIRECT_COST_OUT': return 'OUTSOURCING';
-    case 'INPUT_VAT_OUT': return 'TAX_PAYMENT';
-    case 'MYSC_LABOR_OUT': return 'LABOR_COST';
-    case 'MYSC_PROFIT_OUT': return 'MISC_EXPENSE';
-    case 'SALES_VAT_OUT': return 'TAX_PAYMENT';
-    case 'TEAM_SUPPORT_OUT': return 'MISC_EXPENSE';
-    case 'BANK_INTEREST_OUT': return 'MISC_EXPENSE';
-    default: return direction === 'IN' ? 'MISC_INCOME' : 'MISC_EXPENSE';
-  }
+  return getCashflowCategoryFromSheetLineId(lineId, direction);
 }
 
 function inferDirectionFromRow(

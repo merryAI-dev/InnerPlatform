@@ -4,25 +4,10 @@ import {
   ensureDocumentExists,
   readOptionalText,
 } from '../bff-utils.mjs';
+import { CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
 
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_LABOR_RISK_SNAPSHOTS_COLLECTION_ID = 'cashflow_labor_risk_snapshots';
-const CASHFLOW_IN_LINES = [
-  'MYSC_PREPAY_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-];
-const CASHFLOW_OUT_LINES = [
-  'DIRECT_COST_OUT',
-  'INPUT_VAT_OUT',
-  'MYSC_LABOR_OUT',
-  'MYSC_PROFIT_OUT',
-  'SALES_VAT_OUT',
-  'TEAM_SUPPORT_OUT',
-  'BANK_INTEREST_OUT',
-];
 const LABOR_LINE_ID = 'MYSC_LABOR_OUT';
 
 function normalizeRole(value) {
