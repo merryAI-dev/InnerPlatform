@@ -27,6 +27,7 @@ import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseProjectionEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseSheetEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
@@ -79,6 +80,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
     private final ThreadLocal<CashflowLeaseScope> currentCashflowLeaseScope = new ThreadLocal<>();
 
+    @Autowired
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId
     ) {
