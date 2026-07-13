@@ -152,6 +152,14 @@ export const cashflowSheetLabPreviewSchema = z.object({
   includeValues: z.boolean().optional(),
 }).strict();
 
+export const cashflowSheetLabMirrorRefreshSchema = z.object({
+  value: NON_EMPTY_STRING.optional(),
+  sheetName: NON_EMPTY_STRING.optional(),
+  startWeek: NON_EMPTY_STRING.optional(),
+  endWeek: NON_EMPTY_STRING.optional(),
+  idempotencyKey: NON_EMPTY_STRING,
+}).strict();
+
 export const cashflowSheetLabApplySchema = z.object({
   value: NON_EMPTY_STRING.optional(),
   sheetName: NON_EMPTY_STRING.optional(),
@@ -160,6 +168,11 @@ export const cashflowSheetLabApplySchema = z.object({
   stageRunId: NON_EMPTY_STRING.optional(),
   applyRiskCandidates: z.boolean().optional(),
   idempotencyKey: NON_EMPTY_STRING.optional(),
+}).strict();
+
+export const cashflowSheetLabStageSchema = z.object({
+  expectedMirrorRevision: NON_EMPTY_STRING,
+  idempotencyKey: NON_EMPTY_STRING,
 }).strict();
 
 export const cashflowSheetLabWritebackPreviewSchema = z.object({

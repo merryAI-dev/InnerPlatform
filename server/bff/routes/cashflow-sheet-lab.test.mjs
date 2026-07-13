@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './cashflow-sheet-lab.mjs';
+import { mountCashflowSheetLabRoutes } from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 
 const PROJECTION_IN_LABELS = [
@@ -73,11 +73,14 @@ function buildMatrixWithWeekLabels(weekLabels) {
   ];
 }
 
-function createDb({ project = { id: 'project-a' }, weeks = [] } = {}) {
+function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments = {} } = {}) {
   const documents = new Map();
   documents.set('orgs/tenant-a/projects/project-a', { ...project });
   for (const week of weeks) {
     documents.set(`orgs/tenant-a/cashflow_weeks/${week.id}`, { ...week });
+  }
+  for (const [path, value] of Object.entries(initialDocuments)) {
+    documents.set(path, { ...value });
   }
 
   function ref(path) {
@@ -191,6 +194,159 @@ describe('cashflow sheet lab route', () => {
       });
   });
 
+  it('reads Google Sheets only on explicit mirror refresh and pins the result', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    const beforeRefresh = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+    expect(beforeRefresh.body).toMatchObject({ projectId: 'project-a', status: 'EMPTY' });
+    expect(previewSpreadsheet).not.toHaveBeenCalled();
+
+    const refreshed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-refresh-001' })
+      .expect(200);
+    expect(refreshed.body).toMatchObject({
+      projectId: 'project-a',
+      status: 'FRESH',
+      sourceRevision: expect.stringMatching(/^sha256:/),
+      targetRevisionAtFetch: expect.stringMatching(/^sha256:/),
+      summary: { cellCount: 32, valueCount: 32, emptyCount: 0, invalidCount: 0 },
+    });
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+
+    const pinned = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+    expect(pinned.body.sourceRevision).toBe(refreshed.body.sourceRevision);
+    expect(pinned.body.cells).toHaveLength(32);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
+  });
+
+  it('keeps the last-good mirror as STALE when an explicit refresh fails', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const previewSpreadsheet = vi.fn()
+      .mockResolvedValueOnce({
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: 'Cashflow workbook',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrix(),
+      })
+      .mockRejectedValueOnce(new GoogleSheetsServiceError('temporary failure', {
+        code: 'google_sheets_api_error',
+        statusCode: 503,
+      }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-stale-first' })
+      .expect(200);
+    const second = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-stale-second' })
+      .expect(200);
+
+    expect(second.body).toMatchObject({
+      status: 'STALE',
+      sourceRevision: first.body.sourceRevision,
+      lastRefreshError: { code: 'google_sheets_api_error' },
+    });
+    expect(second.body.cells).toEqual(first.body.cells);
+  });
+
+  it('returns ERROR when the first explicit mirror refresh fails', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => {
+          throw new GoogleSheetsServiceError('unavailable', {
+            code: 'google_sheets_api_error',
+            statusCode: 503,
+          });
+        }),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-error-first' })
+      .expect(200);
+    expect(response.body).toMatchObject({
+      projectId: 'project-a',
+      status: 'ERROR',
+      lastRefreshError: { code: 'google_sheets_api_error' },
+    });
+    expect(response.body.sourceRevision).toBeUndefined();
+  });
+
+  it('replays an explicit mirror refresh idempotently without rereading Google', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    const payload = { idempotencyKey: 'mirror-idempotent-001' };
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send(payload)
+      .expect(200);
+    const replay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send(payload)
+      .expect(200);
+
+    expect(replay.body.sourceRevision).toBe(first.body.sourceRevision);
+    expect(replay.body.capturedAt).toBe(first.body.capturedAt);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+  });
+
   it('saves the cashflow sheet config without reading Google Sheets', async () => {
     const db = createDb();
     const previewSpreadsheet = vi.fn();
@@ -230,7 +386,7 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
-  it('hydrates missing saved config spreadsheet title from Google Sheets metadata', async () => {
+  it('does not contact Google while reading saved config', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -261,8 +417,8 @@ describe('cashflow sheet lab route', () => {
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
       .expect(200);
 
-    expect(response.body.config.spreadsheetTitle).toBe('[AXR]사업비 관리 시트');
-    expect(getSpreadsheetMeta).toHaveBeenCalledWith('spreadsheet-a');
+    expect(response.body.config.spreadsheetTitle).toBe('');
+    expect(getSpreadsheetMeta).not.toHaveBeenCalled();
   });
 
   it('allows saving ranges before sheet headers are verified', async () => {
@@ -379,7 +535,7 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
-  it('routes Stage final apply through JVM with the edit lease and performs no Node canonical write', async () => {
+  it('rejects direct final apply without a pinned stage run', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -401,7 +557,7 @@ describe('cashflow sheet lab route', () => {
       })),
     };
 
-    const response = await request(createApp({
+    await request(createApp({
       db,
       routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
     }))
@@ -413,18 +569,10 @@ describe('cashflow sheet lab route', () => {
         'x-edit-finalize': 'true',
       })
       .send({ idempotencyKey: 'apply-jvm-001' })
-      .expect(200);
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_stage_run_required'));
 
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: 'project-a',
-      idempotencyKey: 'apply-jvm-001',
-      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
-      lines: expect.arrayContaining([
-        expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),
-        expect.objectContaining({ mode: 'actual', cashflowLine: 'MYSC_PREPAY_IN', amount: 999 }),
-      ]),
-    }));
-    expect(response.body.firebaseResult.commandName).toBe('weeklyExpense.cashflowSheetLab.apply');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
@@ -471,9 +619,25 @@ describe('cashflow sheet lab route', () => {
       }],
     });
 
-    const response = await request(createApp({ db }))
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-001' })
+      .expect(200);
+
+    const response = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ idempotencyKey: 'stage-001' })
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        idempotencyKey: 'stage-001',
+      })
       .expect(200);
 
     expect(response.body).toMatchObject({
@@ -501,6 +665,213 @@ describe('cashflow sheet lab route', () => {
       sourceCell: expect.any(String),
     });
     expect(candidates.find((candidate) => candidate.data.mode === 'actual' && candidate.data.lineId === 'MYSC_PREPAY_IN')?.data.riskFlags).toEqual([]);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
+  });
+
+  it('rejects stage when the pinned source revision does not match', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-wrong-revision' })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: 'sha256:wrong', idempotencyKey: 'stage-wrong-revision' })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_mirror_revision_conflict');
+      });
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
+  });
+
+  it('replays stage idempotently without duplicating candidates', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-replay' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-replay-001',
+    };
+
+    const first = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+    const replay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
+      .expect(200);
+
+    expect(replay.body.runId).toBe(first.body.runId);
+    expect(replay.body.lastStagedAt).toBe(first.body.lastStagedAt);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(32);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks only a month containing an invalid pinned cell', async () => {
+    const matrix = buildMatrix();
+    matrix[3][3] = '확인 필요';
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-invalid-month' })
+      .expect(200);
+    expect(mirror.body.summary.invalidCount).toBe(1);
+
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-invalid-month' })
+      .expect(200);
+    expect(stage.body).toMatchObject({
+      status: 'BLOCKED',
+      stagedLineCount: 0,
+      blockedMonths: ['2026-01'],
+    });
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
+  });
+
+  it('preserves an EMPTY pinned cell as an authoritative removal candidate', async () => {
+    const matrix = buildMatrix();
+    matrix[3][3] = '-';
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-1',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        projection: { MYSC_PREPAY_IN: 100 },
+      }],
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-empty-cell' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-empty-cell' })
+      .expect(200);
+    const removal = stage.body.candidates.find((candidate) => (
+      candidate.mode === 'projection' && candidate.lineId === 'MYSC_PREPAY_IN'
+    ));
+    expect(removal).toMatchObject({
+      beforeHadValue: true,
+      beforeAmount: 100,
+      proposedHadValue: false,
+      proposedAmount: null,
+      cellState: 'EMPTY',
+    });
+  });
+
+  it('rejects stage when canonical cashflow changed after the explicit refresh', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-target-drift' })
+      .expect(200);
+    await db.doc('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1').set({
+      id: 'project-a-2026-01-w1',
+      projectId: 'project-a',
+      yearMonth: '2026-01',
+      weekNo: 1,
+      projection: { SALES_IN: 1 },
+    });
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-target-drift' })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_target_revision_conflict');
+      });
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 
   it('applies a staged candidate run through JVM without rereading the Google Sheet', async () => {
@@ -552,12 +923,29 @@ describe('cashflow sheet lab route', () => {
       routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
     });
 
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-stage-apply-001' })
+      .expect(200);
+
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ idempotencyKey: 'stage-apply-001' })
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        idempotencyKey: 'stage-apply-001',
+      })
       .expect(200);
 
     const apply = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .set({
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+      })
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-stage-001' })
+      .expect(200);
+    const replay = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set({
         'x-edit-session-id': 'session-a',
@@ -576,42 +964,11 @@ describe('cashflow sheet lab route', () => {
       stagedRunId: stage.body.runId,
     });
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(replay.body).toEqual(apply.body);
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toMatchObject({
       projection: { MYSC_PREPAY_IN: 100 },
       actual: { MYSC_PREPAY_IN: 200 },
     });
-  });
-
-  it('disables the automatic sync worker because it has no interactive edit lease', async () => {
-    const db = createDb({
-      project: {
-        id: 'project-a',
-        cashflowSheetLab: {
-          value: 'saved-spreadsheet-a',
-          sheetName: 'cashflow(사용내역 연동)',
-          startWeek: '26-1-1',
-          endWeek: '26-1-1',
-        },
-      },
-    });
-
-    await expect(runCashflowSheetLabSyncWorker({
-      db,
-      googleSheetsService: {
-        previewSpreadsheet: vi.fn(async () => ({
-          spreadsheetId: 'spreadsheet-a',
-          spreadsheetTitle: 'Cashflow workbook',
-          selectedSheetName: 'cashflow(사용내역 연동)',
-          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-          matrix: buildMatrix(),
-        })),
-      },
-      tenantIds: ['tenant-a'],
-      limit: 10,
-      nowIso: '2026-06-16T09:00:00.000Z',
-      editLeasesEnabled: true,
-    })).rejects.toMatchObject({ statusCode: 503, code: 'cashflow_sync_requires_edit_lease' });
-    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
   it('applies fixed-sheet week labels through canonical finance weeks', async () => {
@@ -644,24 +1001,31 @@ describe('cashflow sheet lab route', () => {
       })),
     };
 
-    const response = await request(createApp({
+    const app = createApp({
       db,
       googleSheetsService,
       routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
-    }))
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-fixed-weeks' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-fixed-weeks' })
+      .expect(200);
+    const response = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set({
         'x-edit-session-id': 'session-a',
         'x-edit-lease-id': 'lease-a',
         'x-edit-fence': '7',
       })
-      .send({ idempotencyKey: 'apply-002' })
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-002' })
       .expect(200);
 
     expect(response.body).toMatchObject({
       appliedLineCount: 64,
-      skippedInvalidWeekCount: 0,
-      skippedInvalidWeeks: [],
     });
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
       lines: expect.arrayContaining([

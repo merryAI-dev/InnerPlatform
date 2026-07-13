@@ -197,6 +197,9 @@ describe('firestore rules policy alignment', () => {
       'privateEditDrafts',
       'cashflowEditLocks',
       'cashflow_edit_locks',
+      'cashflow_sheet_mirrors',
+      'cashflow_sheet_stage_runs',
+      'cashflow_change_candidates',
     ]) {
       expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
       expect(firestoreRulesText).toMatch(

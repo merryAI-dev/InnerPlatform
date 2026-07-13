@@ -30,6 +30,9 @@ const protectedCollections = [
   'privateEditDrafts',
   'cashflowEditLocks',
   'cashflow_edit_locks',
+  'cashflow_sheet_mirrors',
+  'cashflow_sheet_stage_runs',
+  'cashflow_change_candidates',
 ] as const;
 const canonicalRootCollections = [
   'projects',

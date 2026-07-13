@@ -102,7 +102,7 @@ import { mountAuditRoutes } from './routes/audit.mjs';
 import { mountMemberRoutes } from './routes/members.mjs';
 import { mountCashflowExportRoutes } from './routes/cashflow-exports.mjs';
 import { mountJvmWeeklyApiRoutes } from './routes/jvm-weekly-api.mjs';
-import { mountCashflowSheetLabRoutes, runCashflowSheetLabSyncWorker } from './routes/cashflow-sheet-lab.mjs';
+import { mountCashflowSheetLabRoutes } from './routes/cashflow-sheet-lab.mjs';
 import { mountCashflowLaborRiskRoutes } from './routes/cashflow-labor-risk.mjs';
 import { mountBusinessCardRoutes } from './routes/business-cards.mjs';
 import { mountEditLeaseRoutes } from './routes/edit-leases.mjs';
@@ -1017,30 +1017,6 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
   app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
-
-  const runCashflowSheetSyncWorkerRoute = asyncHandler(async (req, res) => {
-    assertInternalWorkerAuthorized(req);
-    const tenantIds = readOptionalText(req.body?.tenantIds ?? req.query?.tenantIds ?? env.BFF_CASHFLOW_SHEET_SYNC_TENANTS) || 'mysc';
-    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId);
-    const projectIdFilter = readOptionalText(req.body?.projectId ?? req.query?.projectId);
-    const limit = parseLimit(req.body?.limit ?? req.query?.limit, 100, 500);
-
-    const result = await runCashflowSheetLabSyncWorker({
-      db,
-      googleSheetsService,
-      tenantIds: tenantId || tenantIds,
-      projectId: projectIdFilter,
-      limit,
-      nowIso: now(),
-    });
-
-    res.status(result.failed > 0 ? 207 : 200).json({
-      bffProjectId: projectId,
-      ...result,
-    });
-  });
-  app.get('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
-  app.post('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
 
   const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
