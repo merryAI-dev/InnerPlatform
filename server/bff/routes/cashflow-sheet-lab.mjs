@@ -9,6 +9,7 @@ import {
 import { GoogleSheetsServiceError, extractSpreadsheetId } from '../google-sheets.mjs';
 import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
 import { computeCashflowTargetRevision, createCashflowPinnedSnapshot } from '../cashflow-sheet-snapshot.mjs';
+import { CASHFLOW_ALL_LINES } from '../cashflow-policy.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import {
   cashflowSheetLabApplySchema,
@@ -27,6 +28,9 @@ const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_SHEET_MIRRORS_COLLECTION_ID = 'cashflow_sheet_mirrors';
 const CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID = 'cashflow_sheet_refresh_runs';
 const CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID = 'cashflow_sheet_stage_runs';
+const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
+const CASHFLOW_MODES = ['projection', 'actual'];
+const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 
 function readEditSession(req) {
   const sessionId = readOptionalText(req.header('x-edit-session-id'));
@@ -131,6 +135,11 @@ function cashflowSheetMirrorDocPath(tenantId, projectId) {
 function cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey) {
   const runId = `cfrefresh_${stableHash({ tenantId, projectId, idempotencyKey }).slice(0, 32)}`;
   return `orgs/${tenantId}/${CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID}/${runId}`;
+}
+
+function cashflowSheetStageMonthDocPath(tenantId, runId, yearMonth) {
+  const monthKey = readOptionalText(yearMonth).replace('-', '_');
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID}/${runId}_${monthKey}`;
 }
 
 async function readProjectDocument(db, tenantId, projectId) {
@@ -556,31 +565,123 @@ function hasIndexedSnapshotAmount(index, mapping) {
   return Boolean(index?.has(cashflowMappingKey(mapping)));
 }
 
-function candidateToApplyLine(candidate) {
-  const cellState = candidate.proposedHadValue === false ? 'EMPTY' : 'VALUE';
+function groupPinnedCellsByMonth(cells = []) {
+  const grouped = new Map();
+  for (const cell of cells) {
+    const yearMonth = readOptionalText(cell?.yearMonth);
+    if (!yearMonth) continue;
+    const monthCells = grouped.get(yearMonth) || [];
+    monthCells.push(cell);
+    grouped.set(yearMonth, monthCells);
+  }
+  return grouped;
+}
+
+function validateCompletePinnedMonth(yearMonth, cells = []) {
+  const keys = new Set();
+  const weekNumbers = new Set();
+  for (const cell of cells) {
+    const mode = readOptionalText(cell?.mode);
+    const lineId = readOptionalText(cell?.lineId);
+    const weekNo = Number(cell?.weekNo);
+    const state = readOptionalText(cell?.state);
+    if (
+      readOptionalText(cell?.yearMonth) !== yearMonth
+      || !CASHFLOW_MODES.includes(mode)
+      || !CASHFLOW_LINE_ORDER.has(lineId)
+      || !Number.isInteger(weekNo)
+      || weekNo < 1
+      || weekNo > 6
+      || !['VALUE', 'EMPTY'].includes(state)
+      || (state === 'VALUE' && !Number.isSafeInteger(cell?.amount))
+      || (state === 'EMPTY' && cell?.amount !== undefined)
+    ) {
+      return { ok: false, reason: 'invalid_cell' };
+    }
+    const key = `${mode}:${weekNo}:${lineId}`;
+    if (keys.has(key)) return { ok: false, reason: 'duplicate_cell' };
+    keys.add(key);
+    weekNumbers.add(weekNo);
+  }
+
+  const lastWeek = Math.max(0, ...weekNumbers);
+  if (lastWeek === 0) return { ok: false, reason: 'empty_month' };
+  for (let weekNo = 1; weekNo <= lastWeek; weekNo += 1) {
+    if (!weekNumbers.has(weekNo)) return { ok: false, reason: 'non_consecutive_weeks' };
+    for (const mode of CASHFLOW_MODES) {
+      for (const lineId of CASHFLOW_ALL_LINES) {
+        if (!keys.has(`${mode}:${weekNo}:${lineId}`)) {
+          return { ok: false, reason: 'incomplete_month' };
+        }
+      }
+    }
+  }
+  if (keys.size !== lastWeek * CASHFLOW_MODES.length * CASHFLOW_ALL_LINES.length) {
+    return { ok: false, reason: 'unexpected_cell_count' };
+  }
+
   return {
-    mode: candidate.mode,
-    yearMonth: candidate.yearMonth,
-    weekNo: candidate.weekNo,
-    cashflowLine: candidate.lineId,
-    direction: candidate.lineDirection === 'in' ? 'IN' : 'OUT',
-    amount: cellState === 'VALUE' ? normalizeAppliedAmount(candidate.proposedAmount) : 0,
-    cellState,
-    sourceCell: candidate.sourceCell,
-    sourceLabel: candidate.sourceLabel || candidate.lineId,
+    ok: true,
+    cells: [...cells]
+      .sort((left, right) => (
+        Number(left.weekNo) - Number(right.weekNo)
+        || CASHFLOW_MODES.indexOf(left.mode) - CASHFLOW_MODES.indexOf(right.mode)
+        || CASHFLOW_LINE_ORDER.get(left.lineId) - CASHFLOW_LINE_ORDER.get(right.lineId)
+      ))
+      .map((cell) => stripUndefinedDeep({
+        mode: cell.mode,
+        weekNo: Number(cell.weekNo),
+        cashflowLine: cell.lineId,
+        cellState: cell.state,
+        amount: cell.state === 'VALUE' ? cell.amount : undefined,
+        sourceCell: readOptionalText(cell.sourceCell) || undefined,
+        sourceLabel: readOptionalText(cell.sourceLabel) || cell.lineId,
+      })),
   };
+}
+
+function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMonth, cells, now }) {
+  return stripUndefinedDeep({
+    tenantId,
+    projectId,
+    runId,
+    yearMonth,
+    sourceRevision: mirror.sourceRevision,
+    targetRevisionAtFetch: mirror.targetRevisionAtFetch,
+    cells,
+    createdAt: now,
+  });
+}
+
+async function readCashflowSheetStageMonth({ db, tenantId, projectId, runId, yearMonth }) {
+  const snap = await db.doc(cashflowSheetStageMonthDocPath(tenantId, runId, yearMonth)).get();
+  if (!snap.exists) {
+    throw createHttpError(409, '검토 당시 고정한 월 시트 값을 찾을 수 없습니다.', 'cashflow_sheet_stage_month_missing');
+  }
+  const value = snap.data() || {};
+  if (
+    readOptionalText(value.projectId) !== readOptionalText(projectId)
+    || readOptionalText(value.runId) !== readOptionalText(runId)
+    || readOptionalText(value.yearMonth) !== readOptionalText(yearMonth)
+  ) {
+    throw createHttpError(409, '검토 당시 고정한 월 시트 값이 일치하지 않습니다.', 'cashflow_sheet_stage_month_mismatch');
+  }
+  return value;
 }
 
 function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, context, now }) {
   const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
   const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
-  const invalidMonths = new Set((mirror?.cells || [])
+  const blockedMonths = new Set((mirror?.cells || [])
     .filter((cell) => cell.state === 'INVALID')
     .map((cell) => readOptionalText(cell.yearMonth))
     .filter(Boolean));
+  for (const [yearMonth, cells] of groupPinnedCellsByMonth(mirror?.cells || [])) {
+    if (!validateCompletePinnedMonth(yearMonth, cells).ok) blockedMonths.add(yearMonth);
+  }
 
   const candidates = (mirror?.cells || [])
-    .filter((cell) => !invalidMonths.has(readOptionalText(cell.yearMonth)))
+    .filter((cell) => !blockedMonths.has(readOptionalText(cell.yearMonth)))
     .filter((cell) => cell.state === 'VALUE' || cell.state === 'EMPTY')
     .map((cell) => {
       const mapping = {
@@ -627,7 +728,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
     })
     .filter(Boolean);
 
-  return { candidates, blockedMonths: [...invalidMonths].sort() };
+  return { candidates, blockedMonths: [...blockedMonths].sort() };
 }
 
 function normalizeAppliedAmount(value) {
@@ -637,6 +738,105 @@ function normalizeAppliedAmount(value) {
 
 function stableHash(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function assertApplyRequestMatches(stageRun, idempotencyKey, applyRequestHash) {
+  if (
+    readOptionalText(stageRun.appliedIdempotencyKey) !== readOptionalText(idempotencyKey)
+    || readOptionalText(stageRun.applyRequestHash) !== readOptionalText(applyRequestHash)
+  ) {
+    throw createHttpError(409, '다른 최종 반영 요청이 이미 이 검토본을 사용 중입니다.', 'cashflow_sheet_apply_in_progress');
+  }
+}
+
+async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId, idempotencyKey, applyRequestHash, now }) {
+  const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`);
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(runRef);
+    if (!snap.exists) {
+      throw createHttpError(404, '시트 검토 run을 찾을 수 없습니다.', 'cashflow_sheet_stage_run_not_found');
+    }
+    const stageRun = snap.data() || {};
+    if (readOptionalText(stageRun.projectId) !== readOptionalText(projectId)) {
+      throw createHttpError(404, '시트 검토 run을 찾을 수 없습니다.', 'cashflow_sheet_stage_run_not_found');
+    }
+    const status = readOptionalText(stageRun.status);
+    if (status === 'APPLIED') {
+      assertApplyRequestMatches(stageRun, idempotencyKey, applyRequestHash);
+      if (stageRun.applyResponse) return { replay: stageRun.applyResponse, resume: false, stageRun };
+      throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
+    }
+    if (status === 'APPLYING') {
+      assertApplyRequestMatches(stageRun, idempotencyKey, applyRequestHash);
+      return { replay: null, resume: true, stageRun };
+    }
+    if (status !== 'READY') {
+      throw createHttpError(409, '반영 가능한 상태의 시트 검토 run이 아닙니다.', 'cashflow_sheet_stage_run_blocked');
+    }
+    transaction.set(runRef, stripUndefinedDeep({
+      status: 'APPLYING',
+      applyStartedAt: now,
+      appliedIdempotencyKey: idempotencyKey,
+      applyRequestHash,
+    }), { merge: true });
+    return { replay: null, resume: false, stageRun };
+  });
+  return { ...result, runRef };
+}
+
+async function restoreCashflowSheetApplyReady({
+  db,
+  runRef,
+  idempotencyKey,
+  applyRequestHash,
+  error,
+}) {
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(runRef);
+    if (!snap.exists) return;
+    const stageRun = snap.data() || {};
+    if (
+      readOptionalText(stageRun.status) !== 'APPLYING'
+      || readOptionalText(stageRun.appliedIdempotencyKey) !== readOptionalText(idempotencyKey)
+      || readOptionalText(stageRun.applyRequestHash) !== readOptionalText(applyRequestHash)
+    ) return;
+    transaction.set(runRef, stripUndefinedDeep({
+      status: 'READY',
+      applyFailedAt: new Date().toISOString(),
+      applyFailure: routeErrorDetails(error),
+    }), { merge: true });
+  });
+}
+
+function monthApplyIdempotencyKey({ idempotencyKey, stagedRunId, yearMonth }) {
+  return `cf-sheet-month-${stableHash({ idempotencyKey, stagedRunId, yearMonth }).slice(0, 48)}`;
+}
+
+function assertResultingTargetRevision(result) {
+  const revision = readOptionalText(result?.resultingTargetRevision);
+  if (!/^sha256:[a-f0-9]{64}$/.test(revision)) {
+    throw createHttpError(
+      502,
+      'JVM 캐시플로 저장 결과의 revision을 확인할 수 없습니다.',
+      'cashflow_jvm_invalid_response',
+    );
+  }
+  return revision;
+}
+
+function summarizeJavaMonthResult(result = {}) {
+  return stripUndefinedDeep({
+    ok: result.ok === true,
+    commandName: readOptionalText(result.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
+    projectId: readOptionalText(result.projectId),
+    yearMonth: readOptionalText(result.yearMonth),
+    sourceRevision: readOptionalText(result.sourceRevision),
+    targetRevision: readOptionalText(result.targetRevision),
+    resultingTargetRevision: readOptionalText(result.resultingTargetRevision),
+    savedProjectionLineCount: Number(result.savedProjectionLineCount) || 0,
+    savedActualLineCount: Number(result.savedActualLineCount) || 0,
+    auditId: readOptionalText(result.auditId) || undefined,
+  });
 }
 
 async function applyStagedCashflowSheetLab({
@@ -661,104 +861,164 @@ async function applyStagedCashflowSheetLab({
     throw createHttpError(400, '검토 후보 runId가 필요합니다.', 'cashflow_sheet_stage_run_required');
   }
 
-  const stageRun = await readCashflowSheetStageRun(db, tenantId, projectId, stagedRunId);
-  const applyRequestHash = stableHash({ applyRiskCandidates: Boolean(parsed.applyRiskCandidates) });
+  let stageRun = await readCashflowSheetStageRun(db, tenantId, projectId, stagedRunId);
+  const applyRequestHash = stableHash({ stagedRunId, applyRiskCandidates: Boolean(parsed.applyRiskCandidates) });
   if (readOptionalText(stageRun.status) === 'APPLIED') {
-    if (
-      readOptionalText(stageRun.appliedIdempotencyKey) === readOptionalText(idempotencyKey)
-      && readOptionalText(stageRun.applyRequestHash) === applyRequestHash
-      && stageRun.applyResponse
-    ) {
-      return stageRun.applyResponse;
-    }
+    assertApplyRequestMatches(stageRun, idempotencyKey, applyRequestHash);
+    if (stageRun.applyResponse) return stageRun.applyResponse;
     throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
   }
-  if (readOptionalText(stageRun.status) !== 'READY') {
+  const resuming = readOptionalText(stageRun.status) === 'APPLYING';
+  if (resuming) assertApplyRequestMatches(stageRun, idempotencyKey, applyRequestHash);
+  if (!resuming && readOptionalText(stageRun.status) !== 'READY') {
     throw createHttpError(409, '반영 가능한 상태의 시트 검토 run이 아닙니다.', 'cashflow_sheet_stage_run_blocked');
   }
-  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-  if (readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)) {
-    throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
-  }
-  const currentTargetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
-  if (computeCashflowTargetRevision(currentTargetSnapshot) !== readOptionalText(stageRun.targetRevisionAtFetch)) {
-    throw createHttpError(409, '검토 후 캐시플로우 값이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_target_revision_conflict');
-  }
-
   const candidates = await readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runId: stagedRunId });
   if (candidates.length === 0) {
     throw createHttpError(400, '저장할 검토 후보가 없습니다.', 'cashflow_sheet_stage_candidates_empty');
   }
 
   const riskCandidates = candidates.filter((candidate) => Array.isArray(candidate.riskFlags) && candidate.riskFlags.length > 0);
-  const selectedCandidates = parsed.applyRiskCandidates
-    ? candidates
-    : candidates.filter((candidate) => !Array.isArray(candidate.riskFlags) || candidate.riskFlags.length === 0);
-  if (selectedCandidates.length === 0) {
+  const riskMonths = new Set(riskCandidates.map((candidate) => readOptionalText(candidate.yearMonth)).filter(Boolean));
+  const candidateMonths = [...new Set(candidates.map((candidate) => readOptionalText(candidate.yearMonth)).filter(Boolean))].sort();
+  const selectedMonths = parsed.applyRiskCandidates
+    ? candidateMonths
+    : candidateMonths.filter((yearMonth) => !riskMonths.has(yearMonth));
+  if (selectedMonths.length === 0) {
     throw createHttpError(
       409,
       '확인 필요 후보만 있습니다. 전체 검토 후 저장해 주세요.',
       'cashflow_sheet_stage_only_risk_candidates',
     );
   }
+  const selectedMonthSet = new Set(selectedMonths);
+  const selectedCandidates = candidates.filter((candidate) => selectedMonthSet.has(readOptionalText(candidate.yearMonth)));
 
-  const lines = selectedCandidates.map(candidateToApplyLine);
   if (!javaWeeklyClient) {
     throw createHttpError(503, 'Cashflow final apply requires the JVM authority service.', 'cashflow_jvm_authority_unavailable');
   }
-  const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
-      context,
-      projectId,
-      idempotencyKey,
-      editSession,
-      lines: lines.map(({ mode, yearMonth, weekNo, cashflowLine, amount, cellState, sourceCell, sourceLabel }) => ({
-        mode,
-        yearMonth,
-        weekNo,
-        cashflowLine,
-        amount,
-        cellState,
-        sourceCell,
-        sourceLabel,
-      })),
-  });
-  const projectionLineCount = Number(javaResult.savedProjectionLineCount)
-    || lines.filter((line) => line.mode === 'projection').length;
-  const actualLineCount = Number(javaResult.savedActualLineCount)
-    || lines.filter((line) => line.mode === 'actual').length;
-  const response = {
-      ok: true,
-      commandName: readOptionalText(javaResult.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
-      projectId,
-      sourceSheetKey: 'cashflow-sheet-lab',
-      weekBasis: CASHFLOW_WEEK_BASIS,
-      totalBasis: CASHFLOW_WEEK_BASIS,
-      appliedLineCount: lines.length,
-      projectionLineCount,
-      actualLineCount,
-      skippedRiskLineCount: riskCandidates.length,
-      lastAppliedAt: now,
-      runId: `cashflow-sheet-apply:${projectId}:${now}`,
-      stagedRunId,
-      lastAppliedBy: {
-        uid: readOptionalText(context?.actorId),
-        email: readOptionalText(context?.actorEmail),
-        role: readOptionalText(context?.actorRole) || 'workspace_user',
-      },
-      firebaseResult: {
-        ...javaResult,
-        commandName: readOptionalText(javaResult.commandName) || 'weeklyExpense.cashflowSheetLab.apply',
-        verifiedLineCount: lines.length,
-      },
-  };
-  await markCashflowChangeCandidatesStatus({
+
+  const stagedMonths = await Promise.all(selectedMonths.map(async (yearMonth) => {
+    const stagedMonth = await readCashflowSheetStageMonth({ db, tenantId, projectId, runId: stagedRunId, yearMonth });
+    if (
+      readOptionalText(stagedMonth.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+      || readOptionalText(stagedMonth.targetRevisionAtFetch) !== readOptionalText(stageRun.targetRevisionAtFetch)
+    ) {
+      throw createHttpError(409, '검토 당시 고정한 월 시트 revision이 일치하지 않습니다.', 'cashflow_sheet_stage_month_revision_conflict');
+    }
+    const validated = validateCompletePinnedMonth(yearMonth, (stagedMonth.cells || []).map((cell) => stripUndefinedDeep({
+      yearMonth,
+      mode: cell.mode,
+      weekNo: cell.weekNo,
+      lineId: cell.cashflowLine,
+      state: cell.cellState,
+      amount: cell.cellState === 'VALUE' ? cell.amount : undefined,
+      sourceCell: cell.sourceCell,
+      sourceLabel: cell.sourceLabel,
+    })));
+    if (!validated.ok) {
+      throw createHttpError(409, '검토 당시 고정한 월 시트 구조가 완전하지 않습니다.', 'cashflow_sheet_stage_month_incomplete');
+    }
+    return { yearMonth, cells: validated.cells };
+  }));
+
+  if (!resuming) {
+    const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+    if (readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)) {
+      throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
+    }
+    const currentTargetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
+    if (computeCashflowTargetRevision(currentTargetSnapshot) !== readOptionalText(stageRun.targetRevisionAtFetch)) {
+      throw createHttpError(409, '검토 후 캐시플로우 값이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_target_revision_conflict');
+    }
+  }
+
+  const reservation = await reserveCashflowSheetApply({
     db,
     tenantId,
-    candidates: selectedCandidates,
-    status: 'applied',
+    projectId,
+    stagedRunId,
+    idempotencyKey,
+    applyRequestHash,
     now,
   });
-  await db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`).set({
+  if (reservation.replay) return reservation.replay;
+  stageRun = reservation.stageRun;
+
+  const javaResults = [];
+  let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
+  try {
+    for (let index = 0; index < stagedMonths.length; index += 1) {
+      const month = stagedMonths[index];
+      const isLastMonth = index === stagedMonths.length - 1;
+      const monthEditSession = editSession
+        ? { ...editSession, finalize: isLastMonth ? Boolean(editSession.finalize) : false }
+        : null;
+      const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
+        context,
+        projectId,
+        idempotencyKey: monthApplyIdempotencyKey({ idempotencyKey, stagedRunId, yearMonth: month.yearMonth }),
+        editSession: monthEditSession,
+        sourceRevision: stageRun.sourceRevision,
+        targetRevision,
+        yearMonth: month.yearMonth,
+        cells: month.cells,
+      });
+      targetRevision = assertResultingTargetRevision(javaResult);
+      javaResults.push(javaResult);
+    }
+  } catch (error) {
+    const statusCode = Number(error?.statusCode || error?.status);
+    if (javaResults.length === 0 && statusCode >= 400 && statusCode < 500) {
+      await restoreCashflowSheetApplyReady({
+        db,
+        runRef: reservation.runRef,
+        idempotencyKey,
+        applyRequestHash,
+        error,
+      });
+    }
+    throw error;
+  }
+
+  const appliedCells = stagedMonths.flatMap((month) => month.cells);
+  const projectionLineCount = appliedCells.filter((cell) => cell.mode === 'projection').length;
+  const actualLineCount = appliedCells.filter((cell) => cell.mode === 'actual').length;
+  const response = {
+    ok: true,
+    commandName: 'weeklyExpense.cashflowSheetLab.apply',
+    projectId,
+    sourceSheetKey: 'cashflow-sheet-lab',
+    sourceRevision: stageRun.sourceRevision,
+    targetRevisionAtStart: stageRun.targetRevisionAtFetch,
+    resultingTargetRevision: targetRevision,
+    appliedMonths: selectedMonths,
+    weekBasis: CASHFLOW_WEEK_BASIS,
+    totalBasis: CASHFLOW_WEEK_BASIS,
+    appliedLineCount: appliedCells.length,
+    projectionLineCount,
+    actualLineCount,
+    skippedRiskLineCount: parsed.applyRiskCandidates ? 0 : riskCandidates.length,
+    lastAppliedAt: now,
+    runId: `cashflow-sheet-apply:${projectId}:${now}`,
+    stagedRunId,
+    lastAppliedBy: {
+      uid: readOptionalText(context?.actorId),
+      email: readOptionalText(context?.actorEmail),
+      role: readOptionalText(context?.actorRole) || 'workspace_user',
+    },
+    firebaseResult: {
+      ok: true,
+      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      projectId,
+      sourceRevision: stageRun.sourceRevision,
+      targetRevisionAtStart: stageRun.targetRevisionAtFetch,
+      resultingTargetRevision: targetRevision,
+      monthResults: javaResults.map(summarizeJavaMonthResult),
+      verifiedLineCount: appliedCells.length,
+    },
+  };
+  await reservation.runRef.set({
     status: 'APPLIED',
     appliedAt: now,
     appliedIdempotencyKey: idempotencyKey,
@@ -766,6 +1026,21 @@ async function applyStagedCashflowSheetLab({
     applyResponse: response,
     appliedBy: response.lastAppliedBy,
   }, { merge: true });
+  try {
+    await markCashflowChangeCandidatesStatus({
+      db,
+      tenantId,
+      candidates: selectedCandidates,
+      status: 'applied',
+      now,
+    });
+  } catch (error) {
+    logger('staged.candidate_status_failed', {
+      projectId,
+      stagedRunId,
+      ...routeErrorDetails(error),
+    }, 'warn');
+  }
   return response;
 }
 
@@ -823,6 +1098,27 @@ async function stagePinnedCashflowSheetLab({
   });
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
   const actualLineCount = candidates.filter((candidate) => candidate.mode === 'actual').length;
+  const cellsByMonth = groupPinnedCellsByMonth(mirror.cells || []);
+  const stagedMonths = [...new Set(candidates.map((candidate) => candidate.yearMonth))].sort();
+  const stagedMonthDocuments = stagedMonths.map((yearMonth) => {
+    const validated = validateCompletePinnedMonth(yearMonth, cellsByMonth.get(yearMonth) || []);
+    if (!validated.ok) {
+      throw createHttpError(
+        409,
+        `${yearMonth} 시트 값이 월 전체 구조를 충족하지 않습니다. 월 1주차부터 다시 연동해 주세요.`,
+        'cashflow_sheet_month_incomplete',
+      );
+    }
+    return stageMonthSnapshotDocument({
+      tenantId,
+      projectId,
+      runId,
+      mirror,
+      yearMonth,
+      cells: validated.cells,
+      now,
+    });
+  });
   const responseCandidates = candidates.slice(0, 200);
   const response = {
     ok: true,
@@ -841,6 +1137,7 @@ async function stagePinnedCashflowSheetLab({
     actualLineCount,
     riskLineCount: candidates.filter((candidate) => candidate.riskFlags?.length > 0).length,
     blockedMonths,
+    stagedMonths,
     candidates: responseCandidates,
     omittedCandidateCount: Math.max(0, candidates.length - responseCandidates.length),
     lastStagedAt: now,
@@ -861,6 +1158,7 @@ async function stagePinnedCashflowSheetLab({
     status: response.status,
     stagedLineCount: candidates.length,
     blockedMonths,
+    stagedMonths,
     createdAt: now,
     createdBy: response.lastStagedBy,
   });
@@ -873,6 +1171,9 @@ async function stagePinnedCashflowSheetLab({
   if (replay) return replay;
   try {
     await saveCashflowChangeCandidates({ db, tenantId, candidates });
+    await Promise.all(stagedMonthDocuments.map((month) => db
+      .doc(cashflowSheetStageMonthDocPath(tenantId, runId, month.yearMonth))
+      .set(month)));
     await runRef.set(stripUndefinedDeep({
       ...runDocument,
       status: response.status,
