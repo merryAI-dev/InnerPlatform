@@ -225,6 +225,30 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
+  it('preserves a non-JSON Cloud Run 403 instead of turning it into a BFF 500', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      text: async () => 'The request was not authenticated.',
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1',
+      actorRole: 'pm',
+    }, { env: stageEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/projection')
+      .set({ 'idempotency-key': 'projection-auth-403', ...editLeaseHeaders })
+      .send({ lines: [] })
+      .expect(403)
+      .expect((response) => {
+        expect(response.body).toMatchObject({
+          code: 'java_weekly_api_error',
+          message: 'The request was not authenticated.',
+        });
+      });
+  });
+
   it('forwards Stage cashflow projection lease headers and rejects caller source context', async () => {
     const calls = [];
     const fetchImpl = vi.fn(async (url, init) => {
@@ -525,6 +549,35 @@ describe('JVM weekly API BFF proxy', () => {
     expect(calls[1].url).toBe('http://jvm-weekly.local/api/v1/cashflow/project-a');
     expect(calls[1].init.headers.authorization).toBe('Bearer metadata-id-token');
     expect(calls[1].init.headers['x-inner-platform-service-token']).toBe('test-service-token');
+  });
+
+  it('adds an audience-bound ID token resolved from Stage BFF credentials', async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ projectId: 'project-a', projection: [], actual: [] }),
+      };
+    });
+    const resolveIdentityToken = vi.fn(async () => 'stage-id-token');
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      jvmWeeklyApiIdTokenAudience: 'https://innerplatform-jvm-weekly-api-lease-stage.a.run.app',
+      jvmWeeklyApiServiceAccountJson: JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' }),
+      jvmWeeklyApiIdentityTokenResolver: resolveIdentityToken,
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a')
+      .expect(200);
+
+    expect(resolveIdentityToken).toHaveBeenCalledWith({
+      audience: 'https://innerplatform-jvm-weekly-api-lease-stage.a.run.app',
+      serviceAccountJson: JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' }),
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.headers.authorization).toBe('Bearer stage-id-token');
   });
 
   it('proxies audit export creation as a finance-only Java command', async () => {

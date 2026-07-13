@@ -12,6 +12,8 @@ export function evaluateStageEditLeaseRuntime(env = process.env) {
   const jvmProjectId = text(env.JVM_WEEKLY_FIRESTORE_PROJECT_ID);
   const jvmUrl = text(env.JVM_WEEKLY_API_BASE_URL);
   const serviceToken = text(env.JVM_WEEKLY_INTERNAL_API_TOKEN);
+  const idTokenAudience = text(env.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE);
+  const invokerCredential = text(env.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON);
 
   if (text(env.BFF_DEPLOY_ENV) !== 'stage') failures.push('BFF_DEPLOY_ENV must be stage');
   if (text(env.BFF_EDIT_LEASES_ENABLED) !== 'true') failures.push('BFF_EDIT_LEASES_ENABLED must be true');
@@ -20,6 +22,10 @@ export function evaluateStageEditLeaseRuntime(env = process.env) {
   if (jvmProjectId !== STAGE_PROJECT_ID) failures.push(`JVM Firestore project must be ${STAGE_PROJECT_ID}`);
   if (dataProjectId === LIVE_PROJECT_ID || jvmProjectId === LIVE_PROJECT_ID) failures.push('Live data project is forbidden');
   if (serviceToken.length < 32) failures.push('JVM stage service token must be at least 32 characters');
+  if (idTokenAudience.replace(/\/$/, '') !== jvmUrl.replace(/\/$/, '')) {
+    failures.push('JVM ID token audience must match the Stage JVM URL');
+  }
+  if (!invokerCredential) failures.push('JVM Stage invoker credential must be configured');
   try {
     const url = new URL(jvmUrl);
     if (

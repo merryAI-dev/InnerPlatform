@@ -5,6 +5,7 @@ import {
   readOptionalText,
   ROUTE_ROLES,
 } from '../bff-utils.mjs';
+import { GoogleAuth } from 'google-auth-library';
 
 function resolveJavaWeeklyApiBaseUrl(options = {}, env = process.env) {
   return readOptionalText(options.jvmWeeklyApiBaseUrl)
@@ -22,6 +23,12 @@ function resolveJavaWeeklyApiIdTokenAudience(options = {}, env = process.env) {
   return readOptionalText(options.jvmWeeklyApiIdTokenAudience)
     || readOptionalText(env.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE)
     || readOptionalText(env.WEEKLY_API_ID_TOKEN_AUDIENCE);
+}
+
+function resolveJavaWeeklyApiServiceAccountJson(options = {}, env = process.env) {
+  return readOptionalText(options.jvmWeeklyApiServiceAccountJson)
+    || readOptionalText(env.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON)
+    || readOptionalText(env.WEEKLY_API_SERVICE_ACCOUNT_JSON);
 }
 
 function resolveJavaWeeklyAuthMode(options = {}, env = process.env) {
@@ -57,8 +64,37 @@ function isWorkspaceAuthMode(authMode) {
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
 }
 
-async function fetchGoogleIdentityToken(fetchImpl, audience) {
+async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
+  let credentials;
+  try {
+    credentials = JSON.parse(serviceAccountJson);
+  } catch {
+    throw createHttpError(503, 'JVM weekly API invoker credential is invalid.', 'jvm_weekly_api_identity_token_unavailable');
+  }
+  try {
+    const auth = new GoogleAuth({ credentials });
+    const client = await auth.getIdTokenClient(audience);
+    const authorization = readOptionalText((await client.getRequestHeaders()).Authorization);
+    const token = authorization.replace(/^Bearer\s+/i, '');
+    if (!token) throw new Error('Missing identity token');
+    return token;
+  } catch {
+    throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
+  }
+}
+
+async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccountJson, resolveIdentityToken) {
   if (!audience) return '';
+  if (serviceAccountJson) {
+    if (typeof resolveIdentityToken === 'function') {
+      const token = await resolveIdentityToken({ audience, serviceAccountJson });
+      if (!readOptionalText(token)) {
+        throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
+      }
+      return String(token).trim();
+    }
+    return fetchCredentialIdentityToken(audience, serviceAccountJson);
+  }
   const tokenUrl = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(audience)}&format=full`;
   const response = await fetchImpl(tokenUrl, {
     method: 'GET',
@@ -76,6 +112,8 @@ async function buildTrustedHeaders({
   context,
   serviceToken,
   idTokenAudience,
+  serviceAccountJson,
+  resolveIdentityToken,
   authMode,
   workspaceEmailDomain,
   editSession,
@@ -105,7 +143,7 @@ async function buildTrustedHeaders({
     headers['x-edit-fence'] = String(editSession.fence);
     if (editSession.finalize === true) headers['x-edit-finalize'] = 'true';
   }
-  const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience);
+  const identityToken = await fetchGoogleIdentityToken(fetchImpl, idTokenAudience, serviceAccountJson, resolveIdentityToken);
   if (identityToken) {
     headers.authorization = `Bearer ${identityToken}`;
   }
@@ -127,6 +165,8 @@ async function proxyJavaWeeklyJson({
   baseUrl,
   serviceToken,
   idTokenAudience,
+  serviceAccountJson,
+  resolveIdentityToken,
   authMode,
   workspaceEmailDomain,
   context,
@@ -146,6 +186,8 @@ async function proxyJavaWeeklyJson({
       context,
       serviceToken,
       idTokenAudience,
+      serviceAccountJson,
+      resolveIdentityToken,
       authMode,
       workspaceEmailDomain,
       editSession,
@@ -155,7 +197,14 @@ async function proxyJavaWeeklyJson({
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+  }
   if (!response.ok) {
     throw readJavaError(response.status, payload);
   }
@@ -216,6 +265,8 @@ export function mountJvmWeeklyApiRoutes(app, {
   jvmWeeklyApiBaseUrl,
   jvmWeeklyApiServiceToken,
   jvmWeeklyApiIdTokenAudience,
+  jvmWeeklyApiServiceAccountJson,
+  jvmWeeklyApiIdentityTokenResolver,
   jvmWeeklyAuthMode,
   jvmWeeklyWorkspaceEmailDomain,
   jvmWeeklyFirestoreProjectId,
@@ -223,11 +274,26 @@ export function mountJvmWeeklyApiRoutes(app, {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
   const idTokenAudience = resolveJavaWeeklyApiIdTokenAudience({ jvmWeeklyApiIdTokenAudience }, env);
+  const serviceAccountJson = resolveJavaWeeklyApiServiceAccountJson({ jvmWeeklyApiServiceAccountJson }, env);
   const authMode = resolveJavaWeeklyAuthMode({ jvmWeeklyAuthMode }, env);
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
   const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
   const bffDataProjectId = resolveBffDataProjectId(env);
   const editLeasesEnabled = readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+
+  function proxyJavaWeeklyRequest(options) {
+    return proxyJavaWeeklyJson({
+      fetchImpl,
+      baseUrl,
+      serviceToken,
+      idTokenAudience,
+      serviceAccountJson,
+      resolveIdentityToken: jvmWeeklyApiIdentityTokenResolver,
+      authMode,
+      workspaceEmailDomain,
+      ...options,
+    });
+  }
 
   async function proxyMutation(req, path, body, { cashflowWrite = false } = {}) {
     let editSession;
@@ -249,13 +315,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       editSession = readCashflowEditSession(req);
       dataProjectId = bffDataProjectId;
     }
-    return proxyJavaWeeklyJson({
-      fetchImpl,
-      baseUrl,
-      serviceToken,
-      idTokenAudience,
-      authMode,
-      workspaceEmailDomain,
+    return proxyJavaWeeklyRequest({
       context: req.context,
       method: 'POST',
       path,
@@ -268,13 +328,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.get('/api/v1/weekly-expenses/:projectId/sheets', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheets', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
-    const result = await proxyJavaWeeklyJson({
-      fetchImpl,
-      baseUrl,
-      serviceToken,
-      idTokenAudience,
-      authMode,
-      workspaceEmailDomain,
+    const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/sheets`,
@@ -286,13 +340,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read weekly expense sheet', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const sheetKey = encodeURIComponent(readOptionalText(req.params.sheetKey));
-    const result = await proxyJavaWeeklyJson({
-      fetchImpl,
-      baseUrl,
-      serviceToken,
-      idTokenAudience,
-      authMode,
-      workspaceEmailDomain,
+    const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}`,
@@ -330,13 +378,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const status = readOptionalText(req.query.status);
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    const result = await proxyJavaWeeklyJson({
-      fetchImpl,
-      baseUrl,
-      serviceToken,
-      idTokenAudience,
-      authMode,
-      workspaceEmailDomain,
+    const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
       path: `/api/v1/weekly-expenses/${projectId}/bank-statements/import-lines${query}`,
@@ -420,13 +462,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.get('/api/v1/cashflow/:projectId', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read Java weekly cashflow snapshot', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
-    const result = await proxyJavaWeeklyJson({
-      fetchImpl,
-      baseUrl,
-      serviceToken,
-      idTokenAudience,
-      authMode,
-      workspaceEmailDomain,
+    const result = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
       path: `/api/v1/cashflow/${projectId}`,
