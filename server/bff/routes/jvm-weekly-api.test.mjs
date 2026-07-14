@@ -420,6 +420,54 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('returns an empty usable dashboard when the project has no linked sheet', async () => {
+    const documents = new Map([
+      ['orgs/tenant-a/projects/project-a', { id: 'project-a', contractAmount: 1000 }],
+    ]);
+    const db = {
+      doc: (path) => ({
+        get: async () => {
+          const value = documents.get(path);
+          return { exists: value !== undefined, data: () => value };
+        },
+      }),
+    };
+    const fetchImpl = vi.fn(async (url) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(url.endsWith('/month-close?yearMonth=2026-06') ? {
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      } : {
+        projectId: 'project-a', projection: [], actual: [], readModel: { months: [] },
+      }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard).toMatchObject({
+          source: { status: 'EMPTY' },
+          cells: [],
+          totals: {
+            projection: { totalIn: 0, totalOut: 0, balance: 0 },
+            actual: { totalIn: 0, totalOut: 0, balance: 0 },
+          },
+        });
+        expect(response.body.dashboard.totals.projection.weeks).toHaveLength(5);
+        expect(response.body.dashboard.totals.actual.weeks).toHaveLength(5);
+        expect(response.body.dashboard.validation.blockers).toContainEqual(expect.objectContaining({
+          code: 'SHEET_SOURCE_REQUIRED',
+        }));
+      });
+  });
+
   it('rejects duplicate confirmation keys even when the confirmation count is 160', async () => {
     const { db, documents } = fullMonthCloseSource();
     const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
@@ -1120,6 +1168,9 @@ describe('JVM weekly API BFF proxy', () => {
             totalIn: 300,
             totalOut: 0,
             net: 300,
+            lines: expect.arrayContaining([
+              expect.objectContaining({ lineId: 'SALES_IN', projection: 1000, actual: 700, difference: 300 }),
+            ]),
           }],
           rowTotals: { SALES_IN: 300 },
           totalIn: 300,
