@@ -48,7 +48,7 @@ function serverNow(clock) {
   return value;
 }
 
-function isInvalidOrClosedTransactionError(error) {
+export function isInvalidOrClosedTransactionError(error) {
   if (Number(error?.code) !== 3) return false;
   return /transaction is invalid or closed/i.test(`${error?.details || ''} ${error?.message || ''}`);
 }

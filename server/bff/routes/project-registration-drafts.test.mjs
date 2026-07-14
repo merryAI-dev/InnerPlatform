@@ -634,6 +634,45 @@ describe('project registration draft service', () => {
       .toEqual(['PROJECT_REGISTRATION_SUBMIT', 'EDIT_LEASE_RELEASE']);
   });
 
+  it('replays a committed final submit when Firestore reports an invalid-or-closed transaction', async () => {
+    const { db, service, base, auditChainService } = createHarness();
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-submit-closed-create',
+      payload: validRegistrationV2Payload(),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    const runTransaction = db.runTransaction.bind(db);
+    let submitTransactionCalls = 0;
+    db.runTransaction = async (callback) => {
+      submitTransactionCalls += 1;
+      const result = await runTransaction(callback);
+      if (submitTransactionCalls === 1) {
+        throw Object.assign(new Error('3 INVALID_ARGUMENT: Transaction is invalid or closed.'), {
+          code: 3,
+          details: 'Transaction is invalid or closed.',
+        });
+      }
+      return result;
+    };
+
+    const submitted = await service.submit({
+      ...base,
+      idempotencyKey: 'idem-submit-closed',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    });
+
+    expect(submitted).toMatchObject({ status: 201, replayed: true, body: { status: 'SUBMITTED' } });
+    expect(submitTransactionCalls).toBe(2);
+    expect([...db.documents.keys()].filter((path) => path.includes('/projects/'))).toHaveLength(1);
+    expect([...db.documents.keys()].filter((path) => path.includes('/project_requests/'))).toHaveLength(1);
+    expect([...db.documents.keys()].filter((path) => path.startsWith('outbox/'))).toHaveLength(1);
+    expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(2);
+  });
+
   it('passes all four required private attachment kinds into registration v2 final-submit validation', async () => {
     const storageService = {
       uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({

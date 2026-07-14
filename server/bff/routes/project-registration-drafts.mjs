@@ -12,6 +12,7 @@ import {
   assertOwnedInTransaction,
   buildActiveEditLeaseDocument,
   buildEditLeaseAuditEntry,
+  isInvalidOrClosedTransactionError,
   resolveEditLeaseDocumentId,
 } from '../edit-lease.mjs';
 import {
@@ -445,6 +446,15 @@ export function createProjectRegistrationDraftService({
     }
   }
 
+  async function runFinalSubmitTransaction(callback) {
+    try {
+      return await db.runTransaction(callback);
+    } catch (error) {
+      if (!isInvalidOrClosedTransactionError(error)) throw error;
+      return db.runTransaction(callback);
+    }
+  }
+
   function assertRevision(draft, expectedDraftRevision) {
     const actual = Number.isInteger(draft.draftRevision) ? draft.draftRevision : 0;
     if (actual !== expectedDraftRevision) {
@@ -691,7 +701,7 @@ export function createProjectRegistrationDraftService({
       const outboxRef = db.doc(`outbox/${documentId(outboxTemplate?.id, 'outboxEvent.id')}`);
 
       try {
-        return await db.runTransaction(async (tx) => {
+        return await runFinalSubmitTransaction(async (tx) => {
         const submissionDate = clockDate(now);
         const timestamp = submissionDate.toISOString();
         const { actorRole, member, ref, draft } = await ownedDraft(tx, current);
@@ -819,7 +829,7 @@ export function createProjectRegistrationDraftService({
         return { status: 201, body, replayed: false };
         });
       } catch (error) {
-        if (isFirestoreTransactionConflict(error)) {
+        if (isFirestoreTransactionConflict(error) || isInvalidOrClosedTransactionError(error)) {
           throw createHttpError(409, 'Another final submission won the project registration race.', 'canonical_submit_conflict');
         }
         throw error;
