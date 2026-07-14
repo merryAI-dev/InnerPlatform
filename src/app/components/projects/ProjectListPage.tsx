@@ -27,7 +27,7 @@ import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { groupProjectListItems, matchesProjectListFilters, summarizeProjectListItems } from '../../platform/project-list-view';
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
-import { canAccessAdminPath } from '../../platform/admin-nav';
+import { buildProjectMonthlyPerformance } from '../../platform/project-monthly-performance';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
 
@@ -40,6 +40,12 @@ const statusColor: Record<string, string> = {
 
 function fmtFull(n: number) {
   return n.toLocaleString('ko-KR');
+}
+
+function formatMom(current: number, previous: number) {
+  if (previous <= 0) return '-';
+  const percent = ((current - previous) / previous) * 100;
+  return `${percent > 0 ? '+' : ''}${percent.toFixed(1)}%`;
 }
 
 type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status';
@@ -86,6 +92,10 @@ export function ProjectListPage() {
     department: deptFilter,
   })), [activeProjects, search, statusFilter, settlementFilter, deptFilter]);
   const portfolioSummary = useMemo(() => summarizeProjectListItems(summaryProjects), [summaryProjects]);
+  const monthlyPerformance = useMemo(() => buildProjectMonthlyPerformance(summaryProjects), [summaryProjects]);
+  const monthlyMaximum = Math.max(...monthlyPerformance.flatMap((month) => [month.contractAmount, month.totalRevenueAmount]), 0);
+  const currentMonthPerformance = monthlyPerformance.at(-1);
+  const previousMonthPerformance = monthlyPerformance.at(-2);
   const contractPendingEnd = portfolioSummary.total ? (portfolioSummary.contractPending / portfolioSummary.total) * 100 : 0;
   const inProgressEnd = contractPendingEnd + (portfolioSummary.total ? (portfolioSummary.inProgress / portfolioSummary.total) * 100 : 0);
   const lifecycleChartBackground = portfolioSummary.total
@@ -375,23 +385,9 @@ export function ProjectListPage() {
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
         description="프로젝트 등록부터 계약·운영·종료까지 현재 단계를 확인합니다."
-        actions={(canAccessAdminPath(currentUser?.role, '/projects/new') || canAccessAdminPath(currentUser?.role, '/approvals')) ? (
-          <>
-            {canAccessAdminPath(currentUser?.role, '/approvals') ? (
-              <Button variant="outline" size="sm" onClick={() => navigate('/approvals')}>
-                승인 대기 확인
-              </Button>
-            ) : null}
-            {canAccessAdminPath(currentUser?.role, '/projects/new') ? (
-              <Button size="sm" onClick={() => navigate('/projects/new')}>
-                프로젝트 등록
-              </Button>
-            ) : null}
-          </>
-        ) : null}
       />
 
-      <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+      <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)_auto] xl:items-center">
         <div>
           <p className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">프로젝트 진행 현황</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
@@ -424,7 +420,44 @@ export function ProjectListPage() {
             </div>
           </dl>
         </div>
-        <div className="flex items-center gap-3 border-t border-slate-100 pt-4 lg:border-t-0 lg:border-l lg:pl-5 lg:pt-0">
+        <section aria-label="승인 기준 월별 매출 및 총수익" className="min-w-0 border-t border-slate-100 pt-4 xl:border-t-0 xl:border-l xl:pl-5 xl:pt-0">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">승인 기준 월별</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-800">매출 · 총수익 <span className="text-[11px] font-normal text-slate-500">최근 12개월 · KST</span></p>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-slate-600">
+              <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#001e46]" />매출</span>
+              <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#315f8c]" />총수익</span>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-12 gap-1" role="img" aria-label="승인 로그 기준 최근 12개월 월별 매출과 총수익 막대 그래프">
+            {monthlyPerformance.map((month) => {
+              const contractHeight = monthlyMaximum ? Math.max(3, (month.contractAmount / monthlyMaximum) * 100) : 0;
+              const revenueHeight = monthlyMaximum ? Math.max(3, (month.totalRevenueAmount / monthlyMaximum) * 100) : 0;
+              return (
+                <div key={month.key} className="min-w-0" title={`${month.key}: 매출 ${fmtFull(month.contractAmount)}원, 총수익 ${fmtFull(month.totalRevenueAmount)}원`}>
+                  <div className="flex h-24 items-end justify-center gap-px border-b border-slate-200">
+                    <span className="w-1.5 rounded-t-sm bg-[#001e46]" style={{ height: `${contractHeight}%` }} />
+                    <span className="w-1.5 rounded-t-sm bg-[#315f8c]" style={{ height: `${revenueHeight}%` }} />
+                  </div>
+                  <p className="mt-1 text-center text-[9px] text-slate-500">{month.label}</p>
+                </div>
+              );
+            })}
+          </div>
+          <dl className="mt-3 grid grid-cols-2 divide-x divide-slate-200 border-t border-slate-100 pt-2">
+            <div className="pr-3">
+              <dt className="text-[10px] text-slate-500">매출 MoM</dt>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#001e46]">{formatMom(currentMonthPerformance?.contractAmount || 0, previousMonthPerformance?.contractAmount || 0)}</dd>
+            </div>
+            <div className="pl-3">
+              <dt className="text-[10px] text-slate-500">총수익 MoM</dt>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#315f8c]">{formatMom(currentMonthPerformance?.totalRevenueAmount || 0, previousMonthPerformance?.totalRevenueAmount || 0)}</dd>
+            </div>
+          </dl>
+        </section>
+        <div className="flex items-center gap-3 border-t border-slate-100 pt-4 xl:border-t-0 xl:border-l xl:pl-5 xl:pt-0">
           <div
             aria-label={`활성 프로젝트 ${portfolioSummary.total}개 중 계약 전 ${portfolioSummary.contractPending}개, 진행 ${portfolioSummary.inProgress}개, 종료 ${portfolioSummary.completed}개`}
             className="grid h-16 w-16 shrink-0 place-items-center rounded-full"
