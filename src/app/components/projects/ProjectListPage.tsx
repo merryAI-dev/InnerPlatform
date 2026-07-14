@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Label } from '../ui/label';
 import { Badge } from '../ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -24,7 +25,8 @@ import {
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
-import { groupProjectListItems, matchesProjectListFilters } from '../../platform/project-list-view';
+import { groupProjectListItems, matchesProjectListFilters, summarizeProjectListItems } from '../../platform/project-list-view';
+import { normalizeProjectRevenueFields } from '../../platform/project-financials';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
@@ -40,7 +42,7 @@ function fmtFull(n: number) {
   return n.toLocaleString('ko-KR');
 }
 
-type SortKey = 'name' | 'contractAmount' | 'status';
+type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
@@ -72,10 +74,23 @@ export function ProjectListPage() {
         : contractPendingProjects;
 
   const departments = useMemo(() => {
-    const depts = new Set(tabProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean));
+    const depts = new Set(activeProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean));
     return Array.from(depts).sort();
-  }, [tabProjects]);
+  }, [activeProjects]);
   const hasActiveFilters = !!search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL';
+
+  const summaryProjects = useMemo(() => activeProjects.filter((project) => matchesProjectListFilters(project, {
+    search,
+    status: statusFilter,
+    settlementType: settlementFilter,
+    department: deptFilter,
+  })), [activeProjects, search, statusFilter, settlementFilter, deptFilter]);
+  const portfolioSummary = useMemo(() => summarizeProjectListItems(summaryProjects), [summaryProjects]);
+  const contractPendingEnd = portfolioSummary.total ? (portfolioSummary.contractPending / portfolioSummary.total) * 100 : 0;
+  const inProgressEnd = contractPendingEnd + (portfolioSummary.total ? (portfolioSummary.inProgress / portfolioSummary.total) * 100 : 0);
+  const lifecycleChartBackground = portfolioSummary.total
+    ? `conic-gradient(#e5484d 0 ${contractPendingEnd}%, #2f9e44 ${contractPendingEnd}% ${inProgressEnd}%, #111827 ${inProgressEnd}% 100%)`
+    : '#e2e8f0';
 
   const filtered = useMemo(() => {
     const result = tabProjects.filter((project) => matchesProjectListFilters(project, {
@@ -90,6 +105,7 @@ export function ProjectListPage() {
       switch (sortKey) {
         case 'name': cmp = a.name.localeCompare(b.name); break;
         case 'contractAmount': cmp = a.contractAmount - b.contractAmount; break;
+        case 'totalRevenueAmount': cmp = normalizeProjectRevenueFields(a, 'totalRevenueAmount').totalRevenueAmount - normalizeProjectRevenueFields(b, 'totalRevenueAmount').totalRevenueAmount; break;
         case 'status': cmp = a.status.localeCompare(b.status); break;
       }
       return sortDir === 'desc' ? -cmp : cmp;
@@ -197,6 +213,11 @@ export function ProjectListPage() {
                     계약금액 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
+                <TableHead className="text-right min-w-[100px] cursor-pointer" onClick={() => handleSort('totalRevenueAmount')}>
+                  <span className="flex items-center justify-end gap-1">
+                    총수익 <ArrowUpDown className="w-3 h-3" />
+                  </span>
+                </TableHead>
                 <TableHead className="min-w-[150px] text-center">정산 유형</TableHead>
                 {activeTab === 'trash' && (
                   <>
@@ -210,7 +231,9 @@ export function ProjectListPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {list.map(p => (
+              {list.map(p => {
+                const totalRevenueAmount = normalizeProjectRevenueFields(p, 'totalRevenueAmount').totalRevenueAmount;
+                return (
                 <Fragment key={p.id}>
                 <TableRow
                   key={p.id}
@@ -256,6 +279,9 @@ export function ProjectListPage() {
                   <TableCell className="text-right text-sm whitespace-nowrap">
                     {p.contractAmount > 0 ? fmtFull(p.contractAmount) : '-'}
                   </TableCell>
+                  <TableCell className="text-right text-sm whitespace-nowrap">
+                    {totalRevenueAmount > 0 ? fmtFull(totalRevenueAmount) : '-'}
+                  </TableCell>
                   <TableCell className="text-center text-sm">
                     <span
                       className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700"
@@ -295,7 +321,7 @@ export function ProjectListPage() {
                 </TableRow>
                 {expandedProjectId === p.id ? (
                   <TableRow key={`${p.id}-details`} className="bg-slate-50/80 hover:bg-slate-50/80">
-                    <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'contract-pending' ? 9 : 8} className="px-4 py-3">
+                    <TableCell colSpan={activeTab === 'trash' ? 11 : activeTab === 'contract-pending' ? 10 : 9} className="px-4 py-3">
                       <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs md:grid-cols-3">
                         <div>
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">프로젝트 목적</p>
@@ -318,11 +344,12 @@ export function ProjectListPage() {
                   </TableRow>
                 ) : null}
                 </Fragment>
-              ))}
+                );
+              })}
 
               {list.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'contract-pending' ? 9 : 8} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={activeTab === 'trash' ? 11 : activeTab === 'contract-pending' ? 10 : 9} className="text-center py-12 text-muted-foreground">
                     {search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL'
                       ? '검색 조건에 맞는 프로젝트가 없습니다'
                       : activeTab === 'trash'
@@ -341,13 +368,13 @@ export function ProjectListPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-[1320px] space-y-4">
       {/* Header */}
       <PageHeader
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
-        description={`활성 ${activeProjects.length}개 프로젝트 · 계약 전 ${contractPendingProjects.length} / 진행 ${inProgressProjects.length} / 종료 ${completedProjects.length}`}
+        description="프로젝트 등록부터 계약·운영·종료까지 현재 단계를 확인합니다."
         actions={(canAccessAdminPath(currentUser?.role, '/projects/new') || canAccessAdminPath(currentUser?.role, '/approvals')) ? (
           <>
             {canAccessAdminPath(currentUser?.role, '/approvals') ? (
@@ -364,6 +391,52 @@ export function ProjectListPage() {
         ) : null}
       />
 
+      <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div>
+          <p className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">프로젝트 진행 현황</p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+            <strong className="text-[28px] font-bold tracking-[-0.04em] text-[#0f2747]">{portfolioSummary.total}</strong>
+            <span className="text-sm font-semibold text-slate-800">활성 프로젝트</span>
+            <span className="text-xs text-slate-500">선택한 검색·필터 기준</span>
+          </div>
+          <dl className="mt-3 grid max-w-xl grid-cols-3 divide-x divide-slate-200 border-y border-slate-100 py-2.5">
+            <div className="px-3 first:pl-0">
+              <dt className="text-[11px] text-slate-500">계약 전</dt>
+              <dd className="mt-0.5 text-base font-bold text-[#e5484d]">{portfolioSummary.contractPending}<span className="ml-0.5 text-xs font-medium text-slate-500">개</span></dd>
+            </div>
+            <div className="px-3">
+              <dt className="text-[11px] text-slate-500">진행</dt>
+              <dd className="mt-0.5 text-base font-bold text-[#2f9e44]">{portfolioSummary.inProgress}<span className="ml-0.5 text-xs font-medium text-slate-500">개</span></dd>
+            </div>
+            <div className="px-3">
+              <dt className="text-[11px] text-slate-500">종료</dt>
+              <dd className="mt-0.5 text-base font-bold text-[#111827]">{portfolioSummary.completed}<span className="ml-0.5 text-xs font-medium text-slate-500">개</span></dd>
+            </div>
+          </dl>
+          <dl className="mt-3 grid max-w-xl grid-cols-2 divide-x divide-slate-200 border-y border-slate-100 py-2.5">
+            <div className="pr-3">
+              <dt className="text-[11px] text-slate-500">계약금액 합계</dt>
+              <dd className="mt-0.5 truncate text-sm font-bold tabular-nums text-slate-900" title={`${fmtFull(portfolioSummary.contractAmount)}원`}>{fmtFull(portfolioSummary.contractAmount)}<span className="ml-0.5 text-[11px] font-medium text-slate-500">원</span></dd>
+            </div>
+            <div className="pl-3">
+              <dt className="text-[11px] text-slate-500">총수익 합계</dt>
+              <dd className="mt-0.5 truncate text-sm font-bold tabular-nums text-slate-900" title={`${fmtFull(portfolioSummary.totalRevenueAmount)}원`}>{fmtFull(portfolioSummary.totalRevenueAmount)}<span className="ml-0.5 text-[11px] font-medium text-slate-500">원</span></dd>
+            </div>
+          </dl>
+        </div>
+        <div className="flex items-center gap-3 border-t border-slate-100 pt-4 lg:border-t-0 lg:border-l lg:pl-5 lg:pt-0">
+          <div
+            aria-label={`활성 프로젝트 ${portfolioSummary.total}개 중 계약 전 ${portfolioSummary.contractPending}개, 진행 ${portfolioSummary.inProgress}개, 종료 ${portfolioSummary.completed}개`}
+            className="grid h-16 w-16 shrink-0 place-items-center rounded-full"
+            role="img"
+            style={{ background: lifecycleChartBackground }}
+          >
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-white text-sm font-bold text-[#0f2747]">{portfolioSummary.total}</span>
+          </div>
+          <p className="max-w-[180px] text-xs leading-5 text-slate-600">상태별 분포를 기준으로 현재 프로젝트 포트폴리오를 확인합니다.</p>
+        </div>
+      </section>
+
       {/* Tabs */}
       <Tabs
         value={activeTab}
@@ -371,38 +444,35 @@ export function ProjectListPage() {
       >
         <TabsList
           aria-label="프로젝트 진행 단계"
-          className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-slate-300 bg-[#0f2747] p-0 shadow-sm"
+          className="grid h-11 w-full grid-cols-3 items-center overflow-hidden rounded-lg border border-slate-300 bg-[#0f2747] p-0 shadow-sm"
         >
           <TabsTrigger
             value="contract-pending"
-            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            className="h-full items-center justify-center gap-1.5 rounded-none border-r border-white/15 px-2 py-0 leading-none text-slate-200 data-[state=active]:bg-[#174a7c] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-contract-pending"
           >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">1</span>
             <span className="font-semibold">계약 전</span>
-            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] leading-none text-current sm:ml-1">
               {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger
             value="in-progress"
-            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            className="h-full items-center justify-center gap-1.5 rounded-none border-r border-white/15 px-2 py-0 leading-none text-slate-200 data-[state=active]:bg-[#174a7c] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-in-progress"
           >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">2</span>
             <span className="font-semibold">진행</span>
-            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] leading-none text-current sm:ml-1">
               {inProgressProjects.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger
             value="completed"
-            className="relative gap-1.5 rounded-none px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            className="h-full items-center justify-center gap-1.5 rounded-none px-2 py-0 leading-none text-slate-200 data-[state=active]:bg-[#174a7c] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-completed"
           >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">3</span>
             <span className="font-semibold">종료</span>
-            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] leading-none text-current sm:ml-1">
               {completedProjects.length}
             </Badge>
           </TabsTrigger>
@@ -411,44 +481,57 @@ export function ProjectListPage() {
         {/* Filters */}
         <Card className="mt-0 rounded-t-none border-t-0 shadow-sm">
           <CardContent className="pt-4 pb-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[220px] flex-1 max-w-sm">
+                <Label htmlFor="project-list-search" className="mb-1.5 block text-[11px] font-semibold text-slate-600">프로젝트 검색</Label>
+                <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
                 <Input
+                  id="project-list-search"
                   placeholder="프로젝트명, 계약명, 계약대상, 담당조직, 운영진 검색"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="pl-8"
                 />
+                </div>
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">전체 상태</SelectItem>
-                  {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map(k => (
-                    <SelectItem key={k} value={k}>{PROJECT_STATUS_LABELS[k]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={settlementFilter} onValueChange={setSettlementFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">전체 정산 유형</SelectItem>
-                  {(Object.keys(SETTLEMENT_TYPE_LABELS) as SettlementType[]).map(k => (
-                    <SelectItem key={k} value={k}>{SETTLEMENT_TYPE_LABELS[k]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={deptFilter} onValueChange={setDeptFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">전체 조직</SelectItem>
-                  {departments.map(d => (
-                    <SelectItem key={d} value={d}>{d}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-muted-foreground">
+              <div className="w-[150px]">
+                <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">담당조직</Label>
+                <Select value={deptFilter} onValueChange={setDeptFilter}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">전체 조직</SelectItem>
+                    {departments.map(d => (
+                      <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-[150px]">
+                <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">진행 상태</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">전체 상태</SelectItem>
+                    {(Object.keys(PROJECT_STATUS_LABELS) as ProjectStatus[]).map(k => (
+                      <SelectItem key={k} value={k}>{PROJECT_STATUS_LABELS[k]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-[180px]">
+                <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">정산 유형</Label>
+                <Select value={settlementFilter} onValueChange={setSettlementFilter}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">전체 정산 유형</SelectItem>
+                    {(Object.keys(SETTLEMENT_TYPE_LABELS) as SettlementType[]).map(k => (
+                      <SelectItem key={k} value={k}>{SETTLEMENT_TYPE_LABELS[k]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <span className="mb-2 text-sm text-muted-foreground">
                 {filtered.length}개 프로젝트
               </span>
             </div>

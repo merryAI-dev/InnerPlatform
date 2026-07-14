@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '../data/types';
-import { groupProjectListItems, matchesProjectListFilters } from './project-list-view';
+import { groupProjectListItems, matchesProjectListFilters, summarizeProjectListItems } from './project-list-view';
 
 const baseProject = {
   id: 'project-a',
@@ -42,5 +42,23 @@ describe('project list view', () => {
       settlementType: 'TYPE2',
       department: 'C-스템CIC',
     })).toBe(false);
+  });
+
+  it('summarizes only active projects with registered contract and total revenue values', () => {
+    const summary = summarizeProjectListItems([
+      { ...baseProject, id: 'pending', status: 'CONTRACT_PENDING', contractAmount: 100_000, totalRevenueAmount: 25_000 } as Project,
+      { ...baseProject, id: 'in-progress', status: 'IN_PROGRESS', contractAmount: 200_000, totalRevenueAmount: 50_000 } as Project,
+      { ...baseProject, id: 'completed', status: 'COMPLETED', contractAmount: 300_000, totalRevenueAmount: 75_000 } as Project,
+      { ...baseProject, id: 'trashed', status: 'COMPLETED', contractAmount: 999_000, totalRevenueAmount: 999_000, trashedAt: '2026-07-14' } as Project,
+    ]);
+
+    expect(summary).toMatchObject({
+      total: 3,
+      contractPending: 1,
+      inProgress: 1,
+      completed: 1,
+      contractAmount: 600_000,
+      totalRevenueAmount: 150_000,
+    });
   });
 });

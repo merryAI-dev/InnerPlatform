@@ -1,5 +1,6 @@
 import type { Project } from '../data/types';
 import { normalizeSettlementType } from '../data/types';
+import { normalizeProjectRevenueFields } from './project-financials';
 import { matchesProjectSearch } from './project-search';
 import { normalizeProjectDepartment } from './project-cic';
 
@@ -13,6 +14,23 @@ export function groupProjectListItems(projects: Project[]) {
       project.status === 'COMPLETED' || project.status === 'COMPLETED_PENDING_PAYMENT'
     )),
     trashed: projects.filter((project) => !!project.trashedAt),
+  };
+}
+
+export function summarizeProjectListItems(projects: Project[]) {
+  const grouped = groupProjectListItems(projects);
+  const active = grouped.active;
+
+  return {
+    total: active.length,
+    contractPending: grouped.contractPending.length,
+    inProgress: grouped.inProgress.length,
+    completed: grouped.completed.length,
+    contractAmount: active.reduce((total, project) => total + project.contractAmount, 0),
+    totalRevenueAmount: active.reduce(
+      (total, project) => total + normalizeProjectRevenueFields(project, 'totalRevenueAmount').totalRevenueAmount,
+      0,
+    ),
   };
 }
 
