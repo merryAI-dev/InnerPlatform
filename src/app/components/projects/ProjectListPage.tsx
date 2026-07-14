@@ -28,7 +28,6 @@ import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { groupProjectListItems, matchesProjectListFilters, summarizeProjectListItems } from '../../platform/project-list-view';
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
 import { buildProjectMonthlyPerformance } from '../../platform/project-monthly-performance';
-import { canAccessAdminPath } from '../../platform/admin-nav';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
 
@@ -386,20 +385,6 @@ export function ProjectListPage() {
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
         description="프로젝트 등록부터 계약·운영·종료까지 현재 단계를 확인합니다."
-        actions={(canAccessAdminPath(currentUser?.role, '/projects/new') || canAccessAdminPath(currentUser?.role, '/approvals')) ? (
-          <>
-            {canAccessAdminPath(currentUser?.role, '/approvals') ? (
-              <Button variant="outline" size="sm" onClick={() => navigate('/approvals')}>
-                승인 대기 확인
-              </Button>
-            ) : null}
-            {canAccessAdminPath(currentUser?.role, '/projects/new') ? (
-              <Button size="sm" onClick={() => navigate('/projects/new')}>
-                프로젝트 등록
-              </Button>
-            ) : null}
-          </>
-        ) : null}
       />
 
       <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)_auto] xl:items-center">
