@@ -16,9 +16,24 @@ describe('ProjectListPage shell contract', () => {
 
   it('shows settlement type labels instead of O/X settlement flags', () => {
     expect(source).toContain('정산 유형');
+    expect(source).toContain('전체 정산 유형');
+    expect(source).toContain('settlementFilter');
+    expect(source).not.toContain('typeFilter');
     expect(source).toContain('normalizeSettlementType(p.settlementType)');
-    expect(source).toContain('SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]');
+    expect(source).toContain('SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]');
+    expect(source).not.toContain('SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]');
     expect(source).not.toContain('p.isSettled ?');
+  });
+
+  it('searches the PPT-defined project fields and exposes primary actions', () => {
+    expect(source).toContain('matchesProjectListFilters(project, {');
+    expect(source).toContain('프로젝트명, 계약명, 계약대상, 담당조직, 운영진 검색');
+    expect(source).toContain("navigate('/projects/new')");
+    expect(source).toContain("navigate('/approvals')");
+    expect(source).toContain('프로젝트 등록');
+    expect(source).toContain('승인 대기');
+    expect(source).toContain("canAccessAdminPath(currentUser?.role, '/projects/new')");
+    expect(source).toContain("canAccessAdminPath(currentUser?.role, '/approvals')");
   });
 
   it('shows the business owner from registeredBy fields', () => {

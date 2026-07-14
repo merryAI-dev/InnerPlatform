@@ -624,10 +624,6 @@ export function ProjectDetailPage() {
                       <span className="text-muted-foreground">PM</span>
                       <span>{project.managerName || '-'}</span>
                     </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">그룹웨어 등록명</span>
-                      <span>{project.groupwareName || '-'}</span>
-                    </div>
                     {project.participantCondition && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">참여기업 조건</span>

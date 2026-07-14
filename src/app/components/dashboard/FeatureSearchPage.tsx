@@ -86,7 +86,7 @@ export function FeatureSearchPage() {
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
             <div className="flex items-center gap-2 text-slate-900 dark:text-slate-200">
               <UserRoundCheck className="h-4 w-4" />
-              <h2 className="text-[13px] font-bold">PM</h2>
+              <h2 className="text-[13px] font-bold">실무자</h2>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {PM_ENTRY_POINTS.map((item) => (

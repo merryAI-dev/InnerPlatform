@@ -943,43 +943,43 @@ export function ProjectEditorWizard({
         <Input
           value={draft.officialContractName}
           onChange={(event) => update('officialContractName', event.target.value)}
-          placeholder="계약서 또는 내부 관리용 공식 명칭"
+          placeholder="계약서에 기재된 계약명 그대로 입력"
           className="mt-1 h-9 text-sm"
         />
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.
+        </p>
       </div>
 
       <div>
-        <Label className="text-xs">프로젝트명(그룹웨어 등록명) *</Label>
+        <Label className="text-xs">프로젝트명 *</Label>
         <Input
           value={draft.name}
           onChange={(event) => update('name', event.target.value.slice(0, mode === 'portal-register' ? 10 : 80))}
-          placeholder="예: 뷰티풀커넥트"
+          placeholder="예: 26농식품AC"
           className="mt-1 h-9 text-sm"
         />
-        {mode === 'portal-register' ? (
-          <p className="mt-1 text-[10px] text-muted-foreground">{draft.name.length}/10자</p>
-        ) : null}
+        <div className="mt-1 flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <p className="max-w-3xl text-[11px] leading-5 text-muted-foreground">
+            계약연도+프로젝트명 형식으로 입력해 주세요. 재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다. 다년도 사업은 같은 프로젝트명을 사용해 주세요.
+          </p>
+          {mode === 'portal-register' ? (
+            <p className="shrink-0 text-[10px] text-muted-foreground">{draft.name.length}/10자</p>
+          ) : null}
+        </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">계약 대상</Label>
-          <Input
-            value={draft.clientOrg}
-            onChange={(event) => update('clientOrg', event.target.value)}
-            placeholder="예: KOICA, 서울시, 아모레퍼시픽재단"
-            className="mt-1 h-9 text-sm"
-          />
-        </div>
-        <div>
-          <Label className="text-xs">그룹웨어 등록명</Label>
-          <Input
-            value={draft.groupwareName}
-            onChange={(event) => update('groupwareName', event.target.value)}
-            placeholder="예: IBS그린임팩트펀드"
-            className="mt-1 h-9 text-sm"
-          />
-        </div>
+      <div>
+        <Label className="text-xs">계약 대상</Label>
+        <Input
+          value={draft.clientOrg}
+          onChange={(event) => update('clientOrg', event.target.value)}
+          placeholder="예: 주식회사 ○○"
+          className="mt-1 h-9 text-sm"
+        />
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
+        </p>
       </div>
 
       <div>
@@ -987,7 +987,7 @@ export function ProjectEditorWizard({
         <Textarea
           value={draft.projectPurpose}
           onChange={(event) => update('projectPurpose', event.target.value)}
-          placeholder="어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력"
+          placeholder="어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력&#10;예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성"
           className="mt-1 min-h-[88px] text-sm"
         />
       </div>
@@ -996,7 +996,7 @@ export function ProjectEditorWizard({
         <Textarea
           value={draft.description}
           onChange={(event) => update('description', event.target.value)}
-          placeholder="주요 수행 내용, 범위, 산출물"
+          placeholder="프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약&#10;예: 1. 사업제안서 작성 교육&#10;2. 사업제안서 작성 - 25개팀 이상 1:1 코칭&#10;3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅"
           className="mt-1 min-h-[110px] text-sm"
         />
       </div>
@@ -1356,7 +1356,7 @@ export function ProjectEditorWizard({
             </SelectContent>
           </Select>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 PM 포털 노출은 이 UID 기준으로 연결됩니다.
+            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
           </p>
           {hasUnlinkedStoredOwner ? (
             <p className="mt-1 text-[11px] text-red-700">
@@ -1555,7 +1555,6 @@ export function ProjectEditorWizard({
             <ReviewRow label="프로젝트 유형" value={PROJECT_TYPE_LABELS[draft.type]} />
             <ReviewRow label="계약서 유형" value={normalizeProjectContractType(draft.contractType)} />
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
-            <ReviewRow label="그룹웨어 등록명" value={draft.groupwareName} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
             {canEditProjectStatus(mode) ? (
               <>

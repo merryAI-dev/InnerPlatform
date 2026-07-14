@@ -12,4 +12,8 @@ describe('ProjectDetailPage shell contract', () => {
     expect(source).toContain('describeProjectRequestVersion');
     expect(source).toContain('승인 전까지 이 화면은 현재 확정된 원장 값을 보여줍니다.');
   });
+
+  it('does not expose the retired groupware registration name in the current project detail', () => {
+    expect(source).not.toContain('>그룹웨어 등록명</span>');
+  });
 });

@@ -136,10 +136,24 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('lastInitialDraftFingerprintRef');
   });
 
-  it('labels project name as the groupware registration name without touching the team step', () => {
-    expect(source).toContain('프로젝트명(그룹웨어 등록명) *');
+  it('keeps the PPT registration guidance and placeholders without touching the team step', () => {
+    expect(source).toContain('프로젝트명 *');
+    expect(source).toContain('계약서에 기재된 계약명 그대로 입력');
+    expect(source).toContain('띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.');
+    expect(source).toContain('예: 26농식품AC');
+    expect(source).toContain('계약연도+프로젝트명 형식으로 입력해 주세요.');
+    expect(source).toContain('재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다.');
+    expect(source).toContain('다년도 사업은 같은 프로젝트명을 사용해 주세요.');
+    expect(source).toContain('사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.');
+    expect(source).toContain('어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력');
+    expect(source).toContain('CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성');
+    expect(source).toContain('프로젝트 주요 수행 내용');
+    expect(source).toContain('1. 사업제안서 작성 교육');
+    expect(source).toContain('2. 사업제안서 작성 - 25개팀 이상 1:1 코칭');
+    expect(source).toContain('3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
-    expect(source).toContain("onChange={(event) => update('groupwareName', event.target.value)}");
+    expect(source).not.toContain('>그룹웨어 등록명</Label>');
+    expect(source).not.toContain('<ReviewRow label="그룹웨어 등록명"');
     expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
