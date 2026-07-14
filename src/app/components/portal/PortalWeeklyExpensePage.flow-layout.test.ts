@@ -72,12 +72,14 @@ describe('PortalWeeklyExpensePage flow layout', () => {
     expect(weeklyExpenseSource).toContain('cashflowLease: mutationLease');
   });
 
-  it('temporary-saves weekly rows privately and finalizes canonical rows only during submit', () => {
+  it('keeps weekly rows editable and leaves final authority to monthly close', () => {
     expect(weeklyExpenseSource).toContain('saveExpenseSheetRowsWithLease');
-    expect(weeklyExpenseSource).toContain('buildWeeklySubmitSheet');
-    expect(weeklyExpenseSource).toContain('weeklySheet, cashflowLease: mutationLease');
-    expect(weeklyExpenseSource).toContain('finalize: true');
-    expect(weeklyExpenseSource).toContain('cashflowPrivateDraftClient.complete');
+    expect(weeklyExpenseSource).toContain('주차별 입력은 저장할 수 있지만 최종 확정과 수정 잠금은 월 결산에서 처리합니다.');
+    expect(weeklyExpenseSource).not.toContain('onSubmitWeek=');
+    expect(weeklyExpenseSource).not.toContain('handleSubmitWeek');
+    expect(weeklyExpenseSource).not.toContain('finalize: true');
+    expect(weeklyExpenseSource).not.toContain('participationRiskWarning');
+    expect(weeklyExpenseSource).not.toContain('참여율 초과 경고');
   });
 
   it('restores the owner weekly snapshot once per lease after same-tab refresh', () => {

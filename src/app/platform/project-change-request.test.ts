@@ -149,6 +149,10 @@ describe('project change request helpers', () => {
       ...baseProject,
       name: '2026 CTS2 수정',
       contractAmount: 3000,
+      settlementSystem: 'SMTECH',
+      laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
+      paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+      advanceInterimBelow70Reason: '발주처 지급 조건',
       registeredById: 'u-berry',
       registeredByName: '김인효(베리)',
     });
@@ -174,6 +178,10 @@ describe('project change request helpers', () => {
       contractAmount: 3000,
       registeredById: 'u-berry',
       managerId: 'u-berry',
+      settlementSystem: 'SMTECH',
+      laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
+      paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+      advanceInterimBelow70Reason: '발주처 지급 조건',
       executiveReviewStatus: 'APPROVED',
     });
     expect(patch.executiveReviewHistory?.at(-1)?.changes?.length).toBeGreaterThan(0);

@@ -151,6 +151,7 @@ describe('edit lease client', () => {
             holderDisplayName: '김메리',
             sameActor: true,
             expiresAt: '2026-07-10T00:30:00.000Z',
+            holderVersion: 'opaque-version-a',
           },
         });
       }),
@@ -164,6 +165,7 @@ describe('edit lease client', () => {
         holderDisplayName: '김메리',
         sameActor: true,
         expiresAt: '2026-07-10T00:30:00.000Z',
+        holderVersion: 'opaque-version-a',
       },
     } satisfies Partial<EditLeaseClientError>));
   });

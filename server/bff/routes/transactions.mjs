@@ -328,31 +328,38 @@ export function mountTransactionRoutes(app, {
       createdAt: timestamp,
     });
 
-    const result = await db.runTransaction(async (tx) => {
-      const snap = await tx.get(txRef);
-      if (!snap.exists) throw createHttpError(404, `Transaction not found: ${txId}`, 'not_found');
+    const snap = await txRef.get();
+    if (!snap.exists) throw createHttpError(404, `Transaction not found: ${txId}`, 'not_found');
 
-      const current = snap.data() || {};
-      const currentState = normalizeState(current.state || 'DRAFT');
-      const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
+    const current = snap.data() || {};
+    const currentState = normalizeState(current.state || 'DRAFT');
+    const currentVersion = Number.isInteger(current.version) && current.version > 0 ? current.version : 1;
 
-      if (parsed.expectedVersion !== currentVersion) {
-        throw createHttpError(409, `Version mismatch: expected ${parsed.expectedVersion}, actual ${currentVersion}`, 'version_conflict');
+    if (parsed.expectedVersion !== currentVersion) {
+      throw createHttpError(409, `Version mismatch: expected ${parsed.expectedVersion}, actual ${currentVersion}`, 'version_conflict');
+    }
+
+    assertTransitionAllowed({ currentState, nextState });
+
+    const nextVersion = currentVersion + 1;
+    const patch = { state: nextState, tenantId, version: nextVersion, updatedBy: actorId, updatedAt: timestamp };
+
+    if (nextState === 'SUBMITTED') { patch.submittedBy = actorId; patch.submittedAt = timestamp; }
+    if (nextState === 'APPROVED') { patch.approvedBy = actorId; patch.approvedAt = timestamp; }
+    if (nextState === 'REJECTED') { patch.rejectedReason = parsed.reason.trim(); }
+
+    const batch = db.batch();
+    batch.update(txRef, patch, { lastUpdateTime: snap.updateTime });
+    enqueueOutboxEventInTransaction(batch, db, outboxEvent);
+    try {
+      await batch.commit();
+    } catch (error) {
+      if (Number(error?.code) === 9) {
+        throw createHttpError(409, `Version mismatch: expected ${parsed.expectedVersion}`, 'version_conflict');
       }
-
-      assertTransitionAllowed({ currentState, nextState });
-
-      const nextVersion = currentVersion + 1;
-      const patch = { state: nextState, tenantId, version: nextVersion, updatedBy: actorId, updatedAt: timestamp };
-
-      if (nextState === 'SUBMITTED') { patch.submittedBy = actorId; patch.submittedAt = timestamp; }
-      if (nextState === 'APPROVED') { patch.approvedBy = actorId; patch.approvedAt = timestamp; }
-      if (nextState === 'REJECTED') { patch.rejectedReason = parsed.reason.trim(); }
-
-      tx.set(txRef, patch, { merge: true });
-      enqueueOutboxEventInTransaction(tx, db, outboxEvent);
-      return { patch, nextVersion };
-    });
+      throw error;
+    }
+    const result = { patch, nextVersion };
 
     const actorEmailEnc = await encryptAuditEmail(piiProtector, actorEmail);
     await auditChainService.append({

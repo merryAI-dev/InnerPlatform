@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   CORE_WRITE_ROUTE_ROLES,
-  PROJECT_REQUEST_ROUTE_ROLES,
   assertActorRoleAllowed,
   asyncHandler,
   createHttpError,
@@ -18,6 +17,7 @@ import { parseWithSchema } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
 
 const RESOURCE_TYPE = 'cashflow';
+const CASHFLOW_DRAFT_ROLES = ['pm'];
 const MAX_DRAFT_BYTES = 900 * 1024;
 const MAX_PAYLOAD_DEPTH = 20;
 
@@ -32,16 +32,6 @@ const patchSchema = z.object({
 const completeSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
 }).strict();
-const varianceIntentSchema = z.object({
-  sheetId: z.string().trim().min(1).max(512),
-  expectedRevision: z.number().int().nonnegative(),
-  action: z.enum(['FLAG', 'REPLY', 'RESOLVE']),
-  content: z.string().trim().max(2_000).optional(),
-}).strict().superRefine((value, ctx) => {
-  if ((value.action === 'FLAG' || value.action === 'REPLY') && !value.content) {
-    ctx.addIssue({ code: 'custom', path: ['content'], message: 'content is required' });
-  }
-});
 const weeklySubmissionStatusIntentSchema = z.object({
   yearMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
   weekNo: z.number().int().min(1).max(5),
@@ -59,8 +49,6 @@ const evidenceRequiredMapIntentSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   map: z.record(z.string().max(500), z.string().max(4_000)),
 }).strict();
-
-const VARIANCE_REVIEW_ROLES = new Set(['admin', 'finance', 'tenant_admin']);
 
 function requiredText(value, fieldName) {
   const normalized = readOptionalText(value);
@@ -190,6 +178,66 @@ function assertMetadataRevision(document, fieldName, expected) {
   return actual;
 }
 
+function assertCashflowMonthOpen(monthCloseSnap, { tenantId, projectId, yearMonth }) {
+  if (!monthCloseSnap.exists) return;
+  const monthClose = monthCloseSnap.data() || {};
+  if (
+    monthClose.contractVersion !== 'cashflow-month-close-v1'
+    || monthClose.tenantId !== tenantId
+    || monthClose.projectId !== projectId
+    || monthClose.yearMonth !== yearMonth
+    || !Number.isSafeInteger(monthClose.revision)
+    || monthClose.revision < 0
+    || !Number.isSafeInteger(monthClose.reopenCount)
+    || monthClose.reopenCount < 0
+  ) {
+    throw createHttpError(
+      409,
+      'Cashflow month close data requires migration before it can be changed',
+      'cashflow_month_close_migration_required',
+    );
+  }
+  const status = monthClose.status;
+  if (status === 'OPEN') return;
+  if (status === 'CLOSED' || status === 'REOPEN_REQUESTED') {
+    throw createHttpError(
+      409,
+      'Cashflow month is closed and cannot be changed',
+      'cashflow_month_closed',
+    );
+  }
+  throw createHttpError(
+    409,
+    'Cashflow month close data requires migration before it can be changed',
+    'cashflow_month_close_migration_required',
+  );
+}
+
+function draftMonthCloseScope(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Object.hasOwn(payload, 'monthClose')) {
+    return null;
+  }
+  const monthClose = payload.monthClose;
+  if (!monthClose || typeof monthClose !== 'object' || Array.isArray(monthClose)) invalidPayload();
+  const yearMonth = readOptionalText(monthClose.yearMonth);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) invalidPayload();
+  return yearMonth;
+}
+
+async function assertDraftMonthsOpen(tx, db, current, ...payloads) {
+  const yearMonths = new Set(payloads.map(draftMonthCloseScope).filter(Boolean));
+  for (const yearMonth of yearMonths) {
+    const monthCloseSnap = await tx.get(db.doc(
+      `orgs/${current.tenantId}/monthly_closes/${current.projectId}-${yearMonth}`,
+    ));
+    assertCashflowMonthOpen(monthCloseSnap, {
+      tenantId: current.tenantId,
+      projectId: current.projectId,
+      yearMonth,
+    });
+  }
+}
+
 function actorDisplayName(member, actorId) {
   return readOptionalText(member?.name)
     || readOptionalText(member?.displayName)
@@ -306,6 +354,9 @@ export function createCashflowEditDraftService({
     const { actorRole, member } = await assertEditLeaseActorAccessInTransaction({
       tx, db, tenantId: current.tenantId, actorId: current.actorId, rbacPolicy,
     });
+    if (readOptionalText(member.role).toLowerCase() !== 'pm') {
+      throw createHttpError(403, 'Only the project PM can use a cashflow private draft', 'forbidden');
+    }
     const projectRef = refs(current).project;
     const projectSnap = await tx.get(projectRef);
     if (!projectSnap.exists) throw createHttpError(404, 'Project not found', 'not_found');
@@ -408,7 +459,17 @@ export function createCashflowEditDraftService({
     async get(input) {
       const current = context(input, { ownership: false, idempotency: false });
       return db.runTransaction(async (tx) => {
-        const { draft } = await ownedDraft(tx, current);
+        const draftSnap = await tx.get(refs(current).draft);
+        const draft = draftSnap.exists ? (draftSnap.data() || {}) : null;
+        if (
+          !draft
+          || readOptionalText(draft.ownerUid) !== current.actorId
+          || readOptionalText(draft.resourceType) !== RESOURCE_TYPE
+          || readOptionalText(draft.resourceId) !== current.projectId
+        ) {
+          throw createHttpError(404, 'Cashflow edit draft not found', 'not_found');
+        }
+        await accessProject(tx, current);
         return { draft: draftContract(draft) };
       });
     },
@@ -459,6 +520,7 @@ export function createCashflowEditDraftService({
               createdAt: timestamp,
               updatedAt: timestamp,
             };
+        await assertDraftMonthsOpen(tx, db, current, draft.payload);
         assertDraftSize(draft);
         const body = { draft: draftContract(draft) };
         if (draft !== existing) {
@@ -501,6 +563,7 @@ export function createCashflowEditDraftService({
         if (lockError) throw lockError;
         assertActive(draft);
         await assertLease(tx, current, nowDate);
+        await assertDraftMonthsOpen(tx, db, current, draft.payload, payload);
         const revision = assertRevision(draft, expectedDraftRevision) + 1;
         const next = { ...draft, payload, draftRevision: revision, updatedAt: timestamp };
         assertDraftSize(next);
@@ -540,6 +603,7 @@ export function createCashflowEditDraftService({
         if (lockError) throw lockError;
         assertActive(draft);
         const lease = await assertFinalizedLease(tx, current);
+        await assertDraftMonthsOpen(tx, db, current, draft.payload);
         const revision = assertRevision(draft, expectedDraftRevision) + 1;
         const next = {
           ownerUid: current.actorId,
@@ -571,111 +635,6 @@ export function createCashflowEditDraftService({
         ]);
         tx.set(draftRef, next);
         completeIdempotency(tx, current, lock, { method, path, status: 200, body, ttlSeconds: 86_400 }, nowDate);
-        return { status: 200, body, replayed: false };
-      });
-    },
-
-    async applyVarianceIntent(input) {
-      const current = context(input);
-      const sheetId = documentId(input?.sheetId, 'sheetId');
-      const expectedRevision = Number(input?.expectedRevision);
-      const action = readOptionalText(input?.action).toUpperCase();
-      const content = readOptionalText(input?.content);
-      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
-        throw createHttpError(400, 'expectedRevision is invalid', 'cashflow_metadata_request_invalid');
-      }
-      if (!['FLAG', 'REPLY', 'RESOLVE'].includes(action)) {
-        throw createHttpError(400, 'Variance action is invalid', 'cashflow_metadata_request_invalid');
-      }
-      if ((action === 'FLAG' || action === 'REPLY') && !content) {
-        throw createHttpError(400, 'Variance content is required', 'cashflow_metadata_request_invalid');
-      }
-      if (Buffer.byteLength(content, 'utf8') > 2_000) {
-        throw createHttpError(400, 'Variance content is too long', 'cashflow_metadata_request_invalid');
-      }
-      const method = 'POST';
-      const path = `/api/v1/cashflow-metadata/${current.projectId}/variance`;
-      const fingerprint = buildRequestFingerprint({
-        method,
-        path,
-        body: {
-          actorId: current.actorId, sessionId: current.sessionId, leaseId: current.leaseId,
-          fence: current.fence, sheetId, expectedRevision, action, content,
-        },
-      });
-      return db.runTransaction(async (tx) => {
-        const nowDate = clockDate(now);
-        const timestamp = nowDate.toISOString();
-        const { actorRole, member } = await accessProject(tx, current);
-        if ((action === 'FLAG' || action === 'RESOLVE') && !VARIANCE_REVIEW_ROLES.has(actorRole)) {
-          throw createHttpError(403, 'Finance review role is required', 'forbidden');
-        }
-        if (action === 'REPLY' && actorRole !== 'pm') {
-          throw createHttpError(403, 'Project manager role is required', 'forbidden');
-        }
-        const weekRef = db.doc(`orgs/${current.tenantId}/cashflow_weeks/${sheetId}`);
-        const weekSnap = await tx.get(weekRef);
-        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
-        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
-        const lockError = idempotencyError(lock);
-        if (lockError) throw lockError;
-        await assertLease(tx, current, nowDate);
-        if (!weekSnap.exists || readOptionalText(weekSnap.data()?.projectId) !== current.projectId) {
-          throw createHttpError(404, 'Cashflow week not found for this project', 'not_found');
-        }
-        const week = weekSnap.data() || {};
-        const revision = assertMetadataRevision(week, 'varianceRevision', expectedRevision) + 1;
-        const previousFlag = week.varianceFlag && typeof week.varianceFlag === 'object'
-          ? week.varianceFlag
-          : null;
-        if (action === 'FLAG' && previousFlag && previousFlag.status !== 'RESOLVED') {
-          throw createHttpError(409, 'An unresolved variance review already exists', 'cashflow_variance_state_conflict');
-        }
-        if (action === 'REPLY' && previousFlag?.status !== 'OPEN') {
-          throw createHttpError(409, 'Only an open variance review can be replied to', 'cashflow_variance_state_conflict');
-        }
-        if (action === 'RESOLVE' && previousFlag?.status !== 'REPLIED') {
-          throw createHttpError(409, 'Only a replied variance review can be resolved', 'cashflow_variance_state_conflict');
-        }
-        const displayName = actorDisplayName(member, current.actorId);
-        const varianceFlag = action === 'FLAG'
-          ? {
-              status: 'OPEN', reason: content, flaggedBy: displayName,
-              flaggedByUid: current.actorId, flaggedAt: timestamp,
-            }
-          : action === 'REPLY'
-            ? {
-                ...previousFlag, status: 'REPLIED', pmReply: content,
-                pmRepliedBy: displayName, pmRepliedByUid: current.actorId, pmRepliedAt: timestamp,
-              }
-            : {
-                ...previousFlag, status: 'RESOLVED', resolvedBy: displayName,
-                resolvedByUid: current.actorId, resolvedAt: timestamp,
-              };
-        const event = {
-          id: `vf-${revision}`,
-          action,
-          actor: displayName,
-          actorUid: current.actorId,
-          content: action === 'RESOLVE' ? (content || '해결 처리') : content,
-          timestamp,
-        };
-        const patch = {
-          tenantId: current.tenantId,
-          varianceFlag,
-          varianceHistory: [...(Array.isArray(week.varianceHistory) ? week.varianceHistory : []), event],
-          varianceRevision: revision,
-          updatedAt: timestamp,
-          updatedByUid: current.actorId,
-          updatedByName: displayName,
-        };
-        const body = { week: { id: sheetId, projectId: current.projectId, ...patch } };
-        await auditChainService.appendManyInTransaction(tx, [metadataAuditEntry(current, actorRole, {
-          entityType: 'cashflow_week', entityId: sheetId,
-          action: `CASHFLOW_VARIANCE_${action}`, revision, timestamp,
-        })]);
-        tx.set(weekRef, patch, { merge: true });
-        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
         return { status: 200, body, replayed: false };
       });
     },
@@ -734,11 +693,19 @@ export function createCashflowEditDraftService({
         const { actorRole, member } = await accessProject(tx, current);
         const statusRef = db.doc(`orgs/${current.tenantId}/weekly_submission_status/${statusId}`);
         const statusSnap = await tx.get(statusRef);
+        const monthCloseSnap = await tx.get(db.doc(
+          `orgs/${current.tenantId}/monthly_closes/${current.projectId}-${yearMonth}`,
+        ));
         const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
         if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
         const lockError = idempotencyError(lock);
         if (lockError) throw lockError;
         await assertLease(tx, current, nowDate);
+        assertCashflowMonthOpen(monthCloseSnap, {
+          tenantId: current.tenantId,
+          projectId: current.projectId,
+          yearMonth,
+        });
         const existing = statusSnap.exists ? (statusSnap.data() || {}) : {};
         if (statusSnap.exists && (
           readOptionalText(existing.projectId) !== current.projectId
@@ -897,14 +864,14 @@ export function mountCashflowEditDraftRoutes(app, {
   if (!cashflowEditDraftService) throw new Error('Cashflow edit draft routes require a service');
 
   app.get('/api/v1/cashflow-edit-drafts/:projectId', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'read a cashflow edit draft');
+    assertActorRoleAllowed(req, CASHFLOW_DRAFT_ROLES, 'read a cashflow edit draft');
     res.status(200).json(await cashflowEditDraftService.get({
       ...await routeContext(req, piiProtector), projectId: routeProjectId(req),
     }));
   }));
 
   app.post('/api/v1/cashflow-edit-drafts/:projectId/open', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'open a cashflow edit draft');
+    assertActorRoleAllowed(req, CASHFLOW_DRAFT_ROLES, 'open a cashflow edit draft');
     const parsed = parseWithSchema(openSchema, req.body);
     sendOutcome(res, await cashflowEditDraftService.open({
       ...await routeContext(req, piiProtector), ...routeOwnership(req),
@@ -913,7 +880,7 @@ export function mountCashflowEditDraftRoutes(app, {
   }));
 
   app.patch('/api/v1/cashflow-edit-drafts/:projectId', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'save a cashflow edit draft');
+    assertActorRoleAllowed(req, CASHFLOW_DRAFT_ROLES, 'save a cashflow edit draft');
     const parsed = parseWithSchema(patchSchema, req.body);
     sendOutcome(res, await cashflowEditDraftService.update({
       ...await routeContext(req, piiProtector), ...routeOwnership(req),
@@ -922,18 +889,9 @@ export function mountCashflowEditDraftRoutes(app, {
   }));
 
   app.post('/api/v1/cashflow-edit-drafts/:projectId/complete', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'complete a cashflow edit draft');
+    assertActorRoleAllowed(req, CASHFLOW_DRAFT_ROLES, 'complete a cashflow edit draft');
     const parsed = parseWithSchema(completeSchema, req.body);
     sendOutcome(res, await cashflowEditDraftService.complete({
-      ...await routeContext(req, piiProtector), ...routeOwnership(req),
-      projectId: routeProjectId(req), ...parsed,
-    }));
-  }));
-
-  app.post('/api/v1/cashflow-metadata/:projectId/variance', asyncHandler(async (req, res) => {
-    assertActorRoleAllowed(req, CORE_WRITE_ROUTE_ROLES, 'update cashflow variance metadata');
-    const parsed = parseWithSchema(varianceIntentSchema, req.body);
-    sendOutcome(res, await cashflowEditDraftService.applyVarianceIntent({
       ...await routeContext(req, piiProtector), ...routeOwnership(req),
       projectId: routeProjectId(req), ...parsed,
     }));

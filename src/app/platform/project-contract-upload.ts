@@ -3,10 +3,60 @@ import { getStorageInstance } from '../lib/firebase';
 import type { FileAttachment } from '../data/types';
 import type { ActorLike } from '../lib/platform-bff-client';
 
-export type ProjectRequestDocumentKind = 'contract' | 'quote' | 'proposal';
+export type ProjectRequestDocumentKind =
+  | 'contract'
+  | 'customer_business_registration'
+  | 'quote'
+  | 'proposal'
+  | 'proposal_word_original'
+  | 'proposal_ppt_original'
+  | 'presentation_ppt_original'
+  | 'rfp_request_evidence'
+  | 'performance_certificate'
+  | 'tax_invoice'
+  | 'final_settlement_report';
 
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES = 1024 * 1024 * 1024;
 export const PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL = '1GB';
+export const PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+export const PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_LABEL = '10MB';
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const PDF_ONLY_KINDS = new Set<ProjectRequestDocumentKind>([
+  'contract', 'customer_business_registration', 'quote', 'proposal',
+  'performance_certificate', 'tax_invoice', 'final_settlement_report',
+]);
+
+export function getProjectDocumentUploadAccept(kind: ProjectRequestDocumentKind): string {
+  if (kind === 'proposal_word_original') return `${DOCX_MIME},.docx`;
+  if (kind === 'proposal_ppt_original' || kind === 'presentation_ppt_original') return `${PPTX_MIME},.pptx`;
+  if (kind === 'rfp_request_evidence') {
+    return `application/pdf,${DOCX_MIME},message/rfc822,application/vnd.ms-outlook,application/x-msg,.pdf,.docx,.eml,.msg`;
+  }
+  return 'application/pdf,.pdf';
+}
+
+export function isProjectDocumentFileAllowed(kind: ProjectRequestDocumentKind, file: Pick<File, 'name'>): boolean {
+  const name = file.name.trim().toLowerCase();
+  if (PDF_ONLY_KINDS.has(kind)) return name.endsWith('.pdf');
+  if (kind === 'proposal_word_original') return name.endsWith('.docx');
+  if (kind === 'proposal_ppt_original' || kind === 'presentation_ppt_original') return name.endsWith('.pptx');
+  return ['.pdf', '.docx', '.eml', '.msg'].some((suffix) => name.endsWith(suffix));
+}
+
+export function resolveProjectDocumentMimeType(
+  kind: ProjectRequestDocumentKind,
+  file: Pick<File, 'name' | 'type'>,
+): string {
+  if (file.type.trim()) return file.type.trim().toLowerCase();
+  const name = file.name.trim().toLowerCase();
+  if (name.endsWith('.docx')) return DOCX_MIME;
+  if (name.endsWith('.pptx')) return PPTX_MIME;
+  if (name.endsWith('.eml')) return 'message/rfc822';
+  if (name.endsWith('.msg')) return 'application/vnd.ms-outlook';
+  return 'application/pdf';
+}
 
 function readText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -29,7 +79,7 @@ function assertProjectDocumentUploadAllowed(params: {
     throw new Error('로그인 정보를 확인할 수 없습니다.');
   }
   if (params.file.size > PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES) {
-    throw new Error(`첨부 PDF는 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`);
+    throw new Error(`첨부파일은 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`);
   }
 }
 
@@ -46,11 +96,12 @@ async function uploadProjectRequestDocumentDirectly(params: {
 
   const tenantId = readText(params.tenantId) || 'mysc';
   const actorId = readText(params.actor.uid) || 'system';
-  const fileName = normalizeSafeFileName(params.file.name, `${params.kind}.pdf`);
+  const fileName = normalizeSafeFileName(params.file.name, params.kind);
+  const contentType = resolveProjectDocumentMimeType(params.kind, params.file);
   const path = `orgs/${tenantId}/project-request-documents/${actorId}/${Date.now()}-${params.kind}-${fileName}`;
   const storageRef = ref(storage, path);
   const task = uploadBytesResumable(storageRef, params.file, {
-    contentType: params.file.type || 'application/pdf',
+    contentType,
     customMetadata: {
       tenantId,
       actorId,
@@ -68,7 +119,7 @@ async function uploadProjectRequestDocumentDirectly(params: {
     name: params.file.name || fileName,
     downloadURL,
     size: params.file.size,
-    contentType: params.file.type || 'application/pdf',
+    contentType,
     uploadedAt: new Date().toISOString(),
   };
 }
@@ -91,20 +142,4 @@ export async function uploadProjectRequestContractFile(params: {
     contractDocument,
     contractAnalysis: null,
   };
-}
-
-export async function uploadProjectRequestSupplementalDocumentFile(params: {
-  tenantId: string;
-  actor: ActorLike | null | undefined;
-  file: File;
-  kind: Exclude<ProjectRequestDocumentKind, 'contract'>;
-}) {
-  assertProjectDocumentUploadAllowed({ actor: params.actor, file: params.file });
-  if (!params.actor) throw new Error('로그인 정보를 확인할 수 없습니다.');
-  return uploadProjectRequestDocumentDirectly({
-    tenantId: params.tenantId,
-    actor: params.actor,
-    file: params.file,
-    kind: params.kind,
-  });
 }

@@ -3,6 +3,7 @@ import {
   classifyCashflowSheetCell,
   computeCashflowTargetRevision,
   createCashflowPinnedSnapshot,
+  extractCashflowSheetFacts,
 } from './cashflow-sheet-snapshot.mjs';
 
 describe('cashflow sheet pinned snapshot', () => {
@@ -64,6 +65,100 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(first.sourceRevision).toBe(second.sourceRevision);
     expect(first.targetRevisionAtFetch).not.toBe(second.targetRevisionAtFetch);
     expect(first.summary).toEqual({ cellCount: 2, valueCount: 1, emptyCount: 1, invalidCount: 0 });
+  });
+
+  it('pins business metadata, the five-week deposit schedule, and BO/BP controls', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+    matrix[0][1] = '최종 업데이트 : 2026.07.01 최종작성자: 보람';
+    matrix[1][1] = 'Type1. 세금계산서발행+공급가액기준';
+    matrix[2][1] = '전용계좌사업';
+    matrix[3][1] = '정산진행';
+    for (let weekIndex = 0; weekIndex < 5; weekIndex += 1) {
+      const columnIndex = 3 + weekIndex;
+      matrix[6][columnIndex] = `2026-06-${String(weekIndex + 1).padStart(2, '0')}`;
+      matrix[7][columnIndex] = `2026.06.${String(weekIndex + 6).padStart(2, '0')}`;
+      matrix[8][columnIndex] = String((weekIndex + 1) * 1000);
+      matrix[13][columnIndex] = String((weekIndex + 1) * 10);
+      matrix[36][columnIndex] = String((weekIndex + 1) * 5);
+    }
+    matrix[8][66] = '15,000';
+    matrix[8][67] = '85,000';
+    matrix[13][66] = '150';
+    matrix[36][66] = '75';
+
+    const weekColumns = Array.from({ length: 5 }, (_, weekIndex) => ({
+      yearMonth: '2026-06', weekNo: weekIndex + 1, columnIndex: 3 + weekIndex,
+    }));
+    const template = {
+      sections: [
+        {
+          mode: 'projection', weekColumns,
+          lineRows: [{ rowIndex: 13, lineId: 'SALES_IN' }], derivedRows: [],
+        },
+        {
+          mode: 'actual', weekColumns,
+          lineRows: [{ rowIndex: 36, lineId: 'SALES_IN' }], derivedRows: [],
+        },
+      ],
+    };
+
+    expect(extractCashflowSheetFacts({ template, matrix })).toEqual({
+      metadata: {
+        lastUpdateText: { sourceCell: 'B1', value: '최종 업데이트 : 2026.07.01 최종작성자: 보람' },
+        businessType: { sourceCell: 'B2', value: 'Type1. 세금계산서발행+공급가액기준' },
+        accountType: { sourceCell: 'B3', value: '전용계좌사업' },
+        settlementStatus: { sourceCell: 'B4', value: '정산진행' },
+      },
+      depositScheduleRows: Array.from({ length: 5 }, (_, weekIndex) => ({
+        yearMonth: '2026-06',
+        weekNo: weekIndex + 1,
+        taxInvoiceIssuedDate: `2026-06-${String(weekIndex + 1).padStart(2, '0')}`,
+        expectedDepositDate: `2026-06-${String(weekIndex + 6).padStart(2, '0')}`,
+        expectedDepositAmount: (weekIndex + 1) * 1000,
+        sourceCells: {
+          taxInvoiceIssuedDate: `${String.fromCharCode(68 + weekIndex)}7`,
+          expectedDepositDate: `${String.fromCharCode(68 + weekIndex)}8`,
+          expectedDepositAmount: `${String.fromCharCode(68 + weekIndex)}9`,
+        },
+      })),
+      controlTotals: {
+        deposit: { sourceCell: 'BO9', value: 15000, computed: 15000, matches: true },
+        unpaid: { sourceCell: 'BP9', value: 85000 },
+        projection: [{
+          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO14', value: 150, computed: 150, matches: true,
+        }],
+        actual: [{
+          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO37', value: 75, computed: 75, matches: true,
+        }],
+      },
+      issues: [],
+    });
+  });
+
+  it('treats future blank week cells as zero for BO sums without inventing deposit values', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+    const weekColumns = Array.from({ length: 60 }, (_, index) => ({
+      yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
+      weekNo: (index % 5) + 1,
+      columnIndex: 3 + index,
+    }));
+    matrix[8][3] = '1000';
+    matrix[8][66] = '1000';
+    matrix[13][3] = '100';
+    matrix[13][66] = '100';
+    const facts = extractCashflowSheetFacts({
+      matrix,
+      template: {
+        sections: [
+          { mode: 'projection', weekColumns, lineRows: [{ rowIndex: 13, lineId: 'SALES_IN' }], derivedRows: [] },
+          { mode: 'actual', weekColumns, lineRows: [], derivedRows: [] },
+        ],
+      },
+    });
+
+    expect(facts.depositScheduleRows[1].expectedDepositAmount).toBeNull();
+    expect(facts.controlTotals.deposit).toMatchObject({ computed: 1000, value: 1000, matches: true });
+    expect(facts.controlTotals.projection[0]).toMatchObject({ computed: 100, value: 100, matches: true });
   });
 
   it('computes the same target revision regardless of Firestore map and week order', () => {

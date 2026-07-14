@@ -2,6 +2,7 @@ package dev.merryai.innerplatform.weekly.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseAtomicWriteLimitException;
@@ -111,6 +112,30 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             .extracting(error -> ((WeeklyExpenseEditLeaseException) error).statusCode())
             .isEqualTo(503);
         verifyNoInteractions(persistence);
+    }
+
+    @Test
+    void monthReopenIsRejectedOutsideTheStageRuntimeWithoutLeaseHeaders() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(any(), any())).thenReturn("pm");
+        WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
+            persistence,
+            new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
+            new ObjectMapper(),
+            false,
+            "live"
+        );
+
+        assertThatThrownBy(() -> service.requestCashflowMonthReopen(
+            new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm"),
+            "project-a",
+            "stage-data-project",
+            new RequestCashflowMonthReopenRequest("reopen-live", "2026-06", 1, "정정 필요")
+        ))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
+                .isEqualTo("unsafe_jvm_runtime"));
+        verify(persistence, never()).requireCashflowDataProject(any());
     }
 
     @Test

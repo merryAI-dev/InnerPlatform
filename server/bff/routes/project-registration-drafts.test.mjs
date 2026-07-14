@@ -9,6 +9,8 @@ import {
   mountProjectRegistrationDraftRoutes,
 } from './project-registration-drafts.mjs';
 
+const VALID_PDF = Buffer.from('%PDF-1.4\n');
+
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
@@ -165,6 +167,7 @@ function validRegistrationPayload(overrides = {}) {
     description: 'Description',
     clientOrg: 'Client',
     department: 'AXR',
+    groupwareName: '2026 Private project',
     currency: 'KRW',
     contractAmount: 100_000,
     salesVatAmount: 10_000,
@@ -189,13 +192,76 @@ function validRegistrationPayload(overrides = {}) {
     managerId: 'actor-a',
     managerName: 'Actor A',
     teamName: 'AXR',
-    teamMembers: 'Actor A · PM · 100%',
-    teamMembersDetailed: [{ memberName: 'Actor A', role: 'PM', participationRate: 100 }],
+    teamMembers: 'Actor A · 실무책임자 · 100% · 실제 참여',
+    teamMembersDetailed: [{
+      memberName: 'Actor A',
+      role: '실무책임자',
+      participationRate: 100,
+      isDocumentOnly: false,
+    }],
     participantCondition: 'Condition',
     note: 'Note',
     arbitraryBrowserField: 'must-not-persist',
     ...overrides,
   };
+}
+
+function validRegistrationV2Payload(overrides = {}) {
+  return validRegistrationPayload({
+    registrationRequirementsVersion: 2,
+    contractStart: '2026-01-01',
+    contractEnd: '2027-12-31',
+    contractAmount: 300_000,
+    salesVatAmount: 30_000,
+    totalRevenueAmount: 120_000,
+    supportAmount: 10_000,
+    financialInputFlags: {
+      contractAmount: true,
+      salesVatAmount: true,
+      totalRevenueAmount: true,
+      supportAmount: true,
+    },
+    financialYears: [
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+    ],
+    registrationConfirmations: {
+      laborIncludesFourInsurance: true,
+      laborIncludesRetirementPay: true,
+      customerSettlementBasisConfirmed: true,
+      modusignContractUsed: true,
+      originalContractSubmitted: false,
+    },
+    registrationOptionalDocumentNotes: {
+      proposalWordOriginal: '해당 없음',
+      proposalPptOriginal: '해당 없음',
+      presentationPptOriginal: '해당 없음',
+    },
+    paymentExpectedMonths: {
+      contract: '2026-07',
+      interim: '',
+      final: '2027-12',
+    },
+    advanceInterimBelow70Reason: '발주처 지급 조건에 따라 잔금 비중이 30%를 초과합니다.',
+    ...overrides,
+  });
+}
+
+function addRequiredRegistrationAttachments(db, draftId, existing = []) {
+  const path = `orgs/tenant-a/projectRequestDrafts/${draftId}`;
+  const draft = db.documents.get(path);
+  const existingKinds = new Set(existing.map((attachment) => attachment.documentKind));
+  const missing = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence']
+    .filter((documentKind) => !existingKinds.has(documentKind))
+    .map((documentKind) => ({
+      attachmentId: `required-${documentKind}`,
+      documentKind,
+      path: `orgs/tenant-a/project-registration-drafts/${draftId}/${documentKind}.pdf`,
+      name: `${documentKind}.pdf`,
+      size: VALID_PDF.byteLength,
+      contentType: 'application/pdf',
+    }));
+  db.documents.set(path, { ...draft, attachmentRefs: [...existing, ...missing] });
 }
 
 async function expectHttpError(promise, statusCode, code) {
@@ -478,8 +544,9 @@ describe('project registration draft service', () => {
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-create',
-      payload: validRegistrationPayload(),
+      payload: validRegistrationV2Payload(),
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
     const input = {
       ...base,
       actorEmail: 'actor-a@example.com',
@@ -567,13 +634,64 @@ describe('project registration draft service', () => {
       .toEqual(['PROJECT_REGISTRATION_SUBMIT', 'EDIT_LEASE_RELEASE']);
   });
 
+  it('passes all four required private attachment kinds into registration v2 final-submit validation', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
+        path: `orgs/${tenantId}/project-registration-drafts/${draftId}/${attachmentId}-${fileName}`,
+        name: fileName,
+        size: buffer.byteLength,
+        contentType: mimeType,
+        uploadedAt: '2026-07-10T00:00:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const { db, service, base } = createHarness({ storageService });
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-v2-create',
+      payload: validRegistrationV2Payload(),
+    });
+    const kinds = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence'];
+    for (const [revision, documentKind] of kinds.entries()) {
+      await service.addAttachment({
+        ...base,
+        idempotencyKey: `idem-v2-${documentKind}`,
+        draftId: created.body.draft.draftId,
+        leaseId: created.body.lease.leaseId,
+        fence: created.body.lease.fence,
+        expectedDraftRevision: revision,
+        documentKind,
+        fileName: `${documentKind}.pdf`,
+        mimeType: 'application/pdf',
+        fileSize: VALID_PDF.byteLength,
+        buffer: VALID_PDF,
+      });
+    }
+
+    await service.submit({
+      ...base,
+      idempotencyKey: 'idem-v2-submit',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 4,
+    });
+
+    expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload).toMatchObject({
+      registrationRequirementsVersion: 2,
+      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+    });
+    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind)).toEqual(kinds);
+  });
+
   it('samples lease time again when Firestore retries final submit', async () => {
     const { db, service, base, advance } = createHarness();
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-retry-expiry-create',
-      payload: validRegistrationPayload(),
+      payload: validRegistrationV2Payload(),
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
     db.retryNextTransaction(() => advance((30 * 60 * 1000) + 1));
 
     await expectHttpError(service.submit({
@@ -595,8 +713,9 @@ describe('project registration draft service', () => {
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-retry-time-create',
-      payload: validRegistrationPayload(),
+      payload: validRegistrationV2Payload(),
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
     db.retryNextTransaction(() => advance(60_000));
 
     const submitted = await service.submit({
@@ -659,8 +778,9 @@ describe('project registration draft service', () => {
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-audit-create',
-      payload: validRegistrationPayload(),
+      payload: validRegistrationV2Payload(),
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
     auditChainService.appendManyInTransaction.mockRejectedValueOnce(new Error('audit append failed'));
 
     await expect(service.submit({
@@ -689,8 +809,9 @@ describe('project registration draft service', () => {
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-collision-create',
-      payload: validRegistrationPayload(),
+      payload: validRegistrationV2Payload(),
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
 
     await expectHttpError(service.submit({
       ...base,
@@ -723,7 +844,7 @@ describe('project registration draft service', () => {
     const created = await service.create({
       ...base,
       idempotencyKey: 'idem-submit-doc-create',
-      payload: validRegistrationPayload({
+      payload: validRegistrationV2Payload({
         contractDocument: { path: 'browser-controlled', downloadURL: 'https://public.example/secret' },
       }),
     });
@@ -734,8 +855,8 @@ describe('project registration draft service', () => {
       fence: created.body.lease.fence,
       documentKind: 'contract',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     };
     await service.addAttachment({
       ...attachmentBase,
@@ -749,6 +870,11 @@ describe('project registration draft service', () => {
       expectedDraftRevision: 1,
       fileName: 'latest-contract.pdf',
     });
+    addRequiredRegistrationAttachments(
+      db,
+      created.body.draft.draftId,
+      db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`).attachmentRefs,
+    );
 
     await service.submit({
       ...base,
@@ -763,9 +889,12 @@ describe('project registration draft service', () => {
     expect(project.contractDocument).toBeNull();
     expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
       .not.toHaveProperty('attachmentRefs');
-    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs).toEqual([
+    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs).toEqual(expect.arrayContaining([
       expect.objectContaining({ documentKind: 'contract', name: 'latest-contract.pdf' }),
-    ]);
+      expect.objectContaining({ documentKind: 'customer_business_registration' }),
+      expect.objectContaining({ documentKind: 'quote' }),
+      expect.objectContaining({ documentKind: 'rfp_request_evidence' }),
+    ]));
   });
 
   it('rejects adopted attachment paths outside the current private draft prefix', async () => {
@@ -806,10 +935,13 @@ describe('project registration draft service', () => {
 
   it('preserves current financial flag semantics by inferring positive stored amounts', async () => {
     const { db, service, base } = createHarness();
-    const payload = validRegistrationPayload({
+    const payload = validRegistrationV2Payload({
       type: 'I1',
-      contractStart: '',
-      contractEnd: '',
+      supportAmount: 0,
+      financialYears: [
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+      ],
     });
     delete payload.financialInputFlags;
     const created = await service.create({
@@ -817,6 +949,7 @@ describe('project registration draft service', () => {
       idempotencyKey: 'idem-submit-financial-flags-create',
       payload,
     });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
     await service.submit({
       ...base,
       idempotencyKey: 'idem-submit-financial-flags',
@@ -929,8 +1062,8 @@ describe('project registration draft service', () => {
       fence: created.body.lease.fence,
       documentKind: 'contract',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     };
     const first = await service.addAttachment({
       ...common, idempotencyKey: 'idem-replace-first', expectedDraftRevision: 0, fileName: 'first.pdf',
@@ -976,8 +1109,8 @@ describe('project registration draft service', () => {
       documentKind: 'contract',
       fileName: 'contract.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     };
 
     const first = await service.addAttachment({
@@ -1013,6 +1146,41 @@ describe('project registration draft service', () => {
       .toEqual([expect.objectContaining({ path: firstPath })]);
   });
 
+  it('rejects non-PDF MIME types and fake PDF content before private storage', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(),
+      deleteDraftAttachment: vi.fn(),
+    };
+    const { service, base } = createHarness({ storageService });
+    const created = await service.create({ ...base, idempotencyKey: 'idem-pdf-validation-create' });
+    const attachment = {
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract.pdf',
+    };
+
+    await expectHttpError(service.addAttachment({
+      ...attachment,
+      idempotencyKey: 'idem-pdf-validation-mime',
+      mimeType: 'text/plain',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    }), 422, 'draft_attachment_invalid');
+    const fakePdf = Buffer.from('not-a-pdf');
+    await expectHttpError(service.addAttachment({
+      ...attachment,
+      idempotencyKey: 'idem-pdf-validation-magic',
+      mimeType: 'application/pdf',
+      fileSize: fakePdf.byteLength,
+      buffer: fakePdf,
+    }), 422, 'draft_attachment_invalid');
+    expect(storageService.uploadDraftAttachment).not.toHaveBeenCalled();
+  });
+
   it('rejects a reused attachment key when only the raw file bytes differ', async () => {
     const storageService = {
       uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
@@ -1026,6 +1194,8 @@ describe('project registration draft service', () => {
     };
     const { service, base } = createHarness({ storageService });
     const created = await service.create({ ...base, idempotencyKey: 'idem-attachment-bytes-create' });
+    const firstPdf = Buffer.from('%PDF-A');
+    const secondPdf = Buffer.from('%PDF-B');
     const common = {
       ...base,
       draftId: created.body.draft.draftId,
@@ -1034,15 +1204,15 @@ describe('project registration draft service', () => {
       idempotencyKey: 'idem-attachment-bytes',
       expectedDraftRevision: 0,
       documentKind: 'contract',
-      fileName: 'bytes.bin',
-      mimeType: 'application/octet-stream',
-      fileSize: 1,
+      fileName: 'bytes.pdf',
+      mimeType: 'application/pdf',
+      fileSize: firstPdf.byteLength,
     };
 
-    await service.addAttachment({ ...common, buffer: Buffer.from([0xff]) });
+    await service.addAttachment({ ...common, buffer: firstPdf });
 
     await expectHttpError(
-      service.addAttachment({ ...common, buffer: Buffer.from([0xfe]) }),
+      service.addAttachment({ ...common, buffer: secondPdf }),
       409,
       'idempotency_conflict',
     );
@@ -1174,8 +1344,8 @@ describe('project registration draft routes', () => {
       documentKind: 'quote',
       fileName: 'quote.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      contentBase64: Buffer.from('pdf').toString('base64'),
+      fileSize: VALID_PDF.byteLength,
+      contentBase64: VALID_PDF.toString('base64'),
     };
 
     await request(app)

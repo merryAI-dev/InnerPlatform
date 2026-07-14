@@ -8,10 +8,13 @@ const payrollStoreSource = readFileSync(
 );
 
 describe('PayrollProvider scoped realtime listeners', () => {
-  it('keeps PM-scoped payroll data on realtime snapshots instead of one-shot fetches', () => {
+  it('keeps PM-scoped payroll data on realtime snapshots without subscribing to cashflow month closes', () => {
     expect(payrollStoreSource).toContain("onSnapshot(scheduleRef");
     expect(payrollStoreSource).toContain("onSnapshot(runQuery");
-    expect(payrollStoreSource).toContain("onSnapshot(closeQuery");
+    expect(payrollStoreSource).not.toContain("onSnapshot(closeQuery");
+    expect(payrollStoreSource).not.toContain("'monthlyCloses'");
+    expect(payrollStoreSource).not.toContain('markMonthlyCloseDone');
+    expect(payrollStoreSource).not.toContain('acknowledgeMonthlyClose');
     expect(payrollStoreSource).not.toContain("getDoc(scheduleRef)");
     expect(payrollStoreSource).not.toContain("getDocs(runQuery)");
     expect(payrollStoreSource).not.toContain("getDocs(closeQuery)");

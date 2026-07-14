@@ -10,14 +10,14 @@ describe('EditLeaseDialogs', () => {
       holderDisplayName: '김메리',
       sameActor: false,
       expiresAt: '2026-07-10T00:30:00.000Z',
-    })).toBe('김메리님이 수정 중입니다');
+    })).toBe('현재 김메리님이 수정 중입니다.');
     expect(editLeaseHolderMessage({
       holderDisplayName: '김메리',
       sameActor: true,
       expiresAt: '2026-07-10T00:30:00.000Z',
-    })).toBe('김메리님이 수정 중입니다');
+    })).toBe('현재 김메리님이 수정 중입니다.');
     expect(source).toContain('지금은 수정은 불가능하지만 읽기/조회는 가능해요!');
-    expect(source).toContain('이전 수정 이어서 하기');
+    expect(source).toContain('이전 수정 세션 이어서 작성');
   });
 
   it('keeps the exact timeout copy and explicit actions in accessible alert dialogs', () => {

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+  getProjectDocumentUploadAccept,
+  isProjectDocumentFileAllowed,
+  resolveProjectDocumentMimeType,
   uploadProjectRequestContractFile,
-  uploadProjectRequestSupplementalDocumentFile,
 } from './project-contract-upload';
 
 const mocks = vi.hoisted(() => ({
@@ -97,27 +98,13 @@ describe('project-contract-upload', () => {
     expect(mocks.uploadBytesResumable).toHaveBeenCalled();
   });
 
-  it('uploads quote and proposal documents directly to Firebase Storage', async () => {
-    const result = await uploadProjectRequestSupplementalDocumentFile({
-      tenantId: 'mysc',
-      actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm' },
-      file: new File(['pdf'], 'quote.pdf', { type: 'application/pdf' }),
-      kind: 'quote',
-    });
-
-    expect(result.name).toBe('quote.pdf');
-    expect(result.downloadURL).toBe('https://example.com/direct.pdf');
-    expect(mocks.ref).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('quote-quote.pdf'));
-  });
-
-  it('rejects files above the 1GB project document limit', async () => {
-    await expect(uploadProjectRequestSupplementalDocumentFile({
-      tenantId: 'mysc',
-      actor: { uid: 'u-1', email: 'pm@mysc.co.kr', role: 'pm' },
-      file: fileWithSize(PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES + 1, 'proposal.pdf'),
-      kind: 'proposal',
-    })).rejects.toThrow('1GB 이하');
-
-    expect(mocks.uploadBytesResumable).not.toHaveBeenCalled();
+  it('maps each PPT attachment slot to its allowed browser file contract', () => {
+    expect(isProjectDocumentFileAllowed('proposal_word_original', { name: 'proposal.docx' } as File)).toBe(true);
+    expect(isProjectDocumentFileAllowed('proposal_ppt_original', { name: 'proposal.pptx' } as File)).toBe(true);
+    expect(isProjectDocumentFileAllowed('rfp_request_evidence', { name: 'request.msg' } as File)).toBe(true);
+    expect(isProjectDocumentFileAllowed('proposal_word_original', { name: 'proposal.pdf' } as File)).toBe(false);
+    expect(getProjectDocumentUploadAccept('rfp_request_evidence')).toContain('.eml');
+    expect(resolveProjectDocumentMimeType('proposal_word_original', { name: 'proposal.docx', type: '' } as File))
+      .toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   });
 });

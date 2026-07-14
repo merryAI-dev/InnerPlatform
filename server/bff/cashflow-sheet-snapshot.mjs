@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { toA1 } from './cashflow-sheet-template.mjs';
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -101,6 +102,156 @@ function compareCells(left, right) {
     || String(left.lineId).localeCompare(String(right.lineId));
 }
 
+function matrixValue(matrix, rowIndex, columnIndex) {
+  return normalizedText(matrix?.[rowIndex]?.[columnIndex]);
+}
+
+function normalizeDateCell(value) {
+  const raw = normalizedText(value);
+  if (!raw) return '';
+  const match = /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/.exec(raw);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function readWholeWon(
+  matrix,
+  rowIndex,
+  columnIndex,
+  issues,
+  field,
+  { allowEmpty = true, emptyValue = null, nonNegative = false } = {},
+) {
+  const sourceCell = toA1(rowIndex, columnIndex);
+  const classified = classifyCashflowSheetCell(matrix?.[rowIndex]?.[columnIndex]);
+  if (classified.state === 'EMPTY') {
+    if (!allowEmpty) issues.push({ code: 'control_total_missing', field, sourceCell });
+    return emptyValue;
+  }
+  if (
+    classified.state !== 'VALUE'
+    || !Number.isSafeInteger(classified.amount)
+    || (nonNegative && classified.amount < 0)
+  ) {
+    issues.push({ code: 'sheet_value_invalid', field, sourceCell, rawValue: classified.rawValue || matrixValue(matrix, rowIndex, columnIndex) });
+    return null;
+  }
+  return classified.amount;
+}
+
+function controlRow({ matrix, row, weekColumns, issues }) {
+  const field = `${row.kind}:${row.lineId || row.derivedKind}`;
+  const amounts = weekColumns.map((week) => readWholeWon(
+    matrix,
+    row.rowIndex,
+    week.columnIndex,
+    issues,
+    `${field}:${week.yearMonth}:${week.weekNo}`,
+    { emptyValue: 0 },
+  ));
+  const computed = amounts.some((amount) => amount === null)
+    ? null
+    : amounts.reduce((sum, amount) => sum + amount, 0);
+  const value = readWholeWon(matrix, row.rowIndex, 66, issues, field, { allowEmpty: false });
+  return {
+    kind: row.kind,
+    ...(row.lineId ? { lineId: row.lineId } : { derivedKind: row.derivedKind }),
+    sourceCell: toA1(row.rowIndex, 66),
+    value,
+    computed,
+    matches: value === null || computed === null ? false : value === computed,
+  };
+}
+
+export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
+  const issues = [];
+  const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
+  const weekColumns = (projectionSection?.weekColumns || [])
+    .filter((week) => week.columnIndex >= 3 && week.columnIndex <= 62)
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
+  const depositScheduleRows = weekColumns.map((week) => {
+    const taxInvoiceIssuedDate = normalizeDateCell(matrix?.[6]?.[week.columnIndex]);
+    const expectedDepositDate = normalizeDateCell(matrix?.[7]?.[week.columnIndex]);
+    if (taxInvoiceIssuedDate === null) {
+      issues.push({ code: 'sheet_date_invalid', field: 'taxInvoiceIssuedDate', sourceCell: toA1(6, week.columnIndex) });
+    }
+    if (expectedDepositDate === null) {
+      issues.push({ code: 'sheet_date_invalid', field: 'expectedDepositDate', sourceCell: toA1(7, week.columnIndex) });
+    }
+    return {
+      yearMonth: week.yearMonth,
+      weekNo: week.weekNo,
+      taxInvoiceIssuedDate: taxInvoiceIssuedDate ?? '',
+      expectedDepositDate: expectedDepositDate ?? '',
+      expectedDepositAmount: readWholeWon(
+        matrix,
+        8,
+        week.columnIndex,
+        issues,
+        `expectedDepositAmount:${week.yearMonth}:${week.weekNo}`,
+        { nonNegative: true },
+      ),
+      sourceCells: {
+        taxInvoiceIssuedDate: toA1(6, week.columnIndex),
+        expectedDepositDate: toA1(7, week.columnIndex),
+        expectedDepositAmount: toA1(8, week.columnIndex),
+      },
+    };
+  });
+
+  const controlRows = (section) => [
+    ...(section?.lineRows || []).map((row) => ({ ...row, kind: 'line' })),
+    ...(section?.derivedRows || []).map((row) => ({ ...row, kind: 'derived', derivedKind: row.kind })),
+  ].sort((left, right) => left.rowIndex - right.rowIndex);
+  const modeControls = (mode) => {
+    const section = template?.sections?.find((candidate) => candidate.mode === mode);
+    const columns = (section?.weekColumns || []).filter((week) => week.columnIndex >= 3 && week.columnIndex <= 62);
+    return controlRows(section).map((row) => controlRow({ matrix, row, weekColumns: columns, issues }));
+  };
+  const depositValues = weekColumns.map((week) => readWholeWon(
+    matrix,
+    8,
+    week.columnIndex,
+    issues,
+    `depositControl:${week.yearMonth}:${week.weekNo}`,
+    { emptyValue: 0, nonNegative: true },
+  ));
+  const depositComputed = depositValues.some((amount) => amount === null)
+    ? null
+    : depositValues.reduce((sum, amount) => sum + amount, 0);
+  const depositValue = readWholeWon(matrix, 8, 66, issues, 'depositControl', { allowEmpty: false, nonNegative: true });
+
+  return {
+    metadata: {
+      lastUpdateText: { sourceCell: 'B1', value: matrixValue(matrix, 0, 1) },
+      businessType: { sourceCell: 'B2', value: matrixValue(matrix, 1, 1) },
+      accountType: { sourceCell: 'B3', value: matrixValue(matrix, 2, 1) },
+      settlementStatus: { sourceCell: 'B4', value: matrixValue(matrix, 3, 1) },
+    },
+    depositScheduleRows,
+    controlTotals: {
+      deposit: {
+        sourceCell: 'BO9',
+        value: depositValue,
+        computed: depositComputed,
+        matches: depositValue === null || depositComputed === null ? false : depositValue === depositComputed,
+      },
+      unpaid: {
+        sourceCell: 'BP9',
+        value: readWholeWon(matrix, 8, 67, issues, 'unpaidControl'),
+      },
+      projection: modeControls('projection'),
+      actual: modeControls('actual'),
+    },
+    issues,
+  };
+}
+
 export function createCashflowPinnedSnapshot({
   projectId,
   spreadsheetId,
@@ -108,12 +259,14 @@ export function createCashflowPinnedSnapshot({
   selectedSheetName,
   mappings = [],
   matrix = [],
+  template = {},
   targetSnapshot = {},
   capturedAt,
   capturedBy = {},
 } = {}) {
   const cells = mappings.map((mapping) => snapshotCell(mapping, matrix)).sort(compareCells);
-  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells });
+  const sheetFacts = extractCashflowSheetFacts({ template, matrix });
+  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (cell.state === 'VALUE') counts.valueCount += 1;
@@ -140,5 +293,6 @@ export function createCashflowPinnedSnapshot({
     yearMonths: [...new Set(cells.map((cell) => cell.yearMonth))].sort(),
     summary,
     cells,
+    sheetFacts,
   };
 }

@@ -1,5 +1,13 @@
 import type { ProjectTeamMemberAssignment } from '../data/types';
 
+export const PROJECT_TEAM_MEMBER_ROLES = [
+  '총괄책임자',
+  '실무책임자',
+  '운영매니저',
+  '정산지원',
+  '사업 최종 책임자',
+] as const;
+
 function toRate(value: unknown) {
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -36,6 +44,9 @@ function normalizeProjectTeamMemberRow(
     role: String(member?.role || '').trim(),
     participationRate: toRate(member?.participationRate),
   };
+  if (typeof member?.isDocumentOnly === 'boolean') {
+    normalized.isDocumentOnly = member.isDocumentOnly;
+  }
   const laborAllocationStartMonth = toMonth(member?.laborAllocationStartMonth);
   const laborAllocationEndMonth = toMonth(member?.laborAllocationEndMonth);
   if (laborAllocationStartMonth) normalized.laborAllocationStartMonth = laborAllocationStartMonth;
@@ -53,12 +64,13 @@ export function normalizeProjectTeamMembers(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ): ProjectTeamMemberAssignment[] {
   return (Array.isArray(members) ? members : [])
-    .map(normalizeProjectTeamMemberRow)
+    .map((member) => normalizeProjectTeamMemberRow(member))
     .filter((member) => (
       member.memberName
       || member.memberNickname
       || member.role
       || member.participationRate > 0
+      || member.isDocumentOnly === true
       || member.laborAllocationStartMonth
       || member.laborAllocationEndMonth
     ));
@@ -72,7 +84,11 @@ export function normalizeProjectTeamMemberDraftRows(
 }
 
 export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment) {
-  return Boolean(member.memberName && member.role);
+  return Boolean(
+    member.memberName
+    && PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof PROJECT_TEAM_MEMBER_ROLES[number])
+    && typeof member.isDocumentOnly === 'boolean',
+  );
 }
 
 export function hasIncompleteProjectTeamMembers(
@@ -92,6 +108,7 @@ export function formatProjectTeamMemberLine(member: ProjectTeamMemberAssignment)
     identity,
     member.role,
     member.participationRate > 0 ? `${member.participationRate}%` : '',
+    member.isDocumentOnly === true ? '서류상 인력' : member.isDocumentOnly === false ? '실제 참여' : '',
     period ? `인건비 ${period}` : '',
   ].filter(Boolean).join(' / ');
 }

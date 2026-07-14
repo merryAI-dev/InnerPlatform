@@ -30,6 +30,7 @@ export interface EditLeaseHeldStatus extends EditLeaseStatusBase {
   expiresAt: string;
   holderDisplayName: string;
   sameActor: boolean;
+  holderVersion?: string;
 }
 
 export interface EditLeaseUnavailableStatus extends EditLeaseStatusBase {
@@ -65,6 +66,7 @@ export interface EditLeaseHolder {
   holderDisplayName: string;
   sameActor: boolean;
   expiresAt: string;
+  holderVersion?: string;
 }
 
 export class EditLeaseProtocolError extends Error {
@@ -122,6 +124,11 @@ function text(value: unknown): string {
   return value.trim();
 }
 
+function optionalText(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return text(value);
+}
+
 function parseStatus(value: unknown): EditLeaseStatus {
   const body = record(value);
   const serverNow = iso(body.serverNow) as string;
@@ -154,6 +161,7 @@ function parseStatus(value: unknown): EditLeaseStatus {
       expiresAt: iso(body.expiresAt) as string,
       holderDisplayName: text(body.holderDisplayName),
       sameActor: body.sameActor,
+      holderVersion: optionalText(body.holderVersion),
     };
   }
   if (body.canEdit) throw new EditLeaseProtocolError();
@@ -172,6 +180,7 @@ function parseHolder(value: unknown): EditLeaseHolder {
     holderDisplayName: text(holder.holderDisplayName),
     sameActor: holder.sameActor,
     expiresAt: iso(holder.expiresAt) as string,
+    holderVersion: optionalText(holder.holderVersion),
   };
 }
 

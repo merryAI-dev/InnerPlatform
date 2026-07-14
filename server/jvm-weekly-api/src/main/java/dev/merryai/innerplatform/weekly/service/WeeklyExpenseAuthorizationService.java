@@ -37,6 +37,11 @@ public class WeeklyExpenseAuthorizationService {
         WeeklyExpenseCommandService.ROW_INSERT_COMMAND,
         WeeklyExpenseCommandService.ROW_DELETE_COMMAND,
         WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND,
+        WeeklyExpenseCommandService.CASHFLOW_VARIANCE_COMMAND,
+        WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+        WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND,
+        WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+        WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
         WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND
     );
     private static final Map<String, Set<String>> COMMAND_ROLES = Map.ofEntries(
@@ -56,6 +61,11 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.ROW_INSERT_COMMAND, Set.of("admin", "finance", "pm")),
         Map.entry(WeeklyExpenseCommandService.ROW_DELETE_COMMAND, Set.of("admin", "finance", "pm")),
         Map.entry(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
+        Map.entry(WeeklyExpenseCommandService.CASHFLOW_VARIANCE_COMMAND, Set.of("admin", "finance", "pm", "tenant_admin")),
+        Map.entry(WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
+        Map.entry(WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND, Set.of("pm")),
+        Map.entry(WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("pm")),
+        Map.entry(WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))
     );

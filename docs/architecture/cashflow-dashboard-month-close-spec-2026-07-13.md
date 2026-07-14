@@ -88,6 +88,7 @@
 - 결산 월은 `monthly_closes.snapshot`만 조회한다.
 - 시트의 기존 수식은 변경하거나 재작성하지 않는다.
 - 전체 주차 합계와 `BO` control total이 다르면 불일치 경고를 표시하고 사람이 확인하기 전에는 결산하지 않는다.
+- 화면은 `BO9` 입금 합계와 `BP9` 미지급 수식 결과를 서버 응답 그대로 표시한다. `BP9`는 산식 확정 전 표시용이며 프론트에서 재계산하지 않는다.
 - 캐시플로우에 표시되는 모든 작성 항목은 사람이 `확인` 또는 `해당 없음`으로 판정한다.
 - 빈 값은 자동으로 `해당 없음`으로 간주하지 않는다.
 
@@ -156,6 +157,7 @@
 - Admin, Finance, 다른 PM에게는 보이지 않는다.
 - 저장마다 `draftRevision`을 올리고 오래된 revision은 `409`로 거절한다.
 - lease가 만료돼도 draft는 삭제하지 않는다.
+- 월 결산 입력을 포함한 draft의 열기·수정·완료는 같은 `monthly_closes` 문서를 transaction 안에서 확인하고, `CLOSED`·`REOPEN_REQUESTED`이면 거절한다.
 
 ## 6. 최종저장과 월 결산
 
@@ -243,12 +245,18 @@ collection 스키마와 기존 소비자 제거를 한 작업 단위로 처리�
 - BFF `getCashflowDashboard(projectId, yearMonth)`
   - 열린 월은 최신 원천을 조합하고 닫힌 월은 snapshot을 반환한다.
   - 화면용 권한 플래그와 lock 상태를 함께 반환한다.
+- BFF `GET /api/v1/cashflow/{projectId}?rangeStart=YYYY-MM:W&rangeEnd=YYYY-MM:W`
+  - JVM 원장 주차를 지정 범위로 합산해 `readModel.range.projection|actual`의 품목별 합계, 입금 합계, 출금 합계, 잔액을 반환한다.
+  - 프론트엔드는 기간 합계를 다시 더하지 않고 이 응답을 그대로 표시한다.
 - JVM `closeCashflowMonth`
   - PM, 프로젝트, 월 상태, lease, fence, draftRevision, idempotency를 검증한다.
+- JVM `updateCashflowVariance`
+  - 편차 검토의 역할, lease, 월 상태, revision, 상태 전이를 검증하고 `cashflow_weeks`를 원자적으로 갱신한다.
 - JVM `requestCashflowMonthReopen`
   - PM과 필수 사유를 검증한다.
 - JVM `decideCashflowMonthReopen`
   - Finance/Admin만 승인·반려한다.
+- 기존 주차 단위 `submit`·`close` 명령은 BFF와 JVM 모두 기본 `410 Gone`으로 차단하고 월 결산 계약만 상태 변경에 사용한다.
 
 같은 idempotency key와 같은 요청은 기존 결과를 반환한다. 같은 key의 다른 요청은 `409`로 거절한다.
 
@@ -304,6 +312,9 @@ collection 스키마와 기존 소비자 제거를 한 작업 단위로 처리�
 - 전체 주차 합계와 BO control total의 불일치가 조용히 덮이지 않는다.
 - 상세 표에 `전체` 보기가 없고 연도 이동·월 선택·월 결산이 동작한다.
 - 모든 검증과 배포는 Stage에서만 수행한다.
+- Stage QA 기준일은 월 결산 가능 여부와 다음 달 10일 초과 판정에만 적용하고, lease·저장·감사 시각은 실제 서버 시간을 유지한다.
+- QA 기준일이 적용된 결산 snapshot에는 `evaluatedBusinessDate`와 `qaDateOverride`를 남긴다.
+- Stage가 아닌 JVM에 QA 기준일이 설정되면 서버 시작을 거절한다.
 
 검증 명령:
 

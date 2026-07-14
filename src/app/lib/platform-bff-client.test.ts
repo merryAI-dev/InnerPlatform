@@ -30,8 +30,10 @@ import {
   upsertTransactionViaBff,
   upsertCashflowWeekAmountsViaBff,
   saveCashflowProjectionBatchViaBff,
-  submitCashflowWeekViaBff,
-  closeCashflowWeekViaBff,
+  fetchCashflowMonthCloseViaBff,
+  closeCashflowMonthViaBff,
+  requestCashflowMonthReopenViaBff,
+  decideCashflowMonthReopenViaBff,
   readWeeklyExpenseSheetViaBff,
   saveWeeklyExpenseDraftViaBff,
   importBankStatementBatchViaBff,
@@ -111,7 +113,91 @@ describe('platform-bff-client', () => {
     }));
   });
 
-  it('routes projection, submit, and close through fenced JVM-owned BFF endpoints', async () => {
+  it('uses the single JVM month-close contract for read, close, reopen request, and decision', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: {
+        ok: true,
+        projectId: 'p001',
+        yearMonth: '2026-06',
+        status: 'CLOSED',
+      } })),
+      post: vi.fn(async () => ({ data: {
+        ok: true,
+        projectId: 'p001',
+        yearMonth: '2026-06',
+        status: 'CLOSED',
+      } })),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'u001', role: 'pm' };
+
+    await fetchCashflowMonthCloseViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
+    });
+    await closeCashflowMonthViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'month-close-1',
+      lease: cashflowLease,
+      payload: {
+        yearMonth: '2026-06',
+        expectedRevision: 2,
+      },
+      client,
+    });
+    await requestCashflowMonthReopenViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'reopen-request-1',
+      payload: { yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
+      client,
+    });
+    await decideCashflowMonthReopenViaBff({
+      tenantId: 'mysc', actor: { uid: 'finance-1', role: 'finance' }, projectId: 'p001',
+      idempotencyKey: 'reopen-decision-1',
+      payload: { yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
+      client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/cashflow/p001/month-close?yearMonth=2026-06',
+      expect.objectContaining({ retries: 0 }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close', expect.objectContaining({
+      idempotencyKey: 'month-close-1',
+      headers: {
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '7',
+        'x-edit-finalize': 'true',
+      },
+      body: expect.objectContaining({ yearMonth: '2026-06', expectedRevision: 2 }),
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/cashflow/p001/month-close/reopen-request',
+      expect.objectContaining({
+        idempotencyKey: 'reopen-request-1',
+        body: { yearMonth: '2026-06', expectedRevision: 3, reason: '증빙 정정 필요' },
+      }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/cashflow/p001/month-close/reopen-request',
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/cashflow/p001/month-close/reopen-decision',
+      expect.objectContaining({
+        idempotencyKey: 'reopen-decision-1',
+        body: { yearMonth: '2026-06', expectedRevision: 4, decision: 'APPROVE', reason: '확인 완료' },
+      }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/cashflow/p001/month-close/reopen-decision',
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
+  it('routes projection through the fenced JVM-owned BFF endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({ data: { ok: true, projectId: 'p001' } })),
       get: vi.fn(),
@@ -127,21 +213,6 @@ describe('platform-bff-client', () => {
       lease: cashflowLease,
       client,
     });
-    await submitCashflowWeekViaBff({
-      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001',
-      payload: {
-        yearMonth: '2026-07', weekNo: 1,
-        weeklySheet: { sheetKey: 'default', expectedSheetVersion: 3, sheetName: '기본 탭', rows: [] },
-      }, idempotencyKey: 'submit-1', lease: cashflowLease, finalize: true, client,
-    });
-    await closeCashflowWeekViaBff({
-      tenantId: 'mysc', actor: { uid: 'u001', role: 'finance' }, projectId: 'p001',
-      payload: {
-        yearMonth: '2026-07', weekNo: 1,
-        projectionLines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
-      }, idempotencyKey: 'close-1', lease: cashflowLease, finalize: true, client,
-    });
-
     const headers = {
       'x-edit-session-id': 'session-a',
       'x-edit-lease-id': 'lease-a',
@@ -151,20 +222,7 @@ describe('platform-bff-client', () => {
       idempotencyKey: 'projection-1', headers,
       body: { lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }] },
     }));
-    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/weekly-expenses/p001/submit', expect.objectContaining({
-      idempotencyKey: 'submit-1', headers: { ...headers, 'x-edit-finalize': 'true' },
-      body: {
-        yearMonth: '2026-07', weekNo: 1,
-        weeklySheet: { sheetKey: 'default', expectedSheetVersion: 3, sheetName: '기본 탭', rows: [] },
-      },
-    }));
-    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/weekly-expenses/p001/close', expect.objectContaining({
-      idempotencyKey: 'close-1', headers: { ...headers, 'x-edit-finalize': 'true' },
-      body: {
-        yearMonth: '2026-07', weekNo: 1,
-        projectionLines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
-      },
-    }));
+    expect(client.post).toHaveBeenCalledTimes(1);
   });
 
   it('reads the current JVM sheet version before a fenced weekly draft save', async () => {
@@ -253,7 +311,10 @@ describe('platform-bff-client', () => {
     const module = await import('./platform-bff-client') as unknown as {
       fetchCashflowSnapshotViaBff?: (params: Record<string, unknown>) => Promise<{
         comparison: { direction: string; asOfDate: string };
-        readModel: { months: Array<{ comparison: { totalIn: number } }> };
+        readModel: {
+          range: { projection: { totalIn: number } };
+          months: Array<{ comparison: { totalIn: number } }>;
+        };
       }>;
     };
     expect(typeof module.fetchCashflowSnapshotViaBff).toBe('function');
@@ -268,22 +329,37 @@ describe('platform-bff-client', () => {
           projectId: 'p001', direction: 'projection_minus_actual', asOfDate: '2026-07-13',
           asOfWeek: { yearMonth: '2026-07', weekNo: 3 }, timeZone: 'Asia/Seoul', lineOrder: [], months: [], ignoredLineIds: [],
         },
-        readModel: { months: [{
-          yearMonth: '2026-07',
-          projection: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
-          actual: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
-          comparison: { weeks: [], rowTotals: {}, totalIn: 300, totalOut: 0, net: 300, totals: {} },
-        }] },
+        readModel: {
+          range: {
+            start: { yearMonth: '2026-01', weekNo: 1 },
+            end: { yearMonth: '2026-12', weekNo: 5 },
+            projection: { rowTotals: {}, totalIn: 300, totalOut: 0, net: 300 },
+            actual: { rowTotals: {}, totalIn: 0, totalOut: 0, net: 0 },
+          },
+          months: [{
+            yearMonth: '2026-07',
+            projection: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
+            actual: { rowTotals: {}, weeks: [], monthTotals: { totalIn: 0, totalOut: 0, net: 0 } },
+            comparison: { weeks: [], rowTotals: {}, totalIn: 300, totalOut: 0, net: 300, totals: {} },
+          }],
+        },
       } })),
       post: vi.fn(), request: vi.fn(),
     });
 
     const result = await module.fetchCashflowSnapshotViaBff({
-      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', asOf: '2026-07-13', client,
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', asOf: '2026-07-13',
+      rangeStart: { yearMonth: '2026-01', weekNo: 1 },
+      rangeEnd: { yearMonth: '2026-12', weekNo: 5 },
+      client,
     });
 
-    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001?asOf=2026-07-13', expect.any(Object));
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/cashflow/p001?asOf=2026-07-13&rangeStart=2026-01%3A1&rangeEnd=2026-12%3A5',
+      expect.any(Object),
+    );
     expect(result.comparison).toMatchObject({ direction: 'projection_minus_actual', asOfDate: '2026-07-13' });
+    expect(result.readModel.range.projection.totalIn).toBe(300);
     expect(result.readModel.months[0]?.comparison.totalIn).toBe(300);
   });
   it('reads runtime config with defaults', () => {

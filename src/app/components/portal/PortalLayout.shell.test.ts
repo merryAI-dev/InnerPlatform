@@ -12,6 +12,7 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain("to: '/portal/payroll'");
     expect(portalLayoutSource).toContain("label: '인건비/공지'");
     expect(portalLayoutSource).not.toContain("label: '인건비/공지', accent: true, hidden: true");
+    expect(portalLayoutSource).not.toContain('monthlyCloses');
   });
 
   it('puts budget first and pushes business cards behind operating work', () => {

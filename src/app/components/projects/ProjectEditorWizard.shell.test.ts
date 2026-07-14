@@ -136,8 +136,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('lastInitialDraftFingerprintRef');
   });
 
-  it('keeps the PPT registration guidance and placeholders without touching the team step', () => {
+  it('keeps project and groupware names separate with the PPT registration guidance', () => {
     expect(source).toContain('프로젝트명 *');
+    expect(source).toContain("그룹웨어 등록명{usesRegistrationV2 ? ' *' : ''}");
     expect(source).toContain('계약서에 기재된 계약명 그대로 입력');
     expect(source).toContain('띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.');
     expect(source).toContain('예: 26농식품AC');
@@ -152,8 +153,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('2. 사업제안서 작성 - 25개팀 이상 1:1 코칭');
     expect(source).toContain('3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
-    expect(source).not.toContain('>그룹웨어 등록명</Label>');
-    expect(source).not.toContain('<ReviewRow label="그룹웨어 등록명"');
+    expect(source).toContain('<ReviewRow label="그룹웨어 등록명"');
     expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
@@ -186,15 +186,51 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(contractDocumentPolicySource).toContain('교체 취소');
   });
 
+  it('renders registration v2 requirements and completed-project checkout without a new route', () => {
+    expect(portalRegisterSource).toContain('registrationRequirementsVersion: 2');
+    expect(source).toContain("'customer_business_registration'");
+    expect(source).toContain("'proposal_word_original'");
+    expect(source).toContain("'proposal_ppt_original'");
+    expect(source).toContain("'presentation_ppt_original'");
+    expect(source).toContain("'rfp_request_evidence'");
+    expect(source).toContain('미첨부 사유 / 해당 없음 *');
+    expect(source).toContain('등록 첨부 7종');
+    expect(source).toContain('발주처 사업자등록증 PDF');
+    expect(source).toContain('연도별 계약·재무 *');
+    expect(source).toContain('계약기간 전체 연도별 재무 확인');
+    expect(source).toContain('4대보험 포함 확인');
+    expect(source).toContain('퇴직급여 포함 확인');
+    expect(source).toContain('모두싸인으로 계약했나요? *');
+    expect(source).toContain('종료사업 체크아웃');
+    expect(source).toContain("'performance_certificate'");
+    expect(source).toContain("'tax_invoice'");
+    expect(source).toContain("'final_settlement_report'");
+    expect(source).toContain('evidenceDeletedAfterUsb');
+    expect(source).toContain('SETTLEMENT_SYSTEM_LABELS');
+    expect(source).toContain('LABOR_SETTLEMENT_BASIS_LABELS');
+    expect(source).toContain('PROJECT_TEAM_MEMBER_ROLES');
+    expect(source).toContain('paymentExpectedMonths');
+    expect(source).toContain('선금·중도금 합계 70% 미만 사유 *');
+    expect(source).toContain('최종 저장 후 사업관리 폴더가 자동 생성');
+  });
+
   it('wires admin project editor to contract upload without automatic analysis merge', () => {
     expect(adminWizardSource).toContain('uploadProjectRequestContractFile');
-    expect(adminWizardSource).toContain('uploadProjectRequestSupplementalDocumentFile');
+    expect(adminWizardSource).not.toContain('uploadProjectRequestSupplementalDocumentFile');
     expect(adminWizardSource).toContain('handleContractFileUpload');
-    expect(adminWizardSource).toContain('handleProjectDocumentFileUpload');
+    expect(adminWizardSource).not.toContain('handleProjectDocumentFileUpload');
     expect(adminWizardSource).toContain('onContractFileUpload={handleContractFileUpload}');
-    expect(adminWizardSource).toContain('onProjectDocumentFileUpload={handleProjectDocumentFileUpload}');
+    expect(adminWizardSource).not.toContain('onProjectDocumentFileUpload={handleProjectDocumentFileUpload}');
     expect(adminWizardSource).toContain('contractAnalysisMergeMode="none"');
     expect(adminWizardSource).toContain('canRemoveContractDocument');
+  });
+
+  it('shows supplemental project documents only when a BFF-backed upload callback exists', () => {
+    expect(source).toContain('const registrationDocumentKinds = onProjectDocumentFileUpload');
+    expect(source).toContain("REGISTRATION_DOCUMENT_KINDS.filter((kind) => kind === 'contract')");
+    expect(source).toContain('const checkoutDocumentKinds = onProjectDocumentFileUpload ? CHECKOUT_DOCUMENT_KINDS : []');
+    expect(source).toContain('registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))');
+    expect(source).toContain('checkoutDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))');
   });
 
   it('keeps private edit inputs read-only without disabling step navigation', () => {
@@ -237,9 +273,13 @@ describe('ProjectEditorWizard dropdown contract', () => {
 });
 
 describe('ProjectEditorWizard safe exit contract', () => {
-  it('saves the private draft and releases the edit session before portal navigation', () => {
+  it('offers continue, discard, and private-save choices before releasing the edit session', () => {
     expect(source).toContain('onLeave?: () => void | Promise<void>;');
-    expect(source).toContain('임시저장 후 수정 세션을 종료하고 나갈까요?');
+    expect(source).toContain('수정 세션을 종료할까요?');
+    expect(source).toContain('계속 작성');
+    expect(source).toContain('저장하지 않고 종료');
+    expect(source).toContain('임시저장 후 종료');
+    expect(source).not.toContain('window.confirm');
     expect(source).toContain('await persistAutosaveSnapshot(draft, stepIndex)');
     expect(source).toContain('await onLeave?.();');
   });

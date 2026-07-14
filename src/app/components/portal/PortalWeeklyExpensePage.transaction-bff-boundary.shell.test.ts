@@ -56,7 +56,8 @@ describe('portal weekly transaction BFF boundary', () => {
       'const handleFetchBudgetSuggestion = useCallback',
     );
 
-    expect(callbacks.match(/cashflowLease\.checkBeforeMutation\(\)/g)).toHaveLength(5);
+    expect(callbacks.match(/cashflowLease\.checkBeforeMutation\(\)/g)).toHaveLength(4);
+    expect(callbacks).not.toContain('finalize: true');
     expect(source).toContain('onAddComment={handleAddComment}');
   });
 });

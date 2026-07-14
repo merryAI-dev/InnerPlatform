@@ -95,6 +95,7 @@ describeIfEmulator('edit leases (Firestore emulator)', () => {
       holderDisplayName: 'Actor A',
       sameActor: true,
       expiresAt: '2026-07-10T00:30:00.000Z',
+      holderVersion: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(conflict.body)).not.toMatch(/actor-a|session-[ab]|leaseId|fence|@/i);
     const audits = await db.collection(`orgs/${tenantId}/audit_logs`).get();

@@ -11,7 +11,7 @@ import {
 } from '../ui/alert-dialog';
 
 export function editLeaseHolderMessage(holder: EditLeaseHolder | null): string {
-  return `${holder?.holderDisplayName.trim() || '다른 사용자'}님이 수정 중입니다`;
+  return `현재 ${holder?.holderDisplayName.trim() || '다른 사용자'}님이 수정 중입니다.`;
 }
 
 export function EditLeaseDialogs({
@@ -87,7 +87,7 @@ export function EditLeaseDialogs({
             </AlertDialogCancel>
             {holder?.sameActor && onTakeover ? (
               <AlertDialogAction disabled={busy} onClick={() => void onTakeover()}>
-                이전 수정 이어서 하기
+                이전 수정 세션 이어서 작성
               </AlertDialogAction>
             ) : null}
           </AlertDialogFooter>

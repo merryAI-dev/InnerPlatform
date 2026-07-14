@@ -48,7 +48,7 @@ final class FirestoreCashflowWeekActualMerge {
     static Map<String, Object> numberMap(Map<String, BigDecimal> amounts) {
         Map<String, Object> result = new TreeMap<>();
         for (Map.Entry<String, BigDecimal> entry : amounts.entrySet()) {
-            result.put(entry.getKey(), amount(entry.getValue()).longValue());
+            result.put(entry.getKey(), exactWon(amount(entry.getValue())));
         }
         return result;
     }
@@ -61,9 +61,9 @@ final class FirestoreCashflowWeekActualMerge {
             .map(line -> amount(amounts.get(line)))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
         return Map.of(
-            "totalIn", in.longValue(),
-            "totalOut", out.longValue(),
-            "net", in.subtract(out).longValue()
+            "totalIn", exactWon(in),
+            "totalOut", exactWon(out),
+            "net", exactWon(in.subtract(out))
         );
     }
 
@@ -92,7 +92,13 @@ final class FirestoreCashflowWeekActualMerge {
 
     private static BigDecimal decimal(Object value) {
         if (value instanceof BigDecimal decimal) return decimal;
-        if (value instanceof Number number) return BigDecimal.valueOf(number.doubleValue());
+        if (value instanceof Number number) {
+            try {
+                return new BigDecimal(number.toString());
+            } catch (NumberFormatException error) {
+                throw new IllegalArgumentException("Cashflow amounts must be finite numbers.", error);
+            }
+        }
         if (value == null) return BigDecimal.ZERO;
         String text = String.valueOf(value).replace(",", "").trim();
         if (text.isBlank()) return BigDecimal.ZERO;
@@ -100,6 +106,17 @@ final class FirestoreCashflowWeekActualMerge {
             return new BigDecimal(text);
         } catch (NumberFormatException error) {
             return BigDecimal.ZERO;
+        }
+    }
+
+    private static long exactWon(BigDecimal value) {
+        try {
+            return value.longValueExact();
+        } catch (ArithmeticException error) {
+            throw new IllegalArgumentException(
+                "Cashflow amounts must be whole won values in the supported range.",
+                error
+            );
         }
     }
 }

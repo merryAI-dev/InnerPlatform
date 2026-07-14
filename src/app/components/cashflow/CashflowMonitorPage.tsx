@@ -98,23 +98,19 @@ export function CashflowMonitorPage() {
     () => new Set(currentMonthWeeks.map((week) => week.projectId)).size,
     [currentMonthWeeks],
   );
-  const unsubmittedCount = useMemo(
-    () => currentMonthWeeks.filter((week) => !week.pmSubmitted).length,
+  const historicalSubmittedCount = useMemo(
+    () => currentMonthWeeks.filter((week) => week.pmSubmitted).length,
     [currentMonthWeeks],
   );
-  const pendingCloseCount = useMemo(
-    () => currentMonthWeeks.filter((week) => week.pmSubmitted && !week.adminClosed).length,
-    [currentMonthWeeks],
-  );
-  const closedCount = useMemo(
+  const historicalClosedCount = useMemo(
     () => currentMonthWeeks.filter((week) => week.adminClosed).length,
     [currentMonthWeeks],
   );
   const primaryLinks = useMemo<MonitorLinkCardProps[]>(
     () => [
       {
-        title: '주간 모니터링',
-        description: '프로젝트별 주차 상태, PM 작성 여부, 결산 흐름을 먼저 확인합니다.',
+        title: '주간 입력 이력',
+        description: '프로젝트별 주차 입력 이력을 조회합니다. 최종 확정과 수정 잠금은 월 결산에서 처리합니다.',
         href: '/cashflow/weekly',
         badge: '우선 확인',
         icon: Activity,
@@ -123,7 +119,7 @@ export function CashflowMonitorPage() {
       },
       {
         title: '경영기획실 페이지',
-        description: `현재 ${yearMonth} 기준 주간 상태를 워크북으로 확인하고 필요한 범위만 내보냅니다.`,
+        description: `현재 ${yearMonth} 기준 기존 주차 기록을 워크북으로 확인하고 필요한 범위만 내보냅니다.`,
         href: '/cashflow/export',
         badge: '정리/내보내기',
         icon: FileSpreadsheet,
@@ -139,7 +135,7 @@ export function CashflowMonitorPage() {
         icon={ShieldAlert}
         iconGradient="linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)"
         title="캐시플로 모니터링 허브"
-        description="주간 작성 상태를 먼저 확인하고, 경영기획실 정리 화면으로 필요한 내보내기만 진행합니다."
+        description="주차 입력 이력은 조회용으로 확인하고, 최종 확정은 프로젝트별 월 결산에서 처리합니다."
         badge="관리자 모니터링"
       />
 
@@ -150,7 +146,7 @@ export function CashflowMonitorPage() {
             <p className="text-[11px] text-muted-foreground">상태 확인과 경영기획실 정리 화면만 상단에 둡니다.</p>
           </div>
           <Badge className="border border-slate-200 bg-white text-[10px] text-slate-700">
-            주간 기준
+            조회 전용
           </Badge>
         </div>
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
@@ -169,23 +165,23 @@ export function CashflowMonitorPage() {
           icon={Activity}
         />
         <MonitorStatCard
-          label="이번 달 주차"
+          label="이번 달 주차 기록"
           value={`${currentMonthWeeks.length}개`}
           hint={`${yearMonth} 기준`}
           toneClass="border-slate-200 bg-white"
           icon={CalendarRange}
         />
         <MonitorStatCard
-          label="작성 대기"
-          value={`${unsubmittedCount}개`}
-          hint="PM 미작성 주차"
+          label="기존 제출 이력"
+          value={`${historicalSubmittedCount}개`}
+          hint="조회용 주차 기록"
           toneClass="border-slate-200 bg-white"
           icon={FileSpreadsheet}
         />
         <MonitorStatCard
-          label="결산 완료"
-          value={`${closedCount}개`}
-          hint={`결산 대기 ${pendingCloseCount}개`}
+          label="기존 결산 이력"
+          value={`${historicalClosedCount}개`}
+          hint="현재 월 결산 권한과 무관"
           toneClass="border-slate-200 bg-white"
           icon={TrendingUp}
         />

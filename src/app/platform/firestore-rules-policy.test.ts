@@ -202,6 +202,7 @@ describe('firestore rules policy alignment', () => {
       'cashflow_sheet_stage_runs',
       'cashflow_sheet_stage_months',
       'cashflow_change_candidates',
+      'monthly_closes',
     ]) {
       expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
       expect(firestoreRulesText).toMatch(
@@ -222,6 +223,7 @@ describe('firestore rules policy alignment', () => {
       'project_requests',
       'projectRequests',
       'cashflow_weeks',
+      'monthly_closes',
       'weekly_submission_status',
       'transactions',
       'comments',
@@ -348,6 +350,8 @@ describe('firestore rules policy alignment', () => {
       { collectionGroup: 'projectRequestDrafts', fieldPath: 'payload', indexes: [] },
       { collectionGroup: 'projectRequestDrafts', fieldPath: 'attachmentRefs', indexes: [] },
       { collectionGroup: 'idempotency_keys', fieldPath: 'responseBody', indexes: [] },
+      { collectionGroup: 'monthly_closes', fieldPath: 'snapshot', indexes: [] },
+      { collectionGroup: 'weekly_api_idempotency', fieldPath: 'responseJson', indexes: [] },
     ]) {
       expect(firestoreIndexes.fieldOverrides).toContainEqual(fieldOverride);
     }

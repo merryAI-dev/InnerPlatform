@@ -4,6 +4,7 @@ import {
   toRequestActor,
   type ActorLike,
 } from './platform-bff-client';
+import type { ProjectRequestDocumentKind } from '../platform/project-contract-upload';
 
 function contentDispositionFileName(value: string | null) {
   const match = String(value || '').match(/filename\*=UTF-8''([^;]+)/i);
@@ -19,7 +20,7 @@ export async function downloadProjectRequestAttachmentViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   requestId: string;
-  documentKind: 'contract' | 'quote' | 'proposal';
+  documentKind: ProjectRequestDocumentKind;
   fetchImpl?: typeof fetch;
 }): Promise<{ blob: Blob; fileName: string }> {
   const requestId = params.requestId.trim();

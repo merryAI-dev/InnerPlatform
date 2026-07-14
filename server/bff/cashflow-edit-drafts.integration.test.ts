@@ -103,6 +103,7 @@ describeIfEmulator('cashflow private drafts (Firestore emulator)', () => {
     const otherActorRead = await api
       .get('/api/v1/cashflow-edit-drafts/project-a')
       .set(actorHeaders('actor-admin', 'admin'));
-    expect(otherActorRead.status).toBe(404);
+    expect(otherActorRead.status).toBe(403);
+    expect(otherActorRead.body.error).toBe('forbidden');
   });
 });

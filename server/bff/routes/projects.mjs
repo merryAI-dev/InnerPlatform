@@ -8,6 +8,10 @@ import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { extractTextFromPdfBuffer } from '../pdf-text.mjs';
 import { normalizeProjectRevenueFields } from '../project-financials.mjs';
 import {
+  PROJECT_INFO_DOCUMENT_KINDS,
+  PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS,
+} from '../project-document-validation.mjs';
+import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed,
   ROUTE_ROLES, PROJECT_REQUEST_ROUTE_ROLES, createHttpError, encryptAuditEmail,
   parseLimit, parseCursor, buildListResponse,
@@ -375,7 +379,10 @@ function formatProjectRequestTeamMember(member) {
   const periodPart = laborAllocationStartMonth || laborAllocationEndMonth
     ? ` · 인건비 ${laborAllocationStartMonth || '-'}~${laborAllocationEndMonth || '-'}`
     : '';
-  return `${identity}${rolePart}${ratePart}${periodPart}`;
+  const documentOnlyPart = typeof member?.isDocumentOnly === 'boolean'
+    ? ` · ${member.isDocumentOnly ? '서류상 인력' : '실제 참여'}`
+    : '';
+  return `${identity}${rolePart}${ratePart}${periodPart}${documentOnlyPart}`;
 }
 
 function normalizeProjectContractType(value) {
@@ -437,10 +444,22 @@ function normalizeProjectType(value) {
 }
 
 const REGISTRATION_PROJECT_TYPES = new Set(['C1', 'A1', 'A2', 'I1', 'I2', 'I3', 'D1', 'S1', 'S2', 'E1', 'P1', 'Z1']);
-const PRIVATE_DOCUMENT_KINDS = ['contract', 'quote', 'proposal'];
+const REGISTRATION_REQUIRED_DOCUMENT_KINDS = PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS;
+const PRIVATE_DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
 const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
 const REGISTRATION_PAYMENT_FIELDS = ['contract', 'interim', 'final'];
 const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const SETTLEMENT_SYSTEM_CODES = new Set([
+  'E_NARA_DOUM', 'IRIS', 'RCMS', 'EZBARO', 'E_HIJO', 'EDUFINE',
+  'HAPPYEUM', 'AGRIX', 'BOTAEM_E', 'SMTECH', 'KOCCA_PMS', 'NIPA',
+  'ACCOUNTANT', 'PRIVATE', 'NONE',
+]);
+const LABOR_SETTLEMENT_BASES = new Set([
+  'INCLUDE_ACTUAL_SALARY', 'EXCLUDE_ACTUAL_SALARY', 'FIXED_AMOUNT', 'NONE',
+]);
+const PROJECT_TEAM_MEMBER_ROLES = new Set([
+  '총괄책임자', '실무책임자', '운영매니저', '정산지원', '사업 최종 책임자',
+]);
 
 function invalidRegistration(message) {
   throw createHttpError(422, message, 'project_registration_invalid');
@@ -502,9 +521,100 @@ function assertRegistrationFinancials(payload, type) {
   }
 }
 
+function assertRegistrationTeamMembers(value) {
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value)) invalidRegistration('Project registration teamMembersDetailed is invalid');
+  value.forEach((member, index) => {
+    if (!member || typeof member !== 'object' || Array.isArray(member)) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index} is invalid`);
+    }
+    if (!readOptionalText(member.memberName)) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index}.memberName is required`);
+    }
+    if (!PROJECT_TEAM_MEMBER_ROLES.has(readOptionalText(member.role))) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index}.role is invalid`);
+    }
+    if (
+      typeof member.participationRate !== 'number'
+      || !Number.isFinite(member.participationRate)
+      || member.participationRate < 0
+      || member.participationRate > 100
+    ) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index}.participationRate is invalid`);
+    }
+    if (typeof member.isDocumentOnly !== 'boolean') {
+      invalidRegistration(`Project registration teamMembersDetailed.${index}.isDocumentOnly is required`);
+    }
+    for (const field of ['laborAllocationStartMonth', 'laborAllocationEndMonth']) {
+      if (member[field] && !normalizeExpectedMonth(member[field])) {
+        invalidRegistration(`Project registration teamMembersDetailed.${index}.${field} is invalid`);
+      }
+    }
+    if (
+      member.laborAllocationStartMonth
+      && member.laborAllocationEndMonth
+      && member.laborAllocationStartMonth > member.laborAllocationEndMonth
+    ) {
+      invalidRegistration(`Project registration teamMembersDetailed.${index} labor allocation period is invalid`);
+    }
+  });
+}
+
+function assertRegistrationV2PaymentPlan(payload) {
+  const paymentPlan = payload.paymentPlan && typeof payload.paymentPlan === 'object'
+    ? payload.paymentPlan
+    : {};
+  const expectedMonths = payload.paymentExpectedMonths;
+  if (expectedMonths !== undefined && (!expectedMonths || typeof expectedMonths !== 'object' || Array.isArray(expectedMonths))) {
+    invalidRegistration('Project registration paymentExpectedMonths is invalid');
+  }
+  for (const field of REGISTRATION_PAYMENT_FIELDS) {
+    if (registrationAmount(paymentPlan[field]) > 0 && !normalizeExpectedMonth(expectedMonths?.[field])) {
+      invalidRegistration(`Project registration paymentExpectedMonths.${field} is required`);
+    }
+  }
+  const contractAmount = registrationAmount(payload.contractAmount);
+  const paymentTotal = REGISTRATION_PAYMENT_FIELDS.reduce(
+    (sum, field) => sum + registrationAmount(paymentPlan[field]),
+    0,
+  );
+  const advanceAndInterim = registrationAmount(paymentPlan.contract) + registrationAmount(paymentPlan.interim);
+  if (
+    contractAmount > 0
+    && paymentTotal > 0
+    && advanceAndInterim / contractAmount < 0.7
+    && !readOptionalText(payload.advanceInterimBelow70Reason)
+  ) {
+    invalidRegistration('Project registration advance/interim below 70% reason is required');
+  }
+}
+
 function registrationAmount(value) {
   const amount = Number(value);
   return Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+}
+
+function normalizeSettlementSystemCode(value) {
+  const normalized = readOptionalText(value);
+  return SETTLEMENT_SYSTEM_CODES.has(normalized) ? normalized : 'NONE';
+}
+
+function normalizeLaborSettlementBasis(value) {
+  const normalized = readOptionalText(value);
+  return LABOR_SETTLEMENT_BASES.has(normalized) ? normalized : 'NONE';
+}
+
+function normalizeExpectedMonth(value) {
+  const normalized = readOptionalText(value);
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : '';
+}
+
+function normalizePaymentExpectedMonths(value) {
+  return {
+    contract: normalizeExpectedMonth(value?.contract),
+    interim: normalizeExpectedMonth(value?.interim),
+    final: normalizeExpectedMonth(value?.final),
+  };
 }
 
 function registrationSlug(value, fallback) {
@@ -569,9 +679,236 @@ function registrationPrivateDocuments(attachmentRefs) {
   }
   return {
     contractDocument: latest.get('contract') || null,
+    customerBusinessRegistrationDocument: latest.get('customer_business_registration') || null,
     quoteDocument: latest.get('quote') || null,
     proposalDocument: latest.get('proposal') || null,
+    proposalWordOriginalDocument: latest.get('proposal_word_original') || null,
+    proposalPptOriginalDocument: latest.get('proposal_ppt_original') || null,
+    presentationPptOriginalDocument: latest.get('presentation_ppt_original') || null,
+    rfpRequestEvidenceDocument: latest.get('rfp_request_evidence') || null,
+    performanceCertificateDocument: latest.get('performance_certificate') || null,
+    taxInvoiceDocument: latest.get('tax_invoice') || null,
+    finalSettlementReportDocument: latest.get('final_settlement_report') || null,
   };
+}
+
+function registrationRequirementsVersion(value) {
+  if (value === undefined || value === null || value === '') return 1;
+  if (value === 1 || value === 2) return value;
+  invalidRegistration('Project registration requirements version is unsupported');
+}
+
+function normalizeRegistrationFinancialYears(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    const year = Number(row?.year);
+    if (!Number.isSafeInteger(year) || year < 2000 || year > 2099) return [];
+    const profitRate = Number(row?.profitRate);
+    return [{
+      year,
+      contractAmount: registrationAmount(row?.contractAmount),
+      salesVatAmount: registrationAmount(row?.salesVatAmount),
+      totalRevenueAmount: registrationAmount(row?.totalRevenueAmount),
+      supportAmount: registrationAmount(row?.supportAmount),
+      profitRate: Number.isFinite(profitRate) ? Math.min(1, Math.max(0, profitRate)) : 0,
+      confirmed: row?.confirmed === true,
+    }];
+  });
+}
+
+function normalizeRegistrationConfirmations(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    laborIncludesFourInsurance: typeof source.laborIncludesFourInsurance === 'boolean'
+      ? source.laborIncludesFourInsurance
+      : null,
+    laborIncludesRetirementPay: typeof source.laborIncludesRetirementPay === 'boolean'
+      ? source.laborIncludesRetirementPay
+      : null,
+    customerSettlementBasisConfirmed: source.customerSettlementBasisConfirmed === true,
+    modusignContractUsed: typeof source.modusignContractUsed === 'boolean' ? source.modusignContractUsed : null,
+    originalContractSubmitted: typeof source.originalContractSubmitted === 'boolean'
+      ? source.originalContractSubmitted
+      : null,
+  };
+}
+
+function normalizeRegistrationOptionalDocumentNotes(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    proposalWordOriginal: readOptionalText(source.proposalWordOriginal),
+    proposalPptOriginal: readOptionalText(source.proposalPptOriginal),
+    presentationPptOriginal: readOptionalText(source.presentationPptOriginal),
+  };
+}
+
+function normalizeProjectCheckout(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    finalPaymentReceived: source.finalPaymentReceived === true,
+    bankBalanceZero: source.bankBalanceZero === true,
+    performanceCertificateReceived: source.performanceCertificateReceived === true,
+    taxInvoiceEvidenceConfirmed: source.taxInvoiceEvidenceConfirmed === true,
+    finalSettlementReportConfirmed: source.finalSettlementReportConfirmed === true,
+    usbEvidenceSubmitted: source.usbEvidenceSubmitted === true,
+    evidenceDeletedAfterUsb: source.evidenceDeletedAfterUsb === true,
+  };
+}
+
+function assertProjectCheckoutPayload(payload, attachmentRefs, currentProject) {
+  const status = normalizeProjectStatus(readOptionalText(payload?.status));
+  if (!['COMPLETED', 'COMPLETED_PENDING_PAYMENT'].includes(status)) return;
+  const checkout = payload?.checkout;
+  if (!checkout || typeof checkout !== 'object' || Array.isArray(checkout)) {
+    invalidRegistration('Completed project checkout is required');
+  }
+  const fields = [
+    'finalPaymentReceived',
+    'bankBalanceZero',
+    'performanceCertificateReceived',
+    'taxInvoiceEvidenceConfirmed',
+    'finalSettlementReportConfirmed',
+    'usbEvidenceSubmitted',
+    'evidenceDeletedAfterUsb',
+  ];
+  for (const field of fields) {
+    if (typeof checkout[field] !== 'boolean') invalidRegistration(`Completed project checkout.${field} must be boolean`);
+  }
+  if (checkout.evidenceDeletedAfterUsb && !checkout.usbEvidenceSubmitted) {
+    invalidRegistration('Completed project evidence cannot be marked deleted before USB submission');
+  }
+  const attachedKinds = new Set((Array.isArray(attachmentRefs) ? attachmentRefs : [])
+    .map((attachment) => readOptionalText(attachment?.documentKind))
+    .filter(Boolean));
+  const hasDocument = (field, kind) => Boolean(currentProject?.[field]?.path) || attachedKinds.has(kind);
+  if (checkout.performanceCertificateReceived && !hasDocument('performanceCertificateDocument', 'performance_certificate')) {
+    invalidRegistration('Completed project performance certificate PDF is required when confirmed');
+  }
+  if (checkout.taxInvoiceEvidenceConfirmed && !hasDocument('taxInvoiceDocument', 'tax_invoice')) {
+    invalidRegistration('Completed project tax invoice PDF is required when confirmed');
+  }
+  if (checkout.finalSettlementReportConfirmed && !hasDocument('finalSettlementReportDocument', 'final_settlement_report')) {
+    invalidRegistration('Completed project final settlement report PDF is required when confirmed');
+  }
+}
+
+function assertRegistrationV2Requirements(payload, attachmentRefs) {
+  if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) return;
+  for (const field of ['officialContractName', 'clientOrg', 'projectPurpose', 'description']) {
+    if (!readOptionalText(payload[field])) {
+      invalidRegistration(`Project registration ${field} is required`);
+    }
+  }
+  if (!readOptionalText(payload.groupwareName)) {
+    invalidRegistration('Project registration groupwareName is required');
+  }
+  if (normalizeSettlementType(readOptionalText(payload.settlementType)) === 'NONE') {
+    invalidRegistration('Project registration settlementType is required');
+  }
+  if (normalizeBasis(readOptionalText(payload.basis)) === 'NONE') {
+    invalidRegistration('Project registration basis is required');
+  }
+  assertRegistrationV2PaymentPlan(payload);
+
+  const attachedKinds = new Set((Array.isArray(attachmentRefs) ? attachmentRefs : [])
+    .map((attachment) => readOptionalText(attachment?.documentKind))
+    .filter(Boolean));
+  const missingDocumentKind = REGISTRATION_REQUIRED_DOCUMENT_KINDS.find((kind) => !attachedKinds.has(kind));
+  if (missingDocumentKind) {
+    invalidRegistration(`Project registration required attachment is missing: ${missingDocumentKind}`);
+  }
+  const optionalNotes = normalizeRegistrationOptionalDocumentNotes(payload.registrationOptionalDocumentNotes);
+  for (const [documentKind, noteField] of [
+    ['proposal_word_original', 'proposalWordOriginal'],
+    ['proposal_ppt_original', 'proposalPptOriginal'],
+    ['presentation_ppt_original', 'presentationPptOriginal'],
+  ]) {
+    if (!attachedKinds.has(documentKind) && !optionalNotes[noteField]) {
+      invalidRegistration(`Project registration optional attachment note is missing: ${documentKind}`);
+    }
+  }
+
+  const contractStart = readOptionalText(payload.contractStart);
+  const contractEnd = readOptionalText(payload.contractEnd);
+  if (!isRealIsoDate(contractStart) || !isRealIsoDate(contractEnd) || contractStart > contractEnd) {
+    invalidRegistration('Project registration v2 contract dates are invalid');
+  }
+  const startYear = Number(contractStart.slice(0, 4));
+  const endYear = Number(contractEnd.slice(0, 4));
+  if (endYear - startYear > 20 || !Array.isArray(payload.financialYears)) {
+    invalidRegistration('Project registration financialYears are invalid');
+  }
+  const rows = new Map();
+  for (const row of payload.financialYears) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      invalidRegistration('Project registration financial year row is invalid');
+    }
+    const year = row.year;
+    if (!Number.isSafeInteger(year) || year < startYear || year > endYear || rows.has(year)) {
+      invalidRegistration('Project registration financial year coverage is invalid');
+    }
+    for (const field of REGISTRATION_AMOUNT_FIELDS) {
+      assertRegistrationAmount(row[field], `financialYears.${year}.${field}`, { required: true });
+    }
+    if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
+      invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
+    }
+    if (row.confirmed !== true) {
+      invalidRegistration(`Project registration financialYears.${year} requires human confirmation`);
+    }
+    rows.set(year, row);
+  }
+  for (let year = startYear; year <= endYear; year += 1) {
+    if (!rows.has(year)) invalidRegistration(`Project registration financial year is missing: ${year}`);
+  }
+  if (rows.size !== endYear - startYear + 1) {
+    invalidRegistration('Project registration financial year coverage is invalid');
+  }
+  for (const field of REGISTRATION_AMOUNT_FIELDS) {
+    const annualTotal = [...rows.values()].reduce((sum, row) => sum + row[field], 0);
+    if (!Number.isSafeInteger(annualTotal) || annualTotal !== payload[field]) {
+      invalidRegistration(`Project registration financialYears ${field} total does not match`);
+    }
+  }
+
+  const confirmations = payload.registrationConfirmations;
+  if (!confirmations || typeof confirmations !== 'object' || Array.isArray(confirmations)) {
+    invalidRegistration('Project registration confirmations are required');
+  }
+  if (confirmations.laborIncludesFourInsurance !== true) {
+    invalidRegistration('Project registration 4-insurance confirmation is required');
+  }
+  if (confirmations.laborIncludesRetirementPay !== true) {
+    invalidRegistration('Project registration retirement pay confirmation is required');
+  }
+  if (confirmations.customerSettlementBasisConfirmed !== true) {
+    invalidRegistration('Project registration customer settlement basis confirmation is required');
+  }
+  if (typeof confirmations.modusignContractUsed !== 'boolean') {
+    invalidRegistration('Project registration Modusign confirmation is required');
+  }
+  if (confirmations.modusignContractUsed === false && confirmations.originalContractSubmitted !== true) {
+    invalidRegistration('Project registration original contract submission is required without Modusign');
+  }
+}
+
+function trustedRegistrationRequirementAttachments(currentProject, attachmentRefs) {
+  const canonicalFields = {
+    contract: 'contractDocument',
+    customer_business_registration: 'customerBusinessRegistrationDocument',
+    quote: 'quoteDocument',
+    proposal: 'proposalDocument',
+    proposal_word_original: 'proposalWordOriginalDocument',
+    proposal_ppt_original: 'proposalPptOriginalDocument',
+    presentation_ppt_original: 'presentationPptOriginalDocument',
+    rfp_request_evidence: 'rfpRequestEvidenceDocument',
+  };
+  return [
+    ...(Array.isArray(attachmentRefs) ? attachmentRefs : []),
+    ...Object.entries(canonicalFields).flatMap(([documentKind, field]) => (
+      readOptionalText(currentProject?.[field]?.path) ? [{ documentKind, path: currentProject[field].path }] : []
+    )),
+  ];
 }
 
 function assertRegistrationPayload(payload) {
@@ -584,6 +921,9 @@ function assertRegistrationPayload(payload) {
     invalidRegistration('Project registration is missing required fields');
   }
   assertRegistrationFinancials(payload, type);
+  if (registrationRequirementsVersion(payload.registrationRequirementsVersion) === 2) {
+    assertRegistrationTeamMembers(payload.teamMembersDetailed);
+  }
   if (
     type !== 'I1'
     && (
@@ -601,12 +941,17 @@ export function buildProjectRegistrationCanonicalDocuments({
   sourceDraftId,
   payload,
   attachmentRefs,
+  requirementsAttachmentRefs = attachmentRefs,
   actorId,
   actorName,
   actorEmail,
   timestamp,
 }) {
   assertRegistrationPayload(payload);
+  if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) {
+    invalidRegistration('New project registration requires requirements version 2');
+  }
+  assertRegistrationV2Requirements(payload, requirementsAttachmentRefs);
   const ownerId = readOptionalText(payload.registeredById) || readOptionalText(payload.managerId) || actorId;
   const ownerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName) || actorName;
   const ownerEmail = readOptionalText(payload.registeredByEmail) || (ownerId === actorId ? readOptionalText(actorEmail) : '');
@@ -622,19 +967,28 @@ export function buildProjectRegistrationCanonicalDocuments({
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
     department: readOptionalText(payload.department),
-    groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(payload.name),
+    groupwareName: readOptionalText(payload.groupwareName),
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
     contractAmount: registrationAmount(payload.contractAmount),
     salesVatAmount: registrationAmount(payload.salesVatAmount),
     totalRevenueAmount: registrationAmount(payload.totalRevenueAmount),
     supportAmount: registrationAmount(payload.supportAmount),
     financialInputFlags: registrationFinancialInputFlags(payload.financialInputFlags, payload),
+    registrationRequirementsVersion: registrationRequirementsVersion(payload.registrationRequirementsVersion),
+    financialYears: normalizeRegistrationFinancialYears(payload.financialYears),
+    registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
+    registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
+      payload.registrationOptionalDocumentNotes,
+    ),
+    checkout: normalizeProjectCheckout(payload.checkout),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
     basis: normalizeBasis(readOptionalText(payload.basis)),
     accountType: normalizeAccountType(readOptionalText(payload.accountType)),
+    settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
+    laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
     fundInputMode,
     settlementSheetPolicy: registrationSettlementSheetPolicy(payload.settlementSheetPolicy, fundInputMode),
     paymentPlan: {
@@ -642,6 +996,8 @@ export function buildProjectRegistrationCanonicalDocuments({
       interim: registrationAmount(payload.paymentPlan?.interim),
       final: registrationAmount(payload.paymentPlan?.final),
     },
+    paymentExpectedMonths: normalizePaymentExpectedMonths(payload.paymentExpectedMonths),
+    advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
     paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
     settlementGuide: readOptionalText(payload.settlementGuide),
     finalPaymentNote: readOptionalText(payload.finalPaymentNote),
@@ -681,6 +1037,11 @@ export function buildProjectRegistrationCanonicalDocuments({
     ...projectPatch,
     quoteDocument: documents.quoteDocument,
     proposalDocument: documents.proposalDocument,
+    proposalWordOriginalDocument: documents.proposalWordOriginalDocument,
+    proposalPptOriginalDocument: documents.proposalPptOriginalDocument,
+    presentationPptOriginalDocument: documents.presentationPptOriginalDocument,
+    rfpRequestEvidenceDocument: documents.rfpRequestEvidenceDocument,
+    customerBusinessRegistrationDocument: documents.customerBusinessRegistrationDocument,
     taxInvoiceAmount: 0,
     isSettled: false,
     confirmerName: '',
@@ -722,6 +1083,7 @@ function normalizeSettlementType(value) {
 function normalizeBasis(value) {
   if (value === 'SUPPLY_AMOUNT' || value === '공급가액') return '공급가액';
   if (value === 'SUPPLY_PRICE' || value === '공급대가') return '공급대가';
+  if (value === 'OTHER' || value === '기타') return '기타';
   return 'NONE';
 }
 
@@ -768,15 +1130,24 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     totalRevenueAmount: pickNumber('totalRevenueAmount'),
     supportAmount: pickNumber('supportAmount'),
     financialInputFlags: project?.financialInputFlags || existingPayload.financialInputFlags || undefined,
+    registrationRequirementsVersion: pickValue('registrationRequirementsVersion'),
+    financialYears: pickValue('financialYears'),
+    registrationConfirmations: pickValue('registrationConfirmations'),
+    registrationOptionalDocumentNotes: pickValue('registrationOptionalDocumentNotes'),
+    checkout: pickValue('checkout'),
     contractStart: pickText('contractStart'),
     contractEnd: pickText('contractEnd'),
     contractType: normalizeProjectContractType(pickText('contractType')),
     settlementType: normalizeSettlementType(pickText('settlementType')),
     basis: normalizeBasis(pickText('basis')),
     accountType: normalizeAccountType(pickText('accountType')),
+    settlementSystem: normalizeSettlementSystemCode(pickText('settlementSystem')),
+    laborSettlementBasis: normalizeLaborSettlementBasis(pickText('laborSettlementBasis')),
     fundInputMode: normalizeProjectFundInputMode(pickText('fundInputMode')),
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
     paymentPlan: pickValue('paymentPlan') || { contract: 0, interim: 0, final: 0 },
+    paymentExpectedMonths: normalizePaymentExpectedMonths(pickValue('paymentExpectedMonths')),
+    advanceInterimBelow70Reason: pickText('advanceInterimBelow70Reason'),
     paymentPlanDesc: pickText('paymentPlanDesc'),
     settlementGuide: pickText('settlementGuide'),
     finalPaymentNote: pickText('finalPaymentNote'),
@@ -789,6 +1160,30 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     participantCondition: pickText('participantCondition'),
     note: pickText('note'),
     contractDocument: project?.contractDocument ?? existingPayload.contractDocument ?? null,
+    customerBusinessRegistrationDocument: project?.customerBusinessRegistrationDocument
+      ?? existingPayload.customerBusinessRegistrationDocument
+      ?? null,
+    quoteDocument: project?.quoteDocument ?? existingPayload.quoteDocument ?? null,
+    proposalDocument: project?.proposalDocument ?? existingPayload.proposalDocument ?? null,
+    proposalWordOriginalDocument: project?.proposalWordOriginalDocument
+      ?? existingPayload.proposalWordOriginalDocument
+      ?? null,
+    proposalPptOriginalDocument: project?.proposalPptOriginalDocument
+      ?? existingPayload.proposalPptOriginalDocument
+      ?? null,
+    presentationPptOriginalDocument: project?.presentationPptOriginalDocument
+      ?? existingPayload.presentationPptOriginalDocument
+      ?? null,
+    rfpRequestEvidenceDocument: project?.rfpRequestEvidenceDocument
+      ?? existingPayload.rfpRequestEvidenceDocument
+      ?? null,
+    performanceCertificateDocument: project?.performanceCertificateDocument
+      ?? existingPayload.performanceCertificateDocument
+      ?? null,
+    taxInvoiceDocument: project?.taxInvoiceDocument ?? existingPayload.taxInvoiceDocument ?? null,
+    finalSettlementReportDocument: project?.finalSettlementReportDocument
+      ?? existingPayload.finalSettlementReportDocument
+      ?? null,
     contractAnalysis: project?.contractAnalysis ?? existingPayload.contractAnalysis ?? null,
   };
 }
@@ -827,15 +1222,28 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     totalRevenueAmount: Number.isFinite(Number(payload.totalRevenueAmount)) ? Math.max(0, Math.round(Number(payload.totalRevenueAmount))) : 0,
     supportAmount: Number.isFinite(Number(payload.supportAmount)) ? Math.max(0, Math.round(Number(payload.supportAmount))) : 0,
     financialInputFlags: payload.financialInputFlags,
+    registrationRequirementsVersion: registrationRequirementsVersion(payload.registrationRequirementsVersion),
+    financialYears: normalizeRegistrationFinancialYears(payload.financialYears),
+    registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
+    registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
+      payload.registrationOptionalDocumentNotes,
+    ),
+    checkout: normalizeProjectCheckout(payload.checkout),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
     settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
     basis: normalizeBasis(readOptionalText(payload.basis)),
     accountType: normalizeAccountType(readOptionalText(payload.accountType)),
+    settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
+    laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode)),
     settlementSheetPolicy: payload.settlementSheetPolicy,
     paymentPlan: payload.paymentPlan || currentProject.paymentPlan || { contract: 0, interim: 0, final: 0 },
+    paymentExpectedMonths: normalizePaymentExpectedMonths(
+      payload.paymentExpectedMonths || currentProject.paymentExpectedMonths,
+    ),
+    advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
     paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
     settlementGuide: readOptionalText(payload.settlementGuide),
     finalPaymentNote: readOptionalText(payload.finalPaymentNote),
@@ -850,6 +1258,16 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     participantCondition: readOptionalText(payload.participantCondition),
     note: readOptionalText(payload.note),
     contractDocument: payload.contractDocument || null,
+    customerBusinessRegistrationDocument: payload.customerBusinessRegistrationDocument || null,
+    quoteDocument: payload.quoteDocument || null,
+    proposalDocument: payload.proposalDocument || null,
+    proposalWordOriginalDocument: payload.proposalWordOriginalDocument || null,
+    proposalPptOriginalDocument: payload.proposalPptOriginalDocument || null,
+    presentationPptOriginalDocument: payload.presentationPptOriginalDocument || null,
+    rfpRequestEvidenceDocument: payload.rfpRequestEvidenceDocument || null,
+    performanceCertificateDocument: payload.performanceCertificateDocument || null,
+    taxInvoiceDocument: payload.taxInvoiceDocument || null,
+    finalSettlementReportDocument: payload.finalSettlementReportDocument || null,
     contractAnalysis: payload.contractAnalysis || null,
     budgetCurrentYear: Number.isFinite(Number(payload.contractAmount))
       ? Math.max(0, Math.round(Number(payload.contractAmount)))
@@ -872,11 +1290,15 @@ const PROJECT_INFO_CHANGE_LABELS = {
   settlementType: '정산 유형',
   basis: '정산 기준',
   accountType: '통장 유형',
+  settlementSystem: '정산 시스템',
+  laborSettlementBasis: '인건비 정산 기준',
   fundInputMode: '자금 입력 방식',
   registeredByName: '사업 담당자',
   teamName: '사내기업팀',
   teamMembersDetailed: '서류상 참여인력',
   paymentPlan: '입금 분할',
+  paymentExpectedMonths: '입금 예상월',
+  advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
   paymentPlanDesc: '입금 계획',
   finalPaymentNote: '최종 입금 메모',
   projectPurpose: '프로젝트 목적',
@@ -885,18 +1307,36 @@ const PROJECT_INFO_CHANGE_LABELS = {
   contractDocument: '계약서 PDF',
   quoteDocument: '견적서 PDF',
   proposalDocument: '제안서 PDF',
+  proposalWordOriginalDocument: '제안서 Word 원본',
+  proposalPptOriginalDocument: '제안서 PPT 원본',
+  presentationPptOriginalDocument: '발표자료 PPT 원본',
+  rfpRequestEvidenceDocument: 'RFP 또는 요청 메일 증빙',
+  registrationOptionalDocumentNotes: '선택 첨부 미첨부 사유',
+  customerBusinessRegistrationDocument: '발주처 사업자등록증 PDF',
+  financialYears: '연도별 재무',
+  registrationConfirmations: '등록 확인사항',
+  checkout: '종료사업 체크아웃',
+  performanceCertificateDocument: '수행확인서 PDF',
+  taxInvoiceDocument: '세금계산서 PDF',
+  finalSettlementReportDocument: '최종 정산보고서 PDF',
 };
 
 const PROJECT_INFO_PAYLOAD_FIELDS = [
   'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
-  'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'contractStart', 'contractEnd',
-  'contractType', 'settlementType', 'basis', 'accountType', 'fundInputMode',
-  'settlementSheetPolicy', 'paymentPlan', 'paymentPlanDesc', 'settlementGuide',
+  'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
+  'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
+  'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
+  'laborSettlementBasis', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
+  'paymentExpectedMonths', 'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'managerId', 'managerName', 'teamName', 'teamMembers',
   'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
-  'quoteDocument', 'proposalDocument', 'contractAnalysis',
+  'customerBusinessRegistrationDocument', 'quoteDocument', 'proposalDocument',
+  'proposalWordOriginalDocument', 'proposalPptOriginalDocument',
+  'presentationPptOriginalDocument', 'rfpRequestEvidenceDocument',
+  'performanceCertificateDocument', 'taxInvoiceDocument', 'finalSettlementReportDocument',
+  'contractAnalysis',
 ];
 
 function projectInfoChangeValue(value) {
@@ -926,8 +1366,40 @@ function projectInfoPayloadWithDocuments(payload, project, attachmentRefs) {
   return stripUndefinedDeep({
     ...proposed,
     contractDocument: privateDocuments.contractDocument || payload.contractDocument || project.contractDocument || null,
+    customerBusinessRegistrationDocument: privateDocuments.customerBusinessRegistrationDocument
+      || payload.customerBusinessRegistrationDocument
+      || project.customerBusinessRegistrationDocument
+      || null,
     quoteDocument: privateDocuments.quoteDocument || payload.quoteDocument || project.quoteDocument || null,
     proposalDocument: privateDocuments.proposalDocument || payload.proposalDocument || project.proposalDocument || null,
+    proposalWordOriginalDocument: privateDocuments.proposalWordOriginalDocument
+      || payload.proposalWordOriginalDocument
+      || project.proposalWordOriginalDocument
+      || null,
+    proposalPptOriginalDocument: privateDocuments.proposalPptOriginalDocument
+      || payload.proposalPptOriginalDocument
+      || project.proposalPptOriginalDocument
+      || null,
+    presentationPptOriginalDocument: privateDocuments.presentationPptOriginalDocument
+      || payload.presentationPptOriginalDocument
+      || project.presentationPptOriginalDocument
+      || null,
+    rfpRequestEvidenceDocument: privateDocuments.rfpRequestEvidenceDocument
+      || payload.rfpRequestEvidenceDocument
+      || project.rfpRequestEvidenceDocument
+      || null,
+    performanceCertificateDocument: privateDocuments.performanceCertificateDocument
+      || payload.performanceCertificateDocument
+      || project.performanceCertificateDocument
+      || null,
+    taxInvoiceDocument: privateDocuments.taxInvoiceDocument
+      || payload.taxInvoiceDocument
+      || project.taxInvoiceDocument
+      || null,
+    finalSettlementReportDocument: privateDocuments.finalSettlementReportDocument
+      || payload.finalSettlementReportDocument
+      || project.finalSettlementReportDocument
+      || null,
     contractAnalysis: payload.contractAnalysis || project.contractAnalysis || null,
   });
 }
@@ -959,6 +1431,11 @@ export function buildProjectInfoChangeSubmission({
   reviewComment,
 }) {
   assertRegistrationPayload(payload);
+  assertRegistrationV2Requirements(
+    payload,
+    trustedRegistrationRequirementAttachments(project, attachmentRefs),
+  );
+  assertProjectCheckoutPayload(payload, attachmentRefs, project);
   const beforeSnapshot = projectInfoPayloadWithDocuments(
     buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
     project,
@@ -1052,6 +1529,7 @@ function normalizeProjectTeamMembersDetailed(value) {
         role: readOptionalText(member?.role),
         participationRate: normalizeParticipationRate(member?.participationRate),
       };
+      if (typeof member?.isDocumentOnly === 'boolean') normalized.isDocumentOnly = member.isDocumentOnly;
       const laborAllocationStartMonth = normalizeMonth(member?.laborAllocationStartMonth);
       const laborAllocationEndMonth = normalizeMonth(member?.laborAllocationEndMonth);
       if (laborAllocationStartMonth) normalized.laborAllocationStartMonth = laborAllocationStartMonth;
@@ -1150,6 +1628,8 @@ export async function tryEnsureProjectRootFolder({
 }
 
 function resolveParticipationSettlementSystem(project) {
+  const selectedSystem = normalizeSettlementSystemCode(project?.settlementSystem);
+  if (selectedSystem !== 'NONE') return selectedSystem;
   if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
     return 'E_NARA_DOUM';
   }
@@ -1206,7 +1686,7 @@ export async function syncProjectParticipationEntries({
       clientOrg: readOptionalText(project.clientOrg),
       periodStart: member.laborAllocationStartMonth || readOptionalText(project.contractStart).slice(0, 7),
       periodEnd: member.laborAllocationEndMonth || readOptionalText(project.contractEnd).slice(0, 7),
-      isDocumentOnly: false,
+      isDocumentOnly: member.isDocumentOnly === true,
       note: member.role,
       source: 'PROJECT_TEAM_SYNC',
       projectTeamMemberKey: key,
@@ -1523,8 +2003,16 @@ export function mountProjectRoutes(app, {
     const documentKind = readOptionalText(req.params.documentKind);
     const field = {
       contract: 'contractDocument',
+      customer_business_registration: 'customerBusinessRegistrationDocument',
       quote: 'quoteDocument',
       proposal: 'proposalDocument',
+      proposal_word_original: 'proposalWordOriginalDocument',
+      proposal_ppt_original: 'proposalPptOriginalDocument',
+      presentation_ppt_original: 'presentationPptOriginalDocument',
+      rfp_request_evidence: 'rfpRequestEvidenceDocument',
+      performance_certificate: 'performanceCertificateDocument',
+      tax_invoice: 'taxInvoiceDocument',
+      final_settlement_report: 'finalSettlementReportDocument',
     }[documentKind];
     if (!projectId || !field) {
       throw createHttpError(400, 'Project attachment request is invalid', 'project_attachment_invalid');
@@ -1571,8 +2059,16 @@ export function mountProjectRoutes(app, {
     const documentKind = readOptionalText(req.params.documentKind);
     const field = {
       contract: 'contractDocument',
+      customer_business_registration: 'customerBusinessRegistrationDocument',
       quote: 'quoteDocument',
       proposal: 'proposalDocument',
+      proposal_word_original: 'proposalWordOriginalDocument',
+      proposal_ppt_original: 'proposalPptOriginalDocument',
+      presentation_ppt_original: 'presentationPptOriginalDocument',
+      rfp_request_evidence: 'rfpRequestEvidenceDocument',
+      performance_certificate: 'performanceCertificateDocument',
+      tax_invoice: 'taxInvoiceDocument',
+      final_settlement_report: 'finalSettlementReportDocument',
     }[documentKind];
     if (!requestId || requestId.includes('/') || !field) {
       throw createHttpError(400, 'Project request attachment is invalid', 'project_request_attachment_invalid');
@@ -1617,6 +2113,13 @@ export function mountProjectRoutes(app, {
     const projectRef = db.doc(`orgs/${tenantId}/projects/${parsed.id.trim()}`);
     const existingProjectSnap = await projectRef.get();
     const existingProject = existingProjectSnap.exists ? (existingProjectSnap.data() || {}) : null;
+    if (!existingProject && normalizeRole(actorRole) === 'pm') {
+      throw createHttpError(
+        403,
+        'PM project creation requires the project registration draft flow',
+        'project_registration_draft_required',
+      );
+    }
 
     const projectPayload = normalizeProjectRevenueFields({
       ...stripServerManagedFields(stripExpectedVersion(parsed)),

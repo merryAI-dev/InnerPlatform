@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { MonthlyClose, PayrollRun, PayrollSchedule } from './types';
+import type { PayrollRun, PayrollSchedule } from './types';
 import {
-  mergeMonthlyCloseState,
   mergePayrollRunState,
   mergePayrollScheduleState,
-  sortMonthlyClosesByYearMonth,
   sortPayrollRunsByPlannedPayDate,
 } from './payroll.helpers';
 
@@ -50,40 +48,6 @@ describe('payroll helpers', () => {
     ] satisfies PayrollRun[];
 
     expect(sortPayrollRunsByPlannedPayDate(rows).map((row) => row.id)).toEqual(['r2', 'r3', 'r1']);
-  });
-
-  it('sorts monthly closes by yearMonth descending for PM listeners', () => {
-    const rows = [
-      {
-        id: 'm1',
-        projectId: 'p1',
-        yearMonth: '2026-02',
-        status: 'DONE',
-        acknowledged: false,
-        createdAt: '2026-02-01T00:00:00.000Z',
-        updatedAt: '2026-02-02T00:00:00.000Z',
-      },
-      {
-        id: 'm2',
-        projectId: 'p1',
-        yearMonth: '2026-04',
-        status: 'DONE',
-        acknowledged: false,
-        createdAt: '2026-04-01T00:00:00.000Z',
-        updatedAt: '2026-04-02T00:00:00.000Z',
-      },
-      {
-        id: 'm3',
-        projectId: 'p1',
-        yearMonth: '2026-03',
-        status: 'DONE',
-        acknowledged: false,
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-02T00:00:00.000Z',
-      },
-    ] satisfies MonthlyClose[];
-
-    expect(sortMonthlyClosesByYearMonth(rows).map((row) => row.id)).toEqual(['m2', 'm3', 'm1']);
   });
 
   it('replaces a payroll run in local state and keeps planned pay date ordering', () => {
@@ -157,32 +121,4 @@ describe('payroll helpers', () => {
     ]);
   });
 
-  it('replaces a monthly close in local state by id', () => {
-    const rows = [
-      {
-        id: 'p1-2026-03',
-        projectId: 'p1',
-        yearMonth: '2026-03',
-        status: 'OPEN',
-        acknowledged: false,
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-02T00:00:00.000Z',
-      },
-    ] satisfies MonthlyClose[];
-
-    const next = mergeMonthlyCloseState(rows, {
-      ...rows[0],
-      status: 'DONE',
-      acknowledged: true,
-      updatedAt: '2026-04-16T00:00:00.000Z',
-    });
-
-    expect(next).toEqual([
-      expect.objectContaining({
-        id: 'p1-2026-03',
-        status: 'DONE',
-        acknowledged: true,
-      }),
-    ]);
-  });
 });

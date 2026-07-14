@@ -10,7 +10,6 @@ const INTERNAL_WORKER_PATHS = [
   '/api/internal/workers/outbox/run',
   '/api/internal/workers/work-queue/run',
   '/api/internal/workers/payroll/run',
-  '/api/internal/workers/monthly-close/run',
   '/api/internal/workers/client-errors/run',
 ];
 
@@ -33,6 +32,12 @@ function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
 }
 
 describe('internal worker endpoints (cron)', () => {
+  it('does not expose the retired payroll monthly-close worker', async () => {
+    const app = createTestApp();
+    const res = await request(app).get('/api/internal/workers/monthly-close/run');
+    expect(res.status).toBe(404);
+  });
+
   it.each(INTERNAL_WORKER_PATHS)('supports GET auth gate for %s', async (workerPath) => {
     const app = createTestApp();
     const res = await request(app).get(workerPath);
@@ -141,11 +146,12 @@ describe('internal worker endpoints (cron)', () => {
     });
 
     const res = await request(app)
-      .get('/api/internal/workers/monthly-close/run')
+      .get('/api/internal/workers/payroll/run')
       .set('Origin', 'https://inner-platform-git-feature-merryai-devs-projects.vercel.app')
       .set('Authorization', `Bearer ${LONG_CRON_SECRET}`);
 
     expect(res.status).toBe(403);
     expect(res.body?.error).toBe('origin_not_allowed');
   });
+
 });

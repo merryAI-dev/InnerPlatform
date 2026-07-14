@@ -55,6 +55,7 @@ class CashflowSheetMonthlyApplyServiceTest {
         )).thenReturn(new WeeklyExpensePersistence.CashflowSheetMonthReplacement(
             List.of(),
             List.of(),
+            List.of(),
             TARGET_REVISION
         ));
         when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));

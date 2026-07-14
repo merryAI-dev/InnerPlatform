@@ -20,7 +20,7 @@ describe('cashflow action chrome', () => {
     expect(cashflowProjectSheetSource).not.toContain('Actual에서 Projection을 뺀 값');
     expect(cashflowProjectSheetSource).not.toContain('actual - projection');
     expect(cashflowProjectSheetSource).toContain('diffColorExplanation');
-    expect(cashflowProjectSheetSource).toContain('차이만');
+    expect(cashflowProjectSheetSource).toContain('차이 항목만');
     expect(cashflowProjectSheetSource).toContain('BFF 기준일');
     expect(cashflowProjectSheetSource).not.toContain('엑셀 다운로드');
     expect(cashflowProjectSheetSource).not.toContain('Actual 불러오기');
@@ -46,11 +46,12 @@ describe('cashflow action chrome', () => {
     expect(cashflowProjectSheetSource).not.toContain('<Badge variant="outline" className={row.section');
   });
 
-  it('blocks cashflow saves until audit-required values are explicitly checked', () => {
-    expect(cashflowProjectSheetSource).toContain('prepareAuditedWeekAmounts');
-    expect(cashflowProjectSheetSource).toContain('collectAuditIssues');
-    expect(cashflowProjectSheetSource).toContain('0원인 경우 0을 입력해 주세요.');
-    expect(cashflowProjectSheetSource).toContain('과거 주차는 Projection');
-    expect(cashflowProjectSheetSource).toContain('showAuditBlock');
+  it('blocks final month close until the server and human-confirmation contract pass', () => {
+    expect(cashflowProjectSheetSource).toContain('buildCashflowMonthCloseDraftInput');
+    expect(cashflowProjectSheetSource).toContain('monthCloseProgress.complete');
+    expect(cashflowProjectSheetSource).toContain('dashboard?.validation.blockers');
+    expect(cashflowProjectSheetSource).toContain('캐시플로 항목 사람 확인');
+    expect(cashflowProjectSheetSource).not.toContain('prepareAuditedWeekAmounts');
+    expect(cashflowProjectSheetSource).not.toContain('showAuditBlock');
   });
 });

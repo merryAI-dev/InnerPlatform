@@ -13,7 +13,14 @@ describe('ProjectDetailPage shell contract', () => {
     expect(source).toContain('승인 전까지 이 화면은 현재 확정된 원장 값을 보여줍니다.');
   });
 
-  it('does not expose the retired groupware registration name in the current project detail', () => {
-    expect(source).not.toContain('>그룹웨어 등록명</span>');
+  it('shows the automatically provisioned project management folder when available', () => {
+    expect(source).toContain('project.evidenceDriveRootFolderLink');
+    expect(source).toContain('사업관리 폴더');
+    expect(source).toContain('폴더 열기');
+  });
+
+  it('shows the confirmed groupware registration name in the current project detail', () => {
+    expect(source).toContain('>그룹웨어 등록명</span>');
+    expect(source).toContain("project.groupwareName || '-'");
   });
 });

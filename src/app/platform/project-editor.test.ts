@@ -162,12 +162,16 @@ describe('project editor draft mapping', () => {
     const draft = createProjectEditorDraft({
       ...buildProjectEditorDraftFromProject(baseProject),
       teamMembersDetailed: [
-        { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
-        { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
+        { memberName: '김다은', memberNickname: '데이나', role: '총괄책임자', participationRate: 60, isDocumentOnly: false, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
+        { memberName: '변민욱', memberNickname: '보람', role: '실무책임자', participationRate: 40, isDocumentOnly: true },
       ],
       groupwareName: '기후테크GW',
       currency: 'USD',
+      settlementSystem: 'KOCCA_PMS',
+      laborSettlementBasis: 'FIXED_AMOUNT',
       paymentPlan: { contract: 50_000, interim: 30_000, final: 20_000 },
+      paymentExpectedMonths: { contract: '2026-04', interim: '2026-06', final: '2026-10' },
+      advanceInterimBelow70Reason: '발주처 지급 조건',
       finalPaymentNote: '잔금은 검수 후 2주 이내',
       quoteDocument: {
         path: 'orgs/mysc/project-request-documents/u001/quote.pdf',
@@ -193,16 +197,80 @@ describe('project editor draft mapping', () => {
     expect(payload.totalRevenueAmount).toBe(91_000);
     expect(payload.currency).toBe('USD');
     expect(payload.teamMembersDetailed).toEqual([
-      { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
-      { memberName: '변민욱', memberNickname: '보람', role: '운영', participationRate: 40 },
+      { memberName: '김다은', memberNickname: '데이나', role: '총괄책임자', participationRate: 60, isDocumentOnly: false, laborAllocationStartMonth: '2026-04', laborAllocationEndMonth: '2026-09' },
+      { memberName: '변민욱', memberNickname: '보람', role: '실무책임자', participationRate: 40, isDocumentOnly: true },
     ]);
-    expect(payload.teamMembers).toBe('김다은 (데이나) / PM / 60% / 인건비 2026-04~2026-09, 변민욱 (보람) / 운영 / 40%');
-    expect(payload.groupwareName).toBe(payload.name);
+    expect(payload.teamMembers).toBe('김다은 (데이나) / 총괄책임자 / 60% / 실제 참여 / 인건비 2026-04~2026-09, 변민욱 (보람) / 실무책임자 / 40% / 서류상 인력');
+    expect(payload.groupwareName).toBe('기후테크GW');
+    expect(payload.settlementSystem).toBe('KOCCA_PMS');
+    expect(payload.laborSettlementBasis).toBe('FIXED_AMOUNT');
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
+    expect(payload.paymentExpectedMonths).toEqual({ contract: '2026-04', interim: '2026-06', final: '2026-10' });
+    expect(payload.advanceInterimBelow70Reason).toBe('발주처 지급 조건');
     expect(payload.finalPaymentNote).toBe('잔금은 검수 후 2주 이내');
     expect(payload.quoteDocument?.name).toBe('quote.pdf');
     expect(payload.proposalDocument?.name).toBe('proposal.pdf');
     expect(payload.contractAnalysis).toEqual({ provider: 'heuristic', summary: '기존 분석값' });
+  });
+
+  it('keeps registration v2 year coverage explicit and carries checkout evidence through payload mapping', () => {
+    const customerBusinessRegistrationDocument = {
+      path: 'private/customer-registration.pdf',
+      name: 'customer-registration.pdf',
+      downloadURL: '',
+      size: 10,
+      contentType: 'application/pdf',
+      uploadedAt: '2026-07-14T00:00:00.000Z',
+    };
+    const performanceCertificateDocument = {
+      ...customerBusinessRegistrationDocument,
+      path: 'private/performance.pdf',
+      name: 'performance.pdf',
+    };
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject),
+      registrationRequirementsVersion: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2027-12-31',
+      financialYears: [{
+        year: 2026,
+        contractAmount: 100_000,
+        salesVatAmount: 9_000,
+        totalRevenueAmount: 91_000,
+        supportAmount: 5_000,
+        profitRate: 0.91,
+        confirmed: true,
+      }],
+      registrationConfirmations: {
+        laborIncludesFourInsurance: true,
+        laborIncludesRetirementPay: true,
+        customerSettlementBasisConfirmed: true,
+        modusignContractUsed: false,
+        originalContractSubmitted: true,
+      },
+      checkout: {
+        finalPaymentReceived: true,
+        bankBalanceZero: true,
+        performanceCertificateReceived: true,
+        taxInvoiceEvidenceConfirmed: false,
+        finalSettlementReportConfirmed: false,
+        usbEvidenceSubmitted: true,
+        evidenceDeletedAfterUsb: true,
+      },
+      customerBusinessRegistrationDocument,
+      performanceCertificateDocument,
+    });
+
+    expect(draft.financialYears).toEqual([
+      expect.objectContaining({ year: 2026, confirmed: true }),
+      expect.objectContaining({ year: 2027, confirmed: false }),
+    ]);
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+    expect(payload.registrationRequirementsVersion).toBe(2);
+    expect(payload.registrationConfirmations?.originalContractSubmitted).toBe(true);
+    expect(payload.checkout?.evidenceDeletedAfterUsb).toBe(true);
+    expect(payload.customerBusinessRegistrationDocument?.name).toBe('customer-registration.pdf');
+    expect(payload.performanceCertificateDocument?.name).toBe('performance.pdf');
   });
 
   it('resets approved PM portal edits to executive review pending without writing hidden business status fields', () => {

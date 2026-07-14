@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -79,6 +80,9 @@ class WeeklyExpenseControllerTest {
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
+        doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
+            .when(weeklyExpensePersistence).requireCashflowWritePermission(any(), any());
+        doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
     }
 
     private static MockHttpServletRequestBuilder asActor(
@@ -839,7 +843,7 @@ class WeeklyExpenseControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isServiceUnavailable())
-            .andExpect(jsonPath("$.code").value("cashflow_write_permission_backend_unavailable"));
+            .andExpect(jsonPath("$.code").value("cashflow_month_replace_backend_unavailable"));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
@@ -1411,6 +1415,195 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void cashflowMonthCloseReadRequiresYearMonthQueryAndCanonicalValue() throws Exception {
+        mockMvc.perform(asActor(
+                get("/api/v1/cashflow/project-month-close/month-close"),
+                "tenant-month-close",
+                "viewer-month-close",
+                "viewer"
+            ))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(asActor(
+                get("/api/v1/cashflow/project-month-close/month-close")
+                    .queryParam("yearMonth", "2026-13"),
+                "tenant-month-close",
+                "viewer-month-close",
+                "viewer"
+            ))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void cashflowVarianceRequiresIdempotencyRevisionAndFlagContent() throws Exception {
+        String missingRevision = """
+            {
+              "idempotencyKey": "variance-missing-revision",
+              "sheetId": "week-a",
+              "action": "FLAG",
+              "content": "입금 편차 확인"
+            }
+            """;
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-variance/variance"),
+                "tenant-variance",
+                "admin-variance",
+                "admin"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingRevision))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_validation_failed"));
+
+        String missingIdempotency = """
+            {
+              "sheetId": "week-a",
+              "expectedRevision": 0,
+              "action": "FLAG",
+              "content": "입금 편차 확인"
+            }
+            """;
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-variance/variance"),
+                "tenant-variance",
+                "admin-variance",
+                "admin"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingIdempotency))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_validation_failed"));
+
+        String missingContent = """
+            {
+              "idempotencyKey": "variance-missing-content",
+              "sheetId": "week-a",
+              "expectedRevision": 0,
+              "action": "FLAG"
+            }
+            """;
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-variance/variance"),
+                "tenant-variance",
+                "admin-variance",
+                "admin"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingContent))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"));
+    }
+
+    @Test
+    void cashflowMonthCloseRejectsIncompletePayloadBeforePersistence() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "month-close-incomplete-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 0,
+              "expectedDraftRevision": 0
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close"),
+                "tenant-month-close",
+                "pm-month-close",
+                "pm"
+            )
+                .header("x-edit-finalize", "true")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_validation_failed"));
+    }
+
+    @Test
+    void cashflowMonthCloseRejectsEveryRoleExceptPm() throws Exception {
+        String body = validCashflowMonthCloseBody("month-close-role-001");
+
+        for (String role : List.of("admin", "finance", "viewer")) {
+            mockMvc.perform(asActor(
+                    post("/api/v1/cashflow/project-month-close-role/month-close"),
+                    "tenant-month-close-role",
+                    role + "-month-close",
+                    role
+                )
+                    .header("x-edit-finalize", "true")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
+        }
+    }
+
+    @Test
+    void cashflowMonthReopenRequestRequiresReason() throws Exception {
+        String body = """
+            {
+              "idempotencyKey": "month-reopen-request-invalid-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 1
+            }
+            """;
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close/reopen-request"),
+                "tenant-month-close",
+                "pm-month-close",
+                "pm"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_validation_failed"));
+    }
+
+    @Test
+    void cashflowMonthReopenDecisionRejectsInvalidDecisionAndNonApproverRoles() throws Exception {
+        String invalidDecision = """
+            {
+              "idempotencyKey": "month-reopen-decision-invalid-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 2,
+              "decision": "REOPEN"
+            }
+            """;
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close/month-close/reopen-decision"),
+                "tenant-month-close",
+                "finance-month-close",
+                "finance"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(invalidDecision))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_validation_failed"));
+
+        String validDecision = """
+            {
+              "idempotencyKey": "month-reopen-decision-role-001",
+              "yearMonth": "2026-06",
+              "expectedRevision": 2,
+              "decision": "APPROVE",
+              "reason": "증빙 확인 완료"
+            }
+            """;
+        for (String role : List.of("pm", "viewer", "auditor")) {
+            mockMvc.perform(asActor(
+                    post("/api/v1/cashflow/project-month-close/month-close/reopen-decision"),
+                    "tenant-month-close",
+                    role + "-month-close",
+                    role
+                )
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(validDecision))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
+        }
+    }
+
+    @Test
     void projectionWriteRejectsViewerRole() throws Exception {
         String body = """
             {
@@ -1744,6 +1937,51 @@ class WeeklyExpenseControllerTest {
             "balanceAfter", 0,
             "rawCells", rawCells
         );
+    }
+
+    private String validCashflowMonthCloseBody(String idempotencyKey) throws Exception {
+        List<Map<String, Object>> cells = new ArrayList<>();
+        List<Map<String, Object>> confirmations = new ArrayList<>();
+        List<Map<String, Object>> depositScheduleRows = new ArrayList<>();
+        for (int weekNo = 1; weekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT; weekNo += 1) {
+            depositScheduleRows.add(Map.of(
+                "weekNo", weekNo,
+                "taxInvoiceIssuedDate", "",
+                "expectedDepositDate", "",
+                "actualDepositDate", "",
+                "actualSource", "NOT_APPLICABLE",
+                "decision", "NOT_APPLICABLE"
+            ));
+        }
+        for (int weekNo = 1; weekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT; weekNo += 1) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String cashflowLine : CashflowLineCatalog.ALL_LINES) {
+                    cells.add(Map.of(
+                        "mode", mode,
+                        "weekNo", weekNo,
+                        "cashflowLine", cashflowLine,
+                        "cellState", "EMPTY"
+                    ));
+                    confirmations.add(Map.of(
+                        "mode", mode,
+                        "weekNo", weekNo,
+                        "cashflowLine", cashflowLine,
+                        "decision", "NOT_APPLICABLE"
+                    ));
+                }
+            }
+        }
+        return objectMapper.writeValueAsString(Map.of(
+            "idempotencyKey", idempotencyKey,
+            "sourceRevision", "sha256:" + "a".repeat(64),
+            "targetRevision", "sha256:" + "b".repeat(64),
+            "yearMonth", "2026-06",
+            "expectedRevision", 0,
+            "expectedDraftRevision", 0,
+            "depositScheduleRows", depositScheduleRows,
+            "cells", cells,
+            "confirmations", confirmations
+        ));
     }
 
     @Test

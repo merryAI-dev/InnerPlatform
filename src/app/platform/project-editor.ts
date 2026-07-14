@@ -7,12 +7,19 @@ import type {
   ProjectCurrency,
   ProjectFinancialInputFlags,
   ProjectFundInputMode,
+  ProjectFinancialYear,
+  ProjectPaymentExpectedMonths,
+  ProjectRegistrationConfirmations,
+  ProjectRegistrationOptionalDocumentNotes,
+  ProjectCheckout,
   ProjectPhase,
   ProjectRequestContractAnalysis,
   ProjectRequestPayload,
   ProjectStatus,
   ProjectTeamMemberAssignment,
   ProjectType,
+  LaborSettlementBasis,
+  SettlementSystemCode,
   SettlementSheetPolicy,
   SettlementType,
 } from '../data/types';
@@ -20,19 +27,23 @@ import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
   createSettlementSheetPolicy,
+  LABOR_SETTLEMENT_BASIS_LABELS,
   normalizeAccountType,
   normalizeBasis,
   normalizeProjectCurrency,
   normalizeProjectContractType,
   normalizeProjectFundInputMode,
+  normalizeLaborSettlementBasis,
   normalizeProjectPhase,
   normalizeProjectStatus,
   normalizeProjectType,
   normalizeSettlementSheetPolicy,
+  normalizeSettlementSystemCode,
   normalizeSettlementType,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_CURRENCY_LABELS,
   PROJECT_TYPE_LABELS,
+  SETTLEMENT_SYSTEM_LABELS,
   SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
 import {
@@ -67,9 +78,16 @@ export interface ProjectEditorDraft {
   totalRevenueAmount: number;
   supportAmount: number;
   financialInputFlags: ProjectFinancialInputFlags;
+  registrationRequirementsVersion: 1 | 2;
+  financialYears: ProjectFinancialYear[];
+  registrationConfirmations: ProjectRegistrationConfirmations;
+  registrationOptionalDocumentNotes: ProjectRegistrationOptionalDocumentNotes;
+  checkout: ProjectCheckout;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  settlementSystem: SettlementSystemCode;
+  laborSettlementBasis: LaborSettlementBasis;
   fundInputMode: ProjectFundInputMode;
   settlementSheetPolicy: SettlementSheetPolicy;
   profitRate: number;
@@ -87,12 +105,22 @@ export interface ProjectEditorDraft {
   settlementGuide: string;
   groupwareName: string;
   paymentPlan: Project['paymentPlan'];
+  paymentExpectedMonths: ProjectPaymentExpectedMonths;
+  advanceInterimBelow70Reason: string;
   finalPaymentNote: string;
   budgetCurrentYear: number;
   taxInvoiceAmount: number;
   contractDocument: FileAttachment | null;
   quoteDocument: FileAttachment | null;
   proposalDocument: FileAttachment | null;
+  proposalWordOriginalDocument: FileAttachment | null;
+  proposalPptOriginalDocument: FileAttachment | null;
+  presentationPptOriginalDocument: FileAttachment | null;
+  rfpRequestEvidenceDocument: FileAttachment | null;
+  customerBusinessRegistrationDocument: FileAttachment | null;
+  performanceCertificateDocument: FileAttachment | null;
+  taxInvoiceDocument: FileAttachment | null;
+  finalSettlementReportDocument: FileAttachment | null;
   contractAnalysis: ProjectRequestContractAnalysis | null;
 }
 
@@ -125,9 +153,34 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   totalRevenueAmount: 0,
   supportAmount: 0,
   financialInputFlags: createEmptyProjectFinancialInputFlags(),
+  registrationRequirementsVersion: 1,
+  financialYears: [],
+  registrationConfirmations: {
+    laborIncludesFourInsurance: null,
+    laborIncludesRetirementPay: null,
+    customerSettlementBasisConfirmed: false,
+    modusignContractUsed: null,
+    originalContractSubmitted: null,
+  },
+  registrationOptionalDocumentNotes: {
+    proposalWordOriginal: '',
+    proposalPptOriginal: '',
+    presentationPptOriginal: '',
+  },
+  checkout: {
+    finalPaymentReceived: false,
+    bankBalanceZero: false,
+    performanceCertificateReceived: false,
+    taxInvoiceEvidenceConfirmed: false,
+    finalSettlementReportConfirmed: false,
+    usbEvidenceSubmitted: false,
+    evidenceDeletedAfterUsb: false,
+  },
   settlementType: 'NONE',
   basis: 'NONE',
   accountType: 'NONE',
+  settlementSystem: 'NONE',
+  laborSettlementBasis: 'NONE',
   fundInputMode: 'BANK_UPLOAD',
   settlementSheetPolicy: createSettlementSheetPolicy('STANDARD'),
   profitRate: 0,
@@ -145,12 +198,22 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   settlementGuide: '',
   groupwareName: '',
   paymentPlan: { contract: 0, interim: 0, final: 0 },
+  paymentExpectedMonths: { contract: '', interim: '', final: '' },
+  advanceInterimBelow70Reason: '',
   finalPaymentNote: '',
   budgetCurrentYear: 0,
   taxInvoiceAmount: 0,
   contractDocument: null,
   quoteDocument: null,
   proposalDocument: null,
+  proposalWordOriginalDocument: null,
+  proposalPptOriginalDocument: null,
+  presentationPptOriginalDocument: null,
+  rfpRequestEvidenceDocument: null,
+  customerBusinessRegistrationDocument: null,
+  performanceCertificateDocument: null,
+  taxInvoiceDocument: null,
+  finalSettlementReportDocument: null,
   contractAnalysis: null,
 };
 
@@ -164,11 +227,117 @@ function text(value: unknown): string {
   return String(value || '').trim();
 }
 
+function registrationRequirementsVersion(value: unknown): 1 | 2 {
+  return value === 2 ? 2 : 1;
+}
+
+function dateYear(value: unknown): number | null {
+  const match = /^(\d{4})-\d{2}-\d{2}$/.exec(text(value));
+  return match ? Number(match[1]) : null;
+}
+
+function projectFinancialYears(
+  value: unknown,
+  contractStart: unknown,
+  contractEnd: unknown,
+  totals: Pick<ProjectEditorDraft, 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount' | 'profitRate'>,
+  version: 1 | 2,
+): ProjectFinancialYear[] {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized = new Map<number, ProjectFinancialYear>();
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const source = row as Partial<ProjectFinancialYear>;
+    const year = Number(source.year);
+    if (!Number.isSafeInteger(year) || year < 2000 || year > 2099 || normalized.has(year)) continue;
+    normalized.set(year, {
+      year,
+      contractAmount: nonNegativeAmount(source.contractAmount),
+      salesVatAmount: nonNegativeAmount(source.salesVatAmount),
+      totalRevenueAmount: nonNegativeAmount(source.totalRevenueAmount),
+      supportAmount: nonNegativeAmount(source.supportAmount),
+      profitRate: Math.min(1, Math.max(0, Number(source.profitRate) || 0)),
+      confirmed: source.confirmed === true,
+    });
+  }
+  if (version !== 2) return [...normalized.values()].sort((a, b) => a.year - b.year);
+  const startYear = dateYear(contractStart);
+  const endYear = dateYear(contractEnd);
+  if (!startYear || !endYear || startYear > endYear || endYear - startYear > 20) return [];
+  return Array.from({ length: endYear - startYear + 1 }, (_, offset) => {
+    const year = startYear + offset;
+    return normalized.get(year) || {
+      year,
+      contractAmount: offset === 0 ? nonNegativeAmount(totals.contractAmount) : 0,
+      salesVatAmount: offset === 0 ? nonNegativeAmount(totals.salesVatAmount) : 0,
+      totalRevenueAmount: offset === 0 ? nonNegativeAmount(totals.totalRevenueAmount) : 0,
+      supportAmount: offset === 0 ? nonNegativeAmount(totals.supportAmount) : 0,
+      profitRate: offset === 0 ? Math.min(1, Math.max(0, Number(totals.profitRate) || 0)) : 0,
+      confirmed: false,
+    };
+  });
+}
+
+function registrationConfirmations(value: unknown): ProjectRegistrationConfirmations {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<ProjectRegistrationConfirmations>
+    : {};
+  const optionalBoolean = (input: unknown) => typeof input === 'boolean' ? input : null;
+  return {
+    laborIncludesFourInsurance: optionalBoolean(source.laborIncludesFourInsurance),
+    laborIncludesRetirementPay: optionalBoolean(source.laborIncludesRetirementPay),
+    customerSettlementBasisConfirmed: source.customerSettlementBasisConfirmed === true,
+    modusignContractUsed: optionalBoolean(source.modusignContractUsed),
+    originalContractSubmitted: optionalBoolean(source.originalContractSubmitted),
+  };
+}
+
+function registrationOptionalDocumentNotes(value: unknown): ProjectRegistrationOptionalDocumentNotes {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<ProjectRegistrationOptionalDocumentNotes>
+    : {};
+  return {
+    proposalWordOriginal: text(source.proposalWordOriginal),
+    proposalPptOriginal: text(source.proposalPptOriginal),
+    presentationPptOriginal: text(source.presentationPptOriginal),
+  };
+}
+
+function projectCheckout(value: unknown): ProjectCheckout {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<ProjectCheckout>
+    : {};
+  return {
+    finalPaymentReceived: source.finalPaymentReceived === true,
+    bankBalanceZero: source.bankBalanceZero === true,
+    performanceCertificateReceived: source.performanceCertificateReceived === true,
+    taxInvoiceEvidenceConfirmed: source.taxInvoiceEvidenceConfirmed === true,
+    finalSettlementReportConfirmed: source.finalSettlementReportConfirmed === true,
+    usbEvidenceSubmitted: source.usbEvidenceSubmitted === true,
+    evidenceDeletedAfterUsb: source.evidenceDeletedAfterUsb === true,
+  };
+}
+
 function normalizePaymentPlan(value: Project['paymentPlan'] | null | undefined): Project['paymentPlan'] {
   return {
     contract: nonNegativeAmount(value?.contract),
     interim: nonNegativeAmount(value?.interim),
     final: nonNegativeAmount(value?.final),
+  };
+}
+
+function normalizeExpectedMonth(value: unknown): string {
+  const normalized = text(value);
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : '';
+}
+
+function normalizePaymentExpectedMonths(
+  value: Partial<ProjectPaymentExpectedMonths> | null | undefined,
+): ProjectPaymentExpectedMonths {
+  return {
+    contract: normalizeExpectedMonth(value?.contract),
+    interim: normalizeExpectedMonth(value?.interim),
+    final: normalizeExpectedMonth(value?.final),
   };
 }
 
@@ -194,6 +363,15 @@ function formatPaymentPlanForChange(value: Project['paymentPlan'] | null | undef
     .map(([name, amount]) => `${name} ${amount.toLocaleString('ko-KR')}원`)
     .join(' · ');
   return label || '-';
+}
+
+function formatPaymentExpectedMonthsForChange(value: Partial<ProjectPaymentExpectedMonths> | null | undefined) {
+  const months = normalizePaymentExpectedMonths(value);
+  return [
+    months.contract ? `선금 ${months.contract}` : '',
+    months.interim ? `중도금 ${months.interim}` : '',
+    months.final ? `잔금 ${months.final}` : '',
+  ].filter(Boolean).join(' · ') || '-';
 }
 
 function formatTeamMembersForChange(value: ProjectTeamMemberAssignment[] | null | undefined) {
@@ -224,11 +402,15 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'settlementType', label: '정산 유형', before: (project) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType)] || '-', after: (draft) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(draft.settlementType)] || '-' },
   { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
   { key: 'accountType', label: '통장 유형', before: (project) => ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType)] || '-', after: (draft) => ACCOUNT_TYPE_LABELS[normalizeAccountType(draft.accountType)] || '-' },
+  { key: 'settlementSystem', label: '정산 시스템', before: (project) => SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(project.settlementSystem)] || '-', after: (draft) => SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(draft.settlementSystem)] || '-' },
+  { key: 'laborSettlementBasis', label: '인건비 정산 기준', before: (project) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(project.laborSettlementBasis)] || '-', after: (draft) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(draft.laborSettlementBasis)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
   { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
+  { key: 'paymentExpectedMonths', label: '입금 예상월', before: (project) => formatPaymentExpectedMonthsForChange(project.paymentExpectedMonths), after: (draft) => formatPaymentExpectedMonthsForChange(draft.paymentExpectedMonths) },
+  { key: 'advanceInterimBelow70Reason', label: '선금·중도금 70% 미만 사유', before: (project) => normalizeChangeValue(project.advanceInterimBelow70Reason), after: (draft) => normalizeChangeValue(draft.advanceInterimBelow70Reason) },
   { key: 'paymentPlanDesc', label: '입금 계획', before: (project) => normalizeChangeValue(project.paymentPlanDesc), after: (draft) => normalizeChangeValue(draft.paymentPlanDesc) },
   { key: 'finalPaymentNote', label: '최종 입금 메모', before: (project) => normalizeChangeValue(project.finalPaymentNote), after: (draft) => normalizeChangeValue(draft.finalPaymentNote) },
   { key: 'projectPurpose', label: '프로젝트 목적', before: (project) => normalizeChangeValue(project.projectPurpose), after: (draft) => normalizeChangeValue(draft.projectPurpose) },
@@ -237,9 +419,25 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'contractDocument', label: '계약서 PDF', before: (project) => normalizeChangeValue(project.contractDocument?.name), after: (draft) => normalizeChangeValue(draft.contractDocument?.name) },
   { key: 'quoteDocument', label: '견적서 PDF', before: (project) => normalizeChangeValue(project.quoteDocument?.name), after: (draft) => normalizeChangeValue(draft.quoteDocument?.name) },
   { key: 'proposalDocument', label: '제안서 PDF', before: (project) => normalizeChangeValue(project.proposalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalDocument?.name) },
+  { key: 'proposalWordOriginalDocument', label: '제안서 Word 원본', before: (project) => normalizeChangeValue(project.proposalWordOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalWordOriginalDocument?.name) },
+  { key: 'proposalPptOriginalDocument', label: '제안서 PPT 원본', before: (project) => normalizeChangeValue(project.proposalPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalPptOriginalDocument?.name) },
+  { key: 'presentationPptOriginalDocument', label: '발표자료 PPT 원본', before: (project) => normalizeChangeValue(project.presentationPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.presentationPptOriginalDocument?.name) },
+  { key: 'rfpRequestEvidenceDocument', label: 'RFP 또는 요청 메일 증빙', before: (project) => normalizeChangeValue(project.rfpRequestEvidenceDocument?.name), after: (draft) => normalizeChangeValue(draft.rfpRequestEvidenceDocument?.name) },
+  { key: 'customerBusinessRegistrationDocument', label: '발주처 사업자등록증 PDF', before: (project) => normalizeChangeValue(project.customerBusinessRegistrationDocument?.name), after: (draft) => normalizeChangeValue(draft.customerBusinessRegistrationDocument?.name) },
+  { key: 'performanceCertificateDocument', label: '수행확인서 PDF', before: (project) => normalizeChangeValue(project.performanceCertificateDocument?.name), after: (draft) => normalizeChangeValue(draft.performanceCertificateDocument?.name) },
+  { key: 'taxInvoiceDocument', label: '세금계산서 PDF', before: (project) => normalizeChangeValue(project.taxInvoiceDocument?.name), after: (draft) => normalizeChangeValue(draft.taxInvoiceDocument?.name) },
+  { key: 'finalSettlementReportDocument', label: '최종 정산보고서 PDF', before: (project) => normalizeChangeValue(project.finalSettlementReportDocument?.name), after: (draft) => normalizeChangeValue(draft.finalSettlementReportDocument?.name) },
 ];
 
 export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
+  const version = registrationRequirementsVersion(overrides.registrationRequirementsVersion);
+  const totals = {
+    contractAmount: nonNegativeAmount(overrides.contractAmount ?? DEFAULT_DRAFT.contractAmount),
+    salesVatAmount: nonNegativeAmount(overrides.salesVatAmount ?? DEFAULT_DRAFT.salesVatAmount),
+    totalRevenueAmount: nonNegativeAmount(overrides.totalRevenueAmount ?? DEFAULT_DRAFT.totalRevenueAmount),
+    supportAmount: nonNegativeAmount(overrides.supportAmount ?? DEFAULT_DRAFT.supportAmount),
+    profitRate: Math.min(1, Math.max(0, Number(overrides.profitRate ?? DEFAULT_DRAFT.profitRate) || 0)),
+  };
   const draft = {
     ...DEFAULT_DRAFT,
     ...overrides,
@@ -258,6 +456,10 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     settlementType: normalizeSettlementType(overrides.settlementType ?? DEFAULT_DRAFT.settlementType),
     basis: normalizeBasis(overrides.basis ?? DEFAULT_DRAFT.basis),
     accountType: normalizeAccountType(overrides.accountType ?? DEFAULT_DRAFT.accountType),
+    settlementSystem: normalizeSettlementSystemCode(overrides.settlementSystem ?? DEFAULT_DRAFT.settlementSystem),
+    laborSettlementBasis: normalizeLaborSettlementBasis(
+      overrides.laborSettlementBasis ?? DEFAULT_DRAFT.laborSettlementBasis,
+    ),
     fundInputMode: normalizeProjectFundInputMode(overrides.fundInputMode ?? DEFAULT_DRAFT.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(
       overrides.settlementSheetPolicy ?? DEFAULT_DRAFT.settlementSheetPolicy,
@@ -271,7 +473,21 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     managerId: text(overrides.registeredById ?? overrides.managerId ?? DEFAULT_DRAFT.managerId),
     managerName: text(overrides.registeredByName ?? overrides.managerName ?? DEFAULT_DRAFT.managerName),
     paymentPlan: normalizePaymentPlan(overrides.paymentPlan ?? DEFAULT_DRAFT.paymentPlan),
+    paymentExpectedMonths: normalizePaymentExpectedMonths(
+      overrides.paymentExpectedMonths ?? DEFAULT_DRAFT.paymentExpectedMonths,
+    ),
     teamMembersDetailed: normalizeProjectTeamMembers(overrides.teamMembersDetailed),
+    registrationRequirementsVersion: version,
+    financialYears: projectFinancialYears(
+      overrides.financialYears,
+      overrides.contractStart ?? DEFAULT_DRAFT.contractStart,
+      overrides.contractEnd ?? DEFAULT_DRAFT.contractEnd,
+      totals,
+      version,
+    ),
+    registrationConfirmations: registrationConfirmations(overrides.registrationConfirmations),
+    registrationOptionalDocumentNotes: registrationOptionalDocumentNotes(overrides.registrationOptionalDocumentNotes),
+    checkout: projectCheckout(overrides.checkout),
   };
   return normalizeProjectRevenueFields(draft, 'totalRevenueAmount');
 }
@@ -289,6 +505,28 @@ export function buildProjectEditorDraftFromProject(
   const contractDocument = normalizedProject.contractDocument ?? payload?.contractDocument ?? null;
   const quoteDocument = normalizedProject.quoteDocument ?? payload?.quoteDocument ?? null;
   const proposalDocument = normalizedProject.proposalDocument ?? payload?.proposalDocument ?? null;
+  const proposalWordOriginalDocument = normalizedProject.proposalWordOriginalDocument
+    ?? payload?.proposalWordOriginalDocument
+    ?? null;
+  const proposalPptOriginalDocument = normalizedProject.proposalPptOriginalDocument
+    ?? payload?.proposalPptOriginalDocument
+    ?? null;
+  const presentationPptOriginalDocument = normalizedProject.presentationPptOriginalDocument
+    ?? payload?.presentationPptOriginalDocument
+    ?? null;
+  const rfpRequestEvidenceDocument = normalizedProject.rfpRequestEvidenceDocument
+    ?? payload?.rfpRequestEvidenceDocument
+    ?? null;
+  const customerBusinessRegistrationDocument = normalizedProject.customerBusinessRegistrationDocument
+    ?? payload?.customerBusinessRegistrationDocument
+    ?? null;
+  const performanceCertificateDocument = normalizedProject.performanceCertificateDocument
+    ?? payload?.performanceCertificateDocument
+    ?? null;
+  const taxInvoiceDocument = normalizedProject.taxInvoiceDocument ?? payload?.taxInvoiceDocument ?? null;
+  const finalSettlementReportDocument = normalizedProject.finalSettlementReportDocument
+    ?? payload?.finalSettlementReportDocument
+    ?? null;
 
   return createProjectEditorDraft({
     name: text(normalizedProject.name || payload?.name),
@@ -319,9 +557,23 @@ export function buildProjectEditorDraftFromProject(
         supportAmount: normalizedProject.supportAmount ?? payload?.supportAmount,
       },
     ),
+    registrationRequirementsVersion: registrationRequirementsVersion(
+      normalizedProject.registrationRequirementsVersion ?? payload?.registrationRequirementsVersion,
+    ),
+    financialYears: normalizedProject.financialYears ?? payload?.financialYears,
+    registrationConfirmations: normalizedProject.registrationConfirmations ?? payload?.registrationConfirmations,
+    registrationOptionalDocumentNotes: normalizedProject.registrationOptionalDocumentNotes
+      ?? payload?.registrationOptionalDocumentNotes,
+    checkout: normalizedProject.checkout ?? payload?.checkout,
     settlementType: normalizeSettlementType(normalizedProject.settlementType || payload?.settlementType),
     basis: normalizeBasis(normalizedProject.basis || payload?.basis),
     accountType: normalizeAccountType(normalizedProject.accountType || payload?.accountType),
+    settlementSystem: normalizeSettlementSystemCode(
+      normalizedProject.settlementSystem || payload?.settlementSystem,
+    ),
+    laborSettlementBasis: normalizeLaborSettlementBasis(
+      normalizedProject.laborSettlementBasis || payload?.laborSettlementBasis,
+    ),
     fundInputMode: normalizeProjectFundInputMode(normalizedProject.fundInputMode || payload?.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(
       normalizedProject.settlementSheetPolicy || payload?.settlementSheetPolicy,
@@ -340,14 +592,28 @@ export function buildProjectEditorDraftFromProject(
     note: text(normalizedProject.note || payload?.note),
     paymentPlanDesc: text(normalizedProject.paymentPlanDesc || payload?.paymentPlanDesc),
     settlementGuide: text(normalizedProject.settlementGuide || payload?.settlementGuide),
-    groupwareName: text(normalizedProject.groupwareName),
-    paymentPlan: normalizePaymentPlan(normalizedProject.paymentPlan),
+    groupwareName: text(normalizedProject.groupwareName || payload?.groupwareName),
+    paymentPlan: normalizePaymentPlan(normalizedProject.paymentPlan || payload?.paymentPlan),
+    paymentExpectedMonths: normalizePaymentExpectedMonths(
+      normalizedProject.paymentExpectedMonths || payload?.paymentExpectedMonths,
+    ),
+    advanceInterimBelow70Reason: text(
+      normalizedProject.advanceInterimBelow70Reason || payload?.advanceInterimBelow70Reason,
+    ),
     finalPaymentNote: text(normalizedProject.finalPaymentNote),
     budgetCurrentYear: nonNegativeAmount(normalizedProject.budgetCurrentYear),
     taxInvoiceAmount: nonNegativeAmount(normalizedProject.taxInvoiceAmount),
     contractDocument,
     quoteDocument,
     proposalDocument,
+    proposalWordOriginalDocument,
+    proposalPptOriginalDocument,
+    presentationPptOriginalDocument,
+    rfpRequestEvidenceDocument,
+    customerBusinessRegistrationDocument,
+    performanceCertificateDocument,
+    taxInvoiceDocument,
+    finalSettlementReportDocument,
     contractAnalysis: normalizedProject.contractAnalysis ?? payload?.contractAnalysis ?? null,
   });
 }
@@ -364,22 +630,31 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
     department: normalizeProjectDepartment(draft.department),
-    groupwareName: text(draft.name),
+    groupwareName: text(draft.groupwareName),
     currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(draft.totalRevenueAmount),
     supportAmount: nonNegativeAmount(draft.supportAmount),
     financialInputFlags: normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft),
+    registrationRequirementsVersion: draft.registrationRequirementsVersion,
+    financialYears: draft.financialYears,
+    registrationConfirmations: draft.registrationConfirmations,
+    registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
+    checkout: draft.checkout,
     contractStart: text(draft.contractStart),
     contractEnd: text(draft.contractEnd),
     contractType: normalizeProjectContractType(draft.contractType),
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
     accountType: normalizeAccountType(draft.accountType),
+    settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
+    laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
+    paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     settlementGuide: text(draft.settlementGuide),
     finalPaymentNote: text(draft.finalPaymentNote),
@@ -397,6 +672,14 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     contractDocument: draft.contractDocument,
     quoteDocument: draft.quoteDocument,
     proposalDocument: draft.proposalDocument,
+    proposalWordOriginalDocument: draft.proposalWordOriginalDocument,
+    proposalPptOriginalDocument: draft.proposalPptOriginalDocument,
+    presentationPptOriginalDocument: draft.presentationPptOriginalDocument,
+    rfpRequestEvidenceDocument: draft.rfpRequestEvidenceDocument,
+    customerBusinessRegistrationDocument: draft.customerBusinessRegistrationDocument,
+    performanceCertificateDocument: draft.performanceCertificateDocument,
+    taxInvoiceDocument: draft.taxInvoiceDocument,
+    finalSettlementReportDocument: draft.finalSettlementReportDocument,
     contractAnalysis: draft.contractAnalysis,
   };
 }
@@ -456,7 +739,7 @@ export function buildProjectEditorProjectPatch(
   const flags = normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft);
   const teamMembersDetailed = normalizeProjectTeamMembers(draft.teamMembersDetailed);
   const reviewChanges = options.baseProject
-    ? buildProjectEditorReviewChanges(options.baseProject, draft)
+    ? (buildProjectEditorReviewChanges(options.baseProject, draft) || [])
     : [];
   const patch: Partial<Project> = {
     name: text(draft.name),
@@ -469,12 +752,16 @@ export function buildProjectEditorProjectPatch(
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
     accountType: normalizeAccountType(draft.accountType),
+    settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
+    laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
+    paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
-    groupwareName: text(draft.name),
+    groupwareName: text(draft.groupwareName),
     participantCondition: text(draft.participantCondition),
     note: text(draft.note),
     teamMembersDetailed,
@@ -484,10 +771,23 @@ export function buildProjectEditorProjectPatch(
     supportAmount: nonNegativeAmount(draft.supportAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     financialInputFlags: flags,
+    registrationRequirementsVersion: draft.registrationRequirementsVersion,
+    financialYears: draft.financialYears,
+    registrationConfirmations: draft.registrationConfirmations,
+    registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
+    checkout: draft.checkout,
     settlementGuide: text(draft.settlementGuide),
     contractDocument: draft.contractDocument,
     quoteDocument: draft.quoteDocument,
     proposalDocument: draft.proposalDocument,
+    proposalWordOriginalDocument: draft.proposalWordOriginalDocument,
+    proposalPptOriginalDocument: draft.proposalPptOriginalDocument,
+    presentationPptOriginalDocument: draft.presentationPptOriginalDocument,
+    rfpRequestEvidenceDocument: draft.rfpRequestEvidenceDocument,
+    customerBusinessRegistrationDocument: draft.customerBusinessRegistrationDocument,
+    performanceCertificateDocument: draft.performanceCertificateDocument,
+    taxInvoiceDocument: draft.taxInvoiceDocument,
+    finalSettlementReportDocument: draft.finalSettlementReportDocument,
     contractAnalysis: draft.contractAnalysis,
     department: normalizeProjectDepartment(draft.department),
     cic: resolveProjectCic({ department: draft.department }),

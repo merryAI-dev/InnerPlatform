@@ -26,7 +26,7 @@ export type ProjectType =
 export type ProjectPhase = 'PROSPECT' | 'CONFIRMED';  // 입찰예정 / 확정
 
 export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5' | 'NONE';
-export type Basis = '공급가액' | '공급대가' | 'NONE';
+export type Basis = '공급가액' | '공급대가' | '기타' | 'NONE';
 export type ProjectCurrency = 'KRW' | 'USD';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
@@ -158,6 +158,7 @@ export const SETTLEMENT_TYPE_SHORT: Record<SettlementType, string> = {
 export const BASIS_LABELS: Record<Basis, string> = {
   '공급가액': '공급가액 기준',
   '공급대가': '공급대가 기준',
+  기타: '기타',
   NONE: '정산 기준 없음',
 };
 
@@ -170,6 +171,7 @@ export function normalizeSettlementType(raw: unknown): SettlementType {
 export function normalizeBasis(raw: unknown): Basis {
   if (raw === 'SUPPLY_AMOUNT' || raw === '공급가액') return '공급가액';
   if (raw === 'SUPPLY_PRICE' || raw === '공급대가') return '공급대가';
+  if (raw === 'OTHER' || raw === '기타') return '기타';
   return 'NONE';
 }
 
@@ -402,19 +404,39 @@ export type SettlementSystemCode =
   | 'EDUFINE'        // 에듀파인 (교육청 예산)
   | 'HAPPYEUM'       // 행복이음/희망이음 (사회보장정보시스템)
   | 'AGRIX'          // 아그릭스 (농림사업정보시스템)
+  | 'BOTAEM_E'       // 보탬e (지방보조금관리시스템)
+  | 'SMTECH'         // 중소기업기술개발사업 종합관리시스템
+  | 'KOCCA_PMS'      // 한국콘텐츠진흥원 사업관리시스템
+  | 'NIPA'           // 정보통신산업진흥원 사업관리시스템
   | 'ACCOUNTANT'     // 회계사정산 (전문 회계법인 정산)
   | 'PRIVATE'        // 민간사업
   | 'NONE';          // 미정/없음
+
+export type LaborSettlementBasis =
+  | 'INCLUDE_ACTUAL_SALARY'
+  | 'EXCLUDE_ACTUAL_SALARY'
+  | 'FIXED_AMOUNT'
+  | 'NONE';
+
+export interface ProjectPaymentExpectedMonths {
+  contract: string;
+  interim: string;
+  final: string;
+}
 
 export const SETTLEMENT_SYSTEM_LABELS: Record<SettlementSystemCode, string> = {
   E_NARA_DOUM: 'e나라도움 (국고보조금통합관리)',
   IRIS: 'IRIS (범부처통합연구지원)',
   RCMS: 'RCMS (실시간연구비)',
-  EZBARO: '이지바로 (EZBaro)',
+  EZBARO: '통합이지바로 (통합 Ez-plus)',
   E_HIJO: 'e호조 (지방재정)',
   EDUFINE: '에듀파인 (교육재정)',
   HAPPYEUM: '행복이음 (사회보장)',
   AGRIX: '아그릭스 (농림사업)',
+  BOTAEM_E: '보탬e (지방보조금관리)',
+  SMTECH: 'SMTECH (중소기업기술개발)',
+  KOCCA_PMS: 'KOCCA PMS (한국콘텐츠진흥원)',
+  NIPA: 'NIPA (정보통신산업진흥원)',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간사업',
   NONE: '미정',
@@ -424,15 +446,36 @@ export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
   E_NARA_DOUM: 'e나라도움',
   IRIS: 'IRIS',
   RCMS: 'RCMS',
-  EZBARO: '이지바로',
+  EZBARO: '통합이지바로',
   E_HIJO: 'e호조',
   EDUFINE: '에듀파인',
   HAPPYEUM: '행복이음',
   AGRIX: '아그릭스',
+  BOTAEM_E: '보탬e',
+  SMTECH: 'SMTECH',
+  KOCCA_PMS: 'KOCCA PMS',
+  NIPA: 'NIPA',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간',
   NONE: '미정',
 };
+
+export const LABOR_SETTLEMENT_BASIS_LABELS: Record<LaborSettlementBasis, string> = {
+  INCLUDE_ACTUAL_SALARY: '포함 실급여',
+  EXCLUDE_ACTUAL_SALARY: '제외 실급여',
+  FIXED_AMOUNT: '정액정산',
+  NONE: '미정',
+};
+
+export function normalizeSettlementSystemCode(raw: unknown): SettlementSystemCode {
+  const value = String(raw || '').trim();
+  return value in SETTLEMENT_SYSTEM_LABELS ? value as SettlementSystemCode : 'NONE';
+}
+
+export function normalizeLaborSettlementBasis(raw: unknown): LaborSettlementBasis {
+  const value = String(raw || '').trim();
+  return value in LABOR_SETTLEMENT_BASIS_LABELS ? value as LaborSettlementBasis : 'NONE';
+}
 
 export type CrossVerifyRisk = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
 
@@ -509,6 +552,40 @@ export interface LedgerTemplate {
   createdAt: string;
 }
 
+export interface ProjectFinancialYear {
+  year: number;
+  contractAmount: number;
+  salesVatAmount: number;
+  totalRevenueAmount: number;
+  supportAmount: number;
+  profitRate: number;
+  confirmed: boolean;
+}
+
+export interface ProjectRegistrationConfirmations {
+  laborIncludesFourInsurance: boolean | null;
+  laborIncludesRetirementPay: boolean | null;
+  customerSettlementBasisConfirmed: boolean;
+  modusignContractUsed: boolean | null;
+  originalContractSubmitted: boolean | null;
+}
+
+export interface ProjectRegistrationOptionalDocumentNotes {
+  proposalWordOriginal: string;
+  proposalPptOriginal: string;
+  presentationPptOriginal: string;
+}
+
+export interface ProjectCheckout {
+  finalPaymentReceived: boolean;
+  bankBalanceZero: boolean;
+  performanceCertificateReceived: boolean;
+  taxInvoiceEvidenceConfirmed: boolean;
+  finalSettlementReportConfirmed: boolean;
+  usbEvidenceSubmitted: boolean;
+  evidenceDeletedAfterUsb: boolean;
+}
+
 export interface Project {
   id: string;
   version?: number;
@@ -543,6 +620,8 @@ export interface Project {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
+  settlementSystem?: SettlementSystemCode;
+  laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
   // 입금계획
@@ -551,6 +630,8 @@ export interface Project {
     interim: number;     // 중도금
     final: number;       // 잔금
   };
+  paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;       // 입금계획 텍스트 (e.g. "선금80%, 잔금20%")
   // MYSC-specific fields
   clientOrg: string;             // 발주기관(계약기관)
@@ -564,10 +645,23 @@ export interface Project {
   supportAmount?: number;
   salesVatAmount?: number;
   financialInputFlags?: ProjectFinancialInputFlags;
+  registrationRequirementsVersion?: 1 | 2;
+  financialYears?: ProjectFinancialYear[];
+  registrationConfirmations?: ProjectRegistrationConfirmations;
+  registrationOptionalDocumentNotes?: ProjectRegistrationOptionalDocumentNotes;
+  checkout?: ProjectCheckout;
   settlementGuide?: string;
   contractDocument?: FileAttachment | null;
   quoteDocument?: FileAttachment | null;
   proposalDocument?: FileAttachment | null;
+  proposalWordOriginalDocument?: FileAttachment | null;
+  proposalPptOriginalDocument?: FileAttachment | null;
+  presentationPptOriginalDocument?: FileAttachment | null;
+  rfpRequestEvidenceDocument?: FileAttachment | null;
+  customerBusinessRegistrationDocument?: FileAttachment | null;
+  performanceCertificateDocument?: FileAttachment | null;
+  taxInvoiceDocument?: FileAttachment | null;
+  finalSettlementReportDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
   // 팀/담당자
   department: string;            // 담당조직
@@ -698,6 +792,7 @@ export interface ProjectTeamMemberAssignment {
   memberNickname: string;
   role: string;
   participationRate: number;
+  isDocumentOnly?: boolean;
   laborAllocationStartMonth?: string;
   laborAllocationEndMonth?: string;
 }
@@ -718,15 +813,24 @@ export interface ProjectRequestPayload {
   totalRevenueAmount: number;
   supportAmount: number;
   financialInputFlags?: ProjectFinancialInputFlags;
+  registrationRequirementsVersion?: 1 | 2;
+  financialYears?: ProjectFinancialYear[];
+  registrationConfirmations?: ProjectRegistrationConfirmations;
+  registrationOptionalDocumentNotes?: ProjectRegistrationOptionalDocumentNotes;
+  checkout?: ProjectCheckout;
   contractStart: string;
   contractEnd: string;
   contractType?: string;
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  settlementSystem?: SettlementSystemCode;
+  laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
   paymentPlan?: Project['paymentPlan'];
+  paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;
   settlementGuide: string;
   finalPaymentNote?: string;
@@ -744,6 +848,14 @@ export interface ProjectRequestPayload {
   contractDocument: FileAttachment | null;
   quoteDocument?: FileAttachment | null;
   proposalDocument?: FileAttachment | null;
+  proposalWordOriginalDocument?: FileAttachment | null;
+  proposalPptOriginalDocument?: FileAttachment | null;
+  presentationPptOriginalDocument?: FileAttachment | null;
+  rfpRequestEvidenceDocument?: FileAttachment | null;
+  customerBusinessRegistrationDocument?: FileAttachment | null;
+  performanceCertificateDocument?: FileAttachment | null;
+  taxInvoiceDocument?: FileAttachment | null;
+  finalSettlementReportDocument?: FileAttachment | null;
   contractAnalysis?: ProjectRequestContractAnalysis | null;
 }
 
@@ -1171,26 +1283,6 @@ export interface PayrollRun {
   confirmedAt?: string;
   confirmedByUid?: string;
   confirmedByName?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type MonthlyCloseStatus = 'OPEN' | 'DONE';
-
-export interface MonthlyClose {
-  /** doc id = `${projectId}-${yearMonth}` */
-  id: string;
-  tenantId?: string;
-  projectId: string;
-  yearMonth: string; // "2026-02"
-  status: MonthlyCloseStatus;
-  doneAt?: string;
-  doneByUid?: string;
-  doneByName?: string;
-  acknowledged: boolean;
-  acknowledgedAt?: string;
-  acknowledgedByUid?: string;
-  acknowledgedByName?: string;
   createdAt: string;
   updatedAt: string;
 }

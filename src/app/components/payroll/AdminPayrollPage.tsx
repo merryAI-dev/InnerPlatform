@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   CircleDollarSign,
-  CalendarCheck2,
   CheckCircle2,
   Clock,
   FileText,
@@ -16,7 +15,6 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { usePayroll } from '../../data/payroll-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
@@ -27,7 +25,7 @@ import type {
   PayrollReviewStatus,
   PayrollRun,
 } from '../../data/types';
-import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { getSeoulTodayIso } from '../../platform/business-days';
 import { fmtShort } from '../../data/budget-data';
 import {
   isPayrollLiquidityRiskStatus,
@@ -130,16 +128,12 @@ export function AdminPayrollPage() {
   const {
     schedules,
     runs,
-    monthlyCloses,
     confirmPayrollPaid,
-    markMonthlyCloseDone,
   } = usePayroll();
-  const [tab, setTab] = useState<'payroll' | 'monthly'>('payroll');
   const [txDialogProjectId, setTxDialogProjectId] = useState<string | null>(null);
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
-  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
 
   const scheduleByProject = useMemo(() => {
     const map = new Map<string, typeof schedules[number]>();
@@ -175,14 +169,6 @@ export function AdminPayrollPage() {
     return map;
   }, [projects, runByProject, today, transactions]);
 
-  const closeByProjectPrev = useMemo(() => {
-    const map = new Map<string, typeof monthlyCloses[number]>();
-    monthlyCloses.forEach((c) => {
-      if (c.yearMonth === prevYearMonth) map.set(c.projectId, c);
-    });
-    return map;
-  }, [monthlyCloses, prevYearMonth]);
-
   const payrollKpis = useMemo(() => {
     const list = projects.map((p) => effectiveRunByProject.get(p.id)).filter(Boolean) as PayrollRun[];
     const due = list.filter((r) => today >= r.noticeDate).length;
@@ -191,12 +177,6 @@ export function AdminPayrollPage() {
     return { due, unacked, unconfirmed };
   }, [effectiveRunByProject, projects, today]);
 
-  const monthlyKpis = useMemo(() => {
-    const list = projects.map((p) => closeByProjectPrev.get(p.id)).filter(Boolean) as typeof monthlyCloses;
-    const done = list.filter((c) => c.status === 'DONE').length;
-    const pendingAck = list.filter((c) => c.status === 'DONE' && !c.acknowledged).length;
-    return { done, pendingAck };
-  }, [projects, closeByProjectPrev, monthlyCloses]);
   const reviewKpis = useMemo(() => {
     const list = projects.map((project) => effectiveRunByProject.get(project.id)).filter(Boolean) as PayrollRun[];
     return {
@@ -298,23 +278,13 @@ export function AdminPayrollPage() {
     }
   }
 
-  async function onMarkMonthlyDone(projectId: string) {
-    try {
-      await markMonthlyCloseDone({ projectId, yearMonth: prevYearMonth });
-      toast.success('월간 정산 완료로 표시했습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '월간 정산 처리에 실패했습니다');
-    }
-  }
-
   return (
     <div className="space-y-5">
       <PageHeader
         icon={CircleDollarSign}
         iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-        title="인건비/월간정산 운영"
-        description="PM이 적요를 먼저 검토하고, Admin이 월 지급을 최종 확정합니다. 공지 인지와 월간정산 확인도 같은 화면에서 추적합니다."
+        title="인건비 운영"
+        description="PM이 적요를 먼저 검토하고, Admin이 월 지급을 최종 확정합니다."
         badge={`${yearMonth}`}
         actions={
           <Button
@@ -329,12 +299,11 @@ export function AdminPayrollPage() {
       />
 
       {/* KPI */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {[
           { label: '공지 대상(이번달)', value: payrollKpis.due, icon: Clock, gradient: 'linear-gradient(135deg, #0891b2, #0f766e)', color: '#0891b2' },
           { label: '미인지(이번달)', value: payrollKpis.unacked, icon: AlertTriangle, gradient: 'linear-gradient(135deg, #e11d48, #f43f5e)', color: '#e11d48' },
           { label: '미확정 지급', value: payrollKpis.unconfirmed, icon: FileText, gradient: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#d97706' },
-          { label: `${prevYearMonth} 정산 완료`, value: monthlyKpis.done, icon: CalendarCheck2, gradient: 'linear-gradient(135deg, #059669, #0d9488)', color: '#059669' },
         ].map((k) => (
           <Card key={k.label}>
             <CardContent className="p-3 flex items-center gap-3">
@@ -352,19 +321,7 @@ export function AdminPayrollPage() {
         ))}
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-        <TabsList className="h-9">
-          <TabsTrigger value="payroll" className="text-[12px] gap-1.5">
-            <CircleDollarSign className="w-3.5 h-3.5" />
-            인건비 공지/지급
-          </TabsTrigger>
-          <TabsTrigger value="monthly" className="text-[12px] gap-1.5">
-            <CalendarCheck2 className="w-3.5 h-3.5" />
-            월간정산 ({prevYearMonth})
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="payroll" className="mt-3 space-y-3">
+      <div className="space-y-3">
           <Card data-testid="admin-payroll-liquidity-queue">
             <CardHeader className="pb-2">
               <CardTitle className="text-[13px] flex items-center justify-between gap-2">
@@ -628,81 +585,7 @@ export function AdminPayrollPage() {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="monthly" className="mt-3 space-y-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-[13px]">프로젝트별 월간정산 현황 ({prevYearMonth})</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-[11px]">프로젝트</TableHead>
-                    <TableHead className="text-[11px]">상태</TableHead>
-                    <TableHead className="text-[11px]">PM 확인</TableHead>
-                    <TableHead className="text-[11px]">완료일</TableHead>
-                    <TableHead className="text-[11px] text-right">액션</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {projects.map((p) => {
-                    const close = closeByProjectPrev.get(p.id);
-                    const status = close?.status || 'OPEN';
-                    return (
-                      <TableRow key={p.id}>
-                        <TableCell className="text-[11px]" style={{ fontWeight: 600 }}>
-                          {p.shortName || p.id}
-                          <div className="text-[10px] text-muted-foreground">{p.name}</div>
-                        </TableCell>
-                        <TableCell className="text-[11px]">
-                          {status === 'DONE' ? (
-                            <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">완료</Badge>
-                          ) : (
-                            <Badge className="text-[10px] bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">진행중</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-[11px]">
-                          {close?.status === 'DONE' ? (
-                            close.acknowledged ? (
-                              <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">확인</Badge>
-                            ) : (
-                              <Badge className="text-[10px] bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">미확인</Badge>
-                            )
-                          ) : (
-                            <Badge variant="outline" className="text-[10px]">-</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-[11px]">
-                          {close?.doneAt ? new Date(close.doneAt).toLocaleDateString('ko-KR') : <span className="text-muted-foreground">-</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[11px] gap-1"
-                            disabled={status === 'DONE'}
-                            onClick={() => onMarkMonthlyDone(p.id)}
-                          >
-                            <CalendarCheck2 className="w-3 h-3" /> 정산완료
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-
-              {monthlyKpis.pendingAck > 0 && (
-                <div className="mt-3 text-[11px] text-muted-foreground">
-                  <span style={{ fontWeight: 600 }}>{monthlyKpis.pendingAck}개 사업</span>에서 PM 확인이 아직 완료되지 않았습니다.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* Hint */}
       <Card className="border-border/50">
@@ -710,7 +593,6 @@ export function AdminPayrollPage() {
           <p style={{ fontWeight: 600 }} className="text-foreground">운영 기준</p>
           <p>인건비 후보 거래는 <Badge variant="outline" className="text-[10px]">APPROVED · OUT · 적요/거래처/인건비 항목</Badge> 기준으로 지급일 ±3영업일 창에서 보수적으로 탐지합니다.</p>
           <p>PM 인지는 공지일(지급일 3영업일 전)부터 “미확인”으로 표시됩니다.</p>
-          <p>월간정산 완료 후 PM 확인을 받아야 “완료(확인)”으로 마무리됩니다.</p>
         </CardContent>
       </Card>
 

@@ -170,6 +170,7 @@ describe('edit lease routes', () => {
         holderDisplayName: 'Actor B',
         sameActor: false,
         expiresAt: '2026-07-10T00:30:00.000Z',
+        holderVersion: 'opaque-holder-version',
       },
       leaseId: 'must-not-leak',
       sessionId: 'must-not-leak',
@@ -186,6 +187,7 @@ describe('edit lease routes', () => {
       holderDisplayName: 'Actor B',
       sameActor: false,
       expiresAt: '2026-07-10T00:30:00.000Z',
+      holderVersion: 'opaque-holder-version',
     });
     expect(JSON.stringify(response.body)).not.toMatch(/must-not-leak|leaseId|sessionId|fence|actor-a|@/i);
     expect(outsideAudit).not.toHaveBeenCalled();

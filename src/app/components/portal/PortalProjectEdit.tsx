@@ -105,6 +105,28 @@ function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
     ...(documents.contract ? { contractDocument: documents.contract } : {}),
     ...(documents.quote ? { quoteDocument: documents.quote } : {}),
     ...(documents.proposal ? { proposalDocument: documents.proposal } : {}),
+    ...(documents.proposal_word_original
+      ? { proposalWordOriginalDocument: documents.proposal_word_original }
+      : {}),
+    ...(documents.proposal_ppt_original
+      ? { proposalPptOriginalDocument: documents.proposal_ppt_original }
+      : {}),
+    ...(documents.presentation_ppt_original
+      ? { presentationPptOriginalDocument: documents.presentation_ppt_original }
+      : {}),
+    ...(documents.rfp_request_evidence
+      ? { rfpRequestEvidenceDocument: documents.rfp_request_evidence }
+      : {}),
+    ...(documents.customer_business_registration
+      ? { customerBusinessRegistrationDocument: documents.customer_business_registration }
+      : {}),
+    ...(documents.performance_certificate
+      ? { performanceCertificateDocument: documents.performance_certificate }
+      : {}),
+    ...(documents.tax_invoice ? { taxInvoiceDocument: documents.tax_invoice } : {}),
+    ...(documents.final_settlement_report
+      ? { finalSettlementReportDocument: documents.final_settlement_report }
+      : {}),
   });
 }
 

@@ -1,4 +1,5 @@
 import type { RequestActor } from '../platform/request-context';
+import { resolveProjectDocumentMimeType } from '../platform/project-contract-upload';
 import {
   createPlatformApiClient,
   toRequestActor,
@@ -8,7 +9,15 @@ import {
 
 export const PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
-export type ProjectRegistrationDocumentKind = 'contract' | 'quote' | 'proposal';
+export type ProjectRegistrationDocumentKind =
+  | 'contract'
+  | 'customer_business_registration'
+  | 'quote'
+  | 'proposal'
+  | 'proposal_word_original'
+  | 'proposal_ppt_original'
+  | 'presentation_ppt_original'
+  | 'rfp_request_evidence';
 
 export interface ProjectRegistrationAttachment {
   attachmentId?: string;
@@ -134,7 +143,16 @@ function parseLease(value: unknown): ProjectRegistrationLeaseOwnership {
 function parseAttachment(value: unknown): ProjectRegistrationAttachment {
   const attachment = requireObject(value, 'draft attachment');
   if (
-    !['contract', 'quote', 'proposal'].includes(String(attachment.documentKind))
+    ![
+      'contract',
+      'customer_business_registration',
+      'quote',
+      'proposal',
+      'proposal_word_original',
+      'proposal_ppt_original',
+      'presentation_ppt_original',
+      'rfp_request_evidence',
+    ].includes(String(attachment.documentKind))
     || typeof attachment.path !== 'string'
     || !attachment.path.trim()
     || typeof attachment.name !== 'string'
@@ -206,7 +224,7 @@ export function createProjectRegistrationDraftClient(options: {
       },
     ) {
       if (input.file.size < 1 || input.file.size > PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES) {
-        throw new Error('첨부 PDF는 10MB 이하만 업로드할 수 있습니다.');
+        throw new Error('첨부파일은 10MB 이하만 업로드할 수 있습니다.');
       }
       const bytes = new Uint8Array(await input.file.arrayBuffer());
       if (bytes.byteLength !== input.file.size) throw new Error('Attachment size does not match its content');
@@ -217,7 +235,7 @@ export function createProjectRegistrationDraftClient(options: {
           expectedDraftRevision: revision(input.expectedDraftRevision),
           documentKind: input.documentKind,
           fileName: input.file.name,
-          mimeType: input.file.type || 'application/pdf',
+          mimeType: resolveProjectDocumentMimeType(input.documentKind, input.file),
           fileSize: input.file.size,
           contentBase64: bytesToBase64(bytes),
         },
