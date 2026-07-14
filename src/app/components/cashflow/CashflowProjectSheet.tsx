@@ -354,6 +354,7 @@ export function CashflowProjectSheet({
     lastProjectionLineCount?: number;
     lastActualLineCount?: number;
   } | null>(null);
+  const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
   const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
   const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
   const [laborRiskLoading, setLaborRiskLoading] = useState(false);
@@ -659,9 +660,11 @@ export function CashflowProjectSheet({
   }, [blocker, cashflowLease.release]);
 
   useEffect(() => {
+    setCashflowSheetConfigLoaded(false);
+    setCashflowSheetRange(null);
+    setCashflowSheetConfig(null);
     if (!db || !projectId) {
-      setCashflowSheetRange(null);
-      setCashflowSheetConfig(null);
+      setCashflowSheetConfigLoaded(true);
       return;
     }
     const documentPath = getOrgDocumentPath(orgId, 'projects', projectId);
@@ -738,11 +741,26 @@ export function CashflowProjectSheet({
         });
         setCashflowSheetRange(null);
         setCashflowSheetConfig(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCashflowSheetConfigLoaded(true);
       });
     return () => {
       cancelled = true;
     };
   }, [db, orgId, projectId]);
+
+  useEffect(() => {
+    if (!cashflowSheetConfigLoaded || cashflowSheetConfig || !projectId || typeof window === 'undefined') return;
+    const storageKey = `myscube:cashflow-sheet-onboarding:${projectId}`;
+    try {
+      if (window.sessionStorage.getItem(storageKey)) return;
+      window.sessionStorage.setItem(storageKey, 'shown');
+    } catch {
+      // Storage가 차단된 브라우저에서도 온보딩은 정상 노출한다.
+    }
+    setSheetReviewDialogOpen(true);
+  }, [cashflowSheetConfig, cashflowSheetConfigLoaded, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1412,6 +1430,10 @@ export function CashflowProjectSheet({
     }
     setSheetReviewDialogOpen(true);
   }, [cashflowSheetMirror]);
+
+  const handleOpenSheetOnboarding = useCallback(() => {
+    setSheetReviewDialogOpen(true);
+  }, []);
 
   const handleStartSheetChangeReview = useCallback(async (): Promise<void> => {
     setSheetReviewDialogOpen(false);
@@ -2298,7 +2320,9 @@ export function CashflowProjectSheet({
                   size="sm"
                   variant="outline"
                   className={`h-7 rounded-full px-2.5 text-[10px] transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
+                  onClick={() => cashflowSheetConfig
+                    ? navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)
+                    : handleOpenSheetOnboarding()}
                 >
                   {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
                 </Button>
@@ -2660,7 +2684,7 @@ export function CashflowProjectSheet({
 
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
-      {!cashflowSheetConfig ? (
+      {cashflowSheetConfigLoaded && !cashflowSheetConfig ? (
         <section className="flex flex-col gap-3 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-2">
             <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
@@ -2669,7 +2693,7 @@ export function CashflowProjectSheet({
               <div className="mt-1 text-[10px] leading-4 text-amber-800">시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 시트값을 가져오려면 먼저 연결 범위를 설정해 주세요.</div>
             </div>
           </div>
-          <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 rounded-full border-amber-300 bg-white px-3 text-[10px] text-amber-900" onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}>
+          <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 rounded-full border-amber-300 bg-white px-3 text-[10px] text-amber-900" onClick={handleOpenSheetOnboarding}>
             시트 연동 설정
           </Button>
         </section>
@@ -2987,9 +3011,11 @@ export function CashflowProjectSheet({
       >
         <AlertDialogContent className="max-w-[760px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>시트 업데이트 반영</AlertDialogTitle>
+            <AlertDialogTitle>{cashflowSheetConfig ? '시트 업데이트 반영' : '캐시플로우 시트 연동 시작하기'}</AlertDialogTitle>
             <AlertDialogDescription>
-              고정해 둔 시트 값을 원장과 비교합니다. 저장 버튼을 누르기 전까지 원장은 바뀌지 않습니다.
+              {cashflowSheetConfig
+                ? '고정해 둔 시트 값을 원장과 비교합니다. 저장 버튼을 누르기 전까지 원장은 바뀌지 않습니다.'
+                : '시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 기존 시트 값을 가져오려면 아래 순서로 연결해 주세요.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -2998,26 +3024,36 @@ export function CashflowProjectSheet({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[13px] font-bold text-slate-950">
                   <ArrowDownToLine className="h-4 w-4 text-blue-600" />
-                  시트에서 가져오기
+                  {cashflowSheetConfig ? '시트에서 가져오기' : '연동 전 확인사항'}
                 </div>
                 <div className="mt-1 text-[11px] leading-5 text-slate-600">
-                  마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.
+                  {cashflowSheetConfig
+                    ? '마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
+                    : '설정 후에도 자동으로 값을 가져오지 않습니다. 캐시플로우 화면에서 시트값 불러오기를 눌렀을 때만 고정합니다.'}
                 </div>
               </div>
               <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                {sheetMirrorStatus}
+                {cashflowSheetConfig ? sheetMirrorStatus : '선택 설정'}
               </Badge>
             </div>
             <div className="flex items-start gap-2 rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-5 text-blue-900">
               <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-              <div>현재 선택: {sheetMirrorCapturedAt || '최근'} 고정본을 원장 값과 나란히 확인합니다.</div>
+              <div>
+                {cashflowSheetConfig
+                  ? `현재 선택: ${sheetMirrorCapturedAt || '최근'} 고정본을 원장 값과 나란히 확인합니다.`
+                  : 'Google Sheet는 조회 전용으로 연결됩니다. 검토 후 저장하기 전까지 MYSCube 원장은 바뀌지 않습니다.'}
+              </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
-              {[
+              {(cashflowSheetConfig ? [
                 ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
                 ['2', '값 비교', '원장과 다른 셀을 모두 보여줍니다.'],
                 ['3', '검토 후 저장', '팝업에서 확정하면 원장에 저장합니다.'],
-              ].map(([step, title, detail]) => (
+              ] : [
+                ['1', '공유 권한 확인', '연동할 Google Sheet에 조회 권한이 있는지 확인합니다.'],
+                ['2', '시트·주차 선택', '사용할 시트 탭과 시작·종료 주차를 지정합니다.'],
+                ['3', '명시적으로 불러오기', '설정 후 시트값 불러오기를 눌러 변경 내용을 검토합니다.'],
+              ]).map(([step, title, detail]) => (
                 <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2">
                   <div className="flex items-center gap-2">
                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{step}</span>
@@ -3035,7 +3071,7 @@ export function CashflowProjectSheet({
           </div>
 
           <AlertDialogFooter>
-            <AlertDialogCancel>닫기</AlertDialogCancel>
+            <AlertDialogCancel>{cashflowSheetConfig ? '닫기' : '나중에 하기'}</AlertDialogCancel>
             {!cashflowSheetConfig?.value ? (
               <AlertDialogAction onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}>
                 시트 연동 설정

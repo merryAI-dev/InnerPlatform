@@ -95,6 +95,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트가 아직 연결되지 않았습니다.');
     expect(source).toContain('시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다.');
     expect(source).toContain('시트 연동 설정');
+    expect(source).toContain('cashflowSheetConfigLoaded && !cashflowSheetConfig');
+    expect(source).toContain('myscube:cashflow-sheet-onboarding:');
+    expect(source).toContain('캐시플로우 시트 연동 시작하기');
+    expect(source).toContain('나중에 하기');
+    expect(source).toContain('설정 후에도 자동으로 값을 가져오지 않습니다.');
     expect(source).toContain('cashflowSnapshot?.comparison?.months || []');
     expect(source).toContain('comparisonWeek?.lines?.find');
   });
