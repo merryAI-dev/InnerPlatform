@@ -67,4 +67,9 @@ describe('project completeness', () => {
     expect(r.missing.some((item) => item.key === 'contractEnd')).toBe(false);
     expect(r.missing.some((item) => item.key === 'contractAmount')).toBe(false);
   });
+
+  it('does not require the retired groupware registration name', () => {
+    const r = computeProjectCompleteness({});
+    expect(r.missing.some((item) => item.key === 'groupwareName')).toBe(false);
+  });
 });
