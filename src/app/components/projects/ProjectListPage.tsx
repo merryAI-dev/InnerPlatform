@@ -334,32 +334,32 @@ export function ProjectListPage() {
         value={activeTab}
         onValueChange={setActiveTab}
       >
-        <TabsList>
-          <TabsTrigger value="contract-pending" className="gap-1.5" data-testid="projects-tab-contract-pending">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="contract-pending" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-contract-pending">
             <Sparkles className="w-3.5 h-3.5" />
             계약 전
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="in-progress" className="gap-1.5" data-testid="projects-tab-in-progress">
+          <TabsTrigger value="in-progress" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-in-progress">
             <ArrowRight className="w-3.5 h-3.5" />
             진행
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {inProgressProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="completed" className="gap-1.5" data-testid="projects-tab-completed">
+          <TabsTrigger value="completed" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-completed">
             <CheckCircle2 className="w-3.5 h-3.5" />
             종료
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {completedProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="trash" className="gap-1.5" data-testid="projects-tab-trash">
+          <TabsTrigger value="trash" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-trash">
             <Trash2 className="w-3.5 h-3.5" />
             휴지통
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {trashedProjects.length}
             </Badge>
           </TabsTrigger>
