@@ -65,7 +65,7 @@ describe('ProjectListPage shell contract', () => {
 
   it('keeps filter defaults while showing planner-defined labels in the required order', () => {
     expect(source).toContain('프로젝트 진행 현황');
-    expect(source).toContain('conic-gradient');
+    expect(source).not.toContain('conic-gradient');
     expect(source).toContain('#e5484d');
     expect(source).toContain('#2f9e44');
     expect(source).toContain('#111827');
@@ -79,12 +79,16 @@ describe('ProjectListPage shell contract', () => {
     expect(source.indexOf('진행 상태</Label>')).toBeLessThan(source.indexOf('정산 유형</Label>'));
   });
 
-  it('renders approval-log monthly performance with KST twelve-month bars and MoM', () => {
+  it('renders approval-log monthly performance for the current KST year with values', () => {
     expect(source).toContain('buildProjectMonthlyPerformance(summaryProjects)');
     expect(source).toContain('승인 기준 월별');
-    expect(source).toContain('최근 12개월 · KST');
-    expect(source).toContain('매출 MoM');
-    expect(source).toContain('총수익 MoM');
+    expect(source).toContain('올해 · KST');
+    expect(source).toContain('formatChartAmount');
+    expect(source).toContain('repeat(${monthlyPerformance.length}, minmax(0, 1fr))');
+    expect(source).not.toContain('매출 MoM');
+    expect(source).not.toContain('총수익 MoM');
+    expect(source).not.toContain('상태별 분포를 기준으로 현재 프로젝트 포트폴리오를 확인합니다.');
+    expect(source).not.toContain('lifecycleChartBackground');
     expect(source).toContain('#001e46');
     expect(source).toContain('#0e7490');
     expect(source).toContain('getProjectRegistrationCicOptions()');
