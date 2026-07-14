@@ -565,7 +565,7 @@ function PortalContent() {
             <button
               type="button"
               aria-label="처음 화면으로 이동"
-              onClick={() => navigate('/')}
+              onClick={() => requestPortalNavigation('/', '처음 화면')}
               className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
             >
               <MyscWordmark
@@ -807,7 +807,7 @@ function PortalContent() {
                 <button
                   type="button"
                   aria-label="처음 화면으로 이동"
-                  onClick={() => navigate('/')}
+                  onClick={() => requestPortalNavigation('/', '처음 화면')}
                   className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                 >
                   <MyscWordmark tone="onDark" size="md" />
