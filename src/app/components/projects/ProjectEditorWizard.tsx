@@ -1719,14 +1719,15 @@ export function ProjectEditorWizard({
         </div>
       ) : null}
 
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="p-4">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+      <Card className="border-slate-200/80 shadow-sm lg:sticky lg:top-4">
+        <CardContent className="p-3">
           <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
             <span>{stepIndex + 1} / {STEPS.length}</span>
             <span>{step.label}</span>
           </div>
           <Progress value={((stepIndex + 1) / STEPS.length) * 100} />
-          <div className="mt-4 grid gap-2 md:grid-cols-5">
+          <div className="mt-4 grid gap-1.5">
             {STEPS.map((item, index) => {
               const Icon = item.icon;
               const active = index === stepIndex;
@@ -1761,6 +1762,7 @@ export function ProjectEditorWizard({
           </fieldset>
         </CardContent>
       </Card>
+      </div>
 
       <div className="z-20 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur lg:sticky lg:bottom-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

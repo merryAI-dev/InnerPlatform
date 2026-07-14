@@ -45,6 +45,7 @@ import { normalizeProjectRevenueFields } from '../../platform/project-financials
 import { buildProjectTeamParticipationEntries } from '../../platform/project-team-participation';
 import { describeProjectRequestVersion } from '../../platform/project-change-request';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
+import { normalizeProjectDepartment } from '../../platform/project-cic';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -444,7 +445,7 @@ export function ProjectDetailPage() {
         <Card>
           <CardContent className="pt-3 pb-3">
             <p className="text-xs text-muted-foreground mb-1">담당조직(CIC) / 팀</p>
-            <p className="text-sm" style={{ fontWeight: 500 }}>{project.department}</p>
+                  <p className="text-sm" style={{ fontWeight: 500 }}>{normalizeProjectDepartment(project.department) || '-'}</p>
             <p className="text-xs text-muted-foreground">{project.teamName || '-'}</p>
           </CardContent>
         </Card>
@@ -614,7 +615,7 @@ export function ProjectDetailPage() {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">담당조직(CIC)</span>
-                      <span>{project.department}</span>
+                      <span>{normalizeProjectDepartment(project.department) || '-'}</span>
                     </div>
                     <div className="flex justify-between gap-4">
                       <span className="text-muted-foreground">팀(팀장)</span>

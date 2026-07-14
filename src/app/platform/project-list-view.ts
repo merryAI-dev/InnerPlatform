@@ -1,6 +1,7 @@
 import type { Project } from '../data/types';
 import { normalizeSettlementType } from '../data/types';
 import { matchesProjectSearch } from './project-search';
+import { normalizeProjectDepartment } from './project-cic';
 
 export function groupProjectListItems(projects: Project[]) {
   const active = projects.filter((project) => !project.trashedAt);
@@ -24,5 +25,5 @@ export function matchesProjectListFilters(project: Project, filters: {
   if (!matchesProjectSearch(project, filters.search)) return false;
   if (filters.status !== 'ALL' && project.status !== filters.status) return false;
   if (filters.settlementType !== 'ALL' && normalizeSettlementType(project.settlementType) !== filters.settlementType) return false;
-  return filters.department === 'ALL' || project.department === filters.department;
+  return filters.department === 'ALL' || normalizeProjectDepartment(project.department) === normalizeProjectDepartment(filters.department);
 }

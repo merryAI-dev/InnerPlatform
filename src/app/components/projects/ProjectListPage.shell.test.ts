@@ -51,10 +51,30 @@ describe('ProjectListPage shell contract', () => {
     expect(source.indexOf('data-testid="projects-tab-in-progress"')).toBeLessThan(
       source.indexOf('data-testid="projects-tab-completed"'),
     );
-    expect(source.indexOf('data-testid="projects-tab-completed"')).toBeLessThan(
-      source.indexOf('data-testid="projects-tab-trash"'),
-    );
+    expect(source).not.toContain('data-testid="projects-tab-trash"');
     expect(source).not.toContain('data-testid="projects-tab-confirmed"');
+  });
+
+  it('visually groups lifecycle tabs with a three-stage gradient', () => {
+    expect(source).toContain('grid-cols-3');
+    expect(source).toContain('from-amber-50 via-sky-50 to-emerald-50');
+    expect(source).toContain('data-[state=active]:bg-amber-100');
+    expect(source).toContain('data-[state=active]:bg-sky-100');
+    expect(source).toContain('data-[state=active]:bg-emerald-100');
+  });
+
+  it('keeps the contract-pending action consistent across rows', () => {
+    expect(source).toContain('navigate(`/projects/${p.id}/edit?phase=CONFIRMED`)');
+    expect(source).toContain('확정 <ArrowRight className="w-3 h-3" />');
+    expect(source).not.toContain("p.phase === 'PROSPECT'");
+  });
+
+  it('expands project context inline instead of navigating away from the list', () => {
+    expect(source).toContain('expandedProjectId');
+    expect(source).toContain('프로젝트 목적');
+    expect(source).toContain('주요 내용');
+    expect(source).toContain('normalizeProjectDepartment(p.department)');
+    expect(source).not.toContain('onClick={() => navigate(`/projects/${p.id}`)}');
   });
 
   it('surfaces pending PM change requests from both request collections', () => {

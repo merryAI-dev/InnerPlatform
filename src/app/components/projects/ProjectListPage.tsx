@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
-  FolderKanban, RotateCcw, Trash2,
+  FolderKanban, RotateCcw, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
@@ -27,6 +27,7 @@ import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { groupProjectListItems, matchesProjectListFilters } from '../../platform/project-list-view';
 import { canAccessAdminPath } from '../../platform/admin-nav';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
+import { normalizeProjectDepartment } from '../../platform/project-cic';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -52,6 +53,7 @@ export function ProjectListPage() {
   const [sortKey, setSortKey] = useState<SortKey>('contractAmount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('contract-pending');
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const pendingProjectChangeMap = usePendingProjectChangeRequests();
 
   const {
@@ -70,7 +72,7 @@ export function ProjectListPage() {
         : contractPendingProjects;
 
   const departments = useMemo(() => {
-    const depts = new Set(tabProjects.map((project) => project.department).filter(Boolean));
+    const depts = new Set(tabProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean));
     return Array.from(depts).sort();
   }, [tabProjects]);
   const hasActiveFilters = !!search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL';
@@ -209,17 +211,27 @@ export function ProjectListPage() {
             </TableHeader>
             <TableBody>
               {list.map(p => (
+                <Fragment key={p.id}>
                 <TableRow
                   key={p.id}
                   data-testid={activeTab === 'trash' ? `project-trash-row-${p.id}` : `project-list-row-${p.id}`}
-                  className="cursor-pointer hover:bg-accent/50"
-                  onClick={() => navigate(`/projects/${p.id}`)}
+                  className={`cursor-pointer hover:bg-accent/50 ${expandedProjectId === p.id ? 'bg-slate-50' : ''}`}
+                  aria-expanded={expandedProjectId === p.id}
+                  tabIndex={0}
+                  onClick={() => setExpandedProjectId((current) => current === p.id ? null : p.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setExpandedProjectId((current) => current === p.id ? null : p.id);
+                    }
+                  }}
                 >
                   <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
-                    {p.department || '-'}
+                    {normalizeProjectDepartment(p.department) || '-'}
                   </TableCell>
                   <TableCell style={{ fontWeight: 500 }} className="max-w-[220px] truncate text-sm">
                     <span className="inline-flex max-w-full items-center gap-1.5">
+                      {expandedProjectId === p.id ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-slate-500" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
                       <span className="truncate">{p.name}</span>
                       {pendingProjectChangeMap.has(p.id) ? (
                         <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
@@ -270,19 +282,42 @@ export function ProjectListPage() {
                   )}
                   {activeTab === 'contract-pending' && (
                     <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                      {p.phase === 'PROSPECT' ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[10px] gap-0.5 px-1.5"
-                          onClick={() => navigate(`/projects/${p.id}/edit?phase=CONFIRMED`)}
-                        >
-                          확정 <ArrowRight className="w-3 h-3" />
-                        </Button>
-                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px] gap-0.5 px-1.5"
+                        onClick={() => navigate(`/projects/${p.id}/edit?phase=CONFIRMED`)}
+                      >
+                        확정 <ArrowRight className="w-3 h-3" />
+                      </Button>
                     </TableCell>
                   )}
                 </TableRow>
+                {expandedProjectId === p.id ? (
+                  <TableRow key={`${p.id}-details`} className="bg-slate-50/80 hover:bg-slate-50/80">
+                    <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'contract-pending' ? 9 : 8} className="px-4 py-3">
+                      <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs md:grid-cols-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">프로젝트 목적</p>
+                          <p className="mt-1 whitespace-pre-line leading-5 text-slate-700">{p.projectPurpose || '등록된 목적이 없습니다.'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">주요 내용</p>
+                          <p className="mt-1 whitespace-pre-line leading-5 text-slate-700">{p.description || '등록된 주요 내용이 없습니다.'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">기본 정보</p>
+                          <dl className="mt-1 space-y-1 text-slate-700">
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">공식 계약명</dt><dd className="text-right">{p.officialContractName || '-'}</dd></div>
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">프로젝트 유형</dt><dd className="text-right">{p.type || '-'}</dd></div>
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">담당조직(CIC)</dt><dd className="text-right">{normalizeProjectDepartment(p.department) || '-'}</dd></div>
+                          </dl>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                </Fragment>
               ))}
 
               {list.length === 0 && (
@@ -334,33 +369,41 @@ export function ProjectListPage() {
         value={activeTab}
         onValueChange={setActiveTab}
       >
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="contract-pending" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-contract-pending">
+        <TabsList
+          aria-label="프로젝트 진행 단계"
+          className="grid w-full grid-cols-3 border border-slate-200/80 bg-gradient-to-r from-amber-50 via-sky-50 to-emerald-50 p-1"
+        >
+          <TabsTrigger
+            value="contract-pending"
+            className="gap-1 px-1.5 text-amber-900/80 data-[state=active]:bg-amber-100 data-[state=active]:text-amber-950 sm:gap-1.5 sm:px-3"
+            data-testid="projects-tab-contract-pending"
+          >
             <Sparkles className="w-3.5 h-3.5" />
             계약 전
             <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="in-progress" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-in-progress">
+          <TabsTrigger
+            value="in-progress"
+            className="gap-1 px-1.5 text-sky-900/80 data-[state=active]:bg-sky-100 data-[state=active]:text-sky-950 sm:gap-1.5 sm:px-3"
+            data-testid="projects-tab-in-progress"
+          >
             <ArrowRight className="w-3.5 h-3.5" />
             진행
             <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {inProgressProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="completed" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-completed">
+          <TabsTrigger
+            value="completed"
+            className="gap-1 px-1.5 text-emerald-900/80 data-[state=active]:bg-emerald-100 data-[state=active]:text-emerald-950 sm:gap-1.5 sm:px-3"
+            data-testid="projects-tab-completed"
+          >
             <CheckCircle2 className="w-3.5 h-3.5" />
             종료
             <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {completedProjects.length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="trash" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-trash">
-            <Trash2 className="w-3.5 h-3.5" />
-            휴지통
-            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
-              {trashedProjects.length}
             </Badge>
           </TabsTrigger>
         </TabsList>
