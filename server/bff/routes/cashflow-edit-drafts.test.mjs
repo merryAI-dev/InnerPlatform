@@ -155,7 +155,7 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
     await expect(h.service.get({
       tenantId: 'tenant-a', actorId: 'actor-admin', projectId: 'project-a',
-    })).rejects.toMatchObject({ statusCode: 403, code: 'forbidden' });
+    })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
     await expect(h.service.open({
       ...h.base, actorId: 'actor-b', sessionId: 'session-b', leaseId: 'lease-b',
       idempotencyKey: 'open-b', baseSnapshot, payload,

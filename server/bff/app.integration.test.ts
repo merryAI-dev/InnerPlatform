@@ -1813,6 +1813,15 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(successCount).toBe(1);
     expect(conflictCount).toBe(24);
+
+    const stored = await db.doc(`orgs/${tenantId}/transactions/tx-race-001`).get();
+    expect(stored.data()).toMatchObject({ state: 'SUBMITTED', version: 2 });
+
+    const stateChangeEvents = await db.collection('outbox')
+      .where('eventType', '==', 'transaction.state_changed')
+      .where('entityId', '==', 'tx-race-001')
+      .get();
+    expect(stateChangeEvents.size).toBe(1);
   });
 
   it('audits member role changes and blocks unauthorized actor role', async () => {
@@ -2097,7 +2106,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(approved.body.state).toBe('APPROVED');
   });
 
-  it('enforces audit-read RBAC while normalizing legacy viewer to pm for writes', async () => {
+  it('enforces audit-read RBAC and requires legacy viewers to use private registration drafts', async () => {
     const deniedAudit = await api
       .get('/api/v1/audit-logs')
       .set({ ...defaultHeaders, 'x-actor-role': 'pm' });
@@ -2110,8 +2119,8 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .set({ ...defaultHeaders, 'x-actor-role': 'viewer', 'idempotency-key': 'idem-rbac-viewer-write' })
       .send({ id: 'p-rbac-viewer-write', name: 'Viewer Project' });
 
-    expect(viewerWrite.status).toBe(201);
-    expect(viewerWrite.body.id).toBe('p-rbac-viewer-write');
+    expect(viewerWrite.status).toBe(403);
+    expect(viewerWrite.body.error).toBe('project_registration_draft_required');
   });
 
   it('writes through generic pipeline without mutating canonical cashflow weeks', async () => {

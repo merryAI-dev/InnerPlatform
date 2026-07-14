@@ -459,7 +459,17 @@ export function createCashflowEditDraftService({
     async get(input) {
       const current = context(input, { ownership: false, idempotency: false });
       return db.runTransaction(async (tx) => {
-        const { draft } = await ownedDraft(tx, current);
+        const draftSnap = await tx.get(refs(current).draft);
+        const draft = draftSnap.exists ? (draftSnap.data() || {}) : null;
+        if (
+          !draft
+          || readOptionalText(draft.ownerUid) !== current.actorId
+          || readOptionalText(draft.resourceType) !== RESOURCE_TYPE
+          || readOptionalText(draft.resourceId) !== current.projectId
+        ) {
+          throw createHttpError(404, 'Cashflow edit draft not found', 'not_found');
+        }
+        await accessProject(tx, current);
         return { draft: draftContract(draft) };
       });
     },
