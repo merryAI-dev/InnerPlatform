@@ -19,11 +19,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import {
   PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
-  SETTLEMENT_TYPE_LABELS, SETTLEMENT_TYPE_SHORT, normalizeSettlementType,
+  SETTLEMENT_TYPE_LABELS, normalizeSettlementType,
   type ProjectStatus, type ProjectType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { matchesProjectSearch } from '../../platform/project-search';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
 
 const statusColor: Record<string, string> = {
@@ -82,15 +83,7 @@ export function ProjectListPage() {
 
   const filtered = useMemo(() => {
     let result = tabProjects.filter(p => {
-      if (search) {
-        const q = search.toLowerCase();
-        const matches = p.name.toLowerCase().includes(q)
-          || p.clientOrg?.toLowerCase().includes(q)
-          || p.department?.toLowerCase().includes(q)
-          || p.managerName?.toLowerCase().includes(q)
-          || p.groupwareName?.toLowerCase().includes(q);
-        if (!matches) return false;
-      }
+      if (!matchesProjectSearch(p, search)) return false;
       if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
       if (typeFilter !== 'ALL' && p.type !== typeFilter) return false;
       if (deptFilter !== 'ALL' && p.department !== deptFilter) return false;
@@ -143,8 +136,8 @@ export function ProjectListPage() {
       }
       : activeTab === 'prospect'
         ? {
-          title: '입찰/예정 프로젝트가 없습니다',
-          description: '등록 요청은 포털에서 접수되고, 여기서는 예정 프로젝트를 검토하고 확정으로 전환합니다.',
+          title: '계약 전 프로젝트가 없습니다',
+          description: '등록 요청은 포털에서 접수되고, 여기서는 계약 전 프로젝트를 검토하고 확정으로 전환합니다.',
         }
         : activeTab === 'trash'
           ? {
@@ -199,7 +192,7 @@ export function ProjectListPage() {
                     계약금액 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[80px] text-center">정산 유형</TableHead>
+                <TableHead className="min-w-[150px] text-center">정산 유형</TableHead>
                 {activeTab === 'trash' && (
                   <>
                     <TableHead className="min-w-[90px]">삭제일</TableHead>
@@ -251,9 +244,8 @@ export function ProjectListPage() {
                   <TableCell className="text-center text-sm">
                     <span
                       className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700"
-                      title={SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]}
                     >
-                      {SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]}
+                      {SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]}
                     </span>
                   </TableCell>
                   {activeTab === 'trash' && (
@@ -296,8 +288,8 @@ export function ProjectListPage() {
                       : activeTab === 'trash'
                         ? '휴지통이 비어 있습니다.'
                         : activeTab === 'prospect'
-                          ? '예정 프로젝트가 없습니다.'
-                          : '확정 프로젝트가 없습니다.'}
+                          ? '계약 전 프로젝트가 없습니다.'
+                          : '등록 프로젝트가 없습니다.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -315,7 +307,17 @@ export function ProjectListPage() {
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
-        description={`활성 ${activeProjects.length}개 프로젝트 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
+        description={`활성 ${activeProjects.length}개 프로젝트 · 계약 전 ${prospectProjects.length} / 진행 ${activeProjects.filter((project) => project.status === 'IN_PROGRESS').length} / 종료 ${activeProjects.filter((project) => project.status === 'COMPLETED' || project.status === 'COMPLETED_PENDING_PAYMENT').length}`}
+        actions={(
+          <>
+            <Button variant="outline" size="sm" onClick={() => navigate('/approvals')}>
+              승인 대기 확인
+            </Button>
+            <Button size="sm" onClick={() => navigate('/projects/new')}>
+              프로젝트 등록
+            </Button>
+          </>
+        )}
       />
 
       {/* Tabs */}
@@ -326,14 +328,14 @@ export function ProjectListPage() {
         <TabsList>
           <TabsTrigger value="confirmed" className="gap-1.5" data-testid="projects-tab-confirmed">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            확정 프로젝트
+            등록 프로젝트
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {confirmedProjects.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="prospect" className="gap-1.5" data-testid="projects-tab-prospect">
             <Sparkles className="w-3.5 h-3.5" />
-            입찰/예정
+            계약 전
             <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
               {prospectProjects.length}
             </Badge>
@@ -354,7 +356,7 @@ export function ProjectListPage() {
               <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="프로젝트명, 계약 대상, 담당자 검색..."
+                  placeholder="프로젝트명, 계약명, 계약대상, 담당조직, 운영진 검색"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="pl-8"

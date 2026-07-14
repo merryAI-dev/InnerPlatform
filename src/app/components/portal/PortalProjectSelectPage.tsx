@@ -13,6 +13,7 @@ import {
   resolvePortalProjectCandidates,
   resolvePortalProjectSwitchPath,
 } from '../../platform/portal-project-selection';
+import { matchesProjectSearch } from '../../platform/project-search';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
@@ -20,20 +21,6 @@ import { Input } from '../ui/input';
 
 function normalizeSearchValue(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function matchesProjectSearch(project: Project, query: string): boolean {
-  if (!query) return true;
-  const haystack = [
-    project.name,
-    project.clientOrg,
-    project.type,
-    project.managerName,
-    project.department,
-  ]
-    .map((value) => String(value || '').toLowerCase())
-    .join(' ');
-  return haystack.includes(query);
 }
 
 function ProjectStartCard(props: {
@@ -204,7 +191,7 @@ export function PortalProjectSelectPage() {
                 name="portalProjectSearch"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="프로젝트명, 계약 대상, 유형, PM으로 검색"
+                placeholder="프로젝트명, 계약명, 계약대상, 담당조직, 운영진으로 검색"
                 className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
               />
             </div>
@@ -275,7 +262,7 @@ export function PortalProjectSelectPage() {
                   {normalizedQuery ? '일치하는 프로젝트가 없습니다.' : '검색어를 입력하면 다른 프로젝트를 바로 찾을 수 있습니다.'}
                 </p>
                 <p className="mt-1 text-[12px] text-muted-foreground">
-                  {normalizedQuery ? '다른 프로젝트명이나 PM 이름으로 다시 검색해 보세요.' : '프로젝트명, 계약 대상, 유형, PM 기준으로 검색할 수 있습니다.'}
+                  {normalizedQuery ? '다른 프로젝트명이나 운영진 이름으로 다시 검색해 보세요.' : '프로젝트명, 계약명, 계약대상, 담당조직, 운영진 기준으로 검색할 수 있습니다.'}
                 </p>
               </CardContent>
             </Card>

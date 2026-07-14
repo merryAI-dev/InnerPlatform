@@ -19,4 +19,9 @@ describe('PortalProjectSelectPage shell', () => {
     expect(source).not.toContain('주사업으로 지정');
     expect(source).not.toContain('증빙 드라이브 연결');
   });
+
+  it('searches the full PPT-defined project identity fields', () => {
+    expect(source).toContain('matchesProjectSearch(project, normalizedQuery)');
+    expect(source).toContain('프로젝트명, 계약명, 계약대상, 담당조직, 운영진으로 검색');
+  });
 });
