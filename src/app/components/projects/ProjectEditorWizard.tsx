@@ -1356,7 +1356,7 @@ export function ProjectEditorWizard({
             </SelectContent>
           </Select>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 PM 포털 노출은 이 UID 기준으로 연결됩니다.
+            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
           </p>
           {hasUnlinkedStoredOwner ? (
             <p className="mt-1 text-[11px] text-red-700">

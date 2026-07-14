@@ -7,7 +7,7 @@ const searchSource = readFileSync(resolve(import.meta.dirname, 'AdminCommandSear
 const routesSource = readFileSync(resolve(import.meta.dirname, '../../routes.tsx'), 'utf8');
 
 describe('FeatureSearchPage shell contract', () => {
-  it('makes feature search the full-screen admin landing page with admin and PM grouping', () => {
+  it('makes feature search the full-screen admin landing page with admin and practitioner grouping', () => {
     expect(routesSource).toContain('const FeatureSearchPage');
     expect(routesSource).toContain('function MobileAwareAdminHome()');
     expect(routesSource).toContain('shouldUseBusinessCardMobileEntry');
@@ -19,7 +19,7 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('안녕하세요, {displayName} 사내기업가님');
     expect(source).toContain('아래 검색창에서 원하시는 기능을 바로 탐색하실 수 있습니다.');
     expect(source).toContain('관리자');
-    expect(source).toContain('PM');
+    expect(source).toContain('실무자');
     expect(source).toContain('전체 프로젝트 보기');
     expect(source).toContain('description');
     expect(source).toContain('프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.');
