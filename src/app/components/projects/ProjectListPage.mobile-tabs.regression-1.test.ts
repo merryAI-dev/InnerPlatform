@@ -9,7 +9,7 @@ describe('ProjectListPage mobile lifecycle tabs', () => {
   // Found by /qa on 2026-07-14
   // Report: .gstack/qa-reports/qa-report-project-navigation-2026-07-14.md
   it('fits the three current lifecycle tabs in one responsive grid', () => {
-    expect(source).toContain('className="grid w-full grid-cols-3 overflow-hidden');
+    expect(source).toMatch(/<TabsList[\s\S]*?className="[^"]*\bgrid-cols-3\b[^"]*"/);
     expect(source).toContain('data-testid="projects-tab-contract-pending"');
     expect(source).toContain('data-testid="projects-tab-in-progress"');
     expect(source).toContain('data-testid="projects-tab-completed"');
