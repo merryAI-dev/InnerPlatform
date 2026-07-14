@@ -81,6 +81,16 @@ describe('ProjectListPage shell contract', () => {
     expect(source.indexOf('진행 상태</Label>')).toBeLessThan(source.indexOf('정산 유형</Label>'));
   });
 
+  it('renders approval-log monthly performance with KST twelve-month bars and MoM', () => {
+    expect(source).toContain('buildProjectMonthlyPerformance(summaryProjects)');
+    expect(source).toContain('승인 기준 월별');
+    expect(source).toContain('최근 12개월 · KST');
+    expect(source).toContain('매출 MoM');
+    expect(source).toContain('총수익 MoM');
+    expect(source).toContain('#001e46');
+    expect(source).toContain('#315f8c');
+  });
+
   it('shows and sorts the registered total revenue next to contract amount', () => {
     expect(source).toContain("type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status'");
     expect(source).toContain("handleSort('totalRevenueAmount')");
