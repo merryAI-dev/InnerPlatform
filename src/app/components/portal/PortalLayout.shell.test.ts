@@ -59,6 +59,10 @@ describe('PortalLayout shell actions', () => {
 
   it('uses a compact MYSC logo without extra workspace subtitle copy', () => {
     expect(portalLayoutSource).toContain('MyscWordmark');
+    expect(portalLayoutSource.match(/aria-label="처음 화면으로 이동"/g)).toHaveLength(2);
+    expect(portalLayoutSource.match(/aria-label="처음 화면으로 이동"[\s\S]*?onClick=\{\(\) => requestPortalNavigation\('\/', '처음 화면'\)\}/g)).toHaveLength(2);
+    expect(portalLayoutSource).not.toContain("onClick={() => navigate('/')}\n");
+    expect(portalLayoutSource).not.toContain('aria-label="포털 홈으로 이동"');
     expect(portalLayoutSource).not.toContain('MYSC Workspace');
     expect(portalLayoutSource).not.toContain('Project Operations');
     expect(portalLayoutSource).not.toContain('My Work');

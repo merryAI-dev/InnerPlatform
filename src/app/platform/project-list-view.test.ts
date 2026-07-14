@@ -16,14 +16,17 @@ const baseProject = {
 } as unknown as Project;
 
 describe('project list view', () => {
-  it('groups contract-pending projects by status even when their phase is confirmed', () => {
+  it('groups active projects into contract-pending, in-progress, and completed tabs', () => {
     const contractPending = { ...baseProject, id: 'pending', status: 'CONTRACT_PENDING', phase: 'CONFIRMED' } as Project;
     const prospectInProgress = { ...baseProject, id: 'in-progress', status: 'IN_PROGRESS', phase: 'PROSPECT' } as Project;
+    const completed = { ...baseProject, id: 'completed', status: 'COMPLETED' } as Project;
+    const pendingPayment = { ...baseProject, id: 'pending-payment', status: 'COMPLETED_PENDING_PAYMENT' } as Project;
 
-    const grouped = groupProjectListItems([contractPending, prospectInProgress]);
+    const grouped = groupProjectListItems([contractPending, prospectInProgress, completed, pendingPayment]);
 
     expect(grouped.contractPending.map((project) => project.id)).toEqual(['pending']);
-    expect(grouped.registered.map((project) => project.id)).toEqual(['in-progress']);
+    expect(grouped.inProgress.map((project) => project.id)).toEqual(['in-progress']);
+    expect(grouped.completed.map((project) => project.id)).toEqual(['completed', 'pending-payment']);
   });
 
   it('combines settlement type, status, department, and text filters', () => {

@@ -51,20 +51,23 @@ export function ProjectListPage() {
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('contractAmount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [activeTab, setActiveTab] = useState<string>('registered');
+  const [activeTab, setActiveTab] = useState<string>('contract-pending');
   const pendingProjectChangeMap = usePendingProjectChangeRequests();
 
   const {
     active: activeProjects,
-    registered: registeredProjects,
     contractPending: contractPendingProjects,
+    inProgress: inProgressProjects,
+    completed: completedProjects,
     trashed: trashedProjects,
   } = useMemo(() => groupProjectListItems(allProjects), [allProjects]);
   const tabProjects = activeTab === 'trash'
     ? trashedProjects
-    : activeTab === 'registered'
-      ? registeredProjects
-      : contractPendingProjects;
+    : activeTab === 'completed'
+      ? completedProjects
+      : activeTab === 'in-progress'
+        ? inProgressProjects
+        : contractPendingProjects;
 
   const departments = useMemo(() => {
     const depts = new Set(tabProjects.map((project) => project.department).filter(Boolean));
@@ -129,14 +132,24 @@ export function ProjectListPage() {
           title: '계약 전 프로젝트가 없습니다',
           description: '등록 요청은 실무자 포털에서 접수되고, 여기서는 계약 전 상태의 프로젝트를 확인합니다.',
         }
-        : activeTab === 'trash'
+        : activeTab === 'in-progress'
+          ? {
+            title: '진행 중인 프로젝트가 없습니다',
+            description: '계약이 완료되어 운영을 시작한 프로젝트가 이 탭에 표시됩니다.',
+          }
+          : activeTab === 'completed'
+            ? {
+              title: '종료된 프로젝트가 없습니다',
+              description: '완료되었거나 잔금 입금을 기다리는 프로젝트가 이 탭에 표시됩니다.',
+            }
+            : activeTab === 'trash'
           ? {
             title: '휴지통이 비어 있습니다',
             description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다.',
           }
           : {
-            title: '등록 프로젝트가 없습니다',
-            description: '프로젝트가 생성되면 이 탭에서 운영 현황과 원장을 바로 확인할 수 있습니다.',
+            title: '프로젝트가 없습니다',
+            description: '프로젝트 상태를 다시 확인해 주세요.',
           };
 
     return (
@@ -299,7 +312,7 @@ export function ProjectListPage() {
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
-        description={`활성 ${activeProjects.length}개 프로젝트 · 계약 전 ${contractPendingProjects.length} / 진행 ${activeProjects.filter((project) => project.status === 'IN_PROGRESS').length} / 종료 ${activeProjects.filter((project) => project.status === 'COMPLETED' || project.status === 'COMPLETED_PENDING_PAYMENT').length}`}
+        description={`활성 ${activeProjects.length}개 프로젝트 · 계약 전 ${contractPendingProjects.length} / 진행 ${inProgressProjects.length} / 종료 ${completedProjects.length}`}
         actions={(canAccessAdminPath(currentUser?.role, '/projects/new') || canAccessAdminPath(currentUser?.role, '/approvals')) ? (
           <>
             {canAccessAdminPath(currentUser?.role, '/approvals') ? (
@@ -321,25 +334,32 @@ export function ProjectListPage() {
         value={activeTab}
         onValueChange={setActiveTab}
       >
-        <TabsList>
-          <TabsTrigger value="registered" className="gap-1.5" data-testid="projects-tab-confirmed">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            등록 프로젝트
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
-              {registeredProjects.length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="contract-pending" className="gap-1.5" data-testid="projects-tab-prospect">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="contract-pending" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-contract-pending">
             <Sparkles className="w-3.5 h-3.5" />
             계약 전
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="trash" className="gap-1.5" data-testid="projects-tab-trash">
+          <TabsTrigger value="in-progress" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-in-progress">
+            <ArrowRight className="w-3.5 h-3.5" />
+            진행
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
+              {inProgressProjects.length}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="completed" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-completed">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            종료
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
+              {completedProjects.length}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="trash" className="gap-1 px-1.5 sm:gap-1.5 sm:px-3" data-testid="projects-tab-trash">
             <Trash2 className="w-3.5 h-3.5" />
             휴지통
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
               {trashedProjects.length}
             </Badge>
           </TabsTrigger>
@@ -392,11 +412,14 @@ export function ProjectListPage() {
           </CardContent>
         </Card>
 
-        <TabsContent value="registered" className="mt-0">
-          {activeTab === 'registered' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
-        </TabsContent>
         <TabsContent value="contract-pending" className="mt-0">
           {activeTab === 'contract-pending' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
+        </TabsContent>
+        <TabsContent value="in-progress" className="mt-0">
+          {activeTab === 'in-progress' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
+        </TabsContent>
+        <TabsContent value="completed" className="mt-0">
+          {activeTab === 'completed' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
         <TabsContent value="trash" className="mt-0">
           {activeTab === 'trash' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}

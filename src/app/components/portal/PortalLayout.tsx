@@ -564,8 +564,8 @@ function PortalContent() {
           <div className={`flex items-center gap-2.5 h-[48px] px-3 ${collapsed ? 'justify-center' : ''}`}>
             <button
               type="button"
-              aria-label="포털 홈으로 이동"
-              onClick={() => navigate('/portal/project-select')}
+              aria-label="처음 화면으로 이동"
+              onClick={() => requestPortalNavigation('/', '처음 화면')}
               className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
             >
               <MyscWordmark
@@ -806,8 +806,8 @@ function PortalContent() {
               <div className="flex min-w-0 items-center gap-2">
                 <button
                   type="button"
-                  aria-label="포털 홈으로 이동"
-                  onClick={() => navigate('/portal/project-select')}
+                  aria-label="처음 화면으로 이동"
+                  onClick={() => requestPortalNavigation('/', '처음 화면')}
                   className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                 >
                   <MyscWordmark tone="onDark" size="md" />
