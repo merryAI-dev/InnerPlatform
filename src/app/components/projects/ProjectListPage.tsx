@@ -29,7 +29,7 @@ import { groupProjectListItems, matchesProjectListFilters, summarizeProjectListI
 import { normalizeProjectRevenueFields } from '../../platform/project-financials';
 import { buildProjectMonthlyPerformance } from '../../platform/project-monthly-performance';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
-import { normalizeProjectDepartment } from '../../platform/project-cic';
+import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -80,7 +80,10 @@ export function ProjectListPage() {
         : contractPendingProjects;
 
   const departments = useMemo(() => {
-    const depts = new Set(activeProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean));
+    const depts = new Set([
+      ...getProjectRegistrationCicOptions(),
+      ...activeProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean),
+    ]);
     return Array.from(depts).sort();
   }, [activeProjects]);
   const hasActiveFilters = !!search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL';
@@ -428,7 +431,7 @@ export function ProjectListPage() {
             </div>
             <div className="flex items-center gap-2 text-[10px] text-slate-600">
               <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#001e46]" />매출</span>
-              <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#315f8c]" />총수익</span>
+              <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#0e7490]" />총수익</span>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-12 gap-1" role="img" aria-label="승인 로그 기준 최근 12개월 월별 매출과 총수익 막대 그래프">
@@ -439,7 +442,7 @@ export function ProjectListPage() {
                 <div key={month.key} className="min-w-0" title={`${month.key}: 매출 ${fmtFull(month.contractAmount)}원, 총수익 ${fmtFull(month.totalRevenueAmount)}원`}>
                   <div className="flex h-24 items-end justify-center gap-px border-b border-slate-200">
                     <span className="w-1.5 rounded-t-sm bg-[#001e46]" style={{ height: `${contractHeight}%` }} />
-                    <span className="w-1.5 rounded-t-sm bg-[#315f8c]" style={{ height: `${revenueHeight}%` }} />
+                    <span className="w-1.5 rounded-t-sm bg-[#0e7490]" style={{ height: `${revenueHeight}%` }} />
                   </div>
                   <p className="mt-1 text-center text-[9px] text-slate-500">{month.label}</p>
                 </div>
@@ -453,7 +456,7 @@ export function ProjectListPage() {
             </div>
             <div className="pl-3">
               <dt className="text-[10px] text-slate-500">총수익 MoM</dt>
-              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#315f8c]">{formatMom(currentMonthPerformance?.totalRevenueAmount || 0, previousMonthPerformance?.totalRevenueAmount || 0)}</dd>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#0e7490]">{formatMom(currentMonthPerformance?.totalRevenueAmount || 0, previousMonthPerformance?.totalRevenueAmount || 0)}</dd>
             </div>
           </dl>
         </section>
