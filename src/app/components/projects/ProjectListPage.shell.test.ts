@@ -58,9 +58,19 @@ describe('ProjectListPage shell contract', () => {
   it('visually groups lifecycle tabs as a connected navy three-stage control', () => {
     expect(source).toContain('grid-cols-3');
     expect(source).toContain('bg-[#0f2747]');
-    expect(source).toContain('data-[state=active]:bg-[#1976d2]');
+    expect(source).toContain('data-[state=active]:bg-[#174a7c]');
     expect(source).toContain('data-[state=active]:text-white');
     expect(source).toContain('rounded-t-none');
+  });
+
+  it('keeps filter defaults while showing planner-defined labels in the required order', () => {
+    expect(source).toContain('프로젝트 진행 현황');
+    expect(source).toContain('conic-gradient');
+    expect(source).toContain('전체 조직');
+    expect(source).toContain('전체 상태');
+    expect(source).toContain('전체 정산 유형');
+    expect(source.indexOf('담당조직</Label>')).toBeLessThan(source.indexOf('진행 상태</Label>'));
+    expect(source.indexOf('진행 상태</Label>')).toBeLessThan(source.indexOf('정산 유형</Label>'));
   });
 
   it('keeps the contract-pending action consistent across rows', () => {
