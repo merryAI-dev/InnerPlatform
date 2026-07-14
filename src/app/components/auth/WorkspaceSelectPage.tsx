@@ -111,7 +111,7 @@ export function WorkspaceSelectPage() {
                   어느 공간에서 시작할까요?
                 </h1>
                 <p className="mt-3 text-[14px] leading-6 text-slate-600 dark:text-slate-300">
-                  로그인 직후 자주 쓰는 업무 화면을 기준으로 관리자와 PM 포털을 구분해 보여줍니다.
+                  로그인 직후 자주 쓰는 업무 화면을 기준으로 관리자와 실무자 포털을 구분해 보여줍니다.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-[12px] font-semibold">
@@ -119,7 +119,7 @@ export function WorkspaceSelectPage() {
                   관리자
                 </span>
                 <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-800 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                  PM
+                  실무자
                 </span>
               </div>
             </div>
@@ -202,7 +202,7 @@ export function WorkspaceSelectPage() {
                     )}
                   </div>
                   <div>
-                    <h2 className="text-[20px] font-bold text-slate-950 dark:text-slate-100">PM 포털</h2>
+                    <h2 className="text-[20px] font-bold text-slate-950 dark:text-slate-100">실무자 포털</h2>
                     <p className="mt-2 text-[13px] leading-6 text-slate-600 dark:text-slate-300">
                       담당 프로젝트 현황, 예산 편집, 사업비 입력, 프로젝트 등록 요청으로 이동합니다.
                     </p>
@@ -234,7 +234,7 @@ export function WorkspaceSelectPage() {
                   onClick={() => void handleSelect('portal')}
                 >
                   {pending === 'portal' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  PM 포털로 계속
+                  실무자 포털로 계속
                 </Button>
               </section>
             </div>

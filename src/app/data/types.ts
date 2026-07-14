@@ -140,7 +140,7 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE1: 'Type1. 세금계산서발행+공급가액',
   TYPE2: 'Type2. 세금계산서발행+공급대가',
-  TYPE3: 'Type3. 공급가액+세금계산서 미발행',
+  TYPE3: 'Type3. 세금계산서 미발행 + 공급가액',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
   TYPE5: 'Type5. 이나라도움+공급가액',
   NONE: '정산 없음',

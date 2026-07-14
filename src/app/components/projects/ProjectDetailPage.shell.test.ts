@@ -18,4 +18,9 @@ describe('ProjectDetailPage shell contract', () => {
     expect(source).toContain('사업관리 폴더');
     expect(source).toContain('폴더 열기');
   });
+
+  it('shows the confirmed groupware registration name in the current project detail', () => {
+    expect(source).toContain('>그룹웨어 등록명</span>');
+    expect(source).toContain("project.groupwareName || '-'");
+  });
 });

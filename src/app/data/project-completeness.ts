@@ -17,7 +17,6 @@ const FIELDS: CompletenessField[] = [
   { key: 'contractEnd', label: '계약 종료일', isFilled: (p) => p.type === 'I1' || !!String(p.contractEnd || '').trim() },
   { key: 'contractAmount', label: '계약금액', isFilled: (p) => p.type === 'I1' || hasStoredProjectContractAmount(p) },
   { key: 'paymentPlanDesc', label: '입금 계획', isFilled: (p) => !!String(p.paymentPlanDesc || '').trim() },
-  { key: 'groupwareName', label: '그룹웨어 등록명', isFilled: (p) => !!String(p.groupwareName || '').trim() },
 ];
 
 export interface ProjectCompletenessResult {

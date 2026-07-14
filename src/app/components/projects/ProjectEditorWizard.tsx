@@ -1223,10 +1223,12 @@ export function ProjectEditorWizard({
         <Input
           value={draft.officialContractName}
           onChange={(event) => update('officialContractName', event.target.value)}
-          placeholder="계약서에 적힌 명칭을 그대로 입력"
+          placeholder="계약서에 기재된 계약명 그대로 입력"
           className="mt-1 h-9 text-sm"
         />
-        <p className="mt-1 text-[10px] text-muted-foreground">계약서 표기와 띄어쓰기 그대로 입력합니다.</p>
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.
+        </p>
       </div>
 
       <div>
@@ -1234,12 +1236,17 @@ export function ProjectEditorWizard({
         <Input
           value={draft.name}
           onChange={(event) => update('name', event.target.value.slice(0, mode === 'portal-register' ? 10 : 80))}
-          placeholder="예: 뷰티풀커넥트"
+          placeholder="예: 26농식품AC"
           className="mt-1 h-9 text-sm"
         />
-        {mode === 'portal-register' ? (
-          <p className="mt-1 text-[10px] text-muted-foreground">화면에서 찾기 쉬운 짧은 이름 · {draft.name.length}/10자</p>
-        ) : null}
+        <div className="mt-1 flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <p className="max-w-3xl text-[11px] leading-5 text-muted-foreground">
+            계약연도+프로젝트명 형식으로 입력해 주세요. 재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다. 다년도 사업은 같은 프로젝트명을 사용해 주세요.
+          </p>
+          {mode === 'portal-register' ? (
+            <p className="shrink-0 text-[10px] text-muted-foreground">{draft.name.length}/10자</p>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -1248,10 +1255,12 @@ export function ProjectEditorWizard({
           <Input
             value={draft.clientOrg}
             onChange={(event) => update('clientOrg', event.target.value)}
-            placeholder="예: KOICA, 서울시, 아모레퍼시픽재단"
+            placeholder="예: 주식회사 ○○"
             className="mt-1 h-9 text-sm"
           />
-          <p className="mt-1 text-[10px] text-muted-foreground">사업자등록증상 법인명과 띄어쓰기 그대로 입력합니다.</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
+          </p>
         </div>
         <div>
           <Label className="text-xs">그룹웨어 등록명{usesRegistrationV2 ? ' *' : ''}</Label>
@@ -1261,7 +1270,9 @@ export function ProjectEditorWizard({
             placeholder="예: 2026 IBS그린임팩트펀드"
             className="mt-1 h-9 text-sm"
           />
-          <p className="mt-1 text-[10px] text-muted-foreground">계약연도+프로젝트명으로 입력합니다. 재경팀 코드는 직접 입력하지 않으며, 다년도 사업도 동일 이름을 사용합니다.</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+            계약연도+프로젝트명으로 입력합니다. 재경팀 코드는 직접 입력하지 않으며, 다년도 사업도 동일 이름을 사용합니다.
+          </p>
         </div>
       </div>
 
@@ -1270,7 +1281,7 @@ export function ProjectEditorWizard({
         <Textarea
           value={draft.projectPurpose}
           onChange={(event) => update('projectPurpose', event.target.value)}
-          placeholder="예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성"
+          placeholder="어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력&#10;예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성"
           className="mt-1 min-h-[88px] text-sm"
         />
         <p className="mt-1 text-[10px] text-muted-foreground">계약 목적을 한두 문장으로 요약합니다.</p>
@@ -1280,7 +1291,7 @@ export function ProjectEditorWizard({
         <Textarea
           value={draft.description}
           onChange={(event) => update('description', event.target.value)}
-          placeholder="수행 내용·범위·산출물을 계약서 기준으로 입력"
+          placeholder="프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약&#10;예: 1. 사업제안서 작성 교육&#10;2. 사업제안서 작성 - 25개팀 이상 1:1 코칭&#10;3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅"
           className="mt-1 min-h-[110px] text-sm"
         />
       </div>
@@ -1759,7 +1770,7 @@ export function ProjectEditorWizard({
             </SelectContent>
           </Select>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 PM 포털 노출은 이 UID 기준으로 연결됩니다.
+            구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
           </p>
           {hasUnlinkedStoredOwner ? (
             <p className="mt-1 text-[11px] text-red-700">
@@ -2380,14 +2391,15 @@ export function ProjectEditorWizard({
         </div>
       ) : null}
 
-      <Card className="border-slate-200/80 shadow-sm">
-        <CardContent className="p-4">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+      <Card className="border-slate-200/80 shadow-sm lg:sticky lg:top-4">
+        <CardContent className="p-3">
           <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
             <span>{stepIndex + 1} / {STEPS.length}</span>
             <span>{step.label}</span>
           </div>
           <Progress value={((stepIndex + 1) / STEPS.length) * 100} />
-          <div className="mt-4 grid gap-2 md:grid-cols-5">
+          <div className="mt-4 grid gap-1.5">
             {STEPS.map((item, index) => {
               const Icon = item.icon;
               const active = index === stepIndex;
@@ -2422,6 +2434,7 @@ export function ProjectEditorWizard({
           </fieldset>
         </CardContent>
       </Card>
+      </div>
 
       <div className="z-20 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur lg:sticky lg:bottom-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

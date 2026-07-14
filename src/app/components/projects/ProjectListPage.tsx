@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { Fragment, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
-  FolderKanban, RotateCcw, Trash2,
+  Search, ArrowUpDown, ArrowRight,
+  FolderKanban, RotateCcw, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '../ui/card';
@@ -18,13 +18,16 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import {
-  PROJECT_STATUS_LABELS, PROJECT_TYPE_LABELS, PROJECT_TYPE_SHORT_LABELS,
-  SETTLEMENT_TYPE_LABELS, SETTLEMENT_TYPE_SHORT, normalizeSettlementType,
-  type ProjectStatus, type ProjectType, type Project,
+  PROJECT_STATUS_LABELS,
+  SETTLEMENT_TYPE_LABELS, normalizeSettlementType,
+  type ProjectStatus, type SettlementType, type Project,
 } from '../../data/types';
 import { PageHeader } from '../layout/PageHeader';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { groupProjectListItems, matchesProjectListFilters } from '../../platform/project-list-view';
+import { canAccessAdminPath } from '../../platform/admin-nav';
 import { usePendingProjectChangeRequests } from './usePendingProjectChangeRequests';
+import { normalizeProjectDepartment } from '../../platform/project-cic';
 
 const statusColor: Record<string, string> = {
   CONTRACT_PENDING: 'bg-amber-100 text-amber-800',
@@ -41,61 +44,46 @@ type SortKey = 'name' | 'contractAmount' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export function ProjectListPage() {
-  const { allProjects, restoreProject } = useAppStore();
+  const { allProjects, restoreProject, currentUser } = useAppStore();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [settlementFilter, setSettlementFilter] = useState<string>('ALL');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('contractAmount');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [activeTab, setActiveTab] = useState<string>('confirmed');
+  const [activeTab, setActiveTab] = useState<string>('contract-pending');
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const pendingProjectChangeMap = usePendingProjectChangeRequests();
 
-  const activeProjects = useMemo(
-    () => allProjects.filter((project) => !project.trashedAt),
-    [allProjects],
-  );
-  const trashedProjects = useMemo(
-    () => allProjects.filter((project) => !!project.trashedAt),
-    [allProjects],
-  );
-  const confirmedProjects = useMemo(
-    () => activeProjects.filter((project) => project.phase === 'CONFIRMED'),
-    [activeProjects],
-  );
-  const prospectProjects = useMemo(
-    () => activeProjects.filter((project) => project.phase === 'PROSPECT'),
-    [activeProjects],
-  );
+  const {
+    active: activeProjects,
+    contractPending: contractPendingProjects,
+    inProgress: inProgressProjects,
+    completed: completedProjects,
+    trashed: trashedProjects,
+  } = useMemo(() => groupProjectListItems(allProjects), [allProjects]);
   const tabProjects = activeTab === 'trash'
     ? trashedProjects
-    : activeTab === 'confirmed'
-      ? confirmedProjects
-      : prospectProjects;
+    : activeTab === 'completed'
+      ? completedProjects
+      : activeTab === 'in-progress'
+        ? inProgressProjects
+        : contractPendingProjects;
 
   const departments = useMemo(() => {
-    const depts = new Set(tabProjects.map((project) => project.department).filter(Boolean));
+    const depts = new Set(tabProjects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean));
     return Array.from(depts).sort();
   }, [tabProjects]);
-  const hasActiveFilters = !!search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL';
+  const hasActiveFilters = !!search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL';
 
   const filtered = useMemo(() => {
-    let result = tabProjects.filter(p => {
-      if (search) {
-        const q = search.toLowerCase();
-        const matches = p.name.toLowerCase().includes(q)
-          || p.clientOrg?.toLowerCase().includes(q)
-          || p.department?.toLowerCase().includes(q)
-          || p.managerName?.toLowerCase().includes(q)
-          || p.groupwareName?.toLowerCase().includes(q);
-        if (!matches) return false;
-      }
-      if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
-      if (typeFilter !== 'ALL' && p.type !== typeFilter) return false;
-      if (deptFilter !== 'ALL' && p.department !== deptFilter) return false;
-      return true;
-    });
+    const result = tabProjects.filter((project) => matchesProjectListFilters(project, {
+      search,
+      status: statusFilter,
+      settlementType: settlementFilter,
+      department: deptFilter,
+    }));
 
     result.sort((a, b) => {
       let cmp = 0;
@@ -108,7 +96,7 @@ export function ProjectListPage() {
     });
 
     return result;
-  }, [tabProjects, search, statusFilter, typeFilter, deptFilter, sortKey, sortDir]);
+  }, [tabProjects, search, statusFilter, settlementFilter, deptFilter, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -131,7 +119,7 @@ export function ProjectListPage() {
   const resetFilters = () => {
     setSearch('');
     setStatusFilter('ALL');
-    setTypeFilter('ALL');
+    setSettlementFilter('ALL');
     setDeptFilter('ALL');
   };
 
@@ -141,19 +129,29 @@ export function ProjectListPage() {
         title: '검색 조건에 맞는 프로젝트가 없습니다',
         description: '필터를 초기화하고 전체 포트폴리오를 다시 확인해 주세요.',
       }
-      : activeTab === 'prospect'
+      : activeTab === 'contract-pending'
         ? {
-          title: '입찰/예정 프로젝트가 없습니다',
-          description: '등록 요청은 포털에서 접수되고, 여기서는 예정 프로젝트를 검토하고 확정으로 전환합니다.',
+          title: '계약 전 프로젝트가 없습니다',
+          description: '등록 요청은 실무자 포털에서 접수되고, 여기서는 계약 전 상태의 프로젝트를 확인합니다.',
         }
-        : activeTab === 'trash'
+        : activeTab === 'in-progress'
+          ? {
+            title: '진행 중인 프로젝트가 없습니다',
+            description: '계약이 완료되어 운영을 시작한 프로젝트가 이 탭에 표시됩니다.',
+          }
+          : activeTab === 'completed'
+            ? {
+              title: '종료된 프로젝트가 없습니다',
+              description: '완료되었거나 잔금 입금을 기다리는 프로젝트가 이 탭에 표시됩니다.',
+            }
+            : activeTab === 'trash'
           ? {
             title: '휴지통이 비어 있습니다',
             description: '삭제된 프로젝트가 생기면 이 탭에서 복구할 수 있습니다.',
           }
           : {
-            title: '확정 프로젝트가 없습니다',
-            description: '프로젝트가 생성되면 이 탭에서 운영 현황과 원장을 바로 확인할 수 있습니다.',
+            title: '프로젝트가 없습니다',
+            description: '프로젝트 상태를 다시 확인해 주세요.',
           };
 
     return (
@@ -199,31 +197,41 @@ export function ProjectListPage() {
                     계약금액 <ArrowUpDown className="w-3 h-3" />
                   </span>
                 </TableHead>
-                <TableHead className="min-w-[80px] text-center">정산 유형</TableHead>
+                <TableHead className="min-w-[150px] text-center">정산 유형</TableHead>
                 {activeTab === 'trash' && (
                   <>
                     <TableHead className="min-w-[90px]">삭제일</TableHead>
                     <TableHead className="min-w-[90px] text-center">액션</TableHead>
                   </>
                 )}
-                {activeTab === 'prospect' && (
+                {activeTab === 'contract-pending' && (
                   <TableHead className="min-w-[60px] text-center">액션</TableHead>
                 )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {list.map(p => (
+                <Fragment key={p.id}>
                 <TableRow
                   key={p.id}
                   data-testid={activeTab === 'trash' ? `project-trash-row-${p.id}` : `project-list-row-${p.id}`}
-                  className="cursor-pointer hover:bg-accent/50"
-                  onClick={() => navigate(`/projects/${p.id}`)}
+                  className={`cursor-pointer hover:bg-accent/50 ${expandedProjectId === p.id ? 'bg-slate-50' : ''}`}
+                  aria-expanded={expandedProjectId === p.id}
+                  tabIndex={0}
+                  onClick={() => setExpandedProjectId((current) => current === p.id ? null : p.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setExpandedProjectId((current) => current === p.id ? null : p.id);
+                    }
+                  }}
                 >
                   <TableCell className="text-[11px] text-muted-foreground whitespace-nowrap">
-                    {p.department || '-'}
+                    {normalizeProjectDepartment(p.department) || '-'}
                   </TableCell>
                   <TableCell style={{ fontWeight: 500 }} className="max-w-[220px] truncate text-sm">
                     <span className="inline-flex max-w-full items-center gap-1.5">
+                      {expandedProjectId === p.id ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-slate-500" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
                       <span className="truncate">{p.name}</span>
                       {pendingProjectChangeMap.has(p.id) ? (
                         <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
@@ -251,9 +259,8 @@ export function ProjectListPage() {
                   <TableCell className="text-center text-sm">
                     <span
                       className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700"
-                      title={SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]}
                     >
-                      {SETTLEMENT_TYPE_SHORT[normalizeSettlementType(p.settlementType)]}
+                      {SETTLEMENT_TYPE_LABELS[normalizeSettlementType(p.settlementType)]}
                     </span>
                   </TableCell>
                   {activeTab === 'trash' && (
@@ -273,7 +280,7 @@ export function ProjectListPage() {
                       </TableCell>
                     </>
                   )}
-                  {activeTab === 'prospect' && (
+                  {activeTab === 'contract-pending' && (
                     <TableCell className="text-center" onClick={e => e.stopPropagation()}>
                       <Button
                         variant="outline"
@@ -286,18 +293,43 @@ export function ProjectListPage() {
                     </TableCell>
                   )}
                 </TableRow>
+                {expandedProjectId === p.id ? (
+                  <TableRow key={`${p.id}-details`} className="bg-slate-50/80 hover:bg-slate-50/80">
+                    <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'contract-pending' ? 9 : 8} className="px-4 py-3">
+                      <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs md:grid-cols-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">프로젝트 목적</p>
+                          <p className="mt-1 whitespace-pre-line leading-5 text-slate-700">{p.projectPurpose || '등록된 목적이 없습니다.'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">주요 내용</p>
+                          <p className="mt-1 whitespace-pre-line leading-5 text-slate-700">{p.description || '등록된 주요 내용이 없습니다.'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">기본 정보</p>
+                          <dl className="mt-1 space-y-1 text-slate-700">
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">공식 계약명</dt><dd className="text-right">{p.officialContractName || '-'}</dd></div>
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">프로젝트 유형</dt><dd className="text-right">{p.type || '-'}</dd></div>
+                            <div className="flex justify-between gap-3"><dt className="text-slate-500">담당조직(CIC)</dt><dd className="text-right">{normalizeProjectDepartment(p.department) || '-'}</dd></div>
+                          </dl>
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                </Fragment>
               ))}
 
               {list.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'prospect' ? 9 : 8} className="text-center py-12 text-muted-foreground">
-                    {search || statusFilter !== 'ALL' || typeFilter !== 'ALL' || deptFilter !== 'ALL'
+                  <TableCell colSpan={activeTab === 'trash' ? 10 : activeTab === 'contract-pending' ? 9 : 8} className="text-center py-12 text-muted-foreground">
+                    {search || statusFilter !== 'ALL' || settlementFilter !== 'ALL' || deptFilter !== 'ALL'
                       ? '검색 조건에 맞는 프로젝트가 없습니다'
                       : activeTab === 'trash'
                         ? '휴지통이 비어 있습니다.'
-                        : activeTab === 'prospect'
-                          ? '예정 프로젝트가 없습니다.'
-                          : '확정 프로젝트가 없습니다.'}
+                        : activeTab === 'contract-pending'
+                          ? '계약 전 프로젝트가 없습니다.'
+                          : '등록 프로젝트가 없습니다.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -315,7 +347,21 @@ export function ProjectListPage() {
         icon={FolderKanban}
         iconGradient="linear-gradient(135deg, #0891b2, #22d3ee)"
         title="프로젝트 통합 관리"
-        description={`활성 ${activeProjects.length}개 프로젝트 · 확정 ${confirmedProjects.length} / 예정 ${prospectProjects.length} / 휴지통 ${trashedProjects.length}`}
+        description={`활성 ${activeProjects.length}개 프로젝트 · 계약 전 ${contractPendingProjects.length} / 진행 ${inProgressProjects.length} / 종료 ${completedProjects.length}`}
+        actions={(canAccessAdminPath(currentUser?.role, '/projects/new') || canAccessAdminPath(currentUser?.role, '/approvals')) ? (
+          <>
+            {canAccessAdminPath(currentUser?.role, '/approvals') ? (
+              <Button variant="outline" size="sm" onClick={() => navigate('/approvals')}>
+                승인 대기 확인
+              </Button>
+            ) : null}
+            {canAccessAdminPath(currentUser?.role, '/projects/new') ? (
+              <Button size="sm" onClick={() => navigate('/projects/new')}>
+                프로젝트 등록
+              </Button>
+            ) : null}
+          </>
+        ) : null}
       />
 
       {/* Tabs */}
@@ -323,38 +369,53 @@ export function ProjectListPage() {
         value={activeTab}
         onValueChange={setActiveTab}
       >
-        <TabsList>
-          <TabsTrigger value="confirmed" className="gap-1.5" data-testid="projects-tab-confirmed">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            확정 프로젝트
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
-              {confirmedProjects.length}
+        <TabsList
+          aria-label="프로젝트 진행 단계"
+          className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-slate-300 bg-[#0f2747] p-0 shadow-sm"
+        >
+          <TabsTrigger
+            value="contract-pending"
+            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            data-testid="projects-tab-contract-pending"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">1</span>
+            <span className="font-semibold">계약 전</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+              {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="prospect" className="gap-1.5" data-testid="projects-tab-prospect">
-            <Sparkles className="w-3.5 h-3.5" />
-            입찰/예정
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
-              {prospectProjects.length}
+          <TabsTrigger
+            value="in-progress"
+            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            data-testid="projects-tab-in-progress"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">2</span>
+            <span className="font-semibold">진행</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+              {inProgressProjects.length}
             </Badge>
           </TabsTrigger>
-          <TabsTrigger value="trash" className="gap-1.5" data-testid="projects-tab-trash">
-            <Trash2 className="w-3.5 h-3.5" />
-            휴지통
-            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
-              {trashedProjects.length}
+          <TabsTrigger
+            value="completed"
+            className="relative gap-1.5 rounded-none px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
+            data-testid="projects-tab-completed"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">3</span>
+            <span className="font-semibold">종료</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
+              {completedProjects.length}
             </Badge>
           </TabsTrigger>
         </TabsList>
 
         {/* Filters */}
-        <Card className="mt-3">
+        <Card className="mt-0 rounded-t-none border-t-0 shadow-sm">
           <CardContent className="pt-4 pb-4">
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="프로젝트명, 계약 대상, 담당자 검색..."
+                  placeholder="프로젝트명, 계약명, 계약대상, 담당조직, 운영진 검색"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="pl-8"
@@ -369,12 +430,12 @@ export function ProjectListPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <Select value={settlementFilter} onValueChange={setSettlementFilter}>
                 <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ALL">전체 유형</SelectItem>
-                  {(Object.keys(PROJECT_TYPE_LABELS) as ProjectType[]).map(k => (
-                    <SelectItem key={k} value={k}>{PROJECT_TYPE_SHORT_LABELS[k]}</SelectItem>
+                  <SelectItem value="ALL">전체 정산 유형</SelectItem>
+                  {(Object.keys(SETTLEMENT_TYPE_LABELS) as SettlementType[]).map(k => (
+                    <SelectItem key={k} value={k}>{SETTLEMENT_TYPE_LABELS[k]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -394,11 +455,14 @@ export function ProjectListPage() {
           </CardContent>
         </Card>
 
-        <TabsContent value="confirmed" className="mt-0">
-          {activeTab === 'confirmed' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
+        <TabsContent value="contract-pending" className="mt-0">
+          {activeTab === 'contract-pending' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
-        <TabsContent value="prospect" className="mt-0">
-          {activeTab === 'prospect' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
+        <TabsContent value="in-progress" className="mt-0">
+          {activeTab === 'in-progress' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
+        </TabsContent>
+        <TabsContent value="completed" className="mt-0">
+          {activeTab === 'completed' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}
         </TabsContent>
         <TabsContent value="trash" className="mt-0">
           {activeTab === 'trash' && (filtered.length === 0 ? renderEmptyState() : renderProjectTable(filtered))}

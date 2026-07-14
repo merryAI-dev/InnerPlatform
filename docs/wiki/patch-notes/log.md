@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-07-14] patch-note | project-management-deck-alignment | 프로젝트 관리 기획안 정렬
+- pages: [portal-onboarding](./pages/portal-onboarding.md)
+- summary: 프로젝트 목록을 등록 프로젝트와 계약 전 상태로 구분하고 상태·정산 유형·조직·검색 조건을 결합했다. 등록·승인 CTA는 역할 권한에 맞게 제한하고, workspace 선택과 기능 검색의 `PM 포털` 표기는 기획안 기준 `실무자 포털`로 통일했다.
+
 ## [2026-07-13] patch-note | portal-project-safe-exit | 프로젝트 임시저장 후 이탈
 - pages: [portal-register-project](./pages/portal-register-project.md), [portal-edit-project](./pages/portal-edit-project.md)
 - summary: 프로젝트 등록·수정에서 화면을 떠날 때 최신 입력을 임시저장한 뒤 수정 lease를 해제한다. 저장 또는 해제에 실패하면 이동하지 않는다.

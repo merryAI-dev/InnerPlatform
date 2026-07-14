@@ -137,7 +137,7 @@ function AppLayoutContent() {
             </p>
             {isPortalRole(displayUser?.role) && (
               <Button type="button" className="mt-5" onClick={openPortalWorkspace}>
-                사용자 포털 열기
+                실무자 포털 열기
               </Button>
             )}
           </div>
@@ -243,7 +243,7 @@ function AppLayoutContent() {
             {navGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
                 {!collapsed && (
-                  <p className="px-4 pb-1 text-[9px] tracking-[0.08em] text-slate-600" style={{ fontWeight: 600, textTransform: 'uppercase' }}>
+                  <p className="border-b border-white/10 px-4 pb-2 text-[12px] tracking-[0.02em] text-slate-200" style={{ fontWeight: 700 }}>
                     {group.label}
                   </p>
                 )}
@@ -401,14 +401,14 @@ function AppLayoutContent() {
                     size="sm"
                     onClick={openPortalWorkspace}
                     className="h-8 gap-1.5 rounded-md border border-slate-950 bg-slate-950 px-3 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-slate-400 dark:border-slate-200 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
-                    aria-label="로그아웃 없이 사용자 포털로 이동"
+                    aria-label="로그아웃 없이 실무자 포털로 이동"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">사용자 포털</span>
+                    <span className="hidden sm:inline">실무자 포털</span>
                     <span className="sm:hidden">포털</span>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent className="text-[11px]">로그아웃 없이 사용자 포털로 이동</TooltipContent>
+                <TooltipContent className="text-[11px]">로그아웃 없이 실무자 포털로 이동</TooltipContent>
               </Tooltip>
 
               <div className="w-px h-4 bg-border/50 mx-0.5" />
