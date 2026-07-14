@@ -61,16 +61,31 @@ describe('ProjectListPage shell contract', () => {
     expect(source).toContain('data-[state=active]:bg-[#174a7c]');
     expect(source).toContain('data-[state=active]:text-white');
     expect(source).toContain('rounded-t-none');
+    expect(source).toContain('h-11 w-full grid-cols-3 items-center');
+    expect(source).not.toContain('rounded-full border border-current text-[10px] font-semibold">1</span>');
   });
 
   it('keeps filter defaults while showing planner-defined labels in the required order', () => {
     expect(source).toContain('프로젝트 진행 현황');
     expect(source).toContain('conic-gradient');
+    expect(source).toContain('#e5484d');
+    expect(source).toContain('#2f9e44');
+    expect(source).toContain('#111827');
+    expect(source).toContain('summaryProjects');
+    expect(source).toContain('계약금액 합계');
+    expect(source).toContain('총수익 합계');
     expect(source).toContain('전체 조직');
     expect(source).toContain('전체 상태');
     expect(source).toContain('전체 정산 유형');
     expect(source.indexOf('담당조직</Label>')).toBeLessThan(source.indexOf('진행 상태</Label>'));
     expect(source.indexOf('진행 상태</Label>')).toBeLessThan(source.indexOf('정산 유형</Label>'));
+  });
+
+  it('shows and sorts the registered total revenue next to contract amount', () => {
+    expect(source).toContain("type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status'");
+    expect(source).toContain("handleSort('totalRevenueAmount')");
+    expect(source).toContain('총수익 <ArrowUpDown');
+    expect(source).toContain("normalizeProjectRevenueFields(p, 'totalRevenueAmount').totalRevenueAmount");
   });
 
   it('keeps the contract-pending action consistent across rows', () => {
