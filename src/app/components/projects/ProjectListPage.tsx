@@ -1,7 +1,7 @@
 import { Fragment, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Search, ArrowUpDown, Sparkles, CheckCircle2, ArrowRight,
+  Search, ArrowUpDown, ArrowRight,
   FolderKanban, RotateCcw, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -371,45 +371,45 @@ export function ProjectListPage() {
       >
         <TabsList
           aria-label="프로젝트 진행 단계"
-          className="grid w-full grid-cols-3 border border-slate-200/80 bg-gradient-to-r from-amber-50 via-sky-50 to-emerald-50 p-1"
+          className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-slate-300 bg-[#0f2747] p-0 shadow-sm"
         >
           <TabsTrigger
             value="contract-pending"
-            className="gap-1 px-1.5 text-amber-900/80 data-[state=active]:bg-amber-100 data-[state=active]:text-amber-950 sm:gap-1.5 sm:px-3"
+            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-contract-pending"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            계약 전
-            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">1</span>
+            <span className="font-semibold">계약 전</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
               {contractPendingProjects.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger
             value="in-progress"
-            className="gap-1 px-1.5 text-sky-900/80 data-[state=active]:bg-sky-100 data-[state=active]:text-sky-950 sm:gap-1.5 sm:px-3"
+            className="relative gap-1.5 rounded-none border-r border-white/15 px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-in-progress"
           >
-            <ArrowRight className="w-3.5 h-3.5" />
-            진행
-            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">2</span>
+            <span className="font-semibold">진행</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
               {inProgressProjects.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger
             value="completed"
-            className="gap-1 px-1.5 text-emerald-900/80 data-[state=active]:bg-emerald-100 data-[state=active]:text-emerald-950 sm:gap-1.5 sm:px-3"
+            className="relative gap-1.5 rounded-none px-2 py-2.5 text-slate-200 data-[state=active]:bg-[#1976d2] data-[state=active]:text-white data-[state=active]:shadow-[inset_0_-3px_0_#ffffff] sm:gap-2 sm:px-4"
             data-testid="projects-tab-completed"
           >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            종료
-            <Badge variant="secondary" className="ml-0.5 px-1 py-0 text-[10px] sm:ml-1 sm:px-1.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-semibold">3</span>
+            <span className="font-semibold">종료</span>
+            <Badge variant="secondary" className="ml-0.5 border-white/20 bg-white/10 px-1.5 py-0 text-[10px] text-current sm:ml-1">
               {completedProjects.length}
             </Badge>
           </TabsTrigger>
         </TabsList>
 
         {/* Filters */}
-        <Card className="mt-3">
+        <Card className="mt-0 rounded-t-none border-t-0 shadow-sm">
           <CardContent className="pt-4 pb-4">
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px] max-w-sm">

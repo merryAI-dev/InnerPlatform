@@ -243,7 +243,7 @@ function AppLayoutContent() {
             {navGroups.map((group, gi) => (
               <div key={group.label} className={gi > 0 ? 'mt-3' : ''}>
                 {!collapsed && (
-                  <p className="px-4 pb-1 text-[9px] tracking-[0.08em] text-slate-600" style={{ fontWeight: 600, textTransform: 'uppercase' }}>
+                  <p className="border-b border-white/10 px-4 pb-2 text-[12px] tracking-[0.02em] text-slate-200" style={{ fontWeight: 700 }}>
                     {group.label}
                   </p>
                 )}

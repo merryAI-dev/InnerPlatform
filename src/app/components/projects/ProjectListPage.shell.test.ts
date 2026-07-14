@@ -55,12 +55,12 @@ describe('ProjectListPage shell contract', () => {
     expect(source).not.toContain('data-testid="projects-tab-confirmed"');
   });
 
-  it('visually groups lifecycle tabs with a three-stage gradient', () => {
+  it('visually groups lifecycle tabs as a connected navy three-stage control', () => {
     expect(source).toContain('grid-cols-3');
-    expect(source).toContain('from-amber-50 via-sky-50 to-emerald-50');
-    expect(source).toContain('data-[state=active]:bg-amber-100');
-    expect(source).toContain('data-[state=active]:bg-sky-100');
-    expect(source).toContain('data-[state=active]:bg-emerald-100');
+    expect(source).toContain('bg-[#0f2747]');
+    expect(source).toContain('data-[state=active]:bg-[#1976d2]');
+    expect(source).toContain('data-[state=active]:text-white');
+    expect(source).toContain('rounded-t-none');
   });
 
   it('keeps the contract-pending action consistent across rows', () => {
