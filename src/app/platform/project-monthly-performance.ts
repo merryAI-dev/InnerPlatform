@@ -32,12 +32,10 @@ function kstYearMonth(date: Date) {
 
 export function buildProjectMonthlyPerformance(projects: Project[], now = new Date()): ProjectMonthlyPerformance[] {
   const current = kstYearMonth(now);
-  const months = Array.from({ length: 12 }, (_, index) => {
-    const date = new Date(Date.UTC(current.year, current.month - 12 + index, 1));
-    const year = date.getUTCFullYear();
-    const month = date.getUTCMonth() + 1;
+  const months = Array.from({ length: current.month }, (_, index) => {
+    const month = index + 1;
     return {
-      key: `${year}-${String(month).padStart(2, '0')}`,
+      key: `${current.year}-${String(month).padStart(2, '0')}`,
       label: `${month}월`,
       contractAmount: 0,
       totalRevenueAmount: 0,

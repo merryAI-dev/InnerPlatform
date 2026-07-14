@@ -42,10 +42,11 @@ function fmtFull(n: number) {
   return n.toLocaleString('ko-KR');
 }
 
-function formatMom(current: number, previous: number) {
-  if (previous <= 0) return '-';
-  const percent = ((current - previous) / previous) * 100;
-  return `${percent > 0 ? '+' : ''}${percent.toFixed(1)}%`;
+function formatChartAmount(amount: number) {
+  if (amount === 0) return '-';
+  if (Math.abs(amount) >= 100_000_000) return `${(amount / 100_000_000).toFixed(1)}억`;
+  if (Math.abs(amount) >= 10_000) return `${Math.round(amount / 10_000)}만`;
+  return fmtFull(amount);
 }
 
 type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status';
@@ -97,13 +98,6 @@ export function ProjectListPage() {
   const portfolioSummary = useMemo(() => summarizeProjectListItems(summaryProjects), [summaryProjects]);
   const monthlyPerformance = useMemo(() => buildProjectMonthlyPerformance(summaryProjects), [summaryProjects]);
   const monthlyMaximum = Math.max(...monthlyPerformance.flatMap((month) => [month.contractAmount, month.totalRevenueAmount]), 0);
-  const currentMonthPerformance = monthlyPerformance.at(-1);
-  const previousMonthPerformance = monthlyPerformance.at(-2);
-  const contractPendingEnd = portfolioSummary.total ? (portfolioSummary.contractPending / portfolioSummary.total) * 100 : 0;
-  const inProgressEnd = contractPendingEnd + (portfolioSummary.total ? (portfolioSummary.inProgress / portfolioSummary.total) * 100 : 0);
-  const lifecycleChartBackground = portfolioSummary.total
-    ? `conic-gradient(#e5484d 0 ${contractPendingEnd}%, #2f9e44 ${contractPendingEnd}% ${inProgressEnd}%, #111827 ${inProgressEnd}% 100%)`
-    : '#e2e8f0';
 
   const filtered = useMemo(() => {
     const result = tabProjects.filter((project) => matchesProjectListFilters(project, {
@@ -390,7 +384,7 @@ export function ProjectListPage() {
         description="프로젝트 등록부터 계약·운영·종료까지 현재 단계를 확인합니다."
       />
 
-      <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)_auto] xl:items-center">
+      <section aria-label="프로젝트 진행 현황" className="grid gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)] xl:items-center">
         <div>
           <p className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">프로젝트 진행 현황</p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
@@ -427,14 +421,14 @@ export function ProjectListPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">승인 기준 월별</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-800">매출 · 총수익 <span className="text-[11px] font-normal text-slate-500">최근 12개월 · KST</span></p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-800">매출 · 총수익 <span className="text-[11px] font-normal text-slate-500">올해 · KST</span></p>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-slate-600">
               <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#001e46]" />매출</span>
               <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-[#0e7490]" />총수익</span>
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-12 gap-1" role="img" aria-label="승인 로그 기준 최근 12개월 월별 매출과 총수익 막대 그래프">
+          <div className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${monthlyPerformance.length}, minmax(0, 1fr))` }} role="img" aria-label="승인 로그 기준 올해 월별 매출과 총수익 막대 그래프">
             {monthlyPerformance.map((month) => {
               const contractHeight = monthlyMaximum ? Math.max(3, (month.contractAmount / monthlyMaximum) * 100) : 0;
               const revenueHeight = monthlyMaximum ? Math.max(3, (month.totalRevenueAmount / monthlyMaximum) * 100) : 0;
@@ -449,28 +443,13 @@ export function ProjectListPage() {
               );
             })}
           </div>
-          <dl className="mt-3 grid grid-cols-2 divide-x divide-slate-200 border-t border-slate-100 pt-2">
-            <div className="pr-3">
-              <dt className="text-[10px] text-slate-500">매출 MoM</dt>
-              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#001e46]">{formatMom(currentMonthPerformance?.contractAmount || 0, previousMonthPerformance?.contractAmount || 0)}</dd>
-            </div>
-            <div className="pl-3">
-              <dt className="text-[10px] text-slate-500">총수익 MoM</dt>
-              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-[#0e7490]">{formatMom(currentMonthPerformance?.totalRevenueAmount || 0, previousMonthPerformance?.totalRevenueAmount || 0)}</dd>
-            </div>
-          </dl>
-        </section>
-        <div className="flex items-center gap-3 border-t border-slate-100 pt-4 xl:border-t-0 xl:border-l xl:pl-5 xl:pt-0">
-          <div
-            aria-label={`활성 프로젝트 ${portfolioSummary.total}개 중 계약 전 ${portfolioSummary.contractPending}개, 진행 ${portfolioSummary.inProgress}개, 종료 ${portfolioSummary.completed}개`}
-            className="grid h-16 w-16 shrink-0 place-items-center rounded-full"
-            role="img"
-            style={{ background: lifecycleChartBackground }}
-          >
-            <span className="grid h-11 w-11 place-items-center rounded-full bg-white text-sm font-bold text-[#0f2747]">{portfolioSummary.total}</span>
+          <div className="mt-2 grid gap-x-1 border-t border-slate-100 pt-2 text-[9px] tabular-nums" style={{ gridTemplateColumns: `28px repeat(${monthlyPerformance.length}, minmax(0, 1fr))` }}>
+            <span className="font-semibold text-[#001e46]">매출</span>
+            {monthlyPerformance.map((month) => <span key={`${month.key}-sales`} className="truncate text-center text-slate-600" title={`${fmtFull(month.contractAmount)}원`}>{formatChartAmount(month.contractAmount)}</span>)}
+            <span className="font-semibold text-[#0e7490]">수익</span>
+            {monthlyPerformance.map((month) => <span key={`${month.key}-revenue`} className="truncate text-center text-slate-600" title={`${fmtFull(month.totalRevenueAmount)}원`}>{formatChartAmount(month.totalRevenueAmount)}</span>)}
           </div>
-          <p className="max-w-[180px] text-xs leading-5 text-slate-600">상태별 분포를 기준으로 현재 프로젝트 포트폴리오를 확인합니다.</p>
-        </div>
+        </section>
       </section>
 
       {/* Tabs */}
