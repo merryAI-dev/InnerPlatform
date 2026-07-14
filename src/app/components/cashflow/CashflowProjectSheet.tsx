@@ -937,7 +937,7 @@ export function CashflowProjectSheet({
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
-    if (!dashboard) return cashflowSheetMirror;
+    if (!dashboard?.source || !Array.isArray(dashboard.cells)) return cashflowSheetMirror;
     return {
       projectId,
       status: dashboard.source.kind === 'PINNED_MIRROR' && dashboard.source.status === 'FRESH' ? 'FRESH' : 'STALE',
@@ -1034,8 +1034,8 @@ export function CashflowProjectSheet({
         yearMonth,
       });
       setMonthCloseResult(prepared);
-      if (!prepared.dashboard?.validation.canClose) {
-        throw new Error(prepared.dashboard?.validation.blockers[0]?.message || '서버 월 결산 검증을 통과하지 못했습니다.');
+      if (!prepared.dashboard?.validation?.canClose) {
+        throw new Error(prepared.dashboard?.validation?.blockers?.[0]?.message || '서버 월 결산 검증을 통과하지 못했습니다.');
       }
       const result = await closeCashflowMonthViaBff({
         tenantId: orgId,
@@ -1447,8 +1447,8 @@ export function CashflowProjectSheet({
 
   const projectionActualComparison = useMemo(() => {
     if (!cashflowSnapshot && !monthCloseResult?.dashboard?.comparison) return { rows: [], changedRows: [] };
-    const comparisonMonths = cashflowSnapshot?.readModel.months || [];
-    const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month.comparison]));
+    const comparisonMonths = cashflowSnapshot?.comparison?.months || [];
+    const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month]));
     if (monthCloseResult?.dashboard?.comparison) {
       comparisonByMonth.set(yearMonth, monthCloseResult.dashboard.comparison);
     }
@@ -1458,8 +1458,8 @@ export function CashflowProjectSheet({
     ];
     const rows = lineDefs.map(({ section, lineId }) => {
       const cells = annualWeeks.map((week) => {
-        const comparisonWeek = comparisonByMonth.get(week.yearMonth)?.weeks.find((candidate) => candidate.weekNo === week.weekNo);
-        const comparisonLine = comparisonWeek?.lines.find((candidate) => candidate.lineId === lineId);
+        const comparisonWeek = comparisonByMonth.get(week.yearMonth)?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
+        const comparisonLine = comparisonWeek?.lines?.find((candidate) => candidate.lineId === lineId);
         return {
           yearMonth: week.yearMonth,
           weekNo: week.weekNo,
@@ -1498,12 +1498,12 @@ export function CashflowProjectSheet({
 
   const opsSummary = useMemo(() => {
     const dashboard = monthCloseResult?.dashboard;
-    const blockers = dashboard?.validation.blockers || [];
-    const warnings = dashboard?.validation.warnings || [];
+    const blockers = dashboard?.validation?.blockers || [];
+    const warnings = dashboard?.validation?.warnings || [];
     const inbox = [
       ...blockers.map((item) => ({ id: `blocker-${item.code}`, tone: 'danger' as CashflowOpsTone, title: item.message, detail: item.code })),
       ...warnings.map((item) => ({ id: `warning-${item.code}`, tone: 'warning' as CashflowOpsTone, title: item.message, detail: item.code })),
-      ...(dashboard && !dashboard.summary.comparisonMatches
+      ...(dashboard && !dashboard.summary?.comparisonMatches
         ? [{ id: 'projection-actual-diff', tone: 'warning' as CashflowOpsTone, title: 'Projection/Actual 차이를 확인해 주세요.', detail: '서버 비교 결과에 차이가 있습니다.' }]
         : []),
     ];
@@ -1513,7 +1513,7 @@ export function CashflowProjectSheet({
     const issueCount = inbox.length;
     const kind = blockers.length > 0 || (!dashboard && !monthCloseLoading)
       ? 'blocked' as const
-      : warnings.length > 0 || !dashboard?.summary.comparisonMatches
+      : warnings.length > 0 || !dashboard?.summary?.comparisonMatches
         ? 'review' as const
         : 'ready' as const;
     const tone: CashflowOpsTone = kind === 'blocked' ? 'danger' : kind === 'review' ? 'warning' : 'success';
@@ -1531,9 +1531,9 @@ export function CashflowProjectSheet({
             : `서버 확인 항목 ${issueCount.toLocaleString()}건이 있습니다.`,
       },
       rates: {
-        projection: rate(dashboard?.summary.projectionProgressPercent || 0),
-        actual: rate(dashboard?.summary.actualProgressPercent || 0),
-        confirmation: rate(dashboard?.summary.confirmationProgressPercent || 0),
+        projection: rate(dashboard?.summary?.projectionProgressPercent || 0),
+        actual: rate(dashboard?.summary?.actualProgressPercent || 0),
+        confirmation: rate(dashboard?.summary?.confirmationProgressPercent || 0),
       },
       inbox,
     };
@@ -1555,25 +1555,25 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
   }): { amount: number; hasValue: boolean; mismatch: boolean } {
     if (params.targetYearMonth === yearMonth && monthCloseResult?.dashboard) {
-      const cell = monthCloseResult.dashboard.cells.find((candidate) => (
+      const cell = monthCloseResult.dashboard.cells?.find((candidate) => (
         candidate.mode === params.mode
         && candidate.weekNo === params.weekNo
         && candidate.cashflowLine === params.lineId
       ));
       const comparisonLine = monthCloseResult.dashboard.comparison?.weeks
-        .find((candidate) => candidate.weekNo === params.weekNo)
-        ?.lines.find((candidate) => candidate.lineId === params.lineId);
+        ?.find((candidate) => candidate.weekNo === params.weekNo)
+        ?.lines?.find((candidate) => candidate.lineId === params.lineId);
       return {
         amount: cell?.cellState === 'VALUE' ? Number(cell.amount || 0) : 0,
         hasValue: cell?.cellState === 'VALUE',
         mismatch: comparisonLine?.mismatch === true,
       };
     }
-    const month = cashflowSnapshot?.readModel.months.find((candidate) => candidate.yearMonth === params.targetYearMonth);
-    const week = month?.[params.mode].weeks.find((candidate) => candidate.weekNo === params.weekNo);
-    const comparisonLine = month?.comparison.weeks
-      .find((candidate) => candidate.weekNo === params.weekNo)
-      ?.lines.find((candidate) => candidate.lineId === params.lineId);
+    const month = cashflowSnapshot?.readModel?.months?.find((candidate) => candidate.yearMonth === params.targetYearMonth);
+    const week = month?.[params.mode]?.weeks?.find((candidate) => candidate.weekNo === params.weekNo);
+    const comparisonLine = month?.comparison?.weeks
+      ?.find((candidate) => candidate.weekNo === params.weekNo)
+      ?.lines?.find((candidate) => candidate.lineId === params.lineId);
     return {
       amount: Number(week?.amounts[params.lineId] || 0),
       hasValue: params.mode === 'projection'
@@ -1712,14 +1712,14 @@ export function CashflowProjectSheet({
     const readServerSummary = (mode: 'projection' | 'actual') => {
       const weekTotals = visibleWeeks.map((week) => {
         const dashboardWeek = week.yearMonth === yearMonth
-          ? monthCloseResult?.dashboard?.totals[mode].weeks.find((candidate) => candidate.weekNo === week.weekNo)
+          ? monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo)
           : null;
-        const serverWeek = dashboardWeek || cashflowSnapshot?.readModel.months
-          .find((month) => month.yearMonth === week.yearMonth)
-          ?.[mode].weeks.find((candidate) => candidate.weekNo === week.weekNo);
+        const serverWeek = dashboardWeek || cashflowSnapshot?.readModel?.months
+          ?.find((month) => month.yearMonth === week.yearMonth)
+          ?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
         return serverWeek || { weekNo: week.weekNo, amounts: {}, totalIn: 0, totalOut: 0, net: 0, weekIn: 0, weekOut: 0 };
       });
-      const rangeTotals = cashflowSnapshot?.readModel.range?.[mode];
+      const rangeTotals = cashflowSnapshot?.readModel?.range?.[mode];
       return {
         rowTotals: (rangeTotals?.rowTotals || {}) as Record<CashflowSheetLineId, number>,
         weekTotals,
@@ -1883,7 +1883,19 @@ export function CashflowProjectSheet({
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
               <div className="mt-1 text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · 서버 확정 원장 합계 · Projection 입력 / Actual 조회</div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="flex items-center gap-1 text-[10px] font-semibold text-slate-600">
+                <span className="sr-only">결산 대상 월</span>
+                <Input
+                  type="month"
+                  value={yearMonth}
+                  className="h-8 w-[138px] rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
+                  onChange={(event) => setYearMonth(event.target.value)}
+                />
+              </label>
+              <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
+                {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
+              </Badge>
               <Button type="button" size="sm" variant={boardIsEditing ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px] shadow-sm" onClick={startBoardEditing} disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}>
                 {cashflowLease.busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
                 수정 시작
@@ -1892,10 +1904,23 @@ export function CashflowProjectSheet({
                 <Save className="mr-1 h-3 w-3" />
                 임시저장
               </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || cashflowLease.busy || monthCloseBusy || monthCloseResult?.status !== 'OPEN'}>
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-                최종저장 · 월 결산
-              </Button>
+              {isPm && monthCloseResult?.status === 'OPEN' ? (
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || cashflowLease.busy || monthCloseBusy}>
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                  최종저장 · 월 결산
+                </Button>
+              ) : null}
+              {isPm && monthCloseResult?.status === 'CLOSED' ? (
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
+                  재오픈 요청
+                </Button>
+              ) : null}
+              {canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
+                <>
+                  <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+                  <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+                </>
+              ) : null}
               {cashflowLease.canEdit ? (
                 <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-[10px]" onClick={() => void cashflowLease.extend()} disabled={cashflowLease.busy}>
                   {cashflowLease.remainingLabel} · 30분 연장
@@ -1933,7 +1958,7 @@ export function CashflowProjectSheet({
     if (cashflowComparisonLoading) {
       return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
     }
-    if (cashflowComparisonError || !cashflowSnapshot?.readModel.range) {
+    if (cashflowComparisonError || !cashflowSnapshot?.readModel?.range) {
       return (
         <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-3 py-6 text-center text-[12px] text-rose-700">
           {cashflowComparisonError || '서버 확정 원장과 기간 합계를 불러오지 못했습니다.'}
@@ -1951,7 +1976,7 @@ export function CashflowProjectSheet({
                 </HoverExplain>
               </div>
               <div className="text-[10px] text-slate-500">
-                BFF 기준일 {monthCloseResult?.dashboard?.summary.comparisonAsOfDate || cashflowSnapshot?.comparison.asOfDate || '-'} · 차이 = Projection - Actual
+                BFF 기준일 {monthCloseResult?.dashboard?.summary?.comparisonAsOfDate || cashflowSnapshot?.comparison?.asOfDate || '-'} · 차이 = Projection - Actual
               </div>
             </div>
             <Badge className="rounded-full border-0 bg-blue-50 px-2.5 py-1 text-[10px] text-blue-700">차이 항목만</Badge>
@@ -2281,6 +2306,31 @@ export function CashflowProjectSheet({
             </div>
           </div>
 
+          {cashflowSheetConfig && monthCloseResult?.dashboard ? (
+            <div className="overflow-x-auto rounded-[18px] border border-slate-200 bg-white">
+              <table className="w-full min-w-[720px] table-fixed text-left text-[10px]">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">사업 구분</th>
+                    <th className="px-3 py-2 font-semibold">전용계좌사업</th>
+                    <th className="px-3 py-2 font-semibold">정산 여부</th>
+                    <th className="px-3 py-2 font-semibold">입금 합계 (BO9)</th>
+                    <th className="px-3 py-2 font-semibold">미지급 표시값 (BP9)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="text-slate-900">
+                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('businessType')}</td>
+                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('accountType')}</td>
+                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('settlementStatus')}</td>
+                    <td className="px-3 py-2 tabular-nums">{monthCloseSheetControlValue('deposit')}</td>
+                    <td className="px-3 py-2 tabular-nums">{monthCloseSheetControlValue('unpaid')} <span className="text-[9px] text-slate-400">· 산식 미정</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
           <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
             <div className="grid gap-2 md:grid-cols-[210px_repeat(3,minmax(158px,1fr))]">
               <div className="flex min-w-[190px] items-center gap-3 rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={opsSummary.status.detail}>
@@ -2598,18 +2648,33 @@ export function CashflowProjectSheet({
       ? 'bg-blue-100 text-blue-800'
       : 'bg-amber-100 text-amber-800';
   const monthCloseSheetMetadataValue = (key: string): string => {
-    const value = monthCloseResult?.dashboard?.sheetMetadata[key];
+    const value = monthCloseResult?.dashboard?.sheetMetadata?.[key];
     if (!value || typeof value !== 'object' || Array.isArray(value)) return '-';
     const textValue = (value as { value?: unknown }).value;
     return typeof textValue === 'string' && textValue.trim() ? textValue.trim() : '-';
   };
   const monthCloseSheetControlValue = (key: 'deposit' | 'unpaid'): string => {
-    const value = monthCloseResult?.dashboard?.sheetControlTotals[key]?.value;
+    const value = monthCloseResult?.dashboard?.sheetControlTotals?.[key]?.value;
     return typeof value === 'number' && Number.isFinite(value) ? `${fmt(value)}원` : '-';
   };
 
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
+      {!cashflowSheetConfig ? (
+        <section className="flex flex-col gap-3 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2">
+            <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+            <div>
+              <div className="text-[12px] font-bold">시트가 아직 연결되지 않았습니다.</div>
+              <div className="mt-1 text-[10px] leading-4 text-amber-800">시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 시트값을 가져오려면 먼저 연결 범위를 설정해 주세요.</div>
+            </div>
+          </div>
+          <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 rounded-full border-amber-300 bg-white px-3 text-[10px] text-amber-900" onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}>
+            시트 연동 설정
+          </Button>
+        </section>
+      ) : null}
+
       <section data-cashflow-block="comparison" className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
@@ -2621,110 +2686,6 @@ export function CashflowProjectSheet({
           </div>
         </div>
         {renderProjectionActualDiffTable()}
-      </section>
-
-      <section data-cashflow-block="month-close" className="rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">월 결산</div>
-            <div className="mt-1 text-[10px] leading-4 text-slate-500">최종저장은 선택한 월의 스냅샷을 확정하며, 완료 후에는 수정할 수 없습니다.</div>
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="grid gap-1 text-[10px] font-semibold text-slate-600">
-              결산 대상 월
-              <Input
-                type="month"
-                value={yearMonth}
-                className="h-8 w-[150px] rounded-full bg-white px-3 text-[11px]"
-                onChange={(event) => setYearMonth(event.target.value)}
-              />
-            </label>
-            <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
-              {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
-            </Badge>
-            {monthCloseResult?.late ? <Badge className="h-8 rounded-full border-0 bg-rose-100 px-3 text-[10px] text-rose-800">기한 초과</Badge> : null}
-            {(monthCloseResult?.projectWarningCount || 0) > 0 ? (
-              <Badge className="h-8 rounded-full border-0 bg-amber-100 px-3 text-[10px] text-amber-800">
-                경고 {monthCloseResult?.projectWarningCount.toLocaleString()}회
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-
-        {monthCloseError ? (
-          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{monthCloseError}</div>
-        ) : null}
-
-        {monthCloseResult?.dashboard ? (
-          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">사업 구분</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('businessType')}</div></div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">전용계좌사업</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('accountType')}</div></div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">정산 여부</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('settlementStatus')}</div></div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">입금 합계 (BO9)</span><div className="mt-1 truncate tabular-nums text-slate-900">{monthCloseSheetControlValue('deposit')}</div></div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">미지급 표시값 (BP9)</span><div className="mt-1 truncate tabular-nums text-slate-900">{monthCloseSheetControlValue('unpaid')}</div><div className="mt-0.5 text-[9px] text-slate-500">시트 수식 표시값 · 산식 미정</div></div>
-            </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-900">
-              서버 요약 · Projection 진행 {monthCloseResult.dashboard.summary.projectionProgressPercent.toLocaleString()}% · Actual 확인 {monthCloseResult.dashboard.summary.actualProgressPercent.toLocaleString()}% · 전체 사람 확인 {monthCloseResult.dashboard.summary.confirmationProgressPercent.toLocaleString()}%
-              {monthCloseResult.dashboard.summary.closeDeadline ? ` · 결산기한 ${monthCloseResult.dashboard.summary.closeDeadline}` : ''}
-            </div>
-          </div>
-        ) : null}
-
-        {(monthCloseResult?.dashboard?.validation.warnings.length || 0) > 0 ? (
-          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-5 text-amber-800">
-            {monthCloseResult?.dashboard?.validation.warnings.map((warning) => warning.message).join(' · ')}
-          </div>
-        ) : null}
-
-        {(monthCloseResult?.dashboard?.validation.blockers.length || 0) > 0 ? (
-          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5 text-slate-600">
-            서버 확인사항 · {monthCloseResult?.dashboard?.validation.blockers.map((blocker) => blocker.message).join(' · ')}
-          </div>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-slate-50 px-3 py-3">
-          <div className="text-[11px] leading-5 text-slate-600">
-            {monthCloseResult?.status === 'CLOSED'
-              ? `${formatSheetAppliedAt(monthCloseResult.closedAt || undefined) || '최근'}에 확정되었습니다.`
-              : monthCloseResult?.status === 'REOPEN_REQUESTED'
-                ? `재오픈 사유: ${monthCloseResult.reopenReason || '-'}`
-                : '시트 고정본 160셀과 입금 일정 5행을 사람이 확인해야 최종저장할 수 있습니다.'}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {isPm && monthCloseResult?.status === 'OPEN' ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 rounded-full px-3 text-[11px]"
-                disabled={monthCloseLoading || monthCloseBusy || Boolean(monthCloseCellsState.error)}
-                onClick={() => {
-                  void (async () => {
-                    if (!cashflowLease.canEdit && !(await beginCashflowEditing())) return;
-                    setMonthCloseReviewOpen(true);
-                  })();
-                }}
-              >
-                월 결산 검토
-              </Button>
-            ) : null}
-            {isPm && monthCloseResult?.status === 'CLOSED' ? (
-              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
-                재오픈 요청
-              </Button>
-            ) : null}
-            {canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
-              <>
-                <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>
-                  재오픈 승인
-                </Button>
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>
-                  재오픈 반려
-                </Button>
-              </>
-            ) : null}
-          </div>
-        </div>
       </section>
 
       {renderUnifiedMonthlyBoard()}
@@ -2751,7 +2712,7 @@ export function CashflowProjectSheet({
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl bg-slate-50 px-3 py-2">
               <div className="text-[10px] text-slate-500">시트 고정본</div>
-              <div className="mt-1 truncate text-[11px] font-semibold text-slate-900">{monthCloseResult?.dashboard?.source.sourceRevision || cashflowSheetMirror?.sourceRevision || '준비되지 않음'}</div>
+              <div className="mt-1 truncate text-[11px] font-semibold text-slate-900">{monthCloseResult?.dashboard?.source?.sourceRevision || cashflowSheetMirror?.sourceRevision || '준비되지 않음'}</div>
             </div>
             <div className="rounded-xl bg-blue-50 px-3 py-2">
               <div className="text-[10px] text-blue-600">캐시플로 항목 확인</div>

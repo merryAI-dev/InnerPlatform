@@ -1213,18 +1213,18 @@ export function mountJvmWeeklyApiRoutes(app, {
           const monthComparison = comparisonByMonth.get(String(month?.yearMonth || ''));
           return {
             ...month,
-            comparison: {
-              weeks: monthComparison?.weeks.map(({ weekNo, amounts, totalIn, totalOut, net }) => ({
-                weekNo,
-                amounts,
-                totalIn,
-                totalOut,
-                net,
-              })) || [],
-              rowTotals: monthComparison?.rowTotals || {},
-              totalIn: monthComparison?.totalIn || 0,
-              totalOut: monthComparison?.totalOut || 0,
-              net: monthComparison?.net || 0,
+            comparison: monthComparison || {
+              yearMonth: String(month?.yearMonth || ''),
+              weeks: [],
+              rowTotals: {},
+              totalIn: 0,
+              totalOut: 0,
+              net: 0,
+              totals: {
+                projection: { totalIn: 0, totalOut: 0, balance: 0 },
+                actual: { totalIn: 0, totalOut: 0, balance: 0 },
+                difference: { totalIn: 0, totalOut: 0, balance: 0 },
+              },
             },
           };
         }),

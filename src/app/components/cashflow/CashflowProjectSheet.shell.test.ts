@@ -19,7 +19,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('makes final save mean atomic month close after private draft and server validation', () => {
     expect(source).toContain('최종저장 · 월 결산');
-    expect(source).toMatch(/await savePrivateCashflowDraft\(monthCloseInput, mutationLease\);[\s\S]*fetchCashflowMonthCloseViaBff[\s\S]*validation\.canClose[\s\S]*closeCashflowMonthViaBff/);
+    expect(source).toMatch(/await savePrivateCashflowDraft\(monthCloseInput, mutationLease\);[\s\S]*fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*closeCashflowMonthViaBff/);
     expect(source).toContain('expectedRevision: prepared.revision');
     expect(source).not.toContain('saveCashflowProjectionBatchViaBff');
     expect(source).toContain('projectionDrafts: drafts');
@@ -49,18 +49,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('consumes composed dashboard totals, comparison, summary, metadata, and validation', () => {
-    expect(source).toContain('monthCloseResult?.dashboard?.totals[mode]');
-    expect(source).toContain('cashflowSnapshot?.readModel.range?.[mode]');
+    expect(source).toContain('monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find');
+    expect(source).toContain('cashflowSnapshot?.readModel?.range?.[mode]');
     expect(source).toContain('rangeStart: cashflowSnapshotRange.start');
     expect(source).toContain('rangeEnd: cashflowSnapshotRange.end');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
-    expect(source).toContain('dashboard.summary.projectionProgressPercent');
+    expect(source).toContain('dashboard?.summary?.projectionProgressPercent');
     expect(source).toContain("monthCloseSheetMetadataValue('businessType')");
     expect(source).toContain("monthCloseSheetControlValue('deposit')");
     expect(source).toContain("monthCloseSheetControlValue('unpaid')");
     expect(source).toContain('입금 합계 (BO9)');
     expect(source).toContain('미지급 표시값 (BP9)');
-    expect(source).toContain('dashboard?.validation.blockers');
+    expect(source).toContain('dashboard?.validation?.blockers');
     expect(source).not.toContain('computeCashflowDerivedTotals');
     expect(source).not.toContain('computeOpeningCashflowTotals');
     expect(source).not.toContain('monthSummaries.reduce');
@@ -89,6 +89,21 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 연동하기');
     expect(source).not.toContain('최신값 다시 가져오기');
     expect(source).not.toContain('setInterval');
+  });
+
+  it('keeps an unlinked project usable and guides the user to sheet setup', () => {
+    expect(source).toContain('시트가 아직 연결되지 않았습니다.');
+    expect(source).toContain('시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다.');
+    expect(source).toContain('시트 연동 설정');
+    expect(source).toContain('cashflowSnapshot?.comparison?.months || []');
+    expect(source).toContain('comparisonWeek?.lines?.find');
+  });
+
+  it('shows month close only as a compact board action instead of a standalone panel', () => {
+    expect(source).not.toContain('data-cashflow-block="month-close"');
+    expect(source).toContain('type="month"');
+    expect(source).toContain('최종저장 · 월 결산');
+    expect(source).toContain('재오픈 요청');
   });
 
   it('offers the exact three in-app exit choices and releases only on exit', () => {
