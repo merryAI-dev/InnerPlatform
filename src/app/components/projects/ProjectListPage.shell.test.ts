@@ -86,7 +86,8 @@ describe('ProjectListPage shell contract', () => {
     expect(source).toContain('매출 MoM');
     expect(source).toContain('총수익 MoM');
     expect(source).toContain('#001e46');
-    expect(source).toContain('#315f8c');
+    expect(source).toContain('#0e7490');
+    expect(source).toContain('getProjectRegistrationCicOptions()');
   });
 
   it('shows and sorts the registered total revenue next to contract amount', () => {
