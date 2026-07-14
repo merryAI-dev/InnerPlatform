@@ -116,11 +116,13 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
     expect(stageWorkflowText).toContain('JVM_WEEKLY_API_BASE_URL_STAGE');
     expect(stageWorkflowText).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE');
+    expect(stageWorkflowText).toContain('JVM_WEEKLY_AUTH_MODE: strict');
     expect(stageWorkflowText).toContain('node scripts/assert-stage-edit-lease-runtime.mjs');
     expect(stageWorkflowText).toContain('--env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}"');
     expect(stageWorkflowText).toContain('--env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}"');
     expect(stageWorkflowText).toContain('--env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}"');
     expect(stageWorkflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}"');
+    expect(stageWorkflowText).toContain('--env JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE}"');
     expect(stageWorkflowText).not.toContain('--prod');
   });
 

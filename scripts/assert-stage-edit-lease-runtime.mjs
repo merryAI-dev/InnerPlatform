@@ -10,6 +10,7 @@ export function evaluateStageEditLeaseRuntime(env = process.env) {
   const failures = [];
   const dataProjectId = text(env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID);
   const jvmProjectId = text(env.JVM_WEEKLY_FIRESTORE_PROJECT_ID);
+  const authMode = text(env.JVM_WEEKLY_AUTH_MODE).toLowerCase();
   const jvmUrl = text(env.JVM_WEEKLY_API_BASE_URL);
   const serviceToken = text(env.JVM_WEEKLY_INTERNAL_API_TOKEN);
   const idTokenAudience = text(env.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE);
@@ -20,6 +21,7 @@ export function evaluateStageEditLeaseRuntime(env = process.env) {
   if (text(env.VERCEL_TARGET_ENV) !== 'preview') failures.push('Vercel target must be preview');
   if (dataProjectId !== STAGE_PROJECT_ID) failures.push(`data project must be ${STAGE_PROJECT_ID}`);
   if (jvmProjectId !== STAGE_PROJECT_ID) failures.push(`JVM Firestore project must be ${STAGE_PROJECT_ID}`);
+  if (authMode !== 'strict') failures.push('JVM weekly auth mode must be strict');
   if (dataProjectId === LIVE_PROJECT_ID || jvmProjectId === LIVE_PROJECT_ID) failures.push('Live data project is forbidden');
   if (serviceToken.length < 32) failures.push('JVM stage service token must be at least 32 characters');
   if (idTokenAudience.replace(/\/$/, '') !== jvmUrl.replace(/\/$/, '')) {
