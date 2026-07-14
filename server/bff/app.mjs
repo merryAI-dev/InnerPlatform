@@ -26,7 +26,6 @@ import {
   listSupportedViews,
 } from './projections.mjs';
 import {
-  runMonthlyCloseWorker,
   runPayrollWorker,
 } from './payroll-worker.mjs';
 import {
@@ -996,28 +995,6 @@ export function createBffApp(options = {}) {
   app.get('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
   app.post('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
 
-  const runMonthlyCloseWorkerRoute = asyncHandler(async (req, res) => {
-    assertInternalWorkerAuthorized(req);
-    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || undefined;
-    const createMonthsRaw = Number.parseInt(String(req.body?.createMonths ?? req.query?.createMonths ?? '2'), 10);
-    const createMonths = Number.isFinite(createMonthsRaw) && createMonthsRaw >= 1 && createMonthsRaw <= 6 ? createMonthsRaw : 2;
-
-    const result = await runMonthlyCloseWorker(db, {
-      tenantId,
-      nowIso: now(),
-      createMonths,
-    });
-
-    res.status(200).json({
-      ok: true,
-      worker: 'monthly_close',
-      projectId,
-      ...result,
-    });
-  });
-  app.get('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
-  app.post('/api/internal/workers/monthly-close/run', runMonthlyCloseWorkerRoute);
-
   const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
     const limit = parseLimit(req.body?.limit ?? req.query?.limit, clientErrorBatchSize, 100);
@@ -1518,6 +1495,7 @@ export function createBffApp(options = {}) {
     now,
   });
   mountJvmWeeklyApiRoutes(app, {
+    db,
     idempotencyService,
     env,
     fetchImpl: options.fetchImpl || globalThis.fetch,

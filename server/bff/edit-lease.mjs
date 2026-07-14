@@ -82,10 +82,13 @@ function auditFence(lease) {
 }
 
 function heldDetails(lease, actorId) {
+  const leaseId = readOptionalText(lease?.leaseId);
+  const fence = auditFence(lease);
   return {
     holderDisplayName: readOptionalText(lease?.holderDisplayName) || '다른 사용자',
     sameActor: readOptionalText(lease?.holderUid) === actorId,
     expiresAt: lease?.expiresAt || null,
+    holderVersion: leaseId && fence !== null ? sha256(`${leaseId}:${fence}`) : null,
   };
 }
 
@@ -375,6 +378,10 @@ export function createEditLeaseService({
       actorId: current.actorId,
       rbacPolicy,
     });
+
+    if (current.resourceType === 'cashflow' && readOptionalText(member.role).toLowerCase() !== 'pm') {
+      throw createHttpError(403, 'Only the project PM can acquire the cashflow edit session', 'forbidden');
+    }
 
     if (current.resourceType === 'project-registration') {
       const draftRef = db.doc(`orgs/${current.tenantId}/projectRequestDrafts/${current.resourceId}`);
@@ -721,9 +728,7 @@ export function createEditLeaseService({
           serverNow: timestamp,
           state: 'ACTIVE',
           canEdit: false,
-          expiresAt: lease.expiresAt,
-          holderDisplayName: readOptionalText(lease.holderDisplayName) || '다른 사용자',
-          sameActor: lease.holderUid === current.actorId,
+          ...heldDetails(lease, current.actorId),
         };
       });
     },

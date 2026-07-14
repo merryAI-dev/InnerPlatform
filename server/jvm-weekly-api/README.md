@@ -15,8 +15,8 @@ of the frontend.
 - Rebuilds sheet-scoped actual aggregates from persisted rows.
 - Writes idempotency and audit records for `weeklyExpense.saveDraft`.
 - Writes projection lines through `weeklyExpense.projection.upsert`.
-- Runs weekly submit state transitions through `weeklyExpense.submitWeek`.
-- Serves weekly submit/close status through `weeklyExpense.status.read`.
+- Keeps the historical weekly status read model for compatibility, while weekly submit/close writes are disabled by default.
+- Runs final save through the server-authoritative cashflow month-close contract.
 - Creates hash-addressed CSV audit export artifacts through `weeklyExpense.auditExport.create`.
 - Enforces command-level role gates before persistence.
 - Provides a backend cashflow read model for projection + actual comparison.
@@ -47,6 +47,18 @@ Optional environment:
 - `JVM_WEEKLY_FIRESTORE_PROJECT_ID`: Firestore project used when `JVM_WEEKLY_STORAGE_BACKEND=firestore`
 - `JVM_WEEKLY_FIREBASE_PROJECT_ID`: legacy fallback for both Firebase Auth and Firestore when the split envs are not set
 - `JVM_WEEKLY_ALLOWED_ORIGINS`: comma-separated browser origins allowed by CORS; defaults to fixed stage and live origins
+- `JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE`: optional Stage-only `YYYY-MM-DD` business date for month-close eligibility and late checks
+
+The runtime configuration fixes `weekly.legacy-week-close-enabled` to `false`.
+Only the isolated test profile sets it to `true` so the historical command service remains regression-tested.
+
+The QA date never changes lease expiry, saved timestamps, audit timestamps, or the host OS clock.
+The JVM refuses to start if this value is configured outside Stage. Change or clear the Stage value with:
+
+```bash
+GOOGLE_CLOUD_PROJECT=inner-platform-qa-20260310 scripts/set_stage_cashflow_month_close_qa_date.sh 2026-08-11
+GOOGLE_CLOUD_PROJECT=inner-platform-qa-20260310 scripts/set_stage_cashflow_month_close_qa_date.sh reset
+```
 
 ## First Endpoints
 
@@ -58,12 +70,16 @@ Optional environment:
 - `POST /api/v1/weekly-expenses/{projectId}/sheets/{sheetId}/commands/cut`
 - `POST /api/v1/weekly-expenses/{projectId}/sheets/{sheetId}/commands/row-insert`
 - `POST /api/v1/weekly-expenses/{projectId}/sheets/{sheetId}/commands/row-delete`
-- `POST /api/v1/weekly-expenses/{projectId}/submit`
-- `POST /api/v1/weekly-expenses/{projectId}/close`
+- `POST /api/v1/weekly-expenses/{projectId}/submit` (legacy, returns `410 Gone` by default)
+- `POST /api/v1/weekly-expenses/{projectId}/close` (legacy, returns `410 Gone` by default)
 - `GET /api/v1/weekly-expenses/{projectId}/statuses`
 - `POST /api/v1/weekly-expenses/{projectId}/audit-export`
 - `POST /api/v1/cashflow/{projectId}/projection`
 - `GET /api/v1/cashflow/{projectId}`
+- `GET /api/v1/cashflow/{projectId}/month-close?yearMonth=YYYY-MM`
+- `POST /api/v1/cashflow/{projectId}/month-close`
+- `POST /api/v1/cashflow/{projectId}/month-close/reopen-request`
+- `POST /api/v1/cashflow/{projectId}/month-close/reopen-decision`
 
 `save-draft` is no longer a placeholder. Mutating commands require trusted actor
 headers and a body idempotency key, then transactionally save the sheet and write

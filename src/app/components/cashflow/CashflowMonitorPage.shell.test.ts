@@ -8,12 +8,19 @@ const cashflowMonitorSource = readFileSync(
 );
 
 describe('CashflowMonitorPage shell contract', () => {
-  it('prioritizes weekly monitoring and the planning office page', () => {
+  it('prioritizes read-only weekly history and the planning office page', () => {
     expect(cashflowMonitorSource).toContain('캐시플로 모니터링 허브');
     expect(cashflowMonitorSource).toContain('/cashflow/weekly');
     expect(cashflowMonitorSource).toContain('/cashflow/export');
-    expect(cashflowMonitorSource).toContain('주간 모니터링');
+    expect(cashflowMonitorSource).toContain('주간 입력 이력');
     expect(cashflowMonitorSource).toContain('경영기획실 페이지');
+    expect(cashflowMonitorSource).toContain('최종 확정과 수정 잠금은 월 결산에서 처리합니다.');
+    expect(cashflowMonitorSource).toContain('조회 전용');
+    expect(cashflowMonitorSource).toContain('기존 제출 이력');
+    expect(cashflowMonitorSource).toContain('기존 결산 이력');
+    expect(cashflowMonitorSource).not.toContain('작성 대기');
+    expect(cashflowMonitorSource).not.toContain('결산 대기');
+    expect(cashflowMonitorSource).not.toContain('결산 완료');
     expect(cashflowMonitorSource).not.toContain('CashflowExportPage');
   });
 

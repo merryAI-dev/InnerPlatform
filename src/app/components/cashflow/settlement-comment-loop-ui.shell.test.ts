@@ -40,15 +40,14 @@ describe('settlement comment and review loop UI copy', () => {
     expect(commentButtonSource).not.toContain('셀 메모');
   });
 
-  it('labels pending review work as a review loop, not a person check', () => {
+  it('keeps sheet import work in the review loop and labels month-close decisions as human confirmation', () => {
     expect(importEditorSource).toContain('검토 루프');
     expect(importEditorSource).toContain('셀 주석');
     expect(importEditorSource).toContain('후보값 또는 주석 확인 필요');
     expect(importEditorRowSource).toContain('행 작업');
     expect(importEditorRowSource).toContain('검토 완료');
-    expect(cashflowProjectSheetSource).toContain('검토 루프 또는 동기화 확인');
     expect(importEditorSource).not.toContain('사람 확인');
     expect(importEditorRowSource).not.toContain('사람 확인');
-    expect(cashflowProjectSheetSource).not.toContain('사람 확인');
+    expect(cashflowProjectSheetSource).toContain('캐시플로 항목 사람 확인');
   });
 });

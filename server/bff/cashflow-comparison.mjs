@@ -98,6 +98,7 @@ export function buildCashflowProjectionActualComparison(snapshot = {}, options =
           const actualHadValue = actual.has(lineId);
           const projectionAmount = projectionHadValue ? finiteAmount(projection.get(lineId)) : 0;
           const actualAmount = actualHadValue ? finiteAmount(actual.get(lineId)) : 0;
+          const difference = projectionAmount - actualAmount;
           return {
             lineId,
             direction: IN_LINES.has(lineId) ? 'IN' : 'OUT',
@@ -105,7 +106,12 @@ export function buildCashflowProjectionActualComparison(snapshot = {}, options =
             projectionHadValue,
             actual: actualAmount,
             actualHadValue,
-            difference: projectionAmount - actualAmount,
+            difference,
+            mismatch: projectionHadValue
+              && actualHadValue
+              && projectionAmount !== 0
+              && actualAmount !== 0
+              && difference !== 0,
           };
         });
         const projectionTotals = modeTotals(lines, 'projection');

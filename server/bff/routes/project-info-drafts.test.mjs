@@ -7,6 +7,8 @@ import {
   createProjectInfoSubmittedOutboxHandler,
 } from './project-info-drafts.mjs';
 
+const VALID_PDF = Buffer.from('%PDF-1.4\n');
+
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
@@ -280,6 +282,105 @@ describe('project information private drafts', () => {
     expect(replay).toEqual({ ...submitted, replayed: true });
   });
 
+  it('preserves completed-project checkout and three private evidence PDFs in the change request', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    await openedDraft(h);
+    const kinds = ['performance_certificate', 'tax_invoice', 'final_settlement_report'];
+    for (const [revision, documentKind] of kinds.entries()) {
+      await h.service.addAttachment({
+        ...h.base,
+        idempotencyKey: `checkout-upload-${documentKind}`,
+        expectedDraftRevision: revision,
+        documentKind,
+        fileName: `${documentKind}.pdf`,
+        mimeType: 'application/pdf',
+        fileSize: VALID_PDF.byteLength,
+        buffer: VALID_PDF,
+      });
+    }
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'checkout-save',
+      expectedDraftRevision: 3,
+      payload: validPayload({
+        status: 'COMPLETED',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: true,
+          taxInvoiceEvidenceConfirmed: true,
+          finalSettlementReportConfirmed: true,
+          usbEvidenceSubmitted: true,
+          evidenceDeletedAfterUsb: true,
+        },
+      }),
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'checkout-submit',
+      expectedDraftRevision: 4,
+      expectedVersion: 3,
+    });
+
+    const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
+    expect(request.proposedSnapshot).toMatchObject({
+      checkout: {
+        finalPaymentReceived: true,
+        bankBalanceZero: true,
+        performanceCertificateReceived: true,
+        taxInvoiceEvidenceConfirmed: true,
+        finalSettlementReportConfirmed: true,
+        usbEvidenceSubmitted: true,
+        evidenceDeletedAfterUsb: true,
+      },
+      performanceCertificateDocument: { documentKind: 'performance_certificate' },
+      taxInvoiceDocument: { documentKind: 'tax_invoice' },
+      finalSettlementReportDocument: { documentKind: 'final_settlement_report' },
+    });
+    expect(h.db.documents.get('outbox/outbox-a').payload.attachmentRefs.map((item) => item.documentKind)).toEqual(kinds);
+  });
+
+  it('rejects a completed-project evidence confirmation without the matching PDF', async () => {
+    const h = harness();
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'checkout-invalid-save',
+      expectedDraftRevision: 0,
+      payload: validPayload({
+        status: 'COMPLETED',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: true,
+          taxInvoiceEvidenceConfirmed: false,
+          finalSettlementReportConfirmed: false,
+          usbEvidenceSubmitted: false,
+          evidenceDeletedAfterUsb: false,
+        },
+      }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'checkout-invalid-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
+  });
+
   it('fails closed on canonical version drift without partial writes', async () => {
     const h = harness();
     await openedDraft(h);
@@ -320,8 +421,8 @@ describe('project information private drafts', () => {
       documentKind: 'contract',
       fileName: 'contract.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     });
     const replaced = await h.service.addAttachment({
       ...h.base,
@@ -330,8 +431,8 @@ describe('project information private drafts', () => {
       documentKind: 'contract',
       fileName: 'replacement.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     });
 
     expect(uploaded.body).toMatchObject({
@@ -342,6 +443,41 @@ describe('project information private drafts', () => {
     }));
     expect(replaced.body.draft.attachmentRefs).toHaveLength(1);
     expect(replaced.body.draft.attachmentRefs[0].name).toBe('replacement.pdf');
+  });
+
+  it('maps a new original-document kind into the canonical change request field', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    await openedDraft(h);
+    const docx = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]);
+    await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'proposal-word-upload',
+      expectedDraftRevision: 0,
+      documentKind: 'proposal_word_original',
+      fileName: 'proposal.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileSize: docx.byteLength,
+      buffer: docx,
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'proposal-word-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot)
+      .toMatchObject({ proposalWordOriginalDocument: { documentKind: 'proposal_word_original' } });
   });
 
   it('allows a same-kind replacement when the private attachment list is at its limit', async () => {
@@ -378,12 +514,44 @@ describe('project information private drafts', () => {
       documentKind: 'contract',
       fileName: 'replacement.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      buffer: Buffer.from('pdf'),
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
     });
 
     expect(replaced.body.draft.attachmentRefs).toHaveLength(100);
     expect(replaced.body.draft.attachmentRefs.filter((item) => item.documentKind === 'contract'))
       .toEqual([expect.objectContaining({ name: 'replacement.pdf' })]);
+  });
+
+  it('rejects non-PDF MIME types and fake PDF content before private storage', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(),
+      deleteDraftAttachment: vi.fn(),
+    };
+    const h = harness({ storageService: storage });
+    await openedDraft(h);
+    const attachment = {
+      ...h.base,
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract.pdf',
+    };
+
+    await expect(h.service.addAttachment({
+      ...attachment,
+      idempotencyKey: 'upload-invalid-mime',
+      mimeType: 'text/plain',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'draft_attachment_invalid' });
+    const fakePdf = Buffer.from('not-a-pdf');
+    await expect(h.service.addAttachment({
+      ...attachment,
+      idempotencyKey: 'upload-invalid-magic',
+      mimeType: 'application/pdf',
+      fileSize: fakePdf.byteLength,
+      buffer: fakePdf,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'draft_attachment_invalid' });
+    expect(storage.uploadDraftAttachment).not.toHaveBeenCalled();
   });
 });

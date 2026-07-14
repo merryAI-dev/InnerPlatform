@@ -58,12 +58,11 @@ export function CashflowWeeklyPage() {
   }, [weeks, yearMonth]);
 
   const byProjectWeek = useMemo(() => {
-    const map = new Map<string, { projectionUpdated: boolean; adminClosed: boolean; totals: CashflowWeekTotals }>();
+    const map = new Map<string, { projectionUpdated: boolean; totals: CashflowWeekTotals }>();
     for (const w of weeks.filter((x) => x.yearMonth === yearMonth)) {
       const key = `${w.projectId}:${w.weekNo}`;
       map.set(key, {
         projectionUpdated: Boolean(w.projectionUpdated),
-        adminClosed: Boolean(w.adminClosed),
         totals: w.projectionTotals || emptyTotals(),
       });
     }
@@ -80,7 +79,7 @@ export function CashflowWeeklyPage() {
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)"
         title="주간 프로젝션 작성 현황(전사)"
-        description={`프로젝트별 주간 작성/결산 현황 · ${yearMonth}`}
+        description={`프로젝트별 주간 입력 현황 · ${yearMonth}`}
         actions={(
           <div className="flex items-center gap-2">
             <select
@@ -157,17 +156,14 @@ export function CashflowWeeklyPage() {
                       const status = byProjectWeek.get(cellKey);
                       const sheet = weekSheetMap.get(cellKey);
                       const projectionUpdated = Boolean(status?.projectionUpdated);
-                      const adminClosed = Boolean(status?.adminClosed);
                       const totals = status?.totals || emptyTotals();
 
                       const projectionChangeAlert = sheet?.projectionChangeAlert;
                       const hasProjectionChangeAlert = Boolean(projectionChangeAlert?.triggered);
-                      const isMissingProjection = !adminClosed && !projectionUpdated;
+                      const isMissingProjection = !projectionUpdated;
 
-                      const chip = adminClosed
-                        ? { bg: 'bg-emerald-500/15', text: 'text-emerald-700 dark:text-emerald-300', label: '결산완료' }
-                        : projectionUpdated
-                          ? { bg: 'bg-amber-500/15', text: 'text-amber-700 dark:text-amber-300', label: '작성완료' }
+                      const chip = projectionUpdated
+                          ? { bg: 'bg-amber-500/15', text: 'text-amber-700 dark:text-amber-300', label: 'Projection 저장' }
                           : { bg: 'bg-red-500/15', text: 'text-red-700 dark:text-red-300', label: '미작성' };
 
                       return (
@@ -233,7 +229,7 @@ export function CashflowWeeklyPage() {
           {!isLoading && (
             <div className="px-4 py-3 text-[10px] text-muted-foreground border-t border-border/40 flex items-center gap-3 flex-wrap">
               <Badge variant="outline" className="text-[9px] h-4 px-1.5">정의</Badge>
-              작성완료=Projection 저장 · 결산완료=관리자 결산확정 ·{' '}
+              주차 상태는 조회용 · 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리 ·{' '}
               <span className="text-red-600">빨간색</span>=미작성 ·{' '}
               <span className="text-amber-700">D-7 1천만↑</span>=주차 시작 7일 이내 Projection 1천만원 이상 변경 ·{' '}
               <Flag className="inline w-2.5 h-2.5 text-red-500" /> 확인요청{' '}

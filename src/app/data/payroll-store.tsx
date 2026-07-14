@@ -23,7 +23,6 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
 import type {
-  MonthlyClose,
   PayrollPaidStatus,
   PayrollReviewCandidate,
   PayrollReviewStatus,
@@ -40,10 +39,8 @@ import {
   subtractBusinessDays,
 } from '../platform/business-days';
 import {
-  mergeMonthlyCloseState,
   mergePayrollRunState,
   mergePayrollScheduleState,
-  sortMonthlyClosesByYearMonth,
   sortPayrollRunsByPlannedPayDate,
 } from './payroll.helpers';
 import { useFirestoreAccessPolicy } from './firestore-realtime-mode';
@@ -71,7 +68,6 @@ export function sanitizePayrollReviewCandidates(candidates: PayrollReviewCandida
 interface PayrollState {
   schedules: PayrollSchedule[];
   runs: PayrollRun[];
-  monthlyCloses: MonthlyClose[];
 }
 
 interface PayrollActions {
@@ -89,10 +85,7 @@ interface PayrollActions {
     paidStatus: PayrollPaidStatus;
     missingCandidateAlertAt?: string;
   }) => Promise<void>;
-  markMonthlyCloseDone: (input: { projectId: string; yearMonth: string }) => Promise<void>;
-  acknowledgeMonthlyClose: (closeId: string) => Promise<void>;
   getProjectRun: (projectId: string, yearMonth: string) => PayrollRun | undefined;
-  getProjectClose: (projectId: string, yearMonth: string) => MonthlyClose | undefined;
 }
 
 const _g = globalThis as any;
@@ -108,7 +101,6 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
 
   const [schedules, setSchedules] = useState<PayrollSchedule[]>([]);
   const [runs, setRuns] = useState<PayrollRun[]>([]);
-  const [monthlyCloses, setMonthlyCloses] = useState<MonthlyClose[]>([]);
   const unsubsRef = useRef<Unsubscribe[]>([]);
 
   const role = user?.role;
@@ -122,14 +114,12 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     if (authLoading || !isAuthenticated || !user) {
       setSchedules([]);
       setRuns([]);
-      setMonthlyCloses([]);
       return;
     }
 
     if (!firestoreEnabled || !db) {
       setSchedules([]);
       setRuns([]);
-      setMonthlyCloses([]);
       return;
     }
 
@@ -144,12 +134,6 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
         orderBy('plannedPayDate', 'desc'),
         limit(800),
       );
-      const closeQuery = query(
-        collection(db, getOrgCollectionPath(orgId, 'monthlyCloses')),
-        orderBy('yearMonth', 'desc'),
-        limit(800),
-      );
-
       unsubsRef.current.push(
         onSnapshot(schedulesQuery, (snap) => {
           setSchedules(snap.docs.map((d) => d.data() as PayrollSchedule));
@@ -160,12 +144,6 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
           setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
         }, (err) => console.error('[Payroll] runs listen error:', err)),
       );
-      unsubsRef.current.push(
-        onSnapshot(closeQuery, (snap) => {
-          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
-        }, (err) => console.error('[Payroll] monthly closes listen error:', err)),
-      );
-
       return () => {
         unsubsRef.current.forEach((u) => u());
         unsubsRef.current = [];
@@ -179,12 +157,6 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
         where('projectId', '==', myProjectId),
         limit(36),
       );
-      const closeQuery = query(
-        collection(db, getOrgCollectionPath(orgId, 'monthlyCloses')),
-        where('projectId', '==', myProjectId),
-        limit(18),
-      );
-
       unsubsRef.current.push(
         onSnapshot(scheduleRef, (snap) => {
           if (!snap.exists()) {
@@ -199,15 +171,9 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
           setRuns(sortPayrollRunsByPlannedPayDate(snap.docs.map((d) => d.data() as PayrollRun)));
         }, (err) => console.error('[Payroll] scoped runs listen error:', err)),
       );
-      unsubsRef.current.push(
-        onSnapshot(closeQuery, (snap) => {
-          setMonthlyCloses(sortMonthlyClosesByYearMonth(snap.docs.map((d) => d.data() as MonthlyClose)));
-        }, (err) => console.error('[Payroll] scoped monthly closes listen error:', err)),
-      );
     } else {
       setSchedules([]);
       setRuns([]);
-      setMonthlyCloses([]);
     }
 
     return () => {
@@ -471,129 +437,29 @@ export function PayrollProvider({ children }: { children: ReactNode }) {
     });
   }, [db, orgId, user]);
 
-  const markMonthlyCloseDone = useCallback(async (input: { projectId: string; yearMonth: string }): Promise<void> => {
-    if (!db) return;
-    const actor = user;
-    if (!actor) return;
-    const projectId = input.projectId.trim();
-    const yearMonth = input.yearMonth.trim();
-    if (!projectId || !/^\d{4}-\d{2}$/.test(yearMonth)) return;
-    const now = new Date().toISOString();
-
-    const closeId = `${projectId}-${yearMonth}`;
-    const closeRef = doc(db, getOrgDocumentPath(orgId, 'monthlyCloses', closeId));
-
-    try {
-      await updateDoc(closeRef, {
-        tenantId: orgId,
-        projectId,
-        yearMonth,
-        status: 'DONE',
-        doneAt: now,
-        doneByUid: actor.uid,
-        doneByName: actor.name,
-        updatedAt: now,
-      } as Partial<MonthlyClose> as any);
-    } catch {
-      const docData: MonthlyClose = {
-        id: closeId,
-        tenantId: orgId,
-        projectId,
-        yearMonth,
-        status: 'DONE',
-        doneAt: now,
-        doneByUid: actor.uid,
-        doneByName: actor.name,
-        acknowledged: false,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await setDoc(closeRef, docData, { merge: true });
-      setMonthlyCloses((current) => mergeMonthlyCloseState(current, docData));
-      return;
-    }
-    setMonthlyCloses((current) => {
-      const existing = current.find((entry) => entry.id === closeId);
-      if (!existing) return current;
-      return mergeMonthlyCloseState(current, {
-        ...existing,
-        tenantId: orgId,
-        projectId,
-        yearMonth,
-        status: 'DONE',
-        doneAt: now,
-        doneByUid: actor.uid,
-        doneByName: actor.name,
-        updatedAt: now,
-      });
-    });
-  }, [db, orgId, user]);
-
-  const acknowledgeMonthlyClose = useCallback(async (closeId: string): Promise<void> => {
-    if (!db) return;
-    const actor = user;
-    if (!actor) return;
-    const id = closeId.trim();
-    if (!id) return;
-    const now = new Date().toISOString();
-    await updateDoc(doc(db, getOrgDocumentPath(orgId, 'monthlyCloses', id)), {
-      tenantId: orgId,
-      acknowledged: true,
-      acknowledgedAt: now,
-      acknowledgedByUid: actor.uid,
-      acknowledgedByName: actor.name,
-      updatedAt: now,
-    } as Partial<MonthlyClose> as any);
-    setMonthlyCloses((current) => {
-      const existing = current.find((entry) => entry.id === id);
-      if (!existing) return current;
-      return mergeMonthlyCloseState(current, {
-        ...existing,
-        acknowledged: true,
-        acknowledgedAt: now,
-        acknowledgedByUid: actor.uid,
-        acknowledgedByName: actor.name,
-        updatedAt: now,
-      });
-    });
-  }, [db, orgId, user]);
-
   const getProjectRun = useCallback((projectId: string, yearMonth: string) => {
     const id = `${projectId}-${yearMonth}`;
     return runs.find((r) => r.id === id);
   }, [runs]);
 
-  const getProjectClose = useCallback((projectId: string, yearMonth: string) => {
-    const id = `${projectId}-${yearMonth}`;
-    return monthlyCloses.find((c) => c.id === id);
-  }, [monthlyCloses]);
-
   const value: PayrollState & PayrollActions = useMemo(() => ({
     schedules,
     runs,
-    monthlyCloses,
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
     savePayrollExpectedAmount,
     savePayrollReview,
-    markMonthlyCloseDone,
-    acknowledgeMonthlyClose,
     getProjectRun,
-    getProjectClose,
   }), [
     schedules,
     runs,
-    monthlyCloses,
     upsertSchedule,
     acknowledgePayrollRun,
     confirmPayrollPaid,
     savePayrollExpectedAmount,
     savePayrollReview,
-    markMonthlyCloseDone,
-    acknowledgeMonthlyClose,
     getProjectRun,
-    getProjectClose,
   ]);
 
   return <PayrollContext.Provider value={value}>{children}</PayrollContext.Provider>;

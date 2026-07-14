@@ -20,6 +20,7 @@ import java.util.Base64;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,6 +44,7 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
+        doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
     }
 
     @Test

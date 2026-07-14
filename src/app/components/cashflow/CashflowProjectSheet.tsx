@@ -24,12 +24,10 @@ import {
   type CashflowSheetLineId,
   type CashflowWeekSheet,
   type UserRole,
-  type WeeklySubmissionStatus,
 } from '../../data/types';
 import { getSeoulTodayIso } from '../../platform/business-days';
-import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES, computeCashflowDerivedTotals, computeOpeningCashflowTotals } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
-import { resolveWeeklyAccountingState } from '../../platform/weekly-accounting-state';
 import { useAuth } from '../../data/auth-store';
 import { hasUnsavedChanges } from './cashflow-unsaved';
 import { useFirebase } from '../../lib/firebase-context';
@@ -38,14 +36,19 @@ import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   fetchCashflowSnapshotViaBff,
   fetchCashflowLaborRiskViaBff,
-  saveCashflowProjectionBatchViaBff,
+  closeCashflowMonthViaBff,
+  decideCashflowMonthReopenViaBff,
+  fetchCashflowMonthCloseViaBff,
+  requestCashflowMonthReopenViaBff,
   type CashflowLaborRiskResult,
+  type CashflowMonthCloseCell,
+  type CashflowMonthCloseDraftInput,
+  type CashflowMonthCloseResult,
   type CashflowSnapshotResult,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
-import { shouldHighlightProjectionAmountMismatch } from './cashflow-projection-cell-style';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
-import { buildCashflowOpsSummary, type CashflowOpsTone } from './cashflow-ops-summary';
+import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
   applyCashflowSheetLabViaBff,
   getCashflowSheetLabMirrorViaBff,
@@ -59,6 +62,18 @@ import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { useCashflowEditLease } from './useCashflowEditLease';
 import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
 import type { CashflowMutationLease } from '../../lib/cashflow-edit-lease';
+import {
+  applyCashflowMonthCloseProjectionDrafts,
+  buildCashflowMonthCloseDraftInput,
+  cashflowMonthCloseConfirmationKey,
+  cashflowMonthCloseReviewProgress,
+  createEmptyCashflowMonthCloseDepositRows,
+  normalizeCashflowMonthCloseCells,
+  readCashflowMonthCloseReview,
+  requiredCashflowMonthCloseDecision,
+  type CashflowMonthCloseDecisionMap,
+  type CashflowMonthCloseDepositReviewRow,
+} from './cashflow-month-close';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -157,11 +172,6 @@ function formatAmountInput(raw: string): string {
   return Math.trunc(n).toLocaleString('ko-KR');
 }
 
-function hasWrittenSheetValues(values: Partial<Record<CashflowSheetLineId, unknown>> | undefined): boolean {
-  if (!values) return false;
-  return CASHFLOW_ALL_LINES.some((lineId) => Object.prototype.hasOwnProperty.call(values, lineId));
-}
-
 function formatSheetWeekLabel(yearMonth: string, weekNo: number): string {
   const year = Number.parseInt(yearMonth.slice(2, 4), 10);
   const month = Number.parseInt(yearMonth.slice(5, 7), 10);
@@ -252,7 +262,6 @@ function isBffAuthRejection(error: unknown): boolean {
 export function CashflowProjectSheet({
   projectId,
   roleOverride,
-  onUpdateWeeklySubmissionStatus,
 }: {
   projectId: string;
   roleOverride?: UserRole | string;
@@ -271,13 +280,15 @@ export function CashflowProjectSheet({
   const { db, orgId } = useFirebase();
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
-  const canUseCashflowActions = Boolean(role || user);
+  const isPm = role === 'pm';
+  const canReviewReopen = role === 'finance' || role === 'admin';
+  const canUseCashflowActions = isPm;
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
     uid: user?.uid || 'cashflow-user',
     email: user?.email || '',
-    role: user?.role || role || 'workspace_user',
+    role: role || user?.role || 'workspace_user',
     idToken: user?.idToken,
     googleAccessToken: user?.googleAccessToken,
   }), [
@@ -299,9 +310,6 @@ export function CashflowProjectSheet({
         })
       : null
   ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
-  const canEdit = canUseCashflowActions && cashflowLease.canEdit;
-  const canSubmitActual = canEdit;
-  const canClose = canEdit;
   const latestBffActorRef = useRef(bffActor);
   useEffect(() => {
     latestBffActorRef.current = bffActor;
@@ -320,11 +328,9 @@ export function CashflowProjectSheet({
 
   const {
     yearMonth,
+    setYearMonth,
     weeks,
     isLoading,
-    upsertWeekAmounts,
-    submitWeekAsPm,
-    closeWeekAsAdmin,
   } = useCashflowWeeks();
 
   const [cashflowSheetRange, setCashflowSheetRange] = useState<{
@@ -356,6 +362,18 @@ export function CashflowProjectSheet({
   const [cashflowComparisonLoading, setCashflowComparisonLoading] = useState(false);
   const [cashflowComparisonError, setCashflowComparisonError] = useState<string | null>(null);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
+  const [monthCloseResult, setMonthCloseResult] = useState<CashflowMonthCloseResult | null>(null);
+  const [monthCloseLoading, setMonthCloseLoading] = useState(false);
+  const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
+  const [monthCloseBusy, setMonthCloseBusy] = useState(false);
+  const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
+  const [monthCloseDecisions, setMonthCloseDecisions] = useState<CashflowMonthCloseDecisionMap>({});
+  const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
+    () => createEmptyCashflowMonthCloseDepositRows(),
+  );
+  const [monthCloseReviewDirty, setMonthCloseReviewDirty] = useState(false);
+  const [reopenAction, setReopenAction] = useState<'request' | 'approve' | 'reject' | null>(null);
+  const [reopenReason, setReopenReason] = useState('');
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
   const [sheetRefreshResult, setSheetRefreshResult] = useState<{
     runId: string;
@@ -384,6 +402,18 @@ export function CashflowProjectSheet({
     const parsed = Number.parseInt(yearMonth.slice(0, 4), 10);
     return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
   }, [yearMonth]);
+  const cashflowSnapshotRange = useMemo(() => {
+    const configuredStart = parseCashflowSheetWeekLabel(cashflowSheetRange?.startWeek);
+    const configuredEnd = parseCashflowSheetWeekLabel(cashflowSheetRange?.endWeek);
+    return {
+      start: configuredStart
+        ? { yearMonth: configuredStart.yearMonth, weekNo: configuredStart.weekNo }
+        : { yearMonth: `${selectedYear}-01`, weekNo: 1 },
+      end: configuredEnd
+        ? { yearMonth: configuredEnd.yearMonth, weekNo: configuredEnd.weekNo }
+        : { yearMonth: `${selectedYear}-12`, weekNo: 5 },
+    };
+  }, [cashflowSheetRange?.endWeek, cashflowSheetRange?.startWeek, selectedYear]);
   const yearWeeks = useMemo(() => getYearMondayWeeks(selectedYear), [selectedYear]);
   const sheetRangeWeeks = cashflowSheetRange?.activeWeeks || [];
   const allProjectCashflowWeeks = useMemo(() => {
@@ -425,113 +455,50 @@ export function CashflowProjectSheet({
     return Array.from(byKey.values())
       .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
   }, [allProjectCashflowWeeks, cashflowSheetRange, projectId, selectedYear, sheetRangeWeeks, yearWeeks]);
-  const normalizedYearMonth = useMemo(() => {
-    const [y, m] = yearMonth.split('-');
-    if (!y || !m) return yearMonth;
-    return `${y}-${m.padStart(2, '0')}`;
-  }, [yearMonth]);
-  const projectWeeks = useMemo(
-    () => allProjectCashflowWeeks.filter((w) => {
-      if (w.projectId !== projectId) return false;
-      const ym = typeof w.yearMonth === 'string' ? w.yearMonth : '';
-      const [yy, mm] = ym.split('-');
-      const normalized = yy && mm ? `${yy}-${mm.padStart(2, '0')}` : ym;
-      return normalized === normalizedYearMonth;
-    }),
-    [allProjectCashflowWeeks, projectId, normalizedYearMonth],
-  );
-  const byWeekNo = useMemo(() => {
-    const map = new Map<number, CashflowWeekSheet>();
-    for (const w of projectWeeks) map.set(w.weekNo, w);
-    return map;
-  }, [projectWeeks]);
-  const byYearMonthWeek = useMemo(() => {
-    const map = new Map<string, CashflowWeekSheet>();
-    for (const week of allProjectCashflowWeeks) {
-      if (week.projectId !== projectId) continue;
-      map.set(`${week.yearMonth}:${week.weekNo}`, week);
-    }
-    return map;
-  }, [allProjectCashflowWeeks, projectId]);
-  const openingTotalsByMode = useMemo(() => {
-    return computeOpeningCashflowTotals({
-      weeks,
-      projectId,
-      yearMonth: normalizedYearMonth,
-    });
-  }, [normalizedYearMonth, projectId, weeks]);
-  const yearOpeningTotalsByMode = useMemo(() => {
-    return computeOpeningCashflowTotals({
-      weeks: allProjectCashflowWeeks,
-      projectId,
-      yearMonth: cashflowSheetRange?.startYearMonth || `${selectedYear}-01`,
-    });
-  }, [allProjectCashflowWeeks, cashflowSheetRange?.startYearMonth, projectId, selectedYear]);
-
-  const [differenceViewMode, setDifferenceViewMode] = useState<'diff' | 'all'>('diff');
   const [showEmptyCashflowRows, setShowEmptyCashflowRows] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
   const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
-  type CashflowAuditIssue = { key: string; label: string; detail: string };
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
   const [privateDraftRevision, setPrivateDraftRevision] = useState<number | null>(null);
   const [privateDraftPayload, setPrivateDraftPayload] = useState<Record<string, unknown>>({});
   const loadedPrivateDraftKeyRef = useRef('');
   const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
-  const [auditDialog, setAuditDialog] = useState<{
-    title: string;
-    weekLabel: string;
-    issues: CashflowAuditIssue[];
-  } | null>(null);
-
-  const [submitConfirm, setSubmitConfirm] = useState<{ weekNo: number; yearMonth: string } | null>(null);
-  const [submitBusy, setSubmitBusy] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
-  const [projectionCompleteWeek, setProjectionCompleteWeek] = useState<number | null>(null);
-  const [closeBusy, setCloseBusy] = useState(false);
-  const [closeDialog, setCloseDialog] = useState<{
-    kind: 'prerequisite' | 'warning' | 'confirm';
-    yearMonth: string;
-    weekNo: number;
-    projectionDone: boolean;
-    expenseDone: boolean;
-    expenseStatusLabel?: string;
-    expenseStatusDescription?: string;
-  } | null>(null);
+  const canEdit = canUseCashflowActions
+    && cashflowLease.canEdit
+    && monthCloseResult?.status === 'OPEN';
 
   const hasDirty = useMemo(
-    () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0,
-    [drafts, weekSaveState],
+    () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0 || monthCloseReviewDirty,
+    [drafts, monthCloseReviewDirty, weekSaveState],
   );
-  const blocker = useBlocker(hasDirty);
+  const hasActiveEditSession = cashflowLease.canEdit && Boolean(cashflowLease.ownership);
+  const blocker = useBlocker(hasDirty || hasActiveEditSession);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (!hasDirty) return;
+      if (!hasDirty && !hasActiveEditSession) return;
       e.preventDefault();
       e.returnValue = '';
     };
 
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [hasDirty]);
-
-  useEffect(() => {
-    if (blocker.state === 'blocked' && !hasDirty) {
-      blocker.proceed();
-    }
-  }, [blocker, hasDirty]);
+  }, [hasActiveEditSession, hasDirty]);
 
   useEffect(() => {
     setDrafts({});
     setEditingWeekModes({});
     setWeekSaveState({});
-    setSubmitConfirm(null);
     setPrivateDraftRevision(null);
     setPrivateDraftPayload({});
+    setMonthCloseResult(null);
+    setMonthCloseDecisions({});
+    setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
+    setMonthCloseReviewDirty(false);
     loadedPrivateDraftKeyRef.current = '';
     privateDraftLoadRef.current = null;
   }, [projectId]);
@@ -574,7 +541,28 @@ export function CashflowProjectSheet({
     });
   }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateCashflowPrivateDraft]);
 
+  useEffect(() => {
+    const restored = readCashflowMonthCloseReview(
+      privateDraftPayload.monthCloseReview || privateDraftPayload.monthClose,
+      yearMonth,
+    );
+    if (restored) {
+      setMonthCloseDecisions(restored.decisions);
+      setMonthCloseDepositRows(restored.depositScheduleRows);
+    } else {
+      setMonthCloseDecisions({});
+      setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
+    }
+    setMonthCloseReviewDirty(false);
+  }, [privateDraftPayload, yearMonth]);
+
   const beginCashflowEditing = useCallback(async (resumePrevious = false): Promise<boolean> => {
+    if (!isPm || monthCloseResult?.status !== 'OPEN') {
+      toast.info(monthCloseResult?.status === 'CLOSED'
+        ? '월 결산 완료 후에는 수정할 수 없습니다. 재오픈을 요청해 주세요.'
+        : 'PM만 결산 전 캐시플로를 수정할 수 있습니다.');
+      return false;
+    }
     if (!cashflowPrivateDraftClient) return false;
     const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
     if (!ownership) return false;
@@ -586,11 +574,14 @@ export function CashflowProjectSheet({
       toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
       return false;
     }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft]);
+  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft, isPm, monthCloseResult?.status]);
 
-  const savePrivateCashflowDraft = useCallback(async (): Promise<void> => {
+  const savePrivateCashflowDraft = useCallback(async (
+    monthCloseInput?: CashflowMonthCloseDraftInput,
+    providedLease?: CashflowMutationLease,
+  ): Promise<number> => {
     if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
-    const mutationLease = await cashflowLease.checkBeforeMutation();
+    const mutationLease = providedLease || await cashflowLease.checkBeforeMutation();
     let revision = privateDraftRevision;
     let payload = privateDraftPayload;
     if (revision === null) {
@@ -598,17 +589,36 @@ export function CashflowProjectSheet({
       revision = opened.draft.draftRevision;
       payload = opened.draft.payload;
     }
-    const nextPayload = { ...payload, board: { drafts, weekSaveState, yearMonth } };
+    const reviewConfirmations = Object.entries(monthCloseDecisions).flatMap(([key, decision]) => {
+      if (!decision) return [];
+      const [mode, weekNo, ...lineParts] = key.split(':');
+      if ((mode !== 'projection' && mode !== 'actual') || !Number.isInteger(Number(weekNo)) || lineParts.length === 0) return [];
+      return [{ mode, weekNo: Number(weekNo), cashflowLine: lineParts.join(':'), decision }];
+    });
+    const nextPayload = {
+      ...payload,
+      board: { drafts, weekSaveState, yearMonth },
+      monthCloseReview: {
+        yearMonth,
+        confirmations: reviewConfirmations,
+        depositScheduleRows: monthCloseDepositRows,
+      },
+      ...(monthCloseInput ? { monthClose: monthCloseInput } : {}),
+    };
     const { draft } = await cashflowPrivateDraftClient.save(mutationLease, {
       expectedDraftRevision: revision,
       payload: nextPayload,
     });
     setPrivateDraftRevision(draft.draftRevision);
     setPrivateDraftPayload(draft.payload);
+    setMonthCloseReviewDirty(false);
+    return draft.draftRevision;
   }, [
     cashflowLease.checkBeforeMutation,
     cashflowPrivateDraftClient,
     drafts,
+    monthCloseDecisions,
+    monthCloseDepositRows,
     privateDraftRevision,
     privateDraftPayload,
     weekSaveState,
@@ -620,7 +630,8 @@ export function CashflowProjectSheet({
     setExitBusy(true);
     try {
       await savePrivateCashflowDraft();
-      await cashflowLease.release();
+      const released = await cashflowLease.release();
+      if (!released) throw new Error('수정 세션을 종료하지 못했습니다. 임시저장본은 유지됩니다.');
       blocker.proceed?.();
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '임시저장 후 이동하지 못했습니다. 현재 화면에서 다시 시도해 주세요.'));
@@ -629,13 +640,23 @@ export function CashflowProjectSheet({
     }
   }, [blocker, cashflowLease.release, savePrivateCashflowDraft]);
 
-  const completePrivateCashflowDraft = useCallback(async (mutationLease: CashflowMutationLease): Promise<void> => {
-    if (!cashflowPrivateDraftClient || privateDraftRevision === null) return;
-    await cashflowPrivateDraftClient.complete(mutationLease, {
-      expectedDraftRevision: privateDraftRevision,
-    });
-    setPrivateDraftRevision(null);
-  }, [cashflowPrivateDraftClient, privateDraftRevision]);
+  const discardChangesAndLeave = useCallback(async (): Promise<void> => {
+    if (blocker.state !== 'blocked') return;
+    setExitBusy(true);
+    try {
+      const released = await cashflowLease.release();
+      if (!released) throw new Error('수정 세션을 종료하지 못했습니다.');
+      setDrafts({});
+      setEditingWeekModes({});
+      setWeekSaveState({});
+      setMonthCloseReviewDirty(false);
+      blocker.proceed?.();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '저장하지 않고 종료하지 못했습니다. 다시 시도해 주세요.'));
+    } finally {
+      setExitBusy(false);
+    }
+  }, [blocker, cashflowLease.release]);
 
   useEffect(() => {
     if (!db || !projectId) {
@@ -760,7 +781,14 @@ export function CashflowProjectSheet({
       return;
     }
     const readSnapshot = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
-      fetchCashflowSnapshotViaBff({ tenantId: orgId, actor, projectId, asOf: todayIso })
+      fetchCashflowSnapshotViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        asOf: todayIso,
+        rangeStart: cashflowSnapshotRange.start,
+        rangeEnd: cashflowSnapshotRange.end,
+      })
     );
     setCashflowComparisonLoading(true);
     setCashflowComparisonError(null);
@@ -781,11 +809,52 @@ export function CashflowProjectSheet({
     } finally {
       setCashflowComparisonLoading(false);
     }
-  }, [orgId, projectId, resolveBffActor, todayIso, user?.uid]);
+  }, [cashflowSnapshotRange.end, cashflowSnapshotRange.start, orgId, projectId, resolveBffActor, todayIso, user?.uid]);
 
   useEffect(() => {
     void loadCashflowComparison();
   }, [loadCashflowComparison]);
+
+  const loadCashflowMonthClose = useCallback(async (): Promise<void> => {
+    if (!projectId || !orgId || !user?.uid) {
+      setMonthCloseResult(null);
+      setMonthCloseError('로그인 세션이 만료되었습니다.');
+      return;
+    }
+    setMonthCloseLoading(true);
+    setMonthCloseError(null);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      try {
+        setMonthCloseResult(await fetchCashflowMonthCloseViaBff({
+          tenantId: orgId,
+          actor,
+          projectId,
+          yearMonth,
+        }));
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        const refreshedActor = await resolveBffActor({ forceRefresh: true });
+        if (!refreshedActor?.idToken) throw error;
+        setMonthCloseResult(await fetchCashflowMonthCloseViaBff({
+          tenantId: orgId,
+          actor: refreshedActor,
+          projectId,
+          yearMonth,
+        }));
+      }
+    } catch (error) {
+      setMonthCloseResult(null);
+      setMonthCloseError(resolveApiErrorMessage(error, '월 결산 상태를 불러오지 못했습니다.'));
+    } finally {
+      setMonthCloseLoading(false);
+    }
+  }, [orgId, projectId, resolveBffActor, user?.uid, yearMonth]);
+
+  useEffect(() => {
+    void loadCashflowMonthClose();
+  }, [loadCashflowMonthClose]);
 
   const loadCashflowSheetRangeWeeks = useCallback(async (): Promise<void> => {
     if (!db || !cashflowSheetRange) {
@@ -865,6 +934,216 @@ export function CashflowProjectSheet({
       cancelled = true;
     };
   }, [loadCashflowEvents]);
+
+  const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
+    const dashboard = monthCloseResult?.dashboard;
+    if (!dashboard) return cashflowSheetMirror;
+    return {
+      projectId,
+      status: dashboard.source.kind === 'PINNED_MIRROR' && dashboard.source.status === 'FRESH' ? 'FRESH' : 'STALE',
+      sourceRevision: dashboard.source.sourceRevision,
+      targetRevisionAtFetch: dashboard.source.targetRevision,
+      capturedAt: dashboard.source.capturedAt,
+      yearMonths: [yearMonth],
+      cells: dashboard.cells.map((cell) => ({
+        mode: cell.mode,
+        yearMonth,
+        weekNo: cell.weekNo,
+        lineId: cell.cashflowLine,
+        direction: CASHFLOW_IN_LINES.includes(cell.cashflowLine as CashflowSheetLineId) ? 'IN' : 'OUT',
+        sourceCell: cell.sourceCell || '',
+        sourceLabel: cell.sourceLabel || '',
+        state: cell.cellState,
+        ...(cell.cellState === 'VALUE' ? { amount: Number(cell.amount || 0) } : {}),
+      })),
+    };
+  }, [cashflowSheetMirror, monthCloseResult?.dashboard, projectId, yearMonth]);
+
+  useEffect(() => {
+    const sourceRows = monthCloseResult?.dashboard?.sheetDepositScheduleRows || [];
+    if (sourceRows.length !== 5 || monthCloseReviewDirty) return;
+    if (readCashflowMonthCloseReview(privateDraftPayload.monthCloseReview || privateDraftPayload.monthClose, yearMonth)) return;
+    setMonthCloseDepositRows(sourceRows
+      .slice()
+      .sort((left, right) => left.weekNo - right.weekNo)
+      .map((row) => ({
+        weekNo: row.weekNo,
+        taxInvoiceIssuedDate: row.taxInvoiceIssuedDate || '',
+        expectedDepositDate: row.expectedDepositDate || '',
+        expectedDepositAmount: row.expectedDepositAmount ?? null,
+        actualDepositDate: '',
+        actualDepositAmount: null,
+        actualSource: 'NOT_APPLICABLE',
+        decision: null,
+      })));
+  }, [monthCloseResult?.dashboard?.sheetDepositScheduleRows, monthCloseReviewDirty, privateDraftPayload, yearMonth]);
+
+  const monthCloseCellsState = useMemo(() => {
+    try {
+      return {
+        cells: applyCashflowMonthCloseProjectionDrafts(
+          normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth),
+          drafts,
+          yearMonth,
+        ),
+        error: null as string | null,
+      };
+    } catch (error) {
+      return {
+        cells: [] as CashflowMonthCloseCell[],
+        error: error instanceof Error ? error.message : '결산 대상 시트 셀을 확인하지 못했습니다.',
+      };
+    }
+  }, [drafts, monthClosePinnedSource, yearMonth]);
+
+  const monthCloseProgress = useMemo(() => cashflowMonthCloseReviewProgress({
+    cells: monthCloseCellsState.cells,
+    decisions: monthCloseDecisions,
+    depositScheduleRows: monthCloseDepositRows,
+  }), [monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows]);
+
+  const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
+    if (!isPm || monthCloseResult?.status !== 'OPEN') {
+      toast.error('결산 전 상태의 PM만 최종저장할 수 있습니다.');
+      return;
+    }
+    let monthCloseInput: CashflowMonthCloseDraftInput;
+    try {
+      monthCloseInput = buildCashflowMonthCloseDraftInput({
+        mirror: monthClosePinnedSource,
+        yearMonth,
+        decisions: monthCloseDecisions,
+        depositScheduleRows: monthCloseDepositRows,
+        projectionDrafts: drafts,
+      });
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '사람 확인이 필요한 항목을 모두 처리해 주세요.'));
+      return;
+    }
+
+    setMonthCloseBusy(true);
+    try {
+      const mutationLease = await cashflowLease.checkBeforeMutation();
+      await savePrivateCashflowDraft(monthCloseInput, mutationLease);
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const prepared = await fetchCashflowMonthCloseViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        yearMonth,
+      });
+      setMonthCloseResult(prepared);
+      if (!prepared.dashboard?.validation.canClose) {
+        throw new Error(prepared.dashboard?.validation.blockers[0]?.message || '서버 월 결산 검증을 통과하지 못했습니다.');
+      }
+      const result = await closeCashflowMonthViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        payload: {
+          yearMonth,
+          expectedRevision: prepared.revision,
+        },
+        idempotencyKey: `cashflow-month-close:${projectId}:${yearMonth}:${prepared.revision}`,
+        lease: mutationLease,
+      });
+      setMonthCloseResult(result);
+      setMonthCloseReviewOpen(false);
+      setDrafts({});
+      setEditingWeekModes({});
+      setWeekSaveState({});
+      setPrivateDraftRevision(null);
+      setPrivateDraftPayload({});
+      setMonthCloseReviewDirty(false);
+      await cashflowLease.checkStatus();
+      await Promise.all([
+        loadCashflowComparison(),
+        loadCashflowEvents(),
+        loadCashflowSheetRangeWeeks(),
+      ]);
+      toast.success(`${yearMonth} 월 결산을 완료했습니다. 이제 수정할 수 없습니다.`);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '월 결산에 실패했습니다. 임시저장본은 유지됩니다.'));
+      await loadCashflowMonthClose();
+    } finally {
+      setMonthCloseBusy(false);
+    }
+  }, [
+    cashflowLease.checkBeforeMutation,
+    cashflowLease.checkStatus,
+    drafts,
+    monthClosePinnedSource,
+    isPm,
+    loadCashflowComparison,
+    loadCashflowEvents,
+    loadCashflowMonthClose,
+    loadCashflowSheetRangeWeeks,
+    monthCloseDecisions,
+    monthCloseDepositRows,
+    monthCloseResult,
+    orgId,
+    projectId,
+    resolveBffActor,
+    savePrivateCashflowDraft,
+    yearMonth,
+  ]);
+
+  const handleMonthReopenAction = useCallback(async (): Promise<void> => {
+    const reason = reopenReason.trim();
+    if (!reopenAction || !monthCloseResult || !reason) {
+      toast.error('사유를 입력해 주세요.');
+      return;
+    }
+    if (reopenAction === 'request' && !isPm) {
+      toast.error('PM만 재오픈을 요청할 수 있습니다.');
+      return;
+    }
+    if (reopenAction !== 'request' && !canReviewReopen) {
+      toast.error('Finance 또는 Admin만 재오픈 요청을 처리할 수 있습니다.');
+      return;
+    }
+
+    setMonthCloseBusy(true);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const idempotencyKey = `cashflow-month-reopen:${reopenAction}:${projectId}:${yearMonth}:${monthCloseResult.revision}`;
+      const result = reopenAction === 'request'
+        ? await requestCashflowMonthReopenViaBff({
+            tenantId: orgId,
+            actor,
+            projectId,
+            payload: { yearMonth, expectedRevision: monthCloseResult.revision, reason },
+            idempotencyKey,
+          })
+        : await decideCashflowMonthReopenViaBff({
+            tenantId: orgId,
+            actor,
+            projectId,
+            payload: {
+              yearMonth,
+              expectedRevision: monthCloseResult.revision,
+              decision: reopenAction === 'approve' ? 'APPROVE' : 'REJECT',
+              reason,
+            },
+            idempotencyKey,
+          });
+      setMonthCloseResult(result);
+      setReopenAction(null);
+      setReopenReason('');
+      toast.success(reopenAction === 'request'
+        ? '재오픈 요청을 보냈습니다.'
+        : reopenAction === 'approve'
+          ? '재오픈을 승인했습니다.'
+          : '재오픈을 반려했습니다.');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '재오픈 처리를 완료하지 못했습니다.'));
+      await loadCashflowMonthClose();
+    } finally {
+      setMonthCloseBusy(false);
+    }
+  }, [canReviewReopen, isPm, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshLaborRisk = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
@@ -950,7 +1229,7 @@ export function CashflowProjectSheet({
       setSheetRefreshResult(null);
       setSheetStageDialog(null);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
-        toast.success('시트 최신값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
+        toast.success('시트값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
       } else if (mirror.status === 'STALE') {
         toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
       } else {
@@ -973,11 +1252,11 @@ export function CashflowProjectSheet({
           rememberMirror(await refreshMirror(actor));
           return;
         } catch (retryError) {
-          toast.error(resolveApiErrorMessage(retryError, '시트 최신값을 가져오지 못했습니다.'));
+          toast.error(resolveApiErrorMessage(retryError, '시트값을 불러오지 못했습니다.'));
           return;
         }
       }
-      toast.error(resolveApiErrorMessage(error, '시트 최신값을 가져오지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
     } finally {
       setSheetRefreshLoading(false);
     }
@@ -985,16 +1264,17 @@ export function CashflowProjectSheet({
 
   const handleStagePinnedSheetValues = useCallback(async (): Promise<void> => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
-      toast.error('먼저 시트 최신값을 가져와 고정해 주세요.');
+      toast.error('먼저 시트값 불러오기를 실행해 고정해 주세요.');
       return;
     }
+    const expectedMirrorRevision = cashflowSheetMirror.sourceRevision;
     const stageIdempotencyKey = `cashflow-sheet-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const stageMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
       stageCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
         projectId,
-        expectedMirrorRevision: cashflowSheetMirror.sourceRevision,
+        expectedMirrorRevision,
         idempotencyKey: stageIdempotencyKey,
       })
     );
@@ -1127,7 +1407,7 @@ export function CashflowProjectSheet({
 
   const handleOpenSheetReviewDialog = useCallback(() => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
-      toast.info('먼저 시트 연동하기를 눌러 최신값을 고정해 주세요.');
+      toast.info('먼저 시트값 불러오기를 눌러 최신값을 고정해 주세요.');
       return;
     }
     setSheetReviewDialogOpen(true);
@@ -1141,28 +1421,6 @@ export function CashflowProjectSheet({
   const handleRevertCashflowRun = useCallback(async (_runId: string): Promise<void> => {
     toast.info('되돌리기는 서버 검증 경로가 준비될 때까지 읽기 전용입니다.');
   }, []);
-
-  const weekMeta = useMemo(() => {
-    const map: Record<number, { projectionUpdated: boolean; pmSubmitted: boolean; adminClosed: boolean }> = {};
-    for (const def of monthWeeks) {
-      const doc = byWeekNo.get(def.weekNo);
-      map[def.weekNo] = {
-        projectionUpdated: Boolean(doc?.projectionUpdated),
-        pmSubmitted: Boolean(doc?.pmSubmitted),
-        adminClosed: Boolean(doc?.adminClosed),
-      };
-    }
-    return map;
-  }, [byWeekNo, monthWeeks]);
-
-  const weekHasActual = useMemo(() => {
-    const map: Record<number, boolean> = {};
-    for (const def of monthWeeks) {
-      const doc = byWeekNo.get(def.weekNo);
-      map[def.weekNo] = hasWrittenSheetValues(doc?.actual);
-    }
-    return map;
-  }, [byWeekNo, monthWeeks]);
 
   function resolveWeekKey(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number }): string {
     return `${params.yearMonth}:${params.mode}:${params.weekNo}`;
@@ -1181,227 +1439,19 @@ export function CashflowProjectSheet({
     return editingWeekModes[resolveWeekKey(params)] === true;
   }
 
-  function setWeekModeEditing(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number; editing: boolean }) {
-    const key = resolveWeekKey(params);
-    setEditingWeekModes((prev) => ({ ...prev, [key]: params.editing }));
-  }
-
-  function getPersistedCell(params: {
-    doc: CashflowWeekSheet | undefined;
-    mode: 'projection' | 'actual';
-    lineId: CashflowSheetLineId;
-  }): { amount: number; hasValue: boolean } {
-    const src = params.mode === 'projection' ? params.doc?.projection : params.doc?.actual;
-    const hasValue = !!src && Object.prototype.hasOwnProperty.call(src, params.lineId);
-    const amount = Number(src?.[params.lineId] ?? 0);
-    return { amount, hasValue };
-  }
-
   function getWeekLabel(weekNo: number, targetYearMonth = yearMonth): string {
     return annualWeeks.find((week) => week.yearMonth === targetYearMonth && week.weekNo === weekNo)?.label
       || monthWeeks.find((week) => week.weekNo === weekNo)?.label
       || `w${weekNo}`;
   }
 
-  function isAuditSettledWeek(weekNo: number, targetYearMonth = yearMonth): boolean {
-    const week = annualWeeks.find((candidate) => candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo)
-      || monthWeeks.find((candidate) => candidate.weekNo === weekNo);
-    return Boolean(week && week.weekEnd <= todayIso);
-  }
-
-  function readAuditedCell(params: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-    lineId: CashflowSheetLineId;
-    overrideMode?: 'projection' | 'actual';
-    overrideAmounts?: Partial<Record<CashflowSheetLineId, number>>;
-  }): { amount: number; hasValue: boolean } {
-    if (
-      params.overrideMode === params.mode
-      && params.overrideAmounts
-      && Object.prototype.hasOwnProperty.call(params.overrideAmounts, params.lineId)
-    ) {
-      return { amount: Number(params.overrideAmounts[params.lineId] || 0), hasValue: true };
-    }
-
-    const targetYearMonth = params.yearMonth || yearMonth;
-    const key = resolveCellKey({ yearMonth: targetYearMonth, mode: params.mode, weekNo: params.weekNo, lineId: params.lineId });
-    if (Object.prototype.hasOwnProperty.call(drafts, key)) {
-      const raw = drafts[key];
-      if (raw.trim() === '') return { amount: 0, hasValue: false };
-      return { amount: parseAmount(raw), hasValue: true };
-    }
-
-    return getPersistedCell({ doc: byYearMonthWeek.get(`${targetYearMonth}:${params.weekNo}`), mode: params.mode, lineId: params.lineId });
-  }
-
-  function addAuditIssue(
-    issuesByKey: Map<string, CashflowAuditIssue>,
-    issue: CashflowAuditIssue,
-  ): void {
-    if (!issuesByKey.has(issue.key)) issuesByKey.set(issue.key, issue);
-  }
-
-  function prepareAuditedWeekAmounts(input: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-  }): {
-    amounts: Partial<Record<CashflowSheetLineId, number>>;
-    issues: CashflowAuditIssue[];
-  } {
-    const issuesByKey = new Map<string, CashflowAuditIssue>();
-    const amounts: Partial<Record<CashflowSheetLineId, number>> = {};
-    const targetYearMonth = input.yearMonth || yearMonth;
-
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const key = resolveCellKey({ yearMonth: targetYearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const hasDraft = Object.prototype.hasOwnProperty.call(drafts, key);
-      const persisted = getPersistedCell({ doc: byYearMonthWeek.get(`${targetYearMonth}:${input.weekNo}`), mode: input.mode, lineId });
-
-      if (hasDraft && drafts[key].trim() === '') {
-        addAuditIssue(issuesByKey, {
-          key: `${input.mode}:${lineId}:missing`,
-          label: CASHFLOW_SHEET_LINE_LABELS[lineId],
-          detail: `${input.mode === 'projection' ? 'Projection' : 'Actual'} 입력값이 비어 있습니다. 0원인 경우 0을 입력해 주세요.`,
-        });
-        continue;
-      }
-
-      if (hasDraft) {
-        amounts[lineId] = parseAmount(drafts[key]);
-      } else if (persisted.hasValue) {
-        amounts[lineId] = persisted.amount;
-      }
-    }
-
-    return { amounts, issues: Array.from(issuesByKey.values()) };
-  }
-
-  function collectAuditIssues(input: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-    amounts: Partial<Record<CashflowSheetLineId, number>>;
-  }): CashflowAuditIssue[] {
-    const issuesByKey = new Map<string, CashflowAuditIssue>();
-    const targetYearMonth = input.yearMonth || yearMonth;
-
-    for (const issue of prepareAuditedWeekAmounts({ yearMonth: targetYearMonth, weekNo: input.weekNo, mode: input.mode }).issues) {
-      addAuditIssue(issuesByKey, issue);
-    }
-
-    if (!isAuditSettledWeek(input.weekNo, targetYearMonth)) return Array.from(issuesByKey.values());
-
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const projection = readAuditedCell({
-        yearMonth: targetYearMonth,
-        weekNo: input.weekNo,
-        mode: 'projection',
-        lineId,
-        overrideMode: input.mode,
-        overrideAmounts: input.amounts,
-      });
-      const actual = readAuditedCell({
-        yearMonth: targetYearMonth,
-        weekNo: input.weekNo,
-        mode: 'actual',
-        lineId,
-        overrideMode: input.mode,
-        overrideAmounts: input.amounts,
-      });
-
-      if (projection.hasValue && actual.hasValue && projection.amount !== actual.amount) {
-        addAuditIssue(issuesByKey, {
-          key: `settled:${lineId}:mismatch`,
-          label: CASHFLOW_SHEET_LINE_LABELS[lineId],
-          detail: `과거 주차는 Projection ${fmt(projection.amount)} / Actual ${fmt(actual.amount)}로 같아야 합니다.`,
-        });
-      }
-    }
-
-    return Array.from(issuesByKey.values());
-  }
-
-  function showAuditBlock(title: string, weekNo: number, issues: CashflowAuditIssue[], targetYearMonth = yearMonth): void {
-    setAuditDialog({ title, weekLabel: getWeekLabel(weekNo, targetYearMonth), issues });
-    toast.error('감사 필수값을 먼저 확인해 주세요.');
-  }
-
-  function getEffectiveAmount(params: {
-    yearMonth: string;
-    mode: 'projection' | 'actual';
-    weekNo: number;
-    lineId: CashflowSheetLineId;
-  }): number {
-    const doc = byWeekNo.get(params.weekNo);
-    const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
-    const key = resolveCellKey(params);
-    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-    return raw !== undefined ? parseAmount(raw) : persisted.amount;
-  }
-
-  function getPersistedYearAmount(params: {
-    yearMonth: string;
-    mode: 'projection' | 'actual';
-    weekNo: number;
-    lineId: CashflowSheetLineId;
-  }): number {
-    const doc = byYearMonthWeek.get(`${params.yearMonth}:${params.weekNo}`);
-    return getPersistedCell({ doc, mode: params.mode, lineId: params.lineId }).amount;
-  }
-
-  const derivedByMode = useMemo(() => {
-    function compute(mode: 'projection' | 'actual') {
-      const openingIn = mode === 'projection' ? openingTotalsByMode.projectionIn : openingTotalsByMode.actualIn;
-      const openingOut = mode === 'projection' ? openingTotalsByMode.projectionOut : openingTotalsByMode.actualOut;
-      return computeCashflowDerivedTotals({
-        openingIn,
-        openingOut,
-        weeks: monthWeeks.map((def) => ({
-          weekNo: def.weekNo,
-          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-            lineId,
-            getEffectiveAmount({ yearMonth, mode, weekNo: def.weekNo, lineId }),
-          ])) as Partial<Record<CashflowSheetLineId, number>>,
-        })),
-      });
-    }
-
-    return {
-      projection: compute('projection'),
-      actual: compute('actual'),
-    };
-  }, [drafts, getEffectiveAmount, monthWeeks, openingTotalsByMode, yearMonth]);
-
-  const annualDerivedByMode = useMemo(() => {
-    function compute(mode: 'projection' | 'actual') {
-      const openingIn = mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn;
-      const openingOut = mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut;
-      return computeCashflowDerivedTotals({
-        openingIn,
-        openingOut,
-        weeks: annualWeeks.map((def) => ({
-          weekNo: def.weekNo,
-          amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-            lineId,
-            getPersistedYearAmount({ yearMonth: def.yearMonth, mode, weekNo: def.weekNo, lineId }),
-          ])) as Partial<Record<CashflowSheetLineId, number>>,
-        })),
-      });
-    }
-
-    return {
-      projection: compute('projection'),
-      actual: compute('actual'),
-    };
-  }, [annualWeeks, getPersistedYearAmount, yearOpeningTotalsByMode]);
-
   const projectionActualComparison = useMemo(() => {
-    if (!cashflowSnapshot) return { rows: [], changedRows: [], changedCellCount: 0 };
-    const comparisonMonths = cashflowSnapshot.readModel.months;
+    if (!cashflowSnapshot && !monthCloseResult?.dashboard?.comparison) return { rows: [], changedRows: [] };
+    const comparisonMonths = cashflowSnapshot?.readModel.months || [];
     const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month.comparison]));
+    if (monthCloseResult?.dashboard?.comparison) {
+      comparisonByMonth.set(yearMonth, monthCloseResult.dashboard.comparison);
+    }
     const lineDefs = [
       ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
       ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
@@ -1431,9 +1481,8 @@ export function CashflowProjectSheet({
     return {
       rows,
       changedRows: rows.filter((row) => row.changed),
-      changedCellCount: rows.reduce((sum, row) => sum + row.cells.filter((cell) => cell.difference !== null && cell.difference !== 0).length, 0),
     };
-  }, [annualWeeks, cashflowSnapshot]);
+  }, [annualWeeks, cashflowSnapshot, monthCloseResult?.dashboard?.comparison, yearMonth]);
 
   const cashflowTotalPeriodLabel = cashflowSheetRange?.label || `${selectedYear}년`;
   const sheetRangeLabel = cashflowSheetConfig
@@ -1448,251 +1497,90 @@ export function CashflowProjectSheet({
     || '';
 
   const opsSummary = useMemo(() => {
-    return buildCashflowOpsSummary({
-      asOfDate: todayIso,
-      weeks: annualWeeks.map((week) => {
-        const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
-        const projectionHasValue = hasWrittenSheetValues(doc?.projection);
-        const actualHasValue = hasWrittenSheetValues(doc?.actual);
-        return {
-          key: `${week.yearMonth}:${week.weekNo}`,
-          label: week.label,
-          weekStart: week.weekStart,
-          weekEnd: week.weekEnd,
-          projectionWritten: Boolean(doc?.projectionUpdated || projectionHasValue),
-          actualWritten: Boolean(doc?.pmSubmitted || actualHasValue),
-          adminClosed: Boolean(doc?.adminClosed),
-          updatedAt: doc?.updatedAt,
-          updatedByName: doc?.updatedByName,
-          projectionUpdatedAt: doc?.projectionUpdatedAt,
-          projectionUpdatedByName: doc?.projectionUpdatedByName,
-          pmSubmittedAt: doc?.pmSubmittedAt,
-          pmSubmittedByName: doc?.pmSubmittedByName,
-          adminClosedAt: doc?.adminClosedAt,
-          adminClosedByName: doc?.adminClosedByName,
-        };
-      }),
-      diffCellCount: projectionActualComparison.changedCellCount,
-      labor: {
-        nextMonthProjectionWritten: laborRisk ? laborRisk.labor.nextMonthProjection.isWritten : true,
-        missingProjectionMonthCount: laborRisk ? laborRisk.labor.missingProjectionMonths.length : 0,
-        shortageStatus: laborRisk ? laborRisk.shortage.status : 'ok',
-        shortageWeekLabel: laborRisk?.shortage.week?.label || null,
-        shortageAmount: laborRisk?.shortage.shortageAmount || 0,
+    const dashboard = monthCloseResult?.dashboard;
+    const blockers = dashboard?.validation.blockers || [];
+    const warnings = dashboard?.validation.warnings || [];
+    const inbox = [
+      ...blockers.map((item) => ({ id: `blocker-${item.code}`, tone: 'danger' as CashflowOpsTone, title: item.message, detail: item.code })),
+      ...warnings.map((item) => ({ id: `warning-${item.code}`, tone: 'warning' as CashflowOpsTone, title: item.message, detail: item.code })),
+      ...(dashboard && !dashboard.summary.comparisonMatches
+        ? [{ id: 'projection-actual-diff', tone: 'warning' as CashflowOpsTone, title: 'Projection/Actual 차이를 확인해 주세요.', detail: '서버 비교 결과에 차이가 있습니다.' }]
+        : []),
+    ];
+    if (!dashboard && !monthCloseLoading) {
+      inbox.push({ id: 'dashboard-unavailable', tone: 'danger', title: '월 결산 서버 상태를 불러오지 못했습니다.', detail: monthCloseError || '잠시 후 다시 시도해 주세요.' });
+    }
+    const issueCount = inbox.length;
+    const kind = blockers.length > 0 || (!dashboard && !monthCloseLoading)
+      ? 'blocked' as const
+      : warnings.length > 0 || !dashboard?.summary.comparisonMatches
+        ? 'review' as const
+        : 'ready' as const;
+    const tone: CashflowOpsTone = kind === 'blocked' ? 'danger' : kind === 'review' ? 'warning' : 'success';
+    const rate = (percent: number) => ({ percent: Math.min(100, Math.max(0, Number(percent) || 0)) });
+    return {
+      status: {
+        kind,
+        tone,
+        count: issueCount,
+        label: monthCloseLoading ? '서버 검증 중' : kind === 'ready' ? '서버 검증 완료' : '확인 필요',
+        detail: monthCloseLoading
+          ? '월 결산 상태와 합계를 불러오고 있습니다.'
+          : kind === 'ready'
+            ? '서버 검증 기준으로 확인할 항목이 없습니다.'
+            : `서버 확인 항목 ${issueCount.toLocaleString()}건이 있습니다.`,
       },
-    });
-  }, [annualWeeks, byYearMonthWeek, laborRisk, projectionActualComparison.changedCellCount, todayIso]);
+      rates: {
+        projection: rate(dashboard?.summary.projectionProgressPercent || 0),
+        actual: rate(dashboard?.summary.actualProgressPercent || 0),
+        confirmation: rate(dashboard?.summary.confirmationProgressPercent || 0),
+      },
+      inbox,
+    };
+  }, [monthCloseError, monthCloseLoading, monthCloseResult?.dashboard]);
 
   const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
     const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
     setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
   }, [resolveWeekKey, yearMonth]);
 
-  const handleSaveWeekValues = useCallback((input: {
-    yearMonth?: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-  }) => {
-    if (input.mode === 'actual') {
-      toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
-      return;
-    }
-    void savePrivateCashflowDraft()
-      .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
-      .catch((error) => {
-        toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.'));
-      });
-  }, [savePrivateCashflowDraft]);
-
-  const handleSaveBoardWeekValues = useCallback((input: {
-    yearMonth: string;
-    weekNo: number;
-    mode: 'projection' | 'actual';
-  }) => {
-    if (input.mode === 'actual') {
-      toast.info('Actual 금액은 사용내역 연동값이라 화면에서 수정하지 않습니다.');
-      return;
-    }
-    void savePrivateCashflowDraft()
-      .then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.'))
-      .catch((error) => {
-        toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.'));
-      });
-  }, [savePrivateCashflowDraft]);
-
-  const handleSubmitWeek = useCallback(async (input: { weekNo: number; yearMonth: string }) => {
-    setSubmitBusy(true);
-    try {
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      await submitWeekAsPm({ projectId, yearMonth: input.yearMonth, weekNo: input.weekNo, cashflowLease: mutationLease, finalize: true });
-      await completePrivateCashflowDraft(mutationLease);
-      await cashflowLease.checkStatus();
-      await loadCashflowEvents();
-      toast.success('작성완료 처리했습니다.');
-    } catch (e) {
-      toast.error('작성완료 처리에 실패했습니다.');
-    } finally {
-      setSubmitBusy(false);
-      setSubmitConfirm(null);
-    }
-  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, completePrivateCashflowDraft, loadCashflowEvents, projectId, submitWeekAsPm]);
-
-  const handleCompleteProjectionWeek = useCallback((weekNo: number, targetYearMonth = yearMonth) => {
-    if (!canEdit) return;
-
-    void (async () => {
-      setProjectionCompleteWeek(weekNo);
-      const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({ yearMonth: targetYearMonth, weekNo, mode: 'projection' });
-      const auditIssues = [
-        ...preparedIssues,
-        ...collectAuditIssues({ yearMonth: targetYearMonth, weekNo, mode: 'projection', amounts })
-          .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
-      ];
-      if (auditIssues.length > 0) {
-        setWeekSaveState((prev) => ({ ...prev, [resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })]: 'error' }));
-        showAuditBlock('작성완료 전에 확인이 필요합니다', weekNo, auditIssues, targetYearMonth);
-        return;
-      }
-
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      await upsertWeekAmounts({
-        projectId,
-        yearMonth: targetYearMonth,
-        weekNo,
-        mode: 'projection',
-        amounts,
-        markCompleted: true,
-        cashflowLease: mutationLease,
-        finalize: true,
-      });
-      await completePrivateCashflowDraft(mutationLease);
-      await cashflowLease.checkStatus();
-
-      await loadCashflowEvents();
-
-      setDrafts((prev) => {
-        const next = { ...prev };
-        for (const lineId of CASHFLOW_ALL_LINES) {
-          delete next[resolveCellKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo, lineId })];
-        }
-        return next;
-      });
-      setWeekSaveState((prev) => {
-        const next = { ...prev };
-        delete next[resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })];
-        return next;
-      });
-      toast.success('주차 Projection을 작성완료 처리했습니다.');
-    })().catch(() => {
-      toast.error('작성완료 처리에 실패했습니다. 네트워크/권한을 확인해 주세요.');
-    }).finally(() => {
-      setProjectionCompleteWeek((prev) => (prev === weekNo ? null : prev));
-    });
-  }, [
-    canEdit,
-    cashflowLease.checkBeforeMutation,
-    cashflowLease.checkStatus,
-    completePrivateCashflowDraft,
-    getEffectiveAmount,
-    loadCashflowEvents,
-    projectId,
-    resolveCellKey,
-    resolveWeekKey,
-    upsertWeekAmounts,
-    yearMonth,
-  ]);
-
-  const handleCloseWeek = useCallback(async (weekNo: number, targetYearMonth = yearMonth) => {
-    setCloseBusy(true);
-    try {
-      const { amounts, issues: preparedIssues } = prepareAuditedWeekAmounts({
-        yearMonth: targetYearMonth,
-        weekNo,
-        mode: 'projection',
-      });
-      const auditIssues = [
-        ...preparedIssues,
-        ...collectAuditIssues({ yearMonth: targetYearMonth, weekNo, mode: 'projection', amounts })
-          .filter((issue) => !preparedIssues.some((prepared) => prepared.key === issue.key)),
-      ];
-      if (auditIssues.length > 0) {
-        showAuditBlock('결산 전에 확인이 필요합니다', weekNo, auditIssues, targetYearMonth);
-        throw new Error('cashflow_audit_validation_failed');
-      }
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      await closeWeekAsAdmin({
-        projectId,
-        yearMonth: targetYearMonth,
-        weekNo,
-        projectionLines: Object.entries(amounts).map(([cashflowLine, amount]) => ({
-          yearMonth: targetYearMonth,
-          weekNo,
-          cashflowLine,
-          amount: Number(amount) || 0,
-        })),
-        cashflowLease: mutationLease,
-        finalize: true,
-      });
-      await completePrivateCashflowDraft(mutationLease);
-      await cashflowLease.checkStatus();
-      await loadCashflowEvents();
-      toast.success('결산완료 처리했습니다.');
-    } catch (e) {
-      toast.error('결산완료 처리에 실패했습니다.');
-    } finally {
-      setCloseBusy(false);
-      setCloseDialog(null);
-    }
-  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, closeWeekAsAdmin, completePrivateCashflowDraft, loadCashflowEvents, projectId, yearMonth]);
-
-  const handleStartCloseWeek = useCallback(async (weekNo: number) => {
-    if (!db) {
-      setCloseDialog({
-        kind: 'confirm',
-        yearMonth,
-        weekNo,
-        projectionDone: true,
-        expenseDone: true,
-      });
-      return;
-    }
-
-    try {
-      const statusId = `${projectId}-${yearMonth}-w${weekNo}`;
-      const statusRef = doc(db, getOrgDocumentPath(orgId, 'weeklySubmissionStatus', statusId));
-      const snap = await getDoc(statusRef);
-      const status = snap.exists() ? (snap.data() as WeeklySubmissionStatus) : undefined;
-      const accountingState = resolveWeeklyAccountingState(status, byWeekNo.get(weekNo));
-
-      setCloseDialog({
-        kind: accountingState.closeDialogKind,
-        yearMonth,
-        weekNo,
-        projectionDone: accountingState.projectionDone,
-        expenseDone: accountingState.expenseDone,
-        expenseStatusLabel: accountingState.expenseStatusLabel,
-        expenseStatusDescription: accountingState.expenseStatusDescription,
-      });
-    } catch {
-      toast.error('결산 전 제출현황을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    }
-  }, [db, orgId, projectId, yearMonth]);
-
-  function countEmptyCellsForWeek(input: { weekNo: number; mode: 'projection' | 'actual' }): number {
-    const doc = byWeekNo.get(input.weekNo);
-    let empty = 0;
-    for (const lineId of CASHFLOW_ALL_LINES) {
-      const persisted = getPersistedCell({ doc, mode: input.mode, lineId });
-      const key = resolveCellKey({ yearMonth, mode: input.mode, weekNo: input.weekNo, lineId });
-      const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-      const filled = persisted.hasValue || (typeof raw === 'string' && raw.trim() !== '');
-      if (!filled) empty += 1;
-    }
-    return empty;
-  }
-
   function diffTextClass(diff: number): string {
     return diff === 0 ? 'text-slate-400' : 'text-slate-800';
+  }
+
+  function getServerReadCell(params: {
+    targetYearMonth: string;
+    mode: 'projection' | 'actual';
+    weekNo: number;
+    lineId: CashflowSheetLineId;
+  }): { amount: number; hasValue: boolean; mismatch: boolean } {
+    if (params.targetYearMonth === yearMonth && monthCloseResult?.dashboard) {
+      const cell = monthCloseResult.dashboard.cells.find((candidate) => (
+        candidate.mode === params.mode
+        && candidate.weekNo === params.weekNo
+        && candidate.cashflowLine === params.lineId
+      ));
+      const comparisonLine = monthCloseResult.dashboard.comparison?.weeks
+        .find((candidate) => candidate.weekNo === params.weekNo)
+        ?.lines.find((candidate) => candidate.lineId === params.lineId);
+      return {
+        amount: cell?.cellState === 'VALUE' ? Number(cell.amount || 0) : 0,
+        hasValue: cell?.cellState === 'VALUE',
+        mismatch: comparisonLine?.mismatch === true,
+      };
+    }
+    const month = cashflowSnapshot?.readModel.months.find((candidate) => candidate.yearMonth === params.targetYearMonth);
+    const week = month?.[params.mode].weeks.find((candidate) => candidate.weekNo === params.weekNo);
+    const comparisonLine = month?.comparison.weeks
+      .find((candidate) => candidate.weekNo === params.weekNo)
+      ?.lines.find((candidate) => candidate.lineId === params.lineId);
+    return {
+      amount: Number(week?.amounts[params.lineId] || 0),
+      hasValue: params.mode === 'projection'
+        ? Boolean(comparisonLine?.projectionHadValue)
+        : Boolean(comparisonLine?.actualHadValue),
+      mismatch: comparisonLine?.mismatch === true,
+    };
   }
 
   function getBoardEffectiveAmount(params: {
@@ -1701,8 +1589,7 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    const doc = byYearMonthWeek.get(`${params.targetYearMonth}:${params.weekNo}`);
-    const persisted = getPersistedCell({ doc, mode: params.mode, lineId: params.lineId });
+    const persisted = getServerReadCell(params);
     const key = resolveCellKey({
       yearMonth: params.targetYearMonth,
       mode: params.mode,
@@ -1710,7 +1597,7 @@ export function CashflowProjectSheet({
       lineId: params.lineId,
     });
     const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-    return raw !== undefined ? parseAmount(raw) : persisted.amount;
+    return params.mode === 'projection' && raw !== undefined ? parseAmount(raw) : persisted.amount;
   }
 
   function renderProjectionCell(input: {
@@ -1719,14 +1606,13 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
   }) {
-    const projectionDoc = byYearMonthWeek.get(`${input.targetYearMonth}:${input.weekNo}`);
-    const persisted = getPersistedCell({ doc: projectionDoc, mode: 'projection', lineId: input.lineId });
+    const persisted = getServerReadCell({ ...input, mode: 'projection' });
     const key = resolveCellKey({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
     const projectionValue = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const shouldHighlightMismatch = shouldHighlightProjectionAmountMismatch({ projection, actual });
+    const shouldHighlightMismatch = persisted.mismatch;
     const isEditing = isWeekModeEditing({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo }) || raw !== undefined;
     const bgClass = input.isThisWeek ? 'bg-blue-50/70' : 'bg-white';
     const isCollapsedEmpty = !showEmptyCashflowRows && !isEditing && projection === 0 && actual === 0 && raw === undefined;
@@ -1763,8 +1649,7 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
   }) {
-    const actualDoc = byYearMonthWeek.get(`${input.targetYearMonth}:${input.weekNo}`);
-    const persisted = getPersistedCell({ doc: actualDoc, mode: 'actual', lineId: input.lineId });
+    const persisted = getServerReadCell({ ...input, mode: 'actual' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const bgClass = input.isThisWeek ? 'bg-blue-50/80' : 'bg-slate-50/80';
@@ -1816,21 +1701,38 @@ export function CashflowProjectSheet({
   }
 
   function renderUnifiedMonthlyBoard() {
+    if (cashflowComparisonLoading && !cashflowSnapshot) {
+      return (
+        <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">
+          서버 확정 원장과 기간 합계를 불러오는 중입니다.
+        </div>
+      );
+    }
     const visibleWeeks = annualWeeks;
-    const computeBoardDerived = (mode: 'projection' | 'actual') => computeCashflowDerivedTotals({
-      openingIn: mode === 'projection' ? yearOpeningTotalsByMode.projectionIn : yearOpeningTotalsByMode.actualIn,
-      openingOut: mode === 'projection' ? yearOpeningTotalsByMode.projectionOut : yearOpeningTotalsByMode.actualOut,
-      weeks: visibleWeeks.map((week) => ({
-        weekNo: week.weekNo,
-        amounts: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
-          lineId,
-          getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode, weekNo: week.weekNo, lineId }),
-        ])) as Partial<Record<CashflowSheetLineId, number>>,
-      })),
-    });
+    const readServerSummary = (mode: 'projection' | 'actual') => {
+      const weekTotals = visibleWeeks.map((week) => {
+        const dashboardWeek = week.yearMonth === yearMonth
+          ? monthCloseResult?.dashboard?.totals[mode].weeks.find((candidate) => candidate.weekNo === week.weekNo)
+          : null;
+        const serverWeek = dashboardWeek || cashflowSnapshot?.readModel.months
+          .find((month) => month.yearMonth === week.yearMonth)
+          ?.[mode].weeks.find((candidate) => candidate.weekNo === week.weekNo);
+        return serverWeek || { weekNo: week.weekNo, amounts: {}, totalIn: 0, totalOut: 0, net: 0, weekIn: 0, weekOut: 0 };
+      });
+      const rangeTotals = cashflowSnapshot?.readModel.range?.[mode];
+      return {
+        rowTotals: (rangeTotals?.rowTotals || {}) as Record<CashflowSheetLineId, number>,
+        weekTotals,
+        monthTotals: {
+          totalIn: rangeTotals?.totalIn || 0,
+          totalOut: rangeTotals?.totalOut || 0,
+          net: rangeTotals?.net || 0,
+        },
+      };
+    };
     const derived = {
-      projection: computeBoardDerived('projection'),
-      actual: computeBoardDerived('actual'),
+      projection: readServerSummary('projection'),
+      actual: readServerSummary('actual'),
     };
     const dirtyBoardWeeks = visibleWeeks.filter((week) => (
       weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
@@ -1853,80 +1755,6 @@ export function CashflowProjectSheet({
       void beginCashflowEditing().then((started) => {
         if (started) setBoardEditing(true);
       });
-    };
-    const saveBoardDrafts = async () => {
-      const weeksToSave = visibleWeeks.filter((week) => (
-        weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
-      ));
-      const lines = weeksToSave.flatMap((week) => {
-        const persisted = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
-        return CASHFLOW_ALL_LINES.flatMap((lineId) => {
-          const key = resolveCellKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-          if (!Object.prototype.hasOwnProperty.call(drafts, key)) return [];
-          const amount = parseAmount(drafts[key]);
-          const before = getPersistedCell({ doc: persisted, mode: 'projection', lineId });
-          return amount === before.amount && before.hasValue
-            ? []
-            : [{ yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine: lineId, amount }];
-        });
-      });
-      const finalMutationLease = await cashflowLease.checkBeforeMutation();
-      const actor = await resolveBffActor();
-      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      await saveCashflowProjectionBatchViaBff({
-        tenantId: orgId,
-        actor,
-        projectId,
-        lines,
-        idempotencyKey: `cashflow-projection-final:${projectId}:${Date.now()}`,
-        lease: finalMutationLease,
-        finalize: true,
-      });
-      await completePrivateCashflowDraft(finalMutationLease);
-      await cashflowLease.checkStatus();
-      setDrafts((current) => {
-        const next = { ...current };
-        for (const week of weeksToSave) {
-          for (const lineId of CASHFLOW_ALL_LINES) {
-            delete next[resolveCellKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId })];
-          }
-        }
-        return next;
-      });
-      await Promise.all([
-        loadCashflowSheetRangeWeeks(),
-        loadCashflowEvents(),
-        loadCashflowComparison(),
-      ]);
-      setBoardEditing(false);
-    };
-    const settleWeek = (week: MonthMondayWeek) => {
-      void (async () => {
-        await savePrivateCashflowDraft();
-        const issues: CashflowAuditIssue[] = [];
-        for (const lineId of CASHFLOW_ALL_LINES) {
-          const projectionAmount = getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
-          const actualAmount = getBoardEffectiveAmount({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
-          if (projectionAmount !== actualAmount) {
-            issues.push({
-              key: `${week.yearMonth}:${week.weekNo}:${lineId}:settle-mismatch`,
-              label: CASHFLOW_SHEET_LINE_LABELS[lineId],
-              detail: `결산 시 Projection ${fmt(projectionAmount)} / Actual ${fmt(actualAmount)}로 같아야 합니다.`,
-            });
-          }
-        }
-        if (issues.length > 0) {
-          showAuditBlock('결산 전에 Projection/Actual 확인이 필요합니다', week.weekNo, issues, week.yearMonth);
-          return;
-        }
-        setCloseDialog({
-          kind: 'confirm',
-          yearMonth: week.yearMonth,
-          weekNo: week.weekNo,
-          projectionDone: true,
-          expenseDone: true,
-        });
-      })().catch(() => toast.error('결산 확인에 실패했습니다.'));
     };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
@@ -2013,20 +1841,20 @@ export function CashflowProjectSheet({
             {visibleWeeks.map((week) => {
               const saveState = weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode, weekNo: week.weekNo })];
               const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
-              const doc = byYearMonthWeek.get(`${week.yearMonth}:${week.weekNo}`);
+              const hasServerValues = CASHFLOW_ALL_LINES.some((lineId) => getServerReadCell({
+                targetYearMonth: week.yearMonth,
+                mode,
+                weekNo: week.weekNo,
+                lineId,
+              }).hasValue);
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
-                  <div className="relative min-h-5">
+                  <div className="min-h-5">
                     <span className="block truncate text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
-                    {mode === 'projection' && canEdit ? (
-                      <Button size="sm" variant="outline" className="absolute right-0 top-0 h-5 w-5 rounded-full border-0 bg-white/95 p-0 shadow-sm" onClick={() => settleWeek(week)} disabled={closeBusy} aria-label={`${week.label} 결산`} title={`${week.label} 결산`}>
-                        <CheckCircle2 className="h-3 w-3" />
-                      </Button>
-                    ) : null}
                   </div>
                   <div className="truncate text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
-                  <Badge className={`mt-1 h-3.5 w-full justify-center rounded-full border-0 px-1 text-[7px] ${mode === 'projection' ? (doc?.projectionUpdated ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700') : (doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700')}`}>
-                    {mode === 'projection' ? (doc?.projectionUpdated ? 'Prj 작성' : 'Prj 미작성') : (doc?.pmSubmitted || hasWrittenSheetValues(doc?.actual) ? 'Act 작성' : 'Act 미작성')}
+                  <Badge className={`mt-1 h-3.5 w-full justify-center rounded-full border-0 px-1 text-[7px] ${hasServerValues ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700'}`}>
+                    {hasServerValues ? '서버 값' : '값 없음'}
                   </Badge>
                   {saveState === 'dirty' ? <Badge className="mt-0.5 h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">미저장</Badge> : null}
                 </th>
@@ -2053,7 +1881,7 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
-              <div className="mt-1 text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · Projection 입력 / Actual 조회</div>
+              <div className="mt-1 text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · 서버 확정 원장 합계 · Projection 입력 / Actual 조회</div>
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" size="sm" variant={boardIsEditing ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px] shadow-sm" onClick={startBoardEditing} disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}>
@@ -2064,9 +1892,9 @@ export function CashflowProjectSheet({
                 <Save className="mr-1 h-3 w-3" />
                 임시저장
               </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => void saveBoardDrafts().then(() => toast.success('최종저장했습니다.')).catch(() => toast.error('최종저장에 실패했습니다. 입력값은 임시저장본에 유지됩니다.'))} disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}>
+              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || cashflowLease.busy || monthCloseBusy || monthCloseResult?.status !== 'OPEN'}>
                 <CheckCircle2 className="mr-1 h-3 w-3" />
-                최종저장
+                최종저장 · 월 결산
               </Button>
               {cashflowLease.canEdit ? (
                 <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-[10px]" onClick={() => void cashflowLease.extend()} disabled={cashflowLease.busy}>
@@ -2099,399 +1927,16 @@ export function CashflowProjectSheet({
     );
   }
 
-  function renderSheetTable(tableMode: 'projection' | 'actual', compact = false) {
-    const derived = tableMode === 'projection' ? derivedByMode.projection : derivedByMode.actual;
-    return (
-      <Card className="overflow-hidden">
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className={`${compact ? 'min-w-[760px]' : 'min-w-[860px]'} w-full text-[11px]`}>
-              <thead>
-                <tr className="bg-muted/30">
-                  <th className={`${compact ? 'px-3' : 'px-4'} py-2 text-left`} style={{ fontWeight: 700, minWidth: compact ? 150 : 180 }}>항목</th>
-                  {monthWeeks.map((w) => {
-                    const wkKey = resolveWeekKey({ yearMonth, mode: tableMode, weekNo: w.weekNo });
-                    const saveState = weekSaveState[wkKey];
-                    const doc = byWeekNo.get(w.weekNo);
-                    const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
-                    const colClass = isThisWeek ? 'bg-teal-50/40 dark:bg-teal-950/10' : '';
-
-                    return (
-                      <th key={w.weekNo} className={`px-3 py-2 text-right ${colClass}`} style={{ fontWeight: 700, minWidth: compact ? 112 : 150 }}>
-                        <div className="flex items-center justify-end gap-2">
-                          <span>{w.label}</span>
-                          {weekMeta[w.weekNo]?.adminClosed ? (
-                            <Badge className="h-4 px-1 text-[9px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0">결산</Badge>
-                          ) : tableMode === 'projection' ? (
-                            weekMeta[w.weekNo]?.projectionUpdated ? (
-                              <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
-                            ) : (
-                              <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">미작성</Badge>
-                            )
-                          ) : weekMeta[w.weekNo]?.pmSubmitted || weekHasActual[w.weekNo] ? (
-                            <Badge className="h-4 px-1 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-300 border-0">작성</Badge>
-                          ) : (
-                            <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">미작성</Badge>
-                          )}
-                          {saveState === 'dirty' && (
-                            <Badge className="h-4 px-1 text-[9px] bg-sky-500/15 text-sky-700 dark:text-sky-300 border-0">미저장</Badge>
-                          )}
-                          {saveState === 'saving' && (
-                            <Badge className="h-4 px-1 text-[9px] bg-slate-500/10 text-slate-600 dark:text-slate-300 border-0">저장중</Badge>
-                          )}
-                          {saveState === 'error' && (
-                            <Badge className="h-4 px-1 text-[9px] bg-rose-500/15 text-rose-700 dark:text-rose-300 border-0">오류</Badge>
-                          )}
-                        </div>
-                          <div className="text-[9px] text-muted-foreground mt-0.5">{w.weekStart} ~ {w.weekEnd}</div>
-                          <div className="mt-2 flex items-center justify-end gap-1.5">
-                            {tableMode === 'projection' && canEdit && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-[10px] gap-1"
-                                onClick={() => handleSaveWeekValues({ weekNo: w.weekNo, mode: tableMode })}
-                                disabled={saveState === 'saving'}
-                                aria-label="임시저장"
-                                title="임시저장"
-                              >
-                                {saveState === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : <ClipboardCheck className="w-3 h-3" />}
-                                {!compact && '임시저장'}
-                              </Button>
-                            )}
-                            {tableMode === 'projection' && canEdit && (
-                              <Button
-                                size="sm"
-                              variant="outline"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => handleCompleteProjectionWeek(w.weekNo)}
-                              disabled={projectionCompleteWeek === w.weekNo}
-                              aria-label="작성완료"
-                              title="작성완료"
-                            >
-                              {projectionCompleteWeek === w.weekNo ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                              {!compact && '작성완료'}
-                            </Button>
-                          )}
-                          {tableMode === 'actual' && !weekMeta[w.weekNo]?.pmSubmitted && canSubmitActual && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => setSubmitConfirm({ weekNo: w.weekNo, yearMonth })}
-                              aria-label="작성완료"
-                              title="작성완료"
-                            >
-                              <CheckCircle2 className="w-3 h-3" /> {!compact && '작성완료'}
-                            </Button>
-                          )}
-                          {tableMode === 'projection' && !weekMeta[w.weekNo]?.adminClosed && canClose && (
-                            <Button
-                              size="sm"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => void handleStartCloseWeek(w.weekNo)}
-                              style={{ background: 'linear-gradient(135deg, #059669, #0d9488)' }}
-                              aria-label="결산"
-                              title="결산"
-                            >
-                              <CheckCircle2 className="w-3 h-3" /> {!compact && '결산'}
-                            </Button>
-                          )}
-                        </div>
-                        {doc?.adminClosed && (
-                          <div className="mt-1 text-[9px] text-muted-foreground">결산완료 이후에도 Projection 수정은 가능합니다.</div>
-                        )}
-                      </th>
-                    );
-                  })}
-                  <th className="px-3 py-2 text-right" style={{ fontWeight: 700, minWidth: compact ? 100 : 120 }}>월 합계</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-emerald-50/40 dark:bg-emerald-950/10">
-                  <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
-                    입금 ({tableMode === 'projection' ? 'Projection' : 'Actual'})
-                  </td>
-                </tr>
-                {CASHFLOW_IN_LINES.map((lineId) => (
-                  <tr key={lineId} className="border-t border-border/30">
-                    <td className={`${compact ? 'px-3' : 'px-4'} py-1.5 text-[10px] whitespace-nowrap`} style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
-                    {monthWeeks.map((w) => {
-                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
-                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
-
-                      if (tableMode === 'actual') {
-                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
-                        return (
-                          <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right text-slate-600 ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
-                        );
-                      }
-
-                      const doc = byWeekNo.get(w.weekNo);
-                      const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
-                      const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
-                      const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-                      const value = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
-
-                      return (
-                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          <Input
-                            value={value}
-                            inputMode="numeric"
-                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
-                            placeholder="0"
-                            disabled={false}
-                            onChange={(e) => {
-                              const formatted = formatAmountInput(e.target.value);
-                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
-                              markDirty({ weekNo: w.weekNo, mode: tableMode });
-                            }}
-                          />
-                        </td>
-                      );
-                    })}
-                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(derived.rowTotals[lineId] || 0)}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="border-t border-border/50 bg-muted/40">
-                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>입금 합계</td>
-                  {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(w.totalIn)}
-                    </td>
-                  ))}
-                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(derived.monthTotals.totalIn)}
-                  </td>
-                </tr>
-
-                <tr className="border-t border-border/50 bg-rose-50/30 dark:bg-rose-950/10">
-                  <td className="px-4 py-2" colSpan={monthWeeks.length + 2} style={{ fontWeight: 700 }}>
-                    출금 ({tableMode === 'projection' ? 'Projection' : 'Actual'})
-                  </td>
-                </tr>
-                {CASHFLOW_OUT_LINES.map((lineId) => (
-                  <tr key={lineId} className="border-t border-border/30">
-                    <td className={`${compact ? 'px-3' : 'px-4'} py-1.5 text-[10px] whitespace-nowrap`} style={{ fontWeight: 500 }}>{CASHFLOW_SHEET_LINE_LABELS[lineId]}</td>
-                    {monthWeeks.map((w) => {
-                      const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
-                      const colClass = isThisWeek ? 'bg-teal-50/30 dark:bg-teal-950/10' : '';
-
-                      if (tableMode === 'actual') {
-                        const amount = getEffectiveAmount({ yearMonth, mode: 'actual', weekNo: w.weekNo, lineId });
-                        return (
-                          <td key={w.weekNo} className={`px-3 py-2 h-9 align-middle text-right text-slate-600 ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                            {fmt(amount)}
-                          </td>
-                        );
-                      }
-
-                      const doc = byWeekNo.get(w.weekNo);
-                      const persisted = getPersistedCell({ doc, mode: tableMode, lineId });
-                      const key = resolveCellKey({ yearMonth, mode: tableMode, weekNo: w.weekNo, lineId });
-                      const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-                      const value = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
-
-                      return (
-                        <td key={w.weekNo} className={`px-3 h-9 align-middle text-right ${colClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          <Input
-                            value={value}
-                            inputMode="numeric"
-                            className="h-6 text-[10px] md:text-[10px] leading-[10px] font-normal text-right px-1 py-0 bg-transparent border-transparent focus-visible:ring-0 focus-visible:border-teal-500/60"
-                            placeholder="0"
-                            disabled={false}
-                            onChange={(e) => {
-                              const formatted = formatAmountInput(e.target.value);
-                              setDrafts((prev) => ({ ...prev, [key]: formatted }));
-                              markDirty({ weekNo: w.weekNo, mode: tableMode });
-                            }}
-                          />
-                        </td>
-                      );
-                    })}
-                    <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(derived.rowTotals[lineId] || 0)}
-                    </td>
-                  </tr>
-                ))}
-
-                <tr className="border-t border-border/30 bg-muted/40">
-                  <td className="px-4 py-1.5 text-[10px]" style={{ fontWeight: 800 }}>출금 합계</td>
-                  {derived.weekTotals.map((w) => (
-                    <td key={w.weekNo} className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 800, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
-                      {fmt(w.totalOut)}
-                    </td>
-                  ))}
-                  <td className="px-3 py-1.5 pr-2 h-9 align-middle text-right text-[10px]" style={{ fontWeight: 900, color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(derived.monthTotals.totalOut)}
-                  </td>
-                </tr>
-                <tr className="border-t border-border/30 bg-muted/50">
-                  <td className="px-4 py-2" style={{ fontWeight: 900 }}>잔액</td>
-                  {(() => {
-                    let running = 0;
-                    return derived.weekTotals.map((w) => {
-                      running = w.net;
-                      return (
-                        <td key={w.weekNo} className="px-3 py-2 text-right" style={{ fontWeight: 900, color: running >= 0 ? '#059669' : '#e11d48' }}>
-                          {fmt(running)}
-                        </td>
-                      );
-                    });
-                  })()}
-                  <td className="px-3 py-2 text-right" style={{ fontWeight: 900, color: derived.monthTotals.net >= 0 ? '#059669' : '#e11d48' }}>
-                    {fmt(derived.monthTotals.net)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          {isLoading && (
-            <div className="px-4 py-3 text-[11px] text-muted-foreground">불러오는 중…</div>
-          )}
-        </CardContent>
-      </Card>
-    );
-  }
-
-  function renderAnnualSheetMatrix(tableMode: 'projection' | 'actual') {
-    const derived = tableMode === 'projection' ? annualDerivedByMode.projection : annualDerivedByMode.actual;
-    const tone = tableMode === 'projection' ? 'text-slate-950' : 'text-slate-950';
-    return (
-      <Card className="overflow-hidden rounded-[20px] border-0 bg-slate-50/80 shadow-none">
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-            <h3 className="text-[13px] font-semibold text-slate-950">
-              저장된 {tableMode === 'projection' ? 'Projection' : 'Actual'}
-            </h3>
-            <span className="text-[11px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · {annualWeeks.length.toLocaleString()}주</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="border-collapse text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
-              <thead className="bg-slate-50 text-slate-500">
-                <tr>
-                  <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r border-slate-200 bg-slate-50 px-3 py-2 text-left font-medium">
-                    항목
-                  </th>
-                  {annualWeeks.map((week) => (
-                    <th key={`${tableMode}-${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right font-medium">
-                      <div>{week.label}</div>
-                      {formatShortWeekRange(week) ? (
-                        <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div>
-                      ) : null}
-                    </th>
-                  ))}
-                  <th className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-medium">범위 합계</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-emerald-50 text-emerald-900">
-                  <td colSpan={annualWeeks.length + 2} className="px-3 py-2 font-semibold">입금</td>
-                </tr>
-                {CASHFLOW_IN_LINES.map((lineId) => (
-                  <tr key={`${tableMode}-${lineId}`} className="border-t border-slate-100">
-                    <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900">
-                      {CASHFLOW_SHEET_LINE_LABELS[lineId]}
-                    </td>
-                    {annualWeeks.map((week) => {
-                      const amount = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: tableMode, weekNo: week.weekNo, lineId });
-                      return (
-                        <td
-                          key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
-                          className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
-                        >
-                          {fmt(amount)}
-                        </td>
-                      );
-                    })}
-                    <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
-                      {fmt(derived.rowTotals[lineId] || 0)}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="border-t border-slate-200 bg-emerald-50/70 font-semibold text-emerald-950">
-                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-emerald-50 px-3 py-2">입금 합계</td>
-                  {derived.weekTotals.map((week, index) => (
-                    <td key={`${tableMode}-year-total-in-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
-                      {fmt(week.totalIn)}
-                    </td>
-                  ))}
-                  <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
-                    {fmt(derived.monthTotals.totalIn)}
-                  </td>
-                </tr>
-                <tr className="bg-rose-50 text-rose-900">
-                  <td colSpan={annualWeeks.length + 2} className="px-3 py-2 font-semibold">출금</td>
-                </tr>
-                {CASHFLOW_OUT_LINES.map((lineId) => (
-                  <tr key={`${tableMode}-${lineId}`} className="border-t border-slate-100">
-                    <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-white px-3 py-2 text-slate-900">
-                      {CASHFLOW_SHEET_LINE_LABELS[lineId]}
-                    </td>
-                    {annualWeeks.map((week) => {
-                      const amount = getPersistedYearAmount({ yearMonth: week.yearMonth, mode: tableMode, weekNo: week.weekNo, lineId });
-                      return (
-                        <td
-                          key={`${tableMode}-${lineId}-${week.yearMonth}-${week.weekNo}`}
-                          className={`min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums ${amount === 0 ? 'text-slate-300' : tone}`}
-                        >
-                          {fmt(amount)}
-                        </td>
-                      );
-                    })}
-                    <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right font-semibold tabular-nums">
-                      {fmt(derived.rowTotals[lineId] || 0)}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="border-t border-slate-200 bg-rose-50/70 font-semibold text-rose-950">
-                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-rose-50 px-3 py-2">출금 합계</td>
-                  {derived.weekTotals.map((week, index) => (
-                    <td key={`${tableMode}-year-total-out-${index}`} className="min-w-[96px] border-l border-slate-100 px-2 py-2 text-right tabular-nums">
-                      {fmt(week.totalOut)}
-                    </td>
-                  ))}
-                  <td className="min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums">
-                    {fmt(derived.monthTotals.totalOut)}
-                  </td>
-                </tr>
-                <tr className="border-t border-slate-300 bg-slate-100 font-semibold text-slate-950">
-                  <td className="sticky left-0 z-10 w-[220px] min-w-[220px] border-r border-slate-200 bg-slate-100 px-3 py-2">잔액</td>
-                  {derived.weekTotals.map((week, index) => (
-                    <td
-                      key={`${tableMode}-year-balance-${index}`}
-                      className={`min-w-[96px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${week.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}
-                    >
-                      {fmt(week.net)}
-                    </td>
-                  ))}
-                  <td className={`min-w-[104px] border-l border-slate-200 px-2 py-2 text-right tabular-nums ${derived.monthTotals.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {fmt(derived.monthTotals.net)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   function renderProjectionActualDiffTable() {
-    const rows = differenceViewMode === 'diff'
-      ? projectionActualComparison.changedRows
-      : projectionActualComparison.rows;
+    const rows = projectionActualComparison.changedRows;
     if (cashflowComparisonLoading) {
       return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
     }
-    if (cashflowComparisonError || !cashflowSnapshot) {
+    if (cashflowComparisonError || !cashflowSnapshot?.readModel.range) {
       return (
         <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-3 py-6 text-center text-[12px] text-rose-700">
-          {cashflowComparisonError || 'Projection - Actual 차이를 불러오지 못했습니다.'}
+          {cashflowComparisonError || '서버 확정 원장과 기간 합계를 불러오지 못했습니다.'}
         </div>
       );
     }
@@ -2506,17 +1951,10 @@ export function CashflowProjectSheet({
                 </HoverExplain>
               </div>
               <div className="text-[10px] text-slate-500">
-                BFF 기준일 {cashflowSnapshot.comparison.asOfDate} · 차이 = Projection - Actual
+                BFF 기준일 {monthCloseResult?.dashboard?.summary.comparisonAsOfDate || cashflowSnapshot?.comparison.asOfDate || '-'} · 차이 = Projection - Actual
               </div>
             </div>
-            <div className="flex items-center gap-1">
-              <Button type="button" size="sm" variant={differenceViewMode === 'diff' ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px]" onClick={() => setDifferenceViewMode('diff')}>
-                차이만
-              </Button>
-              <Button type="button" size="sm" variant={differenceViewMode === 'all' ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px]" onClick={() => setDifferenceViewMode('all')}>
-                전체
-              </Button>
-            </div>
+            <Badge className="rounded-full border-0 bg-blue-50 px-2.5 py-1 text-[10px] text-blue-700">차이 항목만</Badge>
           </div>
           <div className="overflow-x-auto rounded-[18px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
             <table className="border-separate border-spacing-0 text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
@@ -2546,9 +1984,7 @@ export function CashflowProjectSheet({
                     {row.cells.map((cell) => {
                       const differenceClass = cell.difference === null || cell.difference === 0
                         ? 'text-slate-300'
-                        : cell.difference > 0
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'bg-rose-50 text-rose-700';
+                        : 'bg-blue-50 text-blue-700';
                       return (
                         <td
                           key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
@@ -2602,16 +2038,15 @@ export function CashflowProjectSheet({
   }
 
   function renderOpsStatusDonut() {
-    const blockedMatch = opsSummary.status.detail.match(/(\d+)/);
-    const blockedCount = blockedMatch ? Number(blockedMatch[1]) : 0;
-    const closedPercent = Math.min(100, Math.max(0, opsSummary.rates.closed.percent));
+    const blockedCount = opsSummary.status.count;
+    const confirmationPercent = Math.min(100, Math.max(0, opsSummary.rates.confirmation.percent));
     const actualPercent = Math.min(100, Math.max(0, opsSummary.rates.actual.percent));
     const projectionPercent = Math.min(100, Math.max(0, opsSummary.rates.projection.percent));
-    const totalPercent = Math.max(1, projectionPercent + actualPercent + closedPercent);
+    const totalPercent = Math.max(1, projectionPercent + actualPercent + confirmationPercent);
     const projectionEnd = (projectionPercent / totalPercent) * 360;
     const actualEnd = projectionEnd + (actualPercent / totalPercent) * 360;
-    const closedEnd = actualEnd + (closedPercent / totalPercent) * 360;
-    const gradient = `conic-gradient(#3b82f6 0deg ${projectionEnd}deg, #fb7185 ${projectionEnd}deg ${actualEnd}deg, #f59e0b ${actualEnd}deg ${closedEnd}deg, #e5e7eb ${closedEnd}deg 360deg)`;
+    const confirmationEnd = actualEnd + (confirmationPercent / totalPercent) * 360;
+    const gradient = `conic-gradient(#3b82f6 0deg ${projectionEnd}deg, #fb7185 ${projectionEnd}deg ${actualEnd}deg, #f59e0b ${actualEnd}deg ${confirmationEnd}deg, #e5e7eb ${confirmationEnd}deg 360deg)`;
 
     return (
       <div className="flex items-center justify-center">
@@ -2629,36 +2064,23 @@ export function CashflowProjectSheet({
     );
   }
 
-  function renderRateTile(label: string, rate: { done: number; total: number; percent: number; missingLabels: string[] }) {
-    const missingWord = label === '결산' ? '미결산' : '미작성';
-    const visibleMissing = rate.missingLabels.slice(0, 2).join(', ');
-    const hiddenMissingCount = Math.max(0, rate.missingLabels.length - 2);
-    const missingText = rate.missingLabels.length > 0
-      ? `${missingWord} ${visibleMissing}${hiddenMissingCount > 0 ? ` 외 ${hiddenMissingCount}건` : ''}`
-      : '이번 주차까지 완료';
-
+  function renderRateTile(label: string, rate: { percent: number }) {
     return (
-      <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={rate.missingLabels.length > 0 ? `${missingWord}: ${rate.missingLabels.join(', ')}` : '이번 주차까지 완료'}>
+      <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
           <div className="text-[11px] font-semibold leading-4 text-slate-600">{label}</div>
-          <div className="text-[10px] tabular-nums text-slate-500">
-            {rate.done}/{rate.total}
-          </div>
+          <div className="text-[10px] tabular-nums text-slate-500">서버 기준</div>
         </div>
         <div className="mt-1 flex items-end justify-between gap-2">
           <span className="text-[22px] font-bold leading-6 tabular-nums text-blue-700">
             {rate.percent}%
           </span>
-          <span className={`truncate text-right text-[9px] font-semibold leading-3 ${rate.missingLabels.length > 0 ? 'text-rose-700' : 'text-blue-700'}`}>
-            {rate.missingLabels.length > 0 ? `${rate.missingLabels.length}건` : 'OK'}
-          </span>
+          <span className="truncate text-right text-[9px] font-semibold leading-3 text-blue-700">{rate.percent >= 100 ? 'OK' : '확인 중'}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
         </div>
-        <div className={`mt-1.5 truncate text-[9px] leading-3 ${rate.missingLabels.length > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
-          {missingText}
-        </div>
+        <div className="mt-1.5 truncate text-[9px] leading-3 text-slate-500">월 결산 서버 응답</div>
       </div>
     );
   }
@@ -2735,12 +2157,12 @@ export function CashflowProjectSheet({
     const compactStatusDetail = opsSummary.status.detail
       .replace(' 항목이 있습니다.', ' 항목');
     const visibleInbox = opsSummary.inbox.slice(0, 4);
-    const hiddenInboxCount = Math.max(0, opsSummary.inbox.length - visibleInbox.length);
+    const hiddenInboxCount = Math.max(0, opsSummary.status.count - visibleInbox.length);
     const primaryReason = visibleInbox.find((item) => item.id === 'projection-actual-diff') || visibleInbox[0];
-    const remainingReasonCount = Math.max(0, opsSummary.inbox.length - 1);
+    const remainingReasonCount = Math.max(0, opsSummary.status.count - 1);
     const statusBadgeLabel = opsSummary.status.kind === 'ready'
       ? opsSummary.status.label
-      : `확인 항목 ${opsSummary.inbox.length}건`;
+      : `확인 항목 ${opsSummary.status.count}건`;
     const statusReason = opsSummary.status.kind === 'ready'
       ? '확인할 항목이 없습니다.'
       : `${primaryReason?.title || '확인 항목'}입니다. 확인해 주세요.${remainingReasonCount > 0 ? ` 외 ${remainingReasonCount}건` : ''}`;
@@ -2771,8 +2193,8 @@ export function CashflowProjectSheet({
                   </div>
                   <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
                     {cashflowSheetConfig
-                      ? '버튼을 눌렀을 때만 시트 최신값을 가져와 고정하며, 검토와 원장 저장은 별도 단계입니다.'
-                      : '처음 설정한 뒤 이 영역에서 시트 연동하기를 직접 실행합니다.'}
+                      ? '버튼을 눌렀을 때만 시트값을 가져와 고정하며, 검토와 원장 저장은 별도 단계입니다.'
+                      : '처음 설정한 뒤 이 영역에서 시트값 불러오기를 직접 실행합니다.'}
                   </div>
                   {cashflowSheetConfig ? (
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
@@ -2826,7 +2248,7 @@ export function CashflowProjectSheet({
                   disabled={!cashflowSheetConfig?.value || sheetRefreshLoading}
                 >
                   {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  {cashflowSheetMirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기'}
+                  시트값 불러오기
                 </Button>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -2864,19 +2286,19 @@ export function CashflowProjectSheet({
               <div className="flex min-w-[190px] items-center gap-3 rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={opsSummary.status.detail}>
                 {renderOpsStatusDonut()}
                 <div className="min-w-0">
-                  <div className="text-[10px] font-semibold leading-3 text-slate-500">이번 주 기준</div>
+                  <div className="text-[10px] font-semibold leading-3 text-slate-500">선택 월 기준</div>
                   <div className={`mt-1 truncate text-[13px] font-bold leading-4 ${opsTextClass(opsSummary.status.tone)}`}>
                     {statusBadgeLabel}
                   </div>
                   <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">
                     {statusReason}
                   </div>
-                  <div className="mt-1 text-[9px] leading-3 text-slate-400">{compactStatusDetail} · 결산 전 확인</div>
+                  <div className="mt-1 text-[9px] leading-3 text-slate-400">{compactStatusDetail} · 서버 검증</div>
                 </div>
               </div>
               {renderRateTile('Projection', opsSummary.rates.projection)}
               {renderRateTile('Actual', opsSummary.rates.actual)}
-              {renderRateTile('결산', opsSummary.rates.closed)}
+              {renderRateTile('사람 확인', opsSummary.rates.confirmation)}
             </div>
 
             <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
@@ -2884,12 +2306,22 @@ export function CashflowProjectSheet({
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
                   <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-                    {opsSummary.inbox.length}건
+                    {opsSummary.status.count}건
                   </div>
                 </div>
               </div>
               <div className="divide-y divide-slate-50">
-                {visibleInbox.map((item) => (
+                {visibleInbox.length === 0 ? (
+                  <div className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
+                    <div className="flex h-4 items-center justify-center">
+                      <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass('success')}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
+                      <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
+                    </div>
+                  </div>
+                ) : visibleInbox.map((item) => (
                   <div key={item.id} className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
                     <div className="flex h-4 items-center justify-center">
                       <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
@@ -2929,9 +2361,9 @@ export function CashflowProjectSheet({
     if (event.type === 'sheet_apply') return '시트 값 반영';
     if (event.type === 'projection_amount_change') return 'Projection 값 변경';
     if (event.type === 'actual_amount_change') return 'Actual 값 변경';
-    if (event.type === 'projection_completed') return 'Projection 작성완료';
-    if (event.type === 'actual_completed') return 'Actual 작성완료';
-    if (event.type === 'admin_closed') return '결산완료';
+    if (event.type === 'projection_completed') return '과거 Projection 완료 기록';
+    if (event.type === 'actual_completed') return '과거 Actual 완료 기록';
+    if (event.type === 'admin_closed') return '과거 주차 결산 기록';
     if (event.type === 'sheet_apply_reverted') return '시트 반영 되돌림';
     return '변경';
   }
@@ -3077,7 +2509,7 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
-              <div className="text-[10px] text-slate-500">시트 반영, 저장, 작성완료, 결산 기록입니다.</div>
+              <div className="text-[10px] text-slate-500">시트 반영, 임시저장, 월 결산과 과거 기록입니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
@@ -3101,7 +2533,7 @@ export function CashflowProjectSheet({
               <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
-                시트 변경 가져오기, 저장, 작성완료, 결산을 실행하면 여기에 기록됩니다.
+                시트값 반영과 월 결산 이력이 여기에 기록됩니다.
               </div>
             ) : cashflowEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'
@@ -3155,6 +2587,27 @@ export function CashflowProjectSheet({
     );
   }
 
+  const monthCloseStatusLabel = monthCloseResult?.status === 'CLOSED'
+    ? '월 결산 완료'
+    : monthCloseResult?.status === 'REOPEN_REQUESTED'
+      ? '재오픈 승인 대기'
+      : '결산 전';
+  const monthCloseStatusClass = monthCloseResult?.status === 'CLOSED'
+    ? 'bg-emerald-100 text-emerald-800'
+    : monthCloseResult?.status === 'REOPEN_REQUESTED'
+      ? 'bg-blue-100 text-blue-800'
+      : 'bg-amber-100 text-amber-800';
+  const monthCloseSheetMetadataValue = (key: string): string => {
+    const value = monthCloseResult?.dashboard?.sheetMetadata[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return '-';
+    const textValue = (value as { value?: unknown }).value;
+    return typeof textValue === 'string' && textValue.trim() ? textValue.trim() : '-';
+  };
+  const monthCloseSheetControlValue = (key: 'deposit' | 'unpaid'): string => {
+    const value = monthCloseResult?.dashboard?.sheetControlTotals[key]?.value;
+    return typeof value === 'number' && Number.isFinite(value) ? `${fmt(value)}원` : '-';
+  };
+
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
       <section data-cashflow-block="comparison" className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -3170,12 +2623,402 @@ export function CashflowProjectSheet({
         {renderProjectionActualDiffTable()}
       </section>
 
+      <section data-cashflow-block="month-close" className="rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">월 결산</div>
+            <div className="mt-1 text-[10px] leading-4 text-slate-500">최종저장은 선택한 월의 스냅샷을 확정하며, 완료 후에는 수정할 수 없습니다.</div>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid gap-1 text-[10px] font-semibold text-slate-600">
+              결산 대상 월
+              <Input
+                type="month"
+                value={yearMonth}
+                className="h-8 w-[150px] rounded-full bg-white px-3 text-[11px]"
+                onChange={(event) => setYearMonth(event.target.value)}
+              />
+            </label>
+            <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
+              {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
+            </Badge>
+            {monthCloseResult?.late ? <Badge className="h-8 rounded-full border-0 bg-rose-100 px-3 text-[10px] text-rose-800">기한 초과</Badge> : null}
+            {(monthCloseResult?.projectWarningCount || 0) > 0 ? (
+              <Badge className="h-8 rounded-full border-0 bg-amber-100 px-3 text-[10px] text-amber-800">
+                경고 {monthCloseResult?.projectWarningCount.toLocaleString()}회
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+
+        {monthCloseError ? (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{monthCloseError}</div>
+        ) : null}
+
+        {monthCloseResult?.dashboard ? (
+          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">사업 구분</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('businessType')}</div></div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">전용계좌사업</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('accountType')}</div></div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">정산 여부</span><div className="mt-1 truncate text-slate-900">{monthCloseSheetMetadataValue('settlementStatus')}</div></div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">입금 합계 (BO9)</span><div className="mt-1 truncate tabular-nums text-slate-900">{monthCloseSheetControlValue('deposit')}</div></div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600"><span className="font-semibold">미지급 표시값 (BP9)</span><div className="mt-1 truncate tabular-nums text-slate-900">{monthCloseSheetControlValue('unpaid')}</div><div className="mt-0.5 text-[9px] text-slate-500">시트 수식 표시값 · 산식 미정</div></div>
+            </div>
+            <div className="rounded-xl bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-900">
+              서버 요약 · Projection 진행 {monthCloseResult.dashboard.summary.projectionProgressPercent.toLocaleString()}% · Actual 확인 {monthCloseResult.dashboard.summary.actualProgressPercent.toLocaleString()}% · 전체 사람 확인 {monthCloseResult.dashboard.summary.confirmationProgressPercent.toLocaleString()}%
+              {monthCloseResult.dashboard.summary.closeDeadline ? ` · 결산기한 ${monthCloseResult.dashboard.summary.closeDeadline}` : ''}
+            </div>
+          </div>
+        ) : null}
+
+        {(monthCloseResult?.dashboard?.validation.warnings.length || 0) > 0 ? (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-5 text-amber-800">
+            {monthCloseResult?.dashboard?.validation.warnings.map((warning) => warning.message).join(' · ')}
+          </div>
+        ) : null}
+
+        {(monthCloseResult?.dashboard?.validation.blockers.length || 0) > 0 ? (
+          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-5 text-slate-600">
+            서버 확인사항 · {monthCloseResult?.dashboard?.validation.blockers.map((blocker) => blocker.message).join(' · ')}
+          </div>
+        ) : null}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-slate-50 px-3 py-3">
+          <div className="text-[11px] leading-5 text-slate-600">
+            {monthCloseResult?.status === 'CLOSED'
+              ? `${formatSheetAppliedAt(monthCloseResult.closedAt || undefined) || '최근'}에 확정되었습니다.`
+              : monthCloseResult?.status === 'REOPEN_REQUESTED'
+                ? `재오픈 사유: ${monthCloseResult.reopenReason || '-'}`
+                : '시트 고정본 160셀과 입금 일정 5행을 사람이 확인해야 최종저장할 수 있습니다.'}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isPm && monthCloseResult?.status === 'OPEN' ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-full px-3 text-[11px]"
+                disabled={monthCloseLoading || monthCloseBusy || Boolean(monthCloseCellsState.error)}
+                onClick={() => {
+                  void (async () => {
+                    if (!cashflowLease.canEdit && !(await beginCashflowEditing())) return;
+                    setMonthCloseReviewOpen(true);
+                  })();
+                }}
+              >
+                월 결산 검토
+              </Button>
+            ) : null}
+            {isPm && monthCloseResult?.status === 'CLOSED' ? (
+              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
+                재오픈 요청
+              </Button>
+            ) : null}
+            {canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
+              <>
+                <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>
+                  재오픈 승인
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>
+                  재오픈 반려
+                </Button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
       {renderUnifiedMonthlyBoard()}
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
         {renderOpsTimeline()}
       </section>
+
+      <AlertDialog
+        open={monthCloseReviewOpen}
+        onOpenChange={(open) => {
+          if (!monthCloseBusy) setMonthCloseReviewOpen(open);
+        }}
+      >
+        <AlertDialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1180px] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{yearMonth} 최종저장 · 월 결산</AlertDialogTitle>
+            <AlertDialogDescription>
+              시트값과 입금 일정을 사람이 모두 확인하면 서버가 스냅샷을 확정합니다. 확정 후에는 재오픈 승인 전까지 수정할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <div className="text-[10px] text-slate-500">시트 고정본</div>
+              <div className="mt-1 truncate text-[11px] font-semibold text-slate-900">{monthCloseResult?.dashboard?.source.sourceRevision || cashflowSheetMirror?.sourceRevision || '준비되지 않음'}</div>
+            </div>
+            <div className="rounded-xl bg-blue-50 px-3 py-2">
+              <div className="text-[10px] text-blue-600">캐시플로 항목 확인</div>
+              <div className="mt-1 text-[13px] font-bold text-blue-900">{monthCloseProgress.confirmedCells} / {monthCloseProgress.totalCells}</div>
+            </div>
+            <div className="rounded-xl bg-emerald-50 px-3 py-2">
+              <div className="text-[10px] text-emerald-600">입금 일정 확인</div>
+              <div className="mt-1 text-[13px] font-bold text-emerald-900">{monthCloseProgress.confirmedDepositRows} / 5</div>
+            </div>
+          </div>
+
+          {monthCloseCellsState.error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{monthCloseCellsState.error}</div>
+          ) : null}
+
+          <section className="space-y-2 rounded-[18px] border border-slate-200 p-3">
+            <div>
+              <h3 className="text-[13px] font-bold text-slate-950">세금계산서·입금 일정</h3>
+              <p className="mt-1 text-[10px] text-slate-500">시트에서 불러온 발행일·입금예정일·입금액을 확인하고, 실제 입금 정보가 있으면 출처까지 선택해 주세요.</p>
+            </div>
+            <div className="space-y-2">
+              {monthCloseDepositRows.map((row) => {
+                const hasSheetSource = Boolean(row.taxInvoiceIssuedDate || row.expectedDepositDate || row.expectedDepositAmount != null);
+                return (
+                <div key={row.weekNo} className="grid gap-2 rounded-xl bg-slate-50 p-3 xl:grid-cols-[52px_repeat(5,minmax(120px,1fr))_150px_auto] xl:items-end">
+                  <div className="pb-2 text-[11px] font-bold text-slate-800">{row.weekNo}주차</div>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    세금계산서 발행일
+                    <Input
+                      type="date"
+                      value={row.taxInvoiceIssuedDate}
+                      className="h-8 bg-slate-100 text-[10px]"
+                      readOnly
+                      disabled={!canEdit}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    입금예정일
+                    <Input
+                      type="date"
+                      value={row.expectedDepositDate}
+                      className="h-8 bg-slate-100 text-[10px]"
+                      readOnly
+                      disabled={!canEdit}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    입금예정액
+                    <Input
+                      inputMode="numeric"
+                      value={row.expectedDepositAmount == null ? '' : formatAmountInput(String(row.expectedDepositAmount))}
+                      className="h-8 bg-slate-100 text-right text-[10px]"
+                      readOnly
+                      disabled={!canEdit}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    실제 입금일
+                    <Input
+                      type="date"
+                      value={row.actualDepositDate}
+                      className="h-8 bg-white text-[10px]"
+                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      onChange={(event) => {
+                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
+                          ? { ...candidate, actualDepositDate: event.target.value, decision: null }
+                          : candidate));
+                        setMonthCloseReviewDirty(true);
+                      }}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    실제 입금액
+                    <Input
+                      inputMode="numeric"
+                      value={row.actualDepositAmount == null ? '' : formatAmountInput(String(row.actualDepositAmount))}
+                      className="h-8 bg-white text-right text-[10px]"
+                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      onChange={(event) => {
+                        const value = event.target.value.trim() ? parseAmount(event.target.value) : null;
+                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
+                          ? { ...candidate, actualDepositAmount: value, decision: null }
+                          : candidate));
+                        setMonthCloseReviewDirty(true);
+                      }}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
+                    실제 입금 출처
+                    <select
+                      value={row.actualSource}
+                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[10px]"
+                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      onChange={(event) => {
+                        const actualSource = event.target.value as CashflowMonthCloseDepositReviewRow['actualSource'];
+                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
+                          ? { ...candidate, actualSource, decision: null }
+                          : candidate));
+                        setMonthCloseReviewDirty(true);
+                      }}
+                    >
+                      <option value="NOT_APPLICABLE">입금 전/해당 없음</option>
+                      <option value="SHEET">시트</option>
+                      <option value="BANK_TRANSACTION">계좌 거래</option>
+                      <option value="DIRECT_ENTRY">직접 입력</option>
+                    </select>
+                  </label>
+                  <div className="flex gap-1 pb-0.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={row.decision === 'CONFIRMED' ? 'default' : 'outline'}
+                      className="h-8 px-2 text-[10px]"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
+                          ? { ...candidate, decision: 'CONFIRMED' }
+                          : candidate));
+                        setMonthCloseReviewDirty(true);
+                      }}
+                    >확인</Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={row.decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
+                      className="h-8 px-2 text-[10px]"
+                      disabled={!canEdit || hasSheetSource}
+                      onClick={() => {
+                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
+                          ? {
+                              ...candidate,
+                              actualDepositDate: '',
+                              actualDepositAmount: null,
+                              actualSource: 'NOT_APPLICABLE',
+                              decision: 'NOT_APPLICABLE',
+                            }
+                          : candidate));
+                        setMonthCloseReviewDirty(true);
+                      }}
+                    >해당 없음</Button>
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-[18px] border border-slate-200 p-3">
+            <div>
+              <h3 className="text-[13px] font-bold text-slate-950">캐시플로 항목 사람 확인</h3>
+              <p className="mt-1 text-[10px] text-slate-500">금액이 있는 셀은 확인, 빈 셀은 해당 없음을 직접 선택해 주세요.</p>
+            </div>
+            <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+              {(['projection', 'actual'] as const).map((mode) => (
+                <div key={mode} className="space-y-2">
+                  <h4 className="sticky top-0 z-10 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white">
+                    {mode === 'projection' ? 'Projection' : 'ACTUAL'}
+                  </h4>
+                  {[1, 2, 3, 4, 5].map((weekNo) => (
+                    <div key={`${mode}-${weekNo}`} className="rounded-xl bg-slate-50 p-2">
+                      <div className="mb-1 text-[10px] font-bold text-slate-700">{weekNo}주차</div>
+                      <div className="grid gap-1 md:grid-cols-2">
+                        {monthCloseCellsState.cells.filter((cell) => cell.mode === mode && cell.weekNo === weekNo).map((cell) => {
+                          const key = cashflowMonthCloseConfirmationKey(cell);
+                          const requiredDecision = requiredCashflowMonthCloseDecision(cell);
+                          const selected = monthCloseDecisions[key] === requiredDecision;
+                          return (
+                            <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2 py-1.5">
+                              <div className="min-w-0">
+                                <div className="truncate text-[9px] font-semibold text-slate-800">{getCashflowModeLineLabel(cell.cashflowLine as CashflowSheetLineId, mode)}</div>
+                                <div className="text-[9px] tabular-nums text-slate-500">
+                                  {cell.cellState === 'VALUE' ? `${fmt(Number(cell.amount || 0))}원` : '빈 셀'} · {cell.sourceLabel || cell.sourceCell || '-'}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={selected ? 'default' : 'outline'}
+                                className="h-7 shrink-0 px-2 text-[9px]"
+                                disabled={!canEdit}
+                                onClick={() => {
+                                  setMonthCloseDecisions((current) => ({ ...current, [key]: requiredDecision }));
+                                  setMonthCloseReviewDirty(true);
+                                }}
+                              >
+                                {requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!canEdit || monthCloseBusy}
+              onClick={() => void savePrivateCashflowDraft()
+                .then(() => toast.success('월 결산 검토 내용을 임시저장했습니다.'))
+                .catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')))}
+            >
+              <Save className="mr-1 h-3.5 w-3.5" />
+              임시저장
+            </Button>
+            <AlertDialogAction
+              disabled={!canEdit || monthCloseBusy || !monthCloseProgress.complete || Boolean(monthCloseCellsState.error)}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleFinalizeMonthClose();
+              }}
+            >
+              {monthCloseBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
+              최종저장 · 월 결산
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={reopenAction !== null}
+        onOpenChange={(open) => {
+          if (!open && !monthCloseBusy) {
+            setReopenAction(null);
+            setReopenReason('');
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {reopenAction === 'request' ? '월 결산 재오픈 요청' : reopenAction === 'approve' ? '재오픈 승인' : '재오픈 반려'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              결산 이후 변경은 감사 이력과 경고 카운트에 남습니다. 처리 사유를 구체적으로 작성해 주세요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="grid gap-2 text-[11px] font-semibold text-slate-700">
+            사유
+            <textarea
+              value={reopenReason}
+              className="min-h-[120px] rounded-xl border border-slate-200 p-3 text-[12px] font-normal outline-none focus:border-blue-400"
+              placeholder="수정이 필요한 이유와 범위를 입력해 주세요."
+              disabled={monthCloseBusy}
+              onChange={(event) => setReopenReason(event.target.value)}
+            />
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={monthCloseBusy}>취소</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={monthCloseBusy || !reopenReason.trim()}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleMonthReopenAction();
+              }}
+            >
+              {monthCloseBusy ? '처리 중…' : reopenAction === 'request' ? '요청 보내기' : reopenAction === 'approve' ? '승인' : '반려'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={sheetReviewDialogOpen}
@@ -3324,101 +3167,6 @@ export function CashflowProjectSheet({
       </AlertDialog>
 
       <AlertDialog
-        open={!!auditDialog}
-        onOpenChange={(open) => {
-          if (!open) setAuditDialog(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{auditDialog?.title || '확인이 필요합니다'}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {auditDialog?.weekLabel} 주차는 아래 항목을 직접 확인한 뒤 다시 저장해 주세요.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {auditDialog && (
-            <div className="max-h-[320px] overflow-auto rounded-md border border-border/60">
-              <table className="w-full text-[12px]">
-                <thead className="bg-muted/50 text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">항목</th>
-                    <th className="px-3 py-2 text-left font-medium">확인 내용</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditDialog.issues.slice(0, 20).map((issue) => (
-                    <tr key={issue.key} className="border-t border-border/40">
-                      <td className="px-3 py-2 font-medium">{issue.label}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{issue.detail}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {auditDialog.issues.length > 20 && (
-                <div className="border-t border-border/40 px-3 py-2 text-[12px] text-muted-foreground">
-                  외 {auditDialog.issues.length - 20}건
-                </div>
-              )}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setAuditDialog(null)}>확인</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={!!submitConfirm}
-        onOpenChange={(open) => {
-          if (!open) setSubmitConfirm(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>이번 주차를 작성완료 처리할까요?</AlertDialogTitle>
-            <AlertDialogDescription>
-              작성완료 후에는 관리자 결산 전까지 수정은 가능하지만, 승인/결산 흐름이 시작됩니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {submitConfirm && (
-            <div className="text-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">주차</span>
-                <span style={{ fontWeight: 700 }}>
-                  {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.label || `w${submitConfirm.weekNo}`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">기간</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.weekStart} ~ {monthWeeks.find((x) => x.weekNo === submitConfirm.weekNo)?.weekEnd}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">비어있는 항목</span>
-                <span style={{ fontWeight: 700 }}>
-                  {countEmptyCellsForWeek({ weekNo: submitConfirm.weekNo, mode: 'actual' })} / {CASHFLOW_ALL_LINES.length}
-                </span>
-              </div>
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={submitBusy}>취소</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!submitConfirm || submitBusy}
-              onClick={(e) => {
-                e.preventDefault();
-                if (!submitConfirm) return;
-                void handleSubmitWeek(submitConfirm);
-              }}
-            >
-              {submitBusy ? '처리 중…' : '작성완료'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
         open={blocker.state === 'blocked'}
         onOpenChange={(open) => {
           if (!open && !exitBusy && blocker.state === 'blocked') {
@@ -3426,113 +3174,40 @@ export function CashflowProjectSheet({
           }
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>저장되지 않은 변경사항이 있습니다</AlertDialogTitle>
-            <AlertDialogDescription>
-              페이지를 이동하면 아직 저장되지 않은 캐시플로 입력값이 유실될 수 있습니다.
-            </AlertDialogDescription>
+         <AlertDialogContent>
+           <AlertDialogHeader>
+             <AlertDialogTitle>{hasDirty ? '저장되지 않은 변경사항이 있습니다' : '수정 세션을 종료할까요?'}</AlertDialogTitle>
+             <AlertDialogDescription>
+               {hasDirty
+                 ? '페이지를 이동하면 아직 저장되지 않은 캐시플로 입력값이 유실될 수 있습니다.'
+                 : '페이지를 이동하면 현재 프로젝트의 수정 선점이 종료됩니다.'}
+             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={exitBusy} onClick={() => blocker.reset?.()}>계속 편집</AlertDialogCancel>
-            <AlertDialogAction
+            <AlertDialogCancel disabled={exitBusy} onClick={() => blocker.reset?.()}>계속 작성</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
               disabled={exitBusy}
-              onClick={(event) => {
-                event.preventDefault();
-                void savePrivateDraftAndLeave();
-              }}
+              onClick={() => void discardChangesAndLeave()}
             >
-              임시저장 후 나가기
-            </AlertDialogAction>
+               {hasDirty ? '저장하지 않고 종료' : '수정 세션 종료'}
+             </Button>
+             {hasDirty ? (
+               <AlertDialogAction
+                 disabled={exitBusy}
+                 onClick={(event) => {
+                   event.preventDefault();
+                   void savePrivateDraftAndLeave();
+                 }}
+               >
+                 임시저장 후 종료
+               </AlertDialogAction>
+             ) : null}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={!!closeDialog}
-        onOpenChange={(open) => {
-          if (!open && !closeBusy) setCloseDialog(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {closeDialog?.kind === 'prerequisite'
-                ? '결산 전에 제출현황을 확인해 주세요'
-                : closeDialog?.kind === 'warning'
-                  ? '검토/동기화 상태를 확인한 뒤 결산할까요?'
-                : '이번 주차를 결산완료 처리할까요?'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {closeDialog?.kind === 'prerequisite'
-                ? '내 제출현황에서 Projection 업데이트와 사업비 입력을 체크해주세요.'
-                : closeDialog?.kind === 'warning'
-                  ? '사업비 입력은 저장되었지만 일부 주차는 검토 루프 또는 동기화 확인이 더 필요합니다. 그래도 결산은 진행할 수 있습니다.'
-                : 'Projection 업데이트와 사업비 입력 체크가 완료된 주차입니다. 결산완료 후에도 Projection은 계속 수정할 수 있습니다.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {closeDialog && (
-            <div className="text-sm space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">주차</span>
-                <span style={{ fontWeight: 700 }}>
-                  {annualWeeks.find((x) => x.yearMonth === closeDialog.yearMonth && x.weekNo === closeDialog.weekNo)?.label || formatSheetWeekLabel(closeDialog.yearMonth, closeDialog.weekNo)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Projection 업데이트</span>
-                <span style={{ fontWeight: 700 }}>
-                  {closeDialog.projectionDone ? '완료' : '미완료'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">사업비 입력</span>
-                <span style={{ fontWeight: 700 }}>
-                  {closeDialog.expenseDone ? '완료' : '미완료'}
-                </span>
-              </div>
-              {closeDialog.expenseStatusLabel && (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">사업비 입력 상태</span>
-                  <span style={{ fontWeight: 700 }}>
-                    {closeDialog.expenseStatusLabel}
-                  </span>
-                </div>
-              )}
-              {closeDialog.expenseStatusDescription && (
-                <div className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
-                  {closeDialog.expenseStatusDescription}
-                </div>
-              )}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={closeBusy}>취소</AlertDialogCancel>
-            {closeDialog?.kind === 'prerequisite' ? (
-              <AlertDialogAction
-                onClick={(e) => {
-                  e.preventDefault();
-                  setCloseDialog(null);
-                  navigate('/portal/submissions');
-                }}
-              >
-                내 제출현황으로 이동
-              </AlertDialogAction>
-            ) : (
-              <AlertDialogAction
-                disabled={!closeDialog || closeBusy}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (!closeDialog) return;
-                  void handleCloseWeek(closeDialog.weekNo, closeDialog.yearMonth);
-                }}
-              >
-                {closeBusy ? '처리 중…' : '결산완료'}
-              </AlertDialogAction>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <EditLeaseDialogs
         warningOpen={cashflowLease.warningOpen}

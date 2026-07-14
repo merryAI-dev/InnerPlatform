@@ -2,6 +2,8 @@ import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildProjectRegistrationCanonicalDocuments,
+  buildProjectPatchFromChangeRequestPayload,
   formatProjectTypeSlackLabel,
   mergeProjectAndRequestDocs,
   mountProjectRoutes,
@@ -12,7 +14,313 @@ import {
   tryRenameManagedProjectRootFolder,
 } from './projects.mjs';
 
+const registrationV2AttachmentKinds = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence'];
+
+function registrationV2Payload(overrides: Record<string, unknown> = {}) {
+  return {
+    name: '다년도 사업',
+    officialContractName: '2026 다년도 사업 운영 계약',
+    clientOrg: '발주기관 주식회사',
+    projectPurpose: '사내기업가 육성',
+    description: '교육 운영 및 성과보고서 제출',
+    groupwareName: '2026 다년도 사업',
+    type: 'D1',
+    status: 'CONTRACT_PENDING',
+    department: 'AXR',
+    registeredById: 'pm-a',
+    registeredByName: 'PM A',
+    managerId: 'pm-a',
+    managerName: 'PM A',
+    contractStart: '2026-01-01',
+    contractEnd: '2027-12-31',
+    contractAmount: 300_000,
+    salesVatAmount: 30_000,
+    totalRevenueAmount: 120_000,
+    supportAmount: 10_000,
+    settlementType: 'TYPE1',
+    basis: '공급가액',
+    settlementSystem: 'BOTAEM_E',
+    laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+    paymentPlan: { contract: 150_000, interim: 60_000, final: 90_000 },
+    paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
+    advanceInterimBelow70Reason: '',
+    teamMembersDetailed: [{
+      memberName: '변민욱',
+      memberNickname: '보람',
+      role: '실무책임자',
+      participationRate: 50,
+      isDocumentOnly: true,
+    }],
+    financialInputFlags: {
+      contractAmount: true,
+      salesVatAmount: true,
+      totalRevenueAmount: true,
+      supportAmount: true,
+    },
+    registrationRequirementsVersion: 2,
+    financialYears: [
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+    ],
+    registrationConfirmations: {
+      laborIncludesFourInsurance: true,
+      laborIncludesRetirementPay: true,
+      customerSettlementBasisConfirmed: true,
+      modusignContractUsed: false,
+      originalContractSubmitted: true,
+    },
+    registrationOptionalDocumentNotes: {
+      proposalWordOriginal: '해당 없음',
+      proposalPptOriginal: '해당 없음',
+      presentationPptOriginal: '해당 없음',
+    },
+    ...overrides,
+  };
+}
+
+function registrationV2Canonical(payload = registrationV2Payload(), requiredKinds = registrationV2AttachmentKinds) {
+  return buildProjectRegistrationCanonicalDocuments({
+    tenantId: 'mysc',
+    projectId: 'project-v2',
+    projectRequestId: 'request-v2',
+    sourceDraftId: 'draft-v2',
+    payload,
+    attachmentRefs: [],
+    requirementsAttachmentRefs: requiredKinds.map((documentKind) => ({
+      documentKind,
+      path: `orgs/mysc/project-registration-drafts/draft-v2/${documentKind}.pdf`,
+      name: `${documentKind}.pdf`,
+      size: 3,
+      contentType: 'application/pdf',
+    })),
+    actorId: 'pm-a',
+    actorName: 'PM A',
+    actorEmail: 'pm-a@example.com',
+    timestamp: '2026-07-14T00:00:00.000Z',
+  });
+}
+
 describe('project route helpers', () => {
+  it('builds a registration v2 canonical record only after all years, four attachments and confirmations pass', () => {
+    const canonical = registrationV2Canonical();
+
+    expect(canonical.projectRequest.payload).toMatchObject({
+      registrationRequirementsVersion: 2,
+      financialYears: [
+        { year: 2026, confirmed: true, profitRate: 0.4 },
+        { year: 2027, confirmed: true, profitRate: 0.4 },
+      ],
+      registrationConfirmations: {
+        laborIncludesFourInsurance: true,
+        laborIncludesRetirementPay: true,
+        customerSettlementBasisConfirmed: true,
+        modusignContractUsed: false,
+        originalContractSubmitted: true,
+      },
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '해당 없음',
+        proposalPptOriginal: '해당 없음',
+        presentationPptOriginal: '해당 없음',
+      },
+      groupwareName: '2026 다년도 사업',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+      paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
+      teamMembersDetailed: [{ role: '실무책임자', isDocumentOnly: true }],
+    });
+    expect(canonical.project.customerBusinessRegistrationDocument).toBeNull();
+    expect(canonical.project).toMatchObject({
+      registrationRequirementsVersion: 2,
+      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+    });
+  });
+
+  it('requires either each optional original file or its explicit omission note', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '',
+        proposalPptOriginal: '해당 없음',
+        presentationPptOriginal: '해당 없음',
+      },
+    }))).toThrowError('Project registration optional attachment note is missing: proposal_word_original');
+
+    expect(() => registrationV2Canonical(
+      registrationV2Payload({
+        registrationOptionalDocumentNotes: {
+          proposalWordOriginal: '',
+          proposalPptOriginal: '해당 없음',
+          presentationPptOriginal: '해당 없음',
+        },
+      }),
+      [...registrationV2AttachmentKinds, 'proposal_word_original'],
+    )).not.toThrow();
+  });
+
+  it.each([undefined, 1])('rejects new canonical registration requirements version %s', (version) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({ registrationRequirementsVersion: version })))
+      .toThrowError('New project registration requires requirements version 2');
+  });
+
+  it('keeps legacy v1 team rows on the legacy path instead of applying v2 row rules', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      registrationRequirementsVersion: 1,
+      teamMembersDetailed: [{ memberName: '기존 담당자', role: 'PM', participationRate: 50 }],
+    }))).toThrowError('New project registration requires requirements version 2');
+  });
+
+  it.each([
+    ['groupware name', { groupwareName: '' }, 'Project registration groupwareName is required'],
+    [
+      'payment expected month',
+      { paymentExpectedMonths: { contract: '', interim: '2026-06', final: '2027-12' } },
+      'Project registration paymentExpectedMonths.contract is required',
+    ],
+    [
+      'below 70 percent reason',
+      {
+        paymentPlan: { contract: 100_000, interim: 50_000, final: 150_000 },
+        advanceInterimBelow70Reason: '',
+      },
+      'Project registration advance/interim below 70% reason is required',
+    ],
+    [
+      'team role',
+      { teamMembersDetailed: [{ memberName: '변민욱', role: 'PM', participationRate: 50, isDocumentOnly: false }] },
+      'Project registration teamMembersDetailed.0.role is invalid',
+    ],
+    [
+      'team document-only choice',
+      { teamMembersDetailed: [{ memberName: '변민욱', role: '실무책임자', participationRate: 50 }] },
+      'Project registration teamMembersDetailed.0.isDocumentOnly is required',
+    ],
+  ])('rejects registration v2 with incomplete %s', (_label, overrides, message) => {
+    expect(() => registrationV2Canonical(registrationV2Payload(overrides))).toThrowError(message);
+  });
+
+  it('preserves version 1 compatibility for an existing-project change request', () => {
+    const patch = buildProjectPatchFromChangeRequestPayload(
+      registrationV2Payload({ registrationRequirementsVersion: 1 }),
+      { id: 'existing-project', version: 3 },
+    );
+
+    expect(patch.registrationRequirementsVersion).toBe(1);
+  });
+
+  it.each(['pm', 'viewer'])('requires the private draft flow when %s creates a project directly', async (actorRole) => {
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn(() => ({ get: vi.fn(async () => ({ exists: false, data: () => undefined })) })),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'member-a',
+        actorRole,
+        actorEmail: 'member-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: `create-${actorRole}`,
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects').send({ id: 'project-a', name: 'Project A' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('project_registration_draft_required');
+    expect(idempotencyService.complete).not.toHaveBeenCalled();
+  });
+
+  it('applies checkout state and private evidence fields when a change request is approved', () => {
+    const document = { path: 'orgs/mysc/project-registration-documents/project-v2/evidence.pdf', name: 'evidence.pdf' };
+    const patch = buildProjectPatchFromChangeRequestPayload({
+      ...registrationV2Payload(),
+      status: 'COMPLETED',
+      checkout: {
+        finalPaymentReceived: true,
+        bankBalanceZero: true,
+        performanceCertificateReceived: true,
+        taxInvoiceEvidenceConfirmed: true,
+        finalSettlementReportConfirmed: true,
+        usbEvidenceSubmitted: true,
+        evidenceDeletedAfterUsb: true,
+      },
+      performanceCertificateDocument: document,
+      taxInvoiceDocument: document,
+      finalSettlementReportDocument: document,
+    }, { id: 'project-v2' });
+
+    expect(patch).toMatchObject({
+      checkout: { usbEvidenceSubmitted: true, evidenceDeletedAfterUsb: true },
+      performanceCertificateDocument: document,
+      taxInvoiceDocument: document,
+      finalSettlementReportDocument: document,
+    });
+  });
+
+  it.each([
+    [
+      'one contract year is missing',
+      registrationV2Payload({ financialYears: [
+        { year: 2026, contractAmount: 300_000, salesVatAmount: 30_000, totalRevenueAmount: 120_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      ] }),
+      registrationV2AttachmentKinds,
+    ],
+    [
+      'annual totals do not match the canonical total',
+      registrationV2Payload({ contractAmount: 300_001 }),
+      registrationV2AttachmentKinds,
+    ],
+    [
+      'annual profit rate is outside 0..1',
+      registrationV2Payload({ financialYears: [
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 1.01, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      ] }),
+      registrationV2AttachmentKinds,
+    ],
+    [
+      'customer business registration is missing',
+      registrationV2Payload(),
+      ['contract', 'quote', 'rfp_request_evidence'],
+    ],
+    [
+      'original submission fallback is missing',
+      registrationV2Payload({ registrationConfirmations: {
+        laborIncludesFourInsurance: true,
+        laborIncludesRetirementPay: true,
+        customerSettlementBasisConfirmed: true,
+        modusignContractUsed: false,
+        originalContractSubmitted: false,
+      } }),
+      registrationV2AttachmentKinds,
+    ],
+  ])('rejects registration v2 when %s', (_label, payload, requiredKinds) => {
+    let caught: unknown;
+    try {
+      registrationV2Canonical(payload, requiredKinds);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      statusCode: 422,
+      code: 'project_registration_invalid',
+    });
+  });
+
   it('serves a canonical private attachment only through the authorized BFF route', async () => {
     const path = 'orgs/mysc/project-registration-documents/project-a/attachment-a-contract.pdf';
     const downloadProjectRegistrationAttachment = vi.fn(async () => ({

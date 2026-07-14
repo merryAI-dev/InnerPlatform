@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FirestoreCashflowWeekActualMergeTest {
     @Test
@@ -165,5 +166,47 @@ class FirestoreCashflowWeekActualMergeTest {
         assertThat(bySheet).isEmpty();
         assertThat(actual).isEmpty();
         assertThat(patch.get("actualTotals")).isEqualTo(Map.of("totalIn", 0L, "totalOut", 0L, "net", 0L));
+    }
+
+    @Test
+    void preservesLargeFirestoreIntegersWithoutDoubleRounding() {
+        long amount = 9_007_199_254_740_993L;
+
+        Map<String, Object> patch = FirestoreCashflowWeekActualMerge.buildPatch(
+            "mysc",
+            "project-a",
+            "default",
+            Map.of("weeklyExpenseActualBySheet", Map.of("tab-2", Map.of("SALES_IN", amount))),
+            List.of(),
+            Instant.parse("2026-06-08T00:00:00Z")
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> actual = (Map<String, Object>) patch.get("actual");
+        assertThat(actual).containsEntry("SALES_IN", amount);
+        assertThat(patch.get("actualTotals")).isEqualTo(Map.of(
+            "totalIn", amount,
+            "totalOut", 0L,
+            "net", amount
+        ));
+    }
+
+    @Test
+    void rejectsFractionalAndOverflowingWonAmountsInsteadOfTruncating() {
+        assertThatThrownBy(() -> FirestoreCashflowWeekActualMerge.numberMap(Map.of(
+            "SALES_IN",
+            new BigDecimal("1.5")
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("whole won");
+
+        assertThatThrownBy(() -> FirestoreCashflowWeekActualMerge.cashflowTotals(Map.of(
+            "SALES_IN",
+            BigDecimal.valueOf(Long.MAX_VALUE),
+            "MYSC_PREPAY_LABOR_IN",
+            BigDecimal.ONE
+        )))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("supported range");
     }
 }

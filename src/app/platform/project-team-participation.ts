@@ -4,6 +4,7 @@ import type {
   ProjectTeamMemberAssignment,
   SettlementSystemCode,
 } from '../data/types';
+import { normalizeSettlementSystemCode } from '../data/types';
 import { EMPLOYEES } from '../data/participation-data';
 import {
   formatProjectTeamMemberLine,
@@ -95,6 +96,8 @@ function resolveCanonicalMemberId(member: ProjectTeamMemberAssignment, fallbackK
 }
 
 export function resolveProjectTeamSettlementSystem(project: Project): SettlementSystemCode {
+  const selectedSystem = normalizeSettlementSystemCode(project.settlementSystem);
+  if (selectedSystem !== 'NONE') return selectedSystem;
   if (project.settlementType === 'TYPE5' || project.accountType === 'DEDICATED') {
     return 'E_NARA_DOUM';
   }
@@ -141,7 +144,7 @@ export function buildProjectTeamParticipationEntries(
         clientOrg: project.clientOrg,
         periodStart: member.laborAllocationStartMonth || monthPart(project.contractStart),
         periodEnd: member.laborAllocationEndMonth || monthPart(project.contractEnd),
-        isDocumentOnly: false,
+        isDocumentOnly: member.isDocumentOnly === true,
         note: member.role,
         source: 'PROJECT_TEAM_SYNC',
         projectTeamMemberKey: identityKey,

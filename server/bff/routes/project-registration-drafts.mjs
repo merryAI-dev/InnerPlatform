@@ -24,6 +24,10 @@ import {
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
 import { createOutboxEvent } from '../outbox.mjs';
 import { buildProjectRegistrationCanonicalDocuments } from './projects.mjs';
+import {
+  PROJECT_REGISTRATION_DOCUMENT_KINDS,
+  projectDocumentValidationError,
+} from '../project-document-validation.mjs';
 
 const RESOURCE_TYPE = 'project-registration';
 const MAX_DRAFT_DOCUMENT_BYTES = 900 * 1024;
@@ -35,6 +39,11 @@ function requiredText(value, fieldName) {
   const normalized = readOptionalText(value);
   if (!normalized) throw createHttpError(400, `${fieldName} is required`, 'draft_request_invalid');
   return normalized;
+}
+
+function assertProjectAttachment(buffer, mimeType, fileName, documentKind) {
+  const error = projectDocumentValidationError({ buffer, mimeType, fileName, documentKind });
+  if (error) throw createHttpError(422, error, 'draft_attachment_invalid');
 }
 
 function documentId(value, fieldName) {
@@ -86,7 +95,7 @@ function relocationAttachmentRefs(draft, current) {
     const path = readOptionalText(attachment?.path);
     const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
     if (
-      !['contract', 'quote', 'proposal'].includes(documentKind)
+      !PROJECT_REGISTRATION_DOCUMENT_KINDS.includes(documentKind)
       || !objectName
       || objectName.includes('/')
       || objectName === '.'
@@ -723,6 +732,7 @@ export function createProjectRegistrationDraftService({
           sourceDraftId: current.draftId,
           payload: draft.payload,
           attachmentRefs: [],
+          requirementsAttachmentRefs: attachments,
           actorId: current.actorId,
           actorName: current.actorDisplayName,
           actorEmail: current.actorEmail,
@@ -839,9 +849,10 @@ export function createProjectRegistrationDraftService({
       const fileName = requiredText(input?.fileName, 'fileName');
       const mimeType = requiredText(input?.mimeType, 'mimeType');
       const documentKind = requiredText(input?.documentKind, 'documentKind');
-      if (!['contract', 'quote', 'proposal'].includes(documentKind)) {
+      if (!PROJECT_REGISTRATION_DOCUMENT_KINDS.includes(documentKind)) {
         throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
       }
+      assertProjectAttachment(buffer, mimeType, fileName, documentKind);
       const attachmentId = documentId(createAttachmentId(), 'attachmentId');
       const method = 'POST';
       const path = `/api/v1/project-registration-drafts/${current.draftId}/attachments`;

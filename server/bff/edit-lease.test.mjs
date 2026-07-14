@@ -85,6 +85,9 @@ function createHarness({ createLeaseId } = {}) {
     'orgs/tenant-a/members/actor-b': {
       uid: 'actor-b', role: 'pm', status: 'ACTIVE', projectIds: ['project-a'],
     },
+    'orgs/tenant-a/members/actor-admin': {
+      uid: 'actor-admin', role: 'admin', status: 'ACTIVE', projectIds: [],
+    },
     'orgs/tenant-a/projects/project-a': { id: 'project-a' },
   });
   const auditChainService = createAuditChainService(db, { now: () => new Date(serverNow).toISOString() });
@@ -133,6 +136,17 @@ async function expectHttpError(promise, statusCode, code) {
 }
 
 describe('edit lease service', () => {
+  it('allows only the project PM to acquire a cashflow edit session', async () => {
+    const { service, base } = createHarness();
+    await expectHttpError(service.acquire({
+      ...base,
+      resourceType: 'cashflow',
+      actorId: 'actor-admin',
+      sessionId: 'admin-session',
+      idempotencyKey: 'admin-cashflow-acquire',
+    }), 403, 'forbidden');
+  });
+
   it('reuses one acquire ID when Firestore retries the transaction', async () => {
     let uuidCalls = 0;
     const { db, service, base } = createHarness({
@@ -386,6 +400,7 @@ describe('edit lease service', () => {
       expiresAt: '2026-07-10T00:30:00.000Z',
       holderDisplayName: 'Actor A',
       sameActor: false,
+      holderVersion: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(status)).not.toMatch(/actor-a|session-a|lease-1|fence|@/i);
   });
@@ -404,6 +419,7 @@ describe('edit lease service', () => {
       holderDisplayName: 'Actor A',
       sameActor: true,
       expiresAt: '2026-07-10T00:30:00.000Z',
+      holderVersion: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(error.publicDetails)).not.toMatch(/actor-a|session-a|lease-1|fence/i);
   });

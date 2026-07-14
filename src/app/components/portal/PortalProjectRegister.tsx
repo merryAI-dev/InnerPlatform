@@ -14,6 +14,7 @@ import {
   type ProjectRegistrationAttachment,
   type ProjectRegistrationDraft,
   type ProjectRegistrationFileLike,
+  type ProjectRegistrationDocumentKind,
 } from '../../lib/project-registration-draft-client';
 import type { ActorLike } from '../../lib/platform-bff-client';
 import { openEditSession, type EditSession } from '../../platform/edit-session';
@@ -52,6 +53,11 @@ function draftForEditor(record: ProjectRegistrationDraft): ProjectEditorDraft {
     contractDocument: documents.contract || null,
     quoteDocument: documents.quote || null,
     proposalDocument: documents.proposal || null,
+    proposalWordOriginalDocument: documents.proposal_word_original || null,
+    proposalPptOriginalDocument: documents.proposal_ppt_original || null,
+    presentationPptOriginalDocument: documents.presentation_ppt_original || null,
+    rfpRequestEvidenceDocument: documents.rfp_request_evidence || null,
+    customerBusinessRegistrationDocument: documents.customer_business_registration || null,
   });
 }
 
@@ -119,9 +125,21 @@ function RegistrationEditor({
 
   const uploadDocument = useCallback((kind: ProjectRequestDocumentKind, file: File) => enqueueMutation(() => (
     withOwnership(async (ownership) => {
+      if (![
+        'contract',
+        'customer_business_registration',
+        'quote',
+        'proposal',
+        'proposal_word_original',
+        'proposal_ppt_original',
+        'presentation_ppt_original',
+        'rfp_request_evidence',
+      ].includes(kind)) {
+        throw new Error('신규 등록에서 지원하지 않는 첨부 종류입니다.');
+      }
       const uploaded = await draftClient.upload(record.draftId, ownership, {
         expectedDraftRevision: revisionRef.current,
-        documentKind: kind,
+        documentKind: kind as ProjectRegistrationDocumentKind,
         file: file as ProjectRegistrationFileLike,
       });
       revisionRef.current = uploaded.draft.draftRevision;
@@ -273,6 +291,7 @@ export function PortalProjectRegister() {
         if (!draftId) {
           const ownerKey = `${orgId}:${user.uid}`;
           const initial = createProjectEditorDraft({
+            registrationRequirementsVersion: 2,
             registeredById: user.uid,
             registeredByName: user.name || '',
             registeredByEmail: user.email || '',

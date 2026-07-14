@@ -9,7 +9,6 @@ const VERCEL_OWNED_WORKERS = new Set([
   '/api/internal/workers/work-queue/run',
   '/api/internal/workers/outbox/run',
   '/api/internal/workers/payroll/run',
-  '/api/internal/workers/monthly-close/run',
 ]);
 
 describe('scheduler ownership config', () => {

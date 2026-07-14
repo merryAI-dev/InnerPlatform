@@ -72,10 +72,16 @@ describe('project-team-members', () => {
     ]);
   });
 
-  it('treats member with name and role but no rate as complete', () => {
+  it('treats member with a PPT role and explicit document-only choice but no rate as complete', () => {
     expect(hasIncompleteProjectTeamMembers([
-      { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 0 },
+      { memberName: '김다은', memberNickname: '', role: '총괄책임자', participationRate: 0, isDocumentOnly: false },
     ])).toBe(false);
+  });
+
+  it('rejects a legacy free-text role or missing document-only choice in v2 completeness checks', () => {
+    expect(hasIncompleteProjectTeamMembers([
+      { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 50 },
+    ])).toBe(true);
   });
 
   it('detects incomplete rows but keeps normalized values trimmed', () => {

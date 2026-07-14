@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  PROJECT_INFO_DOCUMENT_KINDS,
+  PROJECT_REGISTRATION_DOCUMENT_KINDS,
+} from './project-document-validation.mjs';
 
 const NON_EMPTY_STRING = z.string().trim().min(1);
 const RECORD_UNKNOWN = z.record(z.string(), z.unknown());
@@ -19,7 +23,7 @@ export const projectRegistrationDraftPatchSchema = z.object({
 
 export const projectRegistrationDraftAttachmentSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
-  documentKind: z.enum(['contract', 'quote', 'proposal']),
+  documentKind: z.enum(PROJECT_REGISTRATION_DOCUMENT_KINDS),
   fileName: NON_EMPTY_STRING.max(300),
   mimeType: NON_EMPTY_STRING.max(200),
   fileSize: z.number().int().positive().max(PROJECT_REGISTRATION_ATTACHMENT_MAX_BYTES),
@@ -38,7 +42,9 @@ export const projectInfoDraftPatchSchema = z.object({
   stepIndex: z.number().int().nonnegative().optional(),
 }).strict();
 
-export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema;
+export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachmentSchema.extend({
+  documentKind: z.enum(PROJECT_INFO_DOCUMENT_KINDS),
+});
 
 export const projectInfoDraftSubmitSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
@@ -361,7 +367,7 @@ export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),
   accountType: z.enum(['DEDICATED', 'OPERATING', 'NONE']).optional(),
-  basis: z.enum(['공급가액', '공급대가', 'NONE']).optional(),
+  basis: z.enum(['공급가액', '공급대가', '기타', 'NONE']).optional(),
   startYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
   endYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
   variant: z.enum(['single-project', 'combined', 'multi-sheet']),

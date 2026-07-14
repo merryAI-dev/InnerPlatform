@@ -1,18 +1,11 @@
 import {
   asyncHandler,
   assertActorPermissionAllowed,
-  assertActorRoleAllowed,
   createHttpError,
-  createMutatingRoute,
   readOptionalText,
-  ROUTE_ROLES,
 } from '../bff-utils.mjs';
-import { parseWithSchema, cashflowActualSyncSchema, cashflowExportSchema, cashflowWeekAmountsSchema } from '../schemas.mjs';
+import { parseWithSchema, cashflowExportSchema } from '../schemas.mjs';
 import { buildCashflowExportFileName, buildCashflowExportWorkbookBuffer, expandCashflowYearMonthRange } from '../cashflow-export.mjs';
-import {
-  syncProjectCashflowActualsFromExpenseSheets,
-  upsertCashflowWeekAmounts,
-} from '../cashflow-canonical-store.mjs';
 
 function encodeContentDisposition(fileName) {
   const fallback = 'cashflow-export.xlsx';
@@ -30,53 +23,7 @@ function nextYearMonth(yearMonth) {
   return `${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}`;
 }
 
-export function mountCashflowExportRoutes(app, { db, rbacPolicy, idempotencyService, now }) {
-  app.post('/api/v1/projects/:projectId/cashflow-weeks/upsert', createMutatingRoute(idempotencyService, async (req) => {
-    const { tenantId, actorId, actorEmail } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCashflowWeek, 'write cashflow week amounts');
-    const projectId = readOptionalText(req.params.projectId);
-    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
-    if (!projectSnap.exists) {
-      throw createHttpError(404, '프로젝트를 찾을 수 없습니다.', 'not_found');
-    }
-
-    const payload = parseWithSchema(cashflowWeekAmountsSchema, req.body, 'Invalid cashflow week request');
-    const result = await upsertCashflowWeekAmounts({
-      db,
-      tenantId,
-      actorId,
-      actorName: actorEmail || actorId,
-      projectId,
-      mode: payload.mode,
-      yearMonth: payload.yearMonth,
-      weekNo: payload.weekNo,
-      amounts: payload.amounts,
-      now: now(),
-    });
-    return { status: 200, body: { ok: true, ...result } };
-  }));
-
-  app.post('/api/v1/projects/:projectId/cashflow-actuals/sync', createMutatingRoute(idempotencyService, async (req) => {
-    const { tenantId, actorId, actorEmail } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCashflowWeek, 'sync cashflow actuals');
-    parseWithSchema(cashflowActualSyncSchema, req.body || {}, 'Invalid cashflow actual sync request');
-    const projectId = readOptionalText(req.params.projectId);
-    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
-    if (!projectSnap.exists) {
-      throw createHttpError(404, '프로젝트를 찾을 수 없습니다.', 'not_found');
-    }
-
-    const result = await syncProjectCashflowActualsFromExpenseSheets({
-      db,
-      tenantId,
-      actorId,
-      actorName: actorEmail || actorId,
-      projectId,
-      now: now(),
-    });
-    return { status: 200, body: result };
-  }));
-
+export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
   app.post('/api/v1/cashflow-exports', asyncHandler(async (req, res) => {
     const { tenantId } = req.context;
     assertActorPermissionAllowed(rbacPolicy, req, 'cashflow:export', 'export cashflow workbooks');

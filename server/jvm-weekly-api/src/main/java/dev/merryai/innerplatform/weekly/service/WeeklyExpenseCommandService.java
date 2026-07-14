@@ -6,11 +6,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CellCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CellPatchCommandRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
 import dev.merryai.innerplatform.weekly.api.CloseWeekResponse;
+import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
+import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsResponse;
 import dev.merryai.innerplatform.weekly.api.BankStatementImportLinesResponse;
@@ -24,6 +29,7 @@ import dev.merryai.innerplatform.weekly.api.PasteCellsRequest;
 import dev.merryai.innerplatform.weekly.api.RowCommandResponse;
 import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
+import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -34,6 +40,7 @@ import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseAtomicWriteLimitException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseRequestLimits;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseSheetsResponse;
@@ -101,18 +108,25 @@ public class WeeklyExpenseCommandService {
     public static final String ROW_INSERT_COMMAND = "weeklyExpense.row.insert";
     public static final String ROW_DELETE_COMMAND = "weeklyExpense.row.delete";
     public static final String CASHFLOW_READ_COMMAND = "weeklyExpense.cashflow.read";
+    public static final String CASHFLOW_VARIANCE_COMMAND = "cashflowVariance.update";
+    public static final String CASHFLOW_MONTH_CLOSE_READ_COMMAND = "cashflowMonth.read";
+    public static final String CLOSE_CASHFLOW_MONTH_COMMAND = "cashflowMonth.close";
+    public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
+    public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
 
     private static final Pattern WEEK_LABEL_PATTERN = Pattern.compile("(20\\d{2}-\\d{2}).*?([1-6])");
     private static final Pattern SHORT_WEEK_LABEL_PATTERN = Pattern.compile("^(\\d{2})-(\\d{1,2})-([1-6])$");
     private static final int ROW_REINDEX_TEMPORARY_OFFSET = 1_000_000;
     private static final String CASHFLOW_SHEET_LAB_ACTUAL_SOURCE = "cashflow-sheet-lab";
+    private static final Set<String> CASHFLOW_VARIANCE_REVIEW_ROLES = Set.of("admin", "finance", "tenant_admin");
 
     private final WeeklyExpensePersistence persistence;
     private final WeeklyExpenseAuthorizationService authorizationService;
     private final WeeklyExpenseSpreadsheetService spreadsheetService;
     private final ObjectMapper objectMapper;
     private final boolean cashflowEditLeasesEnabled;
+    private final boolean cashflowStageRuntime;
 
     public WeeklyExpenseCommandService(
         WeeklyExpensePersistence persistence,
@@ -121,7 +135,8 @@ public class WeeklyExpenseCommandService {
         @Value("${weekly.cashflow-edit-leases-enabled:false}") boolean cashflowEditLeasesEnabled,
         @Value("${weekly.deploy-env:local}") String deployEnv
     ) {
-        if (cashflowEditLeasesEnabled && !"stage".equalsIgnoreCase(deployEnv == null ? "" : deployEnv.trim())) {
+        this.cashflowStageRuntime = "stage".equalsIgnoreCase(deployEnv == null ? "" : deployEnv.trim());
+        if (cashflowEditLeasesEnabled && !cashflowStageRuntime) {
             throw new IllegalStateException("Cashflow edit leases can only be enabled in the Stage JVM runtime.");
         }
         this.persistence = persistence;
@@ -670,6 +685,265 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
+    @Transactional(readOnly = true)
+    public CashflowMonthCloseResponse readCashflowMonthClose(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth
+    ) {
+        requireYearMonth(yearMonth);
+        authorizationService.requireProjectAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId);
+        return monthCloseResponse(
+            CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+            persistence.findCashflowMonthClose(actor.tenantId(), projectId, yearMonth),
+            ""
+        );
+    }
+
+    @Transactional
+    public CashflowVarianceResponse updateCashflowVariance(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        CashflowVarianceRequest request
+    ) {
+        String idempotencyKey = requireIdempotencyKey(request.idempotencyKey());
+        requireVarianceContent(request);
+        TrustedActorContext writer = requireCashflowWritePermission(
+            CASHFLOW_VARIANCE_COMMAND,
+            actor,
+            projectId
+        );
+        requireVarianceActionRole(writer.role(), request.action());
+        String requestHash = hashJson(request);
+        Optional<CashflowVarianceResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            CASHFLOW_VARIANCE_COMMAND,
+            idempotencyKey,
+            requestHash,
+            CashflowVarianceResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        writer = requireCashflowWriteLease(
+            CASHFLOW_VARIANCE_COMMAND,
+            writer,
+            projectId,
+            nonFinalSession(editSession)
+        );
+        WeeklyExpensePersistence.CashflowVarianceRecord saved = persistence.updateCashflowVariance(
+            writer,
+            projectId,
+            request
+        );
+        persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(),
+            projectId,
+            saved.sheetId(),
+            CASHFLOW_VARIANCE_COMMAND,
+            writer.id(),
+            normalizeRole(writer.role()),
+            idempotencyKey,
+            varianceAuditMetadataJson(writer, saved, request.action())
+        ));
+        CashflowVarianceResponse response = new CashflowVarianceResponse(new CashflowVarianceResponse.Week(
+            saved.sheetId(),
+            saved.projectId(),
+            saved.tenantId(),
+            saved.varianceFlag(),
+            saved.varianceHistory(),
+            saved.varianceRevision(),
+            saved.updatedAt(),
+            saved.updatedByUid(),
+            saved.updatedByName()
+        ));
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            idempotencyKey,
+            CASHFLOW_VARIANCE_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    private static void requireYearMonth(String yearMonth) {
+        if (yearMonth == null || !yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])")) {
+            throw new IllegalArgumentException("yearMonth must use YYYY-MM.");
+        }
+    }
+
+    @Transactional
+    public CashflowMonthCloseResponse closeCashflowMonth(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        CloseCashflowMonthRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowWritePermission(
+            CLOSE_CASHFLOW_MONTH_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            CLOSE_CASHFLOW_MONTH_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowMonthCloseResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
+        CloseCashflowMonthRequest.requireCompleteDepositSchedule(request.depositScheduleRows());
+        CloseCashflowMonthRequest.requireCompleteConfirmations(request.confirmations());
+        CashflowEditSession finalSession = finalizedSession(editSession);
+        assertAtomicWriteBudget(
+            CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT,
+            5 + finalizeWriteCount(finalSession),
+            "Cashflow month close"
+        );
+        writer = requireCashflowWriteLease(CLOSE_CASHFLOW_MONTH_COMMAND, writer, projectId, finalSession);
+        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.closeCashflowMonth(
+            writer,
+            projectId,
+            CASHFLOW_SHEET_LAB_ACTUAL_SOURCE,
+            request
+        );
+        WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
+            writer,
+            projectId,
+            CLOSE_CASHFLOW_MONTH_COMMAND,
+            request.idempotencyKey(),
+            saved
+        );
+        CashflowMonthCloseResponse response = monthCloseResponse(CLOSE_CASHFLOW_MONTH_COMMAND, saved, audit.getId());
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            CLOSE_CASHFLOW_MONTH_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowMonthCloseResponse requestCashflowMonthReopen(
+        TrustedActorContext actor,
+        String projectId,
+        String dataProjectId,
+        RequestCashflowMonthReopenRequest request
+    ) {
+        if (request.reason().isBlank()) {
+            throw new IllegalArgumentException("A reason is required to request a cashflow month reopen.");
+        }
+        TrustedActorContext writer = requireCashflowWritePermissionWithoutLeaseRuntime(
+            REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+            actor,
+            projectId
+        );
+        requireCashflowStageDataProject(dataProjectId);
+        String requestHash = hashJson(request);
+        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowMonthCloseResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.requestCashflowMonthReopen(
+            writer,
+            projectId,
+            request
+        );
+        WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
+            writer,
+            projectId,
+            REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+            request.idempotencyKey(),
+            saved
+        );
+        CashflowMonthCloseResponse response = monthCloseResponse(
+            REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+            saved,
+            audit.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowMonthCloseResponse decideCashflowMonthReopen(
+        TrustedActorContext actor,
+        String projectId,
+        String dataProjectId,
+        DecideCashflowMonthReopenRequest request
+    ) {
+        if (!("APPROVE".equals(request.decision()) || "REJECT".equals(request.decision()))
+            || request.reason().isBlank()) {
+            throw new IllegalArgumentException("A decision and reason are required for a cashflow month reopen request.");
+        }
+        TrustedActorContext writer = requireCashflowWritePermissionWithoutLeaseRuntime(
+            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+            actor,
+            projectId
+        );
+        requireCashflowStageDataProject(dataProjectId);
+        String requestHash = hashJson(request);
+        Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowMonthCloseResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.decideCashflowMonthReopen(
+            writer,
+            projectId,
+            request
+        );
+        WeeklyExpenseAuditEventEntity audit = saveMonthCloseAudit(
+            writer,
+            projectId,
+            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+            request.idempotencyKey(),
+            saved
+        );
+        CashflowMonthCloseResponse response = monthCloseResponse(
+            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+            saved,
+            audit.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
     @Transactional
     public CashflowSheetLabApplyResponse applyCashflowSheetLab(
         TrustedActorContext actor,
@@ -694,7 +968,7 @@ public class WeeklyExpenseCommandService {
         if (replay.isPresent()) return replay.get();
 
         List<CashflowSheetLabApplyRequest.Cell> cells = requireCompleteCashflowSheetMonth(request);
-        assertAtomicWriteBudget(cells.size(), 2 + finalizeWriteCount(editSession), "Cashflow sheet apply");
+        assertAtomicWriteBudget(cells.size(), 3 + finalizeWriteCount(editSession), "Cashflow sheet apply");
         writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
@@ -788,6 +1062,7 @@ public class WeeklyExpenseCommandService {
             SubmitWeekResponse.class
         );
         if (replay.isPresent()) return replay.get();
+        persistence.requireCashflowMonthsOpen(tenantId, projectId, List.of(request.yearMonth()));
 
         SubmitWeekRequest.WeeklySheetSnapshot weeklySheet = request.weeklySheet();
         WeeklyExpenseSheetEntity sheet = weeklySheet == null
@@ -914,6 +1189,7 @@ public class WeeklyExpenseCommandService {
             CloseWeekResponse.class
         );
         if (replay.isPresent()) return replay.get();
+        persistence.requireCashflowMonthsOpen(actor.tenantId(), projectId, List.of(request.yearMonth()));
 
         List<WeeklyExpenseProjectionEntity> projectionEntities = prepareProjectionEntities(
             actor,
@@ -1415,6 +1691,14 @@ public class WeeklyExpenseCommandService {
     private List<CashflowSnapshotResponse.ProjectionLine> saveProjectionEntities(
         List<WeeklyExpenseProjectionEntity> entities
     ) {
+        if (!entities.isEmpty()) {
+            WeeklyExpenseProjectionEntity first = entities.getFirst();
+            persistence.requireCashflowMonthsOpen(
+                first.getTenantId(),
+                first.getProjectId(),
+                entities.stream().map(WeeklyExpenseProjectionEntity::getYearMonth).distinct().toList()
+            );
+        }
         List<CashflowSnapshotResponse.ProjectionLine> savedLines = new ArrayList<>();
         for (WeeklyExpenseProjectionEntity entity : entities) {
             WeeklyExpenseProjectionEntity saved = persistence.saveProjection(entity);
@@ -2222,6 +2506,166 @@ public class WeeklyExpenseCommandService {
         return text.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
+    private CashflowEditSession finalizedSession(CashflowEditSession session) {
+        if (session == null) return null;
+        return new CashflowEditSession(
+            session.dataProjectId(),
+            session.sessionId(),
+            session.leaseId(),
+            session.fence(),
+            true
+        );
+    }
+
+    private CashflowEditSession nonFinalSession(CashflowEditSession session) {
+        if (session == null) return null;
+        return new CashflowEditSession(
+            session.dataProjectId(),
+            session.sessionId(),
+            session.leaseId(),
+            session.fence(),
+            false
+        );
+    }
+
+    private void requireCashflowStageDataProject(String dataProjectId) {
+        if (!cashflowStageRuntime) {
+            throw new WeeklyExpenseEditLeaseException(
+                503,
+                "unsafe_jvm_runtime",
+                "Cashflow month reopen writes are restricted to the Stage JVM runtime."
+            );
+        }
+        persistence.requireCashflowDataProject(dataProjectId);
+    }
+
+    private String requireIdempotencyKey(String value) {
+        String key = value == null ? "" : value.trim();
+        if (key.isBlank() || key.length() > WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new IllegalArgumentException("idempotencyKey is required and must be at most 120 characters.");
+        }
+        return key;
+    }
+
+    private void requireVarianceContent(CashflowVarianceRequest request) {
+        if (request.expectedRevision() == null) {
+            throw new IllegalArgumentException("expectedRevision is required.");
+        }
+        if (request.sheetId().isBlank()
+            || request.sheetId().equals(".")
+            || request.sheetId().equals("..")
+            || request.sheetId().contains("/")
+            || request.sheetId().getBytes(StandardCharsets.UTF_8).length > 512) {
+            throw new IllegalArgumentException("sheetId is invalid.");
+        }
+        if (!Set.of("FLAG", "REPLY", "RESOLVE").contains(request.action())) {
+            throw new IllegalArgumentException("Variance action must be FLAG, REPLY, or RESOLVE.");
+        }
+        if (("FLAG".equals(request.action()) || "REPLY".equals(request.action()))
+            && request.content().isBlank()) {
+            throw new IllegalArgumentException("Variance content is required for FLAG and REPLY.");
+        }
+        if (request.content().getBytes(StandardCharsets.UTF_8).length > 2_000) {
+            throw new IllegalArgumentException("Variance content must be at most 2,000 UTF-8 bytes.");
+        }
+    }
+
+    private void requireVarianceActionRole(String role, String action) {
+        String normalizedRole = normalizeRole(role);
+        if ("REPLY".equals(action)) {
+            if (!"pm".equals(normalizedRole)) {
+                throw new WeeklyExpenseForbiddenException("Project manager role is required to reply to a cashflow variance.");
+            }
+            return;
+        }
+        if (!CASHFLOW_VARIANCE_REVIEW_ROLES.contains(normalizedRole)) {
+            throw new WeeklyExpenseForbiddenException("Finance review role is required to flag or resolve a cashflow variance.");
+        }
+    }
+
+    private String varianceAuditMetadataJson(
+        TrustedActorContext actor,
+        WeeklyExpensePersistence.CashflowVarianceRecord variance,
+        String action
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("entityType", "cashflow_week");
+        metadata.put("entityId", variance.sheetId());
+        metadata.put("action", "CASHFLOW_VARIANCE_" + action);
+        metadata.put("yearMonth", variance.yearMonth());
+        metadata.put("revision", variance.varianceRevision());
+        putActorMetadata(metadata, actor);
+        return writeJson(metadata);
+    }
+
+    private WeeklyExpenseAuditEventEntity saveMonthCloseAudit(
+        TrustedActorContext actor,
+        String projectId,
+        String commandName,
+        String idempotencyKey,
+        WeeklyExpensePersistence.CashflowMonthCloseRecord close
+    ) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("yearMonth", close.yearMonth());
+        metadata.put("status", close.status());
+        metadata.put("revision", close.revision());
+        metadata.put("reopenCount", close.reopenCount());
+        metadata.put("projectWarningCount", close.projectWarningCount());
+        metadata.put("snapshotHash", close.snapshotHash());
+        metadata.put("previousSnapshotHash", close.previousSnapshotHash());
+        metadata.put("late", close.late());
+        metadata.put("closedAt", close.closedAt());
+        metadata.put("reopenReason", close.reopenReason());
+        metadata.put("reopenDecision", close.reopenDecision());
+        metadata.put("reopenDecisionReason", close.reopenDecisionReason());
+        putActorMetadata(metadata, actor);
+        return persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            actor.tenantId(),
+            projectId,
+            "month-close",
+            commandName,
+            actor.id(),
+            normalizeRole(actor.role()),
+            idempotencyKey,
+            writeJson(metadata)
+        ));
+    }
+
+    private CashflowMonthCloseResponse monthCloseResponse(
+        String commandName,
+        WeeklyExpensePersistence.CashflowMonthCloseRecord close,
+        String auditId
+    ) {
+        return new CashflowMonthCloseResponse(
+            true,
+            commandName,
+            close.projectId(),
+            close.yearMonth(),
+            close.status(),
+            close.revision(),
+            close.reopenCount(),
+            close.projectWarningCount(),
+            close.snapshotHash(),
+            close.previousSnapshotHash(),
+            close.snapshot(),
+            close.closeEligible(),
+            close.evaluatedBusinessDate(),
+            close.closeDeadline(),
+            close.late(),
+            close.closedAt(),
+            close.closedByUid(),
+            close.closedByName(),
+            close.reopenReason(),
+            close.reopenRequestedAt(),
+            close.reopenRequestedByUid(),
+            close.reopenDecision(),
+            close.reopenDecisionReason(),
+            close.reopenDecidedAt(),
+            close.reopenDecidedByUid(),
+            auditId
+        );
+    }
+
     private String text(String value) {
         return value == null ? "" : value;
     }
@@ -2263,6 +2707,14 @@ public class WeeklyExpenseCommandService {
                 "Cashflow writes require the Stage edit-lease runtime."
             );
         }
+        return requireCashflowWritePermissionWithoutLeaseRuntime(commandName, actor, projectId);
+    }
+
+    private TrustedActorContext requireCashflowWritePermissionWithoutLeaseRuntime(
+        String commandName,
+        TrustedActorContext actor,
+        String projectId
+    ) {
         String storedRole = persistence.requireCashflowWritePermission(actor, projectId);
         TrustedActorContext storedActor = new TrustedActorContext(
             actor.tenantId(),

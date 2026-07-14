@@ -1579,6 +1579,7 @@ export function mountCashflowSheetLabRoutes(app, {
         selectedSheetName: preview.selectedSheetName,
         mappings,
         matrix: preview.matrix,
+        template,
         targetSnapshot,
         capturedAt: attemptedAt,
         capturedBy: {

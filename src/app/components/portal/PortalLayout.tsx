@@ -66,7 +66,7 @@ import {
   isPortalStandaloneEntryPath,
   isAdminSpaceRole,
 } from '../../platform/navigation';
-import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
+import { getSeoulTodayIso } from '../../platform/business-days';
 import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
@@ -181,7 +181,7 @@ function PortalContent() {
     setWorkspacePreference,
   } = useAuth();
   const { getUnacknowledgedCount } = useHrAnnouncements();
-  const { runs, monthlyCloses } = usePayroll();
+  const { runs } = usePayroll();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -503,14 +503,10 @@ function PortalContent() {
   const payrollPendingCount = (() => {
     const today = getSeoulTodayIso();
     const yearMonth = today.slice(0, 7);
-    const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
     const projectId = currentProject?.id;
     if (!projectId) return 0;
     const run = runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth);
-    const closePrev = monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth);
-    const payroll = run && today >= run.noticeDate && !run.acknowledged ? 1 : 0;
-    const monthly = closePrev && closePrev.status === 'DONE' && !closePrev.acknowledged ? 1 : 0;
-    return payroll + monthly;
+    return run && today >= run.noticeDate && !run.acknowledged ? 1 : 0;
   })();
   const notificationItems = buildPortalShellNotificationItems({
     pendingChanges,

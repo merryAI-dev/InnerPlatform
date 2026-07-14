@@ -618,6 +618,18 @@ export interface CashflowModeReadModel {
   monthTotals: { totalIn: number; totalOut: number; net: number };
 }
 
+export interface CashflowRangeBoundary {
+  yearMonth: string;
+  weekNo: number;
+}
+
+export interface CashflowRangeTotals {
+  rowTotals: Record<string, number>;
+  totalIn: number;
+  totalOut: number;
+  net: number;
+}
+
 export interface CashflowComparisonTotals {
   totalIn: number;
   totalOut: number;
@@ -638,6 +650,7 @@ export interface CashflowComparisonWeek {
     actual: number;
     actualHadValue: boolean;
     difference: number;
+    mismatch: boolean;
   }>;
   totals: {
     projection: CashflowComparisonTotals;
@@ -673,6 +686,12 @@ export interface CashflowSnapshotResult {
   actual: CashflowActualLine[];
   comparison: CashflowProjectionActualComparison;
   readModel: {
+    range: {
+      start: CashflowRangeBoundary;
+      end: CashflowRangeBoundary;
+      projection: CashflowRangeTotals;
+      actual: CashflowRangeTotals;
+    };
     months: Array<{
       yearMonth: string;
       projection: CashflowModeReadModel;
@@ -680,6 +699,166 @@ export interface CashflowSnapshotResult {
       comparison: CashflowComparisonMonth;
     }>;
   };
+}
+
+export type CashflowMonthCloseStatus = 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED';
+export type CashflowMonthReopenDecision = 'APPROVE' | 'REJECT';
+
+export interface CashflowMonthCloseCell {
+  mode: 'projection' | 'actual';
+  weekNo: number;
+  cashflowLine: string;
+  cellState: 'VALUE' | 'EMPTY';
+  amount?: number | null;
+  sourceCell?: string | null;
+  sourceLabel?: string | null;
+}
+
+export interface CashflowMonthCloseConfirmation {
+  mode: 'projection' | 'actual';
+  weekNo: number;
+  cashflowLine: string;
+  decision: 'CONFIRMED' | 'NOT_APPLICABLE';
+}
+
+export interface CashflowMonthCloseDepositScheduleRow {
+  weekNo: number;
+  taxInvoiceIssuedDate: string;
+  expectedDepositDate: string;
+  expectedDepositAmount?: number | null;
+  actualDepositDate: string;
+  actualDepositAmount?: number | null;
+  actualSource: 'SHEET' | 'BANK_TRANSACTION' | 'DIRECT_ENTRY' | 'NOT_APPLICABLE';
+  decision: 'CONFIRMED' | 'NOT_APPLICABLE';
+}
+
+export interface CashflowMonthCloseDraftInput {
+  sourceRevision: string;
+  targetRevision: string;
+  yearMonth: string;
+  depositScheduleRows: CashflowMonthCloseDepositScheduleRow[];
+  cells: CashflowMonthCloseCell[];
+  confirmations: CashflowMonthCloseConfirmation[];
+}
+
+export interface CashflowMonthCloseDashboard {
+  source: {
+    kind: 'PINNED_MIRROR' | 'MONTH_CLOSE_SNAPSHOT';
+    status: string;
+    sourceRevision: string;
+    targetRevision: string;
+    capturedAt: string;
+  };
+  project: Record<string, unknown>;
+  sheetMetadata: Record<string, unknown>;
+  sheetControlTotals: {
+    deposit: {
+      sourceCell: string;
+      value: number | null;
+      computed?: number | null;
+      matches?: boolean;
+    } | null;
+    unpaid: {
+      sourceCell: string;
+      value: number | null;
+    } | null;
+  };
+  sheetDepositScheduleRows: Array<{
+    yearMonth: string;
+    weekNo: number;
+    taxInvoiceIssuedDate: string;
+    expectedDepositDate: string;
+    expectedDepositAmount?: number | null;
+    sourceCells?: Record<string, string>;
+  }>;
+  depositScheduleRows: Array<Record<string, unknown>>;
+  cells: CashflowMonthCloseCell[];
+  confirmations: CashflowMonthCloseConfirmation[];
+  draftRevision: number | null;
+  totals: {
+    projection: {
+      totalIn: number;
+      totalOut: number;
+      balance: number;
+      rowTotals: Record<string, number>;
+      weeks: CashflowModeReadModel['weeks'];
+    };
+    actual: {
+      totalIn: number;
+      totalOut: number;
+      balance: number;
+      rowTotals: Record<string, number>;
+      weeks: CashflowModeReadModel['weeks'];
+    };
+    difference: {
+      totalIn: number;
+      totalOut: number;
+      balance: number;
+    };
+  };
+  comparison: CashflowComparisonMonth | null;
+  summary: {
+    projectionProgressPercent: number;
+    actualProgressPercent: number;
+    confirmationProgressPercent: number;
+    comparisonMatches: boolean;
+    comparisonAsOfDate: string;
+    comparisonAsOfWeek: { yearMonth: string; weekNo: number };
+    evaluatedBusinessDate: string | null;
+    closeDeadline: string | null;
+    late: boolean;
+  };
+  validation: {
+    canClose: boolean;
+    blockers: Array<{ code: string; message: string; details?: unknown }>;
+    warnings: Array<{ code: string; message: string; details?: unknown }>;
+  };
+  canonical: CashflowSnapshotResult['readModel'] | null;
+}
+
+export interface CloseCashflowMonthPayload {
+  yearMonth: string;
+  expectedRevision: number;
+}
+
+export interface RequestCashflowMonthReopenPayload {
+  yearMonth: string;
+  expectedRevision: number;
+  reason: string;
+}
+
+export interface DecideCashflowMonthReopenPayload {
+  yearMonth: string;
+  expectedRevision: number;
+  decision: CashflowMonthReopenDecision;
+  reason: string;
+}
+
+export interface CashflowMonthCloseResult {
+  ok: boolean;
+  commandName: string;
+  projectId: string;
+  yearMonth: string;
+  status: CashflowMonthCloseStatus;
+  revision: number;
+  reopenCount: number;
+  projectWarningCount: number;
+  snapshotHash: string | null;
+  previousSnapshotHash: string | null;
+  snapshot: Record<string, unknown>;
+  late: boolean;
+  closedAt: string | null;
+  closedByUid: string | null;
+  closedByName: string | null;
+  reopenReason: string | null;
+  reopenRequestedAt: string | null;
+  reopenRequestedByUid: string | null;
+  reopenDecision: CashflowMonthReopenDecision | null;
+  reopenDecisionReason: string | null;
+  reopenDecidedAt: string | null;
+  reopenDecidedByUid: string | null;
+  auditId: string | null;
+  dashboard?: CashflowMonthCloseDashboard;
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -934,28 +1113,6 @@ export interface WeeklyExpenseDraftResult {
     cashflowLine: string;
     amount: number;
   }>;
-  auditId: string;
-}
-
-export interface WeeklyExpenseWeekPayload {
-  yearMonth: string;
-  weekNo: number;
-  projectionLines?: Array<{
-    yearMonth: string;
-    weekNo: number;
-    cashflowLine: string;
-    amount: number;
-  }>;
-  weeklySheet?: WeeklyExpenseDraftPayload & { sheetKey: string };
-}
-
-export interface WeeklyExpenseWeekResult {
-  ok: boolean;
-  commandName: string;
-  projectId: string;
-  yearMonth: string;
-  weekNo: number;
-  state: string;
   auditId: string;
 }
 
@@ -1934,17 +2091,114 @@ export async function fetchCashflowSnapshotViaBff(params: {
   actor: ActorLike;
   projectId: string;
   asOf?: string;
+  rangeStart?: CashflowRangeBoundary;
+  rangeEnd?: CashflowRangeBoundary;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSnapshotResult> {
   const apiClient = resolveClient(params.client);
-  const asOfQuery = params.asOf ? `?asOf=${encodeURIComponent(params.asOf)}` : '';
+  const query = new URLSearchParams();
+  if (params.asOf) query.set('asOf', params.asOf);
+  if (params.rangeStart) query.set('rangeStart', `${params.rangeStart.yearMonth}:${params.rangeStart.weekNo}`);
+  if (params.rangeEnd) query.set('rangeEnd', `${params.rangeEnd.yearMonth}:${params.rangeEnd.weekNo}`);
+  const serializedQuery = query.toString();
+  const queryString = serializedQuery ? `?${serializedQuery}` : '';
   const response = await apiClient.get<CashflowSnapshotResult>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}${asOfQuery}`,
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}${queryString}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       retries: 0,
       timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowMonthCloseViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseResult> {
+  const response = await resolveClient(params.client).get<CashflowMonthCloseResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close?yearMonth=${encodeURIComponent(params.yearMonth)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function closeCashflowMonthViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: CloseCashflowMonthPayload;
+  idempotencyKey: string;
+  lease: CashflowMutationLease;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseResult> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      headers: {
+        ...cashflowMutationHeaders(params.lease),
+        'x-edit-finalize': 'true',
+      },
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 20000,
+    },
+  );
+  return response.data;
+}
+
+export async function requestCashflowMonthReopenViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: RequestCashflowMonthReopenPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseResult> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-request`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function decideCashflowMonthReopenViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: DecideCashflowMonthReopenPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseResult> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/reopen-decision`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
     },
   );
   return response.data;
@@ -2025,48 +2279,6 @@ export async function saveWeeklyExpenseDraftViaBff(params: {
     },
   );
   return response.data;
-}
-
-async function mutateWeeklyExpenseWeek(params: {
-  command: 'submit' | 'close';
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  payload: WeeklyExpenseWeekPayload;
-  idempotencyKey: string;
-  lease: CashflowMutationLease;
-  finalize?: boolean;
-  client?: PlatformApiClientLike;
-}): Promise<WeeklyExpenseWeekResult> {
-  const apiClient = resolveClient(params.client);
-  const response = await apiClient.post<WeeklyExpenseWeekResult>(
-    `/api/v1/weekly-expenses/${encodeURIComponent(params.projectId)}/${params.command}`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: params.payload,
-      headers: {
-        ...cashflowMutationHeaders(params.lease),
-        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
-      },
-      idempotencyKey: params.idempotencyKey,
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data;
-}
-
-export function submitCashflowWeekViaBff(
-  params: Omit<Parameters<typeof mutateWeeklyExpenseWeek>[0], 'command'>,
-): Promise<WeeklyExpenseWeekResult> {
-  return mutateWeeklyExpenseWeek({ ...params, command: 'submit' });
-}
-
-export function closeCashflowWeekViaBff(
-  params: Omit<Parameters<typeof mutateWeeklyExpenseWeek>[0], 'command'>,
-): Promise<WeeklyExpenseWeekResult> {
-  return mutateWeeklyExpenseWeek({ ...params, command: 'close' });
 }
 
 export async function fetchCashflowLaborRiskViaBff(params: {

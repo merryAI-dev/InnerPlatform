@@ -20,6 +20,7 @@ ALLOWED_ORIGINS="${JVM_WEEKLY_ALLOWED_ORIGINS:-$STAGE_ALLOWED_ORIGIN}"
 STORAGE_BACKEND="${JVM_WEEKLY_STORAGE_BACKEND:-firestore}"
 PROJECT_ACCESS_BACKEND="${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:-firestore}"
 DEPLOY_ENV="${JVM_WEEKLY_DEPLOY_ENV:-stage}"
+QA_DATE="${JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE:-}"
 EDIT_LEASES_ENABLED="${JVM_WEEKLY_EDIT_LEASES_ENABLED:-true}"
 INTERNAL_TOKEN_ENABLED="${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:-true}"
 JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET="${JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET:-innerplatform-weekly-api-token}"
@@ -53,6 +54,8 @@ fail() {
   || fail "Stage-only JVM deploy requires Firestore project access"
 [[ "$DEPLOY_ENV" == "stage" && "$EDIT_LEASES_ENABLED" == "true" && "$INTERNAL_TOKEN_ENABLED" == "true" ]] \
   || fail "Stage-only JVM deploy requires the Stage lease and service-token runtime"
+[[ -z "$QA_DATE" || "$QA_DATE" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ ]] \
+  || fail "Stage cashflow month-close QA date must use YYYY-MM-DD"
 [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || fail "Stage-only JVM deploy received an invalid image tag"
 
 IMAGE_URI="gcr.io/${PROJECT_ID}/${STAGE_SERVICE_NAME}:${IMAGE_TAG}"
@@ -69,7 +72,7 @@ gcloud run deploy "$STAGE_SERVICE_NAME" \
   --region "$STAGE_REGION" \
   --platform managed \
   --ingress all \
-  --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=stage|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIRESTORE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app" \
+  --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=stage|JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=${QA_DATE}|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIRESTORE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app" \
   --set-secrets "JVM_WEEKLY_INTERNAL_API_TOKEN=${JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest"
 
 gcloud run services describe "$STAGE_SERVICE_NAME" \

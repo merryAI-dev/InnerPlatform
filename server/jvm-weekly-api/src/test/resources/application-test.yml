@@ -10,6 +10,7 @@ spring:
     enabled: true
 weekly:
   deploy-env: stage
+  legacy-week-close-enabled: true
   cashflow-edit-leases-enabled: true
   internal-api-token-enabled: true
   internal-api-token: test-weekly-api-token

@@ -114,6 +114,7 @@ service cloud.firestore {
         || collection in ['cashflow_sheet_stage_runs']
         || collection in ['cashflow_sheet_stage_months']
         || collection in ['cashflow_change_candidates']
+        || collection in ['monthly_closes']
         || collection in ['weekly_api_idempotency']
         || collection in ['weekly_api_audit_events']
         || collection in ['weekly_api_audit_exports']
@@ -133,6 +134,7 @@ service cloud.firestore {
         'project_requests',
         'projectRequests',
         'cashflow_weeks',
+        'monthly_closes',
         'weekly_submission_status',
         'transactions',
         'comments',
@@ -284,6 +286,10 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/privateEditDrafts/{draftId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/monthly_closes/{closeId} {
       allow read, write: if false;
     }
 

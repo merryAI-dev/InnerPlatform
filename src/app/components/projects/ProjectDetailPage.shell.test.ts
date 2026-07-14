@@ -12,4 +12,10 @@ describe('ProjectDetailPage shell contract', () => {
     expect(source).toContain('describeProjectRequestVersion');
     expect(source).toContain('승인 전까지 이 화면은 현재 확정된 원장 값을 보여줍니다.');
   });
+
+  it('shows the automatically provisioned project management folder when available', () => {
+    expect(source).toContain('project.evidenceDriveRootFolderLink');
+    expect(source).toContain('사업관리 폴더');
+    expect(source).toContain('폴더 열기');
+  });
 });

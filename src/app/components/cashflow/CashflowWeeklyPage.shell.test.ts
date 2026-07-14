@@ -8,10 +8,15 @@ const cashflowWeeklyPageSource = readFileSync(
 );
 
 describe('CashflowWeeklyPage status semantics', () => {
-  it('marks 작성완료 from projection updates instead of actual PM submission', () => {
+  it('keeps weekly status read-only and directs finalization to monthly close', () => {
     expect(cashflowWeeklyPageSource).toContain('title="주간 프로젝션 작성 현황(전사)"');
     expect(cashflowWeeklyPageSource).toContain('projectionUpdated: Boolean(w.projectionUpdated)');
-    expect(cashflowWeeklyPageSource).toContain('작성완료=Projection 저장');
+    expect(cashflowWeeklyPageSource).toContain("label: 'Projection 저장'");
+    expect(cashflowWeeklyPageSource).toContain('주차 상태는 조회용 · 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리');
+    expect(cashflowWeeklyPageSource).toContain('프로젝트별 주간 입력 현황');
+    expect(cashflowWeeklyPageSource).not.toContain('주간 작성/결산 현황');
+    expect(cashflowWeeklyPageSource).not.toContain('작성완료=Projection 저장');
+    expect(cashflowWeeklyPageSource).not.toContain('결산완료=관리자 결산확정');
     expect(cashflowWeeklyPageSource).not.toContain('function hasProjectionInput');
     expect(cashflowWeeklyPageSource).not.toContain('pmSubmitted: Boolean(w.pmSubmitted)');
     expect(cashflowWeeklyPageSource).not.toContain('작성완료=PM 작성완료');
@@ -37,7 +42,8 @@ describe('CashflowWeeklyPage status semantics', () => {
   });
 
   it('uses red as the missing projection signal', () => {
-    expect(cashflowWeeklyPageSource).toContain('const isMissingProjection = !adminClosed && !projectionUpdated');
+    expect(cashflowWeeklyPageSource).toContain('const isMissingProjection = !projectionUpdated');
+    expect(cashflowWeeklyPageSource).not.toContain('adminClosed: Boolean(w.adminClosed)');
     expect(cashflowWeeklyPageSource).toContain('빨간색</span>=미작성');
     expect(cashflowWeeklyPageSource).toContain('bg-red-50 dark:bg-red-950/30');
   });

@@ -24,6 +24,7 @@ import { useBlocker } from 'react-router';
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  LABOR_SETTLEMENT_BASIS_LABELS,
   formatSettlementSheetPolicySummary,
   getProjectContractTypeSelectableOptions,
   getDefaultSettlementSheetPolicyForFundInputMode,
@@ -36,8 +37,10 @@ import {
   PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
+  SETTLEMENT_SYSTEM_LABELS,
   type AccountType,
   type Basis,
+  type LaborSettlementBasis,
   type OrgMember,
   type FileAttachment,
   type ProjectCurrency,
@@ -49,6 +52,7 @@ import {
   type ProjectTeamMemberAssignment,
   type ProjectType,
   type SettlementType,
+  type SettlementSystemCode,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../../data/project-department-options';
 import { PROJECT_TEAM_MEMBER_OPTION_MAP, PROJECT_TEAM_MEMBER_OPTIONS } from '../../data/project-team-member-options';
@@ -63,20 +67,37 @@ import { buildContractDocumentEditPolicy } from '../../platform/project-contract
 import {
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+  PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+  PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+  getProjectDocumentUploadAccept,
+  isProjectDocumentFileAllowed,
   type ProjectRequestDocumentKind,
 } from '../../platform/project-contract-upload';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
 import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
+import {
   formatProjectTeamMembersSummary,
+  hasIncompleteProjectTeamMembers,
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
+  PROJECT_TEAM_MEMBER_ROLES,
 } from '../../platform/project-team-members';
 import { shouldResetProjectEditorDraft } from './project-editor-reset';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Checkbox } from '../ui/checkbox';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Progress } from '../ui/progress';
@@ -150,17 +171,65 @@ interface ProjectEditorWizardProps {
 const PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION = 1;
 
 type ContractUploadState = 'idle' | 'extracting' | 'ready' | 'error';
-const PROJECT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = ['contract', 'quote', 'proposal'];
+const REGISTRATION_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
+  'contract',
+  'customer_business_registration',
+  'quote',
+  'proposal',
+  'proposal_word_original',
+  'proposal_ppt_original',
+  'presentation_ppt_original',
+  'rfp_request_evidence',
+];
+const CHECKOUT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
+  'performance_certificate',
+  'tax_invoice',
+  'final_settlement_report',
+];
 const PROJECT_DOCUMENT_LABELS: Record<ProjectRequestDocumentKind, string> = {
   contract: '계약서 PDF',
+  customer_business_registration: '발주처 사업자등록증 PDF',
   quote: '견적서 PDF',
-  proposal: '제안서 PDF',
+  proposal: '제안서 PDF (기존 첨부, 선택)',
+  proposal_word_original: '제안서 Word 원본 (선택)',
+  proposal_ppt_original: '제안서 PPT 원본 (선택)',
+  presentation_ppt_original: '발표자료 PPT 원본 (선택)',
+  rfp_request_evidence: 'RFP 또는 요청 메일 증빙 *',
+  performance_certificate: '수행확인서 PDF',
+  tax_invoice: '세금계산서 PDF',
+  final_settlement_report: '최종 정산보고서 PDF',
 };
 const PROJECT_DOCUMENT_BUTTON_LABELS: Record<ProjectRequestDocumentKind, string> = {
   contract: '계약서',
+  customer_business_registration: '사업자등록증',
   quote: '견적서',
   proposal: '제안서',
+  proposal_word_original: '제안서 Word 원본',
+  proposal_ppt_original: '제안서 PPT 원본',
+  presentation_ppt_original: '발표자료 PPT 원본',
+  rfp_request_evidence: 'RFP/요청 메일 증빙',
+  performance_certificate: '수행확인서',
+  tax_invoice: '세금계산서',
+  final_settlement_report: '최종 정산보고서',
 };
+const PROJECT_DOCUMENT_FIELD: Record<ProjectRequestDocumentKind, keyof ProjectEditorDraft> = {
+  contract: 'contractDocument',
+  customer_business_registration: 'customerBusinessRegistrationDocument',
+  quote: 'quoteDocument',
+  proposal: 'proposalDocument',
+  proposal_word_original: 'proposalWordOriginalDocument',
+  proposal_ppt_original: 'proposalPptOriginalDocument',
+  presentation_ppt_original: 'presentationPptOriginalDocument',
+  rfp_request_evidence: 'rfpRequestEvidenceDocument',
+  performance_certificate: 'performanceCertificateDocument',
+  tax_invoice: 'taxInvoiceDocument',
+  final_settlement_report: 'finalSettlementReportDocument',
+};
+const OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD = {
+  proposal_word_original: 'proposalWordOriginal',
+  proposal_ppt_original: 'proposalPptOriginal',
+  presentation_ppt_original: 'presentationPptOriginal',
+} as const;
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type StoredProjectEditorDraft = {
   schemaVersion: number;
@@ -303,6 +372,7 @@ function createEmptyTeamMember(): ProjectTeamMemberAssignment {
     memberNickname: '',
     role: '',
     participationRate: 0,
+    isDocumentOnly: false,
     laborAllocationStartMonth: '',
     laborAllocationEndMonth: '',
   };
@@ -468,21 +538,48 @@ export function ProjectEditorWizard({
   const [draft, setDraft] = useState<ProjectEditorDraft>(() => createProjectEditorWizardDraft(initialDraft));
   const [documentUploadState, setDocumentUploadState] = useState<Record<ProjectRequestDocumentKind, ContractUploadState>>({
     contract: 'idle',
+    customer_business_registration: 'idle',
     quote: 'idle',
     proposal: 'idle',
+    proposal_word_original: 'idle',
+    proposal_ppt_original: 'idle',
+    presentation_ppt_original: 'idle',
+    rfp_request_evidence: 'idle',
+    performance_certificate: 'idle',
+    tax_invoice: 'idle',
+    final_settlement_report: 'idle',
   });
   const [documentUploadError, setDocumentUploadError] = useState<Record<ProjectRequestDocumentKind, string>>({
     contract: '',
+    customer_business_registration: '',
     quote: '',
     proposal: '',
+    proposal_word_original: '',
+    proposal_ppt_original: '',
+    presentation_ppt_original: '',
+    rfp_request_evidence: '',
+    performance_certificate: '',
+    tax_invoice: '',
+    final_settlement_report: '',
   });
   const [restoreCandidate, setRestoreCandidate] = useState<StoredProjectEditorDraft | null>(null);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [exitIntent, setExitIntent] = useState<'cancel' | 'route' | null>(null);
+  const [exitBusy, setExitBusy] = useState(false);
   const [lastAutosavedAt, setLastAutosavedAt] = useState('');
   const [preloadWarningVisible, setPreloadWarningVisible] = useState(false);
   const contractUploadInputRef = useRef<HTMLInputElement | null>(null);
   const quoteUploadInputRef = useRef<HTMLInputElement | null>(null);
   const proposalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const proposalWordOriginalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const proposalPptOriginalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const presentationPptOriginalUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const rfpRequestEvidenceUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const customerBusinessRegistrationUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const performanceCertificateUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const taxInvoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const finalSettlementReportUploadInputRef = useRef<HTMLInputElement | null>(null);
   const retryDocumentFileRef = useRef<Partial<Record<ProjectRequestDocumentKind, File>>>({});
   const submitInFlightRef = useRef(false);
   const exitInFlightRef = useRef(false);
@@ -508,13 +605,21 @@ export function ProjectEditorWizard({
   });
   const currentDraftFingerprint = JSON.stringify(createProjectEditorDraft(draft));
   const uploadInProgress = Object.values(documentUploadState).some((state) => state === 'extracting');
-  const hasPendingRetryFile = PROJECT_DOCUMENT_KINDS.some((kind) => Boolean(retryDocumentFileRef.current[kind]));
+  const registrationDocumentKinds = onProjectDocumentFileUpload
+    ? REGISTRATION_DOCUMENT_KINDS
+    : REGISTRATION_DOCUMENT_KINDS.filter((kind) => kind === 'contract');
+  const checkoutDocumentKinds = onProjectDocumentFileUpload ? CHECKOUT_DOCUMENT_KINDS : [];
+  const documentUploadMaxBytes = mode === 'admin'
+    ? PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES
+    : PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_BYTES;
+  const documentUploadMaxLabel = mode === 'admin'
+    ? PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL
+    : PROJECT_PRIVATE_DRAFT_DOCUMENT_UPLOAD_MAX_SIZE_LABEL;
+  const hasPendingRetryFile = [...registrationDocumentKinds, ...checkoutDocumentKinds]
+    .some((kind) => Boolean(retryDocumentFileRef.current[kind]));
   const hasUnsavedInput = currentDraftFingerprint !== lastPersistedFingerprintRef.current;
   const shouldBlockNavigation = hasUnsavedInput || uploadInProgress || hasPendingRetryFile;
   const shouldConfirmExit = shouldBlockNavigation || (Boolean(onLeave) && !readOnly);
-  const exitPrompt = shouldBlockNavigation
-    ? '임시저장 후 수정 세션을 종료하고 나갈까요?'
-    : '수정 세션을 종료하고 나갈까요?';
   const blocker = useBlocker(shouldConfirmExit);
 
   useEffect(() => {
@@ -537,8 +642,32 @@ export function ProjectEditorWizard({
     draftRef.current = nextDraft;
     setDraft(nextDraft);
     setStepIndex(0);
-    setDocumentUploadState({ contract: 'idle', quote: 'idle', proposal: 'idle' });
-    setDocumentUploadError({ contract: '', quote: '', proposal: '' });
+    setDocumentUploadState({
+      contract: 'idle',
+      customer_business_registration: 'idle',
+      quote: 'idle',
+      proposal: 'idle',
+      proposal_word_original: 'idle',
+      proposal_ppt_original: 'idle',
+      presentation_ppt_original: 'idle',
+      rfp_request_evidence: 'idle',
+      performance_certificate: 'idle',
+      tax_invoice: 'idle',
+      final_settlement_report: 'idle',
+    });
+    setDocumentUploadError({
+      contract: '',
+      customer_business_registration: '',
+      quote: '',
+      proposal: '',
+      proposal_word_original: '',
+      proposal_ppt_original: '',
+      presentation_ppt_original: '',
+      rfp_request_evidence: '',
+      performance_certificate: '',
+      tax_invoice: '',
+      final_settlement_report: '',
+    });
     setAutosaveState('idle');
     setLastAutosavedAt('');
     setPreloadWarningVisible(false);
@@ -602,19 +731,50 @@ export function ProjectEditorWizard({
     }
   }, [autosave?.disabled, autosave?.key, draft, hasPendingRetryFile, hasUnsavedInput, onLeave, persistAutosaveSnapshot, readOnly, stepIndex, uploadInProgress]);
 
+  const releaseWithoutSaving = useCallback(async () => {
+    if (uploadInProgress || hasPendingRetryFile) {
+      toast.error('첨부파일 업로드를 완료한 뒤 나갈 수 있습니다.');
+      return false;
+    }
+    try {
+      await onLeave?.();
+      if (autosave?.key) removeStoredProjectEditorDraft(autosave.key);
+      return true;
+    } catch (error) {
+      console.error('[ProjectEditorWizard] edit session release failed:', error);
+      toast.error('수정 세션을 종료하지 못했습니다. 현재 화면에서 다시 시도해 주세요.');
+      return false;
+    }
+  }, [autosave?.key, hasPendingRetryFile, onLeave, uploadInProgress]);
+
+  const finishExit = useCallback(async (saveBeforeExit: boolean) => {
+    if (exitInFlightRef.current) return;
+    exitInFlightRef.current = true;
+    setExitBusy(true);
+    try {
+      const canLeave = saveBeforeExit
+        ? await saveDraftAndRelease()
+        : await releaseWithoutSaving();
+      if (!canLeave) return;
+      leaveApprovedRef.current = true;
+      setExitDialogOpen(false);
+      if (exitIntent === 'route' && blocker.state === 'blocked') blocker.proceed();
+      else await onCancel?.();
+      setExitIntent(null);
+    } finally {
+      exitInFlightRef.current = false;
+      setExitBusy(false);
+    }
+  }, [blocker, exitIntent, onCancel, releaseWithoutSaving, saveDraftAndRelease]);
+
   const requestCancel = () => {
     if (exitInFlightRef.current) return;
-    if (shouldConfirmExit && typeof window !== 'undefined' && !window.confirm(exitPrompt)) return;
-    exitInFlightRef.current = true;
-    void (async () => {
-      try {
-        if (!await saveDraftAndRelease()) return;
-        leaveApprovedRef.current = true;
-        await onCancel?.();
-      } finally {
-        exitInFlightRef.current = false;
-      }
-    })();
+    if (!shouldConfirmExit) {
+      void onCancel?.();
+      return;
+    }
+    setExitIntent('cancel');
+    setExitDialogOpen(true);
   };
 
   useEffect(() => {
@@ -634,18 +794,9 @@ export function ProjectEditorWizard({
       blocker.proceed();
       return;
     }
-    if (exitInFlightRef.current) return;
-    if (!window.confirm(exitPrompt)) {
-      blocker.reset();
-      return;
-    }
-    exitInFlightRef.current = true;
-    void saveDraftAndRelease().then((canLeave) => {
-      exitInFlightRef.current = false;
-      if (canLeave) blocker.proceed();
-      else blocker.reset();
-    });
-  }, [blocker, exitPrompt, saveDraftAndRelease]);
+    setExitIntent('route');
+    setExitDialogOpen(true);
+  }, [blocker]);
 
   useEffect(() => {
     if (readOnly || !autosave?.key || autosave.disabled || restoreCandidate) return undefined;
@@ -708,6 +859,15 @@ export function ProjectEditorWizard({
   const hasSalesVatAmountInput = financialInputFlags.salesVatAmount;
   const hasTotalRevenueAmountInput = financialInputFlags.totalRevenueAmount;
   const hasSupportAmountInput = financialInputFlags.supportAmount;
+  const usesRegistrationV2 = draft.registrationRequirementsVersion === 2;
+  const showProjectCheckout = draft.status === 'COMPLETED' || draft.status === 'COMPLETED_PENDING_PAYMENT';
+  const paymentPlanTotal = draft.paymentPlan.contract + draft.paymentPlan.interim + draft.paymentPlan.final;
+  const advanceInterimRatio = draft.contractAmount > 0
+    ? (draft.paymentPlan.contract + draft.paymentPlan.interim) / draft.contractAmount
+    : null;
+  const requiresAdvanceInterimReason = paymentPlanTotal > 0
+    && advanceInterimRatio !== null
+    && advanceInterimRatio < 0.7;
   const profitRateLabel = formatProfitRatePercentInput(draft.profitRate);
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
@@ -756,6 +916,35 @@ export function ProjectEditorWizard({
     }));
   };
 
+  const updateFinancialYear = (
+    index: number,
+    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount' | 'profitRate' | 'confirmed',
+    value: number | boolean,
+  ) => {
+    setDraft((prev) => {
+      const financialYears = prev.financialYears.map((row, rowIndex) => (
+        rowIndex === index ? { ...row, [key]: value } : row
+      ));
+      const total = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount') => (
+        financialYears.reduce((sum, row) => sum + row[field], 0)
+      );
+      return createProjectEditorWizardDraft({
+        ...prev,
+        financialYears,
+        contractAmount: total('contractAmount'),
+        salesVatAmount: total('salesVatAmount'),
+        totalRevenueAmount: total('totalRevenueAmount'),
+        supportAmount: total('supportAmount'),
+        financialInputFlags: {
+          contractAmount: true,
+          salesVatAmount: true,
+          totalRevenueAmount: true,
+          supportAmount: true,
+        },
+      });
+    });
+  };
+
   const updateFundInputMode = (modeValue: ProjectFundInputMode) => {
     setDraft((prev) => {
       const oldDefault = getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode);
@@ -793,9 +982,19 @@ export function ProjectEditorWizard({
     }));
   };
 
-  const getDocumentInputRef = (kind: ProjectRequestDocumentKind) => (
-    kind === 'contract' ? contractUploadInputRef : kind === 'quote' ? quoteUploadInputRef : proposalUploadInputRef
-  );
+  const getDocumentInputRef = (kind: ProjectRequestDocumentKind) => ({
+    contract: contractUploadInputRef,
+    customer_business_registration: customerBusinessRegistrationUploadInputRef,
+    quote: quoteUploadInputRef,
+    proposal: proposalUploadInputRef,
+    proposal_word_original: proposalWordOriginalUploadInputRef,
+    proposal_ppt_original: proposalPptOriginalUploadInputRef,
+    presentation_ppt_original: presentationPptOriginalUploadInputRef,
+    rfp_request_evidence: rfpRequestEvidenceUploadInputRef,
+    performance_certificate: performanceCertificateUploadInputRef,
+    tax_invoice: taxInvoiceUploadInputRef,
+    final_settlement_report: finalSettlementReportUploadInputRef,
+  }[kind]);
 
   const uploadProjectDocument = async (kind: ProjectRequestDocumentKind, file: File) => {
     if (onProjectDocumentFileUpload) {
@@ -832,13 +1031,22 @@ export function ProjectEditorWizard({
             ? nextDraft
             : mergeContractAnalysisIntoDraft(nextDraft, processed.contractAnalysis);
         }
+        const noteField = OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD[
+          kind as keyof typeof OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD
+        ];
         return createProjectEditorWizardDraft({
           ...prev,
-          [kind === 'quote' ? 'quoteDocument' : 'proposalDocument']: processed.document,
+          [PROJECT_DOCUMENT_FIELD[kind]]: processed.document,
+          ...(noteField ? {
+            registrationOptionalDocumentNotes: {
+              ...prev.registrationOptionalDocumentNotes,
+              [noteField]: '',
+            },
+          } : {}),
         });
       });
       setDocumentUploadState((prev) => ({ ...prev, [kind]: 'ready' }));
-      toast.success(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF 업로드 완료: ${file.name}`);
+      toast.success(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드 완료: ${file.name}`);
       delete retryDocumentFileRef.current[kind];
       if (input) input.value = '';
     } catch (error) {
@@ -854,13 +1062,13 @@ export function ProjectEditorWizard({
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
-    if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-      toast.error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일은 PDF로 업로드해 주세요.`);
+    if (!isProjectDocumentFileAllowed(kind, file)) {
+      toast.error(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일 형식을 확인해 주세요.`);
       input.value = '';
       return;
     }
-    if (file.size > PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES) {
-      const message = `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} PDF는 ${PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_LABEL} 이하만 업로드할 수 있습니다.`;
+    if (file.size > documentUploadMaxBytes) {
+      const message = `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 파일은 ${documentUploadMaxLabel} 이하만 업로드할 수 있습니다.`;
       setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
       setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
       toast.error(message);
@@ -885,10 +1093,10 @@ export function ProjectEditorWizard({
     delete retryDocumentFileRef.current.contract;
   };
 
-  const removeSupplementalDocument = (kind: 'quote' | 'proposal') => {
+  const removeSupplementalDocument = (kind: Exclude<ProjectRequestDocumentKind, 'contract'>) => {
     setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
-      [kind === 'quote' ? 'quoteDocument' : 'proposalDocument']: null,
+      [PROJECT_DOCUMENT_FIELD[kind]]: null,
     }));
     setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
     setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
@@ -900,12 +1108,84 @@ export function ProjectEditorWizard({
     const normalizedDepartment = normalizeProjectDepartment(draft.department);
     if (!normalizedDepartment || !departmentOptionSet.has(normalizedDepartment)) issues.push({ step: 'basic', label: '담당조직(CIC)' });
     if (!draft.name.trim()) issues.push({ step: 'basic', label: '프로젝트명' });
-    if (draft.type !== 'I1' && !draft.contractStart.trim()) issues.push({ step: 'financial', label: '계약 시작일' });
-    if (draft.type !== 'I1' && !draft.contractEnd.trim()) issues.push({ step: 'financial', label: '계약 종료일' });
+    if ((usesRegistrationV2 || draft.type !== 'I1') && !draft.contractStart.trim()) issues.push({ step: 'financial', label: '계약 시작일' });
+    if ((usesRegistrationV2 || draft.type !== 'I1') && !draft.contractEnd.trim()) issues.push({ step: 'financial', label: '계약 종료일' });
     if (draft.type !== 'I1' && !hasContractAmountInput) issues.push({ step: 'financial', label: '계약금액' });
+    if (usesRegistrationV2) {
+      if (!draft.officialContractName.trim()) issues.push({ step: 'basic', label: '공식 계약명' });
+      if (!draft.clientOrg.trim()) issues.push({ step: 'basic', label: '계약 대상' });
+      if (!draft.groupwareName.trim()) issues.push({ step: 'basic', label: '그룹웨어 등록명' });
+      if (!draft.projectPurpose.trim()) issues.push({ step: 'basic', label: '프로젝트 목적' });
+      if (!draft.description.trim()) issues.push({ step: 'basic', label: '프로젝트 주요 내용' });
+      if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '정산 유형' });
+      if (draft.basis === 'NONE') issues.push({ step: 'financial', label: '정산 기준' });
+      if (!draft.contractDocument) issues.push({ step: 'financial', label: '계약서 PDF' });
+      if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '발주처 사업자등록증 PDF' });
+      if (!draft.quoteDocument) issues.push({ step: 'financial', label: '견적서 PDF' });
+      if (!draft.rfpRequestEvidenceDocument) issues.push({ step: 'financial', label: 'RFP 또는 요청 메일 증빙' });
+      if (!draft.proposalWordOriginalDocument && !draft.registrationOptionalDocumentNotes.proposalWordOriginal.trim()) {
+        issues.push({ step: 'financial', label: '제안서 Word 원본 미첨부 사유' });
+      }
+      if (!draft.proposalPptOriginalDocument && !draft.registrationOptionalDocumentNotes.proposalPptOriginal.trim()) {
+        issues.push({ step: 'financial', label: '제안서 PPT 원본 미첨부 사유' });
+      }
+      if (!draft.presentationPptOriginalDocument && !draft.registrationOptionalDocumentNotes.presentationPptOriginal.trim()) {
+        issues.push({ step: 'financial', label: '발표자료 PPT 원본 미첨부 사유' });
+      }
+      const startYear = Number(draft.contractStart.slice(0, 4));
+      const endYear = Number(draft.contractEnd.slice(0, 4));
+      const expectedYears = Number.isSafeInteger(startYear) && Number.isSafeInteger(endYear) && startYear <= endYear
+        ? Array.from({ length: endYear - startYear + 1 }, (_, offset) => startYear + offset)
+        : [];
+      const financialYearsComplete = expectedYears.length > 0
+        && draft.financialYears.length === expectedYears.length
+        && expectedYears.every((year) => draft.financialYears.some((row) => row.year === year && row.confirmed));
+      const annualTotal = (field: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount') => (
+        draft.financialYears.reduce((sum, row) => sum + row[field], 0)
+      );
+      const annualTotalsMatch = annualTotal('contractAmount') === draft.contractAmount
+        && annualTotal('salesVatAmount') === draft.salesVatAmount
+        && annualTotal('totalRevenueAmount') === draft.totalRevenueAmount
+        && annualTotal('supportAmount') === draft.supportAmount;
+      if (!financialYearsComplete || !annualTotalsMatch) issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
+      if (draft.registrationConfirmations.laborIncludesFourInsurance !== true) issues.push({ step: 'payment', label: '4대보험 포함 확인' });
+      if (draft.registrationConfirmations.laborIncludesRetirementPay !== true) issues.push({ step: 'payment', label: '퇴직급여 포함 확인' });
+      if (!draft.registrationConfirmations.customerSettlementBasisConfirmed) issues.push({ step: 'payment', label: '발주처 정산 기준 확인' });
+      if (draft.registrationConfirmations.modusignContractUsed === null) issues.push({ step: 'payment', label: '모두싸인 사용 여부' });
+      if (
+        draft.registrationConfirmations.modusignContractUsed === false
+        && draft.registrationConfirmations.originalContractSubmitted !== true
+      ) issues.push({ step: 'payment', label: '계약서 원본 제출 확인' });
+      (['contract', 'interim', 'final'] as const).forEach((field) => {
+        if (draft.paymentPlan[field] > 0 && !draft.paymentExpectedMonths[field]) {
+          const label = field === 'contract' ? '선금/계약금 입금 예상월' : field === 'interim' ? '중도금 입금 예상월' : '잔금 입금 예상월';
+          issues.push({ step: 'payment', label });
+        }
+      });
+      if (requiresAdvanceInterimReason && !draft.advanceInterimBelow70Reason.trim()) {
+        issues.push({ step: 'payment', label: '선금·중도금 70% 미만 사유' });
+      }
+    }
+    if (showProjectCheckout) {
+      if (draft.checkout.performanceCertificateReceived && !draft.performanceCertificateDocument) {
+        issues.push({ step: 'payment', label: '수행확인서 PDF' });
+      }
+      if (draft.checkout.taxInvoiceEvidenceConfirmed && !draft.taxInvoiceDocument) {
+        issues.push({ step: 'payment', label: '세금계산서 PDF' });
+      }
+      if (draft.checkout.finalSettlementReportConfirmed && !draft.finalSettlementReportDocument) {
+        issues.push({ step: 'payment', label: '최종 정산보고서 PDF' });
+      }
+      if (draft.checkout.evidenceDeletedAfterUsb && !draft.checkout.usbEvidenceSubmitted) {
+        issues.push({ step: 'payment', label: 'USB 제출 확인' });
+      }
+    }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
+    if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
+      issues.push({ step: 'team', label: '참여인력 이름·역할·서류상 여부' });
+    }
     return issues;
-  }, [departmentOptionSet, draft, hasContractAmountInput]);
+  }, [departmentOptionSet, draft, hasContractAmountInput, requiresAdvanceInterimReason, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -939,17 +1219,18 @@ export function ProjectEditorWizard({
       </div>
 
       <div>
-        <Label className="text-xs">공식 계약명</Label>
+        <Label className="text-xs">공식 계약명{usesRegistrationV2 ? ' *' : ''}</Label>
         <Input
           value={draft.officialContractName}
           onChange={(event) => update('officialContractName', event.target.value)}
-          placeholder="계약서 또는 내부 관리용 공식 명칭"
+          placeholder="계약서에 적힌 명칭을 그대로 입력"
           className="mt-1 h-9 text-sm"
         />
+        <p className="mt-1 text-[10px] text-muted-foreground">계약서 표기와 띄어쓰기 그대로 입력합니다.</p>
       </div>
 
       <div>
-        <Label className="text-xs">프로젝트명(그룹웨어 등록명) *</Label>
+        <Label className="text-xs">프로젝트명 *</Label>
         <Input
           value={draft.name}
           onChange={(event) => update('name', event.target.value.slice(0, mode === 'portal-register' ? 10 : 80))}
@@ -957,46 +1238,49 @@ export function ProjectEditorWizard({
           className="mt-1 h-9 text-sm"
         />
         {mode === 'portal-register' ? (
-          <p className="mt-1 text-[10px] text-muted-foreground">{draft.name.length}/10자</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">화면에서 찾기 쉬운 짧은 이름 · {draft.name.length}/10자</p>
         ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
-          <Label className="text-xs">계약 대상</Label>
+          <Label className="text-xs">계약 대상{usesRegistrationV2 ? ' *' : ''}</Label>
           <Input
             value={draft.clientOrg}
             onChange={(event) => update('clientOrg', event.target.value)}
             placeholder="예: KOICA, 서울시, 아모레퍼시픽재단"
             className="mt-1 h-9 text-sm"
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">사업자등록증상 법인명과 띄어쓰기 그대로 입력합니다.</p>
         </div>
         <div>
-          <Label className="text-xs">그룹웨어 등록명</Label>
+          <Label className="text-xs">그룹웨어 등록명{usesRegistrationV2 ? ' *' : ''}</Label>
           <Input
             value={draft.groupwareName}
             onChange={(event) => update('groupwareName', event.target.value)}
-            placeholder="예: IBS그린임팩트펀드"
+            placeholder="예: 2026 IBS그린임팩트펀드"
             className="mt-1 h-9 text-sm"
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">계약연도+프로젝트명으로 입력합니다. 재경팀 코드는 직접 입력하지 않으며, 다년도 사업도 동일 이름을 사용합니다.</p>
         </div>
       </div>
 
       <div>
-        <Label className="text-xs">프로젝트 목적</Label>
+        <Label className="text-xs">프로젝트 목적{usesRegistrationV2 ? ' *' : ''}</Label>
         <Textarea
           value={draft.projectPurpose}
           onChange={(event) => update('projectPurpose', event.target.value)}
-          placeholder="어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력"
+          placeholder="예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성"
           className="mt-1 min-h-[88px] text-sm"
         />
+        <p className="mt-1 text-[10px] text-muted-foreground">계약 목적을 한두 문장으로 요약합니다.</p>
       </div>
       <div>
-        <Label className="text-xs">프로젝트 주요 내용</Label>
+        <Label className="text-xs">프로젝트 주요 내용{usesRegistrationV2 ? ' *' : ''}</Label>
         <Textarea
           value={draft.description}
           onChange={(event) => update('description', event.target.value)}
-          placeholder="주요 수행 내용, 범위, 산출물"
+          placeholder="수행 내용·범위·산출물을 계약서 기준으로 입력"
           className="mt-1 min-h-[110px] text-sm"
         />
       </div>
@@ -1021,11 +1305,7 @@ export function ProjectEditorWizard({
   );
 
   const renderProjectDocumentUpload = (kind: ProjectRequestDocumentKind) => {
-    const document = kind === 'contract'
-      ? draft.contractDocument
-      : kind === 'quote'
-        ? draft.quoteDocument
-        : draft.proposalDocument;
+    const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
     const uploadState = documentUploadState[kind];
     const uploadError = documentUploadError[kind];
     const inputRef = getDocumentInputRef(kind);
@@ -1034,6 +1314,9 @@ export function ProjectEditorWizard({
       : Boolean(document));
     const removeLabel = kind === 'contract' ? contractDocumentEditPolicy.removeButtonLabel : '첨부 제거';
     const remove = kind === 'contract' ? removeContractDocument : () => removeSupplementalDocument(kind);
+    const optionalNoteField = OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD[
+      kind as keyof typeof OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD
+    ];
 
     return (
       <div key={kind} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1048,7 +1331,13 @@ export function ProjectEditorWizard({
                 ? (contractAnalysisMergeMode === 'none'
                     ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
                     : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.')
-                : 'PDF를 올리면 검토용 첨부로 저장합니다.'}
+                : kind === 'proposal_word_original'
+                  ? '원본 DOCX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
+                  : kind === 'proposal_ppt_original' || kind === 'presentation_ppt_original'
+                    ? '원본 PPTX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
+                    : kind === 'rfp_request_evidence'
+                      ? 'RFP 또는 요청 메일 원본을 PDF, DOCX, EML, MSG 중 하나로 올려주세요.'
+                      : 'PDF를 올리면 검토용 첨부로 저장합니다.'}
             </p>
             {document ? (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
@@ -1067,6 +1356,20 @@ export function ProjectEditorWizard({
                     {removeLabel}
                   </Button>
                 ) : null}
+              </div>
+            ) : null}
+            {optionalNoteField && !document ? (
+              <div className="mt-3">
+                <Label className="text-[11px]">미첨부 사유 / 해당 없음 *</Label>
+                <Input
+                  value={draft.registrationOptionalDocumentNotes[optionalNoteField]}
+                  onChange={(event) => update('registrationOptionalDocumentNotes', {
+                    ...draft.registrationOptionalDocumentNotes,
+                    [optionalNoteField]: event.target.value,
+                  })}
+                  placeholder="예: 해당 없음 / 발주처에서 원본을 제공하지 않음"
+                  className="mt-1 h-9 bg-white text-sm"
+                />
               </div>
             ) : null}
             {kind === 'contract' && contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
@@ -1088,7 +1391,7 @@ export function ProjectEditorWizard({
             <input
               ref={inputRef}
               type="file"
-              accept="application/pdf,.pdf"
+              accept={getProjectDocumentUploadAccept(kind)}
               className="hidden"
               onChange={(event) => handleProjectDocumentSelect(kind, event)}
             />
@@ -1120,7 +1423,7 @@ export function ProjectEditorWizard({
     <div className="space-y-4">
       {onContractFileUpload || onProjectDocumentFileUpload ? (
         <div className="space-y-3">
-          {PROJECT_DOCUMENT_KINDS.map((kind) => renderProjectDocumentUpload(kind))}
+          {registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
         </div>
       ) : null}
 
@@ -1187,8 +1490,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
             onChange={(event) => updateAmount('contractAmount', event.target.value)}
+            readOnly={usesRegistrationV2}
             placeholder="0"
-            className="mt-1 h-9 text-sm"
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
             {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
@@ -1203,8 +1507,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
             onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
+            readOnly={usesRegistrationV2}
             placeholder="0"
-            className="mt-1 h-9 text-sm"
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1213,8 +1518,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
             onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
+            readOnly={usesRegistrationV2}
             placeholder="0"
-            className="mt-1 h-9 text-sm"
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1223,8 +1529,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
             onChange={(event) => updateAmount('supportAmount', event.target.value)}
+            readOnly={usesRegistrationV2}
             placeholder="0"
-            className="mt-1 h-9 text-sm"
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1235,6 +1542,67 @@ export function ProjectEditorWizard({
           </p>
         </div>
       </div>
+
+      {usesRegistrationV2 ? (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div>
+            <Label className="text-xs font-semibold">연도별 계약·재무 *</Label>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
+            </p>
+          </div>
+          {draft.financialYears.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-[12px] text-muted-foreground">
+              계약 시작일과 종료일을 먼저 입력해 주세요.
+            </p>
+          ) : draft.financialYears.map((row, index) => (
+            <div key={row.year} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="mb-3 text-sm font-semibold text-slate-900">{row.year}년</div>
+              <div className="grid gap-3 lg:grid-cols-5">
+                {([
+                  ['contractAmount', '계약금액'],
+                  ['salesVatAmount', '매출 부가세'],
+                  ['totalRevenueAmount', '총수익'],
+                  ['supportAmount', '지원금'],
+                ] as const).map(([field, label]) => (
+                  <div key={field}>
+                    <Label className="text-[11px]">{label}</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={formatProjectAmountInput(row[field], true)}
+                      onChange={(event) => updateFinancialYear(index, field, parseProjectAmountInput(event.target.value))}
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                ))}
+                <div>
+                  <Label className="text-[11px]">수익률(%)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={Number((row.profitRate * 100).toFixed(2))}
+                    onChange={(event) => updateFinancialYear(
+                      index,
+                      'profitRate',
+                      Math.min(1, Math.max(0, Number(event.target.value) / 100 || 0)),
+                    )}
+                    className="mt-1 h-9 text-sm"
+                  />
+                </div>
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={row.confirmed}
+                  onCheckedChange={(checked) => updateFinancialYear(index, 'confirmed', checked === true)}
+                />
+                {row.year}년 금액을 계약서와 대조하여 확인했습니다.
+              </label>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {mode === 'admin' ? (
         <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 lg:grid-cols-2">
@@ -1270,23 +1638,33 @@ export function ProjectEditorWizard({
       <div className="grid gap-4 lg:grid-cols-4">
         <div>
           <Label className="text-xs">정산 유형</Label>
-          <Select value={draft.settlementType} onValueChange={(value) => update('settlementType', value as SettlementType)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <Select
+            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
+            onValueChange={(value) => update('settlementType', value as SettlementType)}
+          >
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 유형 선택" /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).map(([key, value]) => (
+              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][])
+                .filter(([key]) => !(usesRegistrationV2 && key === 'NONE'))
+                .map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
+                ))}
             </SelectContent>
           </Select>
         </div>
         <div>
           <Label className="text-xs">정산 기준</Label>
-          <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <Select
+            value={usesRegistrationV2 && draft.basis === 'NONE' ? undefined : draft.basis}
+            onValueChange={(value) => update('basis', value as Basis)}
+          >
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(BASIS_LABELS) as [Basis, string][]).map(([key, value]) => (
+              {(Object.entries(BASIS_LABELS) as [Basis, string][])
+                .filter(([key]) => !(usesRegistrationV2 && key === 'NONE'))
+                .map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
+                ))}
             </SelectContent>
           </Select>
         </div>
@@ -1316,6 +1694,31 @@ export function ProjectEditorWizard({
               ? '정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
               : '통장내역 업로드 후 정산 시트로 이어서 입력합니다.'}
           </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <Label className="text-xs">정산 시스템</Label>
+          <Select value={draft.settlementSystem} onValueChange={(value) => update('settlementSystem', value as SettlementSystemCode)}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(SETTLEMENT_SYSTEM_LABELS) as [SettlementSystemCode, string][]).map(([key, value]) => (
+                <SelectItem key={key} value={key}>{value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">인건비 정산 기준</Label>
+          <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
+                <SelectItem key={key} value={key}>{value}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -1399,7 +1802,7 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_120px_140px_140px]">
+                <div className="mt-3 grid gap-3 lg:grid-cols-2 xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]">
                   <div>
                     <Label className="text-xs">입력 방식</Label>
                     <Select
@@ -1444,7 +1847,12 @@ export function ProjectEditorWizard({
                   </div>
                   <div>
                     <Label className="text-xs">역할</Label>
-                    <Input value={member.role} onChange={(event) => updateTeamMember(index, { role: event.target.value })} className="mt-1 h-9 text-sm" />
+                    <Select value={member.role || undefined} onValueChange={(value) => updateTeamMember(index, { role: value })}>
+                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="역할 선택" /></SelectTrigger>
+                      <SelectContent>
+                        {PROJECT_TEAM_MEMBER_ROLES.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label className="text-xs">참여율(%)</Label>
@@ -1458,6 +1866,13 @@ export function ProjectEditorWizard({
                       className="mt-1 h-9 text-sm"
                     />
                   </div>
+                  <label className="flex items-center gap-2 self-end pb-2 text-[12px] text-slate-700">
+                    <Checkbox
+                      checked={member.isDocumentOnly === true}
+                      onCheckedChange={(checked) => updateTeamMember(index, { isDocumentOnly: checked === true })}
+                    />
+                    서류상 인력
+                  </label>
                   <div>
                     <Label className="text-xs">인건비 시작월</Label>
                     <Input
@@ -1483,10 +1898,6 @@ export function ProjectEditorWizard({
         </div>
       )}
 
-      <div>
-        <Label className="text-xs">기타 참고사항</Label>
-        <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
-      </div>
     </div>
   );
 
@@ -1496,22 +1907,47 @@ export function ProjectEditorWizard({
         <div>
           <Label className="text-xs">선금/계약금 (원)</Label>
           <Input value={formatProjectAmountInput(draft.paymentPlan.contract, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, contract: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(draft.paymentPlan.contract, draft.contractAmount)}</p>
+          <Label className="mt-3 block text-xs">입금 예상월{draft.paymentPlan.contract > 0 ? ' *' : ''}</Label>
+          <Input type="month" value={draft.paymentExpectedMonths.contract} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, contract: event.target.value })} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">중도금 (원)</Label>
           <Input value={formatProjectAmountInput(draft.paymentPlan.interim, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, interim: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(draft.paymentPlan.interim, draft.contractAmount)}</p>
+          <Label className="mt-3 block text-xs">입금 예상월{draft.paymentPlan.interim > 0 ? ' *' : ''}</Label>
+          <Input type="month" value={draft.paymentExpectedMonths.interim} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, interim: event.target.value })} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">잔금 (원)</Label>
           <Input value={formatProjectAmountInput(draft.paymentPlan.final, true)} onChange={(event) => update('paymentPlan', { ...draft.paymentPlan, final: parseProjectAmountInput(event.target.value) })} className="mt-1 h-9 text-sm" />
+          <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(draft.paymentPlan.final, draft.contractAmount)}</p>
+          <Label className="mt-3 block text-xs">입금 예상월{draft.paymentPlan.final > 0 ? ' *' : ''}</Label>
+          <Input type="month" value={draft.paymentExpectedMonths.final} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, final: event.target.value })} className="mt-1 h-9 text-sm" />
         </div>
       </div>
+      {advanceInterimRatio !== null && paymentPlanTotal > 0 ? (
+        <div className={`rounded-lg border px-3 py-2 text-[12px] ${requiresAdvanceInterimReason ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+          선금+중도금 비율 {(advanceInterimRatio * 100).toFixed(1)}%
+        </div>
+      ) : null}
+      {requiresAdvanceInterimReason ? (
+        <div>
+          <Label className="text-xs">선금·중도금 합계 70% 미만 사유 *</Label>
+          <Textarea
+            value={draft.advanceInterimBelow70Reason}
+            onChange={(event) => update('advanceInterimBelow70Reason', event.target.value)}
+            placeholder="발주처 지급 조건 등 70% 미만인 이유를 입력"
+            className="mt-1 min-h-[72px] text-sm"
+          />
+        </div>
+      ) : null}
       <div>
-        <Label className="text-xs">선금/중도금/잔금 비율 및 입금예상시점</Label>
+        <Label className="text-xs">입금 계획 설명</Label>
         <Textarea
           value={draft.paymentPlanDesc}
           onChange={(event) => update('paymentPlanDesc', event.target.value)}
-          placeholder="예: 선금 50%(5천만원, 4월), 중도금 30%(6월), 잔금 20%(완료 후 2주)"
+          placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
           className="mt-1 min-h-[92px] text-sm"
         />
       </div>
@@ -1528,6 +1964,133 @@ export function ProjectEditorWizard({
         <Label className="text-xs">최종 입금 메모</Label>
         <Textarea value={draft.finalPaymentNote} onChange={(event) => update('finalPaymentNote', event.target.value)} className="mt-1 min-h-[72px] text-sm" />
       </div>
+      <div>
+        <Label className="text-xs">기타 참고사항</Label>
+        <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
+      </div>
+      {usesRegistrationV2 ? (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div>
+            <Label className="text-xs font-semibold">등록 전 확인사항 *</Label>
+            <p className="mt-1 text-[11px] text-muted-foreground">계약 및 정산 기준을 사람이 직접 대조한 뒤 체크해 주세요.</p>
+          </div>
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.registrationConfirmations.laborIncludesFourInsurance === true}
+              onCheckedChange={(checked) => update('registrationConfirmations', {
+                ...draft.registrationConfirmations,
+                laborIncludesFourInsurance: checked === true,
+              })}
+            />
+            인건비에 4대보험 사업주 부담분이 포함되어 있습니다.
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.registrationConfirmations.laborIncludesRetirementPay === true}
+              onCheckedChange={(checked) => update('registrationConfirmations', {
+                ...draft.registrationConfirmations,
+                laborIncludesRetirementPay: checked === true,
+              })}
+            />
+            인건비에 퇴직급여 충당액이 포함되어 있습니다.
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.registrationConfirmations.customerSettlementBasisConfirmed}
+              onCheckedChange={(checked) => update('registrationConfirmations', {
+                ...draft.registrationConfirmations,
+                customerSettlementBasisConfirmed: checked === true,
+              })}
+            />
+            발주처와 정산 기준을 확인했습니다.
+          </label>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div>
+              <Label className="text-xs">모두싸인으로 계약했나요? *</Label>
+              <Select
+                value={draft.registrationConfirmations.modusignContractUsed === null
+                  ? undefined
+                  : (draft.registrationConfirmations.modusignContractUsed ? 'yes' : 'no')}
+                onValueChange={(value) => update('registrationConfirmations', {
+                  ...draft.registrationConfirmations,
+                  modusignContractUsed: value === 'yes',
+                  originalContractSubmitted: value === 'yes'
+                    ? false
+                    : draft.registrationConfirmations.originalContractSubmitted,
+                })}
+              >
+                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="선택" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">예</SelectItem>
+                  <SelectItem value="no">아니요</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {draft.registrationConfirmations.modusignContractUsed === false ? (
+              <label className="mt-6 flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.registrationConfirmations.originalContractSubmitted === true}
+                  onCheckedChange={(checked) => update('registrationConfirmations', {
+                    ...draft.registrationConfirmations,
+                    originalContractSubmitted: checked === true,
+                  })}
+                />
+                계약서 원본을 Sunny에게 제출했습니다.
+              </label>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {showProjectCheckout ? (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div>
+            <Label className="text-xs font-semibold">종료사업 체크아웃</Label>
+            <p className="mt-1 text-[11px] text-muted-foreground">완료 프로젝트의 입금·잔액·증빙·USB 인계를 확인합니다.</p>
+          </div>
+          {([
+            ['finalPaymentReceived', '최종 잔금 입금을 확인했습니다.'],
+            ['bankBalanceZero', '사업 전용계좌 잔액이 0원입니다.'],
+            ['performanceCertificateReceived', '수행확인서 원본을 수령했습니다.'],
+            ['taxInvoiceEvidenceConfirmed', '세금계산서 발행 내역을 확인했습니다.'],
+            ['finalSettlementReportConfirmed', '최종 정산보고서를 확인했습니다.'],
+          ] as const).map(([field, label]) => (
+            <label key={field} className="flex items-center gap-2 text-[12px] text-slate-700">
+              <Checkbox
+                checked={draft.checkout[field]}
+                onCheckedChange={(checked) => update('checkout', { ...draft.checkout, [field]: checked === true })}
+              />
+              {label}
+            </label>
+          ))}
+          {onProjectDocumentFileUpload ? (
+            <div className="space-y-3 pt-1">
+              {checkoutDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
+            </div>
+          ) : null}
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.checkout.usbEvidenceSubmitted}
+              onCheckedChange={(checked) => update('checkout', {
+                ...draft.checkout,
+                usbEvidenceSubmitted: checked === true,
+                evidenceDeletedAfterUsb: checked === true ? draft.checkout.evidenceDeletedAfterUsb : false,
+              })}
+            />
+            정산 USB를 제출했습니다.
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.checkout.evidenceDeletedAfterUsb}
+              disabled={!draft.checkout.usbEvidenceSubmitted}
+              onCheckedChange={(checked) => update('checkout', {
+                ...draft.checkout,
+                evidenceDeletedAfterUsb: checked === true,
+              })}
+            />
+            USB 제출 후 로컬·임시 증빙 파일을 삭제했습니다.
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1557,6 +2120,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
             <ReviewRow label="그룹웨어 등록명" value={draft.groupwareName} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
+            <ReviewRow label="프로젝트 주요 내용" value={draft.description} />
             {canEditProjectStatus(mode) ? (
               <>
                 <ReviewRow label="프로젝트 진행 상태" value={PROJECT_STATUS_LABELS[draft.status]} />
@@ -1578,8 +2142,33 @@ export function ProjectEditorWizard({
             <ReviewRow label="정산 유형" value={SETTLEMENT_TYPE_LABELS[draft.settlementType]} />
             <ReviewRow label="정산 기준" value={BASIS_LABELS[draft.basis]} />
             <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[draft.accountType]} />
+            <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
+            <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
             <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]} />
             <ReviewRow label="정산 시트 정책" value={formatSettlementSheetPolicySummary(draft.settlementSheetPolicy)} />
+            {usesRegistrationV2 ? (
+              <>
+                <ReviewRow
+                  label="연도별 재무"
+                  value={draft.financialYears.map((row) => (
+                    `${row.year}년 계약 ${fmtKRW(row.contractAmount)}원 · 매출VAT ${fmtKRW(row.salesVatAmount)}원 · 총수익 ${fmtKRW(row.totalRevenueAmount)}원 · 지원금 ${fmtKRW(row.supportAmount)}원 · 수익률 ${(row.profitRate * 100).toFixed(2)}%${row.confirmed ? ' · 확인' : ' · 미확인'}`
+                  )).join('\n')}
+                />
+                <ReviewRow
+                  label="등록 첨부 7종"
+                  value={[
+                    `1. 계약서: ${draft.contractDocument?.name || '미첨부'}`,
+                    `2. 사업자등록증: ${draft.customerBusinessRegistrationDocument?.name || '미첨부'}`,
+                    `3. 견적서: ${draft.quoteDocument?.name || '미첨부'}`,
+                    `4. 제안서 Word: ${draft.proposalWordOriginalDocument?.name || draft.registrationOptionalDocumentNotes.proposalWordOriginal || '사유 미입력'}`,
+                    `5. 제안서 PPT: ${draft.proposalPptOriginalDocument?.name || draft.registrationOptionalDocumentNotes.proposalPptOriginal || '사유 미입력'}`,
+                    `6. 발표자료 PPT: ${draft.presentationPptOriginalDocument?.name || draft.registrationOptionalDocumentNotes.presentationPptOriginal || '사유 미입력'}`,
+                    `7. RFP/요청 메일: ${draft.rfpRequestEvidenceDocument?.name || '미첨부'}`,
+                    ...(draft.proposalDocument ? [`기존 제안서 PDF: ${draft.proposalDocument.name}`] : []),
+                  ].join('\n')}
+                />
+              </>
+            ) : null}
           </CardContent>
         </Card>
         <Card className="shadow-none">
@@ -1594,11 +2183,37 @@ export function ProjectEditorWizard({
           <CardHeader className="pb-2"><CardTitle className="text-sm">입금/정산</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="선금/계약금" value={formatPaymentPlanAmount(draft.paymentPlan.contract, draft.contractAmount)} />
+            <ReviewRow label="선금/계약금 예상월" value={draft.paymentExpectedMonths.contract} />
             <ReviewRow label="중도금" value={formatPaymentPlanAmount(draft.paymentPlan.interim, draft.contractAmount)} />
+            <ReviewRow label="중도금 예상월" value={draft.paymentExpectedMonths.interim} />
             <ReviewRow label="잔금" value={formatPaymentPlanAmount(draft.paymentPlan.final, draft.contractAmount)} />
+            <ReviewRow label="잔금 예상월" value={draft.paymentExpectedMonths.final} />
+            <ReviewRow label="선금+중도금 비율" value={advanceInterimRatio === null ? '-' : `${(advanceInterimRatio * 100).toFixed(1)}%`} />
+            {requiresAdvanceInterimReason ? <ReviewRow label="70% 미만 사유" value={draft.advanceInterimBelow70Reason} /> : null}
             <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />
             <ReviewRow label="입금/정산 안내" value={draft.settlementGuide} />
             <ReviewRow label="최종 입금 메모" value={draft.finalPaymentNote} />
+            <ReviewRow label="기타 참고사항" value={draft.note} />
+            {usesRegistrationV2 ? (
+              <ReviewRow
+                label="등록 확인사항"
+                value={[
+                  `4대보험 ${draft.registrationConfirmations.laborIncludesFourInsurance ? '확인' : '미확인'}`,
+                  `퇴직급여 ${draft.registrationConfirmations.laborIncludesRetirementPay ? '확인' : '미확인'}`,
+                  `발주처 정산기준 ${draft.registrationConfirmations.customerSettlementBasisConfirmed ? '확인' : '미확인'}`,
+                  `모두싸인 ${draft.registrationConfirmations.modusignContractUsed === null ? '미선택' : draft.registrationConfirmations.modusignContractUsed ? '사용' : '미사용'}`,
+                  draft.registrationConfirmations.modusignContractUsed === false
+                    ? `원본 제출 ${draft.registrationConfirmations.originalContractSubmitted ? '확인' : '미확인'}`
+                    : '',
+                ].filter(Boolean).join(' · ')}
+              />
+            ) : null}
+            {showProjectCheckout ? (
+              <ReviewRow
+                label="종료사업 체크아웃"
+                value={`${Object.values(draft.checkout).filter(Boolean).length}/7 확인`}
+              />
+            ) : null}
           </CardContent>
         </Card>
         {draft.contractDocument ? (
@@ -1632,7 +2247,52 @@ export function ProjectEditorWizard({
             />
           </div>
         ) : null}
+        {draft.customerBusinessRegistrationDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.customerBusinessRegistrationDocument}
+              privateDraftAttachment={!draft.customerBusinessRegistrationDocument.downloadURL}
+              title="발주처 사업자등록증 원문"
+              description="첨부한 발주처 사업자등록증이 맞는지 확인해주세요."
+            />
+          </div>
+        ) : null}
+        {showProjectCheckout && draft.performanceCertificateDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.performanceCertificateDocument}
+              privateDraftAttachment={!draft.performanceCertificateDocument.downloadURL}
+              title="수행확인서 원문"
+              description="종료사업 수행확인서 증빙입니다."
+            />
+          </div>
+        ) : null}
+        {showProjectCheckout && draft.taxInvoiceDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.taxInvoiceDocument}
+              privateDraftAttachment={!draft.taxInvoiceDocument.downloadURL}
+              title="세금계산서 원문"
+              description="종료사업 세금계산서 증빙입니다."
+            />
+          </div>
+        ) : null}
+        {showProjectCheckout && draft.finalSettlementReportDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={draft.finalSettlementReportDocument}
+              privateDraftAttachment={!draft.finalSettlementReportDocument.downloadURL}
+              title="최종 정산보고서 원문"
+              description="종료사업 최종 정산보고서 증빙입니다."
+            />
+          </div>
+        ) : null}
       </div>
+      {usesRegistrationV2 ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] text-slate-700">
+          최종 저장 후 사업관리 폴더가 자동 생성되며, 프로젝트 상세 화면에서 열 수 있습니다.
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1834,6 +2494,47 @@ export function ProjectEditorWizard({
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        open={exitDialogOpen}
+        onOpenChange={(open) => {
+          if (open || exitBusy) return;
+          setExitDialogOpen(false);
+          setExitIntent(null);
+          if (blocker.state === 'blocked') blocker.reset();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>수정 세션을 종료할까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {shouldBlockNavigation
+                ? '작성 중인 내용과 첨부 상태를 확인한 뒤 종료 방법을 선택해 주세요.'
+                : '페이지를 이동하면 현재 프로젝트의 수정 선점이 종료됩니다.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={exitBusy}>계속 작성</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={exitBusy}
+              onClick={() => void finishExit(false)}
+            >
+              저장하지 않고 종료
+            </Button>
+            <AlertDialogAction
+              disabled={exitBusy || uploadInProgress || hasPendingRetryFile}
+              onClick={(event) => {
+                event.preventDefault();
+                void finishExit(true);
+              }}
+            >
+              임시저장 후 종료
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

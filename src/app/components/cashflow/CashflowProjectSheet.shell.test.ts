@@ -2,262 +2,112 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const cashflowProjectSheetSource = readFileSync(
-  resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'),
-  'utf8',
-);
-const cashflowWeeksStoreSource = readFileSync(
-  resolve(import.meta.dirname, '../../data/cashflow-weeks-store.tsx'),
-  'utf8',
-);
+const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8');
 
-describe('CashflowProjectSheet actual sync flow', () => {
-  it('exposes the rescue operations dashboard from the project sheet shell', () => {
-    expect(cashflowProjectSheetSource).toContain('renderOperationsPanel');
-    expect(cashflowProjectSheetSource).toContain('운영 대시보드');
-    expect(cashflowProjectSheetSource).toContain('opsSummary');
-    expect(cashflowProjectSheetSource).toContain('확인 항목 ${opsSummary.inbox.length}건');
-    expect(cashflowProjectSheetSource).toContain("item.id === 'projection-actual-diff'");
-    expect(cashflowProjectSheetSource).toContain('입니다. 확인해 주세요.');
-    expect(cashflowProjectSheetSource).toContain('결산 전 확인');
-    expect(cashflowProjectSheetSource).toContain('시트 연동');
-    expect(cashflowProjectSheetSource).toContain('Google Sheet 연결 후 변경 후보를 검토할 수 있습니다.');
-    expect(cashflowProjectSheetSource).toContain('시트 연동 설정');
-    expect(cashflowProjectSheetSource).not.toContain('시트 연동 검토');
+describe('CashflowProjectSheet monthly close shell', () => {
+  it('uses the single BFF/JVM month-close contract and removes weekly close actions', () => {
+    expect(source).toContain('fetchCashflowMonthCloseViaBff');
+    expect(source).toContain('closeCashflowMonthViaBff');
+    expect(source).toContain('requestCashflowMonthReopenViaBff');
+    expect(source).toContain('decideCashflowMonthReopenViaBff');
+    expect(source).not.toContain('handleCloseWeek');
+    expect(source).not.toContain('handleSubmitWeek');
+    expect(source).not.toContain('handleCompleteProjectionWeek');
+    expect(source).not.toContain('renderSheetTable');
+    expect(source).not.toContain('settleWeek');
   });
 
-  it('keeps actual audit and sync store helpers separate from manual actual completion', () => {
-    expect(cashflowProjectSheetSource).toContain('prepareAuditedWeekAmounts');
-    expect(cashflowWeeksStoreSource).toContain('syncProjectCashflowActualsViaBff');
-    expect(cashflowWeeksStoreSource).toContain('applyWeekAmountsToLocalWeeks');
-    expect(cashflowWeeksStoreSource).toContain('applyProjectActualSyncResultLocally');
-    expect(cashflowWeeksStoreSource).not.toContain('console.groupCollapsed');
-    expect(cashflowWeeksStoreSource).not.toContain('console.table');
-    expect(cashflowWeeksStoreSource).not.toContain('nonZero');
-    expect(cashflowProjectSheetSource).toContain('handleSubmitWeek');
-    expect(cashflowProjectSheetSource).toContain('작성완료');
+  it('makes final save mean atomic month close after private draft and server validation', () => {
+    expect(source).toContain('최종저장 · 월 결산');
+    expect(source).toMatch(/await savePrivateCashflowDraft\(monthCloseInput, mutationLease\);[\s\S]*fetchCashflowMonthCloseViaBff[\s\S]*validation\.canClose[\s\S]*closeCashflowMonthViaBff/);
+    expect(source).toContain('expectedRevision: prepared.revision');
+    expect(source).not.toContain('saveCashflowProjectionBatchViaBff');
+    expect(source).toContain('projectionDrafts: drafts');
+    expect(source).toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
-  it('keeps visible input in a private draft until an explicit final action', () => {
-    expect(cashflowProjectSheetSource).toContain('prepareAuditedWeekAmounts');
-    expect(cashflowProjectSheetSource).toContain('persisted.hasValue');
-    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
-    expect(cashflowProjectSheetSource).toContain('void savePrivateCashflowDraft()');
-    expect(cashflowProjectSheetSource).not.toContain('void persistWeekValues(input)');
-    expect(cashflowProjectSheetSource).not.toContain('저장할 변경사항이 없습니다.');
+  it('requires explicit human decisions for 160 cells and five deposit rows', () => {
+    expect(source).toContain('monthCloseProgress.confirmedCells');
+    expect(source).toContain('monthCloseProgress.confirmedDepositRows');
+    expect(source).toContain('캐시플로 항목 사람 확인');
+    expect(source).toContain("requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'");
+    expect(source).toContain("decision: 'CONFIRMED'");
+    expect(source).toContain("decision: 'NOT_APPLICABLE'");
+    expect(source).toContain('!monthCloseProgress.complete');
   });
 
-  it('saves the private draft and releases the lease before a blocked in-app exit', () => {
-    expect(cashflowProjectSheetSource).toContain('임시저장 후 나가기');
-    expect(cashflowProjectSheetSource).toContain('await savePrivateCashflowDraft();');
-    expect(cashflowProjectSheetSource).toContain('await cashflowLease.release();');
-    expect(cashflowProjectSheetSource).toContain('blocker.proceed?.();');
+  it('prefills immutable sheet-authored deposit facts and edits only actual facts', () => {
+    expect(source).toContain('dashboard?.sheetDepositScheduleRows');
+    expect(source).toContain('taxInvoiceIssuedDate: row.taxInvoiceIssuedDate');
+    expect(source).toContain('expectedDepositDate: row.expectedDepositDate');
+    expect(source).toContain('expectedDepositAmount: row.expectedDepositAmount');
+    expect(source).toContain('readOnly');
+    expect(source).toContain('hasSheetSource');
+    expect(source).toContain('disabled={!canEdit || hasSheetSource}');
+    expect(source).toContain('actualDepositDate: event.target.value');
+    expect(source).toContain('actualDepositAmount: value');
   });
 
-  it('removes projection/actual copy buttons while keeping canonical week saves', () => {
-    expect(cashflowProjectSheetSource).not.toContain('copyMonthValues');
-    expect(cashflowProjectSheetSource).not.toContain('setCopyingMode(direction)');
-    expect(cashflowProjectSheetSource).not.toContain('Projection → Actual');
-    expect(cashflowProjectSheetSource).not.toContain('Actual → Projection');
-    expect(cashflowProjectSheetSource).toContain('await upsertWeekAmounts({');
+  it('consumes composed dashboard totals, comparison, summary, metadata, and validation', () => {
+    expect(source).toContain('monthCloseResult?.dashboard?.totals[mode]');
+    expect(source).toContain('cashflowSnapshot?.readModel.range?.[mode]');
+    expect(source).toContain('rangeStart: cashflowSnapshotRange.start');
+    expect(source).toContain('rangeEnd: cashflowSnapshotRange.end');
+    expect(source).toContain('monthCloseResult.dashboard.comparison');
+    expect(source).toContain('dashboard.summary.projectionProgressPercent');
+    expect(source).toContain("monthCloseSheetMetadataValue('businessType')");
+    expect(source).toContain("monthCloseSheetControlValue('deposit')");
+    expect(source).toContain("monthCloseSheetControlValue('unpaid')");
+    expect(source).toContain('입금 합계 (BO9)');
+    expect(source).toContain('미지급 표시값 (BP9)');
+    expect(source).toContain('dashboard?.validation.blockers');
+    expect(source).not.toContain('computeCashflowDerivedTotals');
+    expect(source).not.toContain('computeOpeningCashflowTotals');
+    expect(source).not.toContain('monthSummaries.reduce');
   });
 
-  it('formats persisted input values for display without changing numeric save parsing', () => {
-    expect(cashflowProjectSheetSource).toContain('formatAmountInput(String(persisted.amount))');
-    expect(cashflowProjectSheetSource).toContain('parseAmount(drafts[key])');
+  it('keeps the ready placeholder out of the issue count', () => {
+    expect(source).not.toContain("inbox.push({ id: 'all-clear'");
+    expect(source).toContain('{opsSummary.status.count}건');
+    expect(source).toContain('visibleInbox.length === 0');
   });
 
-  it('treats a persisted zero amount as a written sheet value', () => {
-    expect(cashflowProjectSheetSource).toContain('function hasWrittenSheetValues');
-    expect(cashflowProjectSheetSource).toContain('Object.prototype.hasOwnProperty.call(values, lineId)');
-    expect(cashflowProjectSheetSource).toContain('hasWrittenSheetValues(doc?.actual)');
-    expect(cashflowProjectSheetSource).not.toContain('Object.values(actual).some((v) => Number(v) !== 0)');
-    expect(cashflowProjectSheetSource).not.toContain('Object.values(doc?.actual || {}).some((value) => Number(value) !== 0)');
+  it('keeps Projection then ACTUAL row order and shows only blue difference rows', () => {
+    expect(source.indexOf('data-cashflow-block="projection"')).toBeLessThan(source.indexOf('data-cashflow-block="actual"'));
+    expect(source).toMatch(/renderModeLineRows\(mode, CASHFLOW_IN_LINES[\s\S]*renderSummaryRow\(mode, 'totalIn'\)[\s\S]*renderModeLineRows\(mode, CASHFLOW_OUT_LINES[\s\S]*renderSummaryRow\(mode, 'totalOut'\)[\s\S]*renderSummaryRow\(mode, 'net'\)/);
+    expect(source).toContain('Projection - Actual 차이');
+    expect(source).toContain('차이 항목만');
+    expect(source).not.toContain('setDifferenceViewMode');
+    expect(source).toContain("'bg-blue-50 text-blue-700'");
   });
 
-  it('shows projection 작성 from projectionUpdated on the project sheet header', () => {
-    expect(cashflowProjectSheetSource).toContain('projectionUpdated: Boolean(doc?.projectionUpdated)');
-    expect(cashflowProjectSheetSource).toContain("tableMode === 'projection'");
-    expect(cashflowProjectSheetSource).toContain('weekMeta[w.weekNo]?.projectionUpdated');
+  it('keeps sheet sync explicit and uses the approved action label', () => {
+    expect(source).toContain('handleRefreshSheetMirror');
+    expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
+    expect(source).toContain('stageCashflowSheetLabViaBff');
+    expect(source).toContain('시트값 불러오기');
+    expect(source).not.toContain('시트 연동하기');
+    expect(source).not.toContain('최신값 다시 가져오기');
+    expect(source).not.toContain('setInterval');
   });
 
-  it('uses per-week projection completion instead of the retired month projection save button', () => {
-    expect(cashflowProjectSheetSource).toContain('handleCompleteProjectionWeek');
-    expect(cashflowProjectSheetSource).toContain("tableMode === 'projection' && canEdit");
-    expect(cashflowProjectSheetSource).not.toContain("tableMode === 'projection' && !weekMeta[w.weekNo]?.projectionUpdated");
-    expect(cashflowProjectSheetSource).toContain('markCompleted: true');
-    expect(cashflowProjectSheetSource).toContain('finalize: true');
-    expect(cashflowProjectSheetSource).toContain('주차 Projection을 작성완료 처리했습니다.');
-    expect(cashflowProjectSheetSource).not.toContain('Projection 저장');
+  it('offers the exact three in-app exit choices and releases only on exit', () => {
+    expect(source).toContain('임시저장 후 종료');
+    expect(source).toContain('저장하지 않고 종료');
+    expect(source).toContain('계속 작성');
+    expect(source).toContain('discardChangesAndLeave');
+    expect(source).toContain('await cashflowLease.release();');
+    expect(source).toMatch(/savePrivateCashflowDraft\(\);[\s\S]*const released = await cashflowLease\.release\(\);[\s\S]*if \(!released\) throw new Error/);
+    expect(source).toContain('blocker.proceed?.();');
+    expect(source).toContain('hasDirty || hasActiveEditSession');
+    expect(source).toContain('수정 세션을 종료할까요?');
   });
 
-  it('keeps the projection, actual, and compare route contract available for embedding', () => {
-    expect(cashflowProjectSheetSource).toContain("initialViewMode?: 'projection' | 'actual' | 'compare'");
-    expect(cashflowProjectSheetSource).toContain("function renderSheetTable(tableMode: 'projection' | 'actual'");
-    expect(cashflowProjectSheetSource).toContain('renderUnifiedMonthlyBoard');
-    expect(cashflowProjectSheetSource).toContain('renderProjectionActualDiffTable');
-    expect(cashflowProjectSheetSource).toContain('/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab');
-    expect(cashflowProjectSheetSource).not.toContain('/portal/cashflow/sheets-lab?projectId=');
-  });
-
-  it('renders the approved fixed blocks in projection-minus-actual order', () => {
-    expect(cashflowProjectSheetSource).toMatch(
-      /\{renderProjectionActualDiffTable\(\)\}[\s\S]*\{renderUnifiedMonthlyBoard\(\)\}/,
-    );
-    expect(cashflowProjectSheetSource.indexOf('data-cashflow-block="projection"')).toBeLessThan(
-      cashflowProjectSheetSource.indexOf('data-cashflow-block="actual"'),
-    );
-    expect(cashflowProjectSheetSource).toContain('data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}');
-    expect(cashflowProjectSheetSource).toContain('getCashflowModeLineLabel(lineId, mode)');
-    expect(cashflowProjectSheetSource).toContain('Projection - Actual 차이');
-    expect(cashflowProjectSheetSource).not.toContain('Actual - Projection');
-    expect(cashflowProjectSheetSource).not.toContain('actual - projection');
-    expect(cashflowProjectSheetSource).not.toContain('projectionActualDiff');
-    expect(cashflowProjectSheetSource).not.toContain('projectionActualYearDiff');
-  });
-
-  it('loads the comparison read model from the BFF without a client-side fallback', () => {
-    expect(cashflowProjectSheetSource).toContain('fetchCashflowSnapshotViaBff');
-    expect(cashflowProjectSheetSource).toContain('cashflowSnapshot.readModel.months');
-    expect(cashflowProjectSheetSource).toContain('cashflowComparisonError');
-    expect(cashflowProjectSheetSource).not.toContain('computeProjectionActualComparison');
-  });
-
-  it('shows weeks excluded by the BFF as unavailable instead of a computed zero', () => {
-    expect(cashflowProjectSheetSource).toContain('difference: comparisonWeek ? (comparisonWeek.amounts[lineId] ?? 0) : null');
-    expect(cashflowProjectSheetSource).toContain('cell.difference === null');
-  });
-
-  it('separates explicit sheet refresh from pinned-revision review', () => {
-    expect(cashflowProjectSheetSource).toContain('getCashflowSheetLabMirrorViaBff');
-    expect(cashflowProjectSheetSource).toContain('refreshCashflowSheetLabMirrorViaBff');
-    expect(cashflowProjectSheetSource).toContain('stageCashflowSheetLabViaBff');
-    expect(cashflowProjectSheetSource).toContain('handleRefreshSheetMirror');
-    expect(cashflowProjectSheetSource).toContain('expectedMirrorRevision: cashflowSheetMirror.sourceRevision');
-    expect(cashflowProjectSheetSource).toContain('const refreshIdempotencyKey =');
-    expect(cashflowProjectSheetSource).toContain('const stageIdempotencyKey =');
-    expect(cashflowProjectSheetSource).toContain('const applyIdempotencyKey =');
-    expect(cashflowProjectSheetSource.indexOf('const refreshIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const refreshMirror ='));
-    expect(cashflowProjectSheetSource.indexOf('const stageIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const stageMirror ='));
-    expect(cashflowProjectSheetSource.indexOf('const applyIdempotencyKey =')).toBeLessThan(cashflowProjectSheetSource.indexOf('const apply = async'));
-    expect(cashflowProjectSheetSource).toContain('시트 연동하기');
-    expect(cashflowProjectSheetSource).toContain('최신값 다시 가져오기');
-    expect(cashflowProjectSheetSource).toContain('FRESH');
-    expect(cashflowProjectSheetSource).toContain('STALE');
-    expect(cashflowProjectSheetSource).toContain('ERROR');
-    expect(cashflowProjectSheetSource).toContain('capturedAt');
-    expect(cashflowProjectSheetSource).toContain('비교 결과');
-    expect(cashflowProjectSheetSource).toContain('sheetStageDialog');
-    expect(cashflowProjectSheetSource).toContain('원장은 아직 변경되지 않았습니다.');
-    expect(cashflowProjectSheetSource).toContain('기존 Actual 변경');
-    expect(cashflowProjectSheetSource).toContain('lastAppliedBy');
-    expect(cashflowProjectSheetSource).toContain('시트 업데이트 반영');
-    expect(cashflowProjectSheetSource).toContain('시트 값 비교');
-    expect(cashflowProjectSheetSource).toContain('renderSheetStageReviewGrid');
-    expect(cashflowProjectSheetSource).toContain('renderSheetStageCandidateCell');
-    expect(cashflowProjectSheetSource).toContain('검토한 값');
-    expect(cashflowProjectSheetSource).toContain('시트에서 가져오기');
-    expect(cashflowProjectSheetSource).toContain('고정값 비교하기');
-    expect(cashflowProjectSheetSource).not.toContain('시트로 내보내기');
-    expect(cashflowProjectSheetSource).not.toContain('시트에 쓸 값 미리보기');
-    expect(cashflowProjectSheetSource).not.toContain('direction=platform-to-sheet');
-    expect(cashflowProjectSheetSource).not.toContain('sheetReviewDirection');
-    expect(cashflowProjectSheetSource).not.toContain('role="tablist"');
-    expect(cashflowProjectSheetSource.indexOf('const sheetRangeLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
-    expect(cashflowProjectSheetSource.indexOf('const sheetIdentityLabel =')).toBeLessThan(cashflowProjectSheetSource.indexOf('function renderOperationsPanel'));
-    expect(cashflowProjectSheetSource).not.toContain('시트에서 플랫폼으로');
-    expect(cashflowProjectSheetSource).not.toContain('플랫폼에서 시트로');
-    expect(cashflowProjectSheetSource).not.toContain('플랫폼 값을 시트로 내보내기');
-    expect(cashflowProjectSheetSource).not.toContain('0원 포함');
-    expect(cashflowProjectSheetSource).not.toContain('setInterval');
-  });
-
-  it('shows cashflow event load failures instead of silently rendering an empty history', () => {
-    expect(cashflowProjectSheetSource).toContain('cashflowEventsError');
-    expect(cashflowProjectSheetSource).toContain('readCashflowEventsSnapshot');
-    expect(cashflowProjectSheetSource).toContain('변경 이력을 불러오지 못했습니다.');
-    expect(cashflowProjectSheetSource).toContain('아직 표시할 변경 기록이 없습니다.');
-  });
-
-  it('hydrates visible sheet weeks with canonical week dates before rendering labels', () => {
-    expect(cashflowProjectSheetSource).toContain('function hydrateWeekDates');
-    expect(cashflowProjectSheetSource).toContain('getMonthMondayWeeks(week.yearMonth)');
-    expect(cashflowProjectSheetSource).toContain('hydrateWeekDates(week)');
-  });
-
-  it('loads cashflow weeks directly from Firestore year range without project assignment gating', () => {
-    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '>=', carryForwardYearStart)");
-    expect(cashflowWeeksStoreSource).toContain("where('yearMonth', '<=', selectedYearEnd)");
-    expect(cashflowWeeksStoreSource).not.toContain("where('projectId'");
-    expect(cashflowWeeksStoreSource).not.toContain('allowPrivilegedReadAll');
-    expect(cashflowWeeksStoreSource).not.toContain('projectIds.length === 0');
-  });
-
-  it('prefers a freshly resolved Firebase ID token for BFF calls', () => {
-    expect(cashflowProjectSheetSource).toContain('firebaseToken || currentActor.idToken');
-    expect(cashflowProjectSheetSource).toContain('getIdToken(Boolean(options.forceRefresh))');
-    expect(cashflowProjectSheetSource).toContain('latestBffActorRef.current = bffActor');
-    expect(cashflowProjectSheetSource).not.toContain('if (firebaseToken || options.forceRefresh)');
-    expect(cashflowProjectSheetSource).not.toContain('bffActor.idToken || firebaseToken');
-    expect(cashflowProjectSheetSource).not.toContain('console.info');
-    expect(cashflowProjectSheetSource).not.toContain('console.warn');
-  });
-
-  it('loads labor risk checks on page entry without a separate manual button', () => {
-    expect(cashflowProjectSheetSource).toContain('handleRefreshLaborRisk');
-    expect(cashflowProjectSheetSource).toContain('void handleRefreshLaborRisk();');
-    expect(cashflowProjectSheetSource).toContain('페이지 새로고침 시 자동 계산');
-    expect(cashflowProjectSheetSource).toContain('RefreshCw');
-    expect(cashflowProjectSheetSource).toContain('fetchCashflowLaborRiskViaBff({');
-    expect(cashflowProjectSheetSource).toContain('resolveBffActor({ forceRefresh: true })');
-    expect(cashflowProjectSheetSource).not.toContain('onClick={() => void handleRefreshLaborRisk()}');
-    expect(cashflowProjectSheetSource).not.toContain('수동 체크');
-    expect(cashflowProjectSheetSource).not.toContain('handleManualLaborRiskCheck');
-    expect(cashflowProjectSheetSource).not.toContain('laborRiskRequestKeyRef');
-    expect(cashflowProjectSheetSource).not.toContain('requesting labor risk');
-  });
-
-  it('does not start cashflow realtime streams from the project sheet shell', () => {
-    expect(cashflowProjectSheetSource).toContain('getDocs(q)');
-    expect(cashflowProjectSheetSource).not.toContain('onSnapshot');
-    expect(cashflowProjectSheetSource).not.toContain('setInterval');
-    expect(cashflowProjectSheetSource).not.toContain('cashflowPresence');
-    expect(cashflowProjectSheetSource).not.toContain('cashflowWeeksStreamKey');
-    expect(cashflowProjectSheetSource).not.toContain('mysc:cashflow-projection-saved');
-  });
-
-  it('uses the shared 30-minute BFF lease and removes the legacy two-minute Firestore lock', () => {
-    expect(cashflowProjectSheetSource).toContain('useCashflowEditLease');
-    expect(cashflowProjectSheetSource).toContain('checkBeforeMutation');
-    expect(cashflowProjectSheetSource).toContain('EditLeaseDialogs');
-    expect(cashflowProjectSheetSource).toContain('30분 연장');
-    expect(cashflowProjectSheetSource).toContain('임시저장');
-    expect(cashflowProjectSheetSource).toContain('최종저장');
-    expect(cashflowProjectSheetSource).not.toContain('CASHFLOW_EDIT_LOCK_TTL_MS');
-    expect(cashflowProjectSheetSource).not.toContain('cashflowEditLocks');
-    expect(cashflowProjectSheetSource).not.toContain('acquireCashflowEditLock');
-    expect(cashflowProjectSheetSource).not.toContain('releaseCashflowEditLock');
-    expect(cashflowWeeksStoreSource).not.toContain("transport: 'firestore'");
-  });
-
-  it('keeps ordinary saves private and batches only explicit final save into one atomic JVM command', () => {
-    const ordinarySave = cashflowProjectSheetSource.slice(
-      cashflowProjectSheetSource.indexOf('const handleSaveWeekValues'),
-      cashflowProjectSheetSource.indexOf('const handleSubmitWeek'),
-    );
-    expect(ordinarySave).toContain('savePrivateCashflowDraft()');
-    expect(cashflowProjectSheetSource).toContain('board: { drafts, weekSaveState, yearMonth }');
-    expect(ordinarySave).not.toContain('persistWeekValues(input)');
-    expect(cashflowProjectSheetSource).toContain('saveCashflowProjectionBatchViaBff');
-    expect(cashflowProjectSheetSource).toContain('finalize: true');
-    expect(cashflowProjectSheetSource).toContain('임시저장');
-    expect(cashflowProjectSheetSource).toContain('최종저장');
-  });
-
-  it('rehydrates the owner draft after same-tab refresh without overwriting on token refresh', () => {
-    expect(cashflowProjectSheetSource).toContain('loadedPrivateDraftKeyRef');
-    expect(cashflowProjectSheetSource).toContain('privateDraftLoadRef');
-    expect(cashflowProjectSheetSource).toContain('cashflowLease.ownership');
-    expect(cashflowProjectSheetSource).toContain('hydrateCashflowPrivateDraft');
+  it('gates PM close and Finance/Admin reopen decisions while viewer stays read-only', () => {
+    expect(source).toContain("const isPm = role === 'pm'");
+    expect(source).toContain("role === 'finance' || role === 'admin'");
+    expect(source).toContain("monthCloseResult?.status === 'OPEN'");
+    expect(source).toContain('PM만 재오픈을 요청할 수 있습니다.');
+    expect(source).toContain('Finance 또는 Admin만 재오픈 요청을 처리할 수 있습니다.');
   });
 });

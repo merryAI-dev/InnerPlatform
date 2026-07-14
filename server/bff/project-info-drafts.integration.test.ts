@@ -4,6 +4,7 @@ import { createBffApp } from './app.mjs';
 import { createFirestoreDb } from './firestore.mjs';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
+const VALID_PDF = Buffer.from('%PDF-1.4\n');
 
 describeIfEmulator('project information private drafts (Firestore emulator)', () => {
   const firebaseProjectId = 'demo-project-info-drafts';
@@ -177,7 +178,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .send({
         expectedDraftRevision: opened.body.draft.draftRevision,
         documentKind: 'contract', fileName: 'contract.pdf', mimeType: 'application/pdf',
-        fileSize: 3, contentBase64: 'cGRm',
+        fileSize: VALID_PDF.byteLength, contentBase64: VALID_PDF.toString('base64'),
       });
     expect(uploaded.status).toBe(200);
     await db.doc(`orgs/${tenantId}/projects/project-a`).set({ version: 4 }, { merge: true });

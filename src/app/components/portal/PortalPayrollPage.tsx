@@ -17,7 +17,7 @@ import { usePortalStore } from '../../data/portal-store';
 import { usePayroll } from '../../data/payroll-store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { TRANSACTIONS } from '../../data/mock-data';
-import { addMonthsToYearMonth, computePlannedPayDate, getSeoulTodayIso, subtractBusinessDays } from '../../platform/business-days';
+import { computePlannedPayDate, getSeoulTodayIso, subtractBusinessDays } from '../../platform/business-days';
 import { fmtShort } from '../../data/budget-data';
 import { featureFlags } from '../../config/feature-flags';
 import { useFirebase } from '../../lib/firebase-context';
@@ -45,10 +45,8 @@ export function PortalPayrollPage() {
   const {
     schedules,
     runs,
-    monthlyCloses,
     upsertSchedule,
     acknowledgePayrollRun,
-    acknowledgeMonthlyClose,
     savePayrollExpectedAmount,
     savePayrollReview,
   } = usePayroll();
@@ -62,12 +60,10 @@ export function PortalPayrollPage() {
 
   const today = getSeoulTodayIso();
   const yearMonth = today.slice(0, 7);
-  const prevYearMonth = addMonthsToYearMonth(yearMonth, -1);
 
   const projectId = activeProjectId || myProject?.id || '';
   const schedule = useMemo(() => schedules.find((s) => s.projectId === projectId) || null, [projectId, schedules]);
   const run = useMemo(() => runs.find((r) => r.projectId === projectId && r.yearMonth === yearMonth) || null, [projectId, runs, yearMonth]);
-  const monthlyClosePrev = useMemo(() => monthlyCloses.find((c) => c.projectId === projectId && c.yearMonth === prevYearMonth) || null, [monthlyCloses, prevYearMonth, projectId]);
   const projectTransactions = useMemo(() => {
     const source = liveTransactions ?? (!firestoreEnabled ? TRANSACTIONS : []);
     return source.filter((tx) => tx.projectId === projectId);
@@ -99,7 +95,6 @@ export function PortalPayrollPage() {
   }, [day, yearMonth]);
 
   const needsPayrollAck = !!(run && today >= run.noticeDate && !run.acknowledged);
-  const needsMonthlyCloseAck = !!(monthlyClosePrev && monthlyClosePrev.status === 'DONE' && !monthlyClosePrev.acknowledged);
   const cashflowAlignment = useMemo(() => (
     run
       ? resolvePayrollCashflowAlignment({
@@ -211,17 +206,6 @@ export function PortalPayrollPage() {
     }
   }
 
-  async function onAckMonthlyClose() {
-    if (!monthlyClosePrev) return;
-    try {
-      await acknowledgeMonthlyClose(monthlyClosePrev.id);
-      toast.success('월간 정산 확인이 기록되었습니다');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || '확인 처리에 실패했습니다');
-    }
-  }
-
   async function onDecideCandidate(txId: string, decision: PayrollCandidateReviewDecision) {
     if (!run || !reviewState || !portalUser) return;
     const now = new Date().toISOString();
@@ -282,7 +266,7 @@ export function PortalPayrollPage() {
 
   return (
     <div className="space-y-5">
-      {(needsPayrollAck || needsMonthlyCloseAck) && (
+      {needsPayrollAck && (
         <Card className="border-rose-200/60 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-950/10">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-start gap-3">
@@ -290,7 +274,7 @@ export function PortalPayrollPage() {
               <div className="min-w-0">
                 <p className="text-[12px]" style={{ fontWeight: 700 }}>확인이 필요한 공지가 있습니다</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  지급 예정 또는 월간 정산 완료 공지를 확인해 주세요. Admin이 확인 여부를 추적합니다.
+                  지급 예정 공지를 확인해 주세요. Admin이 확인 여부를 추적합니다.
                 </p>
               </div>
             </div>
@@ -307,24 +291,6 @@ export function PortalPayrollPage() {
                     </p>
                   </div>
                   <Button size="sm" className="h-8 text-[12px] gap-1.5" onClick={onAckPayroll}>
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {needsMonthlyCloseAck && monthlyClosePrev && (
-              <div className="p-3 rounded-lg bg-background border border-rose-200/50 dark:border-rose-800/40">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[12px]" style={{ fontWeight: 700 }}>
-                      월간 정산 완료 확인: {monthlyClosePrev.yearMonth}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      완료일: {monthlyClosePrev.doneAt ? new Date(monthlyClosePrev.doneAt).toLocaleDateString('ko-KR') : '-'}
-                    </p>
-                  </div>
-                  <Button size="sm" className="h-8 text-[12px] gap-1.5" onClick={onAckMonthlyClose}>
                     <CheckCircle2 className="w-3.5 h-3.5" /> 확인했습니다
                   </Button>
                 </div>

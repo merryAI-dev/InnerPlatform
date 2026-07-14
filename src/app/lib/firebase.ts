@@ -304,7 +304,6 @@ export const ORG_COLLECTIONS = {
   cashflowPresence: 'cashflow_presence',
   payrollSchedules: 'payroll_schedules',
   payrollRuns: 'payroll_runs',
-  monthlyCloses: 'monthly_closes',
   auditLogs: 'audit_logs',
   notifications: 'notifications',
   ledgerTemplates: 'ledger_templates',

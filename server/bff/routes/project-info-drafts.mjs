@@ -26,10 +26,14 @@ import {
   buildProjectInfoChangeSubmission,
   buildProjectInfoDraftSeed,
 } from './projects.mjs';
+import {
+  PROJECT_INFO_DOCUMENT_KINDS,
+  projectDocumentValidationError,
+} from '../project-document-validation.mjs';
 
 const RESOURCE_TYPE = 'project-info';
 const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
-const DOCUMENT_KINDS = ['contract', 'quote', 'proposal'];
+const DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
 const MAX_DRAFT_BYTES = 900 * 1024;
 const MAX_ATTACHMENT_REFS = 100;
 const MAX_PAYLOAD_DEPTH = 20;
@@ -38,6 +42,11 @@ function requiredText(value, fieldName) {
   const normalized = readOptionalText(value);
   if (!normalized) throw createHttpError(400, `${fieldName} is required`, 'draft_request_invalid');
   return normalized;
+}
+
+function assertProjectAttachment(buffer, mimeType, fileName, documentKind) {
+  const error = projectDocumentValidationError({ buffer, mimeType, fileName, documentKind });
+  if (error) throw createHttpError(422, error, 'draft_attachment_invalid');
 }
 
 function documentId(value, fieldName) {
@@ -211,8 +220,16 @@ function privateDocuments(attachments) {
   }
   return {
     contractDocument: latest.get('contract'),
+    customerBusinessRegistrationDocument: latest.get('customer_business_registration'),
     quoteDocument: latest.get('quote'),
     proposalDocument: latest.get('proposal'),
+    proposalWordOriginalDocument: latest.get('proposal_word_original'),
+    proposalPptOriginalDocument: latest.get('proposal_ppt_original'),
+    presentationPptOriginalDocument: latest.get('presentation_ppt_original'),
+    rfpRequestEvidenceDocument: latest.get('rfp_request_evidence'),
+    performanceCertificateDocument: latest.get('performance_certificate'),
+    taxInvoiceDocument: latest.get('tax_invoice'),
+    finalSettlementReportDocument: latest.get('final_settlement_report'),
   };
 }
 
@@ -549,6 +566,7 @@ export function createProjectInfoDraftService({
       }
       const fileName = requiredText(input?.fileName, 'fileName');
       const mimeType = requiredText(input?.mimeType, 'mimeType');
+      assertProjectAttachment(buffer, mimeType, fileName, documentKind);
       const attachmentId = documentId(createAttachmentId(), 'attachmentId');
       const method = 'POST';
       const path = `/api/v1/project-info-drafts/${current.projectId}/attachments`;

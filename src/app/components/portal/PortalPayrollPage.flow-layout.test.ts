@@ -19,5 +19,7 @@ describe('PortalPayrollPage payroll review flow', () => {
     expect(portalPayrollSource).toContain('보류');
     expect(portalPayrollSource).toContain('Admin 최종 확정 대기');
     expect(portalPayrollSource).toContain("transactionsFetchState === 'ready'");
+    expect(portalPayrollSource).not.toContain('acknowledgeMonthlyClose');
+    expect(portalPayrollSource).not.toContain('needsMonthlyCloseAck');
   });
 });

@@ -20,5 +20,7 @@ describe('AdminPayrollPage review console shell', () => {
     expect(adminPayrollSource).not.toContain('지급일 ±2일');
     expect(adminPayrollSource).not.toContain('LABOR_COST');
     expect(adminPayrollSource).not.toContain('finally(() => setTxDialogProjectId(null))');
+    expect(adminPayrollSource).not.toContain('markMonthlyCloseDone');
+    expect(adminPayrollSource).not.toContain('월간정산');
   });
 });

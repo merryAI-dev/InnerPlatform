@@ -628,6 +628,19 @@ export function ProjectDetailPage() {
                       <span className="text-muted-foreground">그룹웨어 등록명</span>
                       <span>{project.groupwareName || '-'}</span>
                     </div>
+                    {project.evidenceDriveRootFolderLink ? (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">사업관리 폴더</span>
+                        <a
+                          href={project.evidenceDriveRootFolderLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-blue-700 underline underline-offset-2"
+                        >
+                          폴더 열기
+                        </a>
+                      </div>
+                    ) : null}
                     {project.participantCondition && (
                       <div className="flex justify-between gap-4">
                         <span className="text-muted-foreground">참여기업 조건</span>

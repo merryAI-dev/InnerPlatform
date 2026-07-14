@@ -213,6 +213,16 @@
       "collectionGroup": "idempotency_keys",
       "fieldPath": "responseBody",
       "indexes": []
+    },
+    {
+      "collectionGroup": "monthly_closes",
+      "fieldPath": "snapshot",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "weekly_api_idempotency",
+      "fieldPath": "responseJson",
+      "indexes": []
     }
   ]
 }

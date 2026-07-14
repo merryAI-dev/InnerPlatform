@@ -32,7 +32,6 @@ import {
   uploadTransactionEvidenceDriveViaBff,
   fetchBudgetSuggestionViaBff,
   isPlatformApiEnabled,
-  readWeeklyExpenseSheetViaBff,
   syncProjectCashflowActualsViaBff,
 } from '../../lib/platform-bff-client';
 import {
@@ -44,19 +43,8 @@ import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { reportError } from '../../platform/observability';
 import { type ImportRow } from '../../platform/settlement-csv';
 import { readDevAuthHarnessConfig } from '../../platform/dev-harness';
-import { detectParticipationRisk } from '../../platform/participation-risk-rules';
 import { normalizeBudgetLabel } from '../../platform/budget-labels';
 import { buildProjectExpenseRowsForActualSync } from '../../platform/expense-sheet-actual-sync';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog';
 import { resolvePortalHappyPath } from '../../platform/portal-happy-path';
 import { resolveWeeklyExpenseSavePolicy } from '../../platform/weekly-expense-save-policy';
 import { usePortalNavigationGuard } from './PortalLayout';
@@ -111,7 +99,6 @@ export function PortalWeeklyExpensePage() {
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
   const {
-    submitWeekAsPm,
     upsertWeekAmounts,
     updateVarianceFlag,
     applyProjectActualSyncResultLocally,
@@ -125,12 +112,6 @@ export function PortalWeeklyExpensePage() {
   const loadedPrivateDraftKeyRef = useRef('');
   const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const actualSyncSignatureRef = useRef('');
-  const [participationRiskWarning, setParticipationRiskWarning] = useState<{
-    yearMonth: string;
-    weekNo: number;
-    txIds: string[];
-    overLimitMembers: { memberName: string; groupLabel: string; totalRate: number }[];
-  } | null>(null);
 
   const projectId = activeProjectId || myProject?.id || '';
   const projectName = myProject?.name || '내 사업';
@@ -315,30 +296,6 @@ export function PortalWeeklyExpensePage() {
     const mutationLease = await cashflowLease.checkBeforeMutation();
     return saveEvidenceRequiredMap(map, { cashflowLease: mutationLease });
   }, [cashflowLease.checkBeforeMutation, saveEvidenceRequiredMap]);
-  const buildWeeklySubmitSheet = useCallback(async () => {
-    const current = await readWeeklyExpenseSheetViaBff({
-      tenantId: orgId,
-      actor: bffActor,
-      projectId,
-      sheetKey: activeExpenseSheetId,
-    });
-    return {
-      sheetKey: activeExpenseSheetId,
-      expectedSheetVersion: current.sheetVersion,
-      sheetName: activeSheetName,
-      rows: (restoredExpenseRows || expenseSheetRows || []).map((row, rowIndex) => ({
-        rowIndex,
-        tempId: row.tempId,
-        sourceTxId: row.sourceTxId,
-        entryKind: row.entryKind,
-        cells: row.cells.map((rawValue, columnIndex) => ({
-          columnIndex,
-          rawValue: String(rawValue ?? ''),
-          userEdited: row.userEditedCells?.has(columnIndex) || false,
-        })),
-      })),
-    };
-  }, [activeExpenseSheetId, activeSheetName, bffActor, expenseSheetRows, orgId, projectId, restoredExpenseRows]);
   const hydrateWeeklyPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }) => {
     if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
     const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
@@ -738,48 +695,6 @@ export function PortalWeeklyExpensePage() {
     })().catch((error) => toast.error(resolveApiErrorMessage(error, '거래 수정에 실패했습니다.')));
   }, [cashflowLease.checkBeforeMutation, updateTransaction]);
 
-  const handleSubmitWeek = useCallback(async ({ yearMonth, weekNo, txIds }: {
-    yearMonth: string;
-    weekNo: number;
-    txIds: string[];
-  }) => {
-    const riskCheck = detectParticipationRisk(participationEntries);
-    if (riskCheck.hasOverLimit) {
-      setParticipationRiskWarning({
-        yearMonth,
-        weekNo,
-        txIds,
-        overLimitMembers: riskCheck.overLimitMembers.map((m) => ({
-          memberName: m.memberName,
-          groupLabel: m.groupLabel,
-          totalRate: m.totalRate,
-        })),
-      });
-      return;
-    }
-    let updatedCount = 0;
-    try {
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
-      const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
-      const weeklySheet = await buildWeeklySubmitSheet();
-      await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
-      await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
-      await cashflowLease.checkStatus();
-      for (const txId of txIds) {
-        await changeTransactionState(txId, 'SUBMITTED', undefined, { cashflowLease: mutationLease });
-        updatedCount += 1;
-      }
-      toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-    } catch (err) {
-      const fallback = updatedCount > 0
-        ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-        : '주간 제출 처리에 실패했습니다';
-      toast.error(resolveApiErrorMessage(err, fallback));
-      throw err;
-    }
-  }, [buildWeeklySubmitSheet, cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, changeTransactionState, participationEntries, projectId, submitWeekAsPm]);
-
   const handleChangeTransactionState = useCallback((txId: string, newState: TransactionState, reason?: string) => {
     void (async () => {
       const mutationLease = await cashflowLease.checkBeforeMutation();
@@ -923,6 +838,9 @@ export function PortalWeeklyExpensePage() {
         projectId={projectId}
         onUpdateVarianceFlag={updateVarianceFlagWithLease}
       />
+      <p className="text-[11px] text-muted-foreground">
+        주차별 입력은 저장할 수 있지만 최종 확정과 수정 잠금은 월 결산에서 처리합니다.
+      </p>
       <Suspense
         fallback={(
           <div className="rounded-xl border bg-background px-4 py-6">
@@ -953,7 +871,6 @@ export function PortalWeeklyExpensePage() {
           onSaveEvidenceRequiredMap={saveEvidenceRequiredMapWithLease}
           sheetRows={restoredExpenseRows || expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRowsWithLease}
-          onSubmitWeek={handleSubmitWeek}
           onChangeTransactionState={handleChangeTransactionState}
           currentUserName={portalUser?.name || 'PM'}
           currentUserId={portalUser?.id || 'pm'}
@@ -1020,66 +937,6 @@ export function PortalWeeklyExpensePage() {
             />
         </Suspense>
       )}
-      {/* 참여율 이상 탐지 경고 모달 */}
-      <AlertDialog open={!!participationRiskWarning} onOpenChange={(open) => { if (!open) setParticipationRiskWarning(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>⚠️ 참여율 초과 경고</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                <p>아래 인력의 참여율이 100%를 초과합니다. 확인 후 제출하세요.</p>
-                <ul className="space-y-1 mt-2">
-                  {participationRiskWarning?.overLimitMembers.map((m, i) => (
-                    <li key={i} className="flex items-center gap-2 text-rose-700 font-medium">
-                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                      {m.memberName} — {m.groupLabel} 합산 {m.totalRate}%
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-muted-foreground text-[11px] mt-2">
-                  계속 진행하면 제출이 완료됩니다. 참여율 관리는 인사 설정에서 수정하세요.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setParticipationRiskWarning(null)}>
-              취소
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-rose-600 hover:bg-rose-700"
-              onClick={async () => {
-                if (!participationRiskWarning) return;
-                const { yearMonth, weekNo, txIds } = participationRiskWarning;
-                setParticipationRiskWarning(null);
-                let updatedCount = 0;
-                try {
-                  const mutationLease = await cashflowLease.checkBeforeMutation();
-                  if (!cashflowPrivateDraftClient) throw new Error('임시저장 세션이 준비되지 않았습니다.');
-                  const opened = await cashflowPrivateDraftClient.open(mutationLease, { baseSnapshot: {}, payload: {} });
-                  const weeklySheet = await buildWeeklySubmitSheet();
-                  await submitWeekAsPm({ projectId, yearMonth, weekNo, weeklySheet, cashflowLease: mutationLease, finalize: true });
-                  await cashflowPrivateDraftClient.complete(mutationLease, { expectedDraftRevision: opened.draft.draftRevision });
-                  await cashflowLease.checkStatus();
-                  for (const txId of txIds) {
-                    await changeTransactionState(txId, 'SUBMITTED');
-                    updatedCount += 1;
-                  }
-                  toast.success(`${yearMonth} ${weekNo}주 제출 처리 완료`);
-                } catch (err) {
-                  const fallback = updatedCount > 0
-                    ? `주간 제출은 저장됐지만 거래 상태 ${updatedCount}/${txIds.length}건만 갱신했습니다.`
-                    : '주간 제출 처리에 실패했습니다';
-                  toast.error(resolveApiErrorMessage(err, fallback));
-                }
-              }}
-            >
-              이해했습니다, 제출
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <EditLeaseDialogs
         warningOpen={cashflowLease.warningOpen}
         expiredOpen={cashflowLease.expiredOpen}

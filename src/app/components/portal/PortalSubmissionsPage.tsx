@@ -4,32 +4,13 @@ import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, ClipboardList, Ext
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { usePortalStore } from '../../data/portal-store';
 import { STATE_LABELS, type ChangeRequestState } from '../../data/personnel-change-data';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
-import { useAuth } from '../../data/auth-store';
-import { useFirebase } from '../../lib/firebase-context';
-import { useCashflowEditLease } from '../cashflow/useCashflowEditLease';
-import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../../platform/business-days';
-import {
-  resolveWeeklyAccountingState,
-  resolveWeeklyAccountingProductStatus,
-  resolveWeeklyAccountingProductStatusDomHooks,
-  resolveWeeklyAccountingSnapshot,
-} from '../../platform/weekly-accounting-state';
+import { resolveWeeklyAccountingSnapshot } from '../../platform/weekly-accounting-state';
 
 function sortIsoDesc(a: string | undefined, b: string | undefined): number {
   return String(b || '').localeCompare(String(a || ''));
@@ -69,7 +50,7 @@ function pickLatestAuditMeta(props: {
       ? { title: props.syncTitle || '최종 동기화 상태 반영', at: props.syncAt, byName: props.syncByName }
       : null,
     props.updatedAt
-      ? { title: '최종 제출 반영', at: props.updatedAt, byName: props.updatedByName }
+      ? { title: '기존 제출 이력 반영', at: props.updatedAt, byName: props.updatedByName }
       : null,
     props.editedAt
       ? { title: '최종 수정 상태 반영', at: props.editedAt, byName: props.editedByName }
@@ -111,20 +92,12 @@ const CHANGE_TABS: Array<{ label: string; value: ChangeRequestState | 'ALL' }> =
   { label: '수정요청', value: 'REVISION_REQUESTED' },
 ];
 
-const pendingStatusButtonClassName =
-  'h-7 rounded-full border-slate-300 bg-white px-2 text-[10px] text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800';
-
-const completedStatusButtonClassName =
-  'h-7 rounded-full border-[#c8d7ea] bg-[#eef4fb] px-2 text-[10px] text-[#1f4a7d] hover:bg-[#e4eef9] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700';
-
 const surfaceCardClassName = 'border-slate-200/90 bg-white shadow-sm shadow-slate-950/5';
 const outlineActionButtonClassName = 'h-8 rounded-lg border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50';
 const tableHeadCellClassName = 'px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-slate-500';
 
 export function PortalSubmissionsPage() {
   const navigate = useNavigate();
-  const { user: authUser } = useAuth();
-  const { orgId } = useFirebase();
   const {
     activeProjectId,
     isLoading,
@@ -133,46 +106,16 @@ export function PortalSubmissionsPage() {
     projects,
     changeRequests,
     weeklySubmissionStatuses,
-    upsertWeeklySubmissionStatus,
   } = usePortalStore();
   const { getWeeksForProject, weeks } = useCashflowWeeks();
 
   const [changeTab, setChangeTab] = useState<ChangeRequestState | 'ALL'>('SUBMITTED');
   const [selectedWeekNo, setSelectedWeekNo] = useState(1);
-  const [confirmState, setConfirmState] = useState<{
-    open: boolean;
-    projectId: string;
-    projectName: string;
-    field: 'projection' | 'expense';
-    nextValue: boolean;
-  }>({
-    open: false,
-    projectId: '',
-    projectName: '',
-    field: 'projection',
-    nextValue: true,
-  });
-  const [confirmSaving, setConfirmSaving] = useState(false);
 
   const todayIso = getSeoulTodayIso();
   const [yearMonth, setYearMonth] = useState(() => todayIso.slice(0, 7));
   const todayYearMonth = todayIso.slice(0, 7);
   const projectId = activeProjectId || myProject?.id || '';
-  const [statusLeaseProjectId, setStatusLeaseProjectId] = useState('');
-  useEffect(() => {
-    if (!statusLeaseProjectId && projectId) setStatusLeaseProjectId(projectId);
-  }, [projectId, statusLeaseProjectId]);
-  const statusLease = useCashflowEditLease({
-    tenantId: orgId,
-    projectId: statusLeaseProjectId,
-    actor: {
-      uid: authUser?.uid || portalUser?.id || 'portal-user',
-      email: authUser?.email || portalUser?.email || '',
-      role: authUser?.role || portalUser?.role || 'pm',
-      idToken: authUser?.idToken,
-      googleAccessToken: authUser?.googleAccessToken,
-    },
-  });
 
   const myChanges = useMemo(() => {
     if (!projectId) return [];
@@ -194,13 +137,6 @@ export function PortalSubmissionsPage() {
   }, [currentWeekNo]);
 
   const myCashflowWeeks = useMemo(() => (projectId ? getWeeksForProject(projectId).filter((w) => w.yearMonth === yearMonth) : []), [getWeeksForProject, projectId, yearMonth]);
-  const byWeekNo = useMemo(() => {
-    const map = new Map<number, { pmSubmitted: boolean; adminClosed: boolean }>();
-    for (const w of myCashflowWeeks) {
-      map.set(w.weekNo, { pmSubmitted: Boolean(w.pmSubmitted), adminClosed: Boolean(w.adminClosed) });
-    }
-    return map;
-  }, [myCashflowWeeks]);
 
   const filteredChanges = useMemo(() => {
     if (changeTab === 'ALL') return myChanges;
@@ -226,12 +162,6 @@ export function PortalSubmissionsPage() {
     return map;
   }, [selectedWeek, weeks, yearMonth]);
 
-  const weekDeadline = useMemo(() => {
-    if (!selectedWeek?.weekStart) return '';
-    const base = new Date(`${selectedWeek.weekStart}T00:00:00`);
-    base.setDate(base.getDate() + 4);
-    return base.toISOString().slice(0, 10);
-  }, [selectedWeek]);
   const statusMap = useMemo(() => {
     const map = new Map<string, typeof weeklySubmissionStatuses[number]>();
     weeklySubmissionStatuses.forEach((s) => {
@@ -239,35 +169,6 @@ export function PortalSubmissionsPage() {
     });
     return map;
   }, [weeklySubmissionStatuses]);
-
-  const openConfirm = useCallback((input: { projectId: string; projectName: string; field: 'projection' | 'expense'; nextValue: boolean }) => {
-    setConfirmState({ open: true, ...input });
-  }, []);
-
-  const handleConfirm = useCallback(async () => {
-    if (!confirmState.projectId || !selectedWeek) return;
-    setConfirmSaving(true);
-    try {
-      if (statusLeaseProjectId !== confirmState.projectId) {
-        throw new Error('해당 프로젝트 수정 세션을 먼저 시작해 주세요.');
-      }
-      const cashflowLease = await statusLease.checkBeforeMutation();
-      await upsertWeeklySubmissionStatus({
-        projectId: confirmState.projectId,
-        yearMonth,
-        weekNo: selectedWeek.weekNo,
-        ...(confirmState.field === 'projection'
-          ? { projectionUpdated: confirmState.nextValue }
-          : { expenseUpdated: confirmState.nextValue }),
-        cashflowLease,
-      });
-      setConfirmState((prev) => ({ ...prev, open: false }));
-    } catch (err) {
-      // store already toasts; keep modal open so user can retry
-    } finally {
-      setConfirmSaving(false);
-    }
-  }, [confirmState, selectedWeek, statusLease.checkBeforeMutation, statusLeaseProjectId, upsertWeeklySubmissionStatus, yearMonth]);
 
   if (isLoading) {
     return (
@@ -306,13 +207,13 @@ export function PortalSubmissionsPage() {
         </div>
       </div>
 
-      {/* Weekly submission checklist */}
+      {/* Historical weekly input records */}
       <Card className={surfaceCardClassName}>
         <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
               <BarChart3 className="w-4 h-4 text-[#1f4a7d]" />
-              주간 제출 체크
+              주간 입력 기록 (조회용)
             </CardTitle>
             <div className="flex items-center gap-1.5">
               <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={goPrevMonth}>
@@ -325,39 +226,8 @@ export function PortalSubmissionsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-3 py-2">
-            <select
-              aria-label="상태 보정 프로젝트"
-              value={statusLeaseProjectId}
-              disabled={statusLease.canEdit}
-              onChange={(event) => setStatusLeaseProjectId(event.target.value)}
-              className="h-8 max-w-56 rounded-md border border-slate-300 bg-white px-2 text-[11px]"
-            >
-              <option value="">프로젝트 선택</option>
-              {assignedProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-            <Button
-              variant="outline"
-              size="sm"
-              className={outlineActionButtonClassName}
-              disabled={!statusLeaseProjectId || !statusLease.sessionId || statusLease.busy || statusLease.canEdit}
-              onClick={() => void statusLease.acquire()}
-            >
-              {statusLease.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              {statusLease.canEdit ? '수정 중' : '수정 시작'}
-            </Button>
-            {statusLease.canEdit ? (
-              <>
-                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void statusLease.extend()}>
-                  {statusLease.remainingLabel} · 30분 연장
-                </Button>
-                <Button variant="ghost" size="sm" className="h-8 text-[11px]" onClick={() => void statusLease.release()}>
-                  수정 종료
-                </Button>
-              </>
-            ) : (
-              <span className="text-[10px] text-slate-500">선택한 프로젝트만 수정되며, 그 전에는 읽기 전용입니다.</span>
-            )}
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-600">
+            주차별 입력 이력은 조회만 가능하며, 최종 확정과 수정 잠금은 프로젝트별 월 결산에서 처리합니다.
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-3">
             <span className="text-[11px] font-semibold text-slate-600">{yearMonth}</span>
@@ -378,7 +248,7 @@ export function PortalSubmissionsPage() {
             </div>
             {selectedWeek && (
               <span className="text-[10px] font-medium text-slate-500">
-                기간 {selectedWeek.weekStart} ~ {selectedWeek.weekEnd} · 마감 {weekDeadline} 24:00
+                기간 {selectedWeek.weekStart} ~ {selectedWeek.weekEnd}
               </span>
             )}
           </div>
@@ -397,14 +267,10 @@ export function PortalSubmissionsPage() {
                   const status = statusMap.get(key);
                   const weekSheet = checklistWeekMap.get(p.id);
                   const snapshot = resolveWeeklyAccountingSnapshot(status, weekSheet);
-                  const projectionDone = snapshot.projectionDone;
-                  const expenseDone = snapshot.expenseDone;
-                  const accountingStatus = resolveWeeklyAccountingProductStatus({ snapshot });
                   const projectionEdited = snapshot.projectionEdited;
                   const expenseEdited = snapshot.expenseEdited;
                   const projectionInputLabel = projectionEdited ? '입력됨' : '미입력';
                   const expenseInputLabel = expenseEdited ? '입력됨' : '미입력';
-                  const accountingStatusHooks = resolveWeeklyAccountingProductStatusDomHooks(accountingStatus);
                   const projectionAudit = pickLatestAuditMeta({
                     editedAt: status?.projectionEditedAt,
                     editedByName: status?.projectionEditedByName,
@@ -418,7 +284,6 @@ export function PortalSubmissionsPage() {
                     updatedByName: status?.expenseUpdatedByName,
                     syncAt: status?.expenseSyncUpdatedAt,
                     syncByName: status?.expenseSyncUpdatedByName,
-                    syncTitle: accountingStatus.auditTitle,
                   });
                   return (
                     <tr key={p.id} className="border-t border-slate-200/70 transition-colors hover:bg-slate-50/70">
@@ -427,33 +292,12 @@ export function PortalSubmissionsPage() {
                         <div className="mt-1 text-[10px] font-medium text-slate-500">{p.shortName || p.id}</div>
                       </td>
                       <td className="px-3 py-3.5 align-top text-center">
-                        <div
-                          className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2"
-                          data-testid={accountingStatusHooks.testId}
-                          aria-label={accountingStatusHooks.ariaLabel}
-                        >
+                        <div className="mx-auto flex max-w-[172px] flex-col items-stretch gap-2">
                           <div className="flex flex-wrap justify-center gap-1.5">
                             <Badge variant="outline" className={projectionEdited ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {projectionInputLabel}
                             </Badge>
-                            <Badge variant="outline" className={projectionDone ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
-                              {projectionDone ? '제출 완료' : '미완료'}
-                            </Badge>
                           </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={projectionDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
-                            disabled={confirmSaving || !statusLease.canEdit || statusLeaseProjectId !== p.id}
-                            onClick={() => openConfirm({
-                              projectId: p.id,
-                              projectName: p.name,
-                              field: 'projection',
-                              nextValue: !projectionDone,
-                            })}
-                          >
-                            {projectionDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
-                          </Button>
                           {projectionAudit && <AuditMetaLine {...projectionAudit} />}
                         </div>
                       </td>
@@ -463,35 +307,6 @@ export function PortalSubmissionsPage() {
                             <Badge variant="outline" className={expenseEdited ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' : 'border-slate-200 bg-slate-50 text-slate-600'}>
                               {expenseInputLabel}
                             </Badge>
-                            <Badge
-                              variant="outline"
-                              className={
-                                accountingStatus.tone === 'success'
-                                  ? 'border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]'
-                                  : accountingStatus.tone === 'danger'
-                                    ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                              }
-                            >
-                              {accountingStatus.label}
-                            </Badge>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={expenseDone ? completedStatusButtonClassName : pendingStatusButtonClassName}
-                            disabled={confirmSaving || !statusLease.canEdit || statusLeaseProjectId !== p.id}
-                            onClick={() => openConfirm({
-                              projectId: p.id,
-                              projectName: p.name,
-                              field: 'expense',
-                              nextValue: !expenseDone,
-                            })}
-                          >
-                            {expenseDone ? '수동 보정: 미완료' : '수동 보정: 완료'}
-                          </Button>
-                          <div className="rounded-lg bg-slate-50 px-2 py-1 text-[9px] leading-4 text-slate-500">
-                            {accountingStatus.description}
                           </div>
                           {expenseAudit && <AuditMetaLine {...expenseAudit} />}
                         </div>
@@ -568,13 +383,13 @@ export function PortalSubmissionsPage() {
         </CardContent>
       </Card>
 
-      {/* Weekly Expense Input */}
+      {/* Historical weekly expense input */}
       <Card className={surfaceCardClassName}>
         <CardHeader className="border-b border-slate-200/80 pb-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-950">
               <BarChart3 className="w-4 h-4 text-[#1f4a7d]" />
-              사업비 입력(주간) 작성/제출
+              사업비 입력(주간) 기록
             </CardTitle>
             <Button variant="outline" size="sm" className={outlineActionButtonClassName} onClick={() => navigate('/portal/weekly-expenses')}>
               입력 열기 <ExternalLink className="w-3 h-3" />
@@ -610,19 +425,16 @@ export function PortalSubmissionsPage() {
                   const weekDoc = myCashflowWeeks.find((item) => item.weekNo === w.weekNo);
                   const statusDoc = statusMap.get(`${projectId}-${yearMonth}-w${w.weekNo}`);
                   const snapshot = resolveWeeklyAccountingSnapshot(statusDoc, weekDoc);
-                  const accountingState = resolveWeeklyAccountingState(statusDoc, weekDoc);
                   const pmSubmitted = snapshot.pmSubmitted;
                   const adminClosed = snapshot.adminClosed;
                   const isThisWeek = todayYearMonth === yearMonth && todayIso >= w.weekStart && todayIso <= w.weekEnd;
                   const status = adminClosed
-                    ? { label: '결산완료', cls: 'border border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' }
-                    : accountingState.closeDialogKind === 'warning'
-                      ? { label: accountingState.expenseStatusLabel, cls: 'border border-amber-200 bg-amber-50 text-amber-700' }
+                    ? { label: '기존 결산 이력', cls: 'border border-slate-200 bg-slate-100 text-slate-700' }
                     : pmSubmitted
-                      ? { label: '작성완료', cls: 'border border-[#c8d7ea] bg-[#eef4fb] text-[#1f4a7d]' }
+                      ? { label: '기존 제출 이력', cls: 'border border-slate-200 bg-slate-100 text-slate-700' }
                       : snapshot.projectionDone || snapshot.expenseDone
-                        ? { label: '저장됨', cls: 'border border-slate-200 bg-slate-100 text-slate-700' }
-                      : { label: '미작성', cls: 'border border-slate-200 bg-white text-slate-600' };
+                        ? { label: '입력 기록 있음', cls: 'border border-slate-200 bg-slate-100 text-slate-700' }
+                      : { label: '입력 기록 없음', cls: 'border border-slate-200 bg-white text-slate-600' };
 
                   return (
                     <tr key={w.weekNo} className={`border-t border-slate-200/70 transition-colors hover:bg-slate-50/70 ${isThisWeek ? 'bg-[#eef4fb]' : ''}`}>
@@ -656,35 +468,6 @@ export function PortalSubmissionsPage() {
         </CardContent>
       </Card>
 
-      <AlertDialog open={confirmState.open} onOpenChange={(open) => setConfirmState((prev) => ({ ...prev, open }))}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>주간 제출 상태를 변경할까요?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmState.projectName} · {yearMonth} {selectedWeek?.label || ''} · {confirmState.field === 'projection' ? 'Projection' : '사업비 입력'} 상태를
-              자동 계산 결과와 다르게 {confirmState.nextValue ? ' 완료' : ' 미완료'}로 수동 보정합니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm} disabled={confirmSaving}>
-              {confirmSaving ? '저장 중...' : '확인'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <EditLeaseDialogs
-        warningOpen={statusLease.warningOpen}
-        expiredOpen={statusLease.expiredOpen}
-        conflictOpen={statusLease.conflictOpen}
-        holder={statusLease.holder}
-        busy={statusLease.busy}
-        onDismissWarning={statusLease.dismissWarning}
-        onExtend={() => { void statusLease.extend(); }}
-        onContinueReadOnly={statusLease.continueReadOnly}
-        onReacquire={() => { void statusLease.acquire(); }}
-        onTakeover={() => { void statusLease.takeover(); }}
-      />
     </div>
   );
 }

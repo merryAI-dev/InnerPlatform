@@ -5,7 +5,9 @@ import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import jakarta.validation.Valid;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.server.ResponseStatusException;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 
 import java.math.BigDecimal;
@@ -37,13 +40,16 @@ public class WeeklyExpenseController {
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private final WeeklyExpenseCommandService commandService;
     private final WeeklyExpensePersistence persistence;
+    private final boolean legacyWeekCloseEnabled;
 
     public WeeklyExpenseController(
         WeeklyExpenseCommandService commandService,
-        WeeklyExpensePersistence persistence
+        WeeklyExpensePersistence persistence,
+        @Value("${weekly.legacy-week-close-enabled:false}") boolean legacyWeekCloseEnabled
     ) {
         this.commandService = commandService;
         this.persistence = persistence;
+        this.legacyWeekCloseEnabled = legacyWeekCloseEnabled;
     }
 
     @GetMapping("/health")
@@ -318,6 +324,94 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/{projectId}/variance")
+    public CashflowVarianceResponse updateCashflowVariance(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody CashflowVarianceRequest request
+    ) {
+        return commandService.updateCashflowVariance(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
+    }
+
+    @GetMapping("/cashflow/{projectId}/month-close")
+    public CashflowMonthCloseResponse readCashflowMonthClose(
+        @PathVariable String projectId,
+        @RequestParam("yearMonth") String yearMonth,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        return commandService.readCashflowMonthClose(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            yearMonth
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/month-close")
+    public CashflowMonthCloseResponse closeCashflowMonth(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody CloseCashflowMonthRequest request
+    ) {
+        return commandService.closeCashflowMonth(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/month-close/reopen-request")
+    public CashflowMonthCloseResponse requestCashflowMonthReopen(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody RequestCashflowMonthReopenRequest request
+    ) {
+        return commandService.requestCashflowMonthReopen(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            httpRequest.getHeader("x-data-project-id"),
+            request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/month-close/reopen-decision")
+    public CashflowMonthCloseResponse decideCashflowMonthReopen(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody DecideCashflowMonthReopenRequest request
+    ) {
+        return commandService.decideCashflowMonthReopen(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            httpRequest.getHeader("x-data-project-id"),
+            request
+        );
+    }
+
     @PostMapping("/cashflow/{projectId}/sheet-lab/apply")
     public CashflowSheetLabApplyResponse applyCashflowSheetLab(
         @PathVariable String projectId,
@@ -346,6 +440,9 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody SubmitWeekRequest request
     ) {
+        if (!legacyWeekCloseEnabled) {
+            throw new ResponseStatusException(HttpStatus.GONE, "Weekly submit is disabled; use cashflow month close.");
+        }
         return commandService.submitWeek(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
@@ -364,6 +461,9 @@ public class WeeklyExpenseController {
         HttpServletRequest httpRequest,
         @Valid @RequestBody CloseWeekRequest request
     ) {
+        if (!legacyWeekCloseEnabled) {
+            throw new ResponseStatusException(HttpStatus.GONE, "Weekly close is disabled; use cashflow month close.");
+        }
         return commandService.closeWeek(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,

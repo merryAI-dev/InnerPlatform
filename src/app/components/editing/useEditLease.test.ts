@@ -204,6 +204,43 @@ describe('createEditLeaseController', () => {
     controller.dispose();
   });
 
+  it('reopens the held dialog when the acknowledged lease version changes', async () => {
+    const heldA: EditLeaseStatus = {
+      serverNow: '2026-07-10T00:00:00.000Z',
+      state: 'ACTIVE',
+      canEdit: false,
+      expiresAt: '2026-07-10T00:30:00.000Z',
+      holderDisplayName: '변민욱(보람)',
+      sameActor: true,
+      holderVersion: 'opaque-v1',
+    };
+    const extendedSameLease: EditLeaseStatus = {
+      ...heldA,
+      serverNow: '2026-07-10T00:10:00.000Z',
+      expiresAt: '2026-07-10T01:01:00.000Z',
+    };
+    const heldB: EditLeaseStatus = {
+      ...extendedSameLease,
+      serverNow: '2026-07-10T01:02:00.000Z',
+      holderVersion: 'opaque-v2',
+    };
+    const client = mockClient({
+      getStatus: vi.fn()
+        .mockResolvedValueOnce(heldA)
+        .mockResolvedValueOnce(extendedSameLease)
+        .mockResolvedValueOnce(heldB),
+    });
+    const controller = createEditLeaseController({ client });
+
+    await controller.checkStatus();
+    controller.continueReadOnly();
+    await controller.checkStatus();
+    expect(controller.getState()).toMatchObject({ mode: 'read-only', conflictOpen: false });
+
+    await controller.checkStatus();
+    expect(controller.getState()).toMatchObject({ mode: 'held', conflictOpen: true, expiresAt: heldB.expiresAt });
+  });
+
   it('exposes a pre-save status check and never releases on unload or dispose', async () => {
     const windowTarget = new FakeEventTarget();
     const client = mockClient();

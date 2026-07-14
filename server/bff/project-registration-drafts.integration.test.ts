@@ -5,6 +5,7 @@ import { createFirestoreDb } from './firestore.mjs';
 import { EDIT_LEASE_TTL_MS, resolveEditLeaseDocumentId } from './edit-lease.mjs';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
+const VALID_PDF = Buffer.from('%PDF-1.4\n');
 
 describeIfEmulator('private project registration drafts (Firestore emulator)', () => {
   const projectId = 'demo-project-registration-drafts';
@@ -148,6 +149,28 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       totalRevenueAmount: 40_000,
       supportAmount: 0,
       financialInputFlags: { contractAmount: true, salesVatAmount: true, totalRevenueAmount: true },
+      registrationRequirementsVersion: 2,
+      financialYears: [{
+        year: 2026,
+        contractAmount: 100_000,
+        salesVatAmount: 10_000,
+        totalRevenueAmount: 40_000,
+        supportAmount: 0,
+        profitRate: 0.4,
+        confirmed: true,
+      }],
+      registrationConfirmations: {
+        laborIncludesFourInsurance: true,
+        laborIncludesRetirementPay: true,
+        customerSettlementBasisConfirmed: true,
+        modusignContractUsed: true,
+        originalContractSubmitted: false,
+      },
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '해당 없음',
+        proposalPptOriginal: '해당 없음',
+        presentationPptOriginal: '해당 없음',
+      },
       contractStart: '2026-07-01',
       contractEnd: '2026-12-31',
       contractType: '계약서(날인)',
@@ -174,6 +197,25 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       .post(`/api/v1/project-registration-drafts/${created.body.draft.draftId}/submit`)
       .set(mutationHeaders(created, key))
       .send({ expectedDraftRevision });
+  }
+
+  async function uploadRequiredAttachments(created: any, keyPrefix: string) {
+    const kinds = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence'];
+    const responses = [];
+    for (const [expectedDraftRevision, documentKind] of kinds.entries()) {
+      responses.push(await api
+        .post(`/api/v1/project-registration-drafts/${created.body.draft.draftId}/attachments`)
+        .set(mutationHeaders(created, `${keyPrefix}-${documentKind}`))
+        .send({
+          expectedDraftRevision,
+          documentKind,
+          fileName: `${documentKind}.pdf`,
+          mimeType: 'application/pdf',
+          fileSize: VALID_PDF.byteLength,
+          contentBase64: VALID_PDF.toString('base64'),
+        }));
+    }
+    return responses;
   }
 
   async function clearCollection(path: string) {
@@ -428,8 +470,8 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       documentKind: 'contract',
       fileName: 'contract.pdf',
       mimeType: 'application/pdf',
-      fileSize: 3,
-      contentBase64: Buffer.from('pdf').toString('base64'),
+      fileSize: VALID_PDF.byteLength,
+      contentBase64: VALID_PDF.toString('base64'),
     };
     const first = await api
       .post(path)
@@ -443,7 +485,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         attachmentId: 'draft-attachment-1',
         path: expect.stringContaining('/project-registration-drafts/'),
         name: 'contract.pdf',
-        size: 3,
+        size: VALID_PDF.byteLength,
         contentType: 'application/pdf',
       },
     });
@@ -472,24 +514,14 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       key: 'idem-submit-create',
       body: { payload: validPayload(), stepIndex: 4 },
     });
-    const attachment = await api
-      .post(`/api/v1/project-registration-drafts/${created.body.draft.draftId}/attachments`)
-      .set(mutationHeaders(created, 'idem-submit-contract'))
-      .send({
-        expectedDraftRevision: 0,
-        documentKind: 'contract',
-        fileName: 'contract.pdf',
-        mimeType: 'application/pdf',
-        fileSize: 3,
-        contentBase64: Buffer.from('pdf').toString('base64'),
-      });
-    expect(attachment.status).toBe(200);
+    const attachments = await uploadRequiredAttachments(created, 'idem-submit');
+    expect(attachments.map((attachment) => attachment.status)).toEqual([200, 200, 200, 200]);
     expect(await count(`orgs/${tenantId}/projects`)).toBe(0);
     expect(await count(`orgs/${tenantId}/project_requests`)).toBe(0);
     expect(await count('outbox')).toBe(0);
 
-    const first = await submitDraft(created, 'idem-submit', 1);
-    const replay = await submitDraft(created, 'idem-submit', 1);
+    const first = await submitDraft(created, 'idem-submit-final', 4);
+    const replay = await submitDraft(created, 'idem-submit-final', 4);
 
     expect(first.status).toBe(201);
     expect(first.body).toMatchObject({
@@ -524,13 +556,18 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     const draft = (await db.doc(`orgs/${tenantId}/projectRequestDrafts/${created.body.draft.draftId}`).get()).data();
     expect(draft).toMatchObject({
       status: 'SUBMITTED',
-      draftRevision: 2,
+      draftRevision: 5,
     });
     expect(draft).not.toHaveProperty('payload');
     expect(draft).not.toHaveProperty('attachmentRefs');
     expect(draft).not.toHaveProperty('stepIndex');
     expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.payload?.attachmentRefs)
-      .toEqual([expect.objectContaining({ documentKind: 'contract', path: expect.stringContaining('/project-registration-drafts/') })]);
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ documentKind: 'contract', path: expect.stringContaining('/project-registration-drafts/') }),
+        expect.objectContaining({ documentKind: 'customer_business_registration' }),
+        expect.objectContaining({ documentKind: 'quote' }),
+        expect.objectContaining({ documentKind: 'rfp_request_evidence' }),
+      ]));
     const lease = (await db.doc(
       `orgs/${tenantId}/editLeases/${resolveEditLeaseDocumentId('project-registration', created.body.draft.draftId)}`,
     ).get()).data();
@@ -541,7 +578,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       lastLoginAt: '2026-07-10T00:00:00.000Z',
     });
 
-    const otherKey = await submitDraft(created, 'idem-submit-after-release', 2);
+    const otherKey = await submitDraft(created, 'idem-submit-after-release', 5);
     expect(otherKey.status).toBe(409);
     expect(otherKey.body.error).toBe('draft_not_active');
 
@@ -553,7 +590,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     expect(worker.body).toMatchObject({ processed: 1, succeeded: 1, failed: 0 });
     expect(driveService.ensureProjectRootFolder).toHaveBeenCalledTimes(1);
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledTimes(1);
-    expect(relocatedPaths).toHaveLength(1);
+    expect(relocatedPaths).toHaveLength(4);
     expect((await db.doc(`orgs/${tenantId}/projects/${first.body.projectId}`).get()).data()?.contractDocument)
       .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
     expect((await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data()?.payload?.contractDocument)
@@ -568,9 +605,10 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       key: 'idem-concurrent-same-create',
       body: { payload: validPayload() },
     });
+    await uploadRequiredAttachments(sameKeyDraft, 'idem-concurrent-same-upload');
     const same = await Promise.all([
-      submitDraft(sameKeyDraft, 'idem-concurrent-same'),
-      submitDraft(sameKeyDraft, 'idem-concurrent-same'),
+      submitDraft(sameKeyDraft, 'idem-concurrent-same', 4),
+      submitDraft(sameKeyDraft, 'idem-concurrent-same', 4),
     ]);
     expect(same.map((response) => response.status)).toEqual([201, 201]);
     expect(same[0].body).toEqual(same[1].body);
@@ -584,9 +622,10 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       key: 'idem-concurrent-different-create',
       body: { payload: validPayload({ name: 'Different key race' }) },
     });
+    await uploadRequiredAttachments(differentKeyDraft, 'idem-concurrent-different-upload');
     const different = await Promise.all([
-      submitDraft(differentKeyDraft, 'idem-concurrent-a'),
-      submitDraft(differentKeyDraft, 'idem-concurrent-b'),
+      submitDraft(differentKeyDraft, 'idem-concurrent-a', 4),
+      submitDraft(differentKeyDraft, 'idem-concurrent-b', 4),
     ]);
     expect(different.map((response) => response.status).sort()).toEqual([201, 409]);
     expect(await count(`orgs/${tenantId}/projects`)).toBe(1);
@@ -600,7 +639,8 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       key: 'idem-worker-failure-create',
       body: { payload: validPayload({ name: 'Worker failure project' }) },
     });
-    const submitted = await submitDraft(created, 'idem-worker-failure');
+    await uploadRequiredAttachments(created, 'idem-worker-failure-upload');
+    const submitted = await submitDraft(created, 'idem-worker-failure', 4);
     expect(submitted.status).toBe(201);
 
     const worker = await api

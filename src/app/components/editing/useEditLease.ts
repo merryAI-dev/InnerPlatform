@@ -103,7 +103,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
   let state = { ...INITIAL_STATE };
   let serverOffsetMs = 0;
   let warnedExpiry: string | null = null;
-  let heldAcknowledged = false;
+  let heldAcknowledgedKey: string | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   let started = false;
 
@@ -116,10 +116,22 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
     Math.max(0, Date.parse(expiresAt) - (now() + serverOffsetMs))
   );
 
+  const heldKey = (holder: EditLeaseHolder | null | undefined): string | null => {
+    if (!holder) return null;
+    if (holder.holderVersion) return holder.holderVersion;
+    const versioned = holder as EditLeaseHolder & { leaseId?: string; fence?: number };
+    if (versioned.leaseId && Number.isSafeInteger(versioned.fence)) {
+      return `${versioned.leaseId}:${versioned.fence}`;
+    }
+    // The public held response intentionally hides ownership secrets. Until the
+    // server exposes an opaque lease version, holder + expiry is its stable UI key.
+    return `${holder.holderDisplayName}:${holder.sameActor ? 'same' : 'other'}:${holder.expiresAt}`;
+  };
+
   const applyStatus = (status: EditLeaseStatus) => {
     serverOffsetMs = Date.parse(status.serverNow) - now();
     if (status.canEdit) {
-      heldAcknowledged = false;
+      heldAcknowledgedKey = null;
       const changedExpiry = status.expiresAt !== state.expiresAt;
       update({
         ...state,
@@ -138,7 +150,8 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
       return;
     }
     if (status.state === 'ACTIVE') {
-      if (heldAcknowledged) {
+      const statusKey = heldKey(status);
+      if (heldAcknowledgedKey === statusKey) {
         update({
           ...state,
           mode: 'read-only',
@@ -171,7 +184,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
       });
       return;
     }
-    heldAcknowledged = false;
+    heldAcknowledgedKey = null;
     const expired = status.state === 'EXPIRED';
     update({
       ...state,
@@ -190,7 +203,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
   };
 
   const expire = () => {
-    heldAcknowledged = false;
+    heldAcknowledgedKey = null;
     update({
       ...state,
       mode: 'expired',
@@ -218,7 +231,9 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
           // Fall through to a credential-free, read-only conflict state.
         }
       }
-      if (heldAcknowledged) {
+      const holder = error.holder || state.holder;
+      const errorKey = heldKey(holder);
+      if (heldAcknowledgedKey === errorKey) {
         update({
           ...state,
           mode: 'read-only',
@@ -228,7 +243,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
           warningOpen: false,
           expiredOpen: false,
           conflictOpen: false,
-          holder: error.holder || state.holder,
+          holder,
           error: null,
         });
         return;
@@ -244,7 +259,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
         warningOpen: false,
         expiredOpen: false,
         conflictOpen: true,
-        holder: error.holder || null,
+        holder: holder || null,
         error: null,
       });
       return;
@@ -309,11 +324,11 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
       windowTarget?.removeEventListener('pageshow', onResume);
       if (interval !== undefined) clearIntervalFn(interval);
       interval = undefined;
-      heldAcknowledged = false;
+      heldAcknowledgedKey = null;
       listeners.clear();
     },
     async acquire() {
-      heldAcknowledged = false;
+      heldAcknowledgedKey = null;
       update({ ...state, mode: 'acquiring', busy: true, expiredOpen: false, conflictOpen: false, error: null });
       try {
         const ownership = await options.client.acquire();
@@ -326,7 +341,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
       }
     },
     async takeover() {
-      heldAcknowledged = false;
+      heldAcknowledgedKey = null;
       update({ ...state, mode: 'acquiring', busy: true, expiredOpen: false, conflictOpen: false, error: null });
       try {
         const ownership = await options.client.takeover();
@@ -373,7 +388,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
       update({ ...state, warningOpen: false });
     },
     continueReadOnly() {
-      heldAcknowledged = true;
+      heldAcknowledgedKey = heldKey(state.holder);
       update({
         ...state,
         mode: 'read-only',

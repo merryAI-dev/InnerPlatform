@@ -40,6 +40,7 @@ describe('cashflow Projection - Actual comparison', () => {
       actual: 700,
       actualHadValue: true,
       difference: 300,
+      mismatch: true,
     });
     expect(week.lines.find((line) => line.lineId === 'BANK_INTEREST_IN')).toMatchObject({
       projection: 0,
@@ -47,6 +48,7 @@ describe('cashflow Projection - Actual comparison', () => {
       actual: 10,
       actualHadValue: true,
       difference: -10,
+      mismatch: false,
     });
     expect(week.totals).toEqual({
       projection: { totalIn: 1000, totalOut: 400, balance: 600 },

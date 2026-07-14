@@ -62,6 +62,9 @@ function harness() {
     'orgs/tenant-a/members/actor-admin': {
       uid: 'actor-admin', name: 'Finance Admin', role: 'admin', status: 'ACTIVE', projectIds: [],
     },
+    'orgs/tenant-a/members/actor-viewer': {
+      uid: 'actor-viewer', name: 'Viewer', role: 'viewer', status: 'ACTIVE', projectIds: ['project-a'],
+    },
     'orgs/tenant-a/projects/project-a': { id: 'project-a', name: 'Project A', version: 3 },
     'orgs/tenant-a/cashflow_weeks/week-a': {
       projectId: 'project-a', yearMonth: '2026-07', weekNo: 1, projection: { SALES_IN: 1000 },
@@ -96,6 +99,19 @@ function openDraft(h, key = 'open-a') {
 }
 
 describe('cashflow private edit drafts', () => {
+  it('keeps a stored viewer role read-only even though legacy role normalization maps viewer to PM', async () => {
+    const h = harness();
+    await expect(h.service.open({
+      ...h.base,
+      actorId: 'actor-viewer',
+      sessionId: 'viewer-session',
+      leaseId: 'viewer-lease',
+      idempotencyKey: 'viewer-open',
+      baseSnapshot,
+      payload,
+    })).rejects.toMatchObject({ statusCode: 403, code: 'forbidden' });
+  });
+
   it('matches edit-lease acquisition access for project owners without member assignment', async () => {
     for (const ownerField of ['registeredById', 'managerId']) {
       const h = harness();
@@ -139,11 +155,59 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
     await expect(h.service.get({
       tenantId: 'tenant-a', actorId: 'actor-admin', projectId: 'project-a',
-    })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
+    })).rejects.toMatchObject({ statusCode: 403, code: 'forbidden' });
     await expect(h.service.open({
       ...h.base, actorId: 'actor-b', sessionId: 'session-b', leaseId: 'lease-b',
       idempotencyKey: 'open-b', baseSnapshot, payload,
     })).rejects.toMatchObject({ statusCode: 423, code: 'edit_lease_held' });
+  });
+
+  it('starts a new ACTIVE draft after an approved reopen instead of reviving the submitted payload', async () => {
+    const h = harness();
+    await openDraft(h);
+    const [draftPath, activeDraft] = [...h.db.documents.entries()].find(([, value]) => (
+      value?.resourceType === 'cashflow' && value?.ownerUid === 'actor-a'
+    ));
+    h.db.documents.set(draftPath, {
+      ownerUid: activeDraft.ownerUid,
+      tenantId: activeDraft.tenantId,
+      resourceType: activeDraft.resourceType,
+      resourceId: activeDraft.resourceId,
+      draftRevision: 1,
+      status: 'SUBMITTED',
+      createdAt: activeDraft.createdAt,
+      updatedAt: '2026-07-12T00:00:01.000Z',
+      submittedAt: '2026-07-12T00:00:01.000Z',
+    });
+    h.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+      contractVersion: 'cashflow-month-close-v1', tenantId: 'tenant-a', projectId: 'project-a',
+      yearMonth: '2026-07', status: 'OPEN', revision: 3, reopenCount: 1,
+    });
+    const nextLease = buildActiveEditLeaseDocument({
+      tenantId: 'tenant-a', resourceType: 'cashflow', resourceId: 'project-a',
+      actorId: 'actor-a', actorDisplayName: 'Actor A', sessionId: 'session-next',
+      leaseId: 'lease-next', serverNow: Date.parse('2026-07-12T00:00:02.000Z'),
+      existing: h.db.documents.get(h.leasePath),
+    });
+    h.db.documents.set(h.leasePath, nextLease);
+    const nextPayload = { monthClose: { yearMonth: '2026-07' } };
+
+    const reopened = await h.service.open({
+      ...h.base,
+      sessionId: 'session-next',
+      leaseId: 'lease-next',
+      fence: nextLease.fence,
+      idempotencyKey: 'open-after-approved-reopen',
+      baseSnapshot,
+      payload: nextPayload,
+    });
+
+    expect(reopened.body.draft).toMatchObject({
+      status: 'ACTIVE', draftRevision: 0, baseSnapshot, payload: nextPayload,
+    });
+    expect(h.db.documents.get(draftPath)).toMatchObject({
+      status: 'ACTIVE', draftRevision: 0, payload: nextPayload,
+    });
   });
 
   it('increments temporary-save revision and rejects stale writers', async () => {
@@ -158,6 +222,50 @@ describe('cashflow private edit drafts', () => {
     await expect(h.service.update({
       ...h.base, idempotencyKey: 'save-stale', expectedDraftRevision: 0, payload,
     })).rejects.toMatchObject({ statusCode: 409, code: 'draft_version_conflict' });
+  });
+
+  it('blocks month-close private draft open, update, and complete when the JVM month is locked', async () => {
+    const closedMonth = {
+      contractVersion: 'cashflow-month-close-v1', tenantId: 'tenant-a', projectId: 'project-a',
+      yearMonth: '2026-07', status: 'CLOSED', revision: 1, reopenCount: 0,
+    };
+    const monthClosePayload = { monthClose: { yearMonth: '2026-07' } };
+
+    for (const [status, code] of [
+      ['CLOSED', 'cashflow_month_closed'],
+      ['REOPEN_REQUESTED', 'cashflow_month_closed'],
+      ['DONE', 'cashflow_month_close_migration_required'],
+    ]) {
+      const openHarness = harness();
+      openHarness.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+        ...closedMonth,
+        status,
+      });
+      await expect(openHarness.service.open({
+        ...openHarness.base, idempotencyKey: `open-${status}`, baseSnapshot,
+        payload: monthClosePayload,
+      })).rejects.toMatchObject({ statusCode: 409, code });
+    }
+
+    const updateHarness = harness();
+    await updateHarness.service.open({
+      ...updateHarness.base, idempotencyKey: 'open-month-before-close', baseSnapshot,
+      payload: monthClosePayload,
+    });
+    updateHarness.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', closedMonth);
+    await expect(updateHarness.service.update({
+      ...updateHarness.base, idempotencyKey: 'update-closed-month', expectedDraftRevision: 0,
+      payload: {},
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_closed' });
+
+    updateHarness.db.documents.set(updateHarness.leasePath, {
+      ...updateHarness.db.documents.get(updateHarness.leasePath),
+      state: 'RELEASED', releaseReason: 'FINAL_SAVE',
+      releasedAt: '2026-07-12T00:00:01.000Z', updatedAt: '2026-07-12T00:00:01.000Z',
+    });
+    await expect(updateHarness.service.complete({
+      ...updateHarness.base, idempotencyKey: 'complete-closed-month', expectedDraftRevision: 0,
+    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_month_closed' });
   });
 
   it('rejects writes after the exact cashflow lease expires', async () => {
@@ -232,43 +340,6 @@ describe('cashflow private edit drafts', () => {
     })).rejects.toMatchObject({ statusCode: 413, code: 'draft_payload_too_large' });
   });
 
-  it('applies variance intents with server identity, append-only history, and revision fencing', async () => {
-    const h = harness();
-    h.db.documents.set(h.leasePath, buildActiveEditLeaseDocument({
-      tenantId: 'tenant-a', resourceType: 'cashflow', resourceId: 'project-a',
-      actorId: 'actor-admin', actorDisplayName: 'Finance Admin', sessionId: 'session-admin',
-      leaseId: 'lease-admin', serverNow: Date.parse('2026-07-12T00:00:00.000Z'),
-    }));
-    const admin = {
-      ...h.base, actorId: 'actor-admin', sessionId: 'session-admin', leaseId: 'lease-admin',
-    };
-
-    const flagged = await h.service.applyVarianceIntent({
-      ...admin, idempotencyKey: 'variance-flag', sheetId: 'week-a',
-      expectedRevision: 0, action: 'FLAG', content: '입금 편차 확인',
-    });
-
-    expect(flagged.body.week).toMatchObject({
-      id: 'week-a', projectId: 'project-a', varianceRevision: 1,
-      varianceFlag: {
-        status: 'OPEN', reason: '입금 편차 확인', flaggedBy: 'Finance Admin',
-        flaggedByUid: 'actor-admin', flaggedAt: '2026-07-12T00:00:00.000Z',
-      },
-      varianceHistory: [{
-        action: 'FLAG', actor: 'Finance Admin', actorUid: 'actor-admin',
-        content: '입금 편차 확인', timestamp: '2026-07-12T00:00:00.000Z',
-      }],
-    });
-    expect(h.db.documents.get('orgs/tenant-a/cashflow_weeks/week-a')).toMatchObject({
-      projection: { SALES_IN: 1000 },
-      varianceRevision: 1,
-    });
-    await expect(h.service.applyVarianceIntent({
-      ...admin, idempotencyKey: 'variance-stale', sheetId: 'week-a',
-      expectedRevision: 0, action: 'FLAG', content: 'stale',
-    })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
-  });
-
   it('merges only whitelisted weekly status intent fields under the project lease', async () => {
     const h = harness();
     const saved = await h.service.applyWeeklySubmissionStatusIntent({
@@ -293,6 +364,35 @@ describe('cashflow private edit drafts', () => {
       ...h.base, idempotencyKey: 'weekly-status-stale', yearMonth: '2026-07', weekNo: 1,
       expectedRevision: 0, changes: { projectionUpdated: false },
     })).rejects.toMatchObject({ statusCode: 409, code: 'cashflow_metadata_version_conflict' });
+  });
+
+  it('fails closed for weekly status writes when the month is closed or its state is non-canonical', async () => {
+    const cases = [
+      ['CLOSED', 'cashflow_month_closed'],
+      ['REOPEN_REQUESTED', 'cashflow_month_closed'],
+      ['DONE', 'cashflow_month_close_migration_required'],
+      ['BROKEN', 'cashflow_month_close_migration_required'],
+      ['open', 'cashflow_month_close_migration_required'],
+      [' OPEN ', 'cashflow_month_close_migration_required'],
+      ['', 'cashflow_month_close_migration_required'],
+    ];
+
+    for (const [status, code] of cases) {
+      const h = harness();
+      h.db.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-07', {
+        contractVersion: 'cashflow-month-close-v1', tenantId: 'tenant-a', projectId: 'project-a',
+        yearMonth: '2026-07', status, revision: 1, reopenCount: 0,
+      });
+
+      await expect(h.service.applyWeeklySubmissionStatusIntent({
+        ...h.base, idempotencyKey: `weekly-status-${status}`, yearMonth: '2026-07', weekNo: 1,
+        expectedRevision: 0, changes: { projectionUpdated: true },
+      })).rejects.toMatchObject({ statusCode: 409, code });
+      expect(h.db.documents.has(
+        'orgs/tenant-a/weekly_submission_status/project-a-2026-07-w1',
+      )).toBe(false);
+      expect(h.auditChainService.appendManyInTransaction).not.toHaveBeenCalled();
+    }
   });
 
   it('replaces the project evidence-required map with revision fencing and server audit metadata', async () => {
@@ -331,7 +431,6 @@ describe('cashflow private edit drafts', () => {
       open: vi.fn(async () => ({ status: 200, body: { draft: {} }, replayed: false })),
       update: vi.fn(),
       complete: vi.fn(),
-      applyVarianceIntent: vi.fn(),
       applyWeeklySubmissionStatusIntent: vi.fn(),
       applyEvidenceRequiredMapIntent: vi.fn(),
     };
@@ -342,7 +441,6 @@ describe('cashflow private edit drafts', () => {
       'POST /api/v1/cashflow-edit-drafts/:projectId/open',
       'PATCH /api/v1/cashflow-edit-drafts/:projectId',
       'POST /api/v1/cashflow-edit-drafts/:projectId/complete',
-      'POST /api/v1/cashflow-metadata/:projectId/variance',
       'POST /api/v1/cashflow-metadata/:projectId/weekly-submission-status',
       'POST /api/v1/cashflow-metadata/:projectId/evidence-required-map',
     ]);
@@ -366,5 +464,14 @@ describe('cashflow private edit drafts', () => {
       projectId: 'project-a', sessionId: 'session-a', leaseId: 'lease-a', fence: 1,
       baseSnapshot, payload,
     }));
+
+    service.open.mockClear();
+    const financeNext = vi.fn();
+    await route.handler({
+      ...req,
+      context: { ...req.context, actorRole: 'finance' },
+    }, res, financeNext);
+    expect(financeNext).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403, code: 'forbidden' }));
+    expect(service.open).not.toHaveBeenCalled();
   });
 });
