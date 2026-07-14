@@ -6,8 +6,11 @@ export function groupProjectListItems(projects: Project[]) {
   const active = projects.filter((project) => !project.trashedAt);
   return {
     active,
-    registered: active.filter((project) => project.status !== 'CONTRACT_PENDING'),
     contractPending: active.filter((project) => project.status === 'CONTRACT_PENDING'),
+    inProgress: active.filter((project) => project.status === 'IN_PROGRESS'),
+    completed: active.filter((project) => (
+      project.status === 'COMPLETED' || project.status === 'COMPLETED_PENDING_PAYMENT'
+    )),
     trashed: projects.filter((project) => !!project.trashedAt),
   };
 }

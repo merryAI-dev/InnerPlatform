@@ -41,6 +41,22 @@ describe('ProjectListPage shell contract', () => {
     expect(source).toContain('p.registeredByName || p.managerName');
   });
 
+  it('orders lifecycle tabs as contract-pending, in-progress, completed, then trash', () => {
+    expect(source).toContain('data-testid="projects-tab-contract-pending"');
+    expect(source).toContain('data-testid="projects-tab-in-progress"');
+    expect(source).toContain('data-testid="projects-tab-completed"');
+    expect(source.indexOf('data-testid="projects-tab-contract-pending"')).toBeLessThan(
+      source.indexOf('data-testid="projects-tab-in-progress"'),
+    );
+    expect(source.indexOf('data-testid="projects-tab-in-progress"')).toBeLessThan(
+      source.indexOf('data-testid="projects-tab-completed"'),
+    );
+    expect(source.indexOf('data-testid="projects-tab-completed"')).toBeLessThan(
+      source.indexOf('data-testid="projects-tab-trash"'),
+    );
+    expect(source).not.toContain('data-testid="projects-tab-confirmed"');
+  });
+
   it('surfaces pending PM change requests from both request collections', () => {
     expect(source).toContain('usePendingProjectChangeRequests');
     expect(source).toContain('수정 검토 중');
