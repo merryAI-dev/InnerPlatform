@@ -49,7 +49,7 @@ describe('cashflow action chrome', () => {
   it('blocks final month close until the server and human-confirmation contract pass', () => {
     expect(cashflowProjectSheetSource).toContain('buildCashflowMonthCloseDraftInput');
     expect(cashflowProjectSheetSource).toContain('monthCloseProgress.complete');
-    expect(cashflowProjectSheetSource).toContain('dashboard?.validation.blockers');
+    expect(cashflowProjectSheetSource).toContain('dashboard?.validation?.blockers');
     expect(cashflowProjectSheetSource).toContain('캐시플로 항목 사람 확인');
     expect(cashflowProjectSheetSource).not.toContain('prepareAuditedWeekAmounts');
     expect(cashflowProjectSheetSource).not.toContain('showAuditBlock');
