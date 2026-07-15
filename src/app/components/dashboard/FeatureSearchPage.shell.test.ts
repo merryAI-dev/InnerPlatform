@@ -38,7 +38,7 @@ describe('FeatureSearchPage shell contract', () => {
   });
 
   it('uses registration-focused quick suggestions without the ambiguous CIC chip', () => {
-    expect(searchSource).toContain("const SUGGESTIONS = ['프로젝트 등록', '계약서', '사업비 입력', '권한']");
+    expect(searchSource).toContain("const SUGGESTIONS = ['프로젝트 선택', '프로젝트 등록']");
     expect(searchSource).not.toContain("'CIC'");
   });
 

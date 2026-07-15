@@ -35,7 +35,7 @@ const ICONS: Record<AdminCommandIcon, LucideIcon> = {
   users: UserCog,
 };
 
-const SUGGESTIONS = ['프로젝트 등록', '계약서', '사업비 입력', '권한'];
+const SUGGESTIONS = ['프로젝트 선택', '프로젝트 등록'];
 
 const SCOPE_STYLE = {
   admin: {
@@ -45,7 +45,7 @@ const SCOPE_STYLE = {
     hover: 'hover:bg-sky-50/70 dark:hover:bg-sky-950/25',
   },
   pm: {
-    label: 'PM',
+    label: '실무자',
     pill: 'border-emerald-200/80 bg-emerald-50/75 text-emerald-800 shadow-sm backdrop-blur-md dark:border-emerald-400/20 dark:bg-emerald-950/40 dark:text-emerald-200',
     icon: 'bg-emerald-50/75 text-emerald-800 shadow-inner shadow-white/40 backdrop-blur-md dark:bg-emerald-950/40 dark:text-emerald-200',
     hover: 'hover:bg-emerald-50/70 dark:hover:bg-emerald-950/25',
@@ -95,7 +95,7 @@ export function AdminCommandSearch({
             관리자
           </span>
           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${SCOPE_STYLE.pm.pill}`}>
-            PM
+            실무자
           </span>
           <span className="text-[11px] text-muted-foreground">색상으로 이동 공간을 구분합니다.</span>
         </div>

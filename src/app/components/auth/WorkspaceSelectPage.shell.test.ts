@@ -17,7 +17,13 @@ describe('WorkspaceSelectPage shell contract', () => {
     expect(source).not.toContain('backdrop-blur-2xl');
     expect(source).toContain('관리자 공간으로 계속');
     expect(source).toContain('실무자 포털로 계속');
+    expect(source).toContain("'프로젝트 선택'");
+    expect(source).toContain("'프로젝트 등록'");
+    expect(source).toContain('담당 프로젝트를 선택하거나 새로운 프로젝트 등록을 시작합니다.');
     expect(source).not.toContain('PM 포털');
+    expect(source).not.toContain("'예산 편집'");
+    expect(source).not.toContain("'사업비 입력'");
+    expect(source).not.toContain("'프로젝트 등록 요청'");
     expect(source).not.toContain('CardContent');
   });
 });
