@@ -2244,7 +2244,7 @@ export function CashflowProjectSheet({
             <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-[11px] font-bold text-slate-900">주요 관리 항목</div>
-                <span className="text-[9px] text-slate-400">BFF/JVM 서버 판정</span>
+                <span className="text-[9px] text-slate-400">프로젝트 전체 기간 · BFF/JVM 서버 판정</span>
               </div>
               <div className="space-y-2">
                 {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {

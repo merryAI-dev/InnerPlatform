@@ -524,6 +524,38 @@ describe('JVM weekly API BFF proxy', () => {
     });
   });
 
+  it('monitors labor and post-deposit transfers across the full pinned project period', () => {
+    const { documents } = fullMonthCloseSource();
+    const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    const juneCells = mirror.cells.map((cell) => (
+      cell.mode === 'actual' && cell.weekNo === 3 && cell.lineId === 'MYSC_LABOR_OUT'
+        ? { ...cell, amount: 10 }
+        : cell
+    ));
+    const julyCells = juneCells.map((cell) => ({
+      ...cell,
+      yearMonth: '2026-07',
+      state: cell.mode === 'projection' && cell.weekNo === 3 && cell.lineId === 'MYSC_LABOR_OUT' ? 'EMPTY' : cell.state,
+      amount: cell.mode === 'actual' && cell.weekNo === 2 && ['MYSC_PROFIT_OUT', 'SALES_VAT_OUT'].includes(cell.lineId) ? 0 : cell.amount,
+    }));
+    const currentCells = juneCells.map(({ lineId, state, yearMonth: _yearMonth, direction: _direction, ...cell }) => ({
+      ...cell, cashflowLine: lineId, cellState: state,
+    }));
+    const checks = buildCashflowManagementChecks({
+      cashflow: { readModel: { months: [] } },
+      cells: currentCells,
+      yearMonth: '2026-06',
+      pinnedSheetCells: [...juneCells, ...julyCells],
+      depositScheduleRows: [{
+        yearMonth: '2026-07', weekNo: 1, actualDepositDate: '2026-07-01', actualDepositAmount: 1_000_000,
+      }],
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-08', weekNo: 3 } },
+    });
+
+    expect(checks.find((check) => check.id === 'labor-transfer')?.detail).toContain('2026-07 3주차 · Projection 인건비 미기입');
+    expect(checks.find((check) => check.id === 'profit-vat-after-deposit')?.detail).toContain('2026-07 2주차 MYSC 수익·매출부가세');
+  });
+
   it('uses the manually pinned sheet range instead of legacy JVM months for negative Projection balance', () => {
     const { documents } = fullMonthCloseSource();
     const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
