@@ -942,7 +942,16 @@ function assertRegistrationPayload(payload) {
   }
   const type = readOptionalText(payload.type);
   const managerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName);
-  if (!readOptionalText(payload.name) || !readOptionalText(payload.department) || !managerName || !REGISTRATION_PROJECT_TYPES.has(type)) {
+  const executiveApproverId = readOptionalText(payload.executiveApproverId);
+  const executiveApproverName = readOptionalText(payload.executiveApproverName);
+  if (
+    !readOptionalText(payload.name)
+    || !readOptionalText(payload.department)
+    || !managerName
+    || !executiveApproverId
+    || !executiveApproverName
+    || !REGISTRATION_PROJECT_TYPES.has(type)
+  ) {
     invalidRegistration('Project registration is missing required fields');
   }
   assertRegistrationFinancials(payload, type);
@@ -1031,6 +1040,9 @@ export function buildProjectRegistrationCanonicalDocuments({
     registeredById: ownerId,
     registeredByName: ownerName,
     registeredByEmail: ownerEmail,
+    executiveApproverId: readOptionalText(payload.executiveApproverId),
+    executiveApproverName: readOptionalText(payload.executiveApproverName),
+    executiveApproverEmail: readOptionalText(payload.executiveApproverEmail),
     managerId: ownerId,
     managerName: ownerName,
     teamName: readOptionalText(payload.teamName),
@@ -1179,6 +1191,12 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     settlementGuide: pickText('settlementGuide'),
     finalPaymentNote: pickText('finalPaymentNote'),
     projectPurpose: pickText('projectPurpose'),
+    registeredById: pickText('registeredById'),
+    registeredByName: pickText('registeredByName'),
+    registeredByEmail: pickText('registeredByEmail'),
+    executiveApproverId: pickText('executiveApproverId'),
+    executiveApproverName: pickText('executiveApproverName'),
+    executiveApproverEmail: pickText('executiveApproverEmail'),
     managerId: pickText('managerId'),
     managerName: pickText('managerName'),
     teamName: pickText('teamName'),
@@ -1279,6 +1297,9 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     registeredById: managerId,
     registeredByName: managerName,
     registeredByEmail: readOptionalText(payload.registeredByEmail) || readOptionalText(currentProject.registeredByEmail),
+    executiveApproverId: readOptionalText(payload.executiveApproverId) || readOptionalText(currentProject.executiveApproverId),
+    executiveApproverName: readOptionalText(payload.executiveApproverName) || readOptionalText(currentProject.executiveApproverName),
+    executiveApproverEmail: readOptionalText(payload.executiveApproverEmail) || readOptionalText(currentProject.executiveApproverEmail),
     managerId,
     managerName,
     teamName: readOptionalText(payload.teamName),
@@ -1323,6 +1344,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   laborTransferPlan: 'MYSC 인건비 이관 계획',
   fundInputMode: '자금 입력 방식',
   registeredByName: '사업 담당자',
+  executiveApproverName: '지정 결재자',
   teamName: '사내기업팀',
   teamMembersDetailed: '서류상 참여인력',
   paymentPlan: '입금 분할',
@@ -1359,7 +1381,8 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
   'paymentExpectedMonths', 'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
-  'registeredByEmail', 'managerId', 'managerName', 'teamName', 'teamMembers',
+  'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',
+  'managerId', 'managerName', 'teamName', 'teamMembers',
   'teamMembersDetailed', 'participantCondition', 'note', 'contractDocument',
   'customerBusinessRegistrationDocument', 'quoteDocument', 'proposalDocument',
   'proposalWordOriginalDocument', 'proposalPptOriginalDocument',

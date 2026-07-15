@@ -877,7 +877,14 @@ export function ProjectEditorWizard({
     () => ownerOptions.find((member) => member.uid === draft.registeredById) || null,
     [draft.registeredById, ownerOptions],
   );
+  const selectedExecutiveApprover = useMemo(
+    () => ownerOptions.find((member) => member.uid === draft.executiveApproverId) || null,
+    [draft.executiveApproverId, ownerOptions],
+  );
   const hasUnlinkedStoredOwner = Boolean(draft.registeredById && !selectedOwner);
+  const hasUnlinkedStoredExecutiveApprover = Boolean(
+    draft.executiveApproverId && !selectedExecutiveApprover,
+  );
 
   useEffect(() => {
     if (!draft.registeredById) return;
@@ -898,6 +905,21 @@ export function ProjectEditorWizard({
       managerName: member.name,
     }));
   }, [draft.managerId, draft.managerName, draft.registeredByEmail, draft.registeredById, draft.registeredByName, members]);
+
+  useEffect(() => {
+    if (!draft.executiveApproverId) return;
+    const member = members.find((item) => item.uid === draft.executiveApproverId);
+    if (!member) return;
+    const name = member.name || member.email || member.uid;
+    const email = member.email || '';
+    if (draft.executiveApproverName === name && draft.executiveApproverEmail === email) return;
+    setDraft((prev) => createProjectEditorDraft({
+      ...prev,
+      executiveApproverId: member.uid,
+      executiveApproverName: name,
+      executiveApproverEmail: email,
+    }));
+  }, [draft.executiveApproverEmail, draft.executiveApproverId, draft.executiveApproverName, members]);
 
   const update = <K extends keyof ProjectEditorDraft>(key: K, value: ProjectEditorDraft[K]) => {
     setDraft((prev) => createProjectEditorWizardDraft({ ...prev, [key]: value }));
@@ -1167,11 +1189,14 @@ export function ProjectEditorWizard({
       }
     }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
+    if (!draft.executiveApproverId || !selectedExecutiveApprover) {
+      issues.push({ step: 'team', label: '지정 결재자' });
+    }
     if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
       issues.push({ step: 'team', label: '참여인력 이름·역할·서류상 여부' });
     }
     return issues;
-  }, [departmentOptionSet, draft, hasContractAmountInput, requiresAdvanceInterimReason, showProjectCheckout, usesRegistrationV2]);
+  }, [departmentOptionSet, draft, hasContractAmountInput, requiresAdvanceInterimReason, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -1756,6 +1781,39 @@ export function ProjectEditorWizard({
             </p>
           ) : null}
         </div>
+        <div>
+          <Label className="text-xs">지정 결재자 *</Label>
+          <Select value={selectedExecutiveApprover?.uid} onValueChange={(value) => {
+            const member = ownerOptions.find((item) => item.uid === value);
+            if (!member) return;
+            setDraft((prev) => createProjectEditorDraft({
+              ...prev,
+              executiveApproverId: member.uid,
+              executiveApproverName: member.name || member.email || member.uid,
+              executiveApproverEmail: member.email || '',
+            }));
+          }} disabled={ownerOptions.length === 0}>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="구성원 원장에서 선택" /></SelectTrigger>
+            <SelectContent>
+              {ownerOptions.map((member) => (
+                <SelectItem key={member.uid} value={member.uid}>
+                  {member.email ? `${member.name || member.uid} (${member.email})` : (member.name || member.uid)}
+                </SelectItem>
+              ))}
+              {ownerOptions.length === 0 ? (
+                <SelectItem value="__no_org_members__" disabled>구성원 원장을 불러오는 중입니다</SelectItem>
+              ) : null}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.
+          </p>
+          {hasUnlinkedStoredExecutiveApprover ? (
+            <p className="mt-1 text-[11px] text-red-700">
+              현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
+            </p>
+          ) : null}
+        </div>
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -2160,6 +2218,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
+            <ReviewRow label="지정 결재자" value={draft.executiveApproverName} />
             <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
           </CardContent>
         </Card>

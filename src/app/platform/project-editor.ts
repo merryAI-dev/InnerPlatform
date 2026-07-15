@@ -96,6 +96,9 @@ export interface ProjectEditorDraft {
   registeredById: string;
   registeredByName: string;
   registeredByEmail: string;
+  executiveApproverId: string;
+  executiveApproverName: string;
+  executiveApproverEmail: string;
   managerId: string;
   managerName: string;
   teamName: string;
@@ -190,6 +193,9 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   registeredById: '',
   registeredByName: '',
   registeredByEmail: '',
+  executiveApproverId: '',
+  executiveApproverName: '',
+  executiveApproverEmail: '',
   managerId: '',
   managerName: '',
   teamName: '',
@@ -416,6 +422,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'laborSettlementBasis', label: '인건비 정산 기준', before: (project) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(project.laborSettlementBasis)] || '-', after: (draft) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(draft.laborSettlementBasis)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
   { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
+  { key: 'executiveApproverName', label: '지정 결재자', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
@@ -480,6 +487,9 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     registeredById: text(overrides.registeredById ?? overrides.managerId ?? DEFAULT_DRAFT.registeredById),
     registeredByName: text(overrides.registeredByName ?? overrides.managerName ?? DEFAULT_DRAFT.registeredByName),
     registeredByEmail: text(overrides.registeredByEmail ?? DEFAULT_DRAFT.registeredByEmail),
+    executiveApproverId: text(overrides.executiveApproverId ?? DEFAULT_DRAFT.executiveApproverId),
+    executiveApproverName: text(overrides.executiveApproverName ?? DEFAULT_DRAFT.executiveApproverName),
+    executiveApproverEmail: text(overrides.executiveApproverEmail ?? DEFAULT_DRAFT.executiveApproverEmail),
     managerId: text(overrides.registeredById ?? overrides.managerId ?? DEFAULT_DRAFT.managerId),
     managerName: text(overrides.registeredByName ?? overrides.managerName ?? DEFAULT_DRAFT.managerName),
     paymentPlan: normalizePaymentPlan(overrides.paymentPlan ?? DEFAULT_DRAFT.paymentPlan),
@@ -597,6 +607,9 @@ export function buildProjectEditorDraftFromProject(
     registeredById: text(normalizedProject.registeredById || payload?.registeredById || normalizedProject.managerId || payload?.managerId),
     registeredByName: text(normalizedProject.registeredByName || payload?.registeredByName || normalizedProject.managerName || payload?.managerName),
     registeredByEmail: text(normalizedProject.registeredByEmail || payload?.registeredByEmail),
+    executiveApproverId: text(normalizedProject.executiveApproverId || payload?.executiveApproverId),
+    executiveApproverName: text(normalizedProject.executiveApproverName || payload?.executiveApproverName),
+    executiveApproverEmail: text(normalizedProject.executiveApproverEmail || payload?.executiveApproverEmail),
     managerId: text(normalizedProject.registeredById || payload?.registeredById || normalizedProject.managerId || payload?.managerId),
     managerName: text(normalizedProject.registeredByName || payload?.registeredByName || normalizedProject.managerName || payload?.managerName),
     teamName: text(normalizedProject.teamName || payload?.teamName),
@@ -679,6 +692,9 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     registeredById: text(draft.registeredById),
     registeredByName: text(draft.registeredByName),
     registeredByEmail: text(draft.registeredByEmail),
+    executiveApproverId: text(draft.executiveApproverId),
+    executiveApproverName: text(draft.executiveApproverName),
+    executiveApproverEmail: text(draft.executiveApproverEmail),
     managerId: text(draft.registeredById),
     managerName: text(draft.registeredByName),
     teamName: text(draft.teamName),
@@ -813,6 +829,9 @@ export function buildProjectEditorProjectPatch(
     registeredById: text(draft.registeredById),
     registeredByName: text(draft.registeredByName),
     registeredByEmail: text(draft.registeredByEmail),
+    executiveApproverId: text(draft.executiveApproverId),
+    executiveApproverName: text(draft.executiveApproverName),
+    executiveApproverEmail: text(draft.executiveApproverEmail),
     managerId: text(draft.registeredById),
     managerName: text(draft.registeredByName),
     budgetCurrentYear: nonNegativeAmount(draft.budgetCurrentYear || draft.contractAmount),

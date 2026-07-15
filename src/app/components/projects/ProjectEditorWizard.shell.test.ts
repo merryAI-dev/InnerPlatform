@@ -42,6 +42,12 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('<Input value={draft.managerName}');
   });
 
+  it('lets project registration and edit choose a designated executive approver from the member directory', () => {
+    expect(source).toContain('지정 결재자 *');
+    expect(source).toContain('const selectedExecutiveApprover = useMemo');
+    expect(source).toContain('if (!draft.executiveApproverId || !selectedExecutiveApprover)');
+  });
+
   it('uses a searchable team member picker for registration and edit flows', () => {
     expect(source).toContain('function TeamMemberSearchCombobox');
     expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');

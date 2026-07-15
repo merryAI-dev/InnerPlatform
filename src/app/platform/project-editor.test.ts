@@ -146,6 +146,33 @@ describe('project editor draft mapping', () => {
     expect(payload.managerName).toBe('새 담당자');
   });
 
+  it('keeps a designated executive approver in project patches and request payloads', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject),
+      executiveApproverId: 'head-1',
+      executiveApproverName: '조직장 A',
+      executiveApproverEmail: 'head-a@mysc.co.kr',
+    });
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject,
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-05-28T00:00:00.000Z',
+    });
+
+    expect(buildProjectRequestPayloadFromDraft(draft)).toMatchObject({
+      executiveApproverId: 'head-1',
+      executiveApproverName: '조직장 A',
+      executiveApproverEmail: 'head-a@mysc.co.kr',
+    });
+    expect(patch).toMatchObject({
+      executiveApproverId: 'head-1',
+      executiveApproverName: '조직장 A',
+      executiveApproverEmail: 'head-a@mysc.co.kr',
+    });
+  });
+
   it('treats an explicit empty project team list as the current edit value', () => {
     const draft = buildProjectEditorDraftFromProject(
       {

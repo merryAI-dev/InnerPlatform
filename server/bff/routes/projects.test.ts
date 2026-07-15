@@ -29,6 +29,9 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     department: 'AXR',
     registeredById: 'pm-a',
     registeredByName: 'PM A',
+    executiveApproverId: 'head-a',
+    executiveApproverName: '조직장 A',
+    executiveApproverEmail: 'head-a@mysc.co.kr',
     managerId: 'pm-a',
     managerName: 'PM A',
     contractStart: '2026-01-01',
@@ -159,6 +162,14 @@ describe('project route helpers', () => {
   it.each([undefined, 1])('rejects new canonical registration requirements version %s', (version) => {
     expect(() => registrationV2Canonical(registrationV2Payload({ registrationRequirementsVersion: version })))
       .toThrowError('New project registration requires requirements version 2');
+  });
+
+  it.each([
+    ['ID', { executiveApproverId: '' }],
+    ['name', { executiveApproverName: '' }],
+  ])('rejects a registration without an executive approver %s', (_field, overrides) => {
+    expect(() => registrationV2Canonical(registrationV2Payload(overrides)))
+      .toThrowError('Project registration is missing required fields');
   });
 
   it('keeps legacy v1 team rows on the legacy path instead of applying v2 row rules', () => {
