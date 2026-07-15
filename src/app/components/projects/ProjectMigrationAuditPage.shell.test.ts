@@ -23,6 +23,8 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('프로젝트 등록 및 승인서');
     expect(compositeSource).toContain('조직장 승인');
     expect(compositeSource).toContain('ApprovalSeal');
+    expect(documentSource).toContain('executiveApproverName');
+    expect(documentSource).toContain("const designatedApproverName = requestPayload?.executiveApproverName\n    || record.project.executiveApproverName");
     expect(compositeSource).toContain('내 검토함');
     expect(compositeSource).toContain('CIC 필터');
     expect(compositeSource).toContain('상태 필터');

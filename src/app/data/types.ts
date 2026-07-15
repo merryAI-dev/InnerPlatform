@@ -607,6 +607,9 @@ export interface Project {
   registeredById?: string;
   registeredByName?: string;
   registeredByEmail?: string;
+  executiveApproverId?: string;
+  executiveApproverName?: string;
+  executiveApproverEmail?: string;
   registeredAt?: string;
   executiveReviewStatus?: ProjectExecutiveReviewStatus;
   executiveReviewedAt?: string;
@@ -851,6 +854,9 @@ export interface ProjectRequestPayload {
   registeredById?: string;
   registeredByName?: string;
   registeredByEmail?: string;
+  executiveApproverId?: string;
+  executiveApproverName?: string;
+  executiveApproverEmail?: string;
   managerId?: string;
   managerName: string;
   teamName: string;

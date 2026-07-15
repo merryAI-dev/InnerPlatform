@@ -78,6 +78,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       paymentPlan: { contract: 100000, interim: 0, final: 0 }, paymentPlanDesc: '선금 100%',
       settlementGuide: '', finalPaymentNote: '', projectPurpose: 'Purpose',
       registeredById: 'actor-a', registeredByName: 'actor-a', managerId: 'actor-a', managerName: 'actor-a',
+      executiveApproverId: 'executive-a', executiveApproverName: 'Executive A', executiveApproverEmail: 'executive-a@example.com',
       teamName: 'AXR', teamMembers: '', teamMembersDetailed: [], participantCondition: '', note: '',
       contractDocument: null, quoteDocument: null, proposalDocument: null, contractAnalysis: null,
       ...overrides,

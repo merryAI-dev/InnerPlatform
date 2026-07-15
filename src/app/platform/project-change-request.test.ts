@@ -36,6 +36,9 @@ const baseProject = {
   managerName: '이전 담당자',
   registeredById: 'u-old',
   registeredByName: '이전 담당자',
+  executiveApproverId: 'head-old',
+  executiveApproverName: '이전 조직장',
+  executiveApproverEmail: 'head-old@mysc.co.kr',
   budgetCurrentYear: 1000,
   taxInvoiceAmount: 0,
   profitRate: 0,
@@ -89,6 +92,9 @@ describe('project change request helpers', () => {
       contractAmount: 2000,
       registeredById: 'u-berry',
       registeredByName: '김인효(베리)',
+      executiveApproverId: 'head-berry',
+      executiveApproverName: '김조직장',
+      executiveApproverEmail: 'head-berry@mysc.co.kr',
     });
 
     const request = buildProjectChangeRequest({
@@ -111,7 +117,9 @@ describe('project change request helpers', () => {
       requestedByName: '김인효(베리)',
     });
     expect(request.beforeSnapshot?.name).toBe('2026 CTS2');
+    expect(request.beforeSnapshot?.executiveApproverName).toBe('이전 조직장');
     expect(request.proposedSnapshot?.name).toBe('2026 CTS2 수정');
+    expect(request.proposedSnapshot?.executiveApproverName).toBe('김조직장');
     expect(request.changedFields?.some((change) => change.key === 'name')).toBe(true);
     expect(request.humanSummary).toContain('기준 프로젝트 v7');
     expect(describeProjectRequestVersion({ request, project: baseProject })).toBe(
@@ -155,6 +163,9 @@ describe('project change request helpers', () => {
       advanceInterimBelow70Reason: '발주처 지급 조건',
       registeredById: 'u-berry',
       registeredByName: '김인효(베리)',
+      executiveApproverId: 'head-berry',
+      executiveApproverName: '김조직장',
+      executiveApproverEmail: 'head-berry@mysc.co.kr',
     });
     const request = buildProjectChangeRequest({
       baseProject,
@@ -178,6 +189,9 @@ describe('project change request helpers', () => {
       contractAmount: 3000,
       registeredById: 'u-berry',
       managerId: 'u-berry',
+      executiveApproverId: 'head-berry',
+      executiveApproverName: '김조직장',
+      executiveApproverEmail: 'head-berry@mysc.co.kr',
       settlementSystem: 'SMTECH',
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },

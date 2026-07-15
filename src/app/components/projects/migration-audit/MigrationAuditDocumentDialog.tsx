@@ -76,6 +76,9 @@ export function MigrationAuditDocumentDialog({
 
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const requestPayload = resolveProjectRequestPayload(record.request);
+  const designatedApproverName = requestPayload?.executiveApproverName
+    || record.project.executiveApproverName
+    || '';
   const latestReview = record.project.executiveReviewHistory?.at(-1);
   const reviewedByName = latestReview?.reviewedByName
     || record.project.executiveReviewedByName
@@ -121,7 +124,14 @@ export function MigrationAuditDocumentDialog({
                     <ApprovalSeal name={dossier.audit.requestedByName} state="submitted" />
                   </div>
                   <div className="flex min-h-[70px] flex-col items-center justify-center gap-1 px-2 py-2">
-                    <ApprovalSeal name={reviewedByName} state={approvalState} />
+                    {approvalState === 'pending' ? (
+                      <span className="text-center" aria-label="조직장 승인 대기">
+                        <span className="block text-[11px] font-medium text-slate-800">{designatedApproverName || '결재자 미지정'}</span>
+                        <span className="mt-1 block text-[10px] text-slate-500">검토 대기</span>
+                      </span>
+                    ) : (
+                      <ApprovalSeal name={reviewedByName} state={approvalState} />
+                    )}
                   </div>
                   <div className="flex items-center justify-center border-r border-t border-slate-400 bg-slate-50 text-[10px] text-slate-600">일자</div>
                   <div className="border-r border-t border-slate-400 px-2 py-2 text-center text-[10px] text-slate-700">{formatDateTime(record.requestedAt)}</div>
