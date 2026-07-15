@@ -176,9 +176,6 @@ const REGISTRATION_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
   'customer_business_registration',
   'quote',
   'proposal',
-  'proposal_word_original',
-  'proposal_ppt_original',
-  'presentation_ppt_original',
   'rfp_request_evidence',
 ];
 const CHECKOUT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
@@ -190,11 +187,11 @@ const PROJECT_DOCUMENT_LABELS: Record<ProjectRequestDocumentKind, string> = {
   contract: '계약서 PDF',
   customer_business_registration: '발주처 사업자등록증 PDF',
   quote: '견적서 PDF',
-  proposal: '제안서 PDF (기존 첨부, 선택)',
+  proposal: '제안서 PDF *',
   proposal_word_original: '제안서 Word 원본 (선택)',
   proposal_ppt_original: '제안서 PPT 원본 (선택)',
   presentation_ppt_original: '발표자료 PPT 원본 (선택)',
-  rfp_request_evidence: 'RFP 또는 요청 메일 증빙 *',
+  rfp_request_evidence: 'RFP 또는 요청 메일 증빙 (제안서가 없는 경우) *',
   performance_certificate: '수행확인서 PDF',
   tax_invoice: '세금계산서 PDF',
   final_settlement_report: '최종 정산보고서 PDF',
@@ -1117,20 +1114,11 @@ export function ProjectEditorWizard({
       if (!draft.groupwareName.trim()) issues.push({ step: 'basic', label: '그룹웨어 등록명' });
       if (!draft.projectPurpose.trim()) issues.push({ step: 'basic', label: '프로젝트 목적' });
       if (!draft.description.trim()) issues.push({ step: 'basic', label: '프로젝트 주요 내용' });
-      if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '정산 유형' });
-      if (draft.basis === 'NONE') issues.push({ step: 'financial', label: '정산 기준' });
       if (!draft.contractDocument) issues.push({ step: 'financial', label: '계약서 PDF' });
       if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '발주처 사업자등록증 PDF' });
       if (!draft.quoteDocument) issues.push({ step: 'financial', label: '견적서 PDF' });
-      if (!draft.rfpRequestEvidenceDocument) issues.push({ step: 'financial', label: 'RFP 또는 요청 메일 증빙' });
-      if (!draft.proposalWordOriginalDocument && !draft.registrationOptionalDocumentNotes.proposalWordOriginal.trim()) {
-        issues.push({ step: 'financial', label: '제안서 Word 원본 미첨부 사유' });
-      }
-      if (!draft.proposalPptOriginalDocument && !draft.registrationOptionalDocumentNotes.proposalPptOriginal.trim()) {
-        issues.push({ step: 'financial', label: '제안서 PPT 원본 미첨부 사유' });
-      }
-      if (!draft.presentationPptOriginalDocument && !draft.registrationOptionalDocumentNotes.presentationPptOriginal.trim()) {
-        issues.push({ step: 'financial', label: '발표자료 PPT 원본 미첨부 사유' });
+      if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument) {
+        issues.push({ step: 'financial', label: '제안서 또는 RFP/요청 메일 증빙' });
       }
       const startYear = Number(draft.contractStart.slice(0, 4));
       const endYear = Number(draft.contractEnd.slice(0, 4));
@@ -1650,14 +1638,12 @@ export function ProjectEditorWizard({
         <div>
           <Label className="text-xs">정산 유형</Label>
           <Select
-            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
+            value={draft.settlementType}
             onValueChange={(value) => update('settlementType', value as SettlementType)}
           >
             <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 유형 선택" /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][])
-                .filter(([key]) => !(usesRegistrationV2 && key === 'NONE'))
-                .map(([key, value]) => (
+              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
                 ))}
             </SelectContent>
@@ -1666,14 +1652,12 @@ export function ProjectEditorWizard({
         <div>
           <Label className="text-xs">정산 기준</Label>
           <Select
-            value={usesRegistrationV2 && draft.basis === 'NONE' ? undefined : draft.basis}
+            value={draft.basis}
             onValueChange={(value) => update('basis', value as Basis)}
           >
             <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(BASIS_LABELS) as [Basis, string][])
-                .filter(([key]) => !(usesRegistrationV2 && key === 'NONE'))
-                .map(([key, value]) => (
+              {(Object.entries(BASIS_LABELS) as [Basis, string][]).map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
                 ))}
             </SelectContent>
@@ -2205,16 +2189,12 @@ export function ProjectEditorWizard({
                   )).join('\n')}
                 />
                 <ReviewRow
-                  label="등록 첨부 7종"
+                  label="등록 필수 첨부"
                   value={[
                     `1. 계약서: ${draft.contractDocument?.name || '미첨부'}`,
                     `2. 사업자등록증: ${draft.customerBusinessRegistrationDocument?.name || '미첨부'}`,
                     `3. 견적서: ${draft.quoteDocument?.name || '미첨부'}`,
-                    `4. 제안서 Word: ${draft.proposalWordOriginalDocument?.name || draft.registrationOptionalDocumentNotes.proposalWordOriginal || '사유 미입력'}`,
-                    `5. 제안서 PPT: ${draft.proposalPptOriginalDocument?.name || draft.registrationOptionalDocumentNotes.proposalPptOriginal || '사유 미입력'}`,
-                    `6. 발표자료 PPT: ${draft.presentationPptOriginalDocument?.name || draft.registrationOptionalDocumentNotes.presentationPptOriginal || '사유 미입력'}`,
-                    `7. RFP/요청 메일: ${draft.rfpRequestEvidenceDocument?.name || '미첨부'}`,
-                    ...(draft.proposalDocument ? [`기존 제안서 PDF: ${draft.proposalDocument.name}`] : []),
+                    `4. 제안서 또는 RFP/요청 메일: ${draft.proposalDocument?.name || draft.rfpRequestEvidenceDocument?.name || '미첨부'}`,
                   ].join('\n')}
                 />
               </>
