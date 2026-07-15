@@ -11,7 +11,6 @@ import {
   FileSpreadsheet,
   Sparkles,
   ArrowRight,
-  Upload,
   Shield,
   ChevronLeft,
   ChevronRight,
@@ -97,14 +96,14 @@ const NAV_SECTIONS: PortalNavSection[] = [
     title: '마이메뉴',
     items: [
       { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
-      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true },
+      { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },
   {
     title: '사업비관리',
     items: [
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
-      { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)' },
+      { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)', hidden: true },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
       { to: '/portal/cashflow/sheets-lab', icon: FileSpreadsheet, label: '시트 연동 검토', hidden: true },
     ],
@@ -436,20 +435,6 @@ function PortalContent() {
                 <p className="text-xs text-muted-foreground mt-0.5">이미 등록된 프로젝트에서 선택하여 시작합니다</p>
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-[#001e46] group-hover:translate-x-0.5 transition-all" />
-            </button>
-
-            <button
-              onClick={() => navigate('/portal/weekly-expenses')}
-              className="group relative flex items-center gap-4 p-5 rounded-lg border border-border/80 bg-white text-left shadow-sm transition-all duration-200 hover:border-cyan-300 hover:bg-cyan-50/60 dark:bg-slate-900 dark:hover:bg-cyan-950/20"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 transition-transform group-hover:scale-105 dark:bg-cyan-950 dark:text-cyan-300">
-                <Upload className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold">증빙 업로드만 할게요</p>
-                <p className="text-xs text-muted-foreground mt-0.5">프로젝트 선택 없이 바로 PDF/영수증을 업로드합니다</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-cyan-600" />
             </button>
 
             <button

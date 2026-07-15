@@ -8,10 +8,9 @@ const portalLayoutSource = readFileSync(
 );
 
 describe('PortalLayout shell actions', () => {
-  it('keeps payroll entry visible in the primary portal navigation', () => {
-    expect(portalLayoutSource).toContain("to: '/portal/payroll'");
-    expect(portalLayoutSource).toContain("label: '인건비/공지'");
-    expect(portalLayoutSource).not.toContain("label: '인건비/공지', accent: true, hidden: true");
+  it('hides payroll and weekly-expense tabs from the primary portal navigation', () => {
+    expect(portalLayoutSource).toContain("label: '인건비/공지', accent: true, hidden: true");
+    expect(portalLayoutSource).toContain("label: '사업비 입력(주간)', hidden: true");
     expect(portalLayoutSource).not.toContain('monthlyCloses');
   });
 
@@ -77,7 +76,7 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
     expect(portalLayoutSource).toContain('blockedPortalAccess');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
-    expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
+    expect(portalLayoutSource).not.toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
     expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
