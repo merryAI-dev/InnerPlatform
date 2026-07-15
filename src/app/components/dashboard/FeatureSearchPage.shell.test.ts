@@ -22,7 +22,7 @@ describe('FeatureSearchPage shell contract', () => {
     expect(source).toContain('실무자');
     expect(source).toContain('전체 프로젝트 보기');
     expect(source).toContain('description');
-    expect(source).toContain('프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.');
+    expect(source).toContain('프로젝트 목록, 담당조직, 실무자, 발주기관을 확인합니다.');
     expect(source).toContain('role="note"');
     expect(source).toContain('opacity-0');
     expect(source).toContain('group-hover:opacity-100');
@@ -42,9 +42,10 @@ describe('FeatureSearchPage shell contract', () => {
     expect(searchSource).not.toContain("'CIC'");
   });
 
-  it('keeps only the registration request in practitioner quick links', () => {
-    expect(source).toContain("{ label: '프로젝트 등록 요청', to: '/portal/register-project' }");
-    expect(source).not.toContain("{ label: '프로젝트 선택', to: '/portal/project-select' }");
+  it('keeps project selection and registration as the only practitioner quick links', () => {
+    expect(source).toContain("{ label: '프로젝트 선택', to: '/portal/project-select' }");
+    expect(source).toContain("{ label: '프로젝트 등록', to: '/portal/register-project' }");
+    expect(source).not.toContain("{ label: '프로젝트 등록 요청', to: '/portal/register-project' }");
     expect(source).not.toContain("{ label: '예산 편집', to: '/portal/budget' }");
     expect(source).not.toContain("{ label: '사업비 입력', to: '/portal/weekly-expenses' }");
   });

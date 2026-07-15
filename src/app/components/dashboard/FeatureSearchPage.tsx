@@ -6,14 +6,15 @@ import { AdminCommandSearch } from './AdminCommandSearch';
 import { MyscWordmark } from '../brand/MyscWordmark';
 
 const ADMIN_ENTRY_POINTS = [
-  { label: '전체 프로젝트 보기', to: '/projects', description: '프로젝트 목록, 담당조직, PM, 발주기관을 확인합니다.' },
+  { label: '전체 프로젝트 보기', to: '/projects', description: '프로젝트 목록, 담당조직, 실무자, 발주기관을 확인합니다.' },
   { label: '프로젝트 등록/승인', to: '/projects/migration-audit', description: '신규 등록 요청, 수정 제출, 계약서 PDF 검토를 처리합니다.' },
   { label: '캐시플로 모니터링', to: '/cashflow', description: '입금, 지출, 계약금, 지원금, 수익 흐름을 확인합니다.' },
   { label: '권한/사용자', to: '/users', description: '사용자 역할, 조직장, 접근 권한을 관리합니다.' },
 ];
 
 const PM_ENTRY_POINTS = [
-  { label: '프로젝트 등록 요청', to: '/portal/register-project' },
+  { label: '프로젝트 선택', to: '/portal/project-select' },
+  { label: '프로젝트 등록', to: '/portal/register-project' },
 ];
 
 export function FeatureSearchPage() {
