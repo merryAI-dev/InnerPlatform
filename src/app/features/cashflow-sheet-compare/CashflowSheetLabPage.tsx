@@ -592,7 +592,7 @@ export function CashflowSheetLabPage({
         ? buildSourceKey({ projectId, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })
         : '');
       if (result.status === 'FRESH' && result.sourceRevision) {
-        setStatusMessage('시트 최신값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
+        setStatusMessage('시트 최신값을 고정했습니다. 저장할 값을 확인해 주세요.');
       } else if (result.status === 'STALE') {
         setStatusMessage('');
       } else {
@@ -722,9 +722,6 @@ export function CashflowSheetLabPage({
     }
   }
 
-  const totalBasisLabel = mirror?.activeWeekRange?.startWeek || mirror?.activeWeekRange?.endWeek
-    ? `${mirror.activeWeekRange.startWeek || '전체'} ~ ${mirror.activeWeekRange.endWeek || '전체'}`
-    : '전체';
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const canRefresh = Boolean(projectId && spreadsheetId && isCurrentSheetConfigSaved && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
@@ -743,8 +740,6 @@ export function CashflowSheetLabPage({
   }, [stageResult]);
   const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
-  const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || mirror?.spreadsheetTitle || '';
-  const mirrorCapturedAt = mirror?.capturedAt ? new Date(mirror.capturedAt).toLocaleString('ko-KR') : '';
   const currentStep = stageResult || reflectResult ? 3 : hasCurrentFreshMirror ? 3 : isCurrentSheetConfigSaved ? 2 : 1;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold ${
@@ -758,22 +753,7 @@ export function CashflowSheetLabPage({
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <CashflowSheetHeroAnimation />
-          <div className="mt-3 text-[13px] text-slate-500">
-            현재 연동된 시트 이름 {linkedSpreadsheetTitle || '파일 이름 확인 전'}
-          </div>
         </header>
-
-        {hasSavedConfig && (
-          <div className="mt-5 border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] text-blue-950">
-            <div className="font-bold">연결된 시트</div>
-            <div className="mt-1 text-[13px] font-semibold text-blue-950">
-              {linkedSpreadsheetTitle || '파일 이름 확인 전'}
-            </div>
-            <div className="mt-1 text-[12px] text-blue-900">
-              {savedConfig?.sheetName || mirror?.selectedSheetName || '시트 탭'} · {savedConfig?.startWeek || '전체'} ~ {savedConfig?.endWeek || '전체'}
-            </div>
-          </div>
-        )}
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
@@ -864,20 +844,9 @@ export function CashflowSheetLabPage({
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 {mirror?.sourceRevision ? '시트 값 다시 가져오기' : '시트 값 가져오기'}
               </Button>
-              {mirror ? (
-                <div className={`border px-3 py-2 text-[12px] ${
-                  mirror.status === 'FRESH'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                    : mirror.status === 'STALE'
-                      ? 'border-amber-200 bg-amber-50 text-amber-900'
-                      : mirror.status === 'ERROR'
-                        ? 'border-red-200 bg-red-50 text-red-900'
-                        : 'border-slate-200 bg-slate-50 text-slate-600'
-                }`}>
-                  <span className="font-bold">{mirror.status}</span>
-                  {mirrorCapturedAt ? ` · ${mirror.status === 'STALE' ? '마지막 정상 고정' : '고정'} ${mirrorCapturedAt}` : ''}
-                  {mirror.summary ? ` · 값 ${mirror.summary.valueCount.toLocaleString()}건` : ''}
-                  {mirror.lastRefreshError?.message ? ` · ${mirror.lastRefreshError.message}` : ''}
+              {mirror?.lastRefreshError?.message ? (
+                <div className="border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-900">
+                  <span className="font-bold">시트 연동 오류</span> · {mirror.lastRefreshError.message}
                 </div>
               ) : null}
             </div>
@@ -887,7 +856,7 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(3)}>3</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">변경 검토 및 저장</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">값 확인 및 저장</h2>
                 <HelpMemo>고정된 시트 값과 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (
@@ -940,7 +909,7 @@ export function CashflowSheetLabPage({
                   onClick={() => void handleStageSheetValues()}
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  변경 내용 검토
+                  저장할 값 확인
                 </Button>
               )}
             </div>
@@ -961,21 +930,6 @@ export function CashflowSheetLabPage({
         )}
       </section>
 
-      {mirror?.sourceRevision && (
-        <section className="mx-auto mt-4 max-w-[560px] space-y-3 border border-slate-200 bg-white px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2 border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-bold text-emerald-800">시트 고정본 · {mirror.status}</div>
-              <div className="truncate text-[12px] font-medium text-slate-950">
-                {mirror.selectedSheetName}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                검토 범위 {totalBasisLabel}{mirrorCapturedAt ? ` · 고정 ${mirrorCapturedAt}` : ''}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
       <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
         <AlertDialogContent className="flex h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[1280px] flex-col">
           <AlertDialogHeader>

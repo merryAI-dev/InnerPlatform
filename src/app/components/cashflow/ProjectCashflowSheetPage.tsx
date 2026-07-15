@@ -35,6 +35,7 @@ export function ProjectCashflowSheetPage() {
   return (
     <CashflowProjectSheet
       projectId={projectId}
+      projectName={project.name}
       initialViewMode={initialViewMode}
     />
   );

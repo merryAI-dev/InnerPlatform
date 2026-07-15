@@ -46,7 +46,6 @@ import {
   type CashflowSnapshotResult,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
-import { extractSpreadsheetId } from '../../integrations/google-sheets/link';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
@@ -262,9 +261,11 @@ function isBffAuthRejection(error: unknown): boolean {
 
 export function CashflowProjectSheet({
   projectId,
+  projectName,
   roleOverride,
 }: {
   projectId: string;
+  projectName?: string;
   roleOverride?: UserRole | string;
   initialViewMode?: 'projection' | 'actual' | 'compare';
   onUpdateWeeklySubmissionStatus?: (input: {
@@ -1214,7 +1215,7 @@ export function CashflowProjectSheet({
       setSheetRefreshResult(null);
       setSheetStageDialog(null);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
-        toast.success('시트값을 고정했습니다. 변경 내용 검토를 눌러 비교해 주세요.');
+        toast.success('시트값을 고정했습니다. 저장할 값을 확인해 주세요.');
       } else if (mirror.status === 'STALE') {
         toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
       } else {
@@ -1480,10 +1481,6 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
-  const linkedSpreadsheetId = cashflowSheetConfig?.spreadsheetId || extractSpreadsheetId(cashflowSheetConfig?.value || '');
-  const linkedSpreadsheetUrl = linkedSpreadsheetId
-    ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(linkedSpreadsheetId)}/edit`
-    : '';
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
   const sheetMirrorCapturedAt = formatSheetAppliedAt(cashflowSheetMirror?.capturedAt)
     || cashflowSheetMirror?.capturedAt
@@ -2151,7 +2148,18 @@ export function CashflowProjectSheet({
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <ClipboardList className="h-4 w-4 shrink-0 text-blue-600" />
-              <div className="truncate text-[15px] font-bold tracking-[-0.01em] text-slate-950">운영 대시보드</div>
+              <div className="truncate text-[15px] font-bold tracking-[-0.01em] text-slate-950">{dashboardTitle}</div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 rounded-full border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-blue-700"
+                onClick={() => cashflowSheetConfig
+                  ? navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)
+                  : handleOpenSheetOnboarding()}
+              >
+                {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
+              </Button>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[10px] text-slate-400 sm:inline">기준일 {todayIso}</span>
@@ -2161,144 +2169,35 @@ export function CashflowProjectSheet({
             </div>
           </div>
 
-          <div className={`rounded-[18px] border px-3 py-2 text-[11px] ${cashflowSheetConfig ? 'border-blue-100 bg-blue-50 text-blue-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-start gap-2">
-                <FileSpreadsheet className={`mt-0.5 h-4 w-4 shrink-0 ${cashflowSheetConfig ? 'text-blue-600' : 'text-amber-700'}`} />
-                <div className="min-w-0">
-                  <div className="font-bold">시트 연동</div>
-                  <div className={`mt-0.5 truncate ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
-                    {cashflowSheetConfig ? `${sheetIdentityLabel} · ${sheetRangeLabel}` : 'Google Sheet 연결 후 변경 후보를 검토할 수 있습니다.'}
-                  </div>
-                  <div className={`mt-1 text-[10px] leading-4 ${cashflowSheetConfig ? 'text-blue-800' : 'text-amber-800'}`}>
-                    {cashflowSheetConfig
-                      ? '버튼을 눌렀을 때만 시트값을 가져와 고정하며, 검토와 원장 저장은 별도 단계입니다.'
-                      : '처음 설정한 뒤 이 영역에서 시트값 불러오기를 직접 실행합니다.'}
-                  </div>
-                  {cashflowSheetConfig ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-                      <Badge className={`rounded-full border-0 px-2 py-0.5 text-[9px] ${
-                        sheetMirrorStatus === 'FRESH'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : sheetMirrorStatus === 'STALE'
-                            ? 'bg-amber-100 text-amber-800'
-                            : sheetMirrorStatus === 'ERROR'
-                              ? 'bg-rose-100 text-rose-800'
-                              : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {sheetMirrorStatus}
-                      </Badge>
-                      {sheetMirrorCapturedAt ? (
-                        <span className={sheetMirrorStatus === 'STALE' ? 'text-amber-800' : 'text-blue-800'}>
-                          {sheetMirrorStatus === 'STALE' ? '마지막 정상 고정' : '고정'} {sheetMirrorCapturedAt}
-                        </span>
-                      ) : null}
-                      {cashflowSheetMirror?.summary ? (
-                        <span className="text-blue-700">값 {cashflowSheetMirror.summary.valueCount.toLocaleString()}건</span>
-                      ) : null}
-                      {cashflowSheetMirror?.lastRefreshError?.message ? (
-                        <span className={sheetMirrorStatus === 'ERROR' ? 'text-rose-700' : 'text-amber-800'}>
-                          {cashflowSheetMirror.lastRefreshError.message}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {sheetRefreshResult ? (
-                    <div className="mt-1 font-semibold text-emerald-800">
-                      비교 결과 {sheetRefreshResult.stagedLineCount.toLocaleString()}건 · Projection {sheetRefreshResult.projectionLineCount.toLocaleString()}건 · Actual {sheetRefreshResult.actualLineCount.toLocaleString()}건
-                      {sheetRefreshResult.riskLineCount > 0 ? ` · 확인 필요 ${sheetRefreshResult.riskLineCount.toLocaleString()}건` : ''}
-                    </div>
-                  ) : cashflowSheetConfig?.lastAppliedAt ? (
-                    <div className="mt-1 text-blue-800">
-                      마지막 반영 {formatSheetAppliedAt(cashflowSheetConfig.lastAppliedAt) || cashflowSheetConfig.lastAppliedAt}
-                      {cashflowSheetConfig.lastAppliedBy?.email || cashflowSheetConfig.lastAppliedBy?.uid ? ` · 실행자 ${cashflowSheetConfig.lastAppliedBy.email || cashflowSheetConfig.lastAppliedBy.uid}` : ''}
-                      {typeof cashflowSheetConfig.lastAppliedLineCount === 'number' ? ` · 반영 ${cashflowSheetConfig.lastAppliedLineCount.toLocaleString()}건` : ''}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className={`h-7 rounded-full px-2.5 text-[10px] font-semibold transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={() => void handleRefreshSheetMirror()}
-                  disabled={!cashflowSheetConfig?.value || sheetRefreshLoading}
-                >
-                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
-                  시트값 불러오기
-                </Button>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className={`h-7 rounded-full px-2.5 text-[10px] font-semibold transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                      onClick={handleOpenSheetReviewDialog}
-                      disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'}
-                    >
-                      <ClipboardCheck className="mr-1 h-3 w-3" />
-                      변경 내용 검토
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[280px] bg-slate-950 text-[11px] leading-relaxed text-white">
-                    고정된 시트 값만 원장과 비교합니다. 저장 버튼을 누르기 전에는 원장이 바뀌지 않습니다.
-                  </TooltipContent>
-                </Tooltip>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className={`h-7 rounded-full px-2.5 text-[10px] transition-transform hover:-translate-y-0.5 ${cashflowSheetConfig ? 'border-blue-200 bg-white text-blue-700' : 'border-amber-300 bg-white text-amber-800'}`}
-                  onClick={() => cashflowSheetConfig
-                    ? navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)
-                    : handleOpenSheetOnboarding()}
-                >
-                  {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
-                </Button>
-                {linkedSpreadsheetUrl ? (
-                  <Button asChild type="button" size="sm" variant="outline" className="h-7 rounded-full border-blue-200 bg-white px-2.5 text-[10px] text-blue-700">
-                    <a href={linkedSpreadsheetUrl} target="_blank" rel="noreferrer">사업시트 열기</a>
-                  </Button>
-                ) : null}
-              </div>
+          {sheetDashboardMetadata ? (
+            <div className="flex flex-wrap items-center gap-2 text-[10px]">
+              {[
+                ['사업 타입', sheetDashboardMetadata.businessType?.value],
+                ['전용 계좌사업', sheetDashboardMetadata.accountType?.value],
+                ['정산 여부', sheetDashboardMetadata.settlementStatus?.value],
+              ].filter(([, value]) => Boolean(value)).map(([label, value]) => (
+                <span key={label} className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-semibold text-blue-950">
+                  <span className="mr-1 text-blue-600">{label}</span>{value}
+                </span>
+              ))}
+              <span className="ml-1 border-l border-slate-200 pl-3 text-slate-500">
+                세금계산서 발행일 · 입금일 · 입금액 {hasSheetDepositSchedule ? '주별 확인됨' : '주별 입력'}
+              </span>
             </div>
-          </div>
+          ) : null}
 
-          {monthCloseResult?.dashboard ? (
-            <div className="overflow-x-auto rounded-[18px] border border-slate-200 bg-white">
-              <table className="w-full min-w-[780px] table-fixed text-left text-[10px]">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr>
-                    <th className="w-[90px] px-3 py-2 font-semibold">출처</th>
-                    <th className="px-3 py-2 font-semibold">사업 구분</th>
-                    <th className="px-3 py-2 font-semibold">전용계좌사업</th>
-                    <th className="px-3 py-2 font-semibold">정산 여부</th>
-                    <th className="px-3 py-2 font-semibold">입금 합계 (BO9)</th>
-                    <th className="px-3 py-2 font-semibold">미지급 표시값 (BP9)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="text-slate-900">
-                    <td className="px-3 py-2 font-semibold text-blue-700">프로젝트 등록</td>
-                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.businessType}</td>
-                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.accountType}</td>
-                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.settlementStatus}</td>
-                    <td className="px-3 py-2 text-slate-400">-</td>
-                    <td className="px-3 py-2 text-slate-400">-</td>
-                  </tr>
-                  <tr className="border-t border-slate-100 text-slate-900">
-                    <td className="px-3 py-2 font-semibold text-emerald-700">연결 시트</td>
-                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('businessType')}</td>
-                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('accountType')}</td>
-                    <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('settlementStatus')}</td>
-                    <td className="px-3 py-2 tabular-nums">{monthCloseSheetControlValue('deposit')}</td>
-                    <td className="px-3 py-2 tabular-nums">{monthCloseSheetControlValue('unpaid')} <span className="text-[9px] text-slate-400">· 산식 미정</span></td>
-                  </tr>
-                </tbody>
-              </table>
+          {cashflowSheetMirror?.lastRefreshError?.message ? (
+            <div className="flex items-center justify-between gap-3 rounded-[14px] border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800">
+              <span className="min-w-0 truncate">시트 연동 오류: {cashflowSheetMirror.lastRefreshError.message}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 rounded-full border-rose-200 bg-white px-2.5 text-[10px] text-rose-700"
+                onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
+              >
+                시트 설정
+              </Button>
             </div>
           ) : null}
 
@@ -2646,16 +2545,17 @@ export function CashflowProjectSheet({
     : monthCloseResult?.status === 'REOPEN_REQUESTED'
       ? 'bg-blue-100 text-blue-800'
       : 'bg-amber-100 text-amber-800';
-  const monthCloseSheetMetadataValue = (key: string): string => {
-    const value = monthCloseResult?.dashboard?.sheetMetadata?.[key];
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return '-';
-    const textValue = (value as { value?: unknown }).value;
-    return typeof textValue === 'string' && textValue.trim() ? textValue.trim() : '-';
-  };
-  const monthCloseSheetControlValue = (key: 'deposit' | 'unpaid'): string => {
-    const value = monthCloseResult?.dashboard?.sheetControlTotals?.[key]?.value;
-    return typeof value === 'number' && Number.isFinite(value) ? `${fmt(value)}원` : '-';
-  };
+  const sheetDashboardMetadata = cashflowSheetMirror?.status === 'FRESH'
+    ? cashflowSheetMirror.sheetFacts?.metadata
+    : undefined;
+  const hasSheetDepositSchedule = (cashflowSheetMirror?.status === 'FRESH'
+    ? cashflowSheetMirror.sheetFacts?.depositScheduleRows
+    : undefined)?.some((row) => (
+    Boolean(row.taxInvoiceIssuedDate)
+    || Boolean(row.expectedDepositDate)
+    || row.expectedDepositAmount != null
+  ));
+  const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
 
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
@@ -2993,7 +2893,7 @@ export function CashflowProjectSheet({
                 <div className="mt-1 text-[11px] leading-5 text-slate-600">
                   {cashflowSheetConfig
                     ? '마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
-                    : '설정 후에도 자동으로 값을 가져오지 않습니다. 캐시플로우 화면에서 시트값 불러오기를 눌렀을 때만 고정합니다.'}
+                  : '설정 후에도 자동으로 값을 가져오지 않습니다. 시트 설정에서 직접 시트값을 가져올 때만 고정합니다.'}
                 </div>
               </div>
               <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
@@ -3016,7 +2916,7 @@ export function CashflowProjectSheet({
               ] : [
                 ['1', '공유 권한 확인', '연동할 Google Sheet에 조회 권한이 있는지 확인합니다.'],
                 ['2', '시트·주차 선택', '사용할 시트 탭과 시작·종료 주차를 지정합니다.'],
-                ['3', '명시적으로 불러오기', '설정 후 시트값 불러오기를 눌러 변경 내용을 검토합니다.'],
+                ['3', '명시적으로 불러오기', '설정 후 시트 설정에서 직접 값을 가져와 저장할 값을 확인합니다.'],
               ]).map(([step, title, detail]) => (
                 <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2">
                   <div className="flex items-center gap-2">

@@ -37,6 +37,7 @@ export function PortalCashflowPage() {
   return (
     <CashflowProjectSheet
       projectId={projectId}
+      projectName={myProject?.name}
       roleOverride={portalUser?.role}
       onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
     />

@@ -50,19 +50,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('actualDepositAmount: value');
   });
 
-  it('consumes composed dashboard totals, comparison, summary, metadata, and validation', () => {
+  it('consumes composed dashboard totals, comparison, summary, sheet metadata, and validation', () => {
     expect(source).toContain('monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find');
     expect(source).toContain('cashflowSnapshot?.readModel?.range?.[mode]');
     expect(source).toContain('rangeStart: cashflowSnapshotRange.start');
     expect(source).toContain('rangeEnd: cashflowSnapshotRange.end');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
     expect(source).toContain('dashboard?.summary?.projectionProgressPercent');
-    expect(source).toContain('monthCloseResult.dashboard.projectMetadata.businessType');
-    expect(source).toContain("monthCloseSheetMetadataValue('businessType')");
-    expect(source).toContain("monthCloseSheetControlValue('deposit')");
-    expect(source).toContain("monthCloseSheetControlValue('unpaid')");
-    expect(source).toContain('입금 합계 (BO9)');
-    expect(source).toContain('미지급 표시값 (BP9)');
+    expect(source).toContain('cashflowSheetMirror.sheetFacts?.metadata');
+    expect(source).toContain("['사업 타입', sheetDashboardMetadata.businessType?.value]");
+    expect(source).toContain("['전용 계좌사업', sheetDashboardMetadata.accountType?.value]");
+    expect(source).toContain("['정산 여부', sheetDashboardMetadata.settlementStatus?.value]");
+    expect(source).toContain('세금계산서 발행일 · 입금일 · 입금액');
     expect(source).toContain('dashboard?.validation?.blockers');
     expect(source).not.toContain('computeCashflowDerivedTotals');
     expect(source).not.toContain('computeOpeningCashflowTotals');
@@ -91,13 +90,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).toBeGreaterThan(-1);
     expect(operations).toBeLessThan(comparison);
     expect(comparison).toBeLessThan(monthlyBoard);
-    expect(source).toContain('프로젝트 등록');
-    expect(source).toContain('연결 시트');
-    expect(source).toContain('사업시트 열기');
+    expect(source).toContain('dashboardTitle');
+    expect(source).toContain("'시트 설정'");
+    expect(source).not.toContain('변경 내용 검토');
   });
 
   it('keeps the dashboard information order from the PPT before the comparison table', () => {
-    const metadata = source.indexOf('입금 합계 (BO9)');
+    const metadata = source.indexOf('sheetDashboardMetadata');
     const summary = source.indexOf('{dashboardSummary}');
     const management = source.indexOf('주요 관리 항목');
     const comparison = source.indexOf('data-cashflow-block="comparison"');
@@ -126,9 +125,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps an unlinked project usable and guides the user to sheet setup', () => {
-    expect(source).toContain('Google Sheet 연결 후 변경 후보를 검토할 수 있습니다.');
-    expect(source).toContain('처음 설정한 뒤 이 영역에서 시트값 불러오기를 직접 실행합니다.');
-    expect(source).toContain('시트 연동 설정');
+    expect(source).toContain("cashflowSheetConfig ? '시트 설정' : '시트 연결'");
+    expect(source).toContain('시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다.');
+    expect(source).toContain('시트 설정에서 직접 시트값을 가져올 때만 고정합니다.');
     expect(source).toContain('!cashflowSheetConfigLoaded || cashflowSheetConfig || !projectId');
     expect(source).toContain('myscube:cashflow-sheet-onboarding:');
     expect(source).toContain('캐시플로우 시트 연동 시작하기');
