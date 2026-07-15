@@ -37,13 +37,6 @@ const PORTAL_DIRECT_COMMANDS = [
     to: '/portal/cashflow',
     keywords: ['cashflow', '캐시플로우', '현금흐름'],
   },
-  {
-    id: 'portal:weekly-expenses',
-    label: '사업비 입력',
-    description: '주간 사업비 입력 열기',
-    to: '/portal/weekly-expenses',
-    keywords: ['사업비', '입력', '주간', '정산'],
-  },
 ] as const;
 
 export function buildPortalShellCommandItems(input: {

@@ -340,19 +340,6 @@ const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
     keywords: ['예산', '예산 편집', '사업비', '사업비 계획', '비목', '세목', '예산 구성', '예산 항목', '편성', '총예산', '지원금', '수익'],
   },
   {
-    id: 'pm:weekly-expenses',
-    label: 'PM 사업비 입력',
-    description: '주간 사업비, 정산 항목, 증빙 제출을 입력합니다.',
-    category: 'PM',
-    scope: 'pm',
-    to: '/portal/weekly-expenses',
-    icon: 'expense',
-    kind: 'page',
-    priority: 104,
-    featured: true,
-    keywords: ['사업비 입력', '주간 입력', '정산', '증빙', '영수증', '세금계산서', '지출', '제출', '거래처', '메모', '첨부', '자료', '집행'],
-  },
-  {
     id: 'pm:cashflow',
     label: 'PM 캐시플로',
     description: '주간 projection, 입금, 지출, 잔액 흐름을 입력합니다.',
@@ -399,18 +386,6 @@ const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
     kind: 'page',
     priority: 94,
     keywords: ['프로젝트 등록', '사업 등록', '등록 요청', '신규 등록', '계약서', 'PDF', '첨부', '발주기관', '담당조직', 'CIC', '통화', 'USD', 'KRW'],
-  },
-  {
-    id: 'pm:payroll',
-    label: 'PM 인건비/공지',
-    description: '인건비 확인, 공지, 월마감 관련 상태를 확인합니다.',
-    category: 'PM',
-    scope: 'pm',
-    to: '/portal/payroll',
-    icon: 'payroll',
-    kind: 'page',
-    priority: 92,
-    keywords: ['인건비', '공지', '월마감', '급여', '배정기간', '시작월', '종료월', '확인', 'PM 검토', 'payroll'],
   },
 ];
 

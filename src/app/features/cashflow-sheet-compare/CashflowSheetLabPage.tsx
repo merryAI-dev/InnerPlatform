@@ -120,10 +120,6 @@ function formatRiskFlag(flag: string) {
   return flag;
 }
 
-function readyCtaClass(active: boolean) {
-  return active ? 'motion-safe:animate-[cashflow-ready-bob_1.15s_ease-in-out_infinite]' : '';
-}
-
 function CashflowSheetHeroAnimation() {
   const tiles = [
     { kind: 'excel', label: 'XLS', x: -112, y: -104, rotate: -16, size: 82, delay: 0 },
@@ -729,7 +725,8 @@ export function CashflowSheetLabPage({
   const totalBasisLabel = mirror?.activeWeekRange?.startWeek || mirror?.activeWeekRange?.endWeek
     ? `${mirror.activeWeekRange.startWeek || '전체'} ~ ${mirror.activeWeekRange.endWeek || '전체'}`
     : '전체';
-  const canRefresh = Boolean(projectId && spreadsheetId && !loading);
+  const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
+  const canRefresh = Boolean(projectId && spreadsheetId && isCurrentSheetConfigSaved && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
   const canStage = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !loading);
@@ -746,44 +743,18 @@ export function CashflowSheetLabPage({
   }, [stageResult]);
   const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
-  const showSetupSteps = true;
-  const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
   const linkedSpreadsheetTitle = savedConfig?.spreadsheetTitle || mirror?.spreadsheetTitle || '';
   const mirrorCapturedAt = mirror?.capturedAt ? new Date(mirror.capturedAt).toLocaleString('ko-KR') : '';
-  const activeStep = stageResult ? 5 : hasCurrentFreshMirror ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 0;
-  const currentStep = reflectResult ? 5 : stageResult ? 5 : hasCurrentFreshMirror ? 4 : spreadsheetId ? 3 : systemAccountEmail ? 2 : 1;
+  const currentStep = stageResult || reflectResult ? 3 : hasCurrentFreshMirror ? 3 : isCurrentSheetConfigSaved ? 2 : 1;
   const stepNumberClass = (step: number) =>
-    `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold transition-all duration-300 ${
-      step <= activeStep
+    `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold ${
+      step <= currentStep
         ? 'bg-[#001e46] text-white shadow-[0_0_0_4px_rgba(0,30,70,0.08)]'
         : 'bg-slate-100 text-slate-500'
-    } ${step === currentStep && !reflectResult ? 'ring-[6px] ring-blue-300 shadow-[0_0_0_8px_rgba(37,99,235,0.18)] motion-safe:animate-pulse' : ''}`;
-  const primaryCta = !isCurrentSheetConfigSaved && spreadsheetId
-    ? {
-        label: '임시 저장',
-        disabled: !canSaveConfig,
-        action: () => void handleSaveSheetConfig(),
-      }
-    : !hasCurrentFreshMirror
-    ? {
-        label: mirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기',
-        disabled: !canRefresh,
-        action: () => void handleRefreshSheetMirror(),
-      }
-    : !stageResult
-      ? {
-        label: '변경 내용 검토',
-          disabled: !canStage,
-          action: () => void handleStageSheetValues(),
-        }
-      : {
-          label: reflectResult ? '저장 완료' : safeStageLineCount > 0 ? '저장 확인 열기' : '저장할 변경 없음',
-          disabled: !stageResult || !safeStageLineCount || Boolean(reflectResult) || loading,
-          action: () => setApplyDialogOpen(true),
-        };
+    }`;
 
   return (
-    <div className="bg-white px-5 pb-28 pt-6 sm:bg-slate-100 sm:px-6">
+    <div className="bg-white px-5 py-6 sm:bg-slate-100 sm:px-6">
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <CashflowSheetHeroAnimation />
@@ -805,50 +776,12 @@ export function CashflowSheetLabPage({
         )}
 
         <ol className="relative mt-10 space-y-8 before:absolute before:left-[17px] before:bottom-6 before:top-8 before:w-px before:bg-slate-200">
-          {showSetupSteps && <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
+          <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
             <span className={stepNumberClass(1)}>1</span>
-            <div className="min-w-0 space-y-3 pb-1">
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트 권한 추가하기</h2>
-                <HelpMemo>시스템 계정이 Google Sheet를 읽을 수 있어야 시트 값과 MYSCube값을 비교할 수 있습니다. 보기 권한이면 충분합니다.</HelpMemo>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
-                  disabled={!projectId || accountLoading}
-                  onClick={() => void handleLoadShareAccount()}
-                >
-                  {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                  공유 계정 확인
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 gap-1.5 rounded-none px-3 text-[12px] transition-transform hover:-translate-y-0.5"
-                  disabled={!systemAccountEmail}
-                  onClick={handleCopyShareAccount}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  공유 계정 복사
-                </Button>
-              </div>
-              {systemAccountEmail && (
-                <div className="break-all border border-blue-100 bg-blue-50 px-3 py-2 font-mono text-[12px] text-blue-900">
-                  {systemAccountEmail}
-                </div>
-              )}
-              <div className="text-[12px] text-slate-500">위 공유계정 확인을 누르고 공유계정 복사를 눌러서 시트에 엑세스 권한을 업데이트 해요.</div>
-            </div>
-          </li>}
-
-          {showSetupSteps && <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-2 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트 정보 저장</h2>
-                <HelpMemo>다음 방문 때 다시 입력하지 않도록 링크, 탭 이름, 주차 범위를 먼저 저장합니다. 이 단계는 금액 저장이 아닙니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 연결</h2>
+                <HelpMemo>링크, 탭 이름, 주차 범위를 저장합니다. 이 단계에서는 금액을 저장하지 않습니다.</HelpMemo>
               </div>
               <Input
                 value={sheetLink}
@@ -889,31 +822,47 @@ export function CashflowSheetLabPage({
                   onClick={() => void handleSaveSheetConfig()}
                 >
                   {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {isCurrentSheetConfigSaved ? '임시 저장됨' : '임시 저장'}
+                  {isCurrentSheetConfigSaved ? '저장됨' : '시트 정보 저장'}
                 </Button>
                 <div className="text-[12px] text-slate-500">
-                  시트 링크와 탭이름을 입력해주세요. 탭 이름과 시작 및 종료 주차는 사업에 맞게 조정해주세요.
+                  링크, 탭 이름, 시작·종료 주차를 입력하세요.
                 </div>
               </div>
+              <details className="pt-2 text-[12px] text-slate-600">
+                <summary className="cursor-pointer font-medium text-slate-700">시트 접근 권한이 필요한가요?</summary>
+                <div className="mt-3 space-y-2 border-l-2 border-blue-200 pl-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!projectId || accountLoading} onClick={() => void handleLoadShareAccount()}>
+                      {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                      공유 계정 확인
+                    </Button>
+                    <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!systemAccountEmail} onClick={handleCopyShareAccount}>
+                      <Copy className="h-3.5 w-3.5" />공유 계정 복사
+                    </Button>
+                  </div>
+                  {systemAccountEmail && <div className="break-all bg-blue-50 px-3 py-2 font-mono text-blue-900">{systemAccountEmail}</div>}
+                  <p>시트에 위 계정을 보기 권한으로 추가하면 됩니다.</p>
+                </div>
+              </details>
             </div>
-          </li>}
+          </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(3)}>{showSetupSteps ? 3 : 1}</span>
+            <span className={stepNumberClass(2)}>2</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">시트에서 플랫폼에 저장할 값을 검토해주세요.</h2>
-                <HelpMemo>이 버튼을 눌렀을 때만 Google Sheet 최신값을 읽어 서버 고정본으로 보관합니다. 아직 MYSCube에는 아무 값도 쓰지 않습니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 값 가져오기</h2>
+                <HelpMemo>저장한 설정으로 Google Sheet 최신값을 읽어 서버 고정본으로 만듭니다. 아직 MYSCube에는 저장하지 않습니다.</HelpMemo>
               </div>
               <Button
                 type="button"
                 variant="outline"
-                className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canRefresh)}`}
+                className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
                 disabled={!canRefresh}
                 onClick={() => void handleRefreshSheetMirror()}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {mirror?.sourceRevision ? '최신값 다시 가져오기' : '시트 연동하기'}
+                {mirror?.sourceRevision ? '시트 값 다시 가져오기' : '시트 값 가져오기'}
               </Button>
               {mirror ? (
                 <div className={`border px-3 py-2 text-[12px] ${
@@ -935,10 +884,10 @@ export function CashflowSheetLabPage({
           </li>
 
           <li className="relative grid grid-cols-[36px_minmax(0,1fr)] gap-4">
-            <span className={stepNumberClass(4)}>{showSetupSteps ? 4 : 2}</span>
+            <span className={stepNumberClass(3)}>3</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">MYSCube에 값 저장</h2>
+                <h2 className="text-[19px] font-bold text-slate-950">변경 검토 및 저장</h2>
                 <HelpMemo>고정된 시트 값과 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
               </div>
               {stageResult ? (
@@ -973,7 +922,7 @@ export function CashflowSheetLabPage({
                       </div>
                       <Button
                         type="button"
-                        className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canReflect)}`}
+                        className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
                         disabled={!canReflect}
                         onClick={() => setApplyDialogOpen(true)}
                       >
@@ -986,7 +935,7 @@ export function CashflowSheetLabPage({
               ) : (
                 <Button
                   type="button"
-                  className={`h-10 gap-1.5 rounded-none px-4 text-[13px] transition-transform hover:-translate-y-0.5 ${readyCtaClass(canStage)}`}
+                  className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
                   disabled={!canStage}
                   onClick={() => void handleStageSheetValues()}
                 >
@@ -1011,18 +960,6 @@ export function CashflowSheetLabPage({
           </div>
         )}
       </section>
-
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur sm:hidden">
-        <Button
-          type="button"
-          className={`h-14 w-full rounded-[14px] bg-blue-600 text-[16px] font-bold text-white hover:bg-blue-700 ${readyCtaClass(!primaryCta.disabled)}`}
-          disabled={primaryCta.disabled}
-          onClick={primaryCta.action}
-        >
-          {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-          {primaryCta.label}
-        </Button>
-      </div>
 
       {mirror?.sourceRevision && (
         <section className="mx-auto mt-4 max-w-[560px] space-y-3 border border-slate-200 bg-white px-4 py-3">
