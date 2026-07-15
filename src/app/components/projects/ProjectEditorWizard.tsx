@@ -25,7 +25,6 @@ import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
   LABOR_SETTLEMENT_BASIS_LABELS,
-  formatSettlementSheetPolicySummary,
   getProjectContractTypeSelectableOptions,
   getDefaultSettlementSheetPolicyForFundInputMode,
   getProjectTypeSelectableOptions,
@@ -110,7 +109,6 @@ import {
 } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { ContractDocumentPreview } from './ContractDocumentPreview';
-import { SettlementSheetPolicyFields } from './SettlementSheetPolicyFields';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import {
   Command,
@@ -1717,10 +1715,6 @@ export function ProjectEditorWizard({
         </div>
       </div>
 
-      <SettlementSheetPolicyFields
-        policy={draft.settlementSheetPolicy}
-        onChange={(next) => update('settlementSheetPolicy', next)}
-      />
     </div>
   );
 
@@ -2179,7 +2173,6 @@ export function ProjectEditorWizard({
             <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
             <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
             <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]} />
-            <ReviewRow label="정산 시트 정책" value={formatSettlementSheetPolicySummary(draft.settlementSheetPolicy)} />
             {usesRegistrationV2 ? (
               <>
                 <ReviewRow

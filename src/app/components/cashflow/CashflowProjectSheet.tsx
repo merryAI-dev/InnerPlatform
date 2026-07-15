@@ -2225,7 +2225,7 @@ export function CashflowProjectSheet({
                 </span>
               ))}
               <span className="ml-1 border-l border-slate-200 pl-3 text-slate-500">
-                세금계산서 발행일 · 입금일 · 입금액 {hasSheetDepositSchedule ? '주별 확인됨' : '주별 입력'}
+                세금계산서 발행일 · 입금일 · 입금액 주별 확인됨
               </span>
             </div>
           ) : null}
@@ -2309,18 +2309,6 @@ export function CashflowProjectSheet({
                   {monthCloseResult?.dashboard?.deadlineSummary?.current
                     ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${monthCloseResult.dashboard.deadlineSummary.current.status}`
                     : '첫 시트 검토 완료 시점부터 집계합니다.'}
-                </div>
-              </div>
-              <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-                <div className="text-[11px] font-bold text-slate-900">세금계산서·입금 일정</div>
-                <div className="mt-2 space-y-1.5">
-                  {(monthCloseResult?.dashboard?.sheetDepositScheduleRows || []).map((row) => (
-                    <div key={row.weekNo} className="grid grid-cols-[42px_1fr] gap-2 text-[9px] leading-4 text-slate-600">
-                      <span className="font-semibold text-slate-800">{row.weekNo}주차</span>
-                      <span>발행 {row.taxInvoiceIssuedDate || '-'} · 입금 {row.expectedDepositDate || '-'} · {row.expectedDepositAmount == null ? '-' : `${fmt(row.expectedDepositAmount)}원`}</span>
-                    </div>
-                  ))}
-                  {(monthCloseResult?.dashboard?.sheetDepositScheduleRows || []).length === 0 ? <div className="text-[9px] text-slate-400">시트 연동 후 일정이 표시됩니다.</div> : null}
                 </div>
               </div>
             </div>
@@ -2595,13 +2583,6 @@ export function CashflowProjectSheet({
   const financialYearChecks = cashflowSheetMirror?.status === 'FRESH'
     ? cashflowSheetMirror.financialYearChecks
     : undefined;
-  const hasSheetDepositSchedule = (cashflowSheetMirror?.status === 'FRESH'
-    ? cashflowSheetMirror.sheetFacts?.depositScheduleRows
-    : undefined)?.some((row) => (
-    Boolean(row.taxInvoiceIssuedDate)
-    || Boolean(row.expectedDepositDate)
-    || row.expectedDepositAmount != null
-  ));
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
 
   return (

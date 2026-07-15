@@ -106,6 +106,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(comparison).toBeGreaterThan(management);
   });
 
+  it('keeps the dashboard deposit schedule as a compact sheet-confirmed note', () => {
+    expect(source).toContain('세금계산서 발행일 · 입금일 · 입금액 주별 확인됨');
+    expect(source.match(/<h3 className="text-\[13px\] font-bold text-slate-950">세금계산서·입금 일정<\/h3>/g)).toHaveLength(1);
+  });
+
   it('keeps the PPT summary as Projection, Actual, and monthly close only', () => {
     expect(source).toContain("renderRateTile('Projection', opsSummary.rates.projection)");
     expect(source).toContain("renderRateTile('Actual', opsSummary.rates.actual)");
