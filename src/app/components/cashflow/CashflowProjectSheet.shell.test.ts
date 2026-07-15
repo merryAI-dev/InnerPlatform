@@ -96,9 +96,23 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('사업시트 열기');
   });
 
-  it('keeps server fallback copy intact without appending a duplicate sentence ending', () => {
-    expect(source).toContain("primaryReason?.title || '확인 항목을 확인해 주세요.'");
-    expect(source).not.toContain("primaryReason?.title || '확인 항목'}입니다");
+  it('keeps the dashboard information order from the PPT before the comparison table', () => {
+    const metadata = source.indexOf('입금 합계 (BO9)');
+    const summary = source.indexOf('{dashboardSummary}');
+    const management = source.indexOf('주요 관리 항목');
+    const comparison = source.indexOf('data-cashflow-block="comparison"');
+    expect(metadata).toBeGreaterThan(-1);
+    expect(summary).toBeGreaterThan(metadata);
+    expect(management).toBeGreaterThan(summary);
+    expect(comparison).toBeGreaterThan(management);
+  });
+
+  it('keeps the PPT summary as Projection, Actual, and monthly close only', () => {
+    expect(source).toContain("renderRateTile('Projection', opsSummary.rates.projection)");
+    expect(source).toContain("renderRateTile('Actual', opsSummary.rates.actual)");
+    expect(source).toContain("renderRateTile('결산', opsSummary.rates.confirmation)");
+    expect(source).not.toContain("renderRateTile('사람 확인', opsSummary.rates.confirmation)");
+    expect(source).not.toContain('renderOpsStatusDonut');
   });
 
   it('keeps sheet sync explicit and uses the approved action label', () => {
@@ -112,16 +126,24 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps an unlinked project usable and guides the user to sheet setup', () => {
-    expect(source).toContain('시트가 아직 연결되지 않았습니다.');
-    expect(source).toContain('시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다.');
+    expect(source).toContain('Google Sheet 연결 후 변경 후보를 검토할 수 있습니다.');
+    expect(source).toContain('처음 설정한 뒤 이 영역에서 시트값 불러오기를 직접 실행합니다.');
     expect(source).toContain('시트 연동 설정');
-    expect(source).toContain('cashflowSheetConfigLoaded && !cashflowSheetConfig');
+    expect(source).toContain('!cashflowSheetConfigLoaded || cashflowSheetConfig || !projectId');
     expect(source).toContain('myscube:cashflow-sheet-onboarding:');
     expect(source).toContain('캐시플로우 시트 연동 시작하기');
     expect(source).toContain('나중에 하기');
     expect(source).toContain('설정 후에도 자동으로 값을 가져오지 않습니다.');
     expect(source).toContain('cashflowSnapshot?.comparison?.months || []');
     expect(source).toContain('comparisonWeek?.lines?.find');
+  });
+
+  it('keeps the operations dashboard as the first visible cashflow block', () => {
+    expect(source).not.toContain('시트가 아직 연결되지 않았습니다.');
+    const operations = source.indexOf('{renderOperationsPanel()}');
+    const comparison = source.indexOf('data-cashflow-block="comparison"');
+    expect(operations).toBeGreaterThan(-1);
+    expect(operations).toBeLessThan(comparison);
   });
 
   it('shows month close only as a compact board action instead of a standalone panel', () => {

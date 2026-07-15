@@ -35,12 +35,10 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../..
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   fetchCashflowSnapshotViaBff,
-  fetchCashflowLaborRiskViaBff,
   closeCashflowMonthViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
   requestCashflowMonthReopenViaBff,
-  type CashflowLaborRiskResult,
   type CashflowMonthCloseCell,
   type CashflowMonthCloseDraftInput,
   type CashflowMonthCloseResult,
@@ -359,9 +357,6 @@ export function CashflowProjectSheet({
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
   const [rangeLoadedWeeks, setRangeLoadedWeeks] = useState<CashflowWeekSheet[]>([]);
-  const [laborRisk, setLaborRisk] = useState<CashflowLaborRiskResult | null>(null);
-  const [laborRiskLoading, setLaborRiskLoading] = useState(false);
-  const [laborRiskError, setLaborRiskError] = useState<string | null>(null);
   const [cashflowSnapshot, setCashflowSnapshot] = useState<CashflowSnapshotResult | null>(null);
   const [cashflowComparisonLoading, setCashflowComparisonLoading] = useState(false);
   const [cashflowComparisonError, setCashflowComparisonError] = useState<string | null>(null);
@@ -1186,58 +1181,6 @@ export function CashflowProjectSheet({
       setMonthCloseBusy(false);
     }
   }, [canReviewReopen, isPm, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
-
-  const handleRefreshLaborRisk = useCallback(async (): Promise<void> => {
-    if (!projectId || !orgId || !user?.uid) {
-      setLaborRisk(null);
-      setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
-      return;
-    }
-    setLaborRiskLoading(true);
-    setLaborRiskError(null);
-    try {
-      const resolvedActor = await resolveBffActor();
-      if (!resolvedActor?.idToken) {
-        setLaborRisk(null);
-        setLaborRiskError('로그인 세션이 만료되었습니다. 저장/검토 동작에서 로그인을 먼저 진행해 주세요.');
-        return;
-      }
-
-      let result: CashflowLaborRiskResult;
-      try {
-        result = await fetchCashflowLaborRiskViaBff({
-          tenantId: orgId,
-          actor: resolvedActor,
-          projectId,
-        });
-      } catch (error) {
-        if (!isBffAuthRejection(error)) throw error;
-        const refreshedActor = await resolveBffActor({ forceRefresh: true });
-        if (!refreshedActor?.idToken) throw error;
-        result = await fetchCashflowLaborRiskViaBff({
-          tenantId: orgId,
-          actor: refreshedActor,
-          projectId,
-        });
-      }
-      setLaborRisk(result);
-    } catch (error) {
-      setLaborRisk(null);
-      setLaborRiskError(resolveApiErrorMessage(error, '인건비/잔액 체크를 불러오지 못했습니다.'));
-    } finally {
-      setLaborRiskLoading(false);
-    }
-  }, [orgId, projectId, resolveBffActor, user?.uid]);
-
-  useEffect(() => {
-    setLaborRisk(null);
-    setLaborRiskError(null);
-    if (!projectId || !orgId || !user?.uid) {
-      setLaborRiskLoading(false);
-      return;
-    }
-    void handleRefreshLaborRisk();
-  }, [handleRefreshLaborRisk, orgId, projectId, user?.uid]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
@@ -2112,34 +2055,12 @@ export function CashflowProjectSheet({
     return 'text-slate-700';
   }
 
-  function renderOpsStatusDonut() {
-    const blockedCount = opsSummary.status.count;
-    const confirmationPercent = Math.min(100, Math.max(0, opsSummary.rates.confirmation.percent));
-    const actualPercent = Math.min(100, Math.max(0, opsSummary.rates.actual.percent));
-    const projectionPercent = Math.min(100, Math.max(0, opsSummary.rates.projection.percent));
-    const totalPercent = Math.max(1, projectionPercent + actualPercent + confirmationPercent);
-    const projectionEnd = (projectionPercent / totalPercent) * 360;
-    const actualEnd = projectionEnd + (actualPercent / totalPercent) * 360;
-    const confirmationEnd = actualEnd + (confirmationPercent / totalPercent) * 360;
-    const gradient = `conic-gradient(#3b82f6 0deg ${projectionEnd}deg, #fb7185 ${projectionEnd}deg ${actualEnd}deg, #f59e0b ${actualEnd}deg ${confirmationEnd}deg, #e5e7eb ${confirmationEnd}deg 360deg)`;
-
-    return (
-      <div className="flex items-center justify-center">
-        <div className="relative h-[78px] w-[78px] rounded-full" style={{ background: gradient }}>
-          <div className="absolute inset-[15px] flex flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
-            <div className={`text-[15px] font-bold leading-4 tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-              {blockedCount > 0 ? `${blockedCount}건` : opsSummary.status.label}
-            </div>
-            <div className="mt-0.5 text-[9px] leading-3 text-slate-500">
-              {blockedCount > 0 ? '확인 필요' : '상태'}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderRateTile(label: string, rate: { percent: number }) {
+    const summaryDescription = label === 'Projection'
+      ? '총 계약금액 기준'
+      : label === 'Actual'
+        ? '이번 주차까지 입력 기준'
+        : '사람 확인 완료 기준';
     return (
       <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
@@ -2155,92 +2076,75 @@ export function CashflowProjectSheet({
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
         </div>
-        <div className="mt-1.5 truncate text-[9px] leading-3 text-slate-500">월 결산 서버 응답</div>
+        <div className="mt-1.5 truncate text-[9px] leading-3 text-slate-500">{summaryDescription}</div>
       </div>
     );
   }
 
-  function renderLaborRiskCopy() {
-    if (laborRiskLoading) {
-      return (
-        <div className="flex items-center gap-2 text-[11px] text-slate-600">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          인건비/잔액 체크를 불러오는 중입니다.
-        </div>
-      );
-    }
-    if (laborRiskError) {
-      return <div className="text-[11px] font-semibold text-amber-700">인건비/잔액 체크 실패: {laborRiskError}</div>;
-    }
-    if (!laborRisk) return <div className="text-[11px] text-slate-500">페이지를 열면 인건비/잔액 체크 결과를 자동으로 계산합니다.</div>;
-
-    const missingMonths = laborRisk.labor.missingProjectionMonths;
-    const nextMonthProjectionMissing = !laborRisk.labor.nextMonthProjection.isWritten;
-    const nextLaborAmount = laborRisk.labor.nextProjection?.amount
-      ?? laborRisk.labor.nextMonthProjection.projectionAmount
-      ?? laborRisk.labor.referenceActualAmount
-      ?? 0;
-    const laborChanged = laborRisk.labor.lastMonth.actualAmount !== nextLaborAmount;
-    const minBalanceText = laborRisk.shortage.week
-      ? `${laborRisk.shortage.week.label} 예상 잔액 ${fmt(laborRisk.shortage.projectedBalance || 0)}원`
-      : '현재 Projection 기준 잔액 부족 예상 주차는 없습니다';
-
+  function renderOperationsSummary(input: {
+    hiddenInboxCount: number;
+    visibleInbox: typeof opsSummary.inbox;
+  }) {
     return (
-      <div className="space-y-1.5 text-[11px] leading-5 text-slate-700">
-        {nextMonthProjectionMissing ? (
-          <p>
-            지난달 Actual 인건비는 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.lastMonth.actualAmount)}원</span>,
-            오늘 기준 Actual 잔액은 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>입니다.{' '}
-            <span className="font-semibold text-rose-700">다음 달 Projection 인건비가 미작성이라 잔액 부족 여부를 확정할 수 없습니다.</span>
-          </p>
-        ) : (
-          <div className="space-y-1">
-            <p>
-              오늘 기준 Actual 잔액은 <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.current.balance)}원</span>입니다.
-              다음 인건비 <span className="font-semibold tabular-nums text-blue-700">{fmt(nextLaborAmount)}원</span> 반영 후 예상 잔액은{' '}
-              <span className="font-semibold tabular-nums text-blue-700">{fmt(laborRisk.labor.balanceAfterNextLabor)}원</span>이며, {minBalanceText}.
-            </p>
-            {laborChanged && (
-              <p className="font-semibold text-amber-700">
-                지난달 인건비는 {fmt(laborRisk.labor.lastMonth.actualAmount)}원인데 이번달 인건비는 {fmt(nextLaborAmount)}원이라서 확인 필요합니다.
-              </p>
+      <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
+        <div className="grid gap-2 md:grid-cols-3">
+          {renderRateTile('Projection', opsSummary.rates.projection)}
+          {renderRateTile('Actual', opsSummary.rates.actual)}
+          {renderRateTile('결산', opsSummary.rates.confirmation)}
+        </div>
+
+        <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
+              <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
+                {opsSummary.status.count}건
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {input.visibleInbox.length === 0 ? (
+              <div className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
+                <div className="flex h-4 items-center justify-center">
+                  <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass('success')}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
+                  <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
+                </div>
+              </div>
+            ) : input.visibleInbox.map((item) => (
+              <div key={item.id} className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
+                <div className="flex h-4 items-center justify-center">
+                  <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass(item.tone)}`}>{item.title}</div>
+                  <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">{item.detail}</div>
+                </div>
+              </div>
+            ))}
+            {input.hiddenInboxCount > 0 && (
+              <div className="px-2 py-1 text-[9px] font-semibold text-slate-500">
+                외 {input.hiddenInboxCount}건
+              </div>
             )}
           </div>
-        )}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-200 pt-1.5 text-[10px] text-slate-500">
-          <span>지난달: {laborRisk.labor.lastMonth.label}</span>
-          <span>현재 주차: {laborRisk.current.week?.label || '없음'}</span>
-          <span>다음 인건비 주차: {laborRisk.labor.nextProjection?.label || '없음'}</span>
-          <span>
-            다음 달 Projection: {laborRisk.labor.nextMonthProjection.label} ·{' '}
-            <span className={laborRisk.labor.nextMonthProjection.isWritten ? 'text-slate-600' : 'font-semibold text-rose-700'}>
-              {laborRisk.labor.nextMonthProjection.isWritten ? '작성됨' : '미작성'}
-            </span>
-          </span>
         </div>
-        {missingMonths.length > 0 && (
-          <div className="text-[11px] text-amber-700">
-            MYSC 인건비 Projection 미산입 월: {missingMonths.slice(0, 6).map((month) => month.label).join(', ')}
-            {missingMonths.length > 6 ? ` 외 ${missingMonths.length - 6}개월` : ''}
-          </div>
-        )}
       </div>
     );
   }
 
   function renderOperationsPanel() {
-    const compactStatusDetail = opsSummary.status.detail
-      .replace(' 항목이 있습니다.', ' 항목');
     const visibleInbox = opsSummary.inbox.slice(0, 4);
     const hiddenInboxCount = Math.max(0, opsSummary.status.count - visibleInbox.length);
-    const primaryReason = visibleInbox.find((item) => item.id === 'projection-actual-diff') || visibleInbox[0];
-    const remainingReasonCount = Math.max(0, opsSummary.status.count - 1);
     const statusBadgeLabel = opsSummary.status.kind === 'ready'
       ? opsSummary.status.label
       : `확인 항목 ${opsSummary.status.count}건`;
-    const statusReason = opsSummary.status.kind === 'ready'
-      ? '확인할 항목이 없습니다.'
-      : `${primaryReason?.title || '확인 항목을 확인해 주세요.'}${remainingReasonCount > 0 ? ` 외 ${remainingReasonCount}건` : ''}`;
+    const dashboardSummary = renderOperationsSummary({
+      hiddenInboxCount,
+      visibleInbox,
+    });
     return (
       <Card className="overflow-hidden rounded-[24px] border-0 bg-slate-50/80 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
         <CardContent className="space-y-3 p-4">
@@ -2398,6 +2302,8 @@ export function CashflowProjectSheet({
             </div>
           ) : null}
 
+          {dashboardSummary}
+
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
             <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -2495,77 +2401,6 @@ export function CashflowProjectSheet({
             </div>
           ) : null}
 
-          <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
-            <div className="grid gap-2 md:grid-cols-[210px_repeat(3,minmax(158px,1fr))]">
-              <div className="flex min-w-[190px] items-center gap-3 rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title={opsSummary.status.detail}>
-                {renderOpsStatusDonut()}
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold leading-3 text-slate-500">선택 월 기준</div>
-                  <div className={`mt-1 truncate text-[13px] font-bold leading-4 ${opsTextClass(opsSummary.status.tone)}`}>
-                    {statusBadgeLabel}
-                  </div>
-                  <div className="mt-1 max-h-8 overflow-hidden text-[10px] leading-4 text-slate-500">
-                    {statusReason}
-                  </div>
-                  <div className="mt-1 text-[9px] leading-3 text-slate-400">{compactStatusDetail} · 서버 검증</div>
-                </div>
-              </div>
-              {renderRateTile('Projection', opsSummary.rates.projection)}
-              {renderRateTile('Actual', opsSummary.rates.actual)}
-              {renderRateTile('사람 확인', opsSummary.rates.confirmation)}
-            </div>
-
-            <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
-              <div className="flex items-center justify-between gap-2 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
-                  <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-                    {opsSummary.status.count}건
-                  </div>
-                </div>
-              </div>
-              <div className="divide-y divide-slate-50">
-                {visibleInbox.length === 0 ? (
-                  <div className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
-                    <div className="flex h-4 items-center justify-center">
-                      <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass('success')}`} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
-                      <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
-                    </div>
-                  </div>
-                ) : visibleInbox.map((item) => (
-                  <div key={item.id} className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
-                    <div className="flex h-4 items-center justify-center">
-                      <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass(item.tone)}`}>{item.title}</div>
-                      <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">{item.detail}</div>
-                    </div>
-                  </div>
-                ))}
-                {hiddenInboxCount > 0 && (
-                  <div className="px-2 py-1 text-[9px] font-semibold text-slate-500">
-                    외 {hiddenInboxCount}건
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <div className="text-[11px] font-bold text-slate-900">
-              <HoverExplain message="저장된 주차 값을 읽어 현재 잔액과 다음 인건비를 계산합니다.">
-                인건비/잔액 체크
-              </HoverExplain>
-              </div>
-              <div className="shrink-0 text-[10px] font-medium text-slate-400">페이지 새로고침 시 자동 계산</div>
-            </div>
-            {renderLaborRiskCopy()}
-          </div>
         </CardContent>
       </Card>
     );
@@ -2824,21 +2659,6 @@ export function CashflowProjectSheet({
 
   return (
     <div className="space-y-5 rounded-[28px] bg-slate-50/80 p-3">
-      {cashflowSheetConfigLoaded && !cashflowSheetConfig ? (
-        <section className="flex flex-col gap-3 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-start gap-2">
-            <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-            <div>
-              <div className="text-[12px] font-bold">시트가 아직 연결되지 않았습니다.</div>
-              <div className="mt-1 text-[10px] leading-4 text-amber-800">시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 시트값을 가져오려면 먼저 연결 범위를 설정해 주세요.</div>
-            </div>
-          </div>
-          <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 rounded-full border-amber-300 bg-white px-3 text-[10px] text-amber-900" onClick={handleOpenSheetOnboarding}>
-            시트 연동 설정
-          </Button>
-        </section>
-      ) : null}
-
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
         {renderOpsTimeline()}

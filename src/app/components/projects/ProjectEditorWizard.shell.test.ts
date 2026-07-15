@@ -186,15 +186,18 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(contractDocumentPolicySource).toContain('교체 취소');
   });
 
-  it('renders registration v2 requirements and completed-project checkout without a new route', () => {
+  it('keeps the PPT registration attachment contract and completed-project checkout without a new route', () => {
     expect(portalRegisterSource).toContain('registrationRequirementsVersion: 2');
     expect(source).toContain("'customer_business_registration'");
-    expect(source).toContain("'proposal_word_original'");
-    expect(source).toContain("'proposal_ppt_original'");
-    expect(source).toContain("'presentation_ppt_original'");
+    expect(source).toContain("'proposal'");
     expect(source).toContain("'rfp_request_evidence'");
-    expect(source).toContain('미첨부 사유 / 해당 없음 *');
-    expect(source).toContain('등록 첨부 7종');
+    expect(source).toContain('제안서 PDF *');
+    expect(source).toContain('RFP 또는 요청 메일 증빙 (제안서가 없는 경우) *');
+    expect(source).toContain("if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument)");
+    expect(source).toContain('등록 필수 첨부');
+    expect(source).not.toContain('등록 첨부 7종');
+    expect(source).not.toContain("if (draft.settlementType === 'NONE') issues.push");
+    expect(source).not.toContain("if (draft.basis === 'NONE') issues.push");
     expect(source).toContain('발주처 사업자등록증 PDF');
     expect(source).toContain('연도별 계약·재무 *');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
