@@ -158,6 +158,12 @@ function controlRow({ matrix, row, weekColumns, issues }) {
     ? null
     : amounts.reduce((sum, amount) => sum + amount, 0);
   const value = readWholeWon(matrix, row.rowIndex, 66, issues, field, { allowEmpty: false });
+  const annualValues = new Map();
+  for (let index = 0; index < weekColumns.length; index += 1) {
+    const year = Number(String(weekColumns[index].yearMonth).slice(0, 4));
+    if (!Number.isSafeInteger(year)) continue;
+    annualValues.set(year, (annualValues.get(year) || 0) + (amounts[index] || 0));
+  }
   return {
     kind: row.kind,
     ...(row.lineId ? { lineId: row.lineId } : { derivedKind: row.derivedKind }),
@@ -165,7 +171,33 @@ function controlRow({ matrix, row, weekColumns, issues }) {
     value,
     computed,
     matches: value === null || computed === null ? false : value === computed,
+    annualValues: [...annualValues.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([year, annualValue]) => ({ year, value: annualValue })),
   };
+}
+
+function annualSheetFinancialTotals({ depositScheduleRows, projectionControls }) {
+  const years = new Set(depositScheduleRows.map((row) => Number(String(row.yearMonth).slice(0, 4))));
+  for (const control of projectionControls) {
+    for (const annualValue of control.annualValues || []) years.add(annualValue.year);
+  }
+  const annualValue = (lineId, year) => (
+    projectionControls.find((control) => control.lineId === lineId)?.annualValues
+      ?.find((value) => value.year === year)?.value || 0
+  );
+  return [...years]
+    .filter(Number.isSafeInteger)
+    .sort((left, right) => left - right)
+    .map((year) => ({
+      year,
+      contractAmount: depositScheduleRows
+        .filter((row) => Number(String(row.yearMonth).slice(0, 4)) === year)
+        .reduce((sum, row) => sum + (row.expectedDepositAmount || 0), 0),
+      salesVatAmount: annualValue('SALES_VAT_IN', year),
+      totalRevenueAmount: annualValue('MYSC_PROFIT_OUT', year),
+      supportAmount: annualValue('TEAM_SUPPORT_IN', year),
+    }));
 }
 
 export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
@@ -226,6 +258,9 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
     : depositValues.reduce((sum, amount) => sum + amount, 0);
   const depositValue = readWholeWon(matrix, 8, 66, issues, 'depositControl', { allowEmpty: false, nonNegative: true });
 
+  const projectionControls = modeControls('projection');
+  const actualControls = modeControls('actual');
+
   return {
     metadata: {
       lastUpdateText: { sourceCell: 'B1', value: matrixValue(matrix, 0, 1) },
@@ -234,6 +269,7 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
       settlementStatus: { sourceCell: 'B4', value: matrixValue(matrix, 3, 1) },
     },
     depositScheduleRows,
+    annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
     controlTotals: {
       deposit: {
         sourceCell: 'BO9',
@@ -245,8 +281,8 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
         sourceCell: 'BP9',
         value: readWholeWon(matrix, 8, 67, issues, 'unpaidControl'),
       },
-      projection: modeControls('projection'),
-      actual: modeControls('actual'),
+      projection: projectionControls,
+      actual: actualControls,
     },
     issues,
   };

@@ -121,14 +121,23 @@ describe('cashflow sheet pinned snapshot', () => {
           expectedDepositAmount: `${String.fromCharCode(68 + weekIndex)}9`,
         },
       })),
+      annualFinancialTotals: [{
+        year: 2026,
+        contractAmount: 15000,
+        salesVatAmount: 0,
+        totalRevenueAmount: 0,
+        supportAmount: 0,
+      }],
       controlTotals: {
         deposit: { sourceCell: 'BO9', value: 15000, computed: 15000, matches: true },
         unpaid: { sourceCell: 'BP9', value: 85000 },
         projection: [{
           kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO14', value: 150, computed: 150, matches: true,
+          annualValues: [{ year: 2026, value: 150 }],
         }],
         actual: [{
           kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO37', value: 75, computed: 75, matches: true,
+          annualValues: [{ year: 2026, value: 75 }],
         }],
       },
       issues: [],
@@ -159,6 +168,50 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(facts.depositScheduleRows[1].expectedDepositAmount).toBeNull();
     expect(facts.controlTotals.deposit).toMatchObject({ computed: 1000, value: 1000, matches: true });
     expect(facts.controlTotals.projection[0]).toMatchObject({ computed: 100, value: 100, matches: true });
+  });
+
+  it('groups sheet finance checks by calendar year using the registered cashflow lines', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+    const weekColumns = [
+      { yearMonth: '2025-12', weekNo: 5, columnIndex: 3 },
+      { yearMonth: '2026-01', weekNo: 1, columnIndex: 4 },
+    ];
+    matrix[8][3] = '100';
+    matrix[8][4] = '200';
+    matrix[8][66] = '300';
+    matrix[13][3] = '10';
+    matrix[13][4] = '20';
+    matrix[13][66] = '30';
+    matrix[14][3] = '30';
+    matrix[14][4] = '40';
+    matrix[14][66] = '70';
+    matrix[15][3] = '50';
+    matrix[15][4] = '60';
+    matrix[15][66] = '110';
+
+    const facts = extractCashflowSheetFacts({
+      matrix,
+      template: {
+        sections: [
+          {
+            mode: 'projection',
+            weekColumns,
+            lineRows: [
+              { rowIndex: 13, lineId: 'SALES_VAT_IN' },
+              { rowIndex: 14, lineId: 'MYSC_PROFIT_OUT' },
+              { rowIndex: 15, lineId: 'TEAM_SUPPORT_IN' },
+            ],
+            derivedRows: [],
+          },
+          { mode: 'actual', weekColumns, lineRows: [], derivedRows: [] },
+        ],
+      },
+    });
+
+    expect(facts.annualFinancialTotals).toEqual([
+      { year: 2025, contractAmount: 100, salesVatAmount: 10, totalRevenueAmount: 30, supportAmount: 50 },
+      { year: 2026, contractAmount: 200, salesVatAmount: 20, totalRevenueAmount: 40, supportAmount: 60 },
+    ]);
   });
 
   it('computes the same target revision regardless of Firestore map and week order', () => {

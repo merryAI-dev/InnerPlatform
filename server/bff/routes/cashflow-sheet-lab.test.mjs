@@ -256,6 +256,42 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
   });
 
+  it('compares a pinned multi-year sheet total with registered financial years', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        financialYears: [
+          { year: 2025, contractAmount: 100, salesVatAmount: 10, totalRevenueAmount: 20, supportAmount: 30 },
+          { year: 2026, contractAmount: 200, salesVatAmount: 20, totalRevenueAmount: 40, supportAmount: 60 },
+        ],
+      },
+      initialDocuments: {
+        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
+          projectId: 'project-a',
+          status: 'FRESH',
+          sheetFacts: {
+            annualFinancialTotals: [
+              { year: 2025, contractAmount: 100, salesVatAmount: 10, totalRevenueAmount: 20, supportAmount: 30 },
+              { year: 2026, contractAmount: 200, salesVatAmount: 21, totalRevenueAmount: 40, supportAmount: 60 },
+            ],
+          },
+        },
+      },
+    });
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+
+    expect(response.body.financialYearChecks).toMatchObject({
+      years: [
+        { year: 2025, status: 'MATCH', mismatches: [] },
+        { year: 2026, status: 'MISMATCH', mismatches: ['salesVatAmount'] },
+      ],
+      total: { status: 'MISMATCH', mismatches: ['salesVatAmount'] },
+    });
+  });
+
   it('keeps the last-good mirror as STALE when an explicit refresh fails', async () => {
     const db = createDb({
       project: {

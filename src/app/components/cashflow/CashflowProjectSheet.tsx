@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
-import { ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, Pencil, RefreshCw, Save } from 'lucide-react';
+import { ArrowDownToLine, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, ClipboardList, Columns2, FileSpreadsheet, Loader2, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useBlocker, useNavigate } from 'react-router';
 import { Button } from '../ui/button';
@@ -83,6 +83,13 @@ function fmtSigned(n: number): string {
   if (n === 0) return '0';
   return `${n > 0 ? '+' : '-'}${Math.abs(n).toLocaleString('ko-KR')}`;
 }
+
+const FINANCIAL_YEAR_CHECK_FIELDS = [
+  { key: 'contractAmount', label: '입금예정' },
+  { key: 'salesVatAmount', label: '매출 부가세' },
+  { key: 'totalRevenueAmount', label: 'MYSC 수익' },
+  { key: 'supportAmount', label: '팀지원금' },
+] as const;
 
 function formatSheetAppliedAt(value?: string): string {
   if (!value) return '';
@@ -1429,6 +1436,18 @@ export function CashflowProjectSheet({
     return editingWeekModes[resolveWeekKey(params)] === true;
   }
 
+  const openProjectionWeekEditing = useCallback(async (targetYearMonth: string, weekNo: number) => {
+    if (!cashflowLease.canEdit) {
+      const started = await beginCashflowEditing();
+      if (!started) return;
+    }
+    setShowEmptyCashflowRows(true);
+    setEditingWeekModes((current) => ({
+      ...current,
+      [resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })]: true,
+    }));
+  }, [beginCashflowEditing, cashflowLease.canEdit]);
+
   function getWeekLabel(weekNo: number, targetYearMonth = yearMonth): string {
     return annualWeeks.find((week) => week.yearMonth === targetYearMonth && week.weekNo === weekNo)?.label
       || monthWeeks.find((week) => week.weekNo === weekNo)?.label
@@ -1610,7 +1629,15 @@ export function CashflowProjectSheet({
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
+          <button
+            type="button"
+            className="w-full py-0.5 text-center text-[9px] text-slate-300"
+            onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
+            disabled={!canUseCashflowActions || cashflowLease.busy || monthCloseResult?.status !== 'OPEN'}
+            aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
+          >
+            -
+          </button>
         ) : isEditing ? (
           <Input
             value={projectionValue}
@@ -1625,9 +1652,15 @@ export function CashflowProjectSheet({
             }}
           />
         ) : (
-          <div className={`h-5 rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
+          <button
+            type="button"
+            className={`h-5 w-full rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}
+            onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
+            disabled={!canUseCashflowActions || cashflowLease.busy || monthCloseResult?.status !== 'OPEN'}
+            aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
+          >
             {fmt(projection)}
-          </div>
+          </button>
         )}
       </td>
     );
@@ -1730,22 +1763,6 @@ export function CashflowProjectSheet({
     const boardIsEditing = visibleWeeks.some((week) => (
       isWeekModeEditing({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })
     ));
-    const setBoardEditing = (editing: boolean) => {
-      setShowEmptyCashflowRows((current) => (editing ? true : current));
-      setEditingWeekModes((current) => {
-        const next = { ...current };
-        for (const week of visibleWeeks) {
-          next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] = editing;
-          next[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo })] = false;
-        }
-        return next;
-      });
-    };
-    const startBoardEditing = () => {
-      void beginCashflowEditing().then((started) => {
-        if (started) setBoardEditing(true);
-      });
-    };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
       if (!container) return;
@@ -1870,8 +1887,7 @@ export function CashflowProjectSheet({
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">캐시플로 진단시트</div>
-              <div className="mt-1 text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel} · 서버 확정 원장 합계 · Projection 입력 / Actual 조회</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">현금흐름 관리시트</div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <label className="flex items-center gap-1 text-[10px] font-semibold text-slate-600">
@@ -1886,10 +1902,6 @@ export function CashflowProjectSheet({
               <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
-              <Button type="button" size="sm" variant={boardIsEditing ? 'default' : 'outline'} className="h-8 rounded-full px-3 text-[11px] shadow-sm" onClick={startBoardEditing} disabled={!canUseCashflowActions || boardIsEditing || cashflowLease.busy || !cashflowLease.sessionId}>
-                {cashflowLease.busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Pencil className="mr-1 h-3 w-3" />}
-                수정 시작
-              </Button>
               <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => void savePrivateCashflowDraft().then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.')).catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')))} disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}>
                 <Save className="mr-1 h-3 w-3" />
                 임시저장
@@ -1918,6 +1930,38 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
           </div>
+          {financialYearChecks?.years.length ? (
+            <div className="grid gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[...financialYearChecks.years.map((check) => ({ ...check, label: `${check.year}년` })), { ...financialYearChecks.total, label: '전체' }].map((check) => (
+                <div key={check.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-900">{check.label}</span>
+                    <span className={`text-[9px] font-semibold ${check.status === 'MATCH' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {check.status === 'MATCH' ? '등록값과 일치' : check.status === 'SHEET_YEAR_MISSING' ? '시트 연도값 없음' : '확인 필요'}
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {FINANCIAL_YEAR_CHECK_FIELDS.map((field) => {
+                      const differs = check.mismatches.includes(field.key);
+                      return (
+                        <div key={field.key} className={`flex items-center justify-between gap-2 text-[9px] ${differs ? 'text-amber-700' : 'text-slate-500'}`}>
+                          <span>{field.label}</span>
+                          <span className="text-right tabular-nums">시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {check.status === 'MISMATCH' ? (
+                    <p className="mt-2 text-[9px] leading-4 text-amber-700">
+                      {FINANCIAL_YEAR_CHECK_FIELDS.filter((field) => check.mismatches.includes(field.key)).map((field) => field.label).join(', ')} 값이 시트와 다릅니다.
+                    </p>
+                  ) : check.status === 'SHEET_YEAR_MISSING' ? (
+                    <p className="mt-2 text-[9px] leading-4 text-amber-700">이 연도의 시트 주차와 값을 확인해 주세요.</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="relative bg-slate-50/80 px-4 pb-4">
             <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
@@ -2547,6 +2591,9 @@ export function CashflowProjectSheet({
       : 'bg-amber-100 text-amber-800';
   const sheetDashboardMetadata = cashflowSheetMirror?.status === 'FRESH'
     ? cashflowSheetMirror.sheetFacts?.metadata
+    : undefined;
+  const financialYearChecks = cashflowSheetMirror?.status === 'FRESH'
+    ? cashflowSheetMirror.financialYearChecks
     : undefined;
   const hasSheetDepositSchedule = (cashflowSheetMirror?.status === 'FRESH'
     ? cashflowSheetMirror.sheetFacts?.depositScheduleRows

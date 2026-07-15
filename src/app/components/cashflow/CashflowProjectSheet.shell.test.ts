@@ -152,6 +152,17 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('재오픈 요청');
   });
 
+  it('opens only the selected Projection week and keeps multi-year sheet checks visible', () => {
+    expect(source).toContain('현금흐름 관리시트');
+    expect(source).not.toContain('캐시플로 진단시트');
+    expect(source).not.toContain('수정 시작');
+    expect(source).not.toContain('서버 확정 원장 합계');
+    expect(source).toContain('openProjectionWeekEditing');
+    expect(source).toContain('financialYearChecks?.years.length');
+    expect(source).toContain('시트 연도값 없음');
+    expect(source).toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
+  });
+
   it('offers the exact three in-app exit choices and releases only on exit', () => {
     expect(source).toContain('임시저장 후 종료');
     expect(source).toContain('저장하지 않고 종료');
