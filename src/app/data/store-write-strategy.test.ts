@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { resolveAppWriteStrategy } from './store-write-strategy';
 
 describe('resolveAppWriteStrategy', () => {
-  it('prefers BFF writes without Firestore fallback when the platform API is enabled', () => {
+  it('prefers BFF writes and mirrors the confirmed result without a realtime listener', () => {
     expect(resolveAppWriteStrategy(true, true)).toEqual({
       target: 'bff',
-      mirrorRemoteWritesLocally: false,
+      mirrorRemoteWritesLocally: true,
     });
   });
 

@@ -11,7 +11,7 @@ import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { useAppStore } from '../../data/store';
 import { computeMemberSummaries } from '../../data/participation-data';
-import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
+import { useOptionalCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { findWeekForDate, getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
@@ -31,7 +31,7 @@ interface NotifItem {
 export function NotificationPanel() {
   const navigate = useNavigate();
   const { transactions, projects, participationEntries } = useAppStore();
-  const { weeks: cashflowWeeks } = useCashflowWeeks();
+  const cashflowWeeks = useOptionalCashflowWeeks()?.weeks ?? [];
   const [open, setOpen] = useState(false);
   const [labEnabled] = useShellLabEnabled();
   const fmtAmount = (value?: number | null) =>

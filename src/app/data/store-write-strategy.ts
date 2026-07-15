@@ -12,7 +12,7 @@ export function resolveAppWriteStrategy(
   if (platformApiEnabled) {
     return {
       target: 'bff',
-      mirrorRemoteWritesLocally: !firestoreEnabled,
+      mirrorRemoteWritesLocally: true,
     };
   }
 

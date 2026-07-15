@@ -1,6 +1,7 @@
 import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
+  Project,
   ProjectExecutiveReviewStatus,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
@@ -1317,6 +1318,35 @@ export function createPlatformApiClient(
     retryDelayMs: 200,
     timeoutMs: 4000,
   });
+}
+
+export async function fetchProjectsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<Project[]> {
+  const apiClient = resolveClient(params.client);
+  const projects: Project[] = [];
+  const seenCursors = new Set<string>();
+  let cursor = '';
+
+  for (;;) {
+    const response = await apiClient.get<{ items: Project[]; nextCursor: string | null }>(
+      `/api/v1/projects?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      {
+        tenantId: params.tenantId,
+        actor: toRequestActor(params.actor),
+        timeoutMs: 10000,
+      },
+    );
+    if (Array.isArray(response.data?.items)) {
+      projects.push(...response.data.items);
+    }
+    const nextCursor = typeof response.data?.nextCursor === 'string' ? response.data.nextCursor : '';
+    if (!nextCursor || seenCursors.has(nextCursor)) return projects;
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
 }
 
 function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {

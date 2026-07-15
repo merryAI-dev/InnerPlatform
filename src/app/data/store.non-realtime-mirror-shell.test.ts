@@ -14,11 +14,15 @@ function extractFunction(name: string, nextName: string): string {
 
 describe('non-realtime store write mirroring', () => {
   it('uses one-shot reads for admin-wide high-volume collections', () => {
+    expect(source).toContain("readOrgCollection(db, orgId, 'members')");
+    expect(source).toContain("readOrgCollection(db, orgId, 'projects')");
     expect(source).toContain("readOrgCollection(db, orgId, 'ledgers')");
     expect(source).toContain("readOrgCollection(db, orgId, 'transactions')");
     expect(source).toContain("readOrgCollection(db, orgId, 'comments')");
     expect(source).toContain("readOrgCollection(db, orgId, 'evidences')");
     expect(source).toContain("readOrgCollection(db, orgId, 'partEntries')");
+    expect(source).not.toContain('listenMembers');
+    expect(source).not.toContain('listenProjects');
   });
 
   it('mirrors remote writes for collections that no longer have live listeners', () => {

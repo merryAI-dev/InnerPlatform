@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useAppStore, AppProvider } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
-import { useHrAnnouncements } from '../../data/hr-announcements-store';
+import { useOptionalHrAnnouncements } from '../../data/hr-announcements-store';
 import { FirebaseStatusBadge } from '../settings/FirebaseSetup';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -33,7 +33,7 @@ import { MyscWordmark } from '../brand/MyscWordmark';
 function AppLayoutContent() {
   const { currentUser, transactions, participationEntries, dataSource } = useAppStore();
   const { isAuthenticated, isLoading: authLoading, user: authUser, logout, setWorkspacePreference } = useAuth();
-  const { getAllPendingCount: getHrPendingCount } = useHrAnnouncements();
+  const hrAnnouncements = useOptionalHrAnnouncements();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [labEnabled, setLabEnabled] = useState(() => readShellLabEnabled());
@@ -166,7 +166,7 @@ function AppLayoutContent() {
     if (to === '/evidence' && missingEvidenceCount > 0) return missingEvidenceCount;
     if (to === '/participation' && participationDangerCount > 0) return participationDangerCount;
     if (to === '/hr-announcements') {
-      const hrCount = getHrPendingCount();
+      const hrCount = hrAnnouncements?.getAllPendingCount() ?? 0;
       return hrCount > 0 ? hrCount : null;
     }
     return null;
@@ -385,7 +385,7 @@ function AppLayoutContent() {
               {dataSource === 'firestore' ? (
                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/60 dark:border-emerald-800/40 rounded-full px-2 py-0.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  실시간
+                  서버 연결
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted border border-border/60 rounded-full px-2 py-0.5">

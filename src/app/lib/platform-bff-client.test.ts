@@ -7,6 +7,7 @@ import {
   changeTransactionStateViaBff,
   deepSyncAuthGovernanceUserViaBff,
   fetchAuthGovernanceUsersViaBff,
+  fetchProjectsViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
   reviewProjectExecutiveStatusViaBff,
@@ -458,6 +459,30 @@ describe('platform-bff-client', () => {
       body: { id: 'p001', name: 'Project 1' },
     }));
     expect(result.version).toBe(1);
+  });
+
+  it('reads all project pages through the BFF without opening a realtime listener', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi
+        .fn()
+        .mockResolvedValueOnce({ data: { items: [{ id: 'p001', name: 'Project 1' }], nextCursor: 'page-2' } })
+        .mockResolvedValueOnce({ data: { items: [{ id: 'p002', name: 'Project 2' }], nextCursor: null } }),
+      request: vi.fn(),
+    });
+
+    const result = await fetchProjectsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'admin', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(result.map((project) => project.id)).toEqual(['p001', 'p002']);
+    expect(client.get).toHaveBeenNthCalledWith(1, '/api/v1/projects?limit=200', expect.objectContaining({
+      tenantId: 'mysc',
+      timeoutMs: 10000,
+    }));
+    expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/projects?limit=200&cursor=page-2', expect.any(Object));
   });
 
   it('calls project trash and restore endpoints', async () => {

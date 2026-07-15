@@ -31,7 +31,7 @@ vi.mock('./training-store', () => ({
   TrainingProvider: PassthroughProvider,
 }));
 
-import { AdminRouteProviders } from './admin-route-providers';
+import { AdminRouteProviderFrame, AdminRouteProviders } from './admin-route-providers';
 import { PortalRouteProviderFrame, PortalRouteProviders, resolvePortalProviderScope } from './portal-route-providers';
 
 function PolicyProbe({ role }: { role: string }) {
@@ -47,13 +47,11 @@ function PolicyProbe({ role }: { role: string }) {
 }
 
 function readPolicy(wrapper: typeof AdminRouteProviders | typeof PortalRouteProviders, role: string) {
-  const markup = renderToStaticMarkup(
-    React.createElement(
-      wrapper === PortalRouteProviders ? PortalRouteProviderFrame : wrapper,
-      wrapper === PortalRouteProviders ? { pathname: '/portal/cashflow' } : null,
-      React.createElement(PolicyProbe, { role }),
-    ),
-  );
+  const probe = React.createElement(PolicyProbe, { role });
+  const tree = wrapper === PortalRouteProviders
+    ? React.createElement(PortalRouteProviderFrame, { pathname: '/portal/cashflow', children: probe })
+    : React.createElement(AdminRouteProviderFrame, { pathname: '/projects', children: probe });
+  const markup = renderToStaticMarkup(tree);
 
   const match = markup.match(/<pre id="policy">([^<]+)<\/pre>/);
   expect(match?.[1]).toBeTruthy();

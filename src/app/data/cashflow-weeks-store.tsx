@@ -555,3 +555,7 @@ export function useCashflowWeeks() {
   if (!ctx) throw new Error('useCashflowWeeks must be used within CashflowWeekProvider');
   return ctx;
 }
+
+export function useOptionalCashflowWeeks() {
+  return useContext(CashflowWeekContext);
+}
