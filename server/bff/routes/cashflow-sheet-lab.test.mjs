@@ -1567,9 +1567,13 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({
         expectedMirrorRevision: mirror.body.sourceRevision,
+        yearMonth: '2026-01',
+        replaceAllActualSources: true,
         idempotencyKey: 'stage-apply-001',
       })
       .expect(200);
+
+    expect(stage.body.replaceAllActualSources).toBe(true);
 
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
@@ -1594,6 +1598,7 @@ describe('cashflow sheet lab route', () => {
       sourceRevision: mirror.body.sourceRevision,
       targetRevision: mirror.body.targetRevisionAtFetch,
       yearMonth: '2026-01',
+      replaceAllActualSources: true,
       cells: expect.arrayContaining([
         expect.objectContaining({
           mode: 'projection',

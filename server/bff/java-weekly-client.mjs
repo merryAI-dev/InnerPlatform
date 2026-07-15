@@ -205,6 +205,7 @@ export function createJavaWeeklyClient({
     targetRevision,
     yearMonth,
     cells,
+    replaceAllActualSources = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -241,6 +242,7 @@ export function createJavaWeeklyClient({
         targetRevision,
         yearMonth,
         cells,
+        replaceAllActualSources: replaceAllActualSources === true,
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {

@@ -680,6 +680,27 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String targetRevision,
         List<CashflowSheetLabApplyRequest.Cell> cells
     ) {
+        return replaceCashflowSheetMonth(
+            tenantId,
+            projectId,
+            sourceSheetKey,
+            yearMonth,
+            targetRevision,
+            cells,
+            false
+        );
+    }
+
+    @Override
+    public CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        boolean replaceAllActualSources
+    ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
         cells = CashflowSheetLabApplyRequest.requireCompleteMonth(cells);
         requireCashflowMonthsOpen(tenantId, projectId, List.of(yearMonth));
@@ -775,7 +796,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 sourceSheetKey,
                 existing,
                 actualDeltas,
-                now
+                now,
+                replaceAllActualSources
             ));
             replacements.put(docId, replacement);
         }

@@ -894,7 +894,7 @@ async function readCashflowSheetStageMonth({ db, tenantId, projectId, runId, yea
   return value;
 }
 
-function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, context, now }) {
+function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, context, now, forceFullReplacement = false }) {
   const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
   const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
   const blockedMonths = new Set((mirror?.cells || [])
@@ -931,7 +931,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       const beforeAmount = beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null;
       const proposedHadValue = cell.state === 'VALUE';
       const proposedAmount = proposedHadValue ? normalizeAppliedAmount(cell.amount) : null;
-      if (beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
+      if (!forceFullReplacement && beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
 
       const week = weekIndex.get(`${cell.yearMonth}:${cell.weekNo}`);
       const riskFlags = week?.adminClosed ? ['closed_week_change'] : [];
@@ -1123,7 +1123,12 @@ async function applyStagedCashflowSheetLab({
   }
 
   let stageRun = await readCashflowSheetStageRun(db, tenantId, projectId, stagedRunId);
-  const applyRequestHash = stableHash({ stagedRunId, applyRiskCandidates: Boolean(parsed.applyRiskCandidates) });
+  const replaceAllActualSources = stageRun.replaceAllActualSources === true;
+  const applyRequestHash = stableHash({
+    stagedRunId,
+    applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
+    ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
+  });
   if (readOptionalText(stageRun.status) === 'APPLIED') {
     assertApplyRequestMatches(stageRun, applyRequestHash);
     if (stageRun.applyResponse) return stageRun.applyResponse;
@@ -1242,6 +1247,7 @@ async function applyStagedCashflowSheetLab({
         targetRevision,
         yearMonth: month.yearMonth,
         cells: month.cells,
+        replaceAllActualSources,
       });
       targetRevision = assertResultingTargetRevision(javaResult);
       javaResults.push(javaResult);
@@ -1334,8 +1340,14 @@ async function stagePinnedCashflowSheetLab({
   logger('start', {
     projectId,
     expectedMirrorRevision: parsed.expectedMirrorRevision,
+    yearMonth: parsed.yearMonth || null,
+    replaceAllActualSources: Boolean(parsed.replaceAllActualSources),
   });
-  const requestHash = stableHash({ expectedMirrorRevision: parsed.expectedMirrorRevision });
+  const requestHash = stableHash({
+    expectedMirrorRevision: parsed.expectedMirrorRevision,
+    ...(parsed.yearMonth ? { yearMonth: parsed.yearMonth } : {}),
+    ...(parsed.replaceAllActualSources ? { replaceAllActualSources: true } : {}),
+  });
   const runId = `cfstage_${stableHash({ tenantId, projectId, idempotencyKey: parsed.idempotencyKey }).slice(0, 32)}`;
   const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${runId}`);
   const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
@@ -1358,7 +1370,10 @@ async function stagePinnedCashflowSheetLab({
     }
   }
 
-  const pinnedMonths = [...groupPinnedCellsByMonth(mirror.cells || []).keys()].sort();
+  const pinnedCells = parsed.yearMonth
+    ? (mirror.cells || []).filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth)
+    : (mirror.cells || []);
+  const pinnedMonths = [...groupPinnedCellsByMonth(pinnedCells).keys()].sort();
   if (pinnedMonths.length !== 1) {
     throw createHttpError(
       409,
@@ -1377,14 +1392,15 @@ async function stagePinnedCashflowSheetLab({
     tenantId,
     projectId,
     runId,
-    mirror,
+    mirror: { ...mirror, cells: pinnedCells },
     cashflowSnapshot,
     context,
     now,
+    forceFullReplacement: Boolean(parsed.replaceAllActualSources),
   });
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
   const actualLineCount = candidates.filter((candidate) => candidate.mode === 'actual').length;
-  const cellsByMonth = groupPinnedCellsByMonth(mirror.cells || []);
+  const cellsByMonth = groupPinnedCellsByMonth(pinnedCells);
   const stagedMonths = [...new Set(candidates.map((candidate) => candidate.yearMonth))].sort();
   const stagedMonthDocuments = stagedMonths.map((yearMonth) => {
     const validated = validateCompletePinnedMonth(yearMonth, cellsByMonth.get(yearMonth) || []);
@@ -1416,6 +1432,7 @@ async function stagePinnedCashflowSheetLab({
     configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
+    replaceAllActualSources: Boolean(parsed.replaceAllActualSources),
     activeWeekRange: mirror.activeWeekRange,
     runId,
     status: blockedMonths.length > 0 ? 'BLOCKED' : 'READY',
@@ -1443,6 +1460,7 @@ async function stagePinnedCashflowSheetLab({
     configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
+    replaceAllActualSources: Boolean(parsed.replaceAllActualSources),
     status: response.status,
     stagedLineCount: candidates.length,
     blockedMonths,
