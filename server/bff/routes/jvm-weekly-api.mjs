@@ -403,21 +403,58 @@ function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells) {
   ));
 }
 
+function cashflowCellKey(yearMonth, cell) {
+  return `${yearMonth}:${cell.mode}:${cell.weekNo}:${cell.cashflowLine}`;
+}
+
+function canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells) {
+  const byKey = new Map();
+  for (const sourceCell of Array.isArray(pinnedSheetCells) ? pinnedSheetCells : []) {
+    const source = objectValue(sourceCell);
+    const sourceYearMonth = readOptionalText(source?.yearMonth);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(sourceYearMonth)) continue;
+    const cell = normalizeMonthCloseCell(source, sourceYearMonth);
+    if (cell) byKey.set(cashflowCellKey(sourceYearMonth, cell), cell);
+  }
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    if (cell) byKey.set(cashflowCellKey(yearMonth, cell), cell);
+  }
+  return byKey;
+}
+
 function managementCheck(id, status, title, detail) {
   return { id, status, title, detail };
 }
 
-function laborTransferCheck(weeks, yearMonth, asOfKey) {
-  const monthWeeks = weeks.filter((week) => week.yearMonth === yearMonth);
-  const week = monthWeeks.find((candidate) => candidate.weekNo === 3);
-  const projectionOk = safeAmount(week?.projection?.MYSC_LABOR_OUT) > 0;
+function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
   const actualDue = cashflowRangeSortKey({ yearMonth, weekNo: 3 }) <= asOfKey;
-  const actualOk = !actualDue || safeAmount(week?.actual?.MYSC_LABOR_OUT) > 0;
+  if (!actualDue) {
+    return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '3주차 도래 전입니다. Projection 인건비 입력을 준비해 주세요.');
+  }
+  const projection = cellStates.get(`${yearMonth}:projection:3:MYSC_LABOR_OUT`);
+  if (!projection || projection.cellState === 'EMPTY') {
+    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · Projection 인건비 미기입`);
+  }
+  const plannedAmount = safeAmount(projection.amount);
+  if (plannedAmount === 0) {
+    return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', `${yearMonth} 3주차 · Projection 0원 입력 · 이관 대상 없음 확인 필요`);
+  }
+  const actual = cellStates.get(`${yearMonth}:actual:3:MYSC_LABOR_OUT`);
+  if (!actual || actual.cellState === 'EMPTY') {
+    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · Actual 인건비 미기입`);
+  }
+  const actualAmount = safeAmount(actual.amount);
+  if (actualAmount === 0) {
+    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 0원 · 실제 미이관`);
+  }
+  if (actualAmount < plannedAmount) {
+    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 ${actualAmount.toLocaleString('ko-KR')}원 · 일부 이관`);
+  }
   return managementCheck(
     'labor-transfer',
-    projectionOk && actualOk ? 'OK' : 'WARNING',
+    'OK',
     'MYSC 인건비 이관',
-    `3주차 Projection ${projectionOk ? '정상' : '미이관'} · Actual ${actualDue ? (actualOk ? '정상' : '미이관') : '기한 전'}`,
+    `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 ${actualAmount.toLocaleString('ko-KR')}원 · 이관 완료`,
   );
 }
 
@@ -494,10 +531,11 @@ function futurePrepayCheck(weeks, asOfKey) {
 
 export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells }) {
   const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells);
+  const cellStates = canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells);
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
   const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({ ...row, yearMonth }));
   return [
-    laborTransferCheck(weeks, yearMonth, asOfKey),
+    laborTransferCheck(weeks, cellStates, yearMonth, asOfKey),
     profitVatAfterDepositCheck(weeks, deposits, asOfKey),
     negativeProjectionCheck(weeks),
     futurePrepayCheck(weeks, asOfKey),
