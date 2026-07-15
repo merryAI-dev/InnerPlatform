@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import type {
   Project,
   Ledger,
@@ -31,8 +31,6 @@ import { useFirebase } from '../lib/firebase-context';
 import { featureFlags } from '../config/feature-flags';
 import { useAuth } from './auth-store';
 import {
-  listenMembers,
-  listenProjects,
   readOrgCollection,
   addPartEntry,
   updatePartEntry,
@@ -50,6 +48,7 @@ import {
   addCommentViaBff,
   addEvidenceViaBff,
   changeTransactionStateViaBff,
+  fetchProjectsViaBff,
   restoreProjectViaBff,
   trashProjectViaBff,
   upsertLedgerViaBff,
@@ -59,7 +58,6 @@ import {
 } from '../lib/platform-bff-client';
 import { reportError } from '../platform/observability';
 import { normalizeProjectRevenueFields } from '../platform/project-financials';
-import type { Unsubscribe } from 'firebase/firestore';
 
 interface EtlStagingUiPayload {
   projects?: Project[];
@@ -172,8 +170,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
 
-  const unsubsRef = useRef<Unsubscribe[]>([]);
-
   const currentUser = useMemo<OrgMember>(() => {
     if (!authUser) return CURRENT_USER;
     return {
@@ -252,8 +248,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [authUser, currentUser, dataSource, localMembers]);
 
   useEffect(() => {
-    unsubsRef.current.forEach((unsub) => unsub());
-    unsubsRef.current = [];
     let cancelled = false;
 
     if (!firestoreEnabled || !db) {
@@ -274,15 +268,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDataSource('firestore');
     setLocalMembers([]);
 
-    unsubsRef.current.push(
-      listenMembers(db, orgId, (items) => setLocalMembers(items as Array<OrgMember & Record<string, unknown>>)),
-    );
-
-    unsubsRef.current.push(
-      listenProjects(db, orgId, (projs) => setProjects(projs as Project[])),
-    );
+    const projectsRequest = platformApiEnabled && bffActor.idToken
+      ? fetchProjectsViaBff({ tenantId: orgId, actor: bffActor }).catch((error) => {
+          reportError(error, {
+            message: '[AppStore] BFF project fetch failed; falling back to Firestore:',
+            options: {
+              level: 'warning',
+              tags: { surface: 'app_store', action: 'project_fetch_fallback' },
+              extra: { orgId },
+            },
+          });
+          return readOrgCollection(db, orgId, 'projects') as Promise<Project[]>;
+        })
+      : readOrgCollection(db, orgId, 'projects');
 
     Promise.all([
+      readOrgCollection(db, orgId, 'members'),
+      projectsRequest,
       readOrgCollection(db, orgId, 'ledgers'),
       readOrgCollection(db, orgId, 'transactions'),
       readOrgCollection(db, orgId, 'comments'),
@@ -290,6 +292,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       readOrgCollection(db, orgId, 'auditLogs'),
       readOrgCollection(db, orgId, 'partEntries'),
     ]).then(([
+      nextMembers,
+      nextProjects,
       nextLedgers,
       nextTransactions,
       nextComments,
@@ -298,6 +302,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       nextParticipationEntries,
     ]) => {
       if (cancelled) return;
+      setLocalMembers(nextMembers as Array<OrgMember & Record<string, unknown>>);
+      setProjects(nextProjects as Project[]);
       setLedgers(nextLedgers as Ledger[]);
       setTransactions(nextTransactions as Transaction[]);
       setComments(nextComments as Comment[]);
@@ -322,10 +328,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
-      unsubsRef.current.forEach((unsub) => unsub());
-      unsubsRef.current = [];
     };
-  }, [firestoreEnabled, db, orgId, usesLocalSeedData]);
+  }, [firestoreEnabled, db, orgId, usesLocalSeedData, platformApiEnabled, bffActor]);
 
   useEffect(() => {
     if (firestoreEnabled || !featureFlags.etlStagingLocalEnabled) return;
@@ -380,13 +384,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
 
         if (writeStrategy.mirrorRemoteWritesLocally) {
-          setProjects((prev) => [...prev, mergeProjectMutationResult(normalizedProject, result)]);
+          setProjects((prev) => upsertLocalItem(prev, mergeProjectMutationResult(normalizedProject, result)));
         }
         return;
       }
 
       if (writeStrategy.target === 'firestore' && db) {
         await upsertProject(db, orgId, normalizedProject, auditActor);
+        setProjects((prev) => upsertLocalItem(prev, normalizedProject));
         return;
       }
 
@@ -398,7 +403,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await runStoreMutation('upsertMember', async () => {
       if (firestoreEnabled && db) {
         await upsertMemberFS(db, orgId, member, auditActor);
-        return;
       }
       setLocalMembers((prev) => {
         const idx = prev.findIndex((m) => m.uid === member.uid);
@@ -414,7 +418,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await runStoreMutation('removeMember', async () => {
       if (firestoreEnabled && db) {
         await deleteMemberFS(db, orgId, uid, auditActor);
-        return;
       }
       setLocalMembers((prev) => prev.filter((m) => m.uid !== uid));
     });
@@ -449,7 +452,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (writeStrategy.target === 'firestore' && db) {
         const existing = projects.find((project) => project.id === id);
         if (existing) {
-          await upsertProject(db, orgId, normalizeProjectRevenueFields({ ...existing, ...updates } as Project, 'totalRevenueAmount'), auditActor);
+          const merged = normalizeProjectRevenueFields({ ...existing, ...updates } as Project, 'totalRevenueAmount');
+          await upsertProject(db, orgId, merged, auditActor);
+          setProjects((prev) => upsertLocalItem(prev, merged));
         }
         return;
       }

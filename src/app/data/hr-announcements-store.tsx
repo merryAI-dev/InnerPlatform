@@ -380,3 +380,7 @@ export function useHrAnnouncements() {
   if (!ctx) throw new Error('useHrAnnouncements must be inside HrAnnouncementProvider');
   return ctx;
 }
+
+export function useOptionalHrAnnouncements() {
+  return useContext(HrContext);
+}
