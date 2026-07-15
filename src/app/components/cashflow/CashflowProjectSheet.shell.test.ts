@@ -96,6 +96,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('사업시트 열기');
   });
 
+  it('keeps server fallback copy intact without appending a duplicate sentence ending', () => {
+    expect(source).toContain("primaryReason?.title || '확인 항목을 확인해 주세요.'");
+    expect(source).not.toContain("primaryReason?.title || '확인 항목'}입니다");
+  });
+
   it('keeps sheet sync explicit and uses the approved action label', () => {
     expect(source).toContain('handleRefreshSheetMirror');
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
