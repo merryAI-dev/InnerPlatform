@@ -77,11 +77,18 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
     expect(portalLayoutSource).toContain('blockedPortalAccess');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
-    expect(portalLayoutSource).toContain("navigate('/portal/weekly-expenses')");
     expect(portalLayoutSource).toContain("navigate('/portal/register-project')");
     expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
     expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');
+  });
+
+  it('keeps the portal entry screen focused on project selection and registration', () => {
+    expect(portalLayoutSource).toContain('안녕하세요, 사내기업가님');
+    expect(portalLayoutSource).toContain('<p className="text-sm font-semibold">프로젝트 선택</p>');
+    expect(portalLayoutSource).toContain('<p className="text-sm font-semibold">프로젝트 등록</p>');
+    expect(portalLayoutSource).not.toContain('증빙 업로드만 할게요');
+    expect(portalLayoutSource).not.toContain('관리자 공간으로 이동');
   });
 
   it('exposes stable portal navigation test ids for release-gate flows', () => {

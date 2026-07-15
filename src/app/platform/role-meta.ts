@@ -13,6 +13,6 @@ export interface RoleMeta {
 export const ROLE_META: Record<UserRole, RoleMeta> = {
   admin:  { label: '관리자', badgeClass: 'bg-cyan-100 text-cyan-800', Icon: ShieldCheck },
   finance: { label: '경영기획실', badgeClass: 'bg-blue-100 text-blue-800', Icon: Activity },
-  pm:     { label: 'PM', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
-  viewer: { label: 'PM', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
+  pm:     { label: '실무자', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
+  viewer: { label: '실무자', badgeClass: 'bg-green-100 text-green-800', Icon: FolderKanban },
 };

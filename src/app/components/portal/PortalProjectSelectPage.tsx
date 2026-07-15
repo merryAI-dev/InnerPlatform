@@ -53,7 +53,7 @@ function ProjectStartCard(props: {
             {project.clientOrg || '계약 대상 미지정'}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            PM {project.managerName || '미지정'} · {project.department || '담당조직 미지정'}
+            실무자 {project.managerName || '미지정'} · {project.department || '담당조직 미지정'}
           </p>
         </div>
         <Button

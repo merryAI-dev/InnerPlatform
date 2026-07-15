@@ -872,7 +872,7 @@ export function PortalWeeklyExpensePage() {
           sheetRows={restoredExpenseRows || expenseSheetRows}
           onSaveSheetRows={saveExpenseSheetRowsWithLease}
           onChangeTransactionState={handleChangeTransactionState}
-          currentUserName={portalUser?.name || 'PM'}
+          currentUserName={portalUser?.name || '실무자'}
           currentUserId={portalUser?.id || 'pm'}
           userRole={ledgerUserRole}
           allowEditSubmitted
@@ -969,7 +969,7 @@ async function readFileAsBase64(file: File): Promise<string> {
   return base64;
 }
 
-// ── PM 편차 확인 배너 ──
+// ── 실무자 편차 확인 배너 ──
 
 function VarianceFlagBanner({
   projectId,

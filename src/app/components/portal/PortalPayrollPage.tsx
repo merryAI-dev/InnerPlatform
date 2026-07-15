@@ -119,7 +119,7 @@ export function PortalPayrollPage() {
     reviewState.paidStatus === 'CONFIRMED'
       ? '지급 확정 완료'
       : reviewState.needsAdminConfirm
-      ? 'Admin 최종 확정 대기'
+      ? '관리자 최종 확정 대기'
       : getPayrollReviewStatusLabel(reviewState.pmReviewStatus)
   ) : null;
 
@@ -257,10 +257,10 @@ export function PortalPayrollPage() {
         runId: run.id,
         pmExpectedPayrollAmount: amount,
       });
-      toast.success(amount === null ? 'PM 입력 금액을 비웠습니다' : 'PM 입력 금액을 저장했습니다');
+      toast.success(amount === null ? '실무자 입력 금액을 비웠습니다' : '실무자 입력 금액을 저장했습니다');
     } catch (err: any) {
       console.error(err);
-      toast.error(err?.message || 'PM 입력 금액 저장에 실패했습니다');
+      toast.error(err?.message || '실무자 입력 금액 저장에 실패했습니다');
     }
   }
 
@@ -274,7 +274,7 @@ export function PortalPayrollPage() {
               <div className="min-w-0">
                 <p className="text-[12px]" style={{ fontWeight: 700 }}>확인이 필요한 공지가 있습니다</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
-                  지급 예정 공지를 확인해 주세요. Admin이 확인 여부를 추적합니다.
+                  지급 예정 공지를 확인해 주세요. 관리자가 확인 여부를 추적합니다.
                 </p>
               </div>
             </div>
@@ -305,7 +305,7 @@ export function PortalPayrollPage() {
           <CardContent className="p-4">
             <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>인건비 적요 검토</p>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              거래 후보를 불러오는 중입니다. 로딩이 끝나면 PM 1차 검토 카드가 열립니다.
+              거래 후보를 불러오는 중입니다. 로딩이 끝나면 실무자 1차 검토 카드가 열립니다.
             </p>
           </CardContent>
         </Card>
@@ -330,10 +330,10 @@ export function PortalPayrollPage() {
                 <div className="flex items-center gap-2">
                   <SearchCheck className="w-4 h-4 text-teal-600" />
                   <p className="text-[13px] text-foreground" style={{ fontWeight: 700 }}>인건비 적요 검토</p>
-                  <Badge variant="outline" className="text-[10px]">PM 1차 검토</Badge>
+                  <Badge variant="outline" className="text-[10px]">실무자 1차 검토</Badge>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  시스템이 먼저 인건비 의심 거래를 잡고, PM이 통장 적요를 보고 맞음/아님/보류를 판단합니다.
+                  시스템이 먼저 인건비 의심 거래를 잡고, 실무자가 통장 적요를 보고 맞음/아님/보류를 판단합니다.
                 </p>
               </div>
             </div>
@@ -365,19 +365,19 @@ export function PortalPayrollPage() {
                   : reviewState.hasMissingCandidate
                   ? '이번 달에는 인건비 후보를 찾지 못했습니다'
                   : reviewState.needsAdminConfirm
-                    ? 'PM 판단이 끝났고 이제 Admin 최종 확정만 남았습니다'
+                    ? '실무자 판단이 끝났고 이제 관리자 최종 확정만 남았습니다'
                     : reviewState.pendingDecisionCount > 0
                       ? `지금 ${reviewState.pendingDecisionCount}건을 판단해 주세요`
-                      : 'PM 판단이 저장되었습니다'}
+                      : '실무자 판단이 저장되었습니다'}
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {reviewState.paidStatus === 'CONFIRMED'
-                  ? 'PM 판단과 Admin 확정이 모두 끝났습니다. 다음 지급 창 전까지는 기준 지급액과 통장 흐름만 점검하면 됩니다.'
+                  ? '실무자 판단과 관리자 확정이 모두 끝났습니다. 다음 지급 창 전까지는 기준 지급액과 통장 흐름만 점검하면 됩니다.'
                   : reviewState.hasMissingCandidate
-                  ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인한 뒤 Admin에 알려 주세요.'
+                  ? '후보 없음은 정상 종료가 아닙니다. 통장내역을 직접 보고 적요를 확인한 뒤 관리자에게 알려 주세요.'
                   : reviewState.needsAdminConfirm
-                    ? '거래 단위 판단은 끝났습니다. Admin이 월 지급 여부를 최종 확정할 때까지 상태를 유지합니다.'
-                  : '원본 적요를 보고 맞음, 아님, 보류 중 하나로 닫아 주세요. 미판단이나 보류가 남아 있으면 Admin이 확정할 수 없습니다.'}
+                    ? '거래 단위 판단은 끝났습니다. 관리자가 월 지급 여부를 최종 확정할 때까지 상태를 유지합니다.'
+                  : '원본 적요를 보고 맞음, 아님, 보류 중 하나로 닫아 주세요. 미판단이나 보류가 남아 있으면 관리자가 확정할 수 없습니다.'}
               </p>
             </div>
 
@@ -386,12 +386,12 @@ export function PortalPayrollPage() {
                 <div className="space-y-1">
                   <p className="text-[12px] text-foreground" style={{ fontWeight: 700 }}>이번 달 금액 대조</p>
                   <p className="text-[11px] text-muted-foreground">
-                    PM 입력 금액과 캐시플로 Projection을 plannedPayDate 기준 주차로 비교합니다.
+                    실무자 입력 금액과 캐시플로 Projection을 plannedPayDate 기준 주차로 비교합니다.
                   </p>
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[11px]">PM 입력 금액</Label>
+                    <Label className="text-[11px]">실무자 입력 금액</Label>
                     <Input
                       className="h-9 w-[160px] text-[12px]"
                       inputMode="numeric"
@@ -408,7 +408,7 @@ export function PortalPayrollPage() {
 
               <div className="grid grid-cols-1 gap-2 md:grid-cols-3 text-[11px]">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
-                  <p className="text-muted-foreground">PM 입력 금액</p>
+                  <p className="text-muted-foreground">실무자 입력 금액</p>
                   <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
                     {cashflowAlignment?.pmExpectedPayrollAmount !== null && cashflowAlignment?.pmExpectedPayrollAmount !== undefined
                       ? `${fmtShort(cashflowAlignment.pmExpectedPayrollAmount)}원`
@@ -456,7 +456,7 @@ export function PortalPayrollPage() {
                     ? 'border-rose-200 bg-rose-50 text-rose-700'
                     : 'border-slate-200 bg-slate-50 text-slate-700'
                 }`}>
-                  PM 기준 잔액 {activeQueueItem?.pmBalanceInsufficient ? '부족' : '정상'}
+                  실무자 기준 잔액 {activeQueueItem?.pmBalanceInsufficient ? '부족' : '정상'}
                 </Badge>
               </div>
 
@@ -469,19 +469,19 @@ export function PortalPayrollPage() {
                   <p className="text-[12px] text-rose-900" style={{ fontWeight: 700 }}>금액 대조 경고</p>
                   <div className="mt-2 space-y-1 text-[11px] text-rose-800/80">
                     {cashflowAlignment?.flags.includes('pm_amount_missing') && (
-                      <p>PM 입력 금액이 아직 없습니다. 이번 달 지급 금액을 먼저 입력해 주세요.</p>
+                      <p>실무자 입력 금액이 아직 없습니다. 이번 달 지급 금액을 먼저 입력해 주세요.</p>
                     )}
                     {cashflowAlignment?.flags.includes('cashflow_projection_missing') && (
                       <p>캐시플로 Projection에서 MYSC 인건비 금액을 찾지 못했습니다.</p>
                     )}
                     {cashflowAlignment?.flags.includes('amount_mismatch') && (
-                      <p>금액 불일치: PM 입력 금액과 캐시플로 Projection 금액이 다릅니다.</p>
+                      <p>금액 불일치: 실무자 입력 금액과 캐시플로 Projection 금액이 다릅니다.</p>
                     )}
                     {activeQueueItem?.projectionBalanceInsufficient && (
-                      <p>Projection 기준 잔액이 부족합니다. Admin과 PM에게 동시에 경고됩니다.</p>
+                      <p>Projection 기준 잔액이 부족합니다. 관리자와 실무자에게 동시에 경고됩니다.</p>
                     )}
                     {activeQueueItem?.pmBalanceInsufficient && (
-                      <p>PM 기준 잔액이 부족합니다. 입력한 지급 금액으로는 현재 잔액이 모자랍니다.</p>
+                      <p>실무자 기준 잔액이 부족합니다. 입력한 지급 금액으로는 현재 잔액이 모자랍니다.</p>
                     )}
                   </div>
                 </div>
@@ -518,7 +518,7 @@ export function PortalPayrollPage() {
                   <div className="min-w-0">
                     <p className="text-[12px] text-rose-900" style={{ fontWeight: 700 }}>이번 달 인건비 후보가 없습니다</p>
                     <p className="mt-1 text-[11px] text-rose-800/80">
-                      후보 없음은 정상 종료가 아니라 이상 신호입니다. 통장내역에서 적요를 직접 확인한 뒤 Admin에 알려 주세요.
+                      후보 없음은 정상 종료가 아니라 이상 신호입니다. 통장내역에서 적요를 직접 확인한 뒤 관리자에게 알려 주세요.
                     </p>
                   </div>
                 </div>
@@ -530,9 +530,9 @@ export function PortalPayrollPage() {
                 <div className="flex items-start gap-2">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
                   <div className="min-w-0">
-                    <p className="text-[12px] text-emerald-900" style={{ fontWeight: 700 }}>Admin 최종 확정 대기</p>
+                    <p className="text-[12px] text-emerald-900" style={{ fontWeight: 700 }}>관리자 최종 확정 대기</p>
                     <p className="mt-1 text-[11px] text-emerald-800/80">
-                      PM 1차 검토가 끝났습니다. 이제 Admin이 월 지급 확정만 하면 됩니다.
+                      실무자 1차 검토가 끝났습니다. 이제 관리자가 월 지급 확정만 하면 됩니다.
                     </p>
                   </div>
                 </div>
@@ -799,7 +799,7 @@ function PortalPayrollLiquidityDetail({
               </p>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
-              <p className="text-muted-foreground">PM 입력 금액</p>
+              <p className="text-muted-foreground">실무자 입력 금액</p>
               <p className="mt-1 text-foreground" style={{ fontWeight: 700 }}>
                 {item.pmExpectedPayrollAmount !== null ? `${fmtShort(item.pmExpectedPayrollAmount)}원` : '-'}
               </p>
@@ -832,7 +832,7 @@ function PortalPayrollLiquidityDetail({
             Projection 기준 잔액 {item.projectionBalanceInsufficient ? '부족' : '정상'}
           </Badge>
           <Badge variant="outline" className={`text-[10px] ${item.pmBalanceInsufficient ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-            PM 기준 잔액 {item.pmBalanceInsufficient ? '부족' : '정상'}
+            실무자 기준 잔액 {item.pmBalanceInsufficient ? '부족' : '정상'}
           </Badge>
         </div>
 

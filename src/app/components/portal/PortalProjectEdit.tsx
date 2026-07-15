@@ -63,7 +63,7 @@ function resolveExecutiveBanner(project: Project) {
   const reason = project.executiveReviewComment || '';
   if (status === 'APPROVED') return {
     tone: 'success', title: '승인 완료',
-    description: 'CIC 대표 검토가 승인된 프로젝트입니다. PM이 수정 저장하면 다시 검토 대기로 전환됩니다.',
+    description: 'CIC 대표 검토가 승인된 프로젝트입니다. 실무자가 수정 저장하면 다시 검토 대기로 전환됩니다.',
   };
   if (status === 'REVISION_REJECTED') return {
     tone: 'danger', title: '수정 요청 후 반려',
