@@ -6,30 +6,37 @@ const pageSource = readFileSync(resolve(import.meta.dirname, 'ProjectMigrationAu
 const controlBarSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditControlBar.tsx'), 'utf8');
 const queueSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditQueueRail.tsx'), 'utf8');
 const detailSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditDetailPanel.tsx'), 'utf8');
+const documentSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditDocumentDialog.tsx'), 'utf8');
+const recordListSource = readFileSync(resolve(import.meta.dirname, 'migration-audit/MigrationAuditRecordList.tsx'), 'utf8');
 const previewSource = readFileSync(resolve(import.meta.dirname, 'ContractDocumentPreview.tsx'), 'utf8');
-const compositeSource = [pageSource, controlBarSource, queueSource, detailSource, previewSource].join('\n');
+const compositeSource = [pageSource, controlBarSource, queueSource, detailSource, documentSource, recordListSource, previewSource].join('\n');
 
 describe('ProjectMigrationAuditPage shell contract', () => {
-  it('presents the page as a PM registration executive approval console', () => {
-    expect(pageSource).toContain('data-testid="migration-review-queue"');
-    expect(pageSource).toContain('data-testid="migration-review-dossier"');
+  it('presents a filtered review inbox and opens the registration as an approval document', () => {
+    expect(pageSource).toContain('MigrationAuditRecordList');
+    expect(pageSource).toContain('MigrationAuditDocumentDialog');
+    expect(pageSource).toContain('isSameMigrationAuditCic');
+    expect(pageSource).not.toContain('MigrationAuditQueueRail');
     expect(compositeSource).toContain('data-testid="migration-review-search-bar"');
-    expect(compositeSource).toContain('data-testid="migration-review-decision-footer"');
+    expect(compositeSource).toContain('data-testid="migration-review-record-list"');
+    expect(compositeSource).toContain('data-testid="migration-review-document"');
+    expect(compositeSource).toContain('프로젝트 등록 및 승인서');
+    expect(compositeSource).toContain('조직장 승인');
+    expect(compositeSource).toContain('ApprovalSeal');
+    expect(compositeSource).toContain('내 검토함');
     expect(compositeSource).toContain('CIC 필터');
     expect(compositeSource).toContain('상태 필터');
     expect(compositeSource).toContain('프로젝트 검색');
     expect(compositeSource).toContain('프로젝트명, 등록 원문, 계약 대상, PM 검색');
     expect(compositeSource).toContain('migration-review-project-search');
-    expect(compositeSource).toContain('h-14');
-    expect(compositeSource).toContain('border-2 border-slate-300');
+    expect(compositeSource).toContain('statusChartBackground');
+    expect(compositeSource).toContain('검토대기');
     expect(compositeSource).toContain('승인');
     expect(compositeSource).toContain('수정 요청 후 반려');
     expect(compositeSource).toContain('중복·폐기');
     expect(compositeSource).toContain('PM 등록 프로젝트 검토');
-    expect(compositeSource).toContain('PM이 포털에서 입력한 내용을 그대로');
-    expect(compositeSource).toContain('CIC 대표 검토 대기열');
-    expect(compositeSource).toContain('CIC 대표 검토 결정');
-    expect(compositeSource).toContain('PM 재제출 시 변경 사항');
+    expect(compositeSource).toContain('기안·조직장 결재선과 등록 원문을 확인합니다.');
+    expect(compositeSource).toContain('문서 열기');
     expect(compositeSource).toContain('describeProjectRequestVersion');
     expect(compositeSource).toContain('수정 중');
     expect(compositeSource).toContain('PM 수정 요청');
@@ -91,16 +98,16 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(detailSource).toContain('requestPayload?.contractDocument || record.project.contractDocument || null');
   });
 
-  it('loads private pending request attachments through the authenticated BFF', () => {
+  it('loads private pending request attachments through the authenticated BFF for the document popup', () => {
     expect(pageSource).toContain('downloadProjectRequestAttachmentViaBff');
     expect(pageSource).toContain('URL.createObjectURL');
     expect(pageSource).toContain('URL.revokeObjectURL');
     expect(pageSource).toContain('secureContractDocumentUrl');
     expect(pageSource).toContain('secureContractDocumentKey');
     expect(pageSource).toContain('privateAttachmentError');
-    expect(detailSource).toContain('contractDocumentDownloadURL');
-    expect(detailSource).toContain('contractDocumentError');
-    expect(detailSource).toContain('downloadURL: contractDocumentDownloadURL || contractDocument.downloadURL');
+    expect(documentSource).toContain('contractDocumentDownloadURL');
+    expect(documentSource).toContain('contractDocumentError');
+    expect(documentSource).toContain('계약서 원문 열기');
   });
 
   it('keeps CIC registration review read-only while improving scan hierarchy', () => {

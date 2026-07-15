@@ -7,6 +7,7 @@ import {
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
   isMigrationAuditPmRegistration,
+  isSameMigrationAuditCic,
   normalizeCicLabel,
   summarizeMigrationAuditConsole,
 } from './project-migration-console';
@@ -99,6 +100,13 @@ describe('project-migration-console', () => {
     expect(normalizeCicLabel('')).toBe('미지정');
     expect(normalizeCicLabel(undefined)).toBe('미지정');
     expect(normalizeCicLabel('CIC-A')).toBe('CIC-A');
+  });
+
+  it('matches equivalent CIC labels for a reviewer inbox without changing the displayed label', () => {
+    expect(isSameMigrationAuditCic('CIC2', 'CIC 2')).toBe(true);
+    expect(isSameMigrationAuditCic('AXR팀', 'AXR Team')).toBe(true);
+    expect(isSameMigrationAuditCic('CIC2', 'CIC3')).toBe(false);
+    expect(isSameMigrationAuditCic('미지정', '')).toBe(false);
   });
 
   it('builds review queue records from PM portal projects only', () => {

@@ -19,7 +19,7 @@ import {
   buildMigrationAuditConsoleRecords,
   collectMigrationAuditCicOptions,
   filterMigrationAuditConsoleRecords,
-  findMigrationAuditRecord,
+  isSameMigrationAuditCic,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
 import {
@@ -29,8 +29,8 @@ import {
 import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { MigrationAuditControlBar } from './migration-audit/MigrationAuditControlBar';
-import { MigrationAuditQueueRail } from './migration-audit/MigrationAuditQueueRail';
-import { MigrationAuditDetailPanel } from './migration-audit/MigrationAuditDetailPanel';
+import { MigrationAuditRecordList } from './migration-audit/MigrationAuditRecordList';
+import { MigrationAuditDocumentDialog } from './migration-audit/MigrationAuditDocumentDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -93,9 +93,10 @@ export function ProjectMigrationAuditPage({
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [cicFilter, setCicFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('PENDING');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [inboxScope, setInboxScope] = useState<'MINE' | 'ALL'>('MINE');
+  const [openRecordId, setOpenRecordId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
   const [reviewComment, setReviewComment] = useState('');
   const [acting, setActing] = useState(false);
@@ -170,44 +171,52 @@ export function ProjectMigrationAuditPage({
     [records, reviewScope],
   );
 
+  const reviewerDepartment = String(authUser?.department || '').trim();
+  const inboxRecords = useMemo(
+    () => inboxScope === 'MINE' && reviewerDepartment
+      ? scopedRecords.filter((record) => isSameMigrationAuditCic(record.cic, reviewerDepartment))
+      : scopedRecords,
+    [inboxScope, reviewerDepartment, scopedRecords],
+  );
+
+  const summaryRecords = useMemo(
+    () => filterMigrationAuditConsoleRecords(inboxRecords, {
+      cic: cicFilter,
+      status: 'ALL',
+      searchQuery,
+    }),
+    [cicFilter, inboxRecords, searchQuery],
+  );
+
   const filteredRecords = useMemo(
-    () => filterMigrationAuditConsoleRecords(scopedRecords, {
+    () => filterMigrationAuditConsoleRecords(summaryRecords, {
       cic: cicFilter,
       status: statusFilter,
       searchQuery,
     }),
-    [cicFilter, scopedRecords, searchQuery, statusFilter],
+    [cicFilter, searchQuery, statusFilter, summaryRecords],
   );
 
   const summary = useMemo(
-    () => summarizeMigrationAuditConsole(filteredRecords),
-    [filteredRecords],
+    () => summarizeMigrationAuditConsole(summaryRecords),
+    [summaryRecords],
   );
 
   const cicOptions = useMemo(
-    () => collectMigrationAuditCicOptions(scopedRecords),
-    [scopedRecords],
+    () => collectMigrationAuditCicOptions(inboxRecords),
+    [inboxRecords],
   );
 
-  const activeRecord = useMemo(
-    () => findMigrationAuditRecord(filteredRecords, selectedRecordId),
-    [filteredRecords, selectedRecordId],
+  const openRecord = useMemo(
+    () => summaryRecords.find((record) => record.id === openRecordId) || null,
+    [openRecordId, summaryRecords],
   );
-
-  useEffect(() => {
-    if (!activeRecord) {
-      setSelectedRecordId(null);
-      return;
-    }
-    setSelectedRecordId(activeRecord.id);
-  }, [activeRecord]);
-
-  const pendingContractDocument = activeRecord?.request?.status === 'PENDING'
-    ? resolveProjectRequestPayload(activeRecord.request)?.contractDocument
+  const pendingContractDocument = openRecord?.request?.status === 'PENDING'
+    ? resolveProjectRequestPayload(openRecord.request)?.contractDocument
     : null;
   const pendingContractPath = String(pendingContractDocument?.path || '').trim();
   const pendingContractDownloadUrl = String(pendingContractDocument?.downloadURL || '').trim();
-  const pendingRequestId = String(activeRecord?.request?.id || '').trim();
+  const pendingRequestId = String(openRecord?.request?.id || '').trim();
   const secureContractDocumentKey = pendingRequestId && pendingContractPath
     ? `${pendingRequestId}:${pendingContractPath}`
     : '';
@@ -271,7 +280,7 @@ export function ProjectMigrationAuditPage({
   ]);
 
   async function handleConfirmAction() {
-    if (!activeRecord || !actionMode) return;
+    if (!openRecord || !actionMode) return;
 
     const nextExecutiveStatus = toExecutiveStatus(actionMode);
     const trimmedComment = reviewComment.trim();
@@ -295,9 +304,9 @@ export function ProjectMigrationAuditPage({
           role: authUser.role,
           idToken: authUser.idToken,
         },
-        projectId: activeRecord.project.id,
+        projectId: openRecord.project.id,
         review: {
-          requestId: activeRecord.request?.id,
+          requestId: openRecord.request?.id,
           reviewStatus: nextExecutiveStatus,
           reviewComment: trimmedComment || undefined,
           reviewerName,
@@ -314,7 +323,7 @@ export function ProjectMigrationAuditPage({
             ? '수정 요청 후 반려로 처리했습니다.'
             : '중복·폐기로 처리했습니다.',
         {
-          description: activeRecord.title,
+          description: openRecord.title,
         },
       );
       setActionMode(null);
@@ -328,7 +337,7 @@ export function ProjectMigrationAuditPage({
     }
   }
 
-  const pageDescription = 'PM이 포털에서 등록한 프로젝트를 CIC와 상태 기준으로 좁힌 뒤, 우측에서 원문·계약/재무·팀/인력을 그대로 읽고 CIC 대표 검토 결정을 내리는 콘솔입니다.';
+  const pageDescription = '내게 배정된 프로젝트 등록 요청을 먼저 확인하고, 문서형 팝업에서 기안·조직장 결재선과 등록 내용을 검토합니다.';
 
   return (
     <div className="space-y-6">
@@ -354,6 +363,9 @@ export function ProjectMigrationAuditPage({
         cicOptions={cicOptions}
         cicFilter={cicFilter}
         onCicFilterChange={setCicFilter}
+        inboxScope={inboxScope}
+        onInboxScopeChange={setInboxScope}
+        reviewerDepartment={reviewerDepartment}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         searchQuery={searchQuery}
@@ -369,36 +381,26 @@ export function ProjectMigrationAuditPage({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <div data-testid="migration-review-queue">
-            <MigrationAuditQueueRail
-              records={filteredRecords}
-              selectedId={activeRecord?.id || null}
-              onSelect={setSelectedRecordId}
-            />
-          </div>
-          <div data-testid="migration-review-dossier">
-            <MigrationAuditDetailPanel
-              record={activeRecord}
-              acting={acting}
-              contractDocumentDownloadURL={secureContractDocumentUrl}
-              contractDocumentError={privateAttachmentError}
-              onApprove={() => {
-                setActionMode('approve');
-                setReviewComment(activeRecord?.project.executiveReviewComment || '');
-              }}
-              onReject={() => {
-                setActionMode('reject');
-                setReviewComment(activeRecord?.project.executiveReviewComment || '');
-              }}
-              onDiscard={() => {
-                setActionMode('discard');
-                setReviewComment(activeRecord?.project.executiveReviewComment || '');
-              }}
-            />
-          </div>
-        </div>
+        <MigrationAuditRecordList records={filteredRecords} onOpen={(record) => setOpenRecordId(record.id)} />
       )}
+
+      <MigrationAuditDocumentDialog
+        open={!!openRecord}
+        record={openRecord}
+        reviewerName={currentUser?.name || authUser?.name || '조직장'}
+        acting={acting}
+        contractDocumentDownloadURL={secureContractDocumentUrl}
+        contractDocumentError={privateAttachmentError}
+        onOpenChange={(open) => { if (!open) setOpenRecordId(null); }}
+        onApprove={() => {
+          setActionMode('approve');
+          setReviewComment(openRecord?.project.executiveReviewComment || '');
+        }}
+        onReject={() => {
+          setActionMode('reject');
+          setReviewComment(openRecord?.project.executiveReviewComment || '');
+        }}
+      />
 
       <AlertDialog open={!!actionMode} onOpenChange={(open) => {
         if (!open) {
@@ -410,7 +412,7 @@ export function ProjectMigrationAuditPage({
           <AlertDialogHeader>
             <AlertDialogTitle>{getReviewDialogTitle(actionMode || 'approve')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {getProjectRequestReviewDescription(actionMode || 'approve', activeRecord?.request)}
+              {getProjectRequestReviewDescription(actionMode || 'approve', openRecord?.request)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">

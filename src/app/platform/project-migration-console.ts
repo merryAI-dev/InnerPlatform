@@ -42,6 +42,16 @@ export function normalizeCicLabel(value: unknown): string {
   return normalized || '미지정';
 }
 
+export function isSameMigrationAuditCic(left: unknown, right: unknown): boolean {
+  const normalizeForComparison = (value: unknown) => normalizeCicLabel(value)
+    .toLocaleLowerCase('en-US')
+    .replace(/\s+/g, '')
+    .replace(/team$/, '팀');
+  const leftKey = normalizeForComparison(left);
+  const rightKey = normalizeForComparison(right);
+  return leftKey !== '미지정' && leftKey === rightKey;
+}
+
 function deriveProjectRequestMap(requests: ProjectRequest[]): Map<string, ProjectRequest> {
   const map = new Map<string, ProjectRequest>();
   requests.forEach((request) => {

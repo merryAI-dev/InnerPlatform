@@ -17,6 +17,9 @@ interface MigrationAuditControlBarProps {
   cicOptions: string[];
   cicFilter: string;
   onCicFilterChange: (value: string) => void;
+  inboxScope: 'MINE' | 'ALL';
+  onInboxScopeChange: (value: 'MINE' | 'ALL') => void;
+  reviewerDepartment: string;
   statusFilter: 'ALL' | MigrationAuditConsoleStatus;
   onStatusFilterChange: (value: 'ALL' | MigrationAuditConsoleStatus) => void;
   searchQuery: string;
@@ -28,49 +31,64 @@ export function MigrationAuditControlBar({
   cicOptions,
   cicFilter,
   onCicFilterChange,
+  inboxScope,
+  onInboxScopeChange,
+  reviewerDepartment,
   statusFilter,
   onStatusFilterChange,
   searchQuery,
   onSearchQueryChange,
   summary,
 }: MigrationAuditControlBarProps) {
+  const reviewTotal = summary.pending + summary.approved + summary.rejected;
+  const pendingEnd = reviewTotal ? (summary.pending / reviewTotal) * 100 : 0;
+  const approvedEnd = pendingEnd + (reviewTotal ? (summary.approved / reviewTotal) * 100 : 0);
+  const statusChartBackground = reviewTotal
+    ? `conic-gradient(#174a7c 0 ${pendingEnd}%, #15803d ${pendingEnd}% ${approvedEnd}%, #b42318 ${approvedEnd}% 100%)`
+    : '#e2e8f0';
+
   return (
-    <Card className="border-slate-200/80 bg-white/95 shadow-sm" data-testid="migration-review-search-bar">
+    <Card className="border-slate-300 bg-white shadow-sm" data-testid="migration-review-search-bar">
       <CardContent className="space-y-4 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">대표 검토</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">조직장 결재</p>
             <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-slate-950">
-              PM 등록 프로젝트 검토
+              프로젝트 등록/승인
             </h2>
             <p className="mt-1 text-[12px] leading-6 text-slate-600">
-              CIC와 상태만 먼저 좁힌 뒤, 우측에서 PM이 포털에서 입력한 내용을 그대로 읽고 CIC 대표 검토 판단을 내립니다.
+              검토할 문서를 먼저 좁힌 뒤, 문서 열기에서 기안·조직장 결재선과 등록 원문을 확인합니다.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="outline" className="h-9 rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
-              전체 {summary.total}건
-            </Badge>
-            <Badge className="h-9 rounded-full border border-amber-200 bg-amber-50 px-3 text-[11px] text-amber-700">
-              검토 대기 {summary.pending}
-            </Badge>
-            <Badge className="h-9 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[11px] text-emerald-700">
-              승인 완료 {summary.approved}
-            </Badge>
-            <Badge className="h-9 rounded-full border border-rose-200 bg-rose-50 px-3 text-[11px] text-rose-700">
-              반려 {summary.rejected}
-            </Badge>
-            <Badge className="h-9 rounded-full border border-slate-300 bg-slate-100 px-3 text-[11px] text-slate-700">
-              폐기 {summary.discarded}
-            </Badge>
+          <div className="flex items-center gap-4 border-l border-slate-200 pl-4">
+            <div className="grid h-[78px] w-[78px] place-items-center rounded-full" role="img" aria-label={`검토 대기 ${summary.pending}건, 승인 완료 ${summary.approved}건, 반려 ${summary.rejected}건`} style={{ background: statusChartBackground }}>
+              <span className="grid h-[54px] w-[54px] place-items-center rounded-full bg-white text-center text-[11px] font-semibold text-slate-700">{reviewTotal}<small className="block text-[9px] font-normal">건</small></span>
+            </div>
+            <dl className="grid grid-cols-3 divide-x divide-slate-200 text-center">
+              <div className="px-3"><dt className="text-[10px] text-slate-500">검토대기</dt><dd className="mt-1 text-[15px] font-bold text-[#174a7c]">{summary.pending}</dd></div>
+              <div className="px-3"><dt className="text-[10px] text-slate-500">승인완료</dt><dd className="mt-1 text-[15px] font-bold text-[#15803d]">{summary.approved}</dd></div>
+              <div className="px-3"><dt className="text-[10px] text-slate-500">반려</dt><dd className="mt-1 text-[15px] font-bold text-[#b42318]">{summary.rejected}</dd></div>
+            </dl>
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(220px,300px)_minmax(220px,300px)_minmax(320px,1fr)]">
+        <div className="grid gap-4 xl:grid-cols-[minmax(180px,230px)_minmax(180px,230px)_minmax(180px,230px)_minmax(260px,1fr)]">
+          <div className="space-y-1.5">
+            <p className="text-[12px] font-semibold text-slate-600">검토함</p>
+            <Select value={inboxScope} onValueChange={(value) => onInboxScopeChange(value as 'MINE' | 'ALL')}>
+              <SelectTrigger className="h-11 rounded-none border-slate-300 bg-white px-3 text-[13px] font-medium">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="MINE">내 검토함{reviewerDepartment ? ` · ${reviewerDepartment}` : ''}</SelectItem>
+                <SelectItem value="ALL">전체 검토 문서</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5">
             <p className="text-[12px] font-semibold text-slate-600">CIC 필터</p>
             <Select value={cicFilter} onValueChange={onCicFilterChange}>
-              <SelectTrigger className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm">
+              <SelectTrigger className="h-11 rounded-none border-slate-300 bg-white px-3 text-[13px] font-medium">
                 <SelectValue placeholder="전체 CIC" />
               </SelectTrigger>
               <SelectContent>
@@ -85,7 +103,7 @@ export function MigrationAuditControlBar({
           <div className="space-y-1.5">
             <p className="text-[12px] font-semibold text-slate-600">상태 필터</p>
             <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as 'ALL' | MigrationAuditConsoleStatus)}>
-              <SelectTrigger className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm">
+              <SelectTrigger className="h-11 rounded-none border-slate-300 bg-white px-3 text-[13px] font-medium">
                 <SelectValue placeholder="전체 상태" />
               </SelectTrigger>
               <SelectContent>
@@ -106,7 +124,7 @@ export function MigrationAuditControlBar({
               value={searchQuery}
               onChange={(event) => onSearchQueryChange(event.target.value)}
               placeholder="프로젝트명, 등록 원문, 계약 대상, PM 검색"
-              className="h-14 rounded-2xl border-2 border-slate-300 bg-white px-4 text-[15px] font-medium shadow-sm"
+              className="h-11 rounded-none border-slate-300 bg-white px-3 text-[13px] font-medium"
             />
           </div>
         </div>
