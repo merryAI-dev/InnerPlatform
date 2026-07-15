@@ -26,9 +26,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
-  it('requires explicit human decisions for 160 cells and five deposit rows', () => {
+  it('requires explicit human decisions for 160 cells, five deposit rows, and four management checks', () => {
     expect(source).toContain('monthCloseProgress.confirmedCells');
     expect(source).toContain('monthCloseProgress.confirmedDepositRows');
+    expect(source).toContain('monthCloseProgress.confirmedManagementChecks');
+    expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
     expect(source).toContain('캐시플로 항목 사람 확인');
     expect(source).toContain("requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'");
     expect(source).toContain("decision: 'CONFIRMED'");
@@ -55,6 +57,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('rangeEnd: cashflowSnapshotRange.end');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
     expect(source).toContain('dashboard?.summary?.projectionProgressPercent');
+    expect(source).toContain('monthCloseResult.dashboard.projectMetadata.businessType');
     expect(source).toContain("monthCloseSheetMetadataValue('businessType')");
     expect(source).toContain("monthCloseSheetControlValue('deposit')");
     expect(source).toContain("monthCloseSheetControlValue('unpaid')");
@@ -79,6 +82,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('차이 항목만');
     expect(source).not.toContain('setDifferenceViewMode');
     expect(source).toContain("'bg-blue-50 text-blue-700'");
+  });
+
+  it('places the operations dashboard before comparison and the monthly board', () => {
+    const operations = source.indexOf('{renderOperationsPanel()}');
+    const comparison = source.indexOf('data-cashflow-block="comparison"');
+    const monthlyBoard = source.lastIndexOf('{renderUnifiedMonthlyBoard()}');
+    expect(operations).toBeGreaterThan(-1);
+    expect(operations).toBeLessThan(comparison);
+    expect(comparison).toBeLessThan(monthlyBoard);
+    expect(source).toContain('프로젝트 등록');
+    expect(source).toContain('연결 시트');
+    expect(source).toContain('사업시트 열기');
   });
 
   it('keeps sheet sync explicit and uses the approved action label', () => {

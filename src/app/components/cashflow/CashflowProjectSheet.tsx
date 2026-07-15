@@ -44,9 +44,11 @@ import {
   type CashflowMonthCloseCell,
   type CashflowMonthCloseDraftInput,
   type CashflowMonthCloseResult,
+  type CashflowDeadlineSummary,
   type CashflowSnapshotResult,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
+import { extractSpreadsheetId } from '../../integrations/google-sheets/link';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
@@ -73,6 +75,7 @@ import {
   requiredCashflowMonthCloseDecision,
   type CashflowMonthCloseDecisionMap,
   type CashflowMonthCloseDepositReviewRow,
+  type CashflowManagementDecisionMap,
 } from './cashflow-month-close';
 
 function fmt(n: number): string {
@@ -369,6 +372,7 @@ export function CashflowProjectSheet({
   const [monthCloseBusy, setMonthCloseBusy] = useState(false);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
   const [monthCloseDecisions, setMonthCloseDecisions] = useState<CashflowMonthCloseDecisionMap>({});
+  const [managementDecisions, setManagementDecisions] = useState<CashflowManagementDecisionMap>({});
   const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
     () => createEmptyCashflowMonthCloseDepositRows(),
   );
@@ -498,6 +502,7 @@ export function CashflowProjectSheet({
     setPrivateDraftPayload({});
     setMonthCloseResult(null);
     setMonthCloseDecisions({});
+    setManagementDecisions({});
     setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
     setMonthCloseReviewDirty(false);
     loadedPrivateDraftKeyRef.current = '';
@@ -550,8 +555,10 @@ export function CashflowProjectSheet({
     if (restored) {
       setMonthCloseDecisions(restored.decisions);
       setMonthCloseDepositRows(restored.depositScheduleRows);
+      setManagementDecisions(restored.managementDecisions);
     } else {
       setMonthCloseDecisions({});
+      setManagementDecisions({});
       setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
     }
     setMonthCloseReviewDirty(false);
@@ -596,12 +603,16 @@ export function CashflowProjectSheet({
       if ((mode !== 'projection' && mode !== 'actual') || !Number.isInteger(Number(weekNo)) || lineParts.length === 0) return [];
       return [{ mode, weekNo: Number(weekNo), cashflowLine: lineParts.join(':'), decision }];
     });
+    const managementConfirmations = Object.entries(managementDecisions).flatMap(([checkId, decision]) => (
+      decision ? [{ checkId, decision }] : []
+    ));
     const nextPayload = {
       ...payload,
       board: { drafts, weekSaveState, yearMonth },
       monthCloseReview: {
         yearMonth,
         confirmations: reviewConfirmations,
+        managementConfirmations,
         depositScheduleRows: monthCloseDepositRows,
       },
       ...(monthCloseInput ? { monthClose: monthCloseInput } : {}),
@@ -620,6 +631,7 @@ export function CashflowProjectSheet({
     drafts,
     monthCloseDecisions,
     monthCloseDepositRows,
+    managementDecisions,
     privateDraftRevision,
     privateDraftPayload,
     weekSaveState,
@@ -1018,7 +1030,9 @@ export function CashflowProjectSheet({
     cells: monthCloseCellsState.cells,
     decisions: monthCloseDecisions,
     depositScheduleRows: monthCloseDepositRows,
-  }), [monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows]);
+    managementChecks: monthCloseResult?.dashboard?.managementChecks,
+    managementDecisions,
+  }), [managementDecisions, monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows, monthCloseResult?.dashboard?.managementChecks]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
     if (!isPm || monthCloseResult?.status !== 'OPEN') {
@@ -1033,6 +1047,14 @@ export function CashflowProjectSheet({
         decisions: monthCloseDecisions,
         depositScheduleRows: monthCloseDepositRows,
         projectionDrafts: drafts,
+        managementChecks: monthCloseResult?.dashboard?.managementChecks || [],
+        managementDecisions,
+        deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
+          trackingStartedAt: null,
+          missedCount: 0,
+          completedCount: 0,
+          current: null,
+        } satisfies CashflowDeadlineSummary,
       });
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '사람 확인이 필요한 항목을 모두 처리해 주세요.'));
@@ -1073,6 +1095,7 @@ export function CashflowProjectSheet({
       setWeekSaveState({});
       setPrivateDraftRevision(null);
       setPrivateDraftPayload({});
+      setManagementDecisions({});
       setMonthCloseReviewDirty(false);
       await cashflowLease.checkStatus();
       await Promise.all([
@@ -1099,6 +1122,7 @@ export function CashflowProjectSheet({
     loadCashflowSheetRangeWeeks,
     monthCloseDecisions,
     monthCloseDepositRows,
+    managementDecisions,
     monthCloseResult,
     orgId,
     projectId,
@@ -1513,6 +1537,10 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
+  const linkedSpreadsheetId = cashflowSheetConfig?.spreadsheetId || extractSpreadsheetId(cashflowSheetConfig?.value || '');
+  const linkedSpreadsheetUrl = linkedSpreadsheetId
+    ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(linkedSpreadsheetId)}/edit`
+    : '';
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
   const sheetMirrorCapturedAt = formatSheetAppliedAt(cashflowSheetMirror?.capturedAt)
     || cashflowSheetMirror?.capturedAt
@@ -2326,15 +2354,21 @@ export function CashflowProjectSheet({
                 >
                   {cashflowSheetConfig ? '시트 설정' : '시트 연동 설정'}
                 </Button>
+                {linkedSpreadsheetUrl ? (
+                  <Button asChild type="button" size="sm" variant="outline" className="h-7 rounded-full border-blue-200 bg-white px-2.5 text-[10px] text-blue-700">
+                    <a href={linkedSpreadsheetUrl} target="_blank" rel="noreferrer">사업시트 열기</a>
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
 
-          {cashflowSheetConfig && monthCloseResult?.dashboard ? (
+          {monthCloseResult?.dashboard ? (
             <div className="overflow-x-auto rounded-[18px] border border-slate-200 bg-white">
-              <table className="w-full min-w-[720px] table-fixed text-left text-[10px]">
+              <table className="w-full min-w-[780px] table-fixed text-left text-[10px]">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
+                    <th className="w-[90px] px-3 py-2 font-semibold">출처</th>
                     <th className="px-3 py-2 font-semibold">사업 구분</th>
                     <th className="px-3 py-2 font-semibold">전용계좌사업</th>
                     <th className="px-3 py-2 font-semibold">정산 여부</th>
@@ -2344,6 +2378,15 @@ export function CashflowProjectSheet({
                 </thead>
                 <tbody>
                   <tr className="text-slate-900">
+                    <td className="px-3 py-2 font-semibold text-blue-700">프로젝트 등록</td>
+                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.businessType}</td>
+                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.accountType}</td>
+                    <td className="truncate px-3 py-2">{monthCloseResult.dashboard.projectMetadata.settlementStatus}</td>
+                    <td className="px-3 py-2 text-slate-400">-</td>
+                    <td className="px-3 py-2 text-slate-400">-</td>
+                  </tr>
+                  <tr className="border-t border-slate-100 text-slate-900">
+                    <td className="px-3 py-2 font-semibold text-emerald-700">연결 시트</td>
                     <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('businessType')}</td>
                     <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('accountType')}</td>
                     <td className="truncate px-3 py-2">{monthCloseSheetMetadataValue('settlementStatus')}</td>
@@ -2352,6 +2395,103 @@ export function CashflowProjectSheet({
                   </tr>
                 </tbody>
               </table>
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+            <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-[11px] font-bold text-slate-900">주요 관리 항목</div>
+                <span className="text-[9px] text-slate-400">BFF/JVM 서버 판정</span>
+              </div>
+              <div className="space-y-2">
+                {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {
+                  const decision = managementDecisions[check.id];
+                  const tone: CashflowOpsTone = check.status === 'OK' ? 'success' : check.status === 'WARNING' ? 'warning' : 'neutral';
+                  return (
+                    <div key={check.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
+                            <span className="text-[10px] font-bold text-slate-900">{check.title}</span>
+                          </div>
+                          <div className="mt-1 text-[9px] leading-4 text-slate-500">{check.detail}</div>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={decision === 'CONFIRMED' ? 'default' : 'outline'}
+                            className="h-6 rounded-full px-2 text-[9px]"
+                            disabled={!canEdit}
+                            onClick={() => {
+                              setManagementDecisions((current) => ({ ...current, [check.id]: 'CONFIRMED' }));
+                              setMonthCloseReviewDirty(true);
+                            }}
+                          >확인</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
+                            className="h-6 rounded-full px-2 text-[9px]"
+                            disabled={!canEdit}
+                            onClick={() => {
+                              setManagementDecisions((current) => ({ ...current, [check.id]: 'NOT_APPLICABLE' }));
+                              setMonthCloseReviewDirty(true);
+                            }}
+                          >해당 없음</Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+                <div className="text-[11px] font-bold text-slate-900">목요일 자정 업데이트</div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">누적 미준수</div><div className="mt-1 font-bold text-rose-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
+                  <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">기한 내 완료</div><div className="mt-1 font-bold text-emerald-700">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
+                </div>
+                <div className="mt-2 text-[9px] leading-4 text-slate-500">
+                  {monthCloseResult?.dashboard?.deadlineSummary?.current
+                    ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${monthCloseResult.dashboard.deadlineSummary.current.status}`
+                    : '첫 시트 검토 완료 시점부터 집계합니다.'}
+                </div>
+              </div>
+              <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+                <div className="text-[11px] font-bold text-slate-900">세금계산서·입금 일정</div>
+                <div className="mt-2 space-y-1.5">
+                  {(monthCloseResult?.dashboard?.sheetDepositScheduleRows || []).map((row) => (
+                    <div key={row.weekNo} className="grid grid-cols-[42px_1fr] gap-2 text-[9px] leading-4 text-slate-600">
+                      <span className="font-semibold text-slate-800">{row.weekNo}주차</span>
+                      <span>발행 {row.taxInvoiceIssuedDate || '-'} · 입금 {row.expectedDepositDate || '-'} · {row.expectedDepositAmount == null ? '-' : `${fmt(row.expectedDepositAmount)}원`}</span>
+                    </div>
+                  ))}
+                  {(monthCloseResult?.dashboard?.sheetDepositScheduleRows || []).length === 0 ? <div className="text-[9px] text-slate-400">시트 연동 후 일정이 표시됩니다.</div> : null}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {monthCloseResult?.dashboard?.postCloseAdjustment ? (
+            <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] text-amber-950">
+              <div className="font-bold">결산 후 조정 특이사항</div>
+              <div className="mt-1">{monthCloseResult.dashboard.postCloseAdjustment.reason} · 변경 {monthCloseResult.dashboard.postCloseAdjustment.changedCount}건</div>
+              <div className="mt-1.5 space-y-1 text-[9px] leading-4 text-amber-900">
+                {monthCloseResult.dashboard.postCloseAdjustment.changes.slice(0, 5).map((change) => (
+                  <div key={`${change.mode}:${change.weekNo}:${change.cashflowLine}`}>
+                    {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[change.cashflowLine as CashflowSheetLineId] || change.cashflowLine}
+                    {' '}{fmt(change.beforeAmount)}원 → {fmt(change.afterAmount)}원
+                  </div>
+                ))}
+                {monthCloseResult.dashboard.postCloseAdjustment.changedCount > 5 ? (
+                  <div>외 {monthCloseResult.dashboard.postCloseAdjustment.changedCount - 5}건</div>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -2699,6 +2839,11 @@ export function CashflowProjectSheet({
         </section>
       ) : null}
 
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+        {renderOperationsPanel()}
+        {renderOpsTimeline()}
+      </section>
+
       <section data-cashflow-block="comparison" className="space-y-3 rounded-[24px] bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-100">
@@ -2714,11 +2859,6 @@ export function CashflowProjectSheet({
 
       {renderUnifiedMonthlyBoard()}
 
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-        {renderOperationsPanel()}
-        {renderOpsTimeline()}
-      </section>
-
       <AlertDialog
         open={monthCloseReviewOpen}
         onOpenChange={(open) => {
@@ -2733,7 +2873,7 @@ export function CashflowProjectSheet({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-xl bg-slate-50 px-3 py-2">
               <div className="text-[10px] text-slate-500">시트 고정본</div>
               <div className="mt-1 truncate text-[11px] font-semibold text-slate-900">{monthCloseResult?.dashboard?.source?.sourceRevision || cashflowSheetMirror?.sourceRevision || '준비되지 않음'}</div>
@@ -2745,6 +2885,10 @@ export function CashflowProjectSheet({
             <div className="rounded-xl bg-emerald-50 px-3 py-2">
               <div className="text-[10px] text-emerald-600">입금 일정 확인</div>
               <div className="mt-1 text-[13px] font-bold text-emerald-900">{monthCloseProgress.confirmedDepositRows} / 5</div>
+            </div>
+            <div className="rounded-xl bg-amber-50 px-3 py-2">
+              <div className="text-[10px] text-amber-700">주요 관리 항목 확인</div>
+              <div className="mt-1 text-[13px] font-bold text-amber-900">{monthCloseProgress.confirmedManagementChecks} / 4</div>
             </div>
           </div>
 
@@ -3211,6 +3355,8 @@ export function CashflowProjectSheet({
         expiredOpen={cashflowLease.expiredOpen}
         conflictOpen={cashflowLease.conflictOpen}
         holder={cashflowLease.holder}
+        expiresAt={cashflowLease.expiresAt}
+        remainingMs={cashflowLease.remainingMs}
         busy={cashflowLease.busy}
         onDismissWarning={cashflowLease.dismissWarning}
         onExtend={() => { void cashflowLease.extend(); }}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
+import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
 import {
   applyCashflowMonthCloseProjectionDrafts,
   buildCashflowMonthCloseDraftInput,
@@ -34,6 +35,20 @@ function mirror(): CashflowSheetLabMirrorResult {
   };
 }
 
+const managementChecks: CashflowManagementCheck[] = [
+  { id: 'labor-transfer', status: 'OK', title: '인건비', detail: '확인' },
+  { id: 'profit-vat-after-deposit', status: 'OK', title: '수익·부가세', detail: '확인' },
+  { id: 'negative-projection-balance', status: 'OK', title: '잔액', detail: '확인' },
+  { id: 'future-prepay-over-million', status: 'OK', title: '선입금', detail: '확인' },
+];
+const managementDecisions = Object.fromEntries(managementChecks.map((check) => [check.id, 'CONFIRMED' as const]));
+const deadlineSummary: CashflowDeadlineSummary = {
+  trackingStartedAt: null,
+  missedCount: 0,
+  completedCount: 0,
+  current: null,
+};
+
 describe('cashflow month close contract', () => {
   it('normalizes exactly 160 pinned cells in Projection then Actual order', () => {
     const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
@@ -48,6 +63,9 @@ describe('cashflow month close contract', () => {
       yearMonth: '2026-07',
       decisions: {},
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
+      managementChecks,
+      managementDecisions: {},
+      deadlineSummary,
     })).toThrow('확인');
   });
 
@@ -86,6 +104,9 @@ describe('cashflow month close contract', () => {
         ...row,
         decision: 'NOT_APPLICABLE' as const,
       })),
+      managementChecks,
+      managementDecisions,
+      deadlineSummary,
     });
 
     expect(result.cells.find((cell) => cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === lineId))
@@ -107,12 +128,16 @@ describe('cashflow month close contract', () => {
         ...row,
         decision: 'NOT_APPLICABLE' as const,
       })),
+      managementChecks,
+      managementDecisions,
+      deadlineSummary,
     });
     expect(result.sourceRevision).toBe('sheet-r1');
     expect(result.targetRevision).toBe('ledger-r1');
     expect(result.cells).toHaveLength(160);
     expect(result.confirmations).toHaveLength(160);
     expect(result.depositScheduleRows).toHaveLength(5);
+    expect(result.managementConfirmations).toHaveLength(4);
   });
 
   it('rejects an invalid or incomplete pinned mirror', () => {

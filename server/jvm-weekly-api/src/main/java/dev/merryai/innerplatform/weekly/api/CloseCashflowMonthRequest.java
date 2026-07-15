@@ -33,8 +33,18 @@ public record CloseCashflowMonthRequest(
     @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
     List<CashflowSheetLabApplyRequest.Cell> cells,
     @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
-    List<Confirmation> confirmations
+    List<Confirmation> confirmations,
+    @Valid @NotNull @Size(min = 4, max = 4) List<ManagementCheck> managementChecks,
+    @Valid @NotNull @Size(min = 4, max = 4) List<ManagementConfirmation> managementConfirmations,
+    @Valid @NotNull DeadlineSummary deadlineSummary
 ) {
+    private static final List<String> MANAGEMENT_CHECK_IDS = List.of(
+        "labor-transfer",
+        "profit-vat-after-deposit",
+        "negative-projection-balance",
+        "future-prepay-over-million"
+    );
+
     public record Confirmation(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,
         @Min(1) @Max(CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) int weekNo,
@@ -62,10 +72,50 @@ public record CloseCashflowMonthRequest(
         }
     }
 
+    public record ManagementCheck(
+        @NotBlank @Pattern(regexp = "labor-transfer|profit-vat-after-deposit|negative-projection-balance|future-prepay-over-million") String id,
+        @NotBlank @Pattern(regexp = "OK|WARNING|REVIEW_REQUIRED") String status,
+        @NotBlank @Size(max = 200) String title,
+        @NotBlank @Size(max = 2000) String detail
+    ) {
+    }
+
+    public record ManagementConfirmation(
+        @NotBlank @Pattern(regexp = "labor-transfer|profit-vat-after-deposit|negative-projection-balance|future-prepay-over-million") String checkId,
+        @NotBlank @Pattern(regexp = "CONFIRMED|NOT_APPLICABLE") String decision
+    ) {
+    }
+
+    public record DeadlineSummary(
+        @Size(max = 64) String trackingStartedAt,
+        @PositiveOrZero long missedCount,
+        @PositiveOrZero long completedCount,
+        @Valid CurrentDeadline current
+    ) {
+        public DeadlineSummary {
+            trackingStartedAt = trackingStartedAt == null ? "" : trackingStartedAt.trim();
+        }
+    }
+
+    public record CurrentDeadline(
+        @NotBlank @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])") String yearMonth,
+        @Min(1) @Max(CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) int weekNo,
+        @NotBlank @Size(max = 64) String deadline,
+        @Size(max = 64) String completedAt,
+        @NotBlank @Pattern(regexp = "COMPLETED|MISSED|PENDING") String status
+    ) {
+        public CurrentDeadline {
+            completedAt = completedAt == null ? "" : completedAt.trim();
+        }
+    }
+
     public CloseCashflowMonthRequest {
         depositScheduleRows = depositScheduleRows == null ? List.of() : List.copyOf(depositScheduleRows);
         cells = cells == null ? List.of() : List.copyOf(cells);
         confirmations = confirmations == null ? List.of() : List.copyOf(confirmations);
+        managementChecks = managementChecks == null ? List.of() : List.copyOf(managementChecks);
+        managementConfirmations = managementConfirmations == null ? List.of() : List.copyOf(managementConfirmations);
+        deadlineSummary = deadlineSummary == null ? new DeadlineSummary("", 0, 0, null) : deadlineSummary;
     }
 
     public static List<DepositScheduleRow> requireCompleteDepositSchedule(List<DepositScheduleRow> rows) {
@@ -167,5 +217,51 @@ public record CloseCashflowMonthRequest(
             }
         }
         return List.copyOf(byKey.values());
+    }
+
+    public static List<ManagementCheck> requireCompleteManagementChecks(List<ManagementCheck> checks) {
+        if (checks == null || checks.size() != MANAGEMENT_CHECK_IDS.size()) {
+            throw new IllegalArgumentException("Cashflow month close requires all four management checks.");
+        }
+        Map<String, ManagementCheck> byId = new LinkedHashMap<>();
+        for (ManagementCheck check : checks) {
+            if (check == null || !MANAGEMENT_CHECK_IDS.contains(check.id())) {
+                throw new IllegalArgumentException("Unsupported cashflow management check.");
+            }
+            String status = check.status() == null ? "" : check.status().trim().toUpperCase(Locale.ROOT);
+            String title = check.title() == null ? "" : check.title().trim();
+            String detail = check.detail() == null ? "" : check.detail().trim();
+            if (!List.of("OK", "WARNING", "REVIEW_REQUIRED").contains(status) || title.isBlank() || detail.isBlank()) {
+                throw new IllegalArgumentException("Cashflow management check status, title, and detail are required.");
+            }
+            ManagementCheck canonical = new ManagementCheck(check.id(), status, title, detail);
+            if (byId.putIfAbsent(check.id(), canonical) != null) {
+                throw new IllegalArgumentException("Cashflow month close contains duplicate management checks.");
+            }
+        }
+        return MANAGEMENT_CHECK_IDS.stream().map(byId::get).toList();
+    }
+
+    public static List<ManagementConfirmation> requireCompleteManagementConfirmations(List<ManagementConfirmation> confirmations) {
+        if (confirmations == null || confirmations.size() != MANAGEMENT_CHECK_IDS.size()) {
+            throw new IllegalArgumentException("Cashflow month close requires a decision for all four management checks.");
+        }
+        Map<String, ManagementConfirmation> byId = new LinkedHashMap<>();
+        for (ManagementConfirmation confirmation : confirmations) {
+            if (confirmation == null || !MANAGEMENT_CHECK_IDS.contains(confirmation.checkId())) {
+                throw new IllegalArgumentException("Unsupported cashflow management confirmation.");
+            }
+            String decision = confirmation.decision() == null
+                ? ""
+                : confirmation.decision().trim().toUpperCase(Locale.ROOT);
+            if (!List.of("CONFIRMED", "NOT_APPLICABLE").contains(decision)) {
+                throw new IllegalArgumentException("Cashflow management confirmation decision is invalid.");
+            }
+            ManagementConfirmation canonical = new ManagementConfirmation(confirmation.checkId(), decision);
+            if (byId.putIfAbsent(confirmation.checkId(), canonical) != null) {
+                throw new IllegalArgumentException("Cashflow month close contains duplicate management confirmations.");
+            }
+        }
+        return MANAGEMENT_CHECK_IDS.stream().map(byId::get).toList();
     }
 }

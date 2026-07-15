@@ -1937,6 +1937,45 @@ export function ProjectEditorWizard({
           <Input type="month" value={draft.paymentExpectedMonths.final} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, final: event.target.value })} className="mt-1 h-9 text-sm" />
         </div>
       </div>
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div>
+          <Label className="text-xs font-semibold">MYSC 인건비 이관 방식</Label>
+          <Select
+            value={draft.laborTransferPlan.mode}
+            onValueChange={(mode) => update('laborTransferPlan', {
+              ...draft.laborTransferPlan,
+              mode: mode as typeof draft.laborTransferPlan.mode,
+            })}
+          >
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="UNDECIDED">미정</SelectItem>
+              <SelectItem value="MONTHLY_WEEK_3">매월 3주차 이관</SelectItem>
+              <SelectItem value="PAYMENT_MILESTONE">선금·중도금·잔금별 일괄 이관</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {draft.laborTransferPlan.mode === 'PAYMENT_MILESTONE' ? (
+          <div className="grid gap-3 lg:grid-cols-3">
+            {(['contract', 'interim', 'final'] as const).map((key) => (
+              <div key={key}>
+                <Label className="text-xs">{key === 'contract' ? '선금' : key === 'interim' ? '중도금' : '잔금'} 인건비 할당액</Label>
+                <Input
+                  value={formatProjectAmountInput(draft.laborTransferPlan.milestoneAmounts[key], true)}
+                  onChange={(event) => update('laborTransferPlan', {
+                    ...draft.laborTransferPlan,
+                    milestoneAmounts: {
+                      ...draft.laborTransferPlan.milestoneAmounts,
+                      [key]: parseProjectAmountInput(event.target.value),
+                    },
+                  })}
+                  className="mt-1 h-9 text-sm"
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
       {advanceInterimRatio !== null && paymentPlanTotal > 0 ? (
         <div className={`rounded-lg border px-3 py-2 text-[12px] ${requiresAdvanceInterimReason ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
           선금+중도금 비율 {(advanceInterimRatio * 100).toFixed(1)}%
@@ -2199,6 +2238,14 @@ export function ProjectEditorWizard({
             <ReviewRow label="중도금 예상월" value={draft.paymentExpectedMonths.interim} />
             <ReviewRow label="잔금" value={formatPaymentPlanAmount(draft.paymentPlan.final, draft.contractAmount)} />
             <ReviewRow label="잔금 예상월" value={draft.paymentExpectedMonths.final} />
+            <ReviewRow
+              label="MYSC 인건비 이관"
+              value={draft.laborTransferPlan.mode === 'MONTHLY_WEEK_3'
+                ? '매월 3주차'
+                : draft.laborTransferPlan.mode === 'PAYMENT_MILESTONE'
+                  ? `선금 ${fmtKRW(draft.laborTransferPlan.milestoneAmounts.contract)}원 · 중도금 ${fmtKRW(draft.laborTransferPlan.milestoneAmounts.interim)}원 · 잔금 ${fmtKRW(draft.laborTransferPlan.milestoneAmounts.final)}원`
+                  : '미정'}
+            />
             <ReviewRow label="선금+중도금 비율" value={advanceInterimRatio === null ? '-' : `${(advanceInterimRatio * 100).toFixed(1)}%`} />
             {requiresAdvanceInterimReason ? <ReviewRow label="70% 미만 사유" value={draft.advanceInterimBelow70Reason} /> : null}
             <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />

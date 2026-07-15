@@ -11,6 +11,15 @@ import {
   resolveCashflowComparisonAsOf,
 } from '../cashflow-comparison.mjs';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
+import { stableStringify } from '../utils.mjs';
+import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
+
+const CASHFLOW_MANAGEMENT_CHECK_IDS = [
+  'labor-transfer',
+  'profit-vat-after-deposit',
+  'negative-projection-balance',
+  'future-prepay-over-million',
+];
 
 function resolveJavaWeeklyApiBaseUrl(options = {}, env = process.env) {
   return readOptionalText(options.jvmWeeklyApiBaseUrl)
@@ -323,6 +332,246 @@ function buildMonthModeReadModel(cells, mode) {
   };
 }
 
+function monthWeeksFromCells(cells, yearMonth) {
+  const modes = {
+    projection: buildMonthModeReadModel(cells, 'projection'),
+    actual: buildMonthModeReadModel(cells, 'actual'),
+  };
+  return Array.from({ length: 5 }, (_, index) => {
+    const weekNo = index + 1;
+    const financeWeek = getMonthFinanceWeeks(yearMonth).find((week) => week.weekNo === weekNo) || {};
+    return {
+      yearMonth,
+      weekNo,
+      weekStart: financeWeek.weekStart || '',
+      weekEnd: financeWeek.weekEnd || '',
+      projection: modes.projection?.weeks?.find((week) => week.weekNo === weekNo)?.amounts || {},
+      actual: modes.actual?.weeks?.find((week) => week.weekNo === weekNo)?.amounts || {},
+    };
+  });
+}
+
+function canonicalCashflowWeeks(cashflow, cells, yearMonth) {
+  const byKey = new Map();
+  for (const month of Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : []) {
+    const monthKey = readOptionalText(month?.yearMonth);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)) continue;
+    const financeWeeks = getMonthFinanceWeeks(monthKey);
+    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
+      const financeWeek = financeWeeks.find((week) => week.weekNo === weekNo) || {};
+      byKey.set(`${monthKey}:${weekNo}`, {
+        yearMonth: monthKey,
+        weekNo,
+        weekStart: financeWeek.weekStart || '',
+        weekEnd: financeWeek.weekEnd || '',
+        projection: month?.projection?.weeks?.find((week) => Number(week?.weekNo) === weekNo)?.amounts || {},
+        actual: month?.actual?.weeks?.find((week) => Number(week?.weekNo) === weekNo)?.amounts || {},
+      });
+    }
+  }
+  if (completeMonthCloseCells(cells)) {
+    for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
+  }
+  return [...byKey.values()].sort((left, right) => (
+    cashflowRangeSortKey(left) - cashflowRangeSortKey(right)
+  ));
+}
+
+function managementCheck(id, status, title, detail) {
+  return { id, status, title, detail };
+}
+
+function laborTransferCheck(project, weeks, yearMonth, asOfKey) {
+  const plan = objectValue(project?.laborTransferPlan) || {};
+  const monthWeeks = weeks.filter((week) => week.yearMonth === yearMonth);
+  const projectionTotal = monthWeeks.reduce((sum, week) => sum + safeAmount(week.projection?.MYSC_LABOR_OUT), 0);
+  const actualTotal = monthWeeks.reduce((sum, week) => sum + safeAmount(week.actual?.MYSC_LABOR_OUT), 0);
+  if (plan.mode === 'MONTHLY_WEEK_3') {
+    const week = monthWeeks.find((candidate) => candidate.weekNo === 3);
+    const projectionOk = safeAmount(week?.projection?.MYSC_LABOR_OUT) > 0;
+    const actualDue = cashflowRangeSortKey({ yearMonth, weekNo: 3 }) <= asOfKey;
+    const actualOk = !actualDue || safeAmount(week?.actual?.MYSC_LABOR_OUT) > 0;
+    return managementCheck(
+      'labor-transfer',
+      projectionOk && actualOk ? 'OK' : 'WARNING',
+      'MYSC 인건비 이관',
+      `3주차 Projection ${projectionOk ? '정상' : '미이관'} · Actual ${actualDue ? (actualOk ? '정상' : '미이관') : '기한 전'}`,
+    );
+  }
+  if (plan.mode === 'PAYMENT_MILESTONE') {
+    const amounts = objectValue(plan.milestoneAmounts) || {};
+    const expectedMonths = objectValue(project?.paymentExpectedMonths) || {};
+    const expected = ['contract', 'interim', 'final'].reduce((sum, key) => (
+      readOptionalText(expectedMonths[key]) === yearMonth ? sum + safeAmount(amounts[key]) : sum
+    ), 0);
+    if (expected <= 0) {
+      return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '선금·중도금·잔금별 인건비 할당액을 프로젝트 등록에서 확인해 주세요.');
+    }
+    const projectionOk = projectionTotal >= expected;
+    const actualOk = actualTotal >= expected;
+    return managementCheck(
+      'labor-transfer',
+      projectionOk && actualOk ? 'OK' : 'WARNING',
+      'MYSC 인건비 이관',
+      `할당 ${expected.toLocaleString('ko-KR')}원 · Projection ${projectionTotal.toLocaleString('ko-KR')}원 · Actual ${actualTotal.toLocaleString('ko-KR')}원`,
+    );
+  }
+  return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '프로젝트 등록에서 인건비 이관 방식을 선택해 주세요.');
+}
+
+function profitVatAfterDepositCheck(weeks, deposits, asOfKey) {
+  const byKey = new Map(weeks.map((week, index) => [`${week.yearMonth}:${week.weekNo}`, { week, index }]));
+  const due = [];
+  for (const deposit of Array.isArray(deposits) ? deposits : []) {
+    if (!readOptionalText(deposit?.actualDepositDate) || safeAmount(deposit?.actualDepositAmount) <= 0) continue;
+    const key = `${readOptionalText(deposit.yearMonth)}:${Number(deposit.weekNo)}`;
+    const current = byKey.get(key);
+    const candidate = current ? weeks[current.index + 1] : null;
+    const calendarGapMs = candidate && current?.week?.weekEnd && candidate.weekStart
+      ? Date.parse(`${candidate.weekStart}T00:00:00Z`) - Date.parse(`${current.week.weekEnd}T00:00:00Z`)
+      : Number.POSITIVE_INFINITY;
+    const target = candidate && calendarGapMs <= 8 * 86_400_000 ? candidate : null;
+    if (!target) {
+      due.push(`${readOptionalText(deposit.yearMonth)} ${Number(deposit.weekNo)}주차 입금의 다음 주차 원장 없음`);
+      continue;
+    }
+    const targetKey = cashflowRangeSortKey(target);
+    const missing = [
+      safeAmount(target.actual?.MYSC_PROFIT_OUT) > 0 ? null : 'MYSC 수익',
+      safeAmount(target.actual?.SALES_VAT_OUT) > 0 ? null : '매출부가세',
+    ].filter(Boolean);
+    if (targetKey <= asOfKey && missing.length > 0) due.push(`${target.yearMonth} ${target.weekNo}주차 ${missing.join('·')}`);
+  }
+  const actualDeposits = (Array.isArray(deposits) ? deposits : []).filter((row) => (
+    readOptionalText(row?.actualDepositDate) && safeAmount(row?.actualDepositAmount) > 0
+  ));
+  if (actualDeposits.length === 0) {
+    return managementCheck('profit-vat-after-deposit', 'REVIEW_REQUIRED', '입금 후 MYSC 수익·매출부가세 이관', '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.');
+  }
+  return managementCheck(
+    'profit-vat-after-deposit',
+    due.length > 0 ? 'WARNING' : 'OK',
+    '입금 후 MYSC 수익·매출부가세 이관',
+    due.length > 0 ? `다음 주차까지 미이관: ${due.join(', ')}` : '실제 입금 건의 다음 주차 이관을 확인했습니다.',
+  );
+}
+
+function negativeProjectionCheck(weeks) {
+  let balance = 0;
+  let prepay = 0;
+  for (const week of weeks) {
+    const totalIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => week.projection?.[lineId])) || 0;
+    const totalOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => week.projection?.[lineId])) || 0;
+    balance += totalIn - totalOut;
+    prepay += safeAmount(week.projection?.MYSC_PREPAY_IN);
+    if (balance < 0) {
+      return managementCheck(
+        'negative-projection-balance',
+        'WARNING',
+        'Projection 잔액 마이너스',
+        `${week.yearMonth} ${week.weekNo}주차부터 ${balance.toLocaleString('ko-KR')}원${prepay > 0 ? '' : ' · MYSC 선입금 Projection 없음'}`,
+      );
+    }
+  }
+  return managementCheck('negative-projection-balance', 'OK', 'Projection 잔액 마이너스', 'Projection 누적 잔액이 0원 이상입니다.');
+}
+
+function futurePrepayCheck(weeks, asOfKey) {
+  const occurrences = weeks.filter((week) => (
+    cashflowRangeSortKey(week) > asOfKey && safeAmount(week.projection?.MYSC_PREPAY_IN) > 1_000_000
+  ));
+  return managementCheck(
+    'future-prepay-over-million',
+    occurrences.length > 0 ? 'WARNING' : 'OK',
+    '금주 이후 선입금 요청 100만원 초과',
+    occurrences.length > 0
+      ? occurrences.map((week) => `${week.yearMonth} ${week.weekNo}주차 ${safeAmount(week.projection?.MYSC_PREPAY_IN).toLocaleString('ko-KR')}원`).join(', ')
+      : '금주 이후 100만원 초과 요청이 없습니다.',
+  );
+}
+
+export function buildCashflowManagementChecks({ project, cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary }) {
+  const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth);
+  const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
+  const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({ ...row, yearMonth }));
+  return [
+    laborTransferCheck(project, weeks, yearMonth, asOfKey),
+    profitVatAfterDepositCheck(weeks, deposits, asOfKey),
+    negativeProjectionCheck(weeks),
+    futurePrepayCheck(weeks, asOfKey),
+  ];
+}
+
+function validManagementConfirmations(confirmations) {
+  const byId = new Map();
+  for (const item of Array.isArray(confirmations) ? confirmations : []) {
+    const checkId = readOptionalText(item?.checkId);
+    const decision = readOptionalText(item?.decision).toUpperCase();
+    if (!CASHFLOW_MANAGEMENT_CHECK_IDS.includes(checkId) || !['CONFIRMED', 'NOT_APPLICABLE'].includes(decision)) continue;
+    byId.set(checkId, { checkId, decision });
+  }
+  return byId;
+}
+
+function completeManagementConfirmations(confirmations) {
+  return validManagementConfirmations(confirmations).size === CASHFLOW_MANAGEMENT_CHECK_IDS.length;
+}
+
+function matchingManagementChecks(expected, actual) {
+  const select = (items) => (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      id: readOptionalText(item?.id),
+      status: readOptionalText(item?.status),
+      title: readOptionalText(item?.title),
+      detail: readOptionalText(item?.detail),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return select(expected).length === CASHFLOW_MANAGEMENT_CHECK_IDS.length
+    && stableStringify(select(expected)) === stableStringify(select(actual));
+}
+
+function actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary) {
+  const asOfYearMonth = readOptionalText(comparisonBoundary?.asOfWeek?.yearMonth);
+  const asOfWeekNo = Number(comparisonBoundary?.asOfWeek?.weekNo);
+  const targetWeekCount = yearMonth < asOfYearMonth ? 5 : yearMonth === asOfYearMonth ? Math.max(0, Math.min(5, asOfWeekNo)) : 0;
+  if (targetWeekCount === 0) return 0;
+  const target = cells.filter((cell) => cell.mode === 'actual' && cell.weekNo <= targetWeekCount);
+  if (target.length === 0) return 0;
+  return Math.round((target.filter((cell) => cell.cellState === 'VALUE').length / target.length) * 10_000) / 100;
+}
+
+function postCloseAdjustment(close, currentSnapshot) {
+  const previous = objectValue(close?.previousSnapshot);
+  if (!previous || Object.keys(previous).length === 0) return null;
+  const amounts = (snapshot) => {
+    const result = new Map();
+    for (const week of Array.isArray(snapshot?.weeklyTotals) ? snapshot.weeklyTotals : []) {
+      const weekNo = Number(week?.weekNo);
+      for (const mode of ['projection', 'actual']) {
+        const values = objectValue(week?.[mode]) || {};
+        for (const lineId of CASHFLOW_ALL_LINES) result.set(`${mode}:${weekNo}:${lineId}`, safeAmount(values[lineId]));
+      }
+    }
+    return result;
+  };
+  const before = amounts(previous);
+  const after = amounts(currentSnapshot);
+  const changes = [...after.entries()].flatMap(([key, afterAmount]) => {
+    const beforeAmount = before.get(key) || 0;
+    if (beforeAmount === afterAmount) return [];
+    const [mode, weekNo, cashflowLine] = key.split(':');
+    return [{ mode, weekNo: Number(weekNo), cashflowLine, beforeAmount, afterAmount }];
+  });
+  const reopenContext = objectValue(currentSnapshot?.reopenContext) || {};
+  const request = objectValue(reopenContext.request) || {};
+  const decision = objectValue(reopenContext.decision) || {};
+  return {
+    reason: readOptionalText(request.reason) || readOptionalText(decision.reason) || '재오픈 후 조정',
+    changedCount: changes.length,
+    changes: changes.slice(0, 200),
+  };
+}
+
 function parseCashflowRangeBoundary(value, fieldName) {
   const normalized = readOptionalText(value);
   if (!normalized) return null;
@@ -434,26 +683,6 @@ function dashboardTotals(mode) {
   };
 }
 
-function actualProgressPercent(confirmations, yearMonth, comparisonBoundary) {
-  const asOfYearMonth = readOptionalText(comparisonBoundary?.asOfWeek?.yearMonth);
-  const asOfWeekNo = Number(comparisonBoundary?.asOfWeek?.weekNo);
-  const targetWeekCount = yearMonth < asOfYearMonth
-    ? 5
-    : (yearMonth === asOfYearMonth ? Math.max(0, Math.min(5, asOfWeekNo)) : 0);
-  if (targetWeekCount === 0) return 0;
-  const confirmedKeys = new Set((Array.isArray(confirmations) ? confirmations : [])
-    .filter((confirmation) => (
-      confirmation?.mode === 'actual'
-      && Number.isInteger(Number(confirmation?.weekNo))
-      && Number(confirmation.weekNo) >= 1
-      && Number(confirmation.weekNo) <= targetWeekCount
-      && CASHFLOW_ALL_LINES.includes(readOptionalText(confirmation?.cashflowLine))
-      && ['CONFIRMED', 'NOT_APPLICABLE'].includes(readOptionalText(confirmation?.decision))
-    ))
-    .map((confirmation) => `${Number(confirmation.weekNo)}:${confirmation.cashflowLine}`));
-  return Math.round(Math.min(1, confirmedKeys.size / (CASHFLOW_ALL_LINES.length * targetWeekCount)) * 10_000) / 100;
-}
-
 function validConfirmationKeys(confirmations) {
   const keys = new Set();
   for (const confirmation of Array.isArray(confirmations) ? confirmations : []) {
@@ -528,6 +757,90 @@ function projectSheetWarnings(project, metadata) {
     warnings.push({ code: 'PROJECT_SHEET_SETTLEMENT_STATUS_MISMATCH', message: '프로젝트 등록 정보와 시트의 정산 여부가 다릅니다.' });
   }
   return warnings;
+}
+
+function projectMetadata(project) {
+  const settlementType = readOptionalText(project?.settlementType).toUpperCase();
+  const basis = readOptionalText(project?.basis);
+  return {
+    businessType: [settlementType && settlementType !== 'NONE' ? settlementType : '', basis && basis !== 'NONE' ? basis : '']
+      .filter(Boolean).join(' · ') || '미정',
+    accountType: project?.accountType === 'DEDICATED' ? '전용계좌사업' : project?.accountType ? '운영계좌사업' : '미정',
+    settlementStatus: !settlementType ? '미정' : settlementType !== 'NONE' ? '정산진행' : '정산없음',
+  };
+}
+
+function addIsoDays(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function thursdayDeadlineMs(week) {
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = addIsoDays(week.weekStart, offset);
+    if (date > week.weekEnd) break;
+    if (new Date(`${date}T00:00:00Z`).getUTCDay() === 4) {
+      return Date.parse(`${addIsoDays(date, 1)}T00:00:00+09:00`);
+    }
+  }
+  return Date.parse(`${addIsoDays(week.weekEnd, 1)}T00:00:00+09:00`);
+}
+
+function monthsBetween(startYearMonth, endYearMonth) {
+  const result = [];
+  let cursor = new Date(`${startYearMonth}-01T00:00:00Z`);
+  const end = new Date(`${endYearMonth}-01T00:00:00Z`);
+  while (cursor <= end && result.length < 240) {
+    result.push(cursor.toISOString().slice(0, 7));
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+  return result;
+}
+
+async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
+  if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
+  const snap = await db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
+    .where('projectId', '==', projectId)
+    .limit(500)
+    .get();
+  const runs = snap.docs.map((doc) => doc.data() || {})
+    .filter((run) => run.status === 'APPLIED' || (run.status === 'READY' && safeAmount(run.stagedLineCount) === 0))
+    .map((run) => readOptionalText(run.appliedAt) || readOptionalText(run.createdAt))
+    .filter((value) => Number.isFinite(Date.parse(value)))
+    .sort();
+  if (runs.length === 0) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
+  const trackingStartedAt = runs[0];
+  const asOfDate = readOptionalText(comparisonBoundary?.asOfDate);
+  const startYearMonth = trackingStartedAt.slice(0, 7);
+  const endYearMonth = asOfDate.slice(0, 7);
+  const asOfMs = Date.parse(`${asOfDate}T23:59:59+09:00`);
+  const weeks = monthsBetween(startYearMonth, endYearMonth).flatMap(getMonthFinanceWeeks)
+    .filter((week) => Date.parse(`${week.weekEnd}T23:59:59+09:00`) >= Date.parse(trackingStartedAt));
+  let missedCount = 0;
+  let completedCount = 0;
+  let current = null;
+  for (const week of weeks) {
+    const deadlineMs = thursdayDeadlineMs(week);
+    const startMs = Date.parse(`${week.weekStart}T00:00:00+09:00`);
+    const completedAt = runs.find((value) => {
+      const time = Date.parse(value);
+      return time >= startMs && time <= deadlineMs;
+    }) || null;
+    const deadlinePassed = asOfMs >= deadlineMs;
+    if (deadlinePassed && completedAt) completedCount += 1;
+    if (deadlinePassed && !completedAt) missedCount += 1;
+    if (week.yearMonth === comparisonBoundary?.asOfWeek?.yearMonth && week.weekNo === comparisonBoundary?.asOfWeek?.weekNo) {
+      current = {
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        deadline: new Date(deadlineMs).toISOString(),
+        completedAt,
+        status: completedAt ? 'COMPLETED' : deadlinePassed ? 'MISSED' : 'PENDING',
+      };
+    }
+  }
+  return { trackingStartedAt, missedCount, completedCount, current };
 }
 
 function sheetControlBlockers(sheetFacts) {
@@ -646,10 +959,29 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     }, comparisonBoundary).months[0] || null
     : null;
   const confirmations = closedSnapshot?.confirmations || (draftMatches ? draftInput?.confirmations : []) || [];
+  const managementConfirmations = closedSnapshot?.managementConfirmations
+    || (draftMatches ? draftInput?.managementConfirmations : [])
+    || [];
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
   const depositScheduleRows = closedSnapshot?.depositScheduleRows
     || (draftSourceMatches ? draftInput?.depositScheduleRows : sourceRows)
     || [];
+  const managementChecks = Array.isArray(closedSnapshot?.managementChecks)
+    ? closedSnapshot.managementChecks
+    : buildCashflowManagementChecks({
+      project,
+      cashflow,
+      cells,
+      yearMonth,
+      depositScheduleRows,
+      comparisonBoundary,
+    });
+  const deadlineSummary = closedSnapshot?.deadlineSummary || await readCashflowDeadlineSummary({
+    db,
+    tenantId,
+    projectId,
+    comparisonBoundary,
+  });
   const blockers = [];
   if (readOptionalText(close?.status) !== 'OPEN') {
     blockers.push({ code: 'MONTH_NOT_OPEN', message: '결산 또는 재오픈 검토 중인 월은 수정할 수 없습니다.' });
@@ -674,14 +1006,23 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     if (!completeMonthCloseConfirmations(confirmations)) {
       blockers.push({ code: 'CONFIRMATIONS_INCOMPLETE', message: '모든 캐시플로우 항목을 확인 또는 해당 없음으로 판정해 주세요.' });
     }
+    if (!completeManagementConfirmations(managementConfirmations)) {
+      blockers.push({ code: 'MANAGEMENT_CONFIRMATIONS_INCOMPLETE', message: '주요 관리 항목 4개를 모두 확인 또는 해당 없음으로 판정해 주세요.' });
+    }
   }
   const contractAmount = safeAmount(project?.contractAmount);
   const rawProjectionProgressPercent = contractAmount === 0
     ? 100
     : Math.round((projection.totalIn / contractAmount) * 10_000) / 100;
   const projectionProgressPercent = Math.max(0, Math.min(100, rawProjectionProgressPercent));
+  const requiredCellConfirmationCount = CASHFLOW_ALL_LINES.length * 2 * 5;
+  const requiredManagementConfirmationCount = CASHFLOW_MANAGEMENT_CHECK_IDS.length;
   const confirmationProgressPercent = Math.round(
-    Math.min(1, validConfirmationKeys(confirmations).size / (CASHFLOW_ALL_LINES.length * 2 * 5)) * 10_000,
+    Math.min(
+      1,
+      (validConfirmationKeys(confirmations).size + validManagementConfirmations(managementConfirmations).size)
+        / (requiredCellConfirmationCount + requiredManagementConfirmationCount),
+    ) * 10_000,
   ) / 100;
   const source = closedSnapshot ? {
     kind: 'MONTH_CLOSE_SNAPSHOT',
@@ -699,6 +1040,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   return {
     source,
     project,
+    projectMetadata: projectMetadata(project),
     sheetMetadata: sheetFacts?.metadata || {},
     sheetControlTotals: {
       deposit: objectValue(sheetFacts?.controlTotals?.deposit) || null,
@@ -708,12 +1050,16 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     depositScheduleRows,
     cells,
     confirmations,
+    managementChecks,
+    managementConfirmations,
+    deadlineSummary,
+    postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
     draftRevision: draftMatches && Number.isSafeInteger(Number(draft?.draftRevision)) ? Number(draft.draftRevision) : null,
     totals: { projection, actual, difference },
     comparison,
     summary: {
       projectionProgressPercent,
-      actualProgressPercent: actualProgressPercent(confirmations, yearMonth, comparisonBoundary),
+      actualProgressPercent: actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary),
       confirmationProgressPercent,
       comparisonMatches: Boolean(comparison) && comparison.weeks.every((week) => week.net === 0 && week.totalIn === 0 && week.totalOut === 0),
       comparisonAsOfDate: comparisonBoundary.asOfDate,
@@ -731,7 +1077,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   };
 }
 
-async function composeCashflowMonthCloseBody({ db, req, projectId }) {
+async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, comparisonBoundary }) {
   if (!db?.doc) {
     throw createHttpError(503, 'Cashflow month close source storage is unavailable.', 'cashflow_month_close_source_unavailable');
   }
@@ -744,9 +1090,10 @@ async function composeCashflowMonthCloseBody({ db, req, projectId }) {
     throw createHttpError(400, 'Cashflow month close scope is invalid.', 'cashflow_month_close_request_invalid');
   }
 
-  const [draftSnap, mirrorSnap] = await Promise.all([
+  const [draftSnap, mirrorSnap, projectSnap] = await Promise.all([
     db.doc(`orgs/${tenantId}/privateEditDrafts/${privateCashflowDraftId(projectId, actorId)}`).get(),
     db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`).get(),
+    db.doc(`orgs/${tenantId}/projects/${projectId}`).get(),
   ]);
   if (!draftSnap.exists) {
     throw createHttpError(409, 'Save a private cashflow draft before closing the month.', 'cashflow_month_close_draft_required');
@@ -771,6 +1118,8 @@ async function composeCashflowMonthCloseBody({ db, req, projectId }) {
     && Array.isArray(submittedRequest?.depositScheduleRows)
     && Array.isArray(submittedRequest?.cells)
     && Array.isArray(submittedRequest?.confirmations)
+    && Array.isArray(submittedRequest?.managementChecks)
+    && Array.isArray(submittedRequest?.managementConfirmations)
   ) {
     return {
       idempotencyKey: requested.idempotencyKey,
@@ -782,6 +1131,9 @@ async function composeCashflowMonthCloseBody({ db, req, projectId }) {
       depositScheduleRows: submittedRequest.depositScheduleRows,
       cells: submittedRequest.cells,
       confirmations: submittedRequest.confirmations,
+      managementChecks: submittedRequest.managementChecks,
+      managementConfirmations: submittedRequest.managementConfirmations,
+      deadlineSummary: submittedRequest.deadlineSummary || null,
     };
   }
   if (
@@ -813,6 +1165,23 @@ async function composeCashflowMonthCloseBody({ db, req, projectId }) {
     throw createHttpError(409, 'The pinned cashflow source changed. Refresh it before closing.', 'cashflow_month_close_source_conflict');
   }
   assertCloseableSheetFacts(mirror, yearMonth, closeInput);
+  const project = projectSnap.exists ? projectSnap.data() || {} : {};
+  const normalizedCells = normalizeMonthCloseCells(closeInput.cells, yearMonth);
+  const managementChecks = buildCashflowManagementChecks({
+    project,
+    cashflow,
+    cells: normalizedCells,
+    yearMonth,
+    depositScheduleRows: closeInput.depositScheduleRows,
+    comparisonBoundary,
+  });
+  if (!matchingManagementChecks(managementChecks, closeInput.managementChecks)) {
+    throw createHttpError(409, '주요 관리 항목 판정이 변경되었습니다. 다시 확인해 주세요.', 'cashflow_management_checks_stale');
+  }
+  if (!completeManagementConfirmations(closeInput.managementConfirmations)) {
+    throw createHttpError(409, '주요 관리 항목 4개를 모두 확인해 주세요.', 'cashflow_management_confirmations_incomplete');
+  }
+  const deadlineSummary = await readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
 
   return {
     idempotencyKey: requested.idempotencyKey,
@@ -824,6 +1193,9 @@ async function composeCashflowMonthCloseBody({ db, req, projectId }) {
     depositScheduleRows: closeInput.depositScheduleRows,
     cells: closeInput.cells,
     confirmations: closeInput.confirmations,
+    managementChecks,
+    managementConfirmations: [...validManagementConfirmations(closeInput.managementConfirmations).values()],
+    deadlineSummary,
   };
 }
 
@@ -1131,7 +1503,19 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     const rawProjectId = readOptionalText(req.params.projectId);
     const projectId = encodeURIComponent(rawProjectId);
-    const closeBody = await composeCashflowMonthCloseBody({ db, req, projectId: rawProjectId });
+    const comparisonBoundary = resolveCashflowComparisonAsOf('', now());
+    const cashflow = await proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/cashflow/${projectId}`,
+    });
+    const closeBody = await composeCashflowMonthCloseBody({
+      db,
+      req,
+      projectId: rawProjectId,
+      cashflow,
+      comparisonBoundary,
+    });
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${projectId}/month-close`,

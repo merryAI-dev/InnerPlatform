@@ -801,6 +801,8 @@ public class WeeklyExpenseCommandService {
         CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
         CloseCashflowMonthRequest.requireCompleteDepositSchedule(request.depositScheduleRows());
         CloseCashflowMonthRequest.requireCompleteConfirmations(request.confirmations());
+        CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
+        CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
         CashflowEditSession finalSession = finalizedSession(editSession);
         assertAtomicWriteBudget(
             CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT,
@@ -2648,6 +2650,7 @@ public class WeeklyExpenseCommandService {
             close.snapshotHash(),
             close.previousSnapshotHash(),
             close.snapshot(),
+            close.previousSnapshot(),
             close.closeEligible(),
             close.evaluatedBusinessDate(),
             close.closeDeadline(),

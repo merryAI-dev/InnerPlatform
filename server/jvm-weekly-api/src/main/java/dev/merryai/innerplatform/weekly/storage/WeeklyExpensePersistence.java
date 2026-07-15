@@ -55,6 +55,7 @@ public interface WeeklyExpensePersistence {
         String snapshotHash,
         String previousSnapshotHash,
         Map<String, Object> snapshot,
+        Map<String, Object> previousSnapshot,
         boolean closeEligible,
         String evaluatedBusinessDate,
         String closeDeadline,
@@ -72,6 +73,7 @@ public interface WeeklyExpensePersistence {
     ) {
         public CashflowMonthCloseRecord {
             snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
+            previousSnapshot = previousSnapshot == null ? Map.of() : Map.copyOf(previousSnapshot);
         }
     }
 

@@ -424,6 +424,17 @@ export interface ProjectPaymentExpectedMonths {
   final: string;
 }
 
+export type ProjectLaborTransferMode = 'UNDECIDED' | 'MONTHLY_WEEK_3' | 'PAYMENT_MILESTONE';
+
+export interface ProjectLaborTransferPlan {
+  mode: ProjectLaborTransferMode;
+  milestoneAmounts: {
+    contract: number;
+    interim: number;
+    final: number;
+  };
+}
+
 export const SETTLEMENT_SYSTEM_LABELS: Record<SettlementSystemCode, string> = {
   E_NARA_DOUM: 'e나라도움 (국고보조금통합관리)',
   IRIS: 'IRIS (범부처통합연구지원)',
@@ -631,6 +642,7 @@ export interface Project {
     final: number;       // 잔금
   };
   paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  laborTransferPlan?: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;       // 입금계획 텍스트 (e.g. "선금80%, 잔금20%")
   // MYSC-specific fields
@@ -830,6 +842,7 @@ export interface ProjectRequestPayload {
   settlementSheetPolicy?: SettlementSheetPolicy;
   paymentPlan?: Project['paymentPlan'];
   paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  laborTransferPlan?: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;
   settlementGuide: string;

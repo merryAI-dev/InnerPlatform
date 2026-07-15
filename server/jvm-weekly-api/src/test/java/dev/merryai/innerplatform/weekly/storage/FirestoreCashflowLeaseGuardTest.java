@@ -863,7 +863,12 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("sourceReadAt", NOW.minusSeconds(120).toString())
             .containsEntry("draftRevision", 3L)
             .hasEntrySatisfying("draftInputHash", value -> assertThat(value).asString().startsWith("sha256:"))
-            .containsKeys("project", "sheetFacts", "depositScheduleRows", "confirmations", "weeklyTotals", "projectionTotal", "actualTotal");
+            .containsKeys(
+                "project", "sheetFacts", "depositScheduleRows", "confirmations",
+                "managementChecks", "managementConfirmations", "deadlineSummary",
+                "weeklyTotals", "projectionTotal", "actualTotal"
+            );
+        assertThat(response.previousSnapshot()).isEmpty();
         assertThat((List<?>) ((Map<String, Object>) close.get("snapshot")).get("depositScheduleRows"))
             .hasSize(5);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_weeks/project-a-2026-06-w1"))
@@ -1564,7 +1569,20 @@ class FirestoreCashflowLeaseGuardTest {
             expectedDraftRevision,
             depositScheduleRows,
             month.cells(),
-            confirmations
+            confirmations,
+            List.of(
+                new CloseCashflowMonthRequest.ManagementCheck("labor-transfer", "OK", "MYSC 인건비 이관", "확인"),
+                new CloseCashflowMonthRequest.ManagementCheck("profit-vat-after-deposit", "OK", "수익·부가세 이관", "확인"),
+                new CloseCashflowMonthRequest.ManagementCheck("negative-projection-balance", "OK", "Projection 잔액", "확인"),
+                new CloseCashflowMonthRequest.ManagementCheck("future-prepay-over-million", "OK", "선입금 요청", "확인")
+            ),
+            List.of(
+                new CloseCashflowMonthRequest.ManagementConfirmation("labor-transfer", "CONFIRMED"),
+                new CloseCashflowMonthRequest.ManagementConfirmation("profit-vat-after-deposit", "CONFIRMED"),
+                new CloseCashflowMonthRequest.ManagementConfirmation("negative-projection-balance", "CONFIRMED"),
+                new CloseCashflowMonthRequest.ManagementConfirmation("future-prepay-over-million", "CONFIRMED")
+            ),
+            new CloseCashflowMonthRequest.DeadlineSummary("", 0, 0, null)
         );
     }
 
@@ -1867,6 +1885,9 @@ class FirestoreCashflowLeaseGuardTest {
         closeInput.put("depositScheduleRows", request.depositScheduleRows());
         closeInput.put("cells", request.cells());
         closeInput.put("confirmations", request.confirmations());
+        closeInput.put("managementChecks", request.managementChecks());
+        closeInput.put("managementConfirmations", request.managementConfirmations());
+        closeInput.put("deadlineSummary", request.deadlineSummary());
         Map<String, Object> storedCloseInput = (Map<String, Object>) stripNullValues(
             new ObjectMapper().convertValue(closeInput, Map.class)
         );

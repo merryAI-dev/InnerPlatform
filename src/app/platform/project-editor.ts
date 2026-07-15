@@ -9,6 +9,7 @@ import type {
   ProjectFundInputMode,
   ProjectFinancialYear,
   ProjectPaymentExpectedMonths,
+  ProjectLaborTransferPlan,
   ProjectRegistrationConfirmations,
   ProjectRegistrationOptionalDocumentNotes,
   ProjectCheckout,
@@ -106,6 +107,7 @@ export interface ProjectEditorDraft {
   groupwareName: string;
   paymentPlan: Project['paymentPlan'];
   paymentExpectedMonths: ProjectPaymentExpectedMonths;
+  laborTransferPlan: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason: string;
   finalPaymentNote: string;
   budgetCurrentYear: number;
@@ -199,6 +201,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   groupwareName: '',
   paymentPlan: { contract: 0, interim: 0, final: 0 },
   paymentExpectedMonths: { contract: '', interim: '', final: '' },
+  laborTransferPlan: { mode: 'UNDECIDED', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
   advanceInterimBelow70Reason: '',
   finalPaymentNote: '',
   budgetCurrentYear: 0,
@@ -341,6 +344,16 @@ function normalizePaymentExpectedMonths(
   };
 }
 
+function normalizeLaborTransferPlan(value: Partial<ProjectLaborTransferPlan> | null | undefined): ProjectLaborTransferPlan {
+  const mode = ['MONTHLY_WEEK_3', 'PAYMENT_MILESTONE'].includes(String(value?.mode || ''))
+    ? value?.mode as ProjectLaborTransferPlan['mode']
+    : 'UNDECIDED';
+  return {
+    mode,
+    milestoneAmounts: normalizePaymentPlan(value?.milestoneAmounts),
+  };
+}
+
 function formatAmountForChange(value: unknown) {
   const amount = nonNegativeAmount(value);
   return amount > 0 ? `${amount.toLocaleString('ko-KR')}원` : '-';
@@ -476,6 +489,9 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       overrides.paymentExpectedMonths ?? DEFAULT_DRAFT.paymentExpectedMonths,
     ),
+    laborTransferPlan: normalizeLaborTransferPlan(
+      overrides.laborTransferPlan ?? DEFAULT_DRAFT.laborTransferPlan,
+    ),
     teamMembersDetailed: normalizeProjectTeamMembers(overrides.teamMembersDetailed),
     registrationRequirementsVersion: version,
     financialYears: projectFinancialYears(
@@ -597,6 +613,9 @@ export function buildProjectEditorDraftFromProject(
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       normalizedProject.paymentExpectedMonths || payload?.paymentExpectedMonths,
     ),
+    laborTransferPlan: normalizeLaborTransferPlan(
+      normalizedProject.laborTransferPlan || payload?.laborTransferPlan,
+    ),
     advanceInterimBelow70Reason: text(
       normalizedProject.advanceInterimBelow70Reason || payload?.advanceInterimBelow70Reason,
     ),
@@ -654,6 +673,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     settlementGuide: text(draft.settlementGuide),
@@ -758,6 +778,7 @@ export function buildProjectEditorProjectPatch(
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
