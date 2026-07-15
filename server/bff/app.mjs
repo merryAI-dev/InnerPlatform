@@ -1489,6 +1489,8 @@ export function createBffApp(options = {}) {
   mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService,
+    editLeasesEnabled,
+    editLeaseService,
   });
   mountCashflowLaborRiskRoutes(app, {
     db,

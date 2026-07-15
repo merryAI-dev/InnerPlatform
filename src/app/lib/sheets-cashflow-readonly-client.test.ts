@@ -151,6 +151,23 @@ describe('sheets cashflow readonly client', () => {
     );
   });
 
+  it('lets the sheet-lab BFF supply its short-lived apply lease when the caller has none', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { projectId: 'p001', appliedLineCount: 1 } })),
+    });
+
+    await applyCashflowSheetLabViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      stageRunId: 'stage-001',
+      idempotencyKey: 'apply-without-ui-lease',
+      client,
+    });
+
+    expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
+  });
+
   it('reads only the pinned mirror without contacting Google Sheets', async () => {
     const client = asMockClient({
       get: vi.fn(async () => ({

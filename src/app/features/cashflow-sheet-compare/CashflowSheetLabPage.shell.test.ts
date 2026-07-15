@@ -47,7 +47,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('getCashflowSheetLabMirrorViaBff');
     expect(pageSource).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(pageSource).not.toContain('previewCashflowSheetLabViaBff');
-    expect(pageSource).toContain('createCashflowPrivateDraftClient');
+    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
@@ -188,26 +188,20 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain("navigate('/login'");
   });
 
-  it('shares the project cashflow lease while leaving preview and staging read-only', () => {
-    expect(pageSource).toContain('useCashflowEditLease');
-    expect(pageSource).toContain('checkBeforeMutation');
-    expect(pageSource).toContain('EditLeaseDialogs');
-    expect(pageSource).toContain('수정 시작');
-    expect(pageSource).toContain('lease: mutationLease');
+  it('does not hold a project edit lease while configuring, reviewing, or applying a sheet', () => {
+    expect(pageSource).not.toContain('useCashflowEditLease');
+    expect(pageSource).not.toContain('checkBeforeMutation');
+    expect(pageSource).not.toContain('EditLeaseDialogs');
+    expect(pageSource).not.toContain('수정 시작');
+    expect(pageSource).not.toContain('lease: mutationLease');
     expect(pageSource).not.toContain('cashflowEditLocks');
   });
 
-  it('stores sheet config in the owner private draft and finalizes only the reviewed apply', () => {
-    expect(pageSource).toContain('createCashflowPrivateDraftClient');
-    expect(pageSource).toContain('settings.private_save.ok');
-    expect(pageSource).not.toContain('saveCashflowSheetLabConfigViaBff');
-    expect(pageSource).toContain('finalize: true');
-    expect(pageSource).toContain('cashflowPrivateDraftClient.complete');
-  });
-
-  it('rehydrates the sheet draft once per active lease after same-tab refresh', () => {
-    expect(pageSource).toContain('loadedPrivateDraftKeyRef');
-    expect(pageSource).toContain('privateDraftLoadRef');
-    expect(pageSource).toContain('hydrateSheetPrivateDraft');
+  it('saves the shared sheet configuration through the BFF without a private edit draft', () => {
+    expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
+    expect(pageSource).toContain('settings.save.ok');
+    expect(pageSource).not.toContain('createCashflowPrivateDraftClient');
+    expect(pageSource).not.toContain('cashflowPrivateDraftClient');
+    expect(pageSource).not.toContain('finalize: true');
   });
 });
