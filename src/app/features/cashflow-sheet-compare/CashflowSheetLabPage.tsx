@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Copy, HelpCircle, Loader2, RefreshCw, Save, Search, UserPlus } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
@@ -12,6 +12,7 @@ import {
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
+  saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabChangeCandidate,
@@ -33,14 +34,6 @@ import {
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
-import { EditLeaseDialogs } from '../../components/editing/EditLeaseDialogs';
-import { useCashflowEditLease } from '../../components/cashflow/useCashflowEditLease';
-import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
-import type { CashflowMutationLease } from '../../lib/cashflow-edit-lease';
-import {
-  createPrivateDraftMutationQueue,
-  saveSheetLabDraftWithRecovery,
-} from './cashflow-private-draft-recovery';
 
 function formatAmount(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -315,12 +308,6 @@ export function CashflowSheetLabPage({
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
-  const loadedPrivateDraftKeyRef = useRef('');
-  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
-  const privateDraftRevisionRef = useRef<number | null>(null);
-  const privateDraftPayloadRef = useRef<Record<string, unknown>>({});
-  const privateDraftMutationQueueRef = useRef(createPrivateDraftMutationQueue());
-
   const projectId = projectIdInput.trim();
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
@@ -354,78 +341,6 @@ export function CashflowSheetLabPage({
     authUser?.role,
     authUser?.idToken,
   ]);
-  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor });
-  const cashflowPrivateDraftClient = useMemo(() => (
-    cashflowLease.sessionId && projectId
-      ? createCashflowPrivateDraftClient({
-          tenantId: orgId,
-          projectId,
-          actor,
-          sessionId: cashflowLease.sessionId,
-        })
-      : null
-  ), [actor, cashflowLease.sessionId, orgId, projectId]);
-  const hydrateSheetPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }) => {
-    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
-    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
-    if (loadedPrivateDraftKeyRef.current === key) return;
-    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
-    const promise = (async () => {
-      const opened = await cashflowPrivateDraftClient.open(ownership, {
-        baseSnapshot: { savedConfig: savedConfig || {} },
-        payload: { sheetLab: { value: sheetLink, sheetName, startWeek, endWeek } },
-      });
-      privateDraftRevisionRef.current = opened.draft.draftRevision;
-      privateDraftPayloadRef.current = opened.draft.payload;
-      const sheetLab = opened.draft.payload.sheetLab;
-      if (sheetLab && typeof sheetLab === 'object' && !Array.isArray(sheetLab)) {
-        const draft = sheetLab as Record<string, unknown>;
-        setSheetLink(typeof draft.value === 'string' ? draft.value : sheetLink);
-        setSheetName(typeof draft.sheetName === 'string' ? draft.sheetName : sheetName);
-        setStartWeek(typeof draft.startWeek === 'string' ? draft.startWeek : startWeek);
-        setEndWeek(typeof draft.endWeek === 'string' ? draft.endWeek : endWeek);
-      }
-      loadedPrivateDraftKeyRef.current = key;
-    })();
-    privateDraftLoadRef.current = { key, promise };
-    try {
-      await promise;
-    } finally {
-      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
-    }
-  }, [
-    cashflowPrivateDraftClient,
-    endWeek,
-    projectId,
-    savedConfig,
-    sheetLink,
-    sheetName,
-    startWeek,
-  ]);
-  useEffect(() => {
-    loadedPrivateDraftKeyRef.current = '';
-    privateDraftLoadRef.current = null;
-    privateDraftRevisionRef.current = null;
-    privateDraftPayloadRef.current = {};
-    privateDraftMutationQueueRef.current = createPrivateDraftMutationQueue();
-  }, [projectId]);
-  useEffect(() => {
-    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
-    void hydrateSheetPrivateDraft(cashflowLease.ownership).catch((error) => setErrorMessage(formatError(error)));
-  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateSheetPrivateDraft]);
-  const beginSheetEditing = useCallback(async (resumePrevious = false) => {
-    if (!cashflowPrivateDraftClient) return null;
-    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
-    if (!ownership) return null;
-    try {
-      await hydrateSheetPrivateDraft(ownership);
-      return ownership;
-    } catch (error) {
-      await cashflowLease.release();
-      setErrorMessage(formatError(error));
-      return null;
-    }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateSheetPrivateDraft]);
   const requestLoginFlow = useCallback(async () => {
     logCashflowLab('auth.popup.start', {
       projectId,
@@ -608,7 +523,7 @@ export function CashflowSheetLabPage({
   }
 
   async function handleSaveSheetConfig() {
-    if (!projectId || loading || !spreadsheetId || !cashflowPrivateDraftClient) return;
+    if (!projectId || loading || !spreadsheetId) return;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
@@ -616,43 +531,23 @@ export function CashflowSheetLabPage({
     setStageResult(null);
     setReflectResult(null);
     try {
-      const saved = await privateDraftMutationQueueRef.current(async () => {
-        const mutationLease = await cashflowLease.checkBeforeMutation();
-        let revision = privateDraftRevisionRef.current;
-        let payload = privateDraftPayloadRef.current;
-        if (revision === null) {
-          const opened = await cashflowPrivateDraftClient.open(mutationLease, {
-            baseSnapshot: { savedConfig: savedConfig || {} },
-            payload: {},
-          });
-          revision = opened.draft.draftRevision;
-          payload = opened.draft.payload;
-        }
-        const savedDraft = await saveSheetLabDraftWithRecovery({
-          client: cashflowPrivateDraftClient,
-          ownership: mutationLease,
-          expectedDraftRevision: revision,
-          payload: {
-            ...payload,
-            sheetLab: { value: sheetLink, sheetName, startWeek, endWeek },
-          },
-        });
-        privateDraftRevisionRef.current = savedDraft.draft.draftRevision;
-        privateDraftPayloadRef.current = savedDraft.draft.payload;
-        return savedDraft;
-      });
-      setSavedConfig((current) => ({
-        ...(current || {}),
-        value: sheetLink,
-        spreadsheetId,
-        sheetName,
-        startWeek,
-        endWeek,
-      }));
-      setStatusMessage('작성자 전용 시트 설정 임시저장본을 저장했습니다.');
-      logCashflowLab('settings.private_save.ok', { projectId, spreadsheetId, sheetName: sheetName || null });
+      const result = await runWithBffAuthRetry('settings.save', (requestActor) => (
+        saveCashflowSheetLabConfigViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          value: sheetLink,
+          sheetName: sheetName || undefined,
+          startWeek: startWeek || undefined,
+          endWeek: endWeek || undefined,
+        })
+      ));
+      if (!result) return;
+      setSavedConfig(result.config || null);
+      setStatusMessage('시트 정보를 저장했습니다. 금액은 아직 MYSCube에 반영되지 않았습니다.');
+      logCashflowLab('settings.save.ok', { projectId, spreadsheetId, sheetName: sheetName || null });
     } catch (error) {
-      logCashflowLab('settings.private_save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      logCashflowLab('settings.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);
@@ -784,7 +679,6 @@ export function CashflowSheetLabPage({
     const startedAt = Date.now();
     const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
-    let finalMutationLease: CashflowMutationLease | null = null;
     setErrorMessage('');
     setStatusMessage('');
       logCashflowLab('apply.sheet_values.start', {
@@ -795,20 +689,16 @@ export function CashflowSheetLabPage({
         riskLineCount: stageResult.riskLineCount,
       });
     try {
-      const result = await runWithBffAuthRetry('apply.sheet_values', async (requestActor) => {
-        const mutationLease = finalMutationLease || await cashflowLease.checkBeforeMutation();
-        finalMutationLease = mutationLease;
-        return applyCashflowSheetLabViaBff({
+      const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
+        applyCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
           stageRunId: stageResult.runId,
           applyRiskCandidates: false,
           idempotencyKey: applyIdempotencyKey,
-          lease: mutationLease,
-          finalize: true,
-        });
-      });
+        })
+      ));
       if (!result) return;
       setReflectResult({
         appliedLineCount: result.appliedLineCount,
@@ -818,13 +708,6 @@ export function CashflowSheetLabPage({
         lastAppliedAt: result.lastAppliedAt,
       });
       setApplyDialogOpen(false);
-      if (cashflowPrivateDraftClient && privateDraftRevisionRef.current !== null && finalMutationLease) {
-        await cashflowPrivateDraftClient.complete(finalMutationLease, {
-          expectedDraftRevision: privateDraftRevisionRef.current,
-        });
-        privateDraftRevisionRef.current = null;
-      }
-      await cashflowLease.checkStatus();
       setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 MYSCube에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
@@ -847,7 +730,7 @@ export function CashflowSheetLabPage({
     ? `${mirror.activeWeekRange.startWeek || '전체'} ~ ${mirror.activeWeekRange.endWeek || '전체'}`
     : '전체';
   const canRefresh = Boolean(projectId && spreadsheetId && !loading);
-  const canSaveConfig = Boolean(projectId && spreadsheetId && cashflowLease.canEdit && !loading);
+  const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
   const canStage = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !loading);
   const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
@@ -861,7 +744,7 @@ export function CashflowSheetLabPage({
       || a.lineId.localeCompare(b.lineId)
     ));
   }, [stageResult]);
-  const canReflect = Boolean(projectId && spreadsheetId && cashflowLease.canEdit && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
+  const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
   const showSetupSteps = true;
   const isCurrentSheetConfigSaved = Boolean(savedConfigSourceKey && savedConfigSourceKey === sourceKey);
@@ -906,23 +789,6 @@ export function CashflowSheetLabPage({
           <CashflowSheetHeroAnimation />
           <div className="mt-3 text-[13px] text-slate-500">
             현재 연동된 시트 이름 {linkedSpreadsheetTitle || '파일 이름 확인 전'}
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant={cashflowLease.canEdit ? 'default' : 'outline'}
-              className="h-9 rounded-none px-3 text-[12px]"
-              disabled={!projectId || !cashflowLease.sessionId || cashflowLease.busy || cashflowLease.canEdit}
-              onClick={() => void beginSheetEditing()}
-            >
-              {cashflowLease.busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-              {cashflowLease.canEdit ? '수정 중' : '수정 시작'}
-            </Button>
-            {cashflowLease.canEdit && (
-              <Button type="button" variant="ghost" className="h-9 px-2 text-[11px]" disabled={cashflowLease.busy} onClick={() => void cashflowLease.extend()}>
-                {cashflowLease.remainingLabel} · 30분 연장
-              </Button>
-            )}
           </div>
         </header>
 
@@ -985,7 +851,6 @@ export function CashflowSheetLabPage({
                 <HelpMemo>다음 방문 때 다시 입력하지 않도록 링크, 탭 이름, 주차 범위를 먼저 저장합니다. 이 단계는 금액 저장이 아닙니다.</HelpMemo>
               </div>
               <Input
-                disabled={!cashflowLease.canEdit}
                 value={sheetLink}
                 onChange={(event) => setSheetLink(event.target.value)}
                 placeholder="Google Sheet 링크"
@@ -994,7 +859,6 @@ export function CashflowSheetLabPage({
               />
               <div className="grid gap-2 sm:grid-cols-3">
                 <Input
-                  disabled={!cashflowLease.canEdit}
                   value={sheetName}
                   onChange={(event) => setSheetName(event.target.value)}
                   placeholder="시트 탭 이름"
@@ -1002,7 +866,6 @@ export function CashflowSheetLabPage({
                   className="h-10 rounded-none text-[12px]"
                 />
                 <Input
-                  disabled={!cashflowLease.canEdit}
                   value={startWeek}
                   onChange={(event) => setStartWeek(event.target.value)}
                   placeholder="시작 주차"
@@ -1010,7 +873,6 @@ export function CashflowSheetLabPage({
                   className="h-10 rounded-none text-[12px]"
                 />
                 <Input
-                  disabled={!cashflowLease.canEdit}
                   value={endWeek}
                   onChange={(event) => setEndWeek(event.target.value)}
                   placeholder="종료 주차"
@@ -1277,18 +1139,6 @@ export function CashflowSheetLabPage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <EditLeaseDialogs
-        warningOpen={cashflowLease.warningOpen}
-        expiredOpen={cashflowLease.expiredOpen}
-        conflictOpen={cashflowLease.conflictOpen}
-        holder={cashflowLease.holder}
-        busy={cashflowLease.busy}
-        onDismissWarning={cashflowLease.dismissWarning}
-        onExtend={() => { void cashflowLease.extend(); }}
-        onContinueReadOnly={cashflowLease.continueReadOnly}
-        onReacquire={() => { void beginSheetEditing(); }}
-        onTakeover={() => { void beginSheetEditing(true); }}
-      />
     </div>
   );
 }

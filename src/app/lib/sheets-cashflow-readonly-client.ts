@@ -355,7 +355,7 @@ export async function applyCashflowSheetLabViaBff(params: {
   stageRunId?: string;
   applyRiskCandidates?: boolean;
   idempotencyKey: string;
-  lease: CashflowMutationLease;
+  lease?: CashflowMutationLease;
   finalize?: boolean;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabApplyResult> {
@@ -375,10 +375,12 @@ export async function applyCashflowSheetLabViaBff(params: {
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
-      headers: {
-        ...cashflowMutationHeaders(params.lease),
-        ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
-      },
+      ...(params.lease ? {
+        headers: {
+          ...cashflowMutationHeaders(params.lease),
+          ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
+        },
+      } : {}),
       timeoutMs: 30000,
       retries: 0,
     },

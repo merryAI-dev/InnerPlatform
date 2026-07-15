@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   asyncHandler,
   createHttpError,
@@ -47,6 +47,57 @@ function readEditSession(req) {
     throw createHttpError(400, 'x-edit-finalize must be true when present.', 'cashflow_edit_lease_request_invalid');
   }
   return { sessionId, leaseId, fence, ...(finalizeText === 'true' ? { finalize: true } : {}) };
+}
+
+function hasEditLeaseHeaders(req) {
+  return [
+    'x-edit-session-id',
+    'x-edit-lease-id',
+    'x-edit-fence',
+    'x-edit-finalize',
+  ].some((header) => Boolean(readOptionalText(req.header(header))));
+}
+
+async function acquireSheetLabApplyLease({ editLeaseService, req, tenantId, projectId }) {
+  if (!editLeaseService) {
+    throw createHttpError(503, 'Cashflow final apply requires the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+  }
+  const sessionId = `cashflow-sheet-lab:${randomUUID()}`;
+  const acquired = await editLeaseService.acquire({
+    tenantId,
+    actorId: req.context?.actorId,
+    actorDisplayName: readOptionalText(req.context?.actorName) || readOptionalText(req.context?.actorEmail) || '사용자',
+    sessionId,
+    resourceType: 'cashflow',
+    resourceId: projectId,
+    requestId: req.context?.requestId,
+  });
+  const lease = acquired?.body || acquired;
+  return {
+    sessionId,
+    leaseId: readOptionalText(lease?.leaseId),
+    fence: Number(lease?.fence),
+    finalize: true,
+  };
+}
+
+async function releaseSheetLabApplyLease({ editLeaseService, req, tenantId, projectId, editSession }) {
+  if (!editLeaseService || !editSession?.sessionId || !editSession?.leaseId || !Number.isSafeInteger(editSession?.fence)) return;
+  try {
+    await editLeaseService.release({
+      tenantId,
+      actorId: req.context?.actorId,
+      actorDisplayName: readOptionalText(req.context?.actorName) || readOptionalText(req.context?.actorEmail) || '사용자',
+      sessionId: editSession.sessionId,
+      resourceType: 'cashflow',
+      resourceId: projectId,
+      leaseId: editSession.leaseId,
+      fence: editSession.fence,
+      requestId: req.context?.requestId,
+    });
+  } catch (error) {
+    logCashflowSheetLab('apply.temporary_lease.release_failed', req, routeErrorDetails(error), 'warn');
+  }
 }
 
 function normalizeRole(value) {
@@ -997,6 +1048,7 @@ async function applyStagedCashflowSheetLab({
   context = {},
   javaWeeklyClient = null,
   editSession = null,
+  resolveEditSession = null,
   idempotencyKey = '',
   logger = () => {},
 } = {}) {
@@ -1109,11 +1161,14 @@ async function applyStagedCashflowSheetLab({
   const javaResults = [];
   let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
   try {
+    const resolvedEditSession = typeof resolveEditSession === 'function'
+      ? await resolveEditSession()
+      : editSession;
     for (let index = 0; index < stagedMonths.length; index += 1) {
       const month = stagedMonths[index];
       const isLastMonth = index === stagedMonths.length - 1;
-      const monthEditSession = editSession
-        ? { ...editSession, finalize: isLastMonth ? Boolean(editSession.finalize) : false }
+      const monthEditSession = resolvedEditSession
+        ? { ...resolvedEditSession, finalize: isLastMonth ? Boolean(resolvedEditSession.finalize) : false }
         : null;
       const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
         context,
@@ -1443,6 +1498,7 @@ export function mountCashflowSheetLabRoutes(app, {
   enabled = true,
   env = process.env,
   editLeasesEnabled,
+  editLeaseService,
   javaWeeklyClient,
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
@@ -1743,12 +1799,15 @@ export function mountCashflowSheetLabRoutes(app, {
     const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab apply payload');
     const project = await readProjectDocument(db, tenantId, projectId);
     const deprecatedGoogleAccessTokenIgnored = Boolean(readOptionalText(req.header('x-google-access-token')));
-    const editSession = authoritativeWritesEnabled ? readEditSession(req) : null;
+    const clientEditSession = hasEditLeaseHeaders(req) ? readEditSession(req) : null;
     const idempotencyKey = readOptionalText(parsed.idempotencyKey) || readOptionalText(req.context?.idempotencyKey);
     if (authoritativeWritesEnabled && !idempotencyKey) {
       throw createHttpError(400, 'idempotencyKey is required for cashflow apply.', 'idempotency_key_required');
     }
 
+    let editSession = clientEditSession;
+    let temporaryLeaseAcquired = false;
+    let applyCompleted = false;
     try {
       const stagedRunId = readOptionalText(parsed.stageRunId);
       if (!stagedRunId) {
@@ -1766,11 +1825,24 @@ export function mountCashflowSheetLabRoutes(app, {
         context: req.context,
         javaWeeklyClient: authoritativeJavaClient,
         editSession,
+        resolveEditSession: clientEditSession
+          ? null
+          : async () => {
+            editSession = await acquireSheetLabApplyLease({
+              editLeaseService,
+              req,
+              tenantId,
+              projectId,
+            });
+            temporaryLeaseAcquired = true;
+            return editSession;
+          },
         idempotencyKey,
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`apply.${event}`, req, details, level);
         },
       });
+      applyCompleted = true;
       res.status(200).json(result);
     } catch (error) {
       logCashflowSheetLab('apply.error', req, {
@@ -1780,6 +1852,16 @@ export function mountCashflowSheetLabRoutes(app, {
         ...routeErrorDetails(normalizeRouteError(error)),
       }, 'warn');
       throw normalizeRouteError(error);
+    } finally {
+      if (temporaryLeaseAcquired && !applyCompleted) {
+        await releaseSheetLabApplyLease({
+          editLeaseService,
+          req,
+          tenantId,
+          projectId,
+          editSession,
+        });
+      }
     }
   }));
 

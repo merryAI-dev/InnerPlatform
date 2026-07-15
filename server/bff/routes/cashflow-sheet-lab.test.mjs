@@ -1512,10 +1512,14 @@ describe('cashflow sheet lab route', () => {
         savedActualLineCount: cells.filter((cell) => cell.mode === 'actual').length,
       })),
     };
+    const editLeaseService = {
+      acquire: vi.fn(async () => ({ body: { leaseId: 'sheet-lab-lease', fence: 8 } })),
+      release: vi.fn(),
+    };
     const app = createApp({
       db,
       googleSheetsService,
-      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+      routeOptions: { editLeasesEnabled: true, editLeaseService, javaWeeklyClient },
     });
 
     const mirror = await request(app)
@@ -1533,20 +1537,10 @@ describe('cashflow sheet lab route', () => {
 
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-stage-001' })
       .expect(200);
     const replay = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-stage-001' })
       .expect(200);
 
@@ -1580,7 +1574,14 @@ describe('cashflow sheet lab route', () => {
           amount: 999,
         }),
       ]),
+      editSession: expect.objectContaining({
+        leaseId: 'sheet-lab-lease',
+        fence: 8,
+        finalize: true,
+      }),
     }));
+    expect(editLeaseService.acquire).toHaveBeenCalledTimes(1);
+    expect(editLeaseService.release).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells).toHaveLength(160);
     expect(db.__getQueries()).toContainEqual({
       path: 'orgs/tenant-a/cashflow_change_candidates',
