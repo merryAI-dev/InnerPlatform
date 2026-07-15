@@ -40,7 +40,7 @@ const managementConfirmations = [
 ].map((checkId) => ({ checkId, decision: 'CONFIRMED' }));
 
 const emptyManagementChecks = [
-  { id: 'labor-transfer', status: 'WARNING', title: 'MYSC 인건비 이관', detail: '3주차 Projection 미이관 · Actual 미이관' },
+  { id: 'labor-transfer', status: 'WARNING', title: 'MYSC 인건비 이관', detail: '2026-06 3주차 · Projection 인건비 미기입' },
   { id: 'profit-vat-after-deposit', status: 'REVIEW_REQUIRED', title: '입금 후 MYSC 수익·매출부가세 이관', detail: '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.' },
   { id: 'negative-projection-balance', status: 'OK', title: 'Projection 잔액 마이너스', detail: 'Projection 누적 잔액이 0원 이상입니다.' },
   { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
@@ -453,18 +453,19 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(checks).toHaveLength(4);
     expect(checks.map((check) => [check.id, check.status])).toEqual([
-      ['labor-transfer', 'OK'],
+      ['labor-transfer', 'WARNING'],
       ['profit-vat-after-deposit', 'REVIEW_REQUIRED'],
       ['negative-projection-balance', 'WARNING'],
       ['future-prepay-over-million', 'OK'],
     ]);
+    expect(checks[0].detail).toContain('일부 이관');
   });
 
   it('flags missing labor, post-deposit transfer, negative balance, and future prepay on the server', () => {
     const { documents } = fullMonthCloseSource();
     const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
     const cells = draft.payload.monthClose.cells.map((cell) => (
-      cell.weekNo === 3 && cell.cashflowLine === 'MYSC_LABOR_OUT' ? { ...cell, amount: 0 } : cell
+      cell.mode === 'actual' && cell.weekNo === 3 && cell.cashflowLine === 'MYSC_LABOR_OUT' ? { ...cell, amount: 0 } : cell
     ));
     const depositScheduleRows = draft.payload.monthClose.depositScheduleRows.map((row) => (
       row.weekNo === 5
@@ -495,7 +496,32 @@ describe('JVM weekly API BFF proxy', () => {
       ['future-prepay-over-million', 'WARNING'],
     ]);
     expect(checks[1].detail).toContain('다음 주차 원장 없음');
+    expect(checks[0].detail).toContain('실제 0원 · 실제 미이관');
     expect(checks[3].detail).toContain('1,000,001원');
+  });
+
+  it('prioritizes an empty third-week Projection over an explicit zero amount', () => {
+    const { documents } = fullMonthCloseSource();
+    const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
+    const cells = draft.payload.monthClose.cells.map((cell) => (
+      cell.mode === 'projection' && cell.weekNo === 3 && cell.cashflowLine === 'MYSC_LABOR_OUT'
+        ? { ...cell, cellState: 'EMPTY' }
+        : cell
+    ));
+    const checks = buildCashflowManagementChecks({
+      cashflow: { readModel: { months: [] } },
+      cells,
+      yearMonth: '2026-06',
+      depositScheduleRows: [],
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+    });
+
+    expect(checks.find((check) => check.id === 'labor-transfer')).toEqual({
+      id: 'labor-transfer',
+      status: 'WARNING',
+      title: 'MYSC 인건비 이관',
+      detail: '2026-06 3주차 · Projection 인건비 미기입',
+    });
   });
 
   it('uses the manually pinned sheet range instead of legacy JVM months for negative Projection balance', () => {
