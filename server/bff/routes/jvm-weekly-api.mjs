@@ -351,7 +351,33 @@ function monthWeeksFromCells(cells, yearMonth) {
   });
 }
 
-function canonicalCashflowWeeks(cashflow, cells, yearMonth) {
+function canonicalPinnedSheetWeeks(pinnedSheetCells) {
+  const cellsByMonth = new Map();
+  for (const sourceCell of Array.isArray(pinnedSheetCells) ? pinnedSheetCells : []) {
+    const source = objectValue(sourceCell);
+    const yearMonth = readOptionalText(source?.yearMonth);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) continue;
+    const cell = normalizeMonthCloseCell(source, yearMonth);
+    if (!cell) continue;
+    const monthCells = cellsByMonth.get(yearMonth) || [];
+    monthCells.push(cell);
+    cellsByMonth.set(yearMonth, monthCells);
+  }
+  return [...cellsByMonth.entries()]
+    .filter(([, monthCells]) => completeMonthCloseCells(monthCells))
+    .flatMap(([yearMonth, monthCells]) => monthWeeksFromCells(monthCells, yearMonth))
+    .sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
+}
+
+function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells) {
+  const pinnedWeeks = canonicalPinnedSheetWeeks(pinnedSheetCells);
+  if (pinnedWeeks.length > 0) {
+    const byKey = new Map(pinnedWeeks.map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
+    if (completeMonthCloseCells(cells)) {
+      for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
+    }
+    return [...byKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
+  }
   const byKey = new Map();
   for (const month of Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : []) {
     const monthKey = readOptionalText(month?.yearMonth);
@@ -381,42 +407,18 @@ function managementCheck(id, status, title, detail) {
   return { id, status, title, detail };
 }
 
-function laborTransferCheck(project, weeks, yearMonth, asOfKey) {
-  const plan = objectValue(project?.laborTransferPlan) || {};
+function laborTransferCheck(weeks, yearMonth, asOfKey) {
   const monthWeeks = weeks.filter((week) => week.yearMonth === yearMonth);
-  const projectionTotal = monthWeeks.reduce((sum, week) => sum + safeAmount(week.projection?.MYSC_LABOR_OUT), 0);
-  const actualTotal = monthWeeks.reduce((sum, week) => sum + safeAmount(week.actual?.MYSC_LABOR_OUT), 0);
-  if (plan.mode === 'MONTHLY_WEEK_3') {
-    const week = monthWeeks.find((candidate) => candidate.weekNo === 3);
-    const projectionOk = safeAmount(week?.projection?.MYSC_LABOR_OUT) > 0;
-    const actualDue = cashflowRangeSortKey({ yearMonth, weekNo: 3 }) <= asOfKey;
-    const actualOk = !actualDue || safeAmount(week?.actual?.MYSC_LABOR_OUT) > 0;
-    return managementCheck(
-      'labor-transfer',
-      projectionOk && actualOk ? 'OK' : 'WARNING',
-      'MYSC 인건비 이관',
-      `3주차 Projection ${projectionOk ? '정상' : '미이관'} · Actual ${actualDue ? (actualOk ? '정상' : '미이관') : '기한 전'}`,
-    );
-  }
-  if (plan.mode === 'PAYMENT_MILESTONE') {
-    const amounts = objectValue(plan.milestoneAmounts) || {};
-    const expectedMonths = objectValue(project?.paymentExpectedMonths) || {};
-    const expected = ['contract', 'interim', 'final'].reduce((sum, key) => (
-      readOptionalText(expectedMonths[key]) === yearMonth ? sum + safeAmount(amounts[key]) : sum
-    ), 0);
-    if (expected <= 0) {
-      return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '선금·중도금·잔금별 인건비 할당액을 프로젝트 등록에서 확인해 주세요.');
-    }
-    const projectionOk = projectionTotal >= expected;
-    const actualOk = actualTotal >= expected;
-    return managementCheck(
-      'labor-transfer',
-      projectionOk && actualOk ? 'OK' : 'WARNING',
-      'MYSC 인건비 이관',
-      `할당 ${expected.toLocaleString('ko-KR')}원 · Projection ${projectionTotal.toLocaleString('ko-KR')}원 · Actual ${actualTotal.toLocaleString('ko-KR')}원`,
-    );
-  }
-  return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '프로젝트 등록에서 인건비 이관 방식을 선택해 주세요.');
+  const week = monthWeeks.find((candidate) => candidate.weekNo === 3);
+  const projectionOk = safeAmount(week?.projection?.MYSC_LABOR_OUT) > 0;
+  const actualDue = cashflowRangeSortKey({ yearMonth, weekNo: 3 }) <= asOfKey;
+  const actualOk = !actualDue || safeAmount(week?.actual?.MYSC_LABOR_OUT) > 0;
+  return managementCheck(
+    'labor-transfer',
+    projectionOk && actualOk ? 'OK' : 'WARNING',
+    'MYSC 인건비 이관',
+    `3주차 Projection ${projectionOk ? '정상' : '미이관'} · Actual ${actualDue ? (actualOk ? '정상' : '미이관') : '기한 전'}`,
+  );
 }
 
 function profitVatAfterDepositCheck(weeks, deposits, asOfKey) {
@@ -490,12 +492,12 @@ function futurePrepayCheck(weeks, asOfKey) {
   );
 }
 
-export function buildCashflowManagementChecks({ project, cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary }) {
-  const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth);
+export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells }) {
+  const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells);
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
   const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({ ...row, yearMonth }));
   return [
-    laborTransferCheck(project, weeks, yearMonth, asOfKey),
+    laborTransferCheck(weeks, yearMonth, asOfKey),
     profitVatAfterDepositCheck(weeks, deposits, asOfKey),
     negativeProjectionCheck(weeks),
     futurePrepayCheck(weeks, asOfKey),
@@ -975,6 +977,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       yearMonth,
       depositScheduleRows,
       comparisonBoundary,
+      pinnedSheetCells: mirror?.cells,
     });
   const deadlineSummary = closedSnapshot?.deadlineSummary || await readCashflowDeadlineSummary({
     db,
@@ -1174,6 +1177,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, com
     yearMonth,
     depositScheduleRows: closeInput.depositScheduleRows,
     comparisonBoundary,
+    pinnedSheetCells: mirror.cells,
   });
   if (!matchingManagementChecks(managementChecks, closeInput.managementChecks)) {
     throw createHttpError(409, '주요 관리 항목 판정이 변경되었습니다. 다시 확인해 주세요.', 'cashflow_management_checks_stale');

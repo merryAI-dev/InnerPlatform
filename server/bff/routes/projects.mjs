@@ -631,17 +631,13 @@ function normalizePaymentExpectedMonths(value) {
   };
 }
 
-function normalizeLaborTransferPlan(value) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const mode = ['MONTHLY_WEEK_3', 'PAYMENT_MILESTONE'].includes(readOptionalText(source.mode))
-    ? readOptionalText(source.mode)
-    : 'UNDECIDED';
+function normalizeLaborTransferPlan(_value) {
   return {
-    mode,
+    mode: 'MONTHLY_WEEK_3',
     milestoneAmounts: {
-      contract: registrationAmount(source.milestoneAmounts?.contract),
-      interim: registrationAmount(source.milestoneAmounts?.interim),
-      final: registrationAmount(source.milestoneAmounts?.final),
+      contract: 0,
+      interim: 0,
+      final: 0,
     },
   };
 }

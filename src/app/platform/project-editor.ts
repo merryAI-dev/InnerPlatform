@@ -201,7 +201,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   groupwareName: '',
   paymentPlan: { contract: 0, interim: 0, final: 0 },
   paymentExpectedMonths: { contract: '', interim: '', final: '' },
-  laborTransferPlan: { mode: 'UNDECIDED', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
+  laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
   advanceInterimBelow70Reason: '',
   finalPaymentNote: '',
   budgetCurrentYear: 0,
@@ -344,13 +344,10 @@ function normalizePaymentExpectedMonths(
   };
 }
 
-function normalizeLaborTransferPlan(value: Partial<ProjectLaborTransferPlan> | null | undefined): ProjectLaborTransferPlan {
-  const mode = ['MONTHLY_WEEK_3', 'PAYMENT_MILESTONE'].includes(String(value?.mode || ''))
-    ? value?.mode as ProjectLaborTransferPlan['mode']
-    : 'UNDECIDED';
+function normalizeLaborTransferPlan(_value: Partial<ProjectLaborTransferPlan> | null | undefined): ProjectLaborTransferPlan {
   return {
-    mode,
-    milestoneAmounts: normalizePaymentPlan(value?.milestoneAmounts),
+    mode: 'MONTHLY_WEEK_3',
+    milestoneAmounts: { contract: 0, interim: 0, final: 0 },
   };
 }
 
