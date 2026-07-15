@@ -4,11 +4,15 @@ import type {
   CashflowMonthCloseConfirmation,
   CashflowMonthCloseDepositScheduleRow,
   CashflowMonthCloseDraftInput,
+  CashflowManagementCheck,
+  CashflowManagementConfirmation,
+  CashflowDeadlineSummary,
 } from '../../lib/platform-bff-client';
 import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
 
 export type CashflowMonthCloseDecision = CashflowMonthCloseConfirmation['decision'];
 export type CashflowMonthCloseDecisionMap = Record<string, CashflowMonthCloseDecision | undefined>;
+export type CashflowManagementDecisionMap = Record<string, CashflowManagementConfirmation['decision'] | undefined>;
 export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositScheduleRow, 'decision'> & {
   decision: CashflowMonthCloseDepositScheduleRow['decision'] | null;
 };
@@ -185,6 +189,9 @@ export function buildCashflowMonthCloseDraftInput(input: {
   decisions: CashflowMonthCloseDecisionMap;
   depositScheduleRows: CashflowMonthCloseDepositReviewRow[];
   projectionDrafts?: Record<string, string>;
+  managementChecks: CashflowManagementCheck[];
+  managementDecisions: CashflowManagementDecisionMap;
+  deadlineSummary: CashflowDeadlineSummary;
 }): CashflowMonthCloseDraftInput {
   const cells = applyCashflowMonthCloseProjectionDrafts(
     normalizeCashflowMonthCloseCells(input.mirror, input.yearMonth),
@@ -207,6 +214,14 @@ export function buildCashflowMonthCloseDraftInput(input: {
   });
 
   assertPinnedMirror(input.mirror, input.yearMonth);
+  if (input.managementChecks.length !== 4) throw new Error('주요 관리 항목 4개를 불러온 뒤 다시 시도해 주세요.');
+  const managementConfirmations = input.managementChecks.map<CashflowManagementConfirmation>((check) => {
+    const decision = input.managementDecisions[check.id];
+    if (decision !== 'CONFIRMED' && decision !== 'NOT_APPLICABLE') {
+      throw new Error(`${check.title}을 확인 또는 해당 없음 처리해 주세요.`);
+    }
+    return { checkId: check.id, decision };
+  });
   return {
     sourceRevision: input.mirror.sourceRevision,
     targetRevision: input.mirror.targetRevisionAtFetch,
@@ -214,18 +229,23 @@ export function buildCashflowMonthCloseDraftInput(input: {
     depositScheduleRows: normalizeDepositRows(input.depositScheduleRows),
     cells,
     confirmations,
+    managementChecks: input.managementChecks,
+    managementConfirmations,
+    deadlineSummary: input.deadlineSummary,
   };
 }
 
 export function readCashflowMonthCloseReview(value: unknown, yearMonth: string): {
   decisions: CashflowMonthCloseDecisionMap;
   depositScheduleRows: CashflowMonthCloseDepositReviewRow[];
+  managementDecisions: CashflowManagementDecisionMap;
 } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const source = value as {
     yearMonth?: unknown;
     confirmations?: unknown;
     depositScheduleRows?: unknown;
+    managementConfirmations?: unknown;
   };
   if (source.yearMonth !== yearMonth || !Array.isArray(source.confirmations) || !Array.isArray(source.depositScheduleRows)) return null;
   const decisions: CashflowMonthCloseDecisionMap = {};
@@ -249,14 +269,24 @@ export function readCashflowMonthCloseReview(value: unknown, yearMonth: string):
     Boolean(row && typeof row === 'object' && !Array.isArray(row) && Number.isInteger((row as { weekNo?: unknown }).weekNo))
   ));
   if (depositRows.length !== CASHFLOW_MONTH_CLOSE_WEEK_NOS.length) return null;
-  return { decisions, depositScheduleRows: depositRows.map((row) => ({ ...row })) };
+  const managementDecisions: CashflowManagementDecisionMap = {};
+  for (const raw of Array.isArray(source.managementConfirmations) ? source.managementConfirmations : []) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item = raw as Partial<CashflowManagementConfirmation>;
+    if (typeof item.checkId === 'string' && (item.decision === 'CONFIRMED' || item.decision === 'NOT_APPLICABLE')) {
+      managementDecisions[item.checkId] = item.decision;
+    }
+  }
+  return { decisions, depositScheduleRows: depositRows.map((row) => ({ ...row })), managementDecisions };
 }
 
 export function cashflowMonthCloseReviewProgress(input: {
   cells: CashflowMonthCloseCell[];
   decisions: CashflowMonthCloseDecisionMap;
   depositScheduleRows: CashflowMonthCloseDepositReviewRow[];
-}): { confirmedCells: number; totalCells: number; confirmedDepositRows: number; complete: boolean } {
+  managementChecks?: CashflowManagementCheck[];
+  managementDecisions?: CashflowManagementDecisionMap;
+}): { confirmedCells: number; totalCells: number; confirmedDepositRows: number; confirmedManagementChecks: number; complete: boolean } {
   const confirmedCells = input.cells.filter((cell) => (
     input.decisions[cashflowMonthCloseConfirmationKey(cell)] === requiredCashflowMonthCloseDecision(cell)
   )).length;
@@ -274,12 +304,18 @@ export function cashflowMonthCloseReviewProgress(input: {
     return (hasExpected || hasActual)
       && (hasActual ? row.actualSource !== 'NOT_APPLICABLE' : row.actualSource === 'NOT_APPLICABLE');
   }).length;
+  const confirmedManagementChecks = (input.managementChecks || []).filter((check) => (
+    ['CONFIRMED', 'NOT_APPLICABLE'].includes(String(input.managementDecisions?.[check.id] || ''))
+  )).length;
   return {
     confirmedCells,
     totalCells: input.cells.length,
     confirmedDepositRows,
+    confirmedManagementChecks,
     complete: input.cells.length > 0
       && confirmedCells === input.cells.length
-      && confirmedDepositRows === CASHFLOW_MONTH_CLOSE_WEEK_NOS.length,
+      && confirmedDepositRows === CASHFLOW_MONTH_CLOSE_WEEK_NOS.length
+      && (input.managementChecks || []).length === 4
+      && confirmedManagementChecks === 4,
   };
 }

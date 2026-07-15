@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { mountJvmWeeklyApiRoutes } from './jvm-weekly-api.mjs';
+import { buildCashflowManagementChecks, mountJvmWeeklyApiRoutes } from './jvm-weekly-api.mjs';
 
 function createIdempotencyService() {
   return {
@@ -30,6 +30,20 @@ const cashflowLineIds = [
   'MYSC_PREPAY_DIRECT_OUT', 'MYSC_PREPAY_LABOR_OUT', 'DIRECT_COST_OUT',
   'INPUT_VAT_OUT', 'MYSC_LABOR_OUT', 'MYSC_PROFIT_OUT', 'SALES_VAT_OUT',
   'TEAM_SUPPORT_OUT', 'BANK_INTEREST_OUT',
+];
+
+const managementConfirmations = [
+  'labor-transfer',
+  'profit-vat-after-deposit',
+  'negative-projection-balance',
+  'future-prepay-over-million',
+].map((checkId) => ({ checkId, decision: 'CONFIRMED' }));
+
+const emptyManagementChecks = [
+  { id: 'labor-transfer', status: 'REVIEW_REQUIRED', title: 'MYSC 인건비 이관', detail: '프로젝트 등록에서 인건비 이관 방식을 선택해 주세요.' },
+  { id: 'profit-vat-after-deposit', status: 'REVIEW_REQUIRED', title: '입금 후 MYSC 수익·매출부가세 이관', detail: '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.' },
+  { id: 'negative-projection-balance', status: 'OK', title: 'Projection 잔액 마이너스', detail: 'Projection 누적 잔액이 0원 이상입니다.' },
+  { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
 ];
 
 function matchingControlRows(startRow, matches = true) {
@@ -98,6 +112,7 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
         depositScheduleRows, cells: cells.map(({ lineId, state, yearMonth: _yearMonth, direction: _direction, ...cell }) => ({
           ...cell, cashflowLine: lineId, cellState: state,
         })), confirmations,
+        managementConfirmations,
       } },
     }],
     ['orgs/tenant-a/cashflow_sheet_mirrors/project-a', {
@@ -139,6 +154,9 @@ function createMonthCloseDb() {
         depositScheduleRows,
         cells: [{ mode: 'projection', weekNo: 1, cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1234 }],
         confirmations: [{ mode: 'projection', weekNo: 1, cashflowLine: 'SALES_IN', decision: 'CONFIRMED' }],
+        managementChecks: emptyManagementChecks,
+        managementConfirmations,
+        deadlineSummary: { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null },
       } },
     }],
     ['orgs/tenant-a/cashflow_sheet_mirrors/project-a', {
@@ -420,6 +438,66 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('returns the four PPT 38 management checks from canonical server values', () => {
+    const { documents } = fullMonthCloseSource();
+    const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
+    const project = documents.get('orgs/tenant-a/projects/project-a');
+    const checks = buildCashflowManagementChecks({
+      project,
+      cashflow: { readModel: { months: [] } },
+      cells: draft.payload.monthClose.cells,
+      yearMonth: '2026-06',
+      depositScheduleRows: draft.payload.monthClose.depositScheduleRows,
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+    });
+
+    expect(checks).toHaveLength(4);
+    expect(checks.map((check) => [check.id, check.status])).toEqual([
+      ['labor-transfer', 'REVIEW_REQUIRED'],
+      ['profit-vat-after-deposit', 'REVIEW_REQUIRED'],
+      ['negative-projection-balance', 'WARNING'],
+      ['future-prepay-over-million', 'OK'],
+    ]);
+  });
+
+  it('flags missing labor, post-deposit transfer, negative balance, and future prepay on the server', () => {
+    const { documents } = fullMonthCloseSource();
+    const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
+    const cells = draft.payload.monthClose.cells.map((cell) => (
+      cell.weekNo === 3 && cell.cashflowLine === 'MYSC_LABOR_OUT' ? { ...cell, amount: 0 } : cell
+    ));
+    const depositScheduleRows = draft.payload.monthClose.depositScheduleRows.map((row) => (
+      row.weekNo === 5
+        ? { ...row, actualDepositDate: '2026-06-30', actualDepositAmount: 1_000_000, actualSource: 'SHEET' }
+        : row
+    ));
+    const checks = buildCashflowManagementChecks({
+      project: { laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: {} } },
+      cashflow: {
+        readModel: {
+          months: [{
+            yearMonth: '2026-08',
+            projection: { weeks: [{ weekNo: 1, amounts: { MYSC_PREPAY_IN: 1_000_001 } }] },
+            actual: { weeks: [] },
+          }],
+        },
+      },
+      cells,
+      yearMonth: '2026-06',
+      depositScheduleRows,
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 2 } },
+    });
+
+    expect(checks.map((check) => [check.id, check.status])).toEqual([
+      ['labor-transfer', 'WARNING'],
+      ['profit-vat-after-deposit', 'WARNING'],
+      ['negative-projection-balance', 'WARNING'],
+      ['future-prepay-over-million', 'WARNING'],
+    ]);
+    expect(checks[1].detail).toContain('다음 주차 원장 없음');
+    expect(checks[3].detail).toContain('1,000,001원');
+  });
+
   it('returns an empty usable dashboard when the project has no linked sheet', async () => {
     const documents = new Map([
       ['orgs/tenant-a/projects/project-a', { id: 'project-a', contractAmount: 1000 }],
@@ -536,18 +614,24 @@ describe('JVM weekly API BFF proxy', () => {
       projection: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 20])),
       actual: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 10])),
     }));
+    const previousWeeklyTotals = weeklyTotals.map((week, index) => ({
+      ...week,
+      projection: index === 0 ? { ...week.projection, SALES_IN: 19 } : week.projection,
+    }));
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
       text: async () => JSON.stringify({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
         reopenCount: 0, projectWarningCount: 0,
+        previousSnapshot: { weeklyTotals: previousWeeklyTotals },
         snapshot: {
           project: { settlementType: 'TYPE5', basis: '공급가액', accountType: 'DEDICATED', contractAmount: 2000 },
           sourceFingerprint: `sha256:${'f'.repeat(64)}`,
           targetRevision: `sha256:${'a'.repeat(64)}`,
           sourceReadAt: '2026-07-09T00:00:00.000Z',
           weeklyTotals,
+          reopenContext: { request: { reason: '입금 반영 오류 수정' }, decision: { reason: '증빙 확인 완료' } },
           depositScheduleRows: [], confirmations: [],
           sheetFacts: { metadata: { businessType: { value: 'snapshot metadata' } }, depositScheduleRows: [] },
         },
@@ -569,6 +653,11 @@ describe('JVM weekly API BFF proxy', () => {
             actual: { totalIn: 350, totalOut: 450, balance: -100 },
           },
           validation: { canClose: false },
+          postCloseAdjustment: {
+            reason: '입금 반영 오류 수정',
+            changedCount: 1,
+            changes: [{ mode: 'projection', weekNo: 1, cashflowLine: 'SALES_IN', beforeAmount: 19, afterAmount: 20 }],
+          },
         });
       });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -661,8 +750,8 @@ describe('JVM weekly API BFF proxy', () => {
       })
       .expect(200);
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchImpl.mock.calls[0];
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchImpl.mock.calls[1];
     expect(url).toBe('http://jvm-weekly.local/api/v1/cashflow/project-a/month-close');
     expect(init.headers).toMatchObject({
       'x-actor-id': 'pm-1',
@@ -724,7 +813,7 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ yearMonth: '2026-06', expectedRevision: 3 })
       .expect(200);
 
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual(originalRequest);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual(originalRequest);
   });
 
   it('forwards PM reopen requests without edit-lease headers', async () => {

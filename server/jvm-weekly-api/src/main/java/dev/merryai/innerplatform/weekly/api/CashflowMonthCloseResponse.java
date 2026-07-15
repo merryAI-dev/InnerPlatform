@@ -14,6 +14,7 @@ public record CashflowMonthCloseResponse(
     String snapshotHash,
     String previousSnapshotHash,
     Map<String, Object> snapshot,
+    Map<String, Object> previousSnapshot,
     boolean closeEligible,
     String evaluatedBusinessDate,
     String closeDeadline,
@@ -32,6 +33,7 @@ public record CashflowMonthCloseResponse(
 ) {
     public CashflowMonthCloseResponse {
         snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
+        previousSnapshot = previousSnapshot == null ? Map.of() : Map.copyOf(previousSnapshot);
         snapshotHash = nullableText(snapshotHash);
         previousSnapshotHash = nullableText(previousSnapshotHash);
         evaluatedBusinessDate = nullableText(evaluatedBusinessDate);

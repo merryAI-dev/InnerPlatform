@@ -458,6 +458,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             .requireCompleteDepositSchedule(request.depositScheduleRows());
         List<CloseCashflowMonthRequest.Confirmation> confirmations = CloseCashflowMonthRequest
             .requireCompleteConfirmations(request.confirmations());
+        CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
+        CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
         requireConfirmationStatesMatchCells(cells, confirmations);
         ValidatedCloseSource source = requireActiveDraftAndPinnedSource(actor, projectId, request);
 
@@ -497,6 +499,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             now,
             today
         );
+        if (!nestedMap(current.get("reopenRequest")).isEmpty() || !nestedMap(current.get("reopenDecision")).isEmpty()) {
+            snapshot.put("reopenContext", Map.of(
+                "request", nestedMap(current.get("reopenRequest")),
+                "decision", nestedMap(current.get("reopenDecision"))
+            ));
+        }
         String snapshotHash = hashCanonicalJson(snapshot);
         String previousSnapshotHash = text(current.get("snapshotHash"), "");
         boolean late = today.isAfter(targetMonth.plusMonths(1).atDay(10));
@@ -510,6 +518,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("revision", revision);
         patch.put("reopenCount", reopenCount);
         patch.put("snapshot", snapshot);
+        patch.put("previousSnapshot", nestedMap(current.get("snapshot")));
         patch.put("snapshotHash", snapshotHash);
         patch.put("previousSnapshotHash", previousSnapshotHash);
         patch.put("late", late);
@@ -1328,6 +1337,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         input.put("depositScheduleRows", request.depositScheduleRows());
         input.put("cells", request.cells());
         input.put("confirmations", request.confirmations());
+        input.put("managementChecks", request.managementChecks());
+        input.put("managementConfirmations", request.managementConfirmations());
+        input.put("deadlineSummary", request.deadlineSummary());
         return JSON.convertValue(input, Map.class);
     }
 
@@ -1340,7 +1352,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "targetRevision",
                 "depositScheduleRows",
                 "cells",
-                "confirmations"
+                "confirmations",
+                "managementChecks",
+                "managementConfirmations",
+                "deadlineSummary"
             )) {
                 selected.put(field, raw.get(field));
             }
@@ -1356,6 +1371,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 .requireCompleteDepositSchedule(input.depositScheduleRows());
             List<CloseCashflowMonthRequest.Confirmation> confirmations = CloseCashflowMonthRequest
                 .requireCompleteConfirmations(input.confirmations());
+            List<CloseCashflowMonthRequest.ManagementCheck> managementChecks = CloseCashflowMonthRequest
+                .requireCompleteManagementChecks(input.managementChecks());
+            List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations = CloseCashflowMonthRequest
+                .requireCompleteManagementConfirmations(input.managementConfirmations());
             requireConfirmationStatesMatchCells(cells, confirmations);
 
             Map<String, Object> canonical = new LinkedHashMap<>();
@@ -1365,6 +1384,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             canonical.put("depositScheduleRows", deposits);
             canonical.put("cells", cells);
             canonical.put("confirmations", confirmations);
+            canonical.put("managementChecks", managementChecks);
+            canonical.put("managementConfirmations", managementConfirmations);
+            canonical.put("deadlineSummary", input.deadlineSummary());
             return JSON.convertValue(canonical, Map.class);
         } catch (WeeklyExpenseConflictException error) {
             throw error;
@@ -1543,6 +1565,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 return item;
             })
             .toList();
+        List<Map<String, Object>> managementConfirmationSnapshot = request.managementConfirmations().stream()
+            .map(confirmation -> {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("checkId", confirmation.checkId());
+                item.put("decision", confirmation.decision());
+                item.put("confirmedByUid", actor.id());
+                item.put("confirmedByName", actor.name());
+                item.put("confirmedAt", now.toString());
+                return item;
+            })
+            .toList();
 
         Map<String, Object> projectDocument = cachedDocumentIfPresent(
             db.document("orgs/" + actor.tenantId() + "/projects/" + projectId)
@@ -1552,7 +1585,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             "Canonical project data is unavailable for the month close snapshot."
         ));
         Map<String, Object> project = new LinkedHashMap<>();
-        for (String field : List.of("settlementType", "basis", "accountType", "fundInputMode", "contractAmount")) {
+        for (String field : List.of(
+            "settlementType", "basis", "accountType", "fundInputMode", "contractAmount",
+            "paymentExpectedMonths", "laborTransferPlan"
+        )) {
             project.put(field, projectDocument.get(field));
         }
 
@@ -1562,6 +1598,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         snapshot.put("sheetFacts", source.sheetFacts());
         snapshot.put("depositScheduleRows", depositSnapshot);
         snapshot.put("confirmations", confirmationSnapshot);
+        snapshot.put("managementChecks", JSON.convertValue(request.managementChecks(), List.class));
+        snapshot.put("managementConfirmations", managementConfirmationSnapshot);
+        snapshot.put("deadlineSummary", JSON.convertValue(request.deadlineSummary(), Map.class));
         snapshot.put("weeklyTotals", weeklyTotals);
         snapshot.put("projectionTotal", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionTotal));
         snapshot.put("actualTotal", FirestoreCashflowWeekActualMerge.cashflowTotals(actualTotal));
@@ -1638,6 +1677,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(document.get("snapshotHash"), ""),
             text(document.get("previousSnapshotHash"), ""),
             nestedMap(document.get("snapshot")),
+            nestedMap(document.get("previousSnapshot")),
             closeEligible,
             evaluatedBusinessDate.toString(),
             closeDeadline.toString(),
@@ -2711,7 +2751,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String targetRevision,
         List<CloseCashflowMonthRequest.DepositScheduleRow> depositScheduleRows,
         List<CashflowSheetLabApplyRequest.Cell> cells,
-        List<CloseCashflowMonthRequest.Confirmation> confirmations
+        List<CloseCashflowMonthRequest.Confirmation> confirmations,
+        List<CloseCashflowMonthRequest.ManagementCheck> managementChecks,
+        List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations,
+        CloseCashflowMonthRequest.DeadlineSummary deadlineSummary
     ) {
     }
 }

@@ -721,6 +721,18 @@ export interface CashflowMonthCloseConfirmation {
   decision: 'CONFIRMED' | 'NOT_APPLICABLE';
 }
 
+export interface CashflowManagementCheck {
+  id: 'labor-transfer' | 'profit-vat-after-deposit' | 'negative-projection-balance' | 'future-prepay-over-million';
+  status: 'OK' | 'WARNING' | 'REVIEW_REQUIRED';
+  title: string;
+  detail: string;
+}
+
+export interface CashflowManagementConfirmation {
+  checkId: CashflowManagementCheck['id'];
+  decision: 'CONFIRMED' | 'NOT_APPLICABLE';
+}
+
 export interface CashflowMonthCloseDepositScheduleRow {
   weekNo: number;
   taxInvoiceIssuedDate: string;
@@ -739,6 +751,22 @@ export interface CashflowMonthCloseDraftInput {
   depositScheduleRows: CashflowMonthCloseDepositScheduleRow[];
   cells: CashflowMonthCloseCell[];
   confirmations: CashflowMonthCloseConfirmation[];
+  managementChecks: CashflowManagementCheck[];
+  managementConfirmations: CashflowManagementConfirmation[];
+  deadlineSummary: CashflowDeadlineSummary;
+}
+
+export interface CashflowDeadlineSummary {
+  trackingStartedAt: string | null;
+  missedCount: number;
+  completedCount: number;
+  current: {
+    yearMonth: string;
+    weekNo: number;
+    deadline: string;
+    completedAt: string | null;
+    status: 'COMPLETED' | 'MISSED' | 'PENDING';
+  } | null;
 }
 
 export interface CashflowMonthCloseDashboard {
@@ -750,6 +778,7 @@ export interface CashflowMonthCloseDashboard {
     capturedAt: string;
   };
   project: Record<string, unknown>;
+  projectMetadata: { businessType: string; accountType: string; settlementStatus: string };
   sheetMetadata: Record<string, unknown>;
   sheetControlTotals: {
     deposit: {
@@ -774,6 +803,20 @@ export interface CashflowMonthCloseDashboard {
   depositScheduleRows: Array<Record<string, unknown>>;
   cells: CashflowMonthCloseCell[];
   confirmations: CashflowMonthCloseConfirmation[];
+  managementChecks: CashflowManagementCheck[];
+  managementConfirmations: CashflowManagementConfirmation[];
+  deadlineSummary: CashflowDeadlineSummary;
+  postCloseAdjustment: {
+    reason: string;
+    changedCount: number;
+    changes: Array<{
+      mode: 'projection' | 'actual';
+      weekNo: number;
+      cashflowLine: string;
+      beforeAmount: number;
+      afterAmount: number;
+    }>;
+  } | null;
   draftRevision: number | null;
   totals: {
     projection: {
@@ -846,6 +889,7 @@ export interface CashflowMonthCloseResult {
   snapshotHash: string | null;
   previousSnapshotHash: string | null;
   snapshot: Record<string, unknown>;
+  previousSnapshot: Record<string, unknown>;
   late: boolean;
   closedAt: string | null;
   closedByUid: string | null;

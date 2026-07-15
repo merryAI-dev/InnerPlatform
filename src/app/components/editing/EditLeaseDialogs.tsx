@@ -14,11 +14,30 @@ export function editLeaseHolderMessage(holder: EditLeaseHolder | null): string {
   return `현재 ${holder?.holderDisplayName.trim() || '다른 사용자'}님이 수정 중입니다.`;
 }
 
+function formatLeaseExpiry(expiresAt: string | null | undefined): string {
+  if (!expiresAt) return '';
+  const timestamp = Date.parse(expiresAt);
+  if (!Number.isFinite(timestamp)) return '';
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
+}
+
+function formatLeaseRemaining(remainingMs: number | undefined): string {
+  if (remainingMs == null || remainingMs <= 0) return '';
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return `약 ${minutes}분 남음`;
+}
+
 export function EditLeaseDialogs({
   warningOpen,
   expiredOpen,
   conflictOpen,
   holder,
+  expiresAt,
+  remainingMs,
   busy = false,
   onDismissWarning,
   onExtend,
@@ -30,6 +49,8 @@ export function EditLeaseDialogs({
   expiredOpen: boolean;
   conflictOpen: boolean;
   holder: EditLeaseHolder | null;
+  expiresAt?: string | null;
+  remainingMs?: number;
   busy?: boolean;
   onDismissWarning: () => void;
   onExtend: () => void | Promise<void>;
@@ -45,6 +66,7 @@ export function EditLeaseDialogs({
             <AlertDialogTitle>수정 시간이 5분 남았습니다</AlertDialogTitle>
             <AlertDialogDescription>
               수정 세션은 자동으로 연장되지 않습니다. 계속 수정하려면 직접 연장해주세요.
+              {formatLeaseExpiry(expiresAt) ? ` 현재 만료 예정 ${formatLeaseExpiry(expiresAt)} · ${formatLeaseRemaining(remainingMs)}` : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -79,7 +101,10 @@ export function EditLeaseDialogs({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{editLeaseHolderMessage(holder)}</AlertDialogTitle>
-            <AlertDialogDescription>지금은 수정은 불가능하지만 읽기/조회는 가능해요!</AlertDialogDescription>
+            <AlertDialogDescription>
+              지금은 수정은 불가능하지만 읽기/조회는 가능해요!
+              {formatLeaseExpiry(holder?.expiresAt) ? ` 수정 권한 만료 예정 ${formatLeaseExpiry(holder?.expiresAt)}` : ''}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy} onClick={onContinueReadOnly}>

@@ -497,6 +497,20 @@ function assertRegistrationFinancials(payload, type) {
       assertRegistrationAmount(payload.paymentPlan[field], `paymentPlan.${field}`, { required: true });
     }
   }
+  if (payload.laborTransferPlan !== undefined && payload.laborTransferPlan !== null) {
+    if (typeof payload.laborTransferPlan !== 'object' || Array.isArray(payload.laborTransferPlan)) {
+      invalidRegistration('Project registration laborTransferPlan is invalid');
+    }
+    if (!['UNDECIDED', 'MONTHLY_WEEK_3', 'PAYMENT_MILESTONE'].includes(readOptionalText(payload.laborTransferPlan.mode))) {
+      invalidRegistration('Project registration laborTransferPlan.mode is invalid');
+    }
+    if (!payload.laborTransferPlan.milestoneAmounts || typeof payload.laborTransferPlan.milestoneAmounts !== 'object') {
+      invalidRegistration('Project registration laborTransferPlan.milestoneAmounts is invalid');
+    }
+    for (const field of REGISTRATION_PAYMENT_FIELDS) {
+      assertRegistrationAmount(payload.laborTransferPlan.milestoneAmounts[field], `laborTransferPlan.milestoneAmounts.${field}`, { required: true });
+    }
+  }
 
   if (payload.financialInputFlags !== undefined && payload.financialInputFlags !== null) {
     if (typeof payload.financialInputFlags !== 'object' || Array.isArray(payload.financialInputFlags)) {
@@ -614,6 +628,21 @@ function normalizePaymentExpectedMonths(value) {
     contract: normalizeExpectedMonth(value?.contract),
     interim: normalizeExpectedMonth(value?.interim),
     final: normalizeExpectedMonth(value?.final),
+  };
+}
+
+function normalizeLaborTransferPlan(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const mode = ['MONTHLY_WEEK_3', 'PAYMENT_MILESTONE'].includes(readOptionalText(source.mode))
+    ? readOptionalText(source.mode)
+    : 'UNDECIDED';
+  return {
+    mode,
+    milestoneAmounts: {
+      contract: registrationAmount(source.milestoneAmounts?.contract),
+      interim: registrationAmount(source.milestoneAmounts?.interim),
+      final: registrationAmount(source.milestoneAmounts?.final),
+    },
   };
 }
 
@@ -989,6 +1018,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     accountType: normalizeAccountType(readOptionalText(payload.accountType)),
     settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
     laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
+    laborTransferPlan: normalizeLaborTransferPlan(payload.laborTransferPlan),
     fundInputMode,
     settlementSheetPolicy: registrationSettlementSheetPolicy(payload.settlementSheetPolicy, fundInputMode),
     paymentPlan: {
@@ -1143,6 +1173,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     accountType: normalizeAccountType(pickText('accountType')),
     settlementSystem: normalizeSettlementSystemCode(pickText('settlementSystem')),
     laborSettlementBasis: normalizeLaborSettlementBasis(pickText('laborSettlementBasis')),
+    laborTransferPlan: normalizeLaborTransferPlan(pickValue('laborTransferPlan')),
     fundInputMode: normalizeProjectFundInputMode(pickText('fundInputMode')),
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
     paymentPlan: pickValue('paymentPlan') || { contract: 0, interim: 0, final: 0 },
@@ -1237,6 +1268,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     accountType: normalizeAccountType(readOptionalText(payload.accountType)),
     settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
     laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
+    laborTransferPlan: normalizeLaborTransferPlan(payload.laborTransferPlan),
     fundInputMode: normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode)),
     settlementSheetPolicy: payload.settlementSheetPolicy,
     paymentPlan: payload.paymentPlan || currentProject.paymentPlan || { contract: 0, interim: 0, final: 0 },
@@ -1292,6 +1324,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   accountType: '통장 유형',
   settlementSystem: '정산 시스템',
   laborSettlementBasis: '인건비 정산 기준',
+  laborTransferPlan: 'MYSC 인건비 이관 계획',
   fundInputMode: '자금 입력 방식',
   registeredByName: '사업 담당자',
   teamName: '사내기업팀',
@@ -1327,7 +1360,7 @@ const PROJECT_INFO_PAYLOAD_FIELDS = [
   'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
   'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
-  'laborSettlementBasis', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
+  'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
   'paymentExpectedMonths', 'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'managerId', 'managerName', 'teamName', 'teamMembers',

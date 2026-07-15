@@ -1971,16 +1971,28 @@ class WeeklyExpenseControllerTest {
                 }
             }
         }
-        return objectMapper.writeValueAsString(Map.of(
-            "idempotencyKey", idempotencyKey,
-            "sourceRevision", "sha256:" + "a".repeat(64),
-            "targetRevision", "sha256:" + "b".repeat(64),
-            "yearMonth", "2026-06",
-            "expectedRevision", 0,
-            "expectedDraftRevision", 0,
-            "depositScheduleRows", depositScheduleRows,
-            "cells", cells,
-            "confirmations", confirmations
+        List<Map<String, Object>> managementChecks = List.of(
+            Map.of("id", "labor-transfer", "status", "OK", "title", "인건비", "detail", "확인"),
+            Map.of("id", "profit-vat-after-deposit", "status", "OK", "title", "수익·부가세", "detail", "확인"),
+            Map.of("id", "negative-projection-balance", "status", "OK", "title", "Projection 잔액", "detail", "확인"),
+            Map.of("id", "future-prepay-over-million", "status", "OK", "title", "선입금", "detail", "확인")
+        );
+        List<Map<String, Object>> managementConfirmations = managementChecks.stream()
+            .map(check -> Map.<String, Object>of("checkId", check.get("id"), "decision", "CONFIRMED"))
+            .toList();
+        return objectMapper.writeValueAsString(Map.ofEntries(
+            Map.entry("idempotencyKey", idempotencyKey),
+            Map.entry("sourceRevision", "sha256:" + "a".repeat(64)),
+            Map.entry("targetRevision", "sha256:" + "b".repeat(64)),
+            Map.entry("yearMonth", "2026-06"),
+            Map.entry("expectedRevision", 0),
+            Map.entry("expectedDraftRevision", 0),
+            Map.entry("depositScheduleRows", depositScheduleRows),
+            Map.entry("cells", cells),
+            Map.entry("confirmations", confirmations),
+            Map.entry("managementChecks", managementChecks),
+            Map.entry("managementConfirmations", managementConfirmations),
+            Map.entry("deadlineSummary", Map.of("trackingStartedAt", "", "missedCount", 0, "completedCount", 0))
         ));
     }
 
