@@ -91,6 +91,11 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain('관리자 공간으로 이동');
   });
 
+  it('keeps the remaining admin-space icon import available to portal shell actions', () => {
+    expect(portalLayoutSource).toContain('Shield,');
+    expect(portalLayoutSource).toContain('<Shield className=');
+  });
+
   it('exposes stable portal navigation test ids for release-gate flows', () => {
     expect(portalLayoutSource).toContain('function buildPortalNavTestId');
     expect(portalLayoutSource).toContain('data-testid={buildPortalNavTestId(item.to)}');

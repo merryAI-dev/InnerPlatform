@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   ArrowRight,
+  Shield,
   ChevronLeft,
   ChevronRight,
   Search,
