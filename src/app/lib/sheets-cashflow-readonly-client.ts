@@ -240,6 +240,26 @@ export interface CashflowSheetLabMirrorResult {
   yearMonths?: string[];
   summary?: { cellCount: number; valueCount: number; emptyCount: number; invalidCount: number };
   cells?: CashflowSheetLabMirrorCell[];
+  sheetFacts?: {
+    metadata?: {
+      lastUpdateText?: { sourceCell: string; value: string };
+      businessType?: { sourceCell: string; value: string };
+      accountType?: { sourceCell: string; value: string };
+      settlementStatus?: { sourceCell: string; value: string };
+    };
+    depositScheduleRows?: Array<{
+      yearMonth: string;
+      weekNo: number;
+      taxInvoiceIssuedDate: string;
+      expectedDepositDate: string;
+      expectedDepositAmount: number | null;
+      sourceCells: {
+        taxInvoiceIssuedDate: string;
+        expectedDepositDate: string;
+        expectedDepositAmount: string;
+      };
+    }>;
+  };
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
   lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
