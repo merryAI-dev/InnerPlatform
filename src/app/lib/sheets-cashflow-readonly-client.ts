@@ -297,6 +297,7 @@ export interface CashflowSheetLabStageResult {
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'];
   sourceRevision?: string;
   targetRevisionAtFetch?: string;
+  replaceAllActualSources?: boolean;
   runId: string;
   status?: 'READY' | 'BLOCKED';
   stagedLineCount: number;
@@ -435,6 +436,8 @@ export async function stageCashflowSheetLabViaBff(params: {
   actor: ActorLike;
   projectId: string;
   expectedMirrorRevision: string;
+  yearMonth?: string;
+  replaceAllActualSources?: boolean;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabStageResult> {
@@ -446,6 +449,8 @@ export async function stageCashflowSheetLabViaBff(params: {
       actor: toRequestActor(params.actor),
       body: {
         expectedMirrorRevision: params.expectedMirrorRevision,
+        ...(params.yearMonth ? { yearMonth: params.yearMonth } : {}),
+        ...(params.replaceAllActualSources ? { replaceAllActualSources: true } : {}),
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,

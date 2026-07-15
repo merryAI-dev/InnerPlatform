@@ -83,6 +83,35 @@ class FirestoreCashflowWeekActualMergeTest {
     }
 
     @Test
+    void replacesAllActualSourcesOnlyWhenInitialLedgerOverwriteIsExplicit() {
+        Map<String, Object> existing = Map.of(
+            "weeklyExpenseActualBySheet", Map.of(
+                "bank-import", Map.of("SALES_IN", 10000),
+                "manual-entry", Map.of("DIRECT_COST_OUT", 2500)
+            )
+        );
+
+        Map<String, Object> patch = FirestoreCashflowWeekActualMerge.buildPatch(
+            "mysc",
+            "project-a",
+            "cashflow-sheet",
+            existing,
+            List.of(new SaveDraftResponse.ActualDelta("2026-06", 1, "SALES_IN", new BigDecimal("3000"))),
+            Instant.parse("2026-06-08T00:00:00Z"),
+            true
+        );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> bySheet = (Map<String, Object>) patch.get("weeklyExpenseActualBySheet");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> actual = (Map<String, Object>) patch.get("actual");
+
+        assertThat(bySheet).containsOnlyKeys("cashflow-sheet");
+        assertThat(actual).containsExactly(Map.entry("SALES_IN", 3000L));
+        assertThat(patch.get("actualTotals")).isEqualTo(Map.of("totalIn", 3000L, "totalOut", 0L, "net", 3000L));
+    }
+
+    @Test
     void removesCurrentSheetContributionWhenSheetNoLongerHasActualDeltas() {
         Map<String, Object> existing = Map.of(
             "weeklyExpenseActualBySheet", Map.of(

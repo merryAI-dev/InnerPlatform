@@ -22,8 +22,21 @@ final class FirestoreCashflowWeekActualMerge {
         List<SaveDraftResponse.ActualDelta> sheetDeltas,
         Instant now
     ) {
+        return buildPatch(tenantId, projectId, sheetKey, existingDoc, sheetDeltas, now, false);
+    }
+
+    static Map<String, Object> buildPatch(
+        String tenantId,
+        String projectId,
+        String sheetKey,
+        Map<String, Object> existingDoc,
+        List<SaveDraftResponse.ActualDelta> sheetDeltas,
+        Instant now,
+        boolean replaceAllActualSources
+    ) {
         Map<String, Object> bySheet = nestedMap(existingDoc.get("weeklyExpenseActualBySheet"));
-        bySheet.remove(sheetKey);
+        if (replaceAllActualSources) bySheet.clear();
+        else bySheet.remove(sheetKey);
         Map<String, BigDecimal> currentSheet = new LinkedHashMap<>();
         for (SaveDraftResponse.ActualDelta delta : sheetDeltas) {
             currentSheet.merge(delta.cashflowLine(), amount(delta.amount()), BigDecimal::add);

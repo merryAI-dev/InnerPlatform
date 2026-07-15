@@ -223,6 +223,18 @@ public interface WeeklyExpensePersistence {
         );
     }
 
+    default CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        boolean replaceAllActualSources
+    ) {
+        return replaceCashflowSheetMonth(tenantId, projectId, sourceSheetKey, yearMonth, targetRevision, cells);
+    }
+
     default int countCashflowActualReplacementWrites(
         String tenantId,
         String projectId,

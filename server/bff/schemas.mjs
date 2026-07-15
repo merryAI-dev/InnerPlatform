@@ -178,6 +178,8 @@ export const cashflowSheetLabApplySchema = z.object({
 
 export const cashflowSheetLabStageSchema = z.object({
   expectedMirrorRevision: NON_EMPTY_STRING,
+  yearMonth: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/).optional(),
+  replaceAllActualSources: z.boolean().optional(),
   idempotencyKey: NON_EMPTY_STRING,
 }).strict();
 

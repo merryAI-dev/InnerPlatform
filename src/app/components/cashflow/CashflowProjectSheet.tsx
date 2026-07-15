@@ -399,6 +399,7 @@ export function CashflowProjectSheet({
     riskLineCount: number;
     candidates: CashflowSheetLabChangeCandidate[];
     omittedCandidateCount: number;
+    replaceAllActualSources: boolean;
   } | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
@@ -1255,7 +1256,7 @@ export function CashflowProjectSheet({
     }
   }, [cashflowSheetConfig, orgId, projectId, resolveBffActor]);
 
-  const handleStagePinnedSheetValues = useCallback(async (): Promise<void> => {
+  const handleStagePinnedSheetValues = useCallback(async (replaceAllActualSources = false): Promise<void> => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
       toast.error('먼저 시트값 불러오기를 실행해 고정해 주세요.');
       return;
@@ -1268,6 +1269,7 @@ export function CashflowProjectSheet({
         actor,
         projectId,
         expectedMirrorRevision,
+        ...(replaceAllActualSources ? { yearMonth, replaceAllActualSources: true } : {}),
         idempotencyKey: stageIdempotencyKey,
       })
     );
@@ -1287,9 +1289,10 @@ export function CashflowProjectSheet({
         riskLineCount: result.riskLineCount,
         candidates: result.candidates || [],
         omittedCandidateCount: result.omittedCandidateCount || 0,
+        replaceAllActualSources: result.replaceAllActualSources === true,
       });
       if (result.status === 'BLOCKED') toast.warning('검토가 필요한 월이 있어 바로 저장할 수 없습니다.');
-      else toast.success('고정된 시트 값과 원장 값을 비교했습니다.');
+      else toast.success(result.replaceAllActualSources ? '선택한 월의 원장 덮어쓰기 값을 준비했습니다.' : '고정된 시트 값과 원장 값을 비교했습니다.');
     };
     setSheetRefreshLoading(true);
     setSheetRefreshResult(null);
@@ -1316,7 +1319,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetMirror, orgId, projectId, resolveBffActor]);
+  }, [cashflowSheetMirror, orgId, projectId, resolveBffActor, yearMonth]);
 
   const handleApplyStagedSheetValues = useCallback(async (): Promise<void> => {
     if (!sheetStageDialog?.runId) {
@@ -1410,9 +1413,9 @@ export function CashflowProjectSheet({
     setSheetReviewDialogOpen(true);
   }, []);
 
-  const handleStartSheetChangeReview = useCallback(async (): Promise<void> => {
+  const handleStartSheetChangeReview = useCallback(async (replaceAllActualSources = false): Promise<void> => {
     setSheetReviewDialogOpen(false);
-    await handleStagePinnedSheetValues();
+    await handleStagePinnedSheetValues(replaceAllActualSources);
   }, [handleStagePinnedSheetValues]);
 
   const handleRevertCashflowRun = useCallback(async (_runId: string): Promise<void> => {
@@ -2959,10 +2962,16 @@ export function CashflowProjectSheet({
                 시트 연동 설정
               </AlertDialogAction>
             ) : (
-              <AlertDialogAction onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'} className="transition-transform hover:-translate-y-0.5">
-                {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
-                고정값 비교하기
-              </AlertDialogAction>
+              <>
+                <Button type="button" variant="outline" onClick={() => void handleStartSheetChangeReview()} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'}>
+                  {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+                  고정값 비교하기
+                </Button>
+                <AlertDialogAction onClick={() => void handleStartSheetChangeReview(true)} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'} className="bg-rose-700 hover:bg-rose-800">
+                  {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
+                  {yearMonth} 원장 덮어쓰기
+                </AlertDialogAction>
+              </>
             )}
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2976,9 +2985,11 @@ export function CashflowProjectSheet({
       >
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[1100px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>시트 값 비교 {sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건</AlertDialogTitle>
+            <AlertDialogTitle>{sheetStageDialog?.replaceAllActualSources ? `${yearMonth} 원장 덮어쓰기` : `시트 값 비교 ${sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건`}</AlertDialogTitle>
             <AlertDialogDescription>
-              원장은 아직 변경되지 않았습니다. 아래 변경 범위를 확인한 뒤 이 팝업에서 바로 저장합니다.
+              {sheetStageDialog?.replaceAllActualSources
+                ? '이 월의 Projection과 Actual 기존값을 모두 지우고, 고정한 시트 160개 셀로 교체합니다. 감사 이력은 유지됩니다.'
+                : '원장은 아직 변경되지 않았습니다. 아래 변경 범위를 확인한 뒤 이 팝업에서 바로 저장합니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {sheetStageDialog && (
@@ -3017,10 +3028,12 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-[16px] font-bold text-amber-900">{sheetStageDialog.riskLineCount.toLocaleString()}건</div>
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600">
-                Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다. 확인 필요 표시가 있는 행은 원장에 저장되지 않으니 별도로 확인해 주세요.
+              <div className={`rounded-lg border px-3 py-2 text-[11px] leading-5 ${sheetStageDialog.replaceAllActualSources ? 'border-rose-200 bg-rose-50 text-rose-900' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                {sheetStageDialog.replaceAllActualSources
+                  ? '기존 은행·수기 등 Actual 출처도 이 월에서는 삭제됩니다. 시트값이 이 월의 단일 기준인지 확인한 뒤 저장하세요.'
+                  : 'Actual은 시트 출처 값만 갱신하고 다른 출처 값은 유지합니다. 확인 필요 표시가 있는 행은 저장되지 않습니다.'}
               </div>
-              {renderSheetStageReviewGrid(sheetStageDialog)}
+              {!sheetStageDialog.replaceAllActualSources ? renderSheetStageReviewGrid(sheetStageDialog) : null}
               {sheetStageDialog.omittedCandidateCount > 0 ? (
                 <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
                   표시되지 않은 변경 값 {sheetStageDialog.omittedCandidateCount.toLocaleString()}건
@@ -3038,7 +3051,9 @@ export function CashflowProjectSheet({
             >
               {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
               {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
-                ? `검토한 값 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 원장에 저장`
+                ? sheetStageDialog.replaceAllActualSources
+                  ? `${yearMonth} 원장 전체 덮어쓰기`
+                  : `검토한 값 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 원장에 저장`
                 : '저장할 변경 없음'}
             </Button>
           </AlertDialogFooter>

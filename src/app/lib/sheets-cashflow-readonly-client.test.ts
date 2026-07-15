@@ -274,6 +274,8 @@ describe('sheets cashflow readonly client', () => {
       projectId: 'p001',
       expectedMirrorRevision: 'sha256:source-001',
       idempotencyKey: 'stage-001',
+      yearMonth: '2026-07',
+      replaceAllActualSources: true,
       client,
     });
 
@@ -285,6 +287,8 @@ describe('sheets cashflow readonly client', () => {
         body: {
           expectedMirrorRevision: 'sha256:source-001',
           idempotencyKey: 'stage-001',
+          yearMonth: '2026-07',
+          replaceAllActualSources: true,
         },
         idempotencyKey: 'stage-001',
       }),

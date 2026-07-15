@@ -1614,6 +1614,7 @@ class FirestoreCashflowLeaseGuardTest {
             SOURCE_REVISION,
             targetRevision,
             yearMonth,
+            false,
             cells
         );
     }

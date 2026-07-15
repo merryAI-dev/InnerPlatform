@@ -22,6 +22,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -51,7 +52,8 @@ class CashflowSheetMonthlyApplyServiceTest {
             eq("cashflow-sheet-lab"),
             eq("2026-07"),
             eq(TARGET_REVISION),
-            any()
+            any(),
+            anyBoolean()
         )).thenReturn(new WeeklyExpensePersistence.CashflowSheetMonthReplacement(
             List.of(),
             List.of(),
@@ -86,7 +88,27 @@ class CashflowSheetMonthlyApplyServiceTest {
             eq("cashflow-sheet-lab"),
             eq("2026-07"),
             eq(TARGET_REVISION),
-            any()
+            any(),
+            eq(false)
+        );
+    }
+
+    @Test
+    void forwardsAnExplicitInitialActualReplacementToPersistence() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION)).thenReturn("pm");
+        when(persistence.replaceCashflowSheetMonth(
+            eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION), any(), eq(true)
+        )).thenReturn(new WeeklyExpensePersistence.CashflowSheetMonthReplacement(List.of(), List.of(), List.of(), TARGET_REVISION));
+        when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service(persistence).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request("apply-replace-all", completeCells(5), true));
+
+        verify(persistence).replaceCashflowSheetMonth(
+            eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION), any(), eq(true)
         );
     }
 
@@ -255,11 +277,20 @@ class CashflowSheetMonthlyApplyServiceTest {
         String idempotencyKey,
         List<CashflowSheetLabApplyRequest.Cell> cells
     ) {
+        return request(idempotencyKey, cells, false);
+    }
+
+    private static CashflowSheetLabApplyRequest request(
+        String idempotencyKey,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        boolean replaceAllActualSources
+    ) {
         return new CashflowSheetLabApplyRequest(
             idempotencyKey,
             SOURCE_REVISION,
             TARGET_REVISION,
             "2026-07",
+            replaceAllActualSources,
             cells
         );
     }

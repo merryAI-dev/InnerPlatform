@@ -979,7 +979,8 @@ public class WeeklyExpenseCommandService {
             sourceSheetKey,
             request.yearMonth(),
             request.targetRevision(),
-            cells
+            cells,
+            request.replaceAllActualSources()
         );
         List<CashflowSnapshotResponse.ActualLine> actual = replacement.actual().stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
@@ -1015,7 +1016,8 @@ public class WeeklyExpenseCommandService {
                 request.targetRevision(),
                 replacement.resultingTargetRevision(),
                 projection.size(),
-                actual.size()
+                actual.size(),
+                request.replaceAllActualSources()
             )
         ));
 
@@ -2382,7 +2384,8 @@ public class WeeklyExpenseCommandService {
         String targetRevision,
         String resultingTargetRevision,
         int projectionLineCount,
-        int actualLineCount
+        int actualLineCount,
+        boolean replaceAllActualSources
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSheetKey", sourceSheetKey);
@@ -2392,6 +2395,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("resultingTargetRevision", resultingTargetRevision);
         metadata.put("projectionLineCount", projectionLineCount);
         metadata.put("actualLineCount", actualLineCount);
+        metadata.put("replaceAllActualSources", replaceAllActualSources);
         putActorMetadata(metadata, actor);
         return writeJson(metadata);
     }

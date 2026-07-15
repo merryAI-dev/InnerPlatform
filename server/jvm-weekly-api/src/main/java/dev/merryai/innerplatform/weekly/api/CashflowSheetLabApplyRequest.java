@@ -23,6 +23,7 @@ public record CashflowSheetLabApplyRequest(
     @Size(min = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH, max = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH)
     @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])")
     String yearMonth,
+    boolean replaceAllActualSources,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
