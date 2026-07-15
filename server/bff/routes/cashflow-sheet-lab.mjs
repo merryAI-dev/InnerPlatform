@@ -33,6 +33,65 @@ const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
+const FINANCIAL_YEAR_FIELDS = [
+  'contractAmount',
+  'salesVatAmount',
+  'totalRevenueAmount',
+  'supportAmount',
+];
+
+function wholeWon(value) {
+  return Number.isSafeInteger(value) ? value : 0;
+}
+
+function attachFinancialYearChecks(mirror, project) {
+  if (mirror?.status !== 'FRESH') return mirror;
+  const registeredYears = Array.isArray(project?.financialYears)
+    ? project.financialYears
+      .filter((row) => Number.isSafeInteger(row?.year))
+      .sort((left, right) => left.year - right.year)
+    : [];
+  if (registeredYears.length < 2) return mirror;
+
+  const sheetYears = new Map((mirror.sheetFacts?.annualFinancialTotals || [])
+    .filter((row) => Number.isSafeInteger(row?.year))
+    .map((row) => [row.year, row]));
+  const compare = (year, registered, sheet) => {
+    const mismatches = FINANCIAL_YEAR_FIELDS.filter((field) => (
+      !sheet || wholeWon(registered[field]) !== wholeWon(sheet[field])
+    ));
+    return {
+      year,
+      status: sheet ? (mismatches.length === 0 ? 'MATCH' : 'MISMATCH') : 'SHEET_YEAR_MISSING',
+      mismatches,
+      registered: Object.fromEntries(FINANCIAL_YEAR_FIELDS.map((field) => [field, wholeWon(registered[field])])),
+      sheet: Object.fromEntries(FINANCIAL_YEAR_FIELDS.map((field) => [field, wholeWon(sheet?.[field])])),
+    };
+  };
+  const years = registeredYears.map((registered) => compare(registered.year, registered, sheetYears.get(registered.year)));
+  const totalRegistered = Object.fromEntries(FINANCIAL_YEAR_FIELDS.map((field) => [field,
+    years.reduce((sum, row) => sum + row.registered[field], 0),
+  ]));
+  const totalSheet = Object.fromEntries(FINANCIAL_YEAR_FIELDS.map((field) => [field,
+    years.reduce((sum, row) => sum + row.sheet[field], 0),
+  ]));
+  const totalMismatches = FINANCIAL_YEAR_FIELDS.filter((field) => totalRegistered[field] !== totalSheet[field]);
+
+  return {
+    ...mirror,
+    financialYearChecks: {
+      years,
+      total: {
+        status: years.some((row) => row.status === 'SHEET_YEAR_MISSING')
+          ? 'SHEET_YEAR_MISSING'
+          : (totalMismatches.length === 0 ? 'MATCH' : 'MISMATCH'),
+        mismatches: totalMismatches,
+        registered: totalRegistered,
+        sheet: totalSheet,
+      },
+    },
+  };
+}
 
 function readEditSession(req) {
   const sessionId = readOptionalText(req.header('x-edit-session-id'));
@@ -1539,9 +1598,9 @@ export function mountCashflowSheetLabRoutes(app, {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
     const { tenantId } = req.context;
     const { projectId } = req.params;
-    await readProjectDocument(db, tenantId, projectId);
+    const project = await readProjectDocument(db, tenantId, projectId);
     const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-    res.status(200).json(mirror || { projectId, status: 'EMPTY' });
+    res.status(200).json(attachFinancialYearChecks(mirror, project) || { projectId, status: 'EMPTY' });
   }));
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {

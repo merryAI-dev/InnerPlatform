@@ -259,6 +259,28 @@ export interface CashflowSheetLabMirrorResult {
         expectedDepositAmount: string;
       };
     }>;
+    annualFinancialTotals?: Array<{
+      year: number;
+      contractAmount: number;
+      salesVatAmount: number;
+      totalRevenueAmount: number;
+      supportAmount: number;
+    }>;
+  };
+  financialYearChecks?: {
+    years: Array<{
+      year: number;
+      status: 'MATCH' | 'MISMATCH' | 'SHEET_YEAR_MISSING';
+      mismatches: Array<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount'>;
+      registered: Record<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', number>;
+      sheet: Record<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', number>;
+    }>;
+    total: {
+      status: 'MATCH' | 'MISMATCH' | 'SHEET_YEAR_MISSING';
+      mismatches: Array<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount'>;
+      registered: Record<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', number>;
+      sheet: Record<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', number>;
+    };
   };
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
