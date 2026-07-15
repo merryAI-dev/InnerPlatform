@@ -427,34 +427,39 @@ function managementCheck(id, status, title, detail) {
 }
 
 function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
-  const actualDue = cashflowRangeSortKey({ yearMonth, weekNo: 3 }) <= asOfKey;
-  if (!actualDue) {
-    return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', '3주차 도래 전입니다. Projection 인건비 입력을 준비해 주세요.');
+  const yearMonths = [...new Set([yearMonth, ...weeks.map((week) => readOptionalText(week.yearMonth))])].sort();
+  const warnings = [];
+  const reviews = [];
+  for (const yearMonth of yearMonths) {
+    if (cashflowRangeSortKey({ yearMonth, weekNo: 3 }) > asOfKey) continue;
+    const projection = cellStates.get(`${yearMonth}:projection:3:MYSC_LABOR_OUT`);
+    if (!projection || projection.cellState === 'EMPTY') {
+      warnings.push(`${yearMonth} 3주차 · Projection 인건비 미기입`);
+      continue;
+    }
+    const plannedAmount = safeAmount(projection.amount);
+    if (plannedAmount === 0) {
+      reviews.push(`${yearMonth} 3주차 · Projection 0원 입력 · 이관 대상 없음 확인 필요`);
+      continue;
+    }
+    const actual = cellStates.get(`${yearMonth}:actual:3:MYSC_LABOR_OUT`);
+    if (!actual || actual.cellState === 'EMPTY') {
+      warnings.push(`${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · Actual 인건비 미기입`);
+      continue;
+    }
+    const actualAmount = safeAmount(actual.amount);
+    if (actualAmount === 0) {
+      warnings.push(`${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 0원 · 실제 미이관`);
+    } else if (actualAmount < plannedAmount) {
+      warnings.push(`${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 ${actualAmount.toLocaleString('ko-KR')}원 · 일부 이관`);
+    }
   }
-  const projection = cellStates.get(`${yearMonth}:projection:3:MYSC_LABOR_OUT`);
-  if (!projection || projection.cellState === 'EMPTY') {
-    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · Projection 인건비 미기입`);
-  }
-  const plannedAmount = safeAmount(projection.amount);
-  if (plannedAmount === 0) {
-    return managementCheck('labor-transfer', 'REVIEW_REQUIRED', 'MYSC 인건비 이관', `${yearMonth} 3주차 · Projection 0원 입력 · 이관 대상 없음 확인 필요`);
-  }
-  const actual = cellStates.get(`${yearMonth}:actual:3:MYSC_LABOR_OUT`);
-  if (!actual || actual.cellState === 'EMPTY') {
-    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · Actual 인건비 미기입`);
-  }
-  const actualAmount = safeAmount(actual.amount);
-  if (actualAmount === 0) {
-    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 0원 · 실제 미이관`);
-  }
-  if (actualAmount < plannedAmount) {
-    return managementCheck('labor-transfer', 'WARNING', 'MYSC 인건비 이관', `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 ${actualAmount.toLocaleString('ko-KR')}원 · 일부 이관`);
-  }
+  const findings = warnings.length > 0 ? warnings : reviews;
   return managementCheck(
     'labor-transfer',
-    'OK',
+    warnings.length > 0 ? 'WARNING' : reviews.length > 0 ? 'REVIEW_REQUIRED' : 'OK',
     'MYSC 인건비 이관',
-    `${yearMonth} 3주차 · 예정 ${plannedAmount.toLocaleString('ko-KR')}원 · 실제 ${actualAmount.toLocaleString('ko-KR')}원 · 이관 완료`,
+    findings.length > 0 ? findings.join(', ') : '기준일까지 모든 3주차 인건비 이관을 확인했습니다.',
   );
 }
 
@@ -533,7 +538,10 @@ export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depo
   const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells);
   const cellStates = canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells);
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
-  const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({ ...row, yearMonth }));
+  const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({
+    ...row,
+    yearMonth: /^20\d{2}-(0[1-9]|1[0-2])$/.test(readOptionalText(row?.yearMonth)) ? row.yearMonth : yearMonth,
+  }));
   return [
     laborTransferCheck(weeks, cellStates, yearMonth, asOfKey),
     profitVatAfterDepositCheck(weeks, deposits, asOfKey),
@@ -1013,7 +1021,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       cashflow,
       cells,
       yearMonth,
-      depositScheduleRows,
+      depositScheduleRows: sheetFacts?.depositScheduleRows || depositScheduleRows,
       comparisonBoundary,
       pinnedSheetCells: mirror?.cells,
     });
