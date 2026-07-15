@@ -106,6 +106,10 @@ describe('project editor draft mapping', () => {
     expect(draft.teamMembersDetailed).toEqual([
       { memberName: '김다은', memberNickname: '데이나', role: 'PM', participationRate: 60 },
     ]);
+    expect(draft.laborTransferPlan).toEqual({
+      mode: 'MONTHLY_WEEK_3',
+      milestoneAmounts: { contract: 0, interim: 0, final: 0 },
+    });
   });
 
   it('uses selected registeredBy member as the project owner source of truth', () => {

@@ -40,7 +40,7 @@ const managementConfirmations = [
 ].map((checkId) => ({ checkId, decision: 'CONFIRMED' }));
 
 const emptyManagementChecks = [
-  { id: 'labor-transfer', status: 'REVIEW_REQUIRED', title: 'MYSC 인건비 이관', detail: '프로젝트 등록에서 인건비 이관 방식을 선택해 주세요.' },
+  { id: 'labor-transfer', status: 'WARNING', title: 'MYSC 인건비 이관', detail: '3주차 Projection 미이관 · Actual 미이관' },
   { id: 'profit-vat-after-deposit', status: 'REVIEW_REQUIRED', title: '입금 후 MYSC 수익·매출부가세 이관', detail: '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.' },
   { id: 'negative-projection-balance', status: 'OK', title: 'Projection 잔액 마이너스', detail: 'Projection 누적 잔액이 0원 이상입니다.' },
   { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
@@ -453,7 +453,7 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(checks).toHaveLength(4);
     expect(checks.map((check) => [check.id, check.status])).toEqual([
-      ['labor-transfer', 'REVIEW_REQUIRED'],
+      ['labor-transfer', 'OK'],
       ['profit-vat-after-deposit', 'REVIEW_REQUIRED'],
       ['negative-projection-balance', 'WARNING'],
       ['future-prepay-over-million', 'OK'],
@@ -472,7 +472,7 @@ describe('JVM weekly API BFF proxy', () => {
         : row
     ));
     const checks = buildCashflowManagementChecks({
-      project: { laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: {} } },
+      project: {},
       cashflow: {
         readModel: {
           months: [{
@@ -496,6 +496,44 @@ describe('JVM weekly API BFF proxy', () => {
     ]);
     expect(checks[1].detail).toContain('다음 주차 원장 없음');
     expect(checks[3].detail).toContain('1,000,001원');
+  });
+
+  it('uses the manually pinned sheet range instead of legacy JVM months for negative Projection balance', () => {
+    const { documents } = fullMonthCloseSource();
+    const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    const pinnedSheetCells = mirror.cells.map((cell) => ({
+      ...cell,
+      amount: cell.lineId === 'MYSC_PREPAY_IN' || cell.lineId === 'DIRECT_COST_OUT' ? 100 : 0,
+    }));
+    const cells = pinnedSheetCells.map(({ lineId, state, yearMonth: _yearMonth, direction: _direction, ...cell }) => ({
+      ...cell,
+      cashflowLine: lineId,
+      cellState: state,
+    }));
+    const checks = buildCashflowManagementChecks({
+      project: {},
+      cashflow: {
+        readModel: {
+          months: [{
+            yearMonth: '2024-09',
+            projection: { weeks: [{ weekNo: 2, amounts: { DIRECT_COST_OUT: 1_293_296 } }] },
+            actual: { weeks: [] },
+          }],
+        },
+      },
+      cells,
+      yearMonth: '2026-06',
+      pinnedSheetCells,
+      depositScheduleRows: [],
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-06', weekNo: 5 } },
+    });
+
+    expect(checks.find((check) => check.id === 'negative-projection-balance')).toEqual({
+      id: 'negative-projection-balance',
+      status: 'OK',
+      title: 'Projection 잔액 마이너스',
+      detail: 'Projection 누적 잔액이 0원 이상입니다.',
+    });
   });
 
   it('returns an empty usable dashboard when the project has no linked sheet', async () => {

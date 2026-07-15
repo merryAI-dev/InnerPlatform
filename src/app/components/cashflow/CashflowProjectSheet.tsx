@@ -1757,12 +1757,6 @@ export function CashflowProjectSheet({
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
     };
-    const dirtyBoardWeeks = visibleWeeks.filter((week) => (
-      weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })] === 'dirty'
-    ));
-    const boardIsEditing = visibleWeeks.some((week) => (
-      isWeekModeEditing({ yearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo })
-    ));
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
       if (!container) return;
@@ -1902,14 +1896,10 @@ export function CashflowProjectSheet({
               <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
-              <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => void savePrivateCashflowDraft().then(() => toast.success('작성자 전용 임시저장본을 저장했습니다.')).catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')))} disabled={!canEdit || cashflowLease.busy || (!boardIsEditing && dirtyBoardWeeks.length === 0)}>
-                <Save className="mr-1 h-3 w-3" />
-                임시저장
-              </Button>
               {isPm && monthCloseResult?.status === 'OPEN' ? (
                 <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || cashflowLease.busy || monthCloseBusy}>
                   <CheckCircle2 className="mr-1 h-3 w-3" />
-                  최종저장 · 월 결산
+                  월 결산
                 </Button>
               ) : null}
               {isPm && monthCloseResult?.status === 'CLOSED' ? (

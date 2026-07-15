@@ -157,6 +157,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('재오픈 요청');
   });
 
+  it('keeps the board action next to the settlement status without a manual temporary-save button', () => {
+    const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('{financialYearChecks?.years.length'));
+    expect(boardHeader).toContain('월 결산');
+    expect(boardHeader).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
+  });
+
   it('opens only the selected Projection week and keeps multi-year sheet checks visible', () => {
     expect(source).toContain('현금흐름 관리시트');
     expect(source).not.toContain('캐시플로 진단시트');
