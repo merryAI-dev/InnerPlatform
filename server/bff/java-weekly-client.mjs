@@ -242,7 +242,7 @@ export function createJavaWeeklyClient({
         targetRevision,
         yearMonth,
         cells,
-        replaceAllActualSources: replaceAllActualSources === true,
+        ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {

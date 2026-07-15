@@ -83,6 +83,28 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('forwards the explicit initial-ledger overwrite flag only when requested', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-overwrite-1',
+      ...monthlyContract,
+      replaceAllActualSources: true,
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+    });
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toMatchObject({
+      replaceAllActualSources: true,
+    });
+  });
+
   it('rejects a JVM response for another project', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
