@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { downloadProjectRequestAttachmentViaBff } from './project-request-attachment-client';
+import { downloadProjectAttachmentViaBff, downloadProjectRequestAttachmentViaBff } from './project-request-attachment-client';
 
 describe('project request attachment client', () => {
   it('downloads a pending attachment with authorization headers and no token in the URL', async () => {
@@ -30,5 +30,21 @@ describe('project request attachment client', () => {
     expect(headers.get('x-tenant-id')).toBe('mysc');
     expect(result.blob.type).toBe('application/pdf');
     expect(result.fileName).toBe('pending-contract.pdf');
+  });
+
+  it('downloads a project attachment after final approval', async () => {
+    const fetchImpl = vi.fn(async () => new Response(new Blob(['private-pdf']), {
+      status: 200,
+      headers: { 'content-disposition': "attachment; filename*=UTF-8''contract.pdf" },
+    }));
+
+    await downloadProjectAttachmentViaBff({
+      tenantId: 'mysc', actor: { uid: 'approver-a', role: 'admin' }, projectId: 'project-a', documentKind: 'contract', fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/v1\/projects\/project-a\/attachments\/contract$/),
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 });

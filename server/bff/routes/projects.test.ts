@@ -381,7 +381,7 @@ describe('project route helpers', () => {
     });
   });
 
-  it('denies an unassigned member using persisted access before reading attachment metadata', async () => {
+  it('denies an unassigned member who is not the designated approver', async () => {
     const projectGet = vi.fn(async () => ({
       exists: true,
       data: () => ({
@@ -422,8 +422,43 @@ describe('project route helpers', () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('forbidden');
-    expect(projectGet).not.toHaveBeenCalled();
+    expect(projectGet).toHaveBeenCalledTimes(1);
     expect(downloadProjectRegistrationAttachment).not.toHaveBeenCalled();
+  });
+
+  it('allows the designated approver to read the final project contract', async () => {
+    const path = 'orgs/mysc/project-registration-documents/project-a/contract.pdf';
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('approver-private-pdf'), contentType: 'application/pdf', size: 20,
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: vi.fn(async () => ({
+          exists: true,
+          data: () => documentPath.includes('/members/')
+            ? { uid: 'approver-a', role: 'pm', status: 'ACTIVE', projectIds: [] }
+            : { id: 'project-a', executiveApproverId: 'approver-a', contractDocument: { path, name: 'contract.pdf' } },
+        })),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'approver-a', actorRole: 'pm' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+
+    const response = await request(app).get('/api/v1/projects/project-a/attachments/contract');
+
+    expect(response.status).toBe(200);
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
+      tenantId: 'mysc', projectId: 'project-a', path,
+    });
   });
 
   it('denies a persisted member document whose uid does not match the authenticated actor', async () => {

@@ -22,6 +22,7 @@ export interface MigrationAuditConsoleRecord {
 export interface MigrationAuditConsoleSummary {
   total: number;
   pending: number;
+  agreed: number;
   approved: number;
   rejected: number;
   discarded: number;
@@ -71,6 +72,8 @@ export function deriveMigrationAuditStatus(
   request?: ProjectRequest | null,
 ): MigrationAuditConsoleStatus {
   if (
+    project.executiveReviewStatus === 'PLANNING_AGREED'
+    ||
     project.executiveReviewStatus === 'REVISION_REJECTED'
     || project.executiveReviewStatus === 'DUPLICATE_DISCARDED'
   ) {
@@ -84,6 +87,7 @@ export function deriveMigrationAuditStatus(
 }
 
 export function getMigrationAuditStatusLabel(status: MigrationAuditConsoleStatus): string {
+  if (status === 'PLANNING_AGREED') return '경영기획실 합의 완료';
   if (status === 'APPROVED') return '승인 완료';
   if (status === 'REVISION_REJECTED') return '수정 요청 후 반려';
   if (status === 'DUPLICATE_DISCARDED') return '중복·폐기';
@@ -187,6 +191,7 @@ export function summarizeMigrationAuditConsole(
   return {
     total: records.length,
     pending: records.filter((record) => record.status === 'PENDING').length,
+    agreed: records.filter((record) => record.status === 'PLANNING_AGREED').length,
     approved: records.filter((record) => record.status === 'APPROVED').length,
     rejected: records.filter((record) => record.status === 'REVISION_REJECTED').length,
     discarded: records.filter((record) => record.status === 'DUPLICATE_DISCARDED').length,
@@ -214,6 +219,13 @@ export function describeMigrationAuditActionState(
       tone: 'success',
       label: '승인 완료',
       helper: 'CIC 대표 검토가 끝났고 이 프로젝트 등록 요청은 확정되었습니다. 필요하면 다시 반려 또는 중복·폐기로 조정할 수 있습니다.',
+    };
+  }
+  if (record.status === 'PLANNING_AGREED') {
+    return {
+      tone: 'neutral',
+      label: '경영기획실 합의 완료',
+      helper: '프로젝트 코드가 부여됐습니다. 지정 조직장의 최종 승인 또는 반려가 필요합니다.',
     };
   }
   if (record.status === 'REVISION_REJECTED') {

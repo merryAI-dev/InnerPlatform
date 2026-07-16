@@ -710,7 +710,7 @@ export interface Project {
 }
 
 export type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-export type ProjectExecutiveReviewStatus = 'PENDING' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
+export type ProjectExecutiveReviewStatus = 'PENDING' | 'PLANNING_AGREED' | 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 export type ProjectRequestReviewOutcome = 'APPROVED' | 'REVISION_REJECTED' | 'DUPLICATE_DISCARDED';
 export type ProjectRequestKind = 'REGISTRATION' | 'CHANGE';
 

@@ -32,12 +32,12 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(compositeSource).toContain('프로젝트명, 등록 원문, 계약 대상, PM 검색');
     expect(compositeSource).toContain('migration-review-project-search');
     expect(compositeSource).toContain('statusChartBackground');
-    expect(compositeSource).toContain('검토대기');
+    expect(compositeSource).toContain('합의대기');
+    expect(compositeSource).toContain('경영기획실 합의');
     expect(compositeSource).toContain('승인');
     expect(compositeSource).toContain('수정 요청 후 반려');
     expect(compositeSource).toContain('중복·폐기');
-    expect(compositeSource).toContain('PM 등록 프로젝트 검토');
-    expect(compositeSource).toContain('기안·조직장 결재선과 등록 원문을 확인합니다.');
+    expect(compositeSource).toContain('경영기획실 프로젝트 합의');
     expect(compositeSource).toContain('문서 열기');
     expect(compositeSource).toContain('describeProjectRequestVersion');
     expect(compositeSource).toContain('수정 중');
@@ -72,9 +72,10 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(pageSource).not.toContain('setDoc(');
   });
 
-  it('requires a project code before saving an approval decision', () => {
+  it('requires a project code before saving a planning agreement', () => {
     expect(pageSource).toContain('프로젝트 코드를 입력해 주세요.');
-    expect(pageSource).toContain('projectCode: trimmedProjectCode');
+    expect(pageSource).toContain("projectCode: actionMode === 'agree' ? trimmedProjectCode : undefined");
+    expect(pageSource).toContain("reviewStatus: nextExecutiveStatus");
     expect(documentSource).toContain('프로젝트 코드');
   });
 

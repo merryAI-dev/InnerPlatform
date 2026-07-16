@@ -281,7 +281,7 @@ export function CashflowAnalyticsPage() {
             <Button variant="outline" className="rounded-none border-[#c7c7c7]" onClick={() => setActiveView('analytics')}>통합 현황으로</Button>
           </div>
         </section>
-        <ProjectMigrationAuditPage embedded defaultInboxScope="ALL" />
+        <ProjectMigrationAuditPage embedded defaultInboxScope="ALL" workflowStage="planning" />
       </div>
     );
   }
