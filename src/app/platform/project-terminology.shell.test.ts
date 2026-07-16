@@ -122,7 +122,7 @@ describe('project terminology contract', () => {
     [
       '프로젝트 등록 요청',
       '프로젝트 등록 검토',
-      'PM 등록 프로젝트 검토',
+      'PM 등록 프로젝트 승인',
       'CIC 대표 검토',
       '프로젝트명',
       '계약 대상',

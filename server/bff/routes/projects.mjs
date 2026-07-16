@@ -77,6 +77,10 @@ function formatOptionalProjectAmount(value, explicit) {
   return Number.isFinite(value) ? formatKrw(value) : '-';
 }
 
+function normalizeProjectCode(value) {
+  return readOptionalText(value).toUpperCase().replace(/\s+/g, '');
+}
+
 export function buildProjectRegistrationSlackPayload(projectRequest) {
   const payload = projectRequest?.payload && typeof projectRequest.payload === 'object'
     ? projectRequest.payload
@@ -171,6 +175,7 @@ function buildProjectCreatedSlackPayload(project, context = {}) {
 }
 
 function formatExecutiveReviewSlackLabel(status) {
+  if (status === 'PLANNING_AGREED') return '경영기획실 합의 완료';
   if (status === 'APPROVED') return '승인 완료';
   if (status === 'REVISION_REJECTED') return '수정 요청 후 반려';
   if (status === 'DUPLICATE_DISCARDED') return '중복·폐기';
@@ -189,12 +194,14 @@ function buildProjectExecutiveReviewSlackPayload({ project, projectRequest, revi
   const requester = trimSlackText(projectRequest?.requestedByName, 120);
   const requestId = trimSlackText(projectRequest?.id, 120);
   const projectId = trimSlackText(payload.id, 120);
+  const projectCode = trimSlackText(payload.projectCode, 120);
   const decisionLabel = formatExecutiveReviewSlackLabel(reviewStatus);
   const reason = trimSlackText(reviewComment, 280);
   const reviewer = trimSlackText(reviewerName, 120);
   const lines = [
-    '*[InnerPlatform] CIC 대표 검토 결과*',
+    '*[InnerPlatform] 프로젝트 등록 처리 결과*',
     `프로젝트명: \`${projectName}\``,
+    `프로젝트 코드: ${projectCode}`,
     `공식 계약명: ${officialContractName}`,
     `계약 대상: ${clientOrg}`,
     `담당조직(CIC): ${department}`,
@@ -207,7 +214,7 @@ function buildProjectExecutiveReviewSlackPayload({ project, projectRequest, revi
   ];
 
   return {
-    text: `[InnerPlatform] CIC 대표 검토 결과: ${decisionLabel} · ${projectName}`,
+    text: `[InnerPlatform] 프로젝트 등록 처리 결과: ${decisionLabel} · ${projectName}`,
     blocks: [
       {
         type: 'section',
@@ -333,7 +340,7 @@ export async function mergeProjectAndRequestDocs({
         );
       }
     }
-    const projectPatch = buildProjectPatch(current, currentRequest, nextVersion);
+    const projectPatch = await buildProjectPatch(current, currentRequest, nextVersion, tx);
     const document = {
       ...current, ...projectPatch, tenantId, version: nextVersion,
       createdBy: current.createdBy || actorId, createdAt: current.createdAt || now,
@@ -2080,14 +2087,17 @@ export function mountProjectRoutes(app, {
       profile.projectId,
       ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
     ].map(readOptionalText).filter(Boolean));
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
+    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    const project = projectSnap.data() || {};
     if (
-      !['admin', 'finance'].includes(storedRole) && !assignedProjectIds.has(projectId)
+      !['admin', 'finance'].includes(storedRole)
+      && !assignedProjectIds.has(projectId)
+      && readOptionalText(project.executiveApproverId) !== actorId
     ) {
       throw createHttpError(403, 'Project attachment access denied', 'forbidden');
     }
-    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
-    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
-    const attachment = projectSnap.data()?.[field];
+    const attachment = project[field];
     const path = readOptionalText(attachment?.path);
     const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
     const objectName = path.startsWith(expectedPrefix) ? path.slice(expectedPrefix.length) : '';
@@ -2611,7 +2621,7 @@ export function mountProjectRoutes(app, {
   }));
 
   app.post('/api/v1/projects/:projectId/executive-review', createMutatingRoute(idempotencyService, async (req) => {
-    const { tenantId, actorId, actorEmail } = req.context;
+    const { tenantId, actorId, actorEmail, actorName } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'review project executive status');
     const projectId = readOptionalText(req.params.projectId);
     if (!projectId) {
@@ -2620,7 +2630,7 @@ export function mountProjectRoutes(app, {
 
     const parsed = parseWithSchema(projectExecutiveReviewSchema, req.body, 'Invalid executive review payload');
     const projectPath = `orgs/${tenantId}/projects/${projectId}`;
-    const reviewerName = readOptionalText(parsed.reviewerName) || readOptionalText(actorEmail) || actorId;
+    const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
     await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
     const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
@@ -2633,13 +2643,58 @@ export function mountProjectRoutes(app, {
     const projectResult = await mergeProjectAndRequestDocs({
       db,
       projectPath,
-      buildProjectPatch: (currentProject, currentRequest) => {
+      buildProjectPatch: async (currentProject, currentRequest, _nextVersion, tx) => {
         const reviewRequest = currentRequest || request;
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
+        const isPlanningAgreement = parsed.reviewStatus === 'PLANNING_AGREED';
+        const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
+        const designatedApproverId = readOptionalText(currentProject.executiveApproverId)
+          || readOptionalText(requestPayload?.executiveApproverId);
+        const projectCode = normalizeProjectCode(
+          isPlanningAgreement ? parsed.projectCode : currentProject.projectCode,
+        );
+
+        if (isPlanningAgreement) {
+          if (!projectCode) {
+            throw createHttpError(422, 'projectCode is required when agreeing a project', 'missing_project_code');
+          }
+          if (previousStatus !== 'PENDING') {
+            throw createHttpError(409, 'Only submitted projects can be agreed', 'invalid_planning_agreement_state');
+          }
+          const existingProjectCode = normalizeProjectCode(currentProject.projectCode);
+          if (existingProjectCode && existingProjectCode !== projectCode) {
+            throw createHttpError(422, 'projectCode cannot change after it is assigned', 'project_code_locked');
+          }
+          const codeRef = db.doc(`orgs/${tenantId}/project_code_registry/${encodeURIComponent(projectCode)}`);
+          const codeSnap = await tx.get(codeRef);
+          if (codeSnap.exists && readOptionalText(codeSnap.data()?.projectId) !== projectId) {
+            throw createHttpError(409, `Project code '${projectCode}' is already assigned`, 'duplicate_project_code');
+          }
+          tx.set(codeRef, {
+            code: projectCode,
+            projectId,
+            agreedAt: now,
+            agreedById: actorId,
+            agreedByName: reviewerName,
+          }, { merge: true });
+        } else {
+          if (previousStatus !== 'PLANNING_AGREED') {
+            throw createHttpError(409, 'Planning agreement is required before final approval', 'planning_agreement_required');
+          }
+          if (!designatedApproverId || designatedApproverId !== actorId) {
+            throw createHttpError(403, 'Only the designated approver can make the final decision', 'designated_approver_required');
+          }
+          if (!projectCode) {
+            throw createHttpError(422, 'projectCode is required before final approval', 'missing_project_code');
+          }
+          const submittedCode = normalizeProjectCode(parsed.projectCode);
+          if (submittedCode && submittedCode !== projectCode) {
+            throw createHttpError(422, 'projectCode cannot change after planning agreement', 'project_code_locked');
+          }
+        }
         const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(reviewRequest);
         const requestChanges = Array.isArray(reviewRequest?.changedFields) ? reviewRequest.changedFields : [];
-        const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
         const payloadPatch = isApprovedChangeRequest
           ? buildProjectPatchFromChangeRequestPayload(requestPayload, currentProject)
           : {};
@@ -2650,6 +2705,7 @@ export function mountProjectRoutes(app, {
           executiveReviewedById: actorId,
           executiveReviewedByName: reviewerName,
           executiveReviewComment: readOptionalText(parsed.reviewComment) || null,
+          ...(isPlanningAgreement || projectCode ? { projectCode } : {}),
           executiveReviewHistory: [
             ...currentHistory,
             {
@@ -2659,6 +2715,7 @@ export function mountProjectRoutes(app, {
               reviewedById: actorId,
               reviewedByName: reviewerName,
               reviewComment: readOptionalText(parsed.reviewComment) || null,
+              ...(isPlanningAgreement || projectCode ? { projectCode } : {}),
               ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],
@@ -2670,7 +2727,10 @@ export function mountProjectRoutes(app, {
           } : {}),
         };
       },
-      buildRequestPatch: (_currentProject, currentRequest, nextVersion) => resolvedRequestId ? ({
+      buildRequestPatch: (_currentProject, currentRequest, nextVersion) => (
+        parsed.reviewStatus === 'PLANNING_AGREED' || !resolvedRequestId
+          ? null
+          : ({
         status: parsed.reviewStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
         reviewOutcome: parsed.reviewStatus,
         reviewedBy: actorId,
@@ -2685,7 +2745,8 @@ export function mountProjectRoutes(app, {
           approvedProjectVersion: nextVersion,
         } : {}),
         updatedAt: now,
-      }) : null,
+          })
+      ),
       requestRefs: resolvedRequestId ? refs : [],
       enforceChangeRequestVersion: parsed.reviewStatus === 'APPROVED',
       tenantId,

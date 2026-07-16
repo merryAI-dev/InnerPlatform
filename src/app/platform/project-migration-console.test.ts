@@ -4,6 +4,7 @@ import {
   buildMigrationAuditConsoleRecords,
   collectMigrationAuditCicOptions,
   describeMigrationAuditActionState,
+  deriveMigrationAuditStatus,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
   isMigrationAuditPmRegistration,
@@ -96,6 +97,10 @@ function makeRequest(overrides: Partial<ProjectRequest> = {}): ProjectRequest {
 }
 
 describe('project-migration-console', () => {
+  it('keeps planning-agreed registrations out of the unreviewed queue', () => {
+    expect(deriveMigrationAuditStatus(makeProject({ executiveReviewStatus: 'PLANNING_AGREED' }))).toBe('PLANNING_AGREED');
+  });
+
   it('normalizes empty cic to 미지정', () => {
     expect(normalizeCicLabel('')).toBe('미지정');
     expect(normalizeCicLabel(undefined)).toBe('미지정');

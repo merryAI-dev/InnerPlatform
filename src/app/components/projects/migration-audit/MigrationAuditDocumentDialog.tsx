@@ -18,9 +18,12 @@ interface MigrationAuditDocumentDialogProps {
   record: MigrationAuditConsoleRecord | null;
   reviewerName: string;
   acting: boolean;
+  workflowStage: 'planning' | 'approval';
+  canFinalize: boolean;
   contractDocumentDownloadURL?: string;
   contractDocumentError?: string;
   onOpenChange: (open: boolean) => void;
+  onAgree: () => void;
   onApprove: () => void;
   onReject: () => void;
 }
@@ -66,9 +69,12 @@ export function MigrationAuditDocumentDialog({
   record,
   reviewerName,
   acting,
+  workflowStage,
+  canFinalize,
   contractDocumentDownloadURL = '',
   contractDocumentError = '',
   onOpenChange,
+  onAgree,
   onApprove,
   onReject,
 }: MigrationAuditDocumentDialogProps) {
@@ -79,12 +85,16 @@ export function MigrationAuditDocumentDialog({
   const designatedApproverName = requestPayload?.executiveApproverName
     || record.project.executiveApproverName
     || '';
-  const latestReview = record.project.executiveReviewHistory?.at(-1);
-  const reviewedByName = latestReview?.reviewedByName
+  const history = record.project.executiveReviewHistory || [];
+  const planningAgreement = [...history].reverse().find((entry) => entry.status === 'PLANNING_AGREED');
+  const finalReview = [...history].reverse().find((entry) => (
+    entry.status === 'APPROVED' || entry.status === 'REVISION_REJECTED' || entry.status === 'DUPLICATE_DISCARDED'
+  ));
+  const reviewedByName = finalReview?.reviewedByName
     || record.project.executiveReviewedByName
     || record.request?.reviewedByName
     || reviewerName;
-  const reviewedAt = latestReview?.reviewedAt
+  const reviewedAt = finalReview?.reviewedAt
     || record.project.executiveReviewedAt
     || record.request?.reviewedAt;
   const approvalState = record.status === 'APPROVED'
@@ -115,13 +125,21 @@ export function MigrationAuditDocumentDialog({
                 <h2 className="mt-3 text-center text-[25px] font-bold tracking-[0.08em]">프로젝트 등록 및 승인서</h2>
               </div>
               <div className="border border-slate-400">
-                <div className="grid grid-cols-[48px_repeat(2,minmax(0,1fr))]">
+                  <div className="grid grid-cols-[48px_repeat(3,minmax(0,1fr))]">
                   <div className="flex items-center justify-center border-r border-b border-slate-400 bg-slate-50 text-[11px] font-semibold">결재</div>
                   <div className="border-r border-b border-slate-400 px-2 py-1.5 text-center text-[11px] font-semibold">기안</div>
+                  <div className="border-r border-b border-slate-400 px-2 py-1.5 text-center text-[11px] font-semibold">경영기획실 합의</div>
                   <div className="border-b border-slate-400 px-2 py-1.5 text-center text-[11px] font-semibold">조직장 승인</div>
                   <div className="flex items-center justify-center border-r border-slate-400 bg-slate-50 text-[10px] text-slate-600">인</div>
                   <div className="flex min-h-[70px] flex-col items-center justify-center gap-1 border-r border-slate-400 px-2 py-2">
                     <ApprovalSeal name={dossier.audit.requestedByName} state="submitted" />
+                  </div>
+                  <div className="flex min-h-[70px] flex-col items-center justify-center gap-1 border-r border-slate-400 px-2 py-2">
+                    {planningAgreement ? (
+                      <ApprovalSeal name={planningAgreement.reviewedByName} state="approved" />
+                    ) : (
+                      <span className="text-center text-[10px] text-slate-500">합의 대기</span>
+                    )}
                   </div>
                   <div className="flex min-h-[70px] flex-col items-center justify-center gap-1 px-2 py-2">
                     {approvalState === 'pending' ? (
@@ -135,6 +153,7 @@ export function MigrationAuditDocumentDialog({
                   </div>
                   <div className="flex items-center justify-center border-r border-t border-slate-400 bg-slate-50 text-[10px] text-slate-600">일자</div>
                   <div className="border-r border-t border-slate-400 px-2 py-2 text-center text-[10px] text-slate-700">{formatDateTime(record.requestedAt)}</div>
+                  <div className="border-r border-t border-slate-400 px-2 py-2 text-center text-[10px] text-slate-700">{planningAgreement ? formatDateTime(planningAgreement.reviewedAt) : '합의 대기'}</div>
                   <div className="border-t border-slate-400 px-2 py-2 text-center text-[10px] text-slate-700">{reviewedAt ? formatDateTime(reviewedAt) : '검토 대기'}</div>
                 </div>
               </div>
@@ -143,10 +162,26 @@ export function MigrationAuditDocumentDialog({
 
           <section className="mt-6 border border-slate-400">
             <DocumentCell label="문서 번호" value={record.request?.id || record.id} />
+            <DocumentCell label="프로젝트 코드" value={record.project.projectCode || ''} />
             <DocumentCell label="작성 일자" value={formatDateTime(record.requestedAt)} />
             <DocumentCell label="기안 부서" value={record.cic} />
             <DocumentCell label="기안자" value={dossier.audit.requestedByName} />
             <DocumentCell label="결재 상태" value={getMigrationAuditStatusLabel(record.status)} />
+          </section>
+
+          <section className="mt-6">
+            <h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">처리 의견</h3>
+            <div className="border border-t-0 border-slate-400">
+              {history.map((entry, index) => (
+                <div key={`${entry.reviewedAt}-${index}`} className="border-b border-slate-300 px-4 py-3 last:border-b-0">
+                  <p className="text-[11px] font-semibold text-slate-800">
+                    {entry.status === 'PLANNING_AGREED' ? '경영기획실 합의' : getMigrationAuditStatusLabel(entry.status)} · {entry.reviewedByName} · {formatDateTime(entry.reviewedAt)}
+                    {entry.projectCode ? ` · ${entry.projectCode}` : ''}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-slate-700">{entry.reviewComment || '-'}</p>
+                </div>
+              ))}
+            </div>
           </section>
 
           <section className="mt-6">
@@ -189,14 +224,25 @@ export function MigrationAuditDocumentDialog({
                 <a className="ml-3 font-semibold text-[#174a7c] underline underline-offset-2" href={contractDocumentUrl} target="_blank" rel="noreferrer">계약서 원문 열기</a>
               ) : null}
               {contractDocumentError ? <p className="mt-1 text-[11px] text-rose-700">{contractDocumentError}</p> : null}
+              {contractDocumentUrl ? (
+                <iframe title="계약서 미리보기" src={contractDocumentUrl} className="mt-3 h-[520px] w-full border border-slate-300 bg-slate-50" />
+              ) : null}
             </div>
           </section>
 
-          {record.status === 'PENDING' ? (
+          {workflowStage === 'planning' && record.status === 'PENDING' ? (
+            <footer className="mt-7 flex justify-end gap-2 border-t border-slate-300 pt-4">
+              <Button type="button" className="rounded-none bg-[#174a7c] hover:bg-[#103a63]" onClick={onAgree} disabled={acting}>합의</Button>
+            </footer>
+          ) : null}
+          {workflowStage === 'approval' && record.status === 'PLANNING_AGREED' && canFinalize ? (
             <footer className="mt-7 flex justify-end gap-2 border-t border-slate-300 pt-4">
               <Button type="button" variant="outline" className="rounded-none border-slate-500" onClick={onReject} disabled={acting}>반려</Button>
               <Button type="button" className="rounded-none bg-[#174a7c] hover:bg-[#103a63]" onClick={onApprove} disabled={acting}>승인</Button>
             </footer>
+          ) : null}
+          {workflowStage === 'approval' && record.status === 'PLANNING_AGREED' && !canFinalize ? (
+            <p className="mt-7 border-t border-slate-300 pt-4 text-right text-[11px] text-slate-500">지정된 조직장만 최종 승인 또는 반려할 수 있습니다.</p>
           ) : null}
         </article>
       </DialogContent>

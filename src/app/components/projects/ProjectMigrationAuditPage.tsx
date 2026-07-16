@@ -13,7 +13,7 @@ import type { ProjectExecutiveReviewStatus, ProjectRequest } from '../../data/ty
 import { getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import { isPlatformApiEnabled, reviewProjectExecutiveStatusViaBff } from '../../lib/platform-bff-client';
-import { downloadProjectRequestAttachmentViaBff } from '../../lib/project-request-attachment-client';
+import { downloadProjectAttachmentViaBff, downloadProjectRequestAttachmentViaBff } from '../../lib/project-request-attachment-client';
 import {
   type MigrationAuditConsoleStatus,
   buildMigrationAuditConsoleRecords,
@@ -42,8 +42,10 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
 
-type ReviewActionMode = 'approve' | 'reject' | 'discard';
+type ReviewActionMode = 'agree' | 'approve' | 'reject';
+type WorkflowStage = 'planning' | 'approval';
 type ProjectRequestCollectionName = 'project_requests' | 'projectRequests';
 type ProjectRequestWithSource = ProjectRequest & {
   __collectionName?: ProjectRequestCollectionName;
@@ -52,39 +54,46 @@ type ProjectRequestWithSource = ProjectRequest & {
 const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests'];
 
 function getReviewDialogTitle(mode: ReviewActionMode): string {
+  if (mode === 'agree') return '이 프로젝트에 합의할까요?';
   if (mode === 'approve') return '이 프로젝트를 승인할까요?';
   if (mode === 'reject') return '수정 요청 후 반려할까요?';
-  return '이 프로젝트를 중복·폐기할까요?';
+  return '';
 }
 
 function getReviewDialogDescription(mode: ReviewActionMode): string {
-  if (mode === 'approve') return 'PM이 올린 원문을 기준으로 이 프로젝트를 등록 대상으로 확정합니다.';
+  if (mode === 'agree') return '경영기획실 합의와 함께 프로젝트 코드를 부여하고, 지정 조직장에게 최종 승인을 요청합니다.';
+  if (mode === 'approve') return '경영기획실 합의가 끝난 문서를 최종 승인합니다.';
   if (mode === 'reject') return '수정이 필요한 이유를 반드시 남기고 PM이 다시 보완하도록 돌려보냅니다.';
-  return '중복 또는 폐기 대상으로 정리하고, 왜 그렇게 판단했는지 사유를 반드시 남깁니다.';
+  return '';
 }
 
 function getProjectRequestReviewDescription(mode: ReviewActionMode, request: ProjectRequest | null | undefined): string {
   const isChangeRequest = resolveProjectRequestKind(request) === 'CHANGE';
-  if (!isChangeRequest) return getReviewDialogDescription(mode);
+  if (!isChangeRequest || mode === 'agree') return getReviewDialogDescription(mode);
   if (mode === 'approve') return 'PM이 제출한 수정 중 값을 프로젝트 원장에 반영하고 변경 요청을 승인 완료로 닫습니다.';
   if (mode === 'reject') return '프로젝트 원장은 유지하고, 수정이 필요한 이유를 남겨 PM에게 돌려보냅니다.';
   return '프로젝트 원장은 유지하고, 중복 또는 폐기된 수정 요청으로 정리합니다.';
 }
 
 function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus {
+  if (mode === 'agree') return 'PLANNING_AGREED';
   if (mode === 'approve') return 'APPROVED';
   if (mode === 'reject') return 'REVISION_REJECTED';
-  return 'DUPLICATE_DISCARDED';
+  return 'PENDING';
 }
 
 type ProjectMigrationAuditPageProps = {
   embedded?: boolean;
   reviewScope?: 'all' | 'pending';
+  defaultInboxScope?: 'MINE' | 'ALL';
+  workflowStage?: WorkflowStage;
 };
 
 export function ProjectMigrationAuditPage({
   embedded = false,
   reviewScope = 'all',
+  defaultInboxScope = 'MINE',
+  workflowStage = 'approval',
 }: ProjectMigrationAuditPageProps = {}) {
   const { user: authUser } = useAuth();
   const { projects, currentUser } = useAppStore();
@@ -93,12 +102,15 @@ export function ProjectMigrationAuditPage({
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [cicFilter, setCicFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('PENDING');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>(
+    workflowStage === 'planning' ? 'PENDING' : 'PLANNING_AGREED',
+  );
   const [searchQuery, setSearchQuery] = useState('');
-  const [inboxScope, setInboxScope] = useState<'MINE' | 'ALL'>('MINE');
+  const [inboxScope, setInboxScope] = useState<'MINE' | 'ALL'>(defaultInboxScope);
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
   const [reviewComment, setReviewComment] = useState('');
+  const [projectCode, setProjectCode] = useState('');
   const [acting, setActing] = useState(false);
   const [secureContractDocument, setSecureContractDocument] = useState({ key: '', url: '', error: '' });
 
@@ -165,18 +177,23 @@ export function ProjectMigrationAuditPage({
   const scopedRecords = useMemo(
     () => reviewScope === 'pending'
       ? records.filter((record) => (
-          record.status === 'PENDING'
+          workflowStage === 'planning'
+            ? record.status === 'PENDING'
+            : record.status === 'PLANNING_AGREED'
         ))
       : records,
-    [records, reviewScope],
+    [records, reviewScope, workflowStage],
   );
 
   const reviewerDepartment = String(authUser?.department || '').trim();
   const inboxRecords = useMemo(
-    () => inboxScope === 'MINE' && reviewerDepartment
-      ? scopedRecords.filter((record) => isSameMigrationAuditCic(record.cic, reviewerDepartment))
+    () => inboxScope === 'MINE'
+      ? scopedRecords.filter((record) => workflowStage === 'planning'
+        ? reviewerDepartment && isSameMigrationAuditCic(record.cic, reviewerDepartment)
+        : (resolveProjectRequestPayload(record.request)?.executiveApproverId || record.project.executiveApproverId) === authUser?.uid,
+      )
       : scopedRecords,
-    [inboxScope, reviewerDepartment, scopedRecords],
+    [authUser?.uid, inboxScope, reviewerDepartment, scopedRecords, workflowStage],
   );
 
   const summaryRecords = useMemo(
@@ -211,14 +228,14 @@ export function ProjectMigrationAuditPage({
     () => summaryRecords.find((record) => record.id === openRecordId) || null,
     [openRecordId, summaryRecords],
   );
-  const pendingContractDocument = openRecord?.request?.status === 'PENDING'
-    ? resolveProjectRequestPayload(openRecord.request)?.contractDocument
-    : null;
-  const pendingContractPath = String(pendingContractDocument?.path || '').trim();
-  const pendingContractDownloadUrl = String(pendingContractDocument?.downloadURL || '').trim();
-  const pendingRequestId = String(openRecord?.request?.id || '').trim();
-  const secureContractDocumentKey = pendingRequestId && pendingContractPath
-    ? `${pendingRequestId}:${pendingContractPath}`
+  const contractDocument = resolveProjectRequestPayload(openRecord?.request)?.contractDocument || openRecord?.project.contractDocument;
+  const contractPath = String(contractDocument?.path || '').trim();
+  const contractDownloadUrl = String(contractDocument?.downloadURL || '').trim();
+  const requestId = String(openRecord?.request?.id || '').trim();
+  const projectId = String(openRecord?.project.id || '').trim();
+  const usePendingRequestAttachment = openRecord?.request?.status === 'PENDING';
+  const secureContractDocumentKey = (usePendingRequestAttachment ? requestId : projectId) && contractPath
+    ? `${usePendingRequestAttachment ? requestId : projectId}:${contractPath}`
     : '';
   const secureContractDocumentUrl = secureContractDocument.key === secureContractDocumentKey
     ? secureContractDocument.url
@@ -232,24 +249,23 @@ export function ProjectMigrationAuditPage({
     if (
       !isPlatformApiEnabled()
       || !authUser?.uid
-      || !pendingRequestId
-      || !pendingContractPath
-      || pendingContractDownloadUrl
+      || !projectId
+      || !contractPath
+      || contractDownloadUrl
     ) return undefined;
 
     let disposed = false;
     let objectUrl = '';
-    void downloadProjectRequestAttachmentViaBff({
-      tenantId: orgId,
-      actor: {
-        uid: authUser.uid,
-        email: authUser.email,
-        role: authUser.role,
-        idToken: authUser.idToken,
-      },
-      requestId: pendingRequestId,
-      documentKind: 'contract',
-    }).then(({ blob }) => {
+    const actor = {
+      uid: authUser.uid,
+      email: authUser.email,
+      role: authUser.role,
+      idToken: authUser.idToken,
+    };
+    const download = usePendingRequestAttachment && requestId
+      ? downloadProjectRequestAttachmentViaBff({ tenantId: orgId, actor, requestId, documentKind: 'contract' })
+      : downloadProjectAttachmentViaBff({ tenantId: orgId, actor, projectId, documentKind: 'contract' });
+    void download.then(({ blob }) => {
       if (disposed) return;
       objectUrl = URL.createObjectURL(blob);
       setSecureContractDocument({ key: secureContractDocumentKey, url: objectUrl, error: '' });
@@ -273,10 +289,12 @@ export function ProjectMigrationAuditPage({
     authUser?.role,
     authUser?.uid,
     orgId,
-    pendingContractDownloadUrl,
-    pendingContractPath,
-    pendingRequestId,
+    contractDownloadUrl,
+    contractPath,
+    projectId,
+    requestId,
     secureContractDocumentKey,
+    usePendingRequestAttachment,
   ]);
 
   async function handleConfirmAction() {
@@ -284,13 +302,18 @@ export function ProjectMigrationAuditPage({
 
     const nextExecutiveStatus = toExecutiveStatus(actionMode);
     const trimmedComment = reviewComment.trim();
+    const trimmedProjectCode = projectCode.trim();
     const reviewerName = currentUser?.name || authUser?.name || currentUser?.email || authUser?.email || '관리자';
-    if (nextExecutiveStatus !== 'APPROVED' && !trimmedComment) {
-      toast.error(actionMode === 'reject' ? '반려 사유를 입력해 주세요.' : '폐기 사유를 입력해 주세요.');
+    if (nextExecutiveStatus === 'PLANNING_AGREED' && !trimmedProjectCode) {
+      toast.error('프로젝트 코드를 입력해 주세요.');
+      return;
+    }
+    if (nextExecutiveStatus === 'REVISION_REJECTED' && !trimmedComment) {
+      toast.error('반려 사유를 입력해 주세요.');
       return;
     }
     if (!isPlatformApiEnabled() || !authUser?.uid) {
-      toast.error('CIC 대표 검토 API가 연결되어 있지 않아 저장하지 않았습니다.');
+      toast.error('프로젝트 처리 서버가 연결되어 있지 않아 저장하지 않았습니다.');
       return;
     }
 
@@ -310,6 +333,7 @@ export function ProjectMigrationAuditPage({
           reviewStatus: nextExecutiveStatus,
           reviewComment: trimmedComment || undefined,
           reviewerName,
+          projectCode: actionMode === 'agree' ? trimmedProjectCode : undefined,
         },
       });
       if (response.slackDelivered === false && response.slackReason) {
@@ -317,19 +341,22 @@ export function ProjectMigrationAuditPage({
       }
 
       toast.success(
-        actionMode === 'approve'
-          ? '프로젝트를 승인했습니다.'
+        actionMode === 'agree'
+          ? '경영기획실 합의를 완료했습니다. 지정 조직장 승인 대기 상태입니다.'
+          : actionMode === 'approve'
+            ? '프로젝트를 승인했습니다.'
           : actionMode === 'reject'
             ? '수정 요청 후 반려로 처리했습니다.'
-            : '중복·폐기로 처리했습니다.',
+            : '',
         {
           description: openRecord.title,
         },
       );
       setActionMode(null);
       setReviewComment('');
+      setProjectCode('');
     } catch (error) {
-      toast.error('CIC 대표 검토 결정 저장 실패', {
+      toast.error(actionMode === 'agree' ? '경영기획실 합의 저장 실패' : '조직장 결재 저장 실패', {
         description: error instanceof Error ? error.message : '다시 시도해 주세요.',
       });
     } finally {
@@ -337,7 +364,9 @@ export function ProjectMigrationAuditPage({
     }
   }
 
-  const pageDescription = '내게 배정된 프로젝트 등록 요청을 먼저 확인하고, 문서형 팝업에서 기안·조직장 결재선과 등록 내용을 검토합니다.';
+  const pageDescription = workflowStage === 'planning'
+    ? '프로젝트 코드 부여와 경영기획실 합의가 필요한 등록 문서를 확인합니다.'
+    : '경영기획실 합의가 끝난 문서를 지정 조직장이 최종 승인 또는 반려합니다.';
 
   return (
     <div className="space-y-6">
@@ -345,9 +374,9 @@ export function ProjectMigrationAuditPage({
         <PageHeader
           icon={ClipboardCheck}
           iconGradient="linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)"
-          title="PM 등록 프로젝트 검토"
+          title={workflowStage === 'planning' ? '경영기획실 프로젝트 합의' : 'PM 등록 프로젝트 승인'}
           description={pageDescription}
-          badge="대표 검토"
+          badge={workflowStage === 'planning' ? '코드 부여·합의' : '지정 조직장 결재'}
         />
       ) : null}
 
@@ -366,6 +395,7 @@ export function ProjectMigrationAuditPage({
         inboxScope={inboxScope}
         onInboxScopeChange={setInboxScope}
         reviewerDepartment={reviewerDepartment}
+        workflowStage={workflowStage}
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         searchQuery={searchQuery}
@@ -388,17 +418,26 @@ export function ProjectMigrationAuditPage({
         open={!!openRecord}
         record={openRecord}
         reviewerName={currentUser?.name || authUser?.name || '조직장'}
+        workflowStage={workflowStage}
+        canFinalize={Boolean(authUser?.uid && (resolveProjectRequestPayload(openRecord?.request)?.executiveApproverId || openRecord?.project.executiveApproverId) === authUser.uid)}
         acting={acting}
         contractDocumentDownloadURL={secureContractDocumentUrl}
         contractDocumentError={privateAttachmentError}
         onOpenChange={(open) => { if (!open) setOpenRecordId(null); }}
+        onAgree={() => {
+          setActionMode('agree');
+          setReviewComment('');
+          setProjectCode(openRecord?.project.projectCode || '');
+        }}
         onApprove={() => {
           setActionMode('approve');
-          setReviewComment(openRecord?.project.executiveReviewComment || '');
+          setReviewComment('');
+          setProjectCode('');
         }}
         onReject={() => {
           setActionMode('reject');
           setReviewComment(openRecord?.project.executiveReviewComment || '');
+          setProjectCode('');
         }}
       />
 
@@ -406,6 +445,7 @@ export function ProjectMigrationAuditPage({
         if (!open) {
           setActionMode(null);
           setReviewComment('');
+          setProjectCode('');
         }
       }}>
         <AlertDialogContent>
@@ -416,13 +456,25 @@ export function ProjectMigrationAuditPage({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
+            {actionMode === 'agree' ? (
+              <label className="block text-[12px] font-medium text-slate-700">
+                프로젝트 코드
+                <Input
+                  value={projectCode}
+                  onChange={(event) => setProjectCode(event.target.value)}
+                  placeholder="예: PRJ-2026-001"
+                  className="mt-2 h-10 rounded-none"
+                  aria-label="프로젝트 코드"
+                />
+              </label>
+            ) : null}
             <p className="text-[12px] font-medium text-slate-700">
-              {actionMode === 'approve' ? '승인 메모' : actionMode === 'reject' ? '반려 사유' : '폐기 사유'}
+              {actionMode === 'agree' ? '합의 메모' : actionMode === 'approve' ? '승인 메모' : '반려 사유'}
             </p>
             <Textarea
               value={reviewComment}
               onChange={(event) => setReviewComment(event.target.value)}
-              placeholder={actionMode === 'approve' ? '승인 판단 근거를 남길 수 있습니다.' : 'PM이 수정하거나 폐기 판단을 이해할 수 있도록 사유를 남겨 주세요.'}
+              placeholder={actionMode === 'agree' ? '합의 근거를 남길 수 있습니다.' : actionMode === 'approve' ? '승인 판단 근거를 남길 수 있습니다.' : 'PM이 수정하거나 폐기 판단을 이해할 수 있도록 사유를 남겨 주세요.'}
               className="min-h-[120px]"
             />
           </div>
@@ -431,8 +483,8 @@ export function ProjectMigrationAuditPage({
             <AlertDialogAction onClick={(event) => {
               event.preventDefault();
               void handleConfirmAction();
-            }} disabled={acting || (actionMode !== 'approve' && !reviewComment.trim())}>
-              {acting ? '저장 중...' : actionMode === 'approve' ? '승인 저장' : actionMode === 'reject' ? '반려 저장' : '폐기 저장'}
+            }} disabled={acting || (actionMode === 'agree' ? !projectCode.trim() : actionMode === 'reject' ? !reviewComment.trim() : false)}>
+              {acting ? '저장 중...' : actionMode === 'agree' ? '합의 저장' : actionMode === 'approve' ? '승인 저장' : '반려 저장'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

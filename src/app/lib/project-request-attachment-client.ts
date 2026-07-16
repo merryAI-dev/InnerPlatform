@@ -45,3 +45,33 @@ export async function downloadProjectRequestAttachmentViaBff(params: {
     fileName: contentDispositionFileName(response.headers.get('content-disposition')) || 'attachment',
   };
 }
+
+export async function downloadProjectAttachmentViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  documentKind: ProjectRequestDocumentKind;
+  fetchImpl?: typeof fetch;
+}): Promise<{ blob: Blob; fileName: string }> {
+  const projectId = params.projectId.trim();
+  if (!projectId || projectId.includes('/')) throw new Error('project ID is invalid');
+  const response = await (params.fetchImpl || globalThis.fetch)(
+    `${readPlatformApiRuntimeConfig().baseUrl}/api/v1/projects/${encodeURIComponent(projectId)}/attachments/${params.documentKind}`,
+    {
+      method: 'GET',
+      headers: buildStandardHeaders({
+        tenantId: params.tenantId,
+        actor: toRequestActor(params.actor),
+        method: 'GET',
+      }),
+    },
+  );
+  if (!response.ok) {
+    const message = (await response.text()).trim();
+    throw new Error(message || '첨부 파일을 불러오지 못했습니다.');
+  }
+  return {
+    blob: await response.blob(),
+    fileName: contentDispositionFileName(response.headers.get('content-disposition')) || 'attachment',
+  };
+}

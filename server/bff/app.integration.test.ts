@@ -67,6 +67,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   async function resetTenantData(): Promise<void> {
     const collections = [
       'projects',
+      'project_code_registry',
+      'project_requests',
+      'projectRequests',
       'ledgers',
       'transactions',
       'comments',
@@ -202,7 +205,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     }));
   });
 
-  it('allows executive review reversal, appends history, and posts Slack on rejection', async () => {
+  it('records planning agreement before the designated approver rejects, and posts Slack', async () => {
     const projectRegistrationSlackService = {
       enabled: true,
       notifyMessage: vi.fn(async () => {}),
@@ -219,19 +222,17 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       tenantId,
       name: '네팔 귀환노동자 재정착 사업',
       registrationSource: 'pm_portal',
-      executiveReviewStatus: 'APPROVED',
-      executiveReviewedAt: '2026-04-20T09:00:00.000Z',
-      executiveReviewedById: 'u-old',
-      executiveReviewedByName: '임원A',
-      executiveReviewComment: '초안 승인',
+      executiveReviewStatus: 'PENDING',
+      executiveApproverId: actorId,
+      executiveApproverName: '조직장A',
       executiveReviewHistory: [
         {
-          status: 'APPROVED',
-          previousStatus: 'PENDING',
-          reviewedAt: '2026-04-20T09:00:00.000Z',
+          status: 'PENDING',
+          previousStatus: null,
+          reviewedAt: '2026-04-20T08:00:00.000Z',
           reviewedById: 'u-old',
-          reviewedByName: '임원A',
-          reviewComment: '초안 승인',
+          reviewedByName: '변민욱',
+          reviewComment: 'PM 신규 등록',
         },
       ],
       createdAt: '2026-04-20T08:00:00.000Z',
@@ -251,20 +252,33 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
         clientOrg: 'KOICA',
         department: 'CIC1',
         managerName: '변민욱',
+        executiveApproverId: actorId,
         teamName: 'AXR팀',
       },
       createdAt: '2026-04-20T08:00:00.000Z',
       updatedAt: '2026-04-20T09:00:00.000Z',
     }, { merge: true });
 
-    const response = await reviewApi
+    const agreement = await reviewApi
       .post('/api/v1/projects/p_exec_review_001/executive-review')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-001' })
       .send({
         requestId: 'pr_exec_review_001',
+        reviewStatus: 'PLANNING_AGREED',
+        projectCode: 'PRJ-2026-001',
+        reviewerName: '무시되는 요청 본문 이름',
+      });
+    expect(agreement.status).toBe(200);
+    expect(agreement.body.reviewStatus).toBe('PLANNING_AGREED');
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_exec_review_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-001-reject' })
+      .send({
+        requestId: 'pr_exec_review_001',
         reviewStatus: 'REVISION_REJECTED',
         reviewComment: '예산 산출 근거 보완 필요',
-        reviewerName: '임원B',
+        reviewerName: '무시되는 요청 본문 이름',
       });
 
     expect(response.status).toBe(200);
@@ -280,14 +294,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(projectSnap.exists).toBe(true);
     expect(projectSnap.data()).toMatchObject({
       executiveReviewStatus: 'REVISION_REJECTED',
-      executiveReviewedByName: '임원B',
+      executiveReviewedByName: actorId,
       executiveReviewComment: '예산 산출 근거 보완 필요',
     });
-    expect(projectSnap.data()?.executiveReviewHistory).toHaveLength(2);
-    expect(projectSnap.data()?.executiveReviewHistory?.[1]).toMatchObject({
+    expect(projectSnap.data()?.executiveReviewHistory).toHaveLength(3);
+    expect(projectSnap.data()?.executiveReviewHistory?.[2]).toMatchObject({
       status: 'REVISION_REJECTED',
-      previousStatus: 'APPROVED',
-      reviewedByName: '임원B',
+      previousStatus: 'PLANNING_AGREED',
+      reviewedByName: actorId,
       reviewComment: '예산 산출 근거 보완 필요',
     });
 
@@ -296,7 +310,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(requestSnap.data()).toMatchObject({
       status: 'REJECTED',
       reviewOutcome: 'REVISION_REJECTED',
-      reviewedByName: '임원B',
+      reviewedByName: actorId,
       rejectedReason: '예산 산출 근거 보완 필요',
     });
     expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -333,6 +347,67 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.message).toMatch(/reviewComment/i);
   });
 
+  it('requires a code for planning agreement and locks it for final approval', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).set({
+      id: 'p_project_code_001', tenantId, name: '코드 부여 테스트', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+    });
+
+    const missingCode = await reviewApi
+      .post('/api/v1/projects/p_project_code_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-missing' })
+      .send({ reviewStatus: 'PLANNING_AGREED', reviewerName: '경영기획실' });
+    expect(missingCode.status).toBe(422);
+
+    const agreed = await reviewApi
+      .post('/api/v1/projects/p_project_code_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-approved' })
+      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-001', reviewerName: '경영기획실' });
+    expect(agreed.status).toBe(200);
+
+    const approved = await reviewApi
+      .post('/api/v1/projects/p_project_code_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-final-approved' })
+      .send({ reviewStatus: 'APPROVED' });
+    expect(approved.status).toBe(200);
+
+    expect((await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).get()).data()).toMatchObject({
+      executiveReviewStatus: 'APPROVED', projectCode: 'PRJ-2026-001',
+      executiveReviewHistory: expect.arrayContaining([expect.objectContaining({ projectCode: 'PRJ-2026-001' })]),
+    });
+    expect((await db.doc(`orgs/${tenantId}/project_code_registry/PRJ-2026-001`).get()).data()).toMatchObject({
+      projectId: 'p_project_code_001',
+    });
+  });
+
+  it('rejects duplicate codes and final decisions by someone other than the designated approver', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_code_owner_001`).set({
+      id: 'p_code_owner_001', tenantId, name: '코드 소유 프로젝트', executiveApproverId: 'u-other', executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+    });
+    await db.doc(`orgs/${tenantId}/projects/p_code_owner_002`).set({
+      id: 'p_code_owner_002', tenantId, name: '코드 중복 프로젝트', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+    });
+
+    const agreed = await reviewApi
+      .post('/api/v1/projects/p_code_owner_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-agree' })
+      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-009' });
+    expect(agreed.status).toBe(200);
+
+    const wrongApprover = await reviewApi
+      .post('/api/v1/projects/p_code_owner_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-final' })
+      .send({ reviewStatus: 'APPROVED' });
+    expect(wrongApprover.status).toBe(403);
+
+    const duplicate = await reviewApi
+      .post('/api/v1/projects/p_code_owner_002/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-duplicate' })
+      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-009' });
+    expect(duplicate.status).toBe(409);
+  });
+
   it('atomically trashes a project with its duplicate-discard review', async () => {
     const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
     const projectRef = db.doc(`orgs/${tenantId}/projects/p_exec_discard_001`);
@@ -342,7 +417,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       name: '중복 폐기 테스트',
       version: 1,
       registrationSource: 'pm_portal',
-      executiveReviewStatus: 'PENDING',
+      executiveReviewStatus: 'PLANNING_AGREED',
+      executiveApproverId: actorId,
+      projectCode: 'PRJ-2026-002',
       createdAt: '2026-07-12T00:00:00.000Z',
       updatedAt: '2026-07-12T00:00:00.000Z',
     });

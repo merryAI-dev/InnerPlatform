@@ -44,6 +44,7 @@ import {
   type TransactionState,
 } from '../../data/types';
 import { buildCashflowAnalytics } from '../../platform/cashflow-analytics';
+import { ProjectMigrationAuditPage } from '../projects/ProjectMigrationAuditPage';
 
 const REPORT_TEAL = '#008c86';
 const REPORT_DARK_TEAL = '#00766f';
@@ -139,6 +140,7 @@ function FilterLabel({ label, disabled = false }: { label: string; disabled?: bo
 
 export function CashflowAnalyticsPage() {
   const { transactions, projects } = useAppStore();
+  const [activeView, setActiveView] = useState<'analytics' | 'projectApproval'>('analytics');
   const [projectFilter, setProjectFilter] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
@@ -266,6 +268,24 @@ export function CashflowAnalyticsPage() {
 
   const { totals } = analytics;
 
+  if (activeView === 'projectApproval') {
+    return (
+      <div className="space-y-5 bg-white px-1 pb-8 text-zinc-950">
+        <section className="border bg-white px-6 py-5" style={{ borderColor: REPORT_BORDER }}>
+          <p className="text-[13px]" style={{ color: REPORT_TEAL, fontWeight: 800 }}>경영기획실 통합 관리</p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-[28px] leading-tight text-zinc-950" style={{ fontWeight: 900 }}>프로젝트 등록·승인</h1>
+              <p className="mt-2 text-[12px] text-[#6f7478]">등록 문서를 열어 프로젝트 코드를 부여하고 승인 또는 반려 사유를 처리합니다.</p>
+            </div>
+            <Button variant="outline" className="rounded-none border-[#c7c7c7]" onClick={() => setActiveView('analytics')}>통합 현황으로</Button>
+          </div>
+        </section>
+        <ProjectMigrationAuditPage embedded defaultInboxScope="ALL" workflowStage="planning" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 bg-white px-1 pb-8 text-zinc-950">
       <section className="relative border bg-white px-6 py-5" style={{ borderColor: REPORT_BORDER }}>
@@ -281,8 +301,9 @@ export function CashflowAnalyticsPage() {
               사업·통장사용내역 기반 조회/필터/집계 · 현재 조건 {totals.count}건
             </p>
           </div>
-          <div className="hidden text-right sm:block">
-            <p className="text-[34px] leading-none text-[#c9c9c9]" style={{ fontWeight: 900 }}>2026</p>
+          <div className="flex flex-col items-end gap-3 text-right">
+            <p className="hidden text-[34px] leading-none text-[#c9c9c9] sm:block" style={{ fontWeight: 900 }}>2026</p>
+            <Button variant="outline" size="sm" className="rounded-none border-[#c7c7c7] text-[11px]" onClick={() => setActiveView('projectApproval')}>프로젝트 등록·승인</Button>
           </div>
         </div>
       </section>

@@ -126,11 +126,12 @@ export const projectRestoreSchema = z.object({
 
 export const projectExecutiveReviewSchema = z.object({
   requestId: NON_EMPTY_STRING.optional(),
-  reviewStatus: z.enum(['APPROVED', 'REVISION_REJECTED', 'DUPLICATE_DISCARDED']),
+  reviewStatus: z.enum(['PLANNING_AGREED', 'APPROVED', 'REVISION_REJECTED', 'DUPLICATE_DISCARDED']),
   reviewComment: z.string().trim().max(2000).optional(),
   reviewerName: z.string().trim().max(200).optional(),
+  projectCode: z.string().trim().max(100).optional(),
 }).strict().superRefine((value, ctx) => {
-  if (value.reviewStatus !== 'APPROVED' && !value.reviewComment) {
+  if (!['PLANNING_AGREED', 'APPROVED'].includes(value.reviewStatus) && !value.reviewComment) {
     ctx.addIssue({
       code: 'custom',
       path: ['reviewComment'],

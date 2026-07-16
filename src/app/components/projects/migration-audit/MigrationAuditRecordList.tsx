@@ -10,6 +10,7 @@ interface MigrationAuditRecordListProps {
 }
 
 function statusClass(status: MigrationAuditConsoleRecord['status']) {
+  if (status === 'PLANNING_AGREED') return 'border-blue-300 text-blue-800';
   if (status === 'APPROVED') return 'border-emerald-300 text-emerald-800';
   if (status === 'REVISION_REJECTED') return 'border-rose-300 text-rose-800';
   if (status === 'DUPLICATE_DISCARDED') return 'border-slate-400 text-slate-700';

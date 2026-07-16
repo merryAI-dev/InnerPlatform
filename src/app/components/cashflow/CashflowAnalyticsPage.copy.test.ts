@@ -27,4 +27,9 @@ describe('CashflowAnalyticsPage copy', () => {
     expect(source).toContain('<LineChart data={analytics.monthlyRows}>');
     expect(source).not.toContain('<AreaChart data={analytics.monthlyRows}>');
   });
+
+  it('opens the planning office project registration and approval surface', () => {
+    expect(source).toContain('프로젝트 등록·승인');
+    expect(source).toContain('<ProjectMigrationAuditPage embedded defaultInboxScope="ALL" workflowStage="planning" />');
+  });
 });

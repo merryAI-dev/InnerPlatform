@@ -258,6 +258,7 @@ export interface ProjectExecutiveReviewPayload {
   reviewStatus: ProjectExecutiveReviewStatus;
   reviewComment?: string;
   reviewerName?: string;
+  projectCode?: string;
 }
 
 export interface ProjectExecutiveReviewResult {
@@ -362,11 +363,13 @@ function normalizeProjectExecutiveReviewPayload(
   const requestId = normalizeOptionalText(payload.requestId);
   const reviewComment = normalizeOptionalText(payload.reviewComment);
   const reviewerName = normalizeOptionalText(payload.reviewerName);
+  const projectCode = normalizeOptionalText(payload.projectCode);
   return {
     ...(requestId ? { requestId } : {}),
     reviewStatus: payload.reviewStatus,
     ...(reviewComment ? { reviewComment } : {}),
     ...(reviewerName ? { reviewerName } : {}),
+    ...(projectCode ? { projectCode } : {}),
   };
 }
 
