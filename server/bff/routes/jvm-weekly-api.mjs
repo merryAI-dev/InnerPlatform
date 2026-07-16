@@ -246,6 +246,66 @@ function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+function parseAuditMetadata(value) {
+  try {
+    return objectValue(JSON.parse(readOptionalText(value) || '{}')) || {};
+  } catch {
+    return {};
+  }
+}
+
+async function readCashflowActivityDocuments(db, tenantId, collectionId, projectId) {
+  if (!db?.collection) return [];
+  const snap = await db.collection(`orgs/${tenantId}/${collectionId}`)
+    .where('projectId', '==', projectId)
+    .limit(200)
+    .get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+}
+
+async function readCashflowActivity(db, tenantId, projectId) {
+  const [refreshRuns, monthlyAudits, legacyEvents] = await Promise.all([
+    readCashflowActivityDocuments(db, tenantId, 'cashflow_sheet_refresh_runs', projectId),
+    readCashflowActivityDocuments(db, tenantId, 'weekly_api_audit_events', projectId),
+    readCashflowActivityDocuments(db, tenantId, 'cashflow_events', projectId),
+  ]);
+  const refreshEvents = refreshRuns
+    .filter((run) => readOptionalText(run.status) === 'COMPLETED' && readOptionalText(run.response?.status) === 'FRESH')
+    .map((run) => ({
+      id: `sheet-refresh:${run.id}`,
+      projectId,
+      runId: readOptionalText(run.idempotencyKey) || run.id,
+      type: 'sheet_refresh',
+      source: 'google_sheet_refresh',
+      actorUid: readOptionalText(run.createdBy?.uid),
+      actorEmail: readOptionalText(run.createdBy?.email),
+      createdAt: readOptionalText(run.completedAt) || readOptionalText(run.createdAt),
+      sheetName: readOptionalText(run.response?.selectedSheetName),
+    }));
+  const closeEvents = monthlyAudits
+    .filter((audit) => readOptionalText(audit.commandName).startsWith('cashflowMonth.'))
+    .map((audit) => {
+      const metadata = parseAuditMetadata(audit.metadataJson);
+      return {
+        id: `month-close:${audit.id}`,
+        projectId,
+        runId: readOptionalText(audit.idempotencyKey) || audit.id,
+        type: 'month_close',
+        source: 'month_close',
+        yearMonth: readOptionalText(metadata.yearMonth),
+        status: readOptionalText(metadata.status),
+        actorUid: readOptionalText(audit.actorId),
+        actorEmail: readOptionalText(metadata.actorEmail),
+        actorName: readOptionalText(metadata.actorName),
+        createdAt: readOptionalText(audit.createdAt),
+      };
+    });
+  return [...legacyEvents, ...refreshEvents, ...closeEvents]
+    .filter((event) => readOptionalText(event.createdAt))
+    .sort((left, right) => readOptionalText(right.createdAt).localeCompare(readOptionalText(left.createdAt)))
+    .slice(0, 200);
+}
+
 function safeAmount(value) {
   const amount = Number(value);
   return Number.isSafeInteger(amount) ? amount : 0;
@@ -1505,6 +1565,15 @@ export function mountJvmWeeklyApiRoutes(app, {
       { cashflowWrite: true },
     );
     return { status: 200, body: result };
+  }));
+
+  app.get('/api/v1/cashflow/:projectId/activity', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow activity', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    res.status(200).json({
+      projectId,
+      events: await readCashflowActivity(db, readOptionalText(req.context?.tenantId), projectId),
+    });
   }));
 
   app.get('/api/v1/cashflow/:projectId/month-close', asyncHandler(async (req, res) => {

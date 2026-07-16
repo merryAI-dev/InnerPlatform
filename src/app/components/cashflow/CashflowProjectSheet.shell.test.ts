@@ -124,6 +124,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(source).toContain('stageCashflowSheetLabViaBff');
     expect(source).toContain('시트값 불러오기');
+    expect(source).toContain('시트 값 불러오기');
+    expect(source).toContain('fetchCashflowActivityViaBff');
     expect(source).toContain('원장 덮어쓰기');
     expect(source).toContain('replaceAllActualSources');
     expect(source).not.toContain('시트 연동하기');
