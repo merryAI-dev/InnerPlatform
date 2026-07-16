@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from '../ui/alert-dialog';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
 
 type ReviewActionMode = 'approve' | 'reject' | 'discard';
 type ProjectRequestCollectionName = 'project_requests' | 'projectRequests';
@@ -80,11 +81,13 @@ function toExecutiveStatus(mode: ReviewActionMode): ProjectExecutiveReviewStatus
 type ProjectMigrationAuditPageProps = {
   embedded?: boolean;
   reviewScope?: 'all' | 'pending';
+  defaultInboxScope?: 'MINE' | 'ALL';
 };
 
 export function ProjectMigrationAuditPage({
   embedded = false,
   reviewScope = 'all',
+  defaultInboxScope = 'MINE',
 }: ProjectMigrationAuditPageProps = {}) {
   const { user: authUser } = useAuth();
   const { projects, currentUser } = useAppStore();
@@ -95,10 +98,11 @@ export function ProjectMigrationAuditPage({
   const [cicFilter, setCicFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('PENDING');
   const [searchQuery, setSearchQuery] = useState('');
-  const [inboxScope, setInboxScope] = useState<'MINE' | 'ALL'>('MINE');
+  const [inboxScope, setInboxScope] = useState<'MINE' | 'ALL'>(defaultInboxScope);
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
   const [actionMode, setActionMode] = useState<ReviewActionMode | null>(null);
   const [reviewComment, setReviewComment] = useState('');
+  const [projectCode, setProjectCode] = useState('');
   const [acting, setActing] = useState(false);
   const [secureContractDocument, setSecureContractDocument] = useState({ key: '', url: '', error: '' });
 
@@ -284,7 +288,12 @@ export function ProjectMigrationAuditPage({
 
     const nextExecutiveStatus = toExecutiveStatus(actionMode);
     const trimmedComment = reviewComment.trim();
+    const trimmedProjectCode = projectCode.trim();
     const reviewerName = currentUser?.name || authUser?.name || currentUser?.email || authUser?.email || '관리자';
+    if (nextExecutiveStatus === 'APPROVED' && !trimmedProjectCode) {
+      toast.error('프로젝트 코드를 입력해 주세요.');
+      return;
+    }
     if (nextExecutiveStatus !== 'APPROVED' && !trimmedComment) {
       toast.error(actionMode === 'reject' ? '반려 사유를 입력해 주세요.' : '폐기 사유를 입력해 주세요.');
       return;
@@ -310,6 +319,7 @@ export function ProjectMigrationAuditPage({
           reviewStatus: nextExecutiveStatus,
           reviewComment: trimmedComment || undefined,
           reviewerName,
+          projectCode: trimmedProjectCode || undefined,
         },
       });
       if (response.slackDelivered === false && response.slackReason) {
@@ -328,6 +338,7 @@ export function ProjectMigrationAuditPage({
       );
       setActionMode(null);
       setReviewComment('');
+      setProjectCode('');
     } catch (error) {
       toast.error('CIC 대표 검토 결정 저장 실패', {
         description: error instanceof Error ? error.message : '다시 시도해 주세요.',
@@ -395,10 +406,12 @@ export function ProjectMigrationAuditPage({
         onApprove={() => {
           setActionMode('approve');
           setReviewComment(openRecord?.project.executiveReviewComment || '');
+          setProjectCode(openRecord?.project.projectCode || '');
         }}
         onReject={() => {
           setActionMode('reject');
           setReviewComment(openRecord?.project.executiveReviewComment || '');
+          setProjectCode('');
         }}
       />
 
@@ -406,6 +419,7 @@ export function ProjectMigrationAuditPage({
         if (!open) {
           setActionMode(null);
           setReviewComment('');
+          setProjectCode('');
         }
       }}>
         <AlertDialogContent>
@@ -416,6 +430,18 @@ export function ProjectMigrationAuditPage({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
+            {actionMode === 'approve' ? (
+              <label className="block text-[12px] font-medium text-slate-700">
+                프로젝트 코드
+                <Input
+                  value={projectCode}
+                  onChange={(event) => setProjectCode(event.target.value)}
+                  placeholder="예: PRJ-2026-001"
+                  className="mt-2 h-10 rounded-none"
+                  aria-label="프로젝트 코드"
+                />
+              </label>
+            ) : null}
             <p className="text-[12px] font-medium text-slate-700">
               {actionMode === 'approve' ? '승인 메모' : actionMode === 'reject' ? '반려 사유' : '폐기 사유'}
             </p>
@@ -431,7 +457,7 @@ export function ProjectMigrationAuditPage({
             <AlertDialogAction onClick={(event) => {
               event.preventDefault();
               void handleConfirmAction();
-            }} disabled={acting || (actionMode !== 'approve' && !reviewComment.trim())}>
+            }} disabled={acting || (actionMode === 'approve' ? !projectCode.trim() : !reviewComment.trim())}>
               {acting ? '저장 중...' : actionMode === 'approve' ? '승인 저장' : actionMode === 'reject' ? '반려 저장' : '폐기 저장'}
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -963,6 +963,26 @@ describe('platform-bff-client', () => {
     }));
   });
 
+  it('sends the assigned project code with an approval decision', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { ok: true, projectId: 'p-123', requestId: null, reviewStatus: 'APPROVED' } })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    await reviewProjectExecutiveStatusViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-admin', role: 'admin', idToken: 'token-abc' },
+      projectId: 'p-123',
+      review: { reviewStatus: 'APPROVED', projectCode: '  PRJ-2026-001  ' },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/executive-review', expect.objectContaining({
+      body: { reviewStatus: 'APPROVED', projectCode: 'PRJ-2026-001' },
+    }));
+  });
+
   it('calls project executive review resubmission endpoint', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({

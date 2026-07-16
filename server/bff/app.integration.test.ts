@@ -333,6 +333,30 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.message).toMatch(/reviewComment/i);
   });
 
+  it('requires and persists a project code when approving a project', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).set({
+      id: 'p_project_code_001', tenantId, name: '코드 부여 테스트', executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+    });
+
+    const missingCode = await reviewApi
+      .post('/api/v1/projects/p_project_code_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-missing' })
+      .send({ reviewStatus: 'APPROVED', reviewerName: '경영기획실' });
+    expect(missingCode.status).toBe(422);
+
+    const approved = await reviewApi
+      .post('/api/v1/projects/p_project_code_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-approved' })
+      .send({ reviewStatus: 'APPROVED', projectCode: 'PRJ-2026-001', reviewerName: '경영기획실' });
+    expect(approved.status).toBe(200);
+
+    expect((await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).get()).data()).toMatchObject({
+      executiveReviewStatus: 'APPROVED', projectCode: 'PRJ-2026-001',
+      executiveReviewHistory: [expect.objectContaining({ projectCode: 'PRJ-2026-001' })],
+    });
+  });
+
   it('atomically trashes a project with its duplicate-discard review', async () => {
     const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
     const projectRef = db.doc(`orgs/${tenantId}/projects/p_exec_discard_001`);

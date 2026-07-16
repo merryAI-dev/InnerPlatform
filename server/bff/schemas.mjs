@@ -129,6 +129,7 @@ export const projectExecutiveReviewSchema = z.object({
   reviewStatus: z.enum(['APPROVED', 'REVISION_REJECTED', 'DUPLICATE_DISCARDED']),
   reviewComment: z.string().trim().max(2000).optional(),
   reviewerName: z.string().trim().max(200).optional(),
+  projectCode: z.string().trim().max(100).optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.reviewStatus !== 'APPROVED' && !value.reviewComment) {
     ctx.addIssue({

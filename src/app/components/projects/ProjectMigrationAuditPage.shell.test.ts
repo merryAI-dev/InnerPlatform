@@ -72,6 +72,12 @@ describe('ProjectMigrationAuditPage shell contract', () => {
     expect(pageSource).not.toContain('setDoc(');
   });
 
+  it('requires a project code before saving an approval decision', () => {
+    expect(pageSource).toContain('프로젝트 코드를 입력해 주세요.');
+    expect(pageSource).toContain('projectCode: trimmedProjectCode');
+    expect(documentSource).toContain('프로젝트 코드');
+  });
+
   it('listens to both canonical and legacy project request collections', () => {
     expect(pageSource).toContain("const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests']");
     expect(pageSource).toContain('__collectionName: collectionName');

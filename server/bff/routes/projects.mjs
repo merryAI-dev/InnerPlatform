@@ -2637,6 +2637,12 @@ export function mountProjectRoutes(app, {
         const reviewRequest = currentRequest || request;
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
+        const projectCode = parsed.reviewStatus === 'APPROVED'
+          ? readOptionalText(parsed.projectCode) || readOptionalText(currentProject.projectCode)
+          : null;
+        if (parsed.reviewStatus === 'APPROVED' && !projectCode) {
+          throw createHttpError(422, 'projectCode is required when approving a project', 'missing_project_code');
+        }
         const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(reviewRequest);
         const requestChanges = Array.isArray(reviewRequest?.changedFields) ? reviewRequest.changedFields : [];
         const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
@@ -2650,6 +2656,7 @@ export function mountProjectRoutes(app, {
           executiveReviewedById: actorId,
           executiveReviewedByName: reviewerName,
           executiveReviewComment: readOptionalText(parsed.reviewComment) || null,
+          ...(projectCode ? { projectCode } : {}),
           executiveReviewHistory: [
             ...currentHistory,
             {
@@ -2659,6 +2666,7 @@ export function mountProjectRoutes(app, {
               reviewedById: actorId,
               reviewedByName: reviewerName,
               reviewComment: readOptionalText(parsed.reviewComment) || null,
+              ...(projectCode ? { projectCode } : {}),
               ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],

@@ -610,6 +610,7 @@ export interface Project {
   executiveApproverId?: string;
   executiveApproverName?: string;
   executiveApproverEmail?: string;
+  projectCode?: string;
   registeredAt?: string;
   executiveReviewStatus?: ProjectExecutiveReviewStatus;
   executiveReviewedAt?: string;
@@ -727,6 +728,7 @@ export interface ProjectExecutiveReviewHistoryEntry {
   reviewedById: string;
   reviewedByName: string;
   reviewComment?: string;
+  projectCode?: string;
   changes?: ProjectReviewFieldChange[];
 }
 

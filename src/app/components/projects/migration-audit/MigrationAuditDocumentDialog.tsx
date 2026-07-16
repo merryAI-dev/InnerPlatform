@@ -143,6 +143,7 @@ export function MigrationAuditDocumentDialog({
 
           <section className="mt-6 border border-slate-400">
             <DocumentCell label="문서 번호" value={record.request?.id || record.id} />
+            <DocumentCell label="프로젝트 코드" value={record.project.projectCode || ''} />
             <DocumentCell label="작성 일자" value={formatDateTime(record.requestedAt)} />
             <DocumentCell label="기안 부서" value={record.cic} />
             <DocumentCell label="기안자" value={dossier.audit.requestedByName} />
