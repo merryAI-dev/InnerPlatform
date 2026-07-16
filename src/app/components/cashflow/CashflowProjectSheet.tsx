@@ -35,6 +35,7 @@ import { getAuthInstance, getOrgCollectionPath, getOrgDocumentPath } from '../..
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import {
   fetchCashflowSnapshotViaBff,
+  fetchCashflowActivityViaBff,
   closeCashflowMonthViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
@@ -44,6 +45,7 @@ import {
   type CashflowMonthCloseResult,
   type CashflowDeadlineSummary,
   type CashflowSnapshotResult,
+  type CashflowActivityEvent,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
@@ -101,40 +103,7 @@ function formatSheetAppliedAt(value?: string): string {
   }).format(date);
 }
 
-type CashflowEventType =
-  | 'sheet_apply'
-  | 'projection_amount_change'
-  | 'actual_amount_change'
-  | 'projection_completed'
-  | 'actual_completed'
-  | 'admin_closed'
-  | 'sheet_apply_reverted';
-
-type CashflowEvent = {
-  id?: string;
-  tenantId?: string;
-  projectId: string;
-  runId: string;
-  type: CashflowEventType;
-  source?: 'manual' | 'google_sheet_apply' | 'revert';
-  yearMonth?: string;
-  weekNo?: number;
-  mode?: 'projection' | 'actual';
-  lineId?: CashflowSheetLineId;
-  beforeAmount?: number;
-  afterAmount?: number;
-  beforeHadValue?: boolean;
-  afterHadValue?: boolean;
-  appliedLineCount?: number;
-  projectionLineCount?: number;
-  actualLineCount?: number;
-  revertedRunId?: string;
-  actorUid?: string;
-  actorName?: string;
-  actorEmail?: string;
-  createdAt: string;
-  revertedAt?: string;
-};
+type CashflowEvent = CashflowActivityEvent & { revertedAt?: string };
 
 function diffColorExplanation(section: '입금' | '출금', diff: number): string {
   if (diff === 0) return '차이가 없습니다.';
@@ -921,40 +890,30 @@ export function CashflowProjectSheet({
   }, [loadCashflowSheetRangeWeeks]);
 
   const loadCashflowEvents = useCallback(async (): Promise<void> => {
-    if (!db || !projectId) {
+    if (!projectId || !orgId || !user?.uid) {
       setCashflowEvents([]);
       setCashflowEventsError(null);
       return;
     }
-    const base = collection(db, getOrgCollectionPath(orgId, 'cashflowEvents'));
-    const targetProjectId = String(projectId || '').trim();
-    const readCashflowEventsSnapshot = async (filterByProject: boolean): Promise<CashflowEvent[]> => {
-      const snap = await getDocs(filterByProject
-        ? query(base, where('projectId', '==', projectId), limit(200))
-        : query(base, limit(500)));
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CashflowEvent, 'id'>) }))
-        .filter((event) => String(event.projectId || '').trim() === targetProjectId)
-        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-        .slice(0, 200);
-    };
-
     try {
-      let events = await readCashflowEventsSnapshot(true);
-      if (events.length === 0) events = await readCashflowEventsSnapshot(false);
-      setCashflowEvents(events);
+      let actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      try {
+        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId });
+        setCashflowEvents(response.events);
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        actor = await resolveBffActor({ forceRefresh: true });
+        if (!actor?.idToken) throw error;
+        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId });
+        setCashflowEvents(response.events);
+      }
       setCashflowEventsError(null);
     } catch (error) {
-      try {
-        const events = await readCashflowEventsSnapshot(false);
-        setCashflowEvents(events);
-        setCashflowEventsError(null);
-      } catch {
-        setCashflowEvents([]);
-        setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
-      }
+      setCashflowEvents([]);
+      setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
     }
-  }, [db, orgId, projectId]);
+  }, [orgId, projectId, resolveBffActor, user?.uid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1223,6 +1182,7 @@ export function CashflowProjectSheet({
       setSheetRefreshResult(null);
       setSheetStageDialog(null);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+        void loadCashflowEvents();
         toast.success('시트값을 고정했습니다. 저장할 값을 확인해 주세요.');
       } else if (mirror.status === 'STALE') {
         toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
@@ -1254,7 +1214,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetConfig, orgId, projectId, resolveBffActor]);
+  }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor]);
 
   const handleStagePinnedSheetValues = useCallback(async (replaceAllActualSources = false): Promise<void> => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
@@ -2197,6 +2157,19 @@ export function CashflowProjectSheet({
               >
                 {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
               </Button>
+              {cashflowSheetConfig ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 rounded-full border-emerald-200 bg-white px-2.5 text-[10px] font-semibold text-emerald-700"
+                  disabled={sheetRefreshLoading}
+                  onClick={() => void handleRefreshSheetMirror()}
+                >
+                  {sheetRefreshLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                  시트 값 불러오기
+                </Button>
+              ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[10px] text-slate-400 sm:inline">기준일 {todayIso}</span>
@@ -2331,7 +2304,9 @@ export function CashflowProjectSheet({
   }
 
   function cashflowEventLabel(event: CashflowEvent): string {
+    if (event.type === 'sheet_refresh') return '시트 값 불러오기';
     if (event.type === 'sheet_apply') return '시트 값 반영';
+    if (event.type === 'month_close') return '월 결산';
     if (event.type === 'projection_amount_change') return 'Projection 값 변경';
     if (event.type === 'actual_amount_change') return 'Actual 값 변경';
     if (event.type === 'projection_completed') return '과거 Projection 완료 기록';
@@ -2342,12 +2317,14 @@ export function CashflowProjectSheet({
   }
 
   function cashflowEventDetail(event: CashflowEvent): string {
+    if (event.type === 'sheet_refresh') return [event.sheetName, '시트값을 고정했습니다.'].filter(Boolean).join(' · ');
     if (event.type === 'sheet_apply') {
       return `Google Sheet 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
     }
+    if (event.type === 'month_close') return [`${event.yearMonth || ''} 월`, event.status || '결산 완료', event.actorName || event.actorEmail || '사용자'].filter(Boolean).join(' · ');
     if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
       const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
-      const lineLabel = event.lineId ? CASHFLOW_SHEET_LINE_LABELS[event.lineId] || event.lineId : '';
+      const lineLabel = event.lineId ? CASHFLOW_SHEET_LINE_LABELS[event.lineId as CashflowSheetLineId] || event.lineId : '';
       const before = event.beforeHadValue ? `${fmt(Number(event.beforeAmount || 0))}원` : '미작성';
       const after = `${fmt(Number(event.afterAmount || 0))}원`;
       return `${weekLabel} ${lineLabel} ${before} → ${after}`;
@@ -2358,7 +2335,9 @@ export function CashflowProjectSheet({
   }
 
   function cashflowEventSourceClass(source: CashflowEvent['source']): string {
+    if (source === 'google_sheet_refresh') return 'bg-emerald-50 text-emerald-700';
     if (source === 'google_sheet_apply') return 'bg-blue-50 text-blue-700';
+    if (source === 'month_close') return 'bg-violet-50 text-violet-700';
     if (source === 'revert') return 'bg-amber-50 text-amber-700';
     return 'bg-slate-100 text-slate-700';
   }
@@ -2471,9 +2450,9 @@ export function CashflowProjectSheet({
 
   function renderOpsTimeline() {
     const countBadges = [
-      { key: 'sheet', label: '시트 반영', value: cashflowEvents.filter((event) => event.type === 'sheet_apply').length },
+      { key: 'sheet', label: '시트 불러오기', value: cashflowEvents.filter((event) => event.type === 'sheet_refresh').length },
       { key: 'amount', label: '금액 변경', value: cashflowEvents.filter((event) => event.type === 'projection_amount_change' || event.type === 'actual_amount_change').length },
-      { key: 'status', label: '완료', value: cashflowEvents.filter((event) => ['projection_completed', 'actual_completed', 'admin_closed'].includes(event.type)).length },
+      { key: 'status', label: '월 결산', value: cashflowEvents.filter((event) => event.type === 'month_close').length },
     ].filter((item) => item.value > 0);
 
     return (
@@ -2482,7 +2461,7 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
-              <div className="text-[10px] text-slate-500">시트 반영, 임시저장, 월 결산과 과거 기록입니다.</div>
+              <div className="text-[10px] text-slate-500">명시적 시트 불러오기와 월 결산 이력입니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
@@ -2506,7 +2485,7 @@ export function CashflowProjectSheet({
               <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
-                시트값 반영과 월 결산 이력이 여기에 기록됩니다.
+                시트값 불러오기와 월 결산 이력이 여기에 기록됩니다.
               </div>
             ) : cashflowEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'
@@ -2528,7 +2507,7 @@ export function CashflowProjectSheet({
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[9px] font-semibold leading-3 ${cashflowEventSourceClass(event.source)}`}>
-                          {event.source === 'google_sheet_apply' ? '시트' : event.source === 'revert' ? '되돌림' : '기록'}
+                          {event.source === 'google_sheet_refresh' ? '불러오기' : event.source === 'google_sheet_apply' ? '시트' : event.source === 'month_close' ? '결산' : event.source === 'revert' ? '되돌림' : '기록'}
                         </span>
                         <span className="truncate text-[11px] font-bold text-slate-900">{cashflowEventLabel(event)}</span>
                       </div>

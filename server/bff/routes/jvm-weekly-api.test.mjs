@@ -392,6 +392,43 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
   });
 
+  it('combines explicit sheet refresh and JVM month-close audit records for the activity timeline', async () => {
+    const eventsByCollection = {
+      cashflow_sheet_refresh_runs: [{
+        id: 'refresh-1', projectId: 'project-a', idempotencyKey: 'refresh-key', status: 'COMPLETED',
+        createdAt: '2026-07-01T00:00:00.000Z', completedAt: '2026-07-01T00:01:00.000Z',
+        createdBy: { uid: 'pm-1', email: 'pm@example.com' },
+        response: { status: 'FRESH', selectedSheetName: 'cashflow(사용내역 연동)' },
+      }],
+      weekly_api_audit_events: [{
+        id: 'close-1', projectId: 'project-a', idempotencyKey: 'close-key', commandName: 'cashflowMonth.close',
+        actorId: 'pm-1', createdAt: '2026-07-02T00:00:00.000Z',
+        metadataJson: JSON.stringify({ yearMonth: '2026-06', status: 'CLOSED', actorEmail: 'pm@example.com' }),
+      }],
+      cashflow_events: [],
+    };
+    const db = {
+      collection: (path) => ({
+        where: () => ({
+          limit: () => ({
+            get: async () => ({ docs: (eventsByCollection[path.split('/').at(-1)] || []).map((data) => ({ id: data.id, data: () => data })) }),
+          }),
+        }),
+      }),
+    };
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: stageEnv, db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/activity')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.events).toMatchObject([
+          { type: 'month_close', yearMonth: '2026-06', status: 'CLOSED' },
+          { type: 'sheet_refresh', sheetName: 'cashflow(사용내역 연동)' },
+        ]);
+      });
+  });
+
   it('composes the open-month dashboard from the pinned sheet, private draft, project, and JVM state', async () => {
     const { db, sourceRevision, targetRevision } = fullMonthCloseSource();
     const fetchImpl = vi.fn(async (url) => ({

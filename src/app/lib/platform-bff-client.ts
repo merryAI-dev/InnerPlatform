@@ -705,6 +705,32 @@ export interface CashflowSnapshotResult {
 export type CashflowMonthCloseStatus = 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED';
 export type CashflowMonthReopenDecision = 'APPROVE' | 'REJECT';
 
+export interface CashflowActivityEvent {
+  id: string;
+  projectId: string;
+  runId: string;
+  type: 'sheet_refresh' | 'sheet_apply' | 'projection_amount_change' | 'actual_amount_change' | 'projection_completed' | 'actual_completed' | 'admin_closed' | 'sheet_apply_reverted' | 'month_close';
+  source?: 'google_sheet_refresh' | 'google_sheet_apply' | 'month_close' | 'manual' | 'revert';
+  yearMonth?: string;
+  weekNo?: number;
+  mode?: 'projection' | 'actual';
+  lineId?: string;
+  beforeAmount?: number;
+  afterAmount?: number;
+  beforeHadValue?: boolean;
+  afterHadValue?: boolean;
+  appliedLineCount?: number;
+  projectionLineCount?: number;
+  actualLineCount?: number;
+  revertedRunId?: string;
+  actorUid?: string;
+  actorName?: string;
+  actorEmail?: string;
+  status?: string;
+  sheetName?: string;
+  createdAt: string;
+}
+
 export interface CashflowMonthCloseCell {
   mode: 'projection' | 'actual';
   weekNo: number;
@@ -2197,6 +2223,24 @@ export async function fetchCashflowMonthCloseViaBff(params: {
 }): Promise<CashflowMonthCloseResult> {
   const response = await resolveClient(params.client).get<CashflowMonthCloseResult>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close?yearMonth=${encodeURIComponent(params.yearMonth)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowActivityViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<{ projectId: string; events: CashflowActivityEvent[] }> {
+  const response = await resolveClient(params.client).get<{ projectId: string; events: CashflowActivityEvent[] }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/activity`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
