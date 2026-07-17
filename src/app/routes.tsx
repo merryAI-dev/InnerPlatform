@@ -7,72 +7,88 @@ import { PortalRouteProviders } from './data/portal-route-providers';
 import { loadLazyRouteModule } from './platform/lazy-route';
 import { shouldUseBusinessCardMobileEntry } from './platform/mobile-entry';
 
-// Lazy-loaded pages — each becomes a separate chunk
-const LoginPage = lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
-const WorkspaceSelectPage = lazy(() => import('./components/auth/WorkspaceSelectPage').then(m => ({ default: m.WorkspaceSelectPage })));
-const PwaInstallPage = lazy(() => import('./components/pwa/PwaInstallPage').then(m => ({ default: m.PwaInstallPage })));
-const MobileEntryPage = lazy(() => import('./components/pwa/MobileEntryPage').then(m => ({ default: m.MobileEntryPage })));
-const FeatureSearchPage = lazy(() => import('./components/dashboard/FeatureSearchPage').then(m => ({ default: m.FeatureSearchPage })));
-const DashboardPage = lazy(() => import('./components/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
-const BoardFeedPage = lazy(() => import('./components/board/BoardFeedPage').then(m => ({ default: m.BoardFeedPage })));
-const BoardPostPage = lazy(() => import('./components/board/BoardPostPage').then(m => ({ default: m.BoardPostPage })));
-const ProjectListPage = lazy(() => import('./components/projects/ProjectListPage').then(m => ({ default: m.ProjectListPage })));
-const ProjectMigrationAuditPage = lazy(() => import('./components/projects/ProjectMigrationAuditPage').then(m => ({ default: m.ProjectMigrationAuditPage })));
-const ProjectDetailPage = lazy(() => import('./components/projects/ProjectDetailPage').then(m => ({ default: m.ProjectDetailPage })));
-const ProjectWizardPage = lazy(() => import('./components/projects/ProjectWizardPage').then(m => ({ default: m.ProjectWizardPage })));
-const ProjectRegisterRedirectPage = lazy(() => import('./components/projects/ProjectRegisterRedirectPage').then(m => ({ default: m.ProjectRegisterRedirectPage })));
-const LedgerDetailPage = lazy(() => import('./components/ledgers/LedgerDetailPage').then(m => ({ default: m.LedgerDetailPage })));
-const CashflowPage = lazy(() => import('./components/cashflow/CashflowPage').then(m => ({ default: m.CashflowPage })));
-const CashflowWeeklyPage = lazy(() => import('./components/cashflow/CashflowWeeklyPage').then(m => ({ default: m.CashflowWeeklyPage })));
-const CashflowAnalyticsPage = lazy(() => import('./components/cashflow/CashflowAnalyticsPage').then(m => ({ default: m.CashflowAnalyticsPage })));
-const CashflowExportPage = lazy(() => import('./components/cashflow/CashflowExportPage').then(m => ({ default: m.CashflowExportPage })));
-const ProjectCashflowSheetPage = lazy(() => import('./components/cashflow/ProjectCashflowSheetPage').then(m => ({ default: m.ProjectCashflowSheetPage })));
-const EvidenceQueuePage = lazy(() => import('./components/evidence/EvidenceQueuePage').then(m => ({ default: m.EvidenceQueuePage })));
-const AuditLogPage = lazy(() => import('./components/audit/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
-const SettingsPage = lazy(() => import('./components/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const ParticipationPage = lazy(() => import('./components/participation/ParticipationPage').then(m => ({ default: m.ParticipationPage })));
-const KoicaPersonnelPage = lazy(() => import('./components/koica/KoicaPersonnelPage').then(m => ({ default: m.KoicaPersonnelPage })));
-const PersonnelChangePage = lazy(() => import('./components/koica/PersonnelChangePage').then(m => ({ default: m.PersonnelChangePage })));
-const BudgetSummaryPage = lazy(() => import('./components/budget/BudgetSummaryPage').then(m => ({ default: m.BudgetSummaryPage })));
-const ExpenseManagementPage = lazy(() => import('./components/expense/ExpenseManagementPage').then(m => ({ default: m.ExpenseManagementPage })));
-const AdminApprovalPage = lazy(() => import('./components/approval/AdminApprovalPage').then(m => ({ default: m.AdminApprovalPage })));
-const UserManagementPage = lazy(() => import('./components/users/UserManagementPage').then(m => ({ default: m.UserManagementPage })));
-const AdminHrAnnouncementPage = lazy(() => import('./components/hr/AdminHrAnnouncementPage').then(m => ({ default: m.AdminHrAnnouncementPage })));
-const AdminPayrollPage = lazy(() => import('./components/payroll/AdminPayrollPage').then(m => ({ default: m.AdminPayrollPage })));
-const TrainingManagePage = lazy(() => import('./components/training/TrainingManagePage').then(m => ({ default: m.TrainingManagePage })));
-const BankReconciliationPage = lazy(() => import('./components/cashflow/BankReconciliationPage').then(m => ({ default: m.BankReconciliationPage })));
-const NotFoundPage = lazy(() => import('./components/layout/NotFoundPage').then(m => ({ default: m.NotFoundPage })));
-
-// Portal pages
-const PortalOnboarding = lazy(() => import('./components/portal/PortalOnboarding').then(m => ({ default: m.PortalOnboarding })));
-const PortalProjectSelectPage = lazy(() => import('./components/portal/PortalProjectSelectPage').then(m => ({ default: m.PortalProjectSelectPage })));
-const PortalBudget = lazy(() => import('./components/portal/PortalBudget').then(m => ({ default: m.PortalBudget })));
-const PortalPersonnel = lazy(() => import('./components/portal/PortalPersonnel').then(m => ({ default: m.PortalPersonnel })));
-const PortalChangeRequests = lazy(() => import('./components/portal/PortalChangeRequests').then(m => ({ default: m.PortalChangeRequests })));
-const PortalProjectRegister = lazy(() => import('./components/portal/PortalProjectRegister').then(m => ({ default: m.PortalProjectRegister })));
-const PortalProjectEdit = lazy(() => import('./components/portal/PortalProjectEdit').then(m => ({ default: m.PortalProjectEdit })));
-const PortalPayrollPage = lazy(() => import('./components/portal/PortalPayrollPage').then(m => ({ default: m.PortalPayrollPage })));
-const PortalCashflowPage = lazy(() => import('./components/portal/PortalCashflowPage').then(m => ({ default: m.PortalCashflowPage })));
-const CashflowSheetLabPage = lazy(() => import('./features/cashflow-sheet-compare/CashflowSheetLabPage').then(m => ({ default: m.CashflowSheetLabPage })));
-const CareerProfilePage = lazy(() => import('./components/portal/CareerProfilePage').then(m => ({ default: m.CareerProfilePage })));
-const PortalTrainingPage = lazy(() => import('./components/portal/PortalTrainingPage').then(m => ({ default: m.PortalTrainingPage })));
 function RouteChunkFallback() {
   return (
     <div className="flex min-h-[240px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
-      페이지를 다시 불러오고 있습니다. 새로고침하거나 홈으로 이동한 뒤 다시 시도해 주세요.
+      <div className="space-y-4">
+        <p>새 버전이 배포되었습니다. 저장할 내용을 확인한 뒤 새 버전을 불러와 주세요.</p>
+        <button
+          type="button"
+          className="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+          onClick={() => window.location.reload()}
+        >
+          새 버전 불러오기
+        </button>
+      </div>
     </div>
   );
 }
 
-const PortalWeeklyExpensePage = lazy(() => loadLazyRouteModule(
-  () => import('./components/portal/PortalWeeklyExpensePage'),
-  'PortalWeeklyExpensePage',
-  RouteChunkFallback,
-  '[routes] failed to load PortalWeeklyExpensePage:',
-));
-const PortalBankStatementPage = lazy(() => import('./components/portal/PortalBankStatementPage').then(m => ({ default: m.PortalBankStatementPage })));
-const GuideChatPage = lazy(() => import('./components/guide-chat/GuideChatPage').then(m => ({ default: m.GuideChatPage })));
-const BusinessCardLabPage = lazy(() => import('./components/business-cards/BusinessCardLabPage').then(m => ({ default: m.BusinessCardLabPage })));
+function lazyRoute<TModule extends Record<string, unknown>>(
+  loader: () => Promise<TModule>,
+  exportName: keyof TModule,
+) {
+  return lazy(() => loadLazyRouteModule(
+    loader,
+    exportName,
+    RouteChunkFallback,
+    `[routes] failed to load ${String(exportName)}:`,
+  ));
+}
+
+// Lazy-loaded pages — each becomes a separate chunk
+const LoginPage = lazyRoute(() => import('./components/auth/LoginPage'), 'LoginPage');
+const WorkspaceSelectPage = lazyRoute(() => import('./components/auth/WorkspaceSelectPage'), 'WorkspaceSelectPage');
+const PwaInstallPage = lazyRoute(() => import('./components/pwa/PwaInstallPage'), 'PwaInstallPage');
+const MobileEntryPage = lazyRoute(() => import('./components/pwa/MobileEntryPage'), 'MobileEntryPage');
+const FeatureSearchPage = lazyRoute(() => import('./components/dashboard/FeatureSearchPage'), 'FeatureSearchPage');
+const DashboardPage = lazyRoute(() => import('./components/dashboard/DashboardPage'), 'DashboardPage');
+const BoardFeedPage = lazyRoute(() => import('./components/board/BoardFeedPage'), 'BoardFeedPage');
+const BoardPostPage = lazyRoute(() => import('./components/board/BoardPostPage'), 'BoardPostPage');
+const ProjectListPage = lazyRoute(() => import('./components/projects/ProjectListPage'), 'ProjectListPage');
+const ProjectMigrationAuditPage = lazyRoute(() => import('./components/projects/ProjectMigrationAuditPage'), 'ProjectMigrationAuditPage');
+const ProjectDetailPage = lazyRoute(() => import('./components/projects/ProjectDetailPage'), 'ProjectDetailPage');
+const ProjectWizardPage = lazyRoute(() => import('./components/projects/ProjectWizardPage'), 'ProjectWizardPage');
+const ProjectRegisterRedirectPage = lazyRoute(() => import('./components/projects/ProjectRegisterRedirectPage'), 'ProjectRegisterRedirectPage');
+const LedgerDetailPage = lazyRoute(() => import('./components/ledgers/LedgerDetailPage'), 'LedgerDetailPage');
+const CashflowPage = lazyRoute(() => import('./components/cashflow/CashflowPage'), 'CashflowPage');
+const CashflowWeeklyPage = lazyRoute(() => import('./components/cashflow/CashflowWeeklyPage'), 'CashflowWeeklyPage');
+const CashflowAnalyticsPage = lazyRoute(() => import('./components/cashflow/CashflowAnalyticsPage'), 'CashflowAnalyticsPage');
+const CashflowExportPage = lazyRoute(() => import('./components/cashflow/CashflowExportPage'), 'CashflowExportPage');
+const ProjectCashflowSheetPage = lazyRoute(() => import('./components/cashflow/ProjectCashflowSheetPage'), 'ProjectCashflowSheetPage');
+const EvidenceQueuePage = lazyRoute(() => import('./components/evidence/EvidenceQueuePage'), 'EvidenceQueuePage');
+const AuditLogPage = lazyRoute(() => import('./components/audit/AuditLogPage'), 'AuditLogPage');
+const SettingsPage = lazyRoute(() => import('./components/settings/SettingsPage'), 'SettingsPage');
+const ParticipationPage = lazyRoute(() => import('./components/participation/ParticipationPage'), 'ParticipationPage');
+const KoicaPersonnelPage = lazyRoute(() => import('./components/koica/KoicaPersonnelPage'), 'KoicaPersonnelPage');
+const PersonnelChangePage = lazyRoute(() => import('./components/koica/PersonnelChangePage'), 'PersonnelChangePage');
+const BudgetSummaryPage = lazyRoute(() => import('./components/budget/BudgetSummaryPage'), 'BudgetSummaryPage');
+const ExpenseManagementPage = lazyRoute(() => import('./components/expense/ExpenseManagementPage'), 'ExpenseManagementPage');
+const AdminApprovalPage = lazyRoute(() => import('./components/approval/AdminApprovalPage'), 'AdminApprovalPage');
+const UserManagementPage = lazyRoute(() => import('./components/users/UserManagementPage'), 'UserManagementPage');
+const AdminHrAnnouncementPage = lazyRoute(() => import('./components/hr/AdminHrAnnouncementPage'), 'AdminHrAnnouncementPage');
+const AdminPayrollPage = lazyRoute(() => import('./components/payroll/AdminPayrollPage'), 'AdminPayrollPage');
+const TrainingManagePage = lazyRoute(() => import('./components/training/TrainingManagePage'), 'TrainingManagePage');
+const BankReconciliationPage = lazyRoute(() => import('./components/cashflow/BankReconciliationPage'), 'BankReconciliationPage');
+const NotFoundPage = lazyRoute(() => import('./components/layout/NotFoundPage'), 'NotFoundPage');
+
+// Portal pages
+const PortalOnboarding = lazyRoute(() => import('./components/portal/PortalOnboarding'), 'PortalOnboarding');
+const PortalProjectSelectPage = lazyRoute(() => import('./components/portal/PortalProjectSelectPage'), 'PortalProjectSelectPage');
+const PortalBudget = lazyRoute(() => import('./components/portal/PortalBudget'), 'PortalBudget');
+const PortalPersonnel = lazyRoute(() => import('./components/portal/PortalPersonnel'), 'PortalPersonnel');
+const PortalChangeRequests = lazyRoute(() => import('./components/portal/PortalChangeRequests'), 'PortalChangeRequests');
+const PortalProjectRegister = lazyRoute(() => import('./components/portal/PortalProjectRegister'), 'PortalProjectRegister');
+const PortalProjectEdit = lazyRoute(() => import('./components/portal/PortalProjectEdit'), 'PortalProjectEdit');
+const PortalPayrollPage = lazyRoute(() => import('./components/portal/PortalPayrollPage'), 'PortalPayrollPage');
+const PortalCashflowPage = lazyRoute(() => import('./components/portal/PortalCashflowPage'), 'PortalCashflowPage');
+const CashflowSheetLabPage = lazyRoute(() => import('./features/cashflow-sheet-compare/CashflowSheetLabPage'), 'CashflowSheetLabPage');
+const CareerProfilePage = lazyRoute(() => import('./components/portal/CareerProfilePage'), 'CareerProfilePage');
+const PortalTrainingPage = lazyRoute(() => import('./components/portal/PortalTrainingPage'), 'PortalTrainingPage');
+const PortalWeeklyExpensePage = lazyRoute(() => import('./components/portal/PortalWeeklyExpensePage'), 'PortalWeeklyExpensePage');
+const PortalBankStatementPage = lazyRoute(() => import('./components/portal/PortalBankStatementPage'), 'PortalBankStatementPage');
+const GuideChatPage = lazyRoute(() => import('./components/guide-chat/GuideChatPage'), 'GuideChatPage');
+const BusinessCardLabPage = lazyRoute(() => import('./components/business-cards/BusinessCardLabPage'), 'BusinessCardLabPage');
 
 // Suspense wrapper — layouts already provide visual chrome, so a minimal fallback suffices
 function S({ C }: { C: ComponentType }) {
