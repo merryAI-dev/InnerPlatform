@@ -65,7 +65,7 @@ import java.util.concurrent.Callable;
 @ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "firestore")
 public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpensePersistence {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Set<String> CASHFLOW_WRITE_ROLES = Set.of("admin", "finance", "pm", "tenant_admin");
+    private static final Set<String> CASHFLOW_WRITE_ROLES = Set.of("admin", "finance", "pm", "viewer", "tenant_admin");
     private static final Set<String> CASHFLOW_CROSS_PROJECT_ROLES = Set.of("admin", "finance", "tenant_admin");
     private static final String CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION = "cashflow-month-close-v1";
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;

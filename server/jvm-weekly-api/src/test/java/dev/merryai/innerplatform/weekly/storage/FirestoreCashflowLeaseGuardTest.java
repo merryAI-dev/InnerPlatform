@@ -343,6 +343,18 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void allowsAssignedViewerToUseCashflowLeaseForSheetApplyAuthorization() {
+        Fixture fixture = fixture(
+            member(Map.of("role", "viewer", "projectIds", List.of("project-a"))),
+            activeLease()
+        );
+
+        assertThat(fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION)
+        )).isEqualTo("viewer");
+    }
+
+    @Test
     void usesStoredRoleForCrossProjectAccessAndRequiresCanonicalProjectInTransaction() {
         Fixture finance = fixture(member(Map.of("role", "finance", "projectIds", List.of())), activeLease());
         assertThatCode(() -> finance.persistence.runCommandTransaction(() -> {

@@ -51,7 +51,7 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.BANK_IMPORT_LIST_LINES_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
         Map.entry(WeeklyExpenseCommandService.BANK_IMPORT_APPLY_ITEMS_COMMAND, Set.of("admin", "finance", "pm")),
         Map.entry(WeeklyExpenseCommandService.UPSERT_PROJECTION_COMMAND, Set.of("admin", "finance", "pm")),
-        Map.entry(WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND, Set.of("admin", "finance", "pm")),
+        Map.entry(WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND, Set.of("admin", "finance", "pm", "viewer")),
         Map.entry(WeeklyExpenseCommandService.SUBMIT_WEEK_COMMAND, Set.of("admin", "finance", "pm")),
         Map.entry(WeeklyExpenseCommandService.WEEKLY_STATUS_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
         Map.entry(WeeklyExpenseCommandService.CELL_PATCH_COMMAND, Set.of("admin", "finance", "pm")),

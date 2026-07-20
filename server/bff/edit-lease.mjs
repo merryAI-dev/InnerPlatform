@@ -379,10 +379,6 @@ export function createEditLeaseService({
       rbacPolicy,
     });
 
-    if (current.resourceType === 'cashflow' && readOptionalText(member.role).toLowerCase() !== 'pm') {
-      throw createHttpError(403, 'Only the project PM can acquire the cashflow edit session', 'forbidden');
-    }
-
     if (current.resourceType === 'project-registration') {
       const draftRef = db.doc(`orgs/${current.tenantId}/projectRequestDrafts/${current.resourceId}`);
       const draftSnap = await tx.get(draftRef);
