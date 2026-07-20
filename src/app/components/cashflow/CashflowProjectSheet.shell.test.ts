@@ -123,6 +123,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('handleRefreshSheetMirror');
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(source).toContain('stageCashflowSheetLabViaBff');
+    expect(source).toContain('handleStagePinnedSheetValues(false, cashflowSheetMirror)');
     expect(source).toContain('시트값 불러오기');
     expect(source).toContain('시트 값 불러오기');
     expect(source).toContain('fetchCashflowActivityViaBff');
@@ -192,7 +193,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('shows who explicitly loaded the sheet values in the activity timeline', () => {
     expect(source).toContain('`${event.actorName}님이`');
     expect(source).toContain('`${event.actorEmail} 계정으로`');
-    expect(source).toContain('시트의 최신 값을 불러와 기준값으로 저장했습니다.');
+    expect(source).toContain('시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.');
     expect(source).toContain('누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.');
   });
 
@@ -209,6 +210,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('setMonthCloseResult((current) => current?.yearMonth === yearMonth ? current : null)');
     expect(source).toContain('check.findings?.length');
     expect(source).toContain('check.findings.map((finding)');
+  });
+
+  it('reloads both the canonical ledger and management checks after sheet apply', () => {
+    expect(source).toMatch(/loadCashflowComparison\(\)[\s\S]*loadCashflowMonthClose\(\)/);
   });
 
   it('offers the exact three in-app exit choices and releases only on exit', () => {

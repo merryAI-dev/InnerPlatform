@@ -3,7 +3,7 @@
 - route: `/cashflow/projects/:projectId`
 - primary users: admin, finance, 사업 운영 검토자
 - status: active
-- last updated: 2026-04-14
+- last updated: 2026-07-20
 
 ## Purpose
 
@@ -26,6 +26,7 @@
 
 ## Recent Changes
 
+- [2026-07-20] 명시적 시트값 불러오기 뒤 다월 변경분을 JVM 원장에 반영하고, 반환된 프로젝트·월·금액을 시트 고정본과 재검증하도록 보강했다. 운영 대시보드와 주요 관리 항목은 반영된 JVM 원장을 우선 사용하며, 인건비 3주차 외 입력 위치와 Projection 잔액 마이너스 구간을 간결하게 표시한다. 불러오기·원장 반영 이력에는 수행자를 함께 남긴다.
 - [2026-07-13] 화면 내부 이동 시 남은 캐시플로 입력을 개인 임시저장본에 저장한 뒤 수정 lease를 해제하도록 바꿨다. 저장에 실패하면 현재 화면에 남아 다시 시도한다.
 - [2026-04-09] admin export 흐름과 project sheet의 workbook contract를 더 밀접하게 맞췄다.
 - [2026-04-05] lazy heavy module 로딩 안정화를 넣었다.

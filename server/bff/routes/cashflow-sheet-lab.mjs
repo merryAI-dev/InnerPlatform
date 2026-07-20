@@ -1288,6 +1288,48 @@ function summarizeJavaMonthResult(result = {}) {
   });
 }
 
+function javaAppliedLineIndex(lines, { mode, yearMonth }) {
+  const index = new Map();
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (readOptionalText(line?.yearMonth) !== yearMonth) continue;
+    if (mode === 'actual' && readOptionalText(line?.sheetKey) !== CASHFLOW_SHEET_SOURCE_KEY) continue;
+    const weekNo = Number(line?.weekNo);
+    const lineId = readOptionalText(line?.cashflowLine);
+    const amount = Number(line?.amount);
+    const key = `${weekNo}:${lineId}`;
+    if (!Number.isInteger(weekNo) || !CASHFLOW_LINE_ORDER.has(lineId) || !Number.isSafeInteger(amount) || index.has(key)) {
+      throw createHttpError(502, 'JVM 캐시플로 저장 검증값이 올바르지 않습니다.', 'cashflow_jvm_apply_verification_failed');
+    }
+    index.set(key, amount);
+  }
+  return index;
+}
+
+function verifyJavaMonthAppliedCells(result, month, projectId) {
+  if (
+    readOptionalText(result?.projectId) !== projectId
+    || readOptionalText(result?.yearMonth) !== month.yearMonth
+    || readOptionalText(result?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+  ) {
+    throw createHttpError(502, 'JVM 캐시플로 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+  }
+  let verifiedLineCount = 0;
+  for (const mode of CASHFLOW_MODES) {
+    const index = javaAppliedLineIndex(result?.[mode], { mode, yearMonth: month.yearMonth });
+    const expected = month.cells.filter((cell) => cell.mode === mode && cell.cellState === 'VALUE');
+    if (index.size !== expected.length) {
+      throw createHttpError(502, 'JVM 캐시플로 저장 건수가 시트 고정본과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+    }
+    for (const cell of expected) {
+      if (index.get(`${cell.weekNo}:${cell.cashflowLine}`) !== Number(cell.amount)) {
+        throw createHttpError(502, 'JVM 캐시플로 저장 금액이 시트 고정본과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+      }
+      verifiedLineCount += 1;
+    }
+  }
+  return verifiedLineCount;
+}
+
 async function applyStagedCashflowSheetLab({
   db,
   tenantId,
@@ -1335,13 +1377,6 @@ async function applyStagedCashflowSheetLab({
 
   const riskCandidates = candidates.filter((candidate) => Array.isArray(candidate.riskFlags) && candidate.riskFlags.length > 0);
   const candidateMonths = [...new Set(candidates.map((candidate) => readOptionalText(candidate.yearMonth)).filter(Boolean))].sort();
-  if (candidateMonths.length !== 1) {
-    throw createHttpError(
-      409,
-      '최종 반영은 한 달 단위입니다. 한 달의 1~5주차만 다시 연동해 주세요.',
-      'cashflow_sheet_stage_single_month_required',
-    );
-  }
   if (riskCandidates.length > 0) {
     throw createHttpError(409, '결산된 월은 다시 열기 전까지 수정할 수 없습니다.', 'cashflow_sheet_stage_closed_month');
   }
@@ -1412,6 +1447,7 @@ async function applyStagedCashflowSheetLab({
   }
 
   const javaResults = [];
+  let verifiedLineCount = 0;
   let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
   try {
     const resolvedEditSession = typeof resolveEditSession === 'function'
@@ -1439,6 +1475,7 @@ async function applyStagedCashflowSheetLab({
         replaceAllActualSources,
       });
       targetRevision = assertResultingTargetRevision(javaResult);
+      verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, projectId);
       javaResults.push(javaResult);
     }
   } catch (error) {
@@ -1481,6 +1518,7 @@ async function applyStagedCashflowSheetLab({
       email: readOptionalText(context?.actorEmail),
       role: readOptionalText(context?.actorRole) || 'workspace_user',
     },
+    verifiedLineCount,
     firebaseResult: {
       ok: true,
       commandName: 'weeklyExpense.cashflowSheetLab.apply',
@@ -1489,7 +1527,7 @@ async function applyStagedCashflowSheetLab({
       targetRevisionAtStart: stageRun.targetRevisionAtFetch,
       resultingTargetRevision: targetRevision,
       monthResults: javaResults.map(summarizeJavaMonthResult),
-      verifiedLineCount: appliedCells.length,
+      verifiedLineCount,
     },
   };
   await reservation.runRef.set({
@@ -1500,6 +1538,12 @@ async function applyStagedCashflowSheetLab({
     applyResponse: response,
     appliedBy: response.lastAppliedBy,
   }, { merge: true });
+  await db.doc(cashflowSheetMirrorDocPath(tenantId, projectId)).set(stripUndefinedDeep({
+    appliedSourceRevision: stageRun.sourceRevision,
+    appliedTargetRevision: targetRevision,
+    lastAppliedAt: now,
+    lastAppliedBy: response.lastAppliedBy,
+  }), { merge: true });
   try {
     await markCashflowChangeCandidatesStatus({
       db,
@@ -1563,11 +1607,11 @@ async function stagePinnedCashflowSheetLab({
     ? (mirror.cells || []).filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth)
     : (mirror.cells || []);
   const pinnedMonths = [...groupPinnedCellsByMonth(pinnedCells).keys()].sort();
-  if (pinnedMonths.length !== 1) {
+  if (pinnedMonths.length === 0) {
     throw createHttpError(
       409,
-      '최종 반영은 한 달 단위입니다. 한 달의 1~5주차만 다시 연동해 주세요.',
-      'cashflow_sheet_stage_single_month_required',
+      '고정한 시트에서 반영할 월을 찾을 수 없습니다.',
+      'cashflow_sheet_stage_month_required',
     );
   }
 
@@ -2088,7 +2132,6 @@ export function mountCashflowSheetLabRoutes(app, {
 
     let editSession = clientEditSession;
     let temporaryLeaseAcquired = false;
-    let applyCompleted = false;
     try {
       const stagedRunId = readOptionalText(parsed.stageRunId);
       if (!stagedRunId) {
@@ -2123,7 +2166,6 @@ export function mountCashflowSheetLabRoutes(app, {
           logCashflowSheetLab(`apply.${event}`, req, details, level);
         },
       });
-      applyCompleted = true;
       res.status(200).json(result);
     } catch (error) {
       logCashflowSheetLab('apply.error', req, {
@@ -2134,7 +2176,7 @@ export function mountCashflowSheetLabRoutes(app, {
       }, 'warn');
       throw normalizeRouteError(error);
     } finally {
-      if (temporaryLeaseAcquired && !applyCompleted) {
+      if (temporaryLeaseAcquired) {
         await releaseSheetLabApplyLease({
           editLeaseService,
           req,

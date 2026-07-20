@@ -172,6 +172,7 @@ export interface CashflowSheetLabApplyResult {
   lastAppliedAt?: string;
   runId?: string;
   stagedRunId?: string;
+  appliedMonths?: string[];
   lastAppliedBy?: {
     uid?: string;
     email?: string;
@@ -258,6 +259,8 @@ export interface CashflowSheetLabMirrorResult {
   selectedSheetName?: string;
   sourceRevision?: string;
   targetRevisionAtFetch?: string;
+  appliedSourceRevision?: string;
+  appliedTargetRevision?: string;
   capturedAt?: string;
   capturedBy?: { uid?: string; email?: string; role?: string };
   yearMonths?: string[];
@@ -381,6 +384,7 @@ export interface CashflowSheetLabStageResult {
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
   blockedMonths?: string[];
+  stagedMonths?: string[];
   candidates?: CashflowSheetLabChangeCandidate[];
   omittedCandidateCount?: number;
   lastStagedAt?: string;
