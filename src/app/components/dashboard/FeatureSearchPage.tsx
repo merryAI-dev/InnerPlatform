@@ -13,6 +13,7 @@ const ADMIN_ENTRY_POINTS = [
 ];
 
 const PM_ENTRY_POINTS = [
+  { label: '프로젝트 선택', to: '/portal/project-select' },
   { label: '프로젝트 등록 요청', to: '/portal/register-project' },
 ];
 
