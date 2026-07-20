@@ -54,7 +54,7 @@ export function useCashflowEditLease(options: {
     [validProjectId],
   );
   const client = useMemo(() => {
-    if (!session || !validProjectId) return UNAVAILABLE_CLIENT;
+    if (!session || !validProjectId || !options.actor.idToken) return UNAVAILABLE_CLIENT;
     return createEditLeaseClient({
       tenantId: options.tenantId,
       actor: options.actor,

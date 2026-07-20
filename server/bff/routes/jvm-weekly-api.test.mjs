@@ -46,6 +46,10 @@ const emptyManagementChecks = [
   { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
 ];
 
+function monthDashboardSource(monthClose, cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } }) {
+  return { monthClose, cashflow: monthClose.status === 'OPEN' ? cashflow : null };
+}
+
 function matchingControlRows(startRow, matches = true) {
   return Array.from({ length: 19 }, (_, index) => ({
     sourceCell: `BO${startRow + index}`, value: 0, computed: 0, matches,
@@ -361,12 +365,12 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({
+      text: async () => JSON.stringify(monthDashboardSource({
         ok: true,
         projectId: 'project-a',
         yearMonth: '2026-06',
         status: 'CLOSED',
-      }),
+      })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'auditor-1',
@@ -386,7 +390,7 @@ describe('JVM weekly API BFF proxy', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl.mock.calls[0][0]).toBe(
-      'http://jvm-weekly.local/api/v1/cashflow/project-a/month-close?yearMonth=2026-06',
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/month-close/dashboard-source?yearMonth=2026-06',
     );
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
@@ -431,15 +435,13 @@ describe('JVM weekly API BFF proxy', () => {
 
   it('composes the open-month dashboard from the pinned sheet, private draft, project, and JVM state', async () => {
     const { db, sourceRevision, targetRevision } = fullMonthCloseSource();
-    const fetchImpl = vi.fn(async (url) => ({
+    const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(url.endsWith('/month-close?yearMonth=2026-06') ? {
+      text: async () => JSON.stringify(monthDashboardSource({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
         reopenCount: 0, projectWarningCount: 0, snapshot: {},
-      } : {
-        projectId: 'project-a', projection: [], actual: [], readModel: { months: [] },
-      }),
+      })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv,
@@ -472,7 +474,7 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.depositScheduleRows).toHaveLength(5);
       });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('returns the four PPT 38 management checks from canonical server values', () => {
@@ -534,6 +536,9 @@ describe('JVM weekly API BFF proxy', () => {
     ]);
     expect(checks[1].detail).toContain('다음 주차 원장 없음');
     expect(checks[0].detail).toContain('실제 0원 · 실제 미이관');
+    expect(checks[0].findings).toContain('2026-06 3주차 · 예정 10원 · 실제 0원 · 실제 미이관');
+    expect(checks[2].findings).toHaveLength(5);
+    expect(checks[2].findings[0]).toContain('2026-06 1주차');
     expect(checks[3].detail).toContain('1,000,001원');
   });
 
@@ -558,6 +563,7 @@ describe('JVM weekly API BFF proxy', () => {
       status: 'WARNING',
       title: 'MYSC 인건비 이관',
       detail: '2026-06 3주차 · Projection 인건비 미기입',
+      findings: ['2026-06 3주차 · Projection 인건비 미기입'],
     });
   });
 
@@ -643,15 +649,13 @@ describe('JVM weekly API BFF proxy', () => {
         },
       }),
     };
-    const fetchImpl = vi.fn(async (url) => ({
+    const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(url.endsWith('/month-close?yearMonth=2026-06') ? {
+      text: async () => JSON.stringify(monthDashboardSource({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
         reopenCount: 0, projectWarningCount: 0, snapshot: {},
-      } : {
-        projectId: 'project-a', projection: [], actual: [], readModel: { months: [] },
-      }),
+      })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv,
@@ -684,15 +688,13 @@ describe('JVM weekly API BFF proxy', () => {
     const draft = [...documents.values()].find((value) => value?.resourceType === 'cashflow');
     const confirmations = draft.payload.monthClose.confirmations;
     confirmations[confirmations.length - 1] = { ...confirmations[0] };
-    const fetchImpl = vi.fn(async (url) => ({
+    const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(url.endsWith('/month-close?yearMonth=2026-06') ? {
+      text: async () => JSON.stringify(monthDashboardSource({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
         reopenCount: 0, projectWarningCount: 0, snapshot: {},
-      } : {
-        projectId: 'project-a', projection: [], actual: [], readModel: { months: [] },
-      }),
+      })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv,
@@ -715,15 +717,13 @@ describe('JVM weekly API BFF proxy', () => {
   it('caps Projection progress at 100 percent and keeps the zero-contract rule', async () => {
     for (const contractAmount of [100, 0]) {
       const { db } = fullMonthCloseSource({ contractAmount });
-      const fetchImpl = vi.fn(async (url) => ({
+      const fetchImpl = vi.fn(async () => ({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify(url.endsWith('/month-close?yearMonth=2026-06') ? {
+        text: async () => JSON.stringify(monthDashboardSource({
           ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
           reopenCount: 0, projectWarningCount: 0, snapshot: {},
-        } : {
-          projectId: 'project-a', projection: [], actual: [], readModel: { months: [] },
-        }),
+        })),
       }));
       const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
         env: stageEnv,
@@ -754,7 +754,7 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({
+      text: async () => JSON.stringify(monthDashboardSource({
         ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
         reopenCount: 0, projectWarningCount: 0,
         previousSnapshot: { weeklyTotals: previousWeeklyTotals },
@@ -768,7 +768,7 @@ describe('JVM weekly API BFF proxy', () => {
           depositScheduleRows: [], confirmations: [],
           sheetFacts: { metadata: { businessType: { value: 'snapshot metadata' } }, depositScheduleRows: [] },
         },
-      }),
+      })),
     }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: current.db });
 
@@ -804,10 +804,10 @@ describe('JVM weekly API BFF proxy', () => {
       const fetchImpl = vi.fn(async (url) => ({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify(url.includes('/month-close') ? {
+        text: async () => JSON.stringify(url.includes('/dashboard-source') ? monthDashboardSource({
           ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
           reopenCount: 0, projectWarningCount: 0, snapshot: {},
-        } : { projectId: 'project-a', projection: [], actual: [], readModel: { months: [] } }),
+        }) : { ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED' }),
       }));
       const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
 

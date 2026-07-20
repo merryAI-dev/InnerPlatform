@@ -76,8 +76,16 @@ public record CloseCashflowMonthRequest(
         @NotBlank @Pattern(regexp = "labor-transfer|profit-vat-after-deposit|negative-projection-balance|future-prepay-over-million") String id,
         @NotBlank @Pattern(regexp = "OK|WARNING|REVIEW_REQUIRED") String status,
         @NotBlank @Size(max = 200) String title,
-        @NotBlank @Size(max = 2000) String detail
+        @NotBlank @Size(max = 2000) String detail,
+        @Size(max = 500) List<@NotBlank @Size(max = 2000) String> findings
     ) {
+        public ManagementCheck {
+            findings = findings == null ? List.of() : List.copyOf(findings);
+        }
+
+        public ManagementCheck(String id, String status, String title, String detail) {
+            this(id, status, title, detail, List.of());
+        }
     }
 
     public record ManagementConfirmation(
@@ -234,7 +242,7 @@ public record CloseCashflowMonthRequest(
             if (!List.of("OK", "WARNING", "REVIEW_REQUIRED").contains(status) || title.isBlank() || detail.isBlank()) {
                 throw new IllegalArgumentException("Cashflow management check status, title, and detail are required.");
             }
-            ManagementCheck canonical = new ManagementCheck(check.id(), status, title, detail);
+            ManagementCheck canonical = new ManagementCheck(check.id(), status, title, detail, check.findings());
             if (byId.putIfAbsent(check.id(), canonical) != null) {
                 throw new IllegalArgumentException("Cashflow month close contains duplicate management checks.");
             }

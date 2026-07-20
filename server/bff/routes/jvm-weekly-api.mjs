@@ -483,8 +483,8 @@ function canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells) {
   return byKey;
 }
 
-function managementCheck(id, status, title, detail) {
-  return { id, status, title, detail };
+function managementCheck(id, status, title, detail, findings = []) {
+  return findings.length > 0 ? { id, status, title, detail, findings } : { id, status, title, detail };
 }
 
 function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
@@ -521,6 +521,7 @@ function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
     warnings.length > 0 ? 'WARNING' : reviews.length > 0 ? 'REVIEW_REQUIRED' : 'OK',
     'MYSC 인건비 이관',
     findings.length > 0 ? findings.join(', ') : '기준일까지 모든 3주차 인건비 이관을 확인했습니다.',
+    findings,
   );
 }
 
@@ -558,25 +559,31 @@ function profitVatAfterDepositCheck(weeks, deposits, asOfKey) {
     due.length > 0 ? 'WARNING' : 'OK',
     '입금 후 MYSC 수익·매출부가세 이관',
     due.length > 0 ? `다음 주차까지 미이관: ${due.join(', ')}` : '실제 입금 건의 다음 주차 이관을 확인했습니다.',
+    due,
   );
 }
 
 function negativeProjectionCheck(weeks) {
   let balance = 0;
   let prepay = 0;
+  const findings = [];
   for (const week of weeks) {
     const totalIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => week.projection?.[lineId])) || 0;
     const totalOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => week.projection?.[lineId])) || 0;
     balance += totalIn - totalOut;
     prepay += safeAmount(week.projection?.MYSC_PREPAY_IN);
     if (balance < 0) {
-      return managementCheck(
-        'negative-projection-balance',
-        'WARNING',
-        'Projection 잔액 마이너스',
-        `${week.yearMonth} ${week.weekNo}주차부터 ${balance.toLocaleString('ko-KR')}원${prepay > 0 ? '' : ' · MYSC 선입금 Projection 없음'}`,
-      );
+      findings.push(`${week.yearMonth} ${week.weekNo}주차 · ${balance.toLocaleString('ko-KR')}원${prepay > 0 ? '' : ' · MYSC 선입금 Projection 없음'}`);
     }
+  }
+  if (findings.length > 0) {
+    return managementCheck(
+      'negative-projection-balance',
+      'WARNING',
+      'Projection 잔액 마이너스',
+      `${findings.length}개 주차에서 마이너스 · 최초 ${findings[0]}`,
+      findings,
+    );
   }
   return managementCheck('negative-projection-balance', 'OK', 'Projection 잔액 마이너스', 'Projection 누적 잔액이 0원 이상입니다.');
 }
@@ -592,6 +599,7 @@ function futurePrepayCheck(weeks, asOfKey) {
     occurrences.length > 0
       ? occurrences.map((week) => `${week.yearMonth} ${week.weekNo}주차 ${safeAmount(week.projection?.MYSC_PREPAY_IN).toLocaleString('ko-KR')}원`).join(', ')
       : '금주 이후 100만원 초과 요청이 없습니다.',
+    occurrences.map((week) => `${week.yearMonth} ${week.weekNo}주차 · ${safeAmount(week.projection?.MYSC_PREPAY_IN).toLocaleString('ko-KR')}원`),
   );
 }
 
@@ -1588,21 +1596,19 @@ export function mountJvmWeeklyApiRoutes(app, {
       throw createHttpError(400, 'Cashflow month close yearMonth must use YYYY-MM.', 'cashflow_month_close_request_invalid');
     }
     const comparisonBoundary = resolveCashflowComparisonAsOf('', now());
-    const result = await proxyJavaWeeklyRequest({
+    const source = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
-      path: `/api/v1/cashflow/${projectId}/month-close?yearMonth=${encodeURIComponent(yearMonth)}`,
+      path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
     });
+    const result = objectValue(source?.monthClose);
+    const cashflow = objectValue(source?.cashflow);
     if (readOptionalText(result?.projectId) !== rawProjectId || readOptionalText(result?.yearMonth) !== yearMonth) {
       throw createHttpError(502, 'JVM cashflow month response scope does not match the request.', 'jvm_weekly_project_mismatch');
     }
-    const cashflow = db?.doc && readOptionalText(result?.status) === 'OPEN'
-      ? await proxyJavaWeeklyRequest({
-        context: req.context,
-        method: 'GET',
-        path: `/api/v1/cashflow/${projectId}`,
-      })
-      : null;
+    if (db?.doc && readOptionalText(result?.status) === 'OPEN' && !cashflow) {
+      throw createHttpError(502, 'JVM cashflow month source is incomplete.', 'jvm_weekly_response_invalid');
+    }
     if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
       throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
     }

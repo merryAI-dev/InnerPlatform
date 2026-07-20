@@ -10,7 +10,9 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseBankImportLineRe
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseIdempotencyRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseProjectionRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
+import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
+import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,7 +37,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -1432,6 +1436,40 @@ class WeeklyExpenseControllerTest {
                 "viewer"
             ))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void cashflowMonthDashboardSourceReturnsCloseAndCashflowInOneResponse() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-month-dashboard"), eq("2026-06")))
+            .thenReturn(new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-month-dashboard", "2026-06", "OPEN",
+            0, 0, 0, null, null, Map.of(), Map.of(), false,
+            "2026-07-20", "2026-07-10", true,
+            null, null, null, null, null, null, null, null, null, null, null
+        ));
+        when(dashboardPersistence.findProjectionLines("tenant-month-dashboard", "project-month-dashboard"))
+            .thenReturn(List.of());
+        when(dashboardPersistence.findActualLines("tenant-month-dashboard", "project-month-dashboard"))
+            .thenReturn(List.of());
+
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
+            dashboardCommandService,
+            dashboardPersistence,
+            false
+        ).readCashflowMonthDashboardSource(
+            "project-month-dashboard",
+            "2026-06",
+            "tenant-month-dashboard",
+            "viewer-month-dashboard",
+            "viewer",
+            "viewer@example.com"
+        );
+
+        assertThat(response.monthClose().status()).isEqualTo("OPEN");
+        assertThat(response.cashflow().projectId()).isEqualTo("project-month-dashboard");
+        assertThat(response.cashflow().readModel().months()).isEmpty();
     }
 
     @Test
