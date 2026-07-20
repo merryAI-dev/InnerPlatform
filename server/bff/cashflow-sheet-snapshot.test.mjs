@@ -275,6 +275,18 @@ describe('cashflow sheet pinned snapshot', () => {
     ]);
   });
 
+  it('keeps the workbook 2,300,000 won prepayment separate by mode', () => {
+    const facts = extractCashflowSheetFacts({
+      cells: [
+        { mode: 'projection', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
+        { mode: 'actual', yearMonth: '2026-01', weekNo: 3, lineId: 'MYSC_PREPAY_IN', direction: 'IN', state: 'VALUE', amount: 2_300_000 },
+      ],
+    });
+
+    expect(facts.annualCashflowTotals[0].projection.totalIn).toBe(2_300_000);
+    expect(facts.annualCashflowTotals[0].actual.totalIn).toBe(2_300_000);
+  });
+
   it('keeps annual-only values distinct from weekly coverage', () => {
     const facts = extractCashflowSheetFacts({
       annualCells: [

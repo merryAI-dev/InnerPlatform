@@ -193,6 +193,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
   });
 
+  it('keeps Projection and Actual annual cash totals separate', () => {
+    expect(source).toContain('Projection 입금 / 출금');
+    expect(source).toContain('Actual 입금 / 출금');
+    expect(source).toContain('fmt(projection?.totalIn || 0)');
+    expect(source).toContain('fmt(actual?.totalIn || 0)');
+    expect(source).not.toContain('(projection?.totalIn || 0) + (actual?.totalIn || 0)');
+  });
+
   it('shows who explicitly loaded the sheet values in the activity timeline', () => {
     expect(source).toContain('`${event.actorName}님이`');
     expect(source).toContain('`${event.actorEmail} 계정으로`');

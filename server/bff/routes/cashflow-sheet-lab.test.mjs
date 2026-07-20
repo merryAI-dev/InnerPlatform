@@ -333,7 +333,7 @@ describe('cashflow sheet lab route', () => {
       fallbackYears: [],
       mismatchYears: [],
     });
-    expect(yearView.body.years).toHaveLength(4);
+    expect(yearView.body.years.map((row) => row.year)).toEqual([2025, 2026, 2027]);
     expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
   });
 
