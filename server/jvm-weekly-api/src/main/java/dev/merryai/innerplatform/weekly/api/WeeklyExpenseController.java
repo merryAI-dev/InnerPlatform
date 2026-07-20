@@ -358,6 +358,26 @@ public class WeeklyExpenseController {
         );
     }
 
+    @GetMapping("/cashflow/{projectId}/month-close/dashboard-source")
+    public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
+        @PathVariable String projectId,
+        @RequestParam("yearMonth") String yearMonth,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        CashflowMonthCloseResponse monthClose = commandService.readCashflowMonthClose(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            yearMonth
+        );
+        CashflowSnapshotResponse cashflow = "OPEN".equals(monthClose.status())
+            ? cashflowSnapshot(projectId, tenantId, actorId, actorRole, actorEmail)
+            : null;
+        return new CashflowMonthDashboardSourceResponse(monthClose, cashflow);
+    }
+
     @PostMapping("/cashflow/{projectId}/month-close")
     public CashflowMonthCloseResponse closeCashflowMonth(
         @PathVariable String projectId,

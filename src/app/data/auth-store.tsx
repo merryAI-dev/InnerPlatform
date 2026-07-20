@@ -455,7 +455,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         envTenantId: DEFAULT_ORG_ID,
         strict: false,
       });
-      const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId);
+      const optimisticIdToken = await firebaseUser.getIdToken().catch(() => undefined);
+      const optimisticUser = mapFirebaseUserToAuthUser(firebaseUser, cachedMember, cachedTenantId, optimisticIdToken);
       optimisticUser.source = 'firebase';
       setUser(optimisticUser);
       saveUser(optimisticUser);

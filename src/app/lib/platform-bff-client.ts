@@ -789,6 +789,7 @@ export interface CashflowManagementCheck {
   status: 'OK' | 'WARNING' | 'REVIEW_REQUIRED';
   title: string;
   detail: string;
+  findings?: string[];
 }
 
 export interface CashflowManagementConfirmation {

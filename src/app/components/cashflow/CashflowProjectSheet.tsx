@@ -52,14 +52,11 @@ import {
   applyCashflowSheetLabViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
-  getCashflowSheetLabYearViewViaBff,
   refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabChangeCandidate,
-  type CashflowSheetLabAnnualModeTotal,
   type CashflowSheetLabMirrorResult,
   type CashflowSheetLabShareAccountResult,
-  type CashflowSheetLabYearViewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
 import { useCashflowEditLease } from './useCashflowEditLease';
@@ -87,13 +84,6 @@ function fmtSigned(n: number): string {
   if (n === 0) return '0';
   return `${n > 0 ? '+' : '-'}${Math.abs(n).toLocaleString('ko-KR')}`;
 }
-
-const FINANCIAL_YEAR_CHECK_FIELDS = [
-  { key: 'contractAmount', label: '입금예정' },
-  { key: 'salesVatAmount', label: '매출 부가세' },
-  { key: 'totalRevenueAmount', label: 'MYSC 수익' },
-  { key: 'supportAmount', label: '팀지원금' },
-] as const;
 
 function formatSheetAppliedAt(value?: string): string {
   if (!value) return '';
@@ -282,7 +272,6 @@ export function CashflowProjectSheet({
   const [cashflowComparisonLoading, setCashflowComparisonLoading] = useState(false);
   const [cashflowComparisonError, setCashflowComparisonError] = useState<string | null>(null);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
-  const [cashflowYearView, setCashflowYearView] = useState<CashflowSheetLabYearViewResult | null>(null);
   const [monthCloseResult, setMonthCloseResult] = useState<CashflowMonthCloseResult | null>(null);
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
   const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
@@ -623,33 +612,6 @@ export function CashflowProjectSheet({
     return () => { cancelled = true; };
   }, [orgId, projectId, resolveBffActor, user?.uid]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setCashflowYearView(null);
-    if (!cashflowSheetMirror || !projectId || !orgId || !user?.uid) return () => { cancelled = true; };
-
-    const loadYearView = async (): Promise<void> => {
-      try {
-        let actor = await resolveBffActor();
-        if (!actor?.idToken) return;
-        try {
-          const result = await getCashflowSheetLabYearViewViaBff({ tenantId: orgId, actor, projectId, selectedYear });
-          if (!cancelled) setCashflowYearView(result);
-        } catch (error) {
-          if (!isBffAuthRejection(error)) throw error;
-          actor = await resolveBffActor({ forceRefresh: true });
-          if (!actor?.idToken) throw error;
-          const result = await getCashflowSheetLabYearViewViaBff({ tenantId: orgId, actor, projectId, selectedYear });
-          if (!cancelled) setCashflowYearView(result);
-        }
-      } catch {
-        if (!cancelled) setCashflowYearView(null);
-      }
-    };
-    void loadYearView();
-    return () => { cancelled = true; };
-  }, [cashflowSheetMirror, orgId, projectId, resolveBffActor, selectedYear, user?.uid]);
-
   const loadCashflowComparison = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
       setCashflowSnapshot(null);
@@ -697,6 +659,7 @@ export function CashflowProjectSheet({
       setMonthCloseError('로그인 세션이 만료되었습니다.');
       return;
     }
+    setMonthCloseResult((current) => current?.yearMonth === yearMonth ? current : null);
     setMonthCloseLoading(true);
     setMonthCloseError(null);
     try {
@@ -721,7 +684,6 @@ export function CashflowProjectSheet({
         }));
       }
     } catch (error) {
-      setMonthCloseResult(null);
       setMonthCloseError(resolveApiErrorMessage(error, '월 결산 상태를 불러오지 못했습니다.'));
     } finally {
       setMonthCloseLoading(false);
@@ -1297,19 +1259,7 @@ export function CashflowProjectSheet({
   }, [annualWeeks, cashflowSnapshot, monthCloseResult?.dashboard?.comparison, yearMonth]);
 
   const cashflowTotalPeriodLabel = `${selectedYear}년`;
-  const multiYearCashflowTotals = useMemo(() => {
-    const totalsByYear = new Map((cashflowYearView?.years?.length
-      ? cashflowYearView.years
-      : cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
-      .map((total) => [total.year, total]));
-    const navigationYears = cashflowYearView?.navigationYears?.length === 3
-      ? cashflowYearView.navigationYears
-      : [selectedYear - 1, selectedYear, selectedYear + 1];
-    return navigationYears.map((year) => ({
-      year,
-      total: totalsByYear.get(year),
-    }));
-  }, [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals, cashflowYearView, selectedYear]);
+  const navigationYears = [selectedYear - 1, selectedYear, selectedYear + 1];
   const sheetRangeLabel = cashflowSheetConfig
     ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
     : '연결된 Google Sheet가 없습니다.';
@@ -1573,37 +1523,6 @@ export function CashflowProjectSheet({
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
     };
-    const adjacentYearSummaries = [selectedYear - 1, selectedYear + 1].map((year) => (
-      multiYearCashflowTotals.find((item) => item.year === year) || { year, total: undefined }
-    ));
-    const annualSourceLabel = (summary?: CashflowSheetLabAnnualModeTotal) => (
-      summary?.reconciliation?.status === 'MISMATCH'
-        ? '합계 불일치'
-        : summary?.coverage?.status === 'PARTIAL'
-        ? '일부 주차 합계'
-        : summary?.source === 'WEEKLY' ? '주차값 집계' : summary?.source === 'ANNUAL' ? '연간 합계' : '미입력'
-    );
-    const renderAnnualSummaryCell = (input: {
-      year: number;
-      summary?: CashflowSheetLabAnnualModeTotal;
-      mode: 'projection' | 'actual';
-      lineId?: CashflowSheetLineId;
-      kind?: 'totalIn' | 'totalOut' | 'net';
-    }) => {
-      const hasValues = Boolean(input.summary?.valueCellCount);
-      const value = input.lineId
-        ? input.summary?.lineAmounts[input.lineId] || 0
-        : input.kind === 'totalIn'
-          ? input.summary?.totalIn || 0
-          : input.kind === 'totalOut'
-            ? input.summary?.totalOut || 0
-            : input.summary?.net || 0;
-      return (
-        <td key={`${input.mode}-${input.year}-${input.lineId || input.kind}`} className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50/70 px-2 py-1 align-middle">
-          <div className="text-right text-[8px] font-semibold tabular-nums text-slate-800">{hasValues ? fmt(value) : '-'}</div>
-        </td>
-      );
-    };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
       if (!container) return;
@@ -1631,14 +1550,12 @@ export function CashflowProjectSheet({
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-1.5 text-[9px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
             {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
-          {adjacentYearSummaries.map(({ year, total }) => year < selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, lineId }) : null)}
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
             return mode === 'projection'
               ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek })
               : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
           })}
-          {adjacentYearSummaries.map(({ year, total }) => year > selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, lineId }) : null)}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
             value: derived[mode].rowTotals[lineId] || 0,
@@ -1662,7 +1579,6 @@ export function CashflowProjectSheet({
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[9px] font-bold ${isIncome ? 'bg-emerald-50 text-emerald-950' : isExpense ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>
             {label}
           </td>
-          {adjacentYearSummaries.map(({ year, total }) => year < selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, kind }) : null)}
           {visibleWeeks.map((week, index) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
             value: derived[mode].weekTotals[index]?.[kind] || 0,
@@ -1671,7 +1587,6 @@ export function CashflowProjectSheet({
             emphasis,
             rowTone,
           }))}
-          {adjacentYearSummaries.map(({ year, total }) => year > selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, kind }) : null)}
           {renderSummaryCell({
             keyName: `${mode}-${kind}-range`,
             value: derived[mode].monthTotals[kind],
@@ -1684,20 +1599,12 @@ export function CashflowProjectSheet({
       );
     };
     const renderModeTable = (mode: 'projection' | 'actual') => (
-      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + visibleWeeks.length * 84 + 84 * 3}px` }}>
+      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + visibleWeeks.length * 84 + 84}px` }}>
         <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
           <tr>
             <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[11px] font-bold text-slate-800">
               항목
             </th>
-            {adjacentYearSummaries.filter(({ year }) => year < selectedYear).map(({ year, total }) => (
-              <th key={`annual-before-${mode}-${year}`} data-cashflow-annual-summary="true" className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50 px-1 py-2 text-center align-top">
-                <button type="button" className="w-full rounded-md px-1 py-0.5 text-left hover:bg-amber-100" onClick={() => setYearMonth(`${year}-01`)}>
-                  <span className="block text-[10px] font-bold text-slate-800">{year}년 합계</span>
-                  <span className="block text-[8px] font-normal text-slate-500">{annualSourceLabel(total?.[mode])} · 보기</span>
-                </button>
-              </th>
-            ))}
             {visibleWeeks.map((week) => {
               const saveState = weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode, weekNo: week.weekNo })];
               const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
@@ -1711,14 +1618,6 @@ export function CashflowProjectSheet({
                 </th>
               );
             })}
-            {adjacentYearSummaries.filter(({ year }) => year > selectedYear).map(({ year, total }) => (
-              <th key={`annual-after-${mode}-${year}`} data-cashflow-annual-summary="true" className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50 px-1 py-2 text-center align-top">
-                <button type="button" className="w-full rounded-md px-1 py-0.5 text-left hover:bg-amber-100" onClick={() => setYearMonth(`${year}-01`)}>
-                  <span className="block text-[10px] font-bold text-slate-800">{year}년 합계</span>
-                  <span className="block text-[8px] font-normal text-slate-500">{annualSourceLabel(total?.[mode])} · 보기</span>
-                </button>
-              </th>
-            ))}
             <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
               범위 합계
             </th>
@@ -1778,63 +1677,13 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
           </div>
-          <div data-cashflow-block="multi-year-view" className="grid gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-3">
-            {multiYearCashflowTotals.map(({ year, total }) => {
-              const projection = total?.projection;
-              const actual = total?.actual;
-              const hasValues = Boolean((projection?.valueCellCount || 0) + (actual?.valueCellCount || 0));
-              return (
-                <button type="button" key={year} data-cashflow-year-view={year} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-xl border px-3 py-2 text-left shadow-sm transition-colors ${year === selectedYear ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40'}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-slate-900">{year}년</span>
-                    <span className="text-[9px] font-semibold text-slate-500">{annualSourceLabel(projection)} · 시트 기준 · 보기</span>
-                  </div>
-                  {hasValues ? (
-                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] text-slate-600">
-                      <span>Projection 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(projection?.net || 0)}</span>
-                      <span>Actual 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(actual?.net || 0)}</span>
-                      <span>Projection 입금 / 출금</span><span className="text-right tabular-nums">{fmt(projection?.totalIn || 0)} / {fmt(projection?.totalOut || 0)}</span>
-                      <span>Actual 입금 / 출금</span><span className="text-right tabular-nums">{fmt(actual?.totalIn || 0)} / {fmt(actual?.totalOut || 0)}</span>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[9px] leading-4 text-slate-500">시트에 입력된 값이 없습니다. 오류 없이 다음 불러오기 때 반영됩니다.</p>
-                  )}
-                </button>
-              );
-            })}
+          <div data-cashflow-block="multi-year-view" className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3">
+            {navigationYears.map((year) => (
+              <button type="button" key={year} data-cashflow-year-view={year} aria-current={year === selectedYear ? 'page' : undefined} aria-label={`${year}년 현금흐름 보기`} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-full px-4 py-2 text-[11px] font-bold transition-colors ${year === selectedYear ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 shadow-sm hover:bg-blue-50'}`}>
+                {String(year).slice(-2)}년
+              </button>
+            ))}
           </div>
-          {financialYearChecks?.years.length ? (
-            <div className="grid gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-2 xl:grid-cols-4">
-              {[...financialYearChecks.years.map((check) => ({ ...check, label: `${check.year}년` })), { ...financialYearChecks.total, label: '전체' }].map((check) => (
-                <div key={check.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-slate-900">{check.label}</span>
-                    <span className={`text-[9px] font-semibold ${check.status === 'MATCH' ? 'text-emerald-700' : 'text-amber-700'}`}>
-                      {check.status === 'MATCH' ? '등록값과 일치' : check.status === 'SHEET_YEAR_MISSING' ? '시트 연도값 없음' : '확인 필요'}
-                    </span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {FINANCIAL_YEAR_CHECK_FIELDS.map((field) => {
-                      const differs = check.mismatches.includes(field.key);
-                      return (
-                        <div key={field.key} className={`flex items-center justify-between gap-2 text-[9px] ${differs ? 'text-amber-700' : 'text-slate-500'}`}>
-                          <span>{field.label}</span>
-                          <span className="text-right tabular-nums">시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {check.status === 'MISMATCH' ? (
-                    <p className="mt-2 text-[9px] leading-4 text-amber-700">
-                      {FINANCIAL_YEAR_CHECK_FIELDS.filter((field) => check.mismatches.includes(field.key)).map((field) => field.label).join(', ')} 값이 시트와 다릅니다.
-                    </p>
-                  ) : check.status === 'SHEET_YEAR_MISSING' ? (
-                    <p className="mt-2 text-[9px] leading-4 text-amber-700">이 연도의 시트 주차와 값을 확인해 주세요.</p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
           <div className="relative bg-slate-50/80 px-4 pb-4">
             <Button type="button" variant="outline" size="sm" className="absolute left-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(-1)} aria-label="왼쪽 주차로 이동">
               <ChevronLeft className="h-4 w-4" />
@@ -2151,7 +2000,13 @@ export function CashflowProjectSheet({
                             <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
                             <span className="text-[10px] font-bold text-slate-900">{check.title}</span>
                           </div>
-                          <div className="mt-1 text-[9px] leading-4 text-slate-500">{check.detail}</div>
+                          {check.findings?.length ? (
+                            <ul className="mt-1 space-y-0.5 text-[9px] leading-4 text-slate-500">
+                              {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
+                            </ul>
+                          ) : (
+                            <div className="mt-1 text-[9px] leading-4 text-slate-500">{check.detail}</div>
+                          )}
                         </div>
                         <div className="flex shrink-0 gap-1">
                           <Button
@@ -2477,9 +2332,6 @@ export function CashflowProjectSheet({
       : 'bg-amber-100 text-amber-800';
   const sheetDashboardMetadata = cashflowSheetMirror?.status === 'FRESH'
     ? cashflowSheetMirror.sheetFacts?.metadata
-    : undefined;
-  const financialYearChecks = cashflowSheetMirror?.status === 'FRESH'
-    ? cashflowSheetMirror.financialYearChecks
     : undefined;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
 

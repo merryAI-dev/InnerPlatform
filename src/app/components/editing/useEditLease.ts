@@ -106,6 +106,7 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
   let heldAcknowledgedKey: string | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   let started = false;
+  let statusPromise: Promise<EditLeaseViewState> | null = null;
 
   const update = (next: EditLeaseViewState) => {
     state = next;
@@ -289,13 +290,17 @@ export function createEditLeaseController(options: EditLeaseControllerOptions): 
     }
   };
 
-  const checkStatus = async (): Promise<EditLeaseViewState> => {
-    try {
-      applyStatus(await options.client.getStatus());
-    } catch (error) {
-      await failClosed(error);
-    }
-    return state;
+  const checkStatus = (): Promise<EditLeaseViewState> => {
+    if (statusPromise) return statusPromise;
+    statusPromise = (async () => {
+      try {
+        applyStatus(await options.client.getStatus());
+      } catch (error) {
+        await failClosed(error);
+      }
+      return state;
+    })().finally(() => { statusPromise = null; });
+    return statusPromise;
   };
   const onVisibilityChange = () => {
     if (documentTarget?.visibilityState === 'visible') void checkStatus();

@@ -162,43 +162,31 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps the board action next to the settlement status without a manual temporary-save button', () => {
-    const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('{financialYearChecks?.years.length'));
+    const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('data-cashflow-block="multi-year-view"'));
     expect(boardHeader).toContain('월 결산');
     expect(boardHeader).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
   });
 
-  it('opens only the selected Projection week and keeps multi-year sheet checks visible', () => {
+  it('opens only the selected Projection week without annual amount cards', () => {
     expect(source).toContain('현금흐름 관리시트');
     expect(source).not.toContain('캐시플로 진단시트');
     expect(source).not.toContain('수정 시작');
     expect(source).not.toContain('서버 확정 원장 합계');
     expect(source).toContain('openProjectionWeekEditing');
-    expect(source).toContain('financialYearChecks?.years.length');
-    expect(source).toContain('시트 연도값 없음');
-    expect(source).toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
+    expect(source).not.toContain('financialYearChecks?.years.length');
+    expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
-  it('keeps the detailed board on one year while showing the adjacent annual source values', () => {
-    expect(source).toContain('getCashflowSheetLabYearViewViaBff');
-    expect(source).toContain('cashflowYearView?.navigationYears');
-    expect(source).toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
+  it('keeps the detailed board on one year with navigation-only adjacent years', () => {
+    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
+    expect(source).not.toContain('cashflowYearView');
+    expect(source).not.toContain('data-cashflow-annual-summary="true"');
     expect(source).toContain('[selectedYear - 1, selectedYear, selectedYear + 1]');
     expect(source).toContain('data-cashflow-block="multi-year-view"');
-    expect(source).toContain("'주차값 집계'");
-    expect(source).toContain("'일부 주차 합계'");
-    expect(source).toContain("'연간 합계'");
-    expect(source).toContain("'합계 불일치'");
-    expect(source).toContain('오류 없이 다음 불러오기 때 반영됩니다.');
+    expect(source).toContain('data-cashflow-year-view={year}');
+    expect(source).toContain('{String(year).slice(-2)}년');
     expect(source).toContain("start: { yearMonth: `${selectedYear}-01`, weekNo: 1 }");
     expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
-  });
-
-  it('keeps Projection and Actual annual cash totals separate', () => {
-    expect(source).toContain('Projection 입금 / 출금');
-    expect(source).toContain('Actual 입금 / 출금');
-    expect(source).toContain('fmt(projection?.totalIn || 0)');
-    expect(source).toContain('fmt(actual?.totalIn || 0)');
-    expect(source).not.toContain('(projection?.totalIn || 0) + (actual?.totalIn || 0)');
   });
 
   it('shows who explicitly loaded the sheet values in the activity timeline', () => {
@@ -208,13 +196,19 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.');
   });
 
-  it('places adjacent annual totals around weekly columns and lets users open each year view', () => {
-    expect(source).toContain('data-cashflow-annual-summary="true"');
+  it('lets users open each adjacent year without annual amount columns', () => {
     expect(source).toContain('`${year}-01`');
     expect(source).toContain('data-cashflow-year-view={year}');
-    expect(source).toContain('annualSourceLabel(total?.[mode])} · 보기');
+    expect(source).not.toContain('annualSourceLabel');
+    expect(source).not.toContain('renderAnnualSummaryCell');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
+  });
+
+  it('keeps the last good month result during a same-month retry and lists every management finding', () => {
+    expect(source).toContain('setMonthCloseResult((current) => current?.yearMonth === yearMonth ? current : null)');
+    expect(source).toContain('check.findings?.length');
+    expect(source).toContain('check.findings.map((finding)');
   });
 
   it('offers the exact three in-app exit choices and releases only on exit', () => {

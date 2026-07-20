@@ -85,7 +85,7 @@ describe('createEditLeaseController', () => {
     controller.dispose();
   });
 
-  it('checks status on visible visibilitychange, focus, and pageshow without extending', async () => {
+  it('coalesces simultaneous visibility, focus, and pageshow status checks without extending', async () => {
     const windowTarget = new FakeEventTarget();
     const documentTarget = new FakeDocumentTarget();
     const client = mockClient();
@@ -100,7 +100,7 @@ describe('createEditLeaseController', () => {
     windowTarget.dispatch('pageshow');
     await flush();
 
-    expect(client.getStatus).toHaveBeenCalledTimes(3);
+    expect(client.getStatus).toHaveBeenCalledOnce();
     expect(client.extend).not.toHaveBeenCalled();
     expect(client.acquire).not.toHaveBeenCalled();
     controller.dispose();
