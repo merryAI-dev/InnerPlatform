@@ -118,6 +118,7 @@ service cloud.firestore {
         || collection in ['cashflow_sheet_refresh_runs']
         || collection in ['cashflow_sheet_stage_runs']
         || collection in ['cashflow_sheet_stage_months']
+        || collection in ['cashflow_sheet_stage_years']
         || collection in ['cashflow_change_candidates']
         || collection in ['monthly_closes']
         || collection in ['monthly_close_versions']
@@ -286,6 +287,10 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/cashflow_sheet_stage_months/{monthId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_stage_years/{yearId} {
       allow read, write: if false;
     }
 

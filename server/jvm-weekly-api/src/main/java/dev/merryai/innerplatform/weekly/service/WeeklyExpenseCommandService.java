@@ -9,6 +9,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
@@ -1034,6 +1036,80 @@ public class WeeklyExpenseCommandService {
             actual.size(),
             projection,
             actual,
+            auditEvent.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowSheetAnnualApplyResponse applyCashflowSheetAnnualTotal(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        CashflowSheetAnnualApplyRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowWritePermission(
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowSheetAnnualApplyResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowSheetAnnualApplyResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        CashflowSheetAnnualApplyRequest.requireCompleteYear(request.cells());
+        assertAtomicWriteBudget(1, 2 + finalizeWriteCount(editSession), "Cashflow annual total apply");
+        writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
+        String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
+        WeeklyExpensePersistence.CashflowSheetAnnualReplacement replacement = persistence
+            .replaceCashflowSheetYearTotal(writer.tenantId(), projectId, sourceSheetKey, request);
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("sourceSheetKey", sourceSheetKey);
+        metadata.put("scope", "annual");
+        metadata.put("year", request.year());
+        metadata.put("sourceRevision", request.sourceRevision());
+        metadata.put("revision", replacement.revision());
+        metadata.put("projectionLineCount", replacement.projection().size());
+        metadata.put("actualLineCount", replacement.actual().size());
+        putActorMetadata(metadata, writer);
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(),
+            projectId,
+            sourceSheetKey,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            writer.id(),
+            normalizeRole(writer.role()),
+            request.idempotencyKey(),
+            writeJson(metadata)
+        ));
+        CashflowSheetAnnualApplyResponse response = new CashflowSheetAnnualApplyResponse(
+            true,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            projectId,
+            sourceSheetKey,
+            request.year(),
+            request.sourceRevision(),
+            replacement.revision(),
+            replacement.projection(),
+            replacement.actual(),
+            replacement.projectionStates(),
+            replacement.actualStates(),
             auditEvent.getId()
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(

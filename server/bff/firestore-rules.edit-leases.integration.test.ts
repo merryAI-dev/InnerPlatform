@@ -42,6 +42,7 @@ const protectedCollections = [
   'cashflow_sheet_refresh_runs',
   'cashflow_sheet_stage_runs',
   'cashflow_sheet_stage_months',
+  'cashflow_sheet_stage_years',
   'cashflow_change_candidates',
   'monthly_close_versions',
 ] as const;

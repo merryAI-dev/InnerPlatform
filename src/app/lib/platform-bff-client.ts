@@ -748,6 +748,8 @@ export interface CashflowActivityEvent {
   type: 'sheet_refresh' | 'sheet_apply' | 'projection_amount_change' | 'actual_amount_change' | 'projection_completed' | 'actual_completed' | 'admin_closed' | 'sheet_apply_reverted' | 'month_close';
   source?: 'google_sheet_refresh' | 'google_sheet_apply' | 'month_close' | 'manual' | 'revert';
   yearMonth?: string;
+  year?: number;
+  scope?: 'monthly' | 'annual';
   weekNo?: number;
   mode?: 'projection' | 'actual';
   lineId?: string;

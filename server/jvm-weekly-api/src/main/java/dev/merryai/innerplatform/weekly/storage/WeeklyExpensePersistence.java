@@ -7,6 +7,7 @@ import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
@@ -42,6 +43,15 @@ public interface WeeklyExpensePersistence {
         List<WeeklyExpenseActualEntity> actual,
         List<CashflowMonthWeekSnapshot> weeks,
         String resultingTargetRevision
+    ) {
+    }
+
+    record CashflowSheetAnnualReplacement(
+        long revision,
+        Map<String, java.math.BigDecimal> projection,
+        Map<String, java.math.BigDecimal> actual,
+        Map<String, String> projectionStates,
+        Map<String, String> actualStates
     ) {
     }
 
@@ -245,6 +255,19 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_atomic_plan_backend_unavailable",
             "Cashflow atomic write planning requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSheetAnnualReplacement replaceCashflowSheetYearTotal(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        CashflowSheetAnnualApplyRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_annual_replace_backend_unavailable",
+            "Authoritative annual cashflow replacement requires the Firestore transaction backend."
         );
     }
 

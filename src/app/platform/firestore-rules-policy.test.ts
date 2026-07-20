@@ -206,6 +206,7 @@ describe('firestore rules policy alignment', () => {
       'cashflow_sheet_refresh_runs',
       'cashflow_sheet_stage_runs',
       'cashflow_sheet_stage_months',
+      'cashflow_sheet_stage_years',
       'cashflow_change_candidates',
       'monthly_closes',
       'monthly_close_versions',

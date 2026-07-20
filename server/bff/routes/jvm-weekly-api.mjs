@@ -314,6 +314,8 @@ async function readCashflowActivity(db, tenantId, projectId) {
         type: 'sheet_apply',
         source: 'google_sheet_apply',
         yearMonth: readOptionalText(metadata.yearMonth),
+        year: Number.isSafeInteger(Number(metadata.year)) ? Number(metadata.year) : undefined,
+        scope: readOptionalText(metadata.scope) || 'monthly',
         projectionLineCount,
         actualLineCount,
         appliedLineCount: projectionLineCount + actualLineCount,

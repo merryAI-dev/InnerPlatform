@@ -418,6 +418,14 @@ describe('JVM weekly API BFF proxy', () => {
             actorName: '변민욱(보람)', actorEmail: 'pm@example.com',
           }),
         },
+        {
+          id: 'apply-annual-1', projectId: 'project-a', idempotencyKey: 'apply-annual-key', commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          actorId: 'pm-1', createdAt: '2026-07-01T13:00:00.000Z',
+          metadataJson: JSON.stringify({
+            scope: 'annual', year: 2025, projectionLineCount: 16, actualLineCount: 16,
+            actorName: '변민욱(보람)', actorEmail: 'pm@example.com',
+          }),
+        },
       ],
       cashflow_events: [],
     };
@@ -438,6 +446,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => {
         expect(response.body.events).toMatchObject([
           { type: 'month_close', yearMonth: '2026-06', status: 'CLOSED' },
+          { type: 'sheet_apply', scope: 'annual', year: 2025, appliedLineCount: 32 },
           {
             type: 'sheet_apply', yearMonth: '2026-06', appliedLineCount: 15,
             actorName: '변민욱(보람)', actorEmail: 'pm@example.com',

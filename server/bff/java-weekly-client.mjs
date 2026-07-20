@@ -251,10 +251,56 @@ export function createJavaWeeklyClient({
     return result;
   }
 
+  async function applyCashflowSheetAnnualTotal({
+    context,
+    projectId,
+    idempotencyKey,
+    editSession,
+    sourceRevision,
+    year,
+    expectedRevision,
+    cells,
+  }) {
+    const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
+    if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
+    if (readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() !== 'true') {
+      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+    }
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+    }
+    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
+      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+    }
+    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+    if (bffDataProjectId === liveProjectId) {
+      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+    }
+    const sessionId = readOptionalText(editSession?.sessionId);
+    const leaseId = readOptionalText(editSession?.leaseId);
+    const fence = parsePositiveSafeInteger(editSession?.fence);
+    if (!sessionId || !leaseId || fence === null) {
+      throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
+    }
+    const result = await requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/annual/apply`,
+      editSession: { sessionId, leaseId, fence, finalize: editSession?.finalize === true },
+      dataProjectId: bffDataProjectId,
+      body: { idempotencyKey, sourceRevision, year, expectedRevision, cells },
+    });
+    if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
+      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+    }
+    return result;
+  }
+
   return {
     requestJson,
     getCashflowSnapshot,
     applyCashflowSheetLab,
+    applyCashflowSheetAnnualTotal,
     authMode,
     workspaceEmailDomain,
     firestoreProjectId,

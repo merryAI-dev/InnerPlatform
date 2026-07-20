@@ -450,6 +450,24 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/{projectId}/sheet-lab/annual/apply")
+    public CashflowSheetAnnualApplyResponse applyCashflowSheetAnnualTotal(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        HttpServletRequest httpRequest,
+        @Valid @RequestBody CashflowSheetAnnualApplyRequest request
+    ) {
+        return commandService.applyCashflowSheetAnnualTotal(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            editSession(httpRequest),
+            request
+        );
+    }
+
     @PostMapping("/weekly-expenses/{projectId}/submit")
     public SubmitWeekResponse submitWeek(
         @PathVariable String projectId,

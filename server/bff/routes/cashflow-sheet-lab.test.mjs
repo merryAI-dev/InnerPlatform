@@ -72,6 +72,28 @@ function javaApplyResponse(request, resultingTargetRevision) {
   };
 }
 
+function javaAnnualApplyResponse(request) {
+  const values = (mode) => Object.fromEntries((request.cells || [])
+    .filter((cell) => cell.mode === mode && cell.cellState === 'VALUE')
+    .map((cell) => [cell.cashflowLine, cell.amount]));
+  const states = (mode) => Object.fromEntries((request.cells || [])
+    .filter((cell) => cell.mode === mode)
+    .map((cell) => [cell.cashflowLine, cell.cellState]));
+  return {
+    ok: true,
+    commandName: 'weeklyExpense.cashflowSheetAnnual.apply',
+    projectId: request.projectId,
+    sourceSheetKey: 'cashflow-sheet-lab',
+    year: request.year,
+    sourceRevision: request.sourceRevision,
+    revision: request.expectedRevision + 1,
+    projection: values('projection'),
+    actual: values('actual'),
+    projectionStates: states('projection'),
+    actualStates: states('actual'),
+  };
+}
+
 function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3'], annualYears = [], annualValue = '') {
   const firstWeekColumn = annualYears.length > 0 ? 2 + annualYears.length : 3;
   const header = [actual ? 'ACTUAL' : 'Projection'];
@@ -158,6 +180,18 @@ function buildMultiYearMatrix() {
     ...buildSection(false, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027], '100'),
     [],
     ...buildSection(true, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027], '50'),
+  ];
+}
+
+function buildConflictingAnnualWeeklyMatrix() {
+  const weekLabels = Array.from({ length: 12 }, (_, monthIndex) => (
+    Array.from({ length: 5 }, (_unused, weekIndex) => `26-${monthIndex + 1}-${weekIndex + 1}`)
+  )).flat();
+  return [
+    ['title'],
+    ...buildSection(false, weekLabels, [2026], '100'),
+    [],
+    ...buildSection(true, weekLabels, [2026], '50'),
   ];
 }
 
@@ -406,6 +440,137 @@ describe('cashflow sheet lab route', () => {
     });
     expect(yearView.body.years.map((row) => row.year)).toEqual([2025, 2026, 2027]);
     expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
+  });
+
+  it('applies annual totals and weekly values together without inventing annual weeks', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
+      applyCashflowSheetAnnualTotal: vi.fn(async (input) => {
+        const response = javaAnnualApplyResponse(input);
+        const docId = Buffer.from(`${input.projectId}\n${input.year}`, 'utf8').toString('base64url');
+        await db.doc(`orgs/tenant-a/cashflow_sheet_year_totals/${docId}`).set({
+          projectId: input.projectId,
+          year: input.year,
+          sourceRevision: input.sourceRevision,
+          revision: response.revision,
+          projection: response.projection,
+          actual: response.actual,
+          projectionStates: response.projectionStates,
+          actualStates: response.actualStates,
+          updatedAt: '2026-07-20T00:00:00.000Z',
+        });
+        return response;
+      }),
+    };
+    const editLeaseService = {
+      acquire: vi.fn(async () => ({ body: { leaseId: 'annual-lease', fence: 9 } })),
+      release: vi.fn(),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          spreadsheetTitle: 'Cashflow workbook',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMultiYearMatrix(),
+        })),
+      },
+      routeOptions: { editLeasesEnabled: true, editLeaseService, javaWeeklyClient },
+    });
+
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'annual-refresh-001' })
+      .expect(200);
+    expect(mirror.body.cells).toHaveLength(160);
+    expect(mirror.body.annualCells).toHaveLength(96);
+
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'annual-stage-001' })
+      .expect(200);
+    expect(stage.body).toMatchObject({ stagedMonths: ['2026-01'], stagedYears: [2024, 2025], annualLineCount: 64 });
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_years/')).toHaveLength(2);
+
+    const applied = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-apply-001' })
+      .expect(200);
+    expect(applied.body).toMatchObject({ appliedMonths: ['2026-01'], appliedYears: [2024, 2025], appliedLineCount: 224 });
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      year: 2025,
+      expectedRevision: 0,
+      cells: expect.arrayContaining([
+        expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'VALUE', amount: 100 }),
+        expect.objectContaining({ mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
+      ]),
+    }));
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(2);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/')).toHaveLength(0);
+
+    const yearView = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2025')
+      .expect(200);
+    expect(yearView.body.canonicalAnnualYears).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        year: 2025,
+        source: 'ANNUAL',
+        revision: 1,
+        projection: expect.objectContaining({ source: 'ANNUAL', totalIn: 700, totalOut: 900, net: -200 }),
+        actual: expect.objectContaining({ source: 'ANNUAL', totalIn: 350, totalOut: 450, net: -100 }),
+      }),
+    ]));
+  });
+
+  it('blocks final review when a complete weekly year conflicts with its annual total', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-12-5',
+        },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          spreadsheetTitle: 'Cashflow workbook',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildConflictingAnnualWeeklyMatrix(),
+        })),
+      },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'conflicting-year-refresh' })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'conflicting-year-stage' })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_annual_weekly_reconciliation_failed'));
   });
 
   it('keeps legacy mirrors readable until the next explicit sheet refresh rebuilds year snapshots', async () => {

@@ -28,6 +28,37 @@ const monthlyContract = {
 };
 
 describe('Java weekly cashflow client', () => {
+  it('forwards an annual total to the dedicated JVM authority endpoint', async () => {
+    const fetchImpl = vi.fn(async (url, init) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', year: 2025 }),
+      url,
+      init,
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    await client.applyCashflowSheetAnnualTotal({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'annual-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      year: 2025,
+      expectedRevision: 3,
+      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
+      cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 2300000 }],
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toContain('/api/v1/cashflow/project-a/sheet-lab/annual/apply');
+    expect(JSON.parse(init.body)).toEqual({
+      idempotencyKey: 'annual-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      year: 2025,
+      expectedRevision: 3,
+      cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 2300000 }],
+    });
+  });
+
   it('forwards the pinned monthly contract and never sends caller sourceSheetKey', async () => {
     const fetchImpl = vi.fn(async (_url, init) => ({
       ok: true,

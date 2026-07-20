@@ -178,11 +178,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
-  it('keeps the detailed board on one year with navigation-only adjacent years', () => {
-    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
-    expect(source).not.toContain('cashflowYearView');
+  it('keeps adjacent-year navigation and renders annual-only ledgers without fake weeks', () => {
+    expect(source).toContain('getCashflowSheetLabYearViewViaBff');
+    expect(source).toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-annual-summary="true"');
     expect(source).toContain('[selectedYear - 1, selectedYear, selectedYear + 1]');
+    expect(source).toContain('canonicalAnnualTotal');
+    expect(source).toContain('주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.');
     expect(source).toContain('data-cashflow-block="multi-year-view"');
     expect(source).toContain('data-cashflow-year-view={year}');
     expect(source).toContain('{String(year).slice(-2)}년');

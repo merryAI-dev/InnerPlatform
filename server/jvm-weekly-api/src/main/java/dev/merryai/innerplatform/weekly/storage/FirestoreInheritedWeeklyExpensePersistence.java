@@ -17,6 +17,7 @@ import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
@@ -877,6 +878,71 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             List.copyOf(actual),
             canonicalWeeks,
             resultingTargetRevision
+        );
+    }
+
+    @Override
+    public CashflowSheetAnnualReplacement replaceCashflowSheetYearTotal(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        CashflowSheetAnnualApplyRequest request
+    ) {
+        requireValidatedCashflowWriteScope(tenantId, projectId);
+        List<CashflowSheetAnnualApplyRequest.Cell> cells = CashflowSheetAnnualApplyRequest
+            .requireCompleteYear(request.cells());
+        DocumentReference ref = cashflowYearTotalRef(tenantId, projectId, request.year());
+        DocumentSnapshot snapshot = get(ref);
+        Map<String, Object> current = snapshot.exists() ? data(snapshot) : Map.of();
+        long currentRevision = longValue(current.get("revision"), 0);
+        if (currentRevision != request.expectedRevision()) {
+            throw new WeeklyExpenseConflictException("Cashflow annual total revision changed. Reload before applying.");
+        }
+
+        Map<String, BigDecimal> projection = new TreeMap<>();
+        Map<String, BigDecimal> actual = new TreeMap<>();
+        Map<String, String> projectionStates = new TreeMap<>();
+        Map<String, String> actualStates = new TreeMap<>();
+        List<Map<String, Object>> sourceCells = new ArrayList<>();
+        for (CashflowSheetAnnualApplyRequest.Cell cell : cells) {
+            Map<String, BigDecimal> amounts = "projection".equals(cell.mode()) ? projection : actual;
+            Map<String, String> states = "projection".equals(cell.mode()) ? projectionStates : actualStates;
+            states.put(cell.cashflowLine(), cell.cellState());
+            if ("VALUE".equals(cell.cellState())) amounts.put(cell.cashflowLine(), cell.amount());
+            Map<String, Object> sourceCell = new LinkedHashMap<>();
+            sourceCell.put("mode", cell.mode());
+            sourceCell.put("cashflowLine", cell.cashflowLine());
+            sourceCell.put("cellState", cell.cellState());
+            if (cell.amount() != null) sourceCell.put("amount", cell.amount().longValueExact());
+            if (cell.sourceCell() != null && !cell.sourceCell().isBlank()) sourceCell.put("sourceCell", cell.sourceCell());
+            if (cell.sourceLabel() != null && !cell.sourceLabel().isBlank()) sourceCell.put("sourceLabel", cell.sourceLabel());
+            sourceCells.add(sourceCell);
+        }
+
+        long revision = Math.addExact(currentRevision, 1);
+        Instant now = clock.instant();
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("id", safeDocId(projectId + "\n" + request.year()));
+        document.put("tenantId", tenantId);
+        document.put("projectId", projectId);
+        document.put("year", request.year());
+        document.put("sourceSheetKey", sourceSheetKey);
+        document.put("sourceRevision", request.sourceRevision());
+        document.put("revision", revision);
+        document.put("source", "ANNUAL");
+        document.put("projection", FirestoreCashflowWeekActualMerge.numberMap(projection));
+        document.put("actual", FirestoreCashflowWeekActualMerge.numberMap(actual));
+        document.put("projectionStates", projectionStates);
+        document.put("actualStates", actualStates);
+        document.put("cells", sourceCells);
+        document.put("updatedAt", now.toString());
+        replaceDocument(ref, document);
+        return new CashflowSheetAnnualReplacement(
+            revision,
+            Map.copyOf(projection),
+            Map.copyOf(actual),
+            Map.copyOf(projectionStates),
+            Map.copyOf(actualStates)
         );
     }
 
@@ -2441,6 +2507,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private DocumentReference cashflowWeekRef(String tenantId, String docId) {
         return cashflowWeeks(tenantId).document(docId);
+    }
+
+    private DocumentReference cashflowYearTotalRef(String tenantId, String projectId, int year) {
+        return db.document(
+            "orgs/" + tenantId + "/cashflow_sheet_year_totals/" + safeDocId(projectId + "\n" + year)
+        );
     }
 
     private CollectionReference expenseIntake(String tenantId, String projectId) {

@@ -173,6 +173,7 @@ export interface CashflowSheetLabApplyResult {
   runId?: string;
   stagedRunId?: string;
   appliedMonths?: string[];
+  appliedYears?: number[];
   lastAppliedBy?: {
     uid?: string;
     email?: string;
@@ -207,13 +208,15 @@ export interface CashflowSheetLabChangeCandidate {
   source: 'google_sheet' | 'portal';
   status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'applied' | 'superseded' | 'failed';
   mode: 'projection' | 'actual';
-  yearMonth: string;
-  weekNo: number;
+  scope?: 'weekly' | 'annual';
+  year?: number;
+  yearMonth?: string;
+  weekNo?: number;
   lineId: string;
   lineDirection: 'in' | 'out';
   beforeAmount: number | null;
   beforeHadValue: boolean;
-  proposedAmount: number;
+  proposedAmount: number | null;
   proposedHadValue: boolean;
   sourceCell?: string;
   sourceLabel?: string;
@@ -261,6 +264,8 @@ export interface CashflowSheetLabMirrorResult {
   targetRevisionAtFetch?: string;
   appliedSourceRevision?: string;
   appliedTargetRevision?: string;
+  appliedAnnualYears?: number[];
+  appliedWeeklyYears?: number[];
   capturedAt?: string;
   capturedBy?: { uid?: string; email?: string; role?: string };
   yearMonths?: string[];
@@ -333,6 +338,7 @@ export interface CashflowSheetLabAnnualModeTotal {
   emptyCellCount: number;
   invalidCellCount: number;
   lineAmounts: Record<string, number>;
+  lineStates?: Record<string, 'VALUE' | 'EMPTY'>;
   totalIn: number;
   totalOut: number;
   net: number;
@@ -358,6 +364,15 @@ export interface CashflowSheetLabYearViewResult {
     sourceRevision: string;
     capturedAt?: string;
     storage: 'SNAPSHOT' | 'MIRROR_FALLBACK';
+  }>;
+  canonicalAnnualYears: Array<{
+    year: number;
+    source: 'ANNUAL';
+    revision: number;
+    sourceRevision: string;
+    updatedAt?: string;
+    projection: CashflowSheetLabAnnualModeTotal;
+    actual: CashflowSheetLabAnnualModeTotal;
   }>;
   readModelStatus: 'EMPTY' | 'CURRENT' | 'FALLBACK' | 'MISMATCH';
   fallbackYears: number[];
@@ -385,6 +400,8 @@ export interface CashflowSheetLabStageResult {
   skippedInvalidWeeks?: string[];
   blockedMonths?: string[];
   stagedMonths?: string[];
+  stagedYears?: number[];
+  annualLineCount?: number;
   candidates?: CashflowSheetLabChangeCandidate[];
   omittedCandidateCount?: number;
   lastStagedAt?: string;
