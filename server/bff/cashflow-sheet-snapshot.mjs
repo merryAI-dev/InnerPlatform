@@ -95,11 +95,85 @@ function snapshotCell(mapping, matrix) {
   };
 }
 
+function snapshotAnnualCell(mapping, matrix) {
+  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+  return {
+    mode: mapping.mode,
+    year: Number(mapping.year),
+    lineId: mapping.lineId,
+    direction: mapping.direction,
+    sourceCell: mapping.a1,
+    sourceLabel: mapping.label || mapping.canonicalLabel || mapping.lineId,
+    ...classified,
+  };
+}
+
 function compareCells(left, right) {
   return String(left.mode).localeCompare(String(right.mode))
     || String(left.yearMonth).localeCompare(String(right.yearMonth))
     || Number(left.weekNo) - Number(right.weekNo)
     || String(left.lineId).localeCompare(String(right.lineId));
+}
+
+function compareAnnualCells(left, right) {
+  return Number(left.year) - Number(right.year)
+    || String(left.mode).localeCompare(String(right.mode))
+    || String(left.lineId).localeCompare(String(right.lineId));
+}
+
+function summarizeAnnualMode(cells, source) {
+  const lineAmounts = {};
+  let totalIn = 0;
+  let totalOut = 0;
+  let valueCellCount = 0;
+  let emptyCellCount = 0;
+  let invalidCellCount = 0;
+  for (const cell of cells) {
+    if (cell.state === 'EMPTY') {
+      emptyCellCount += 1;
+      continue;
+    }
+    if (cell.state === 'INVALID') {
+      invalidCellCount += 1;
+      continue;
+    }
+    valueCellCount += 1;
+    const amount = Number(cell.amount) || 0;
+    lineAmounts[cell.lineId] = amount;
+    if (cell.direction === 'IN') totalIn += amount;
+    if (cell.direction === 'OUT') totalOut += amount;
+  }
+  return {
+    source,
+    valueCellCount,
+    emptyCellCount,
+    invalidCellCount,
+    lineAmounts,
+    totalIn,
+    totalOut,
+    net: totalIn - totalOut,
+  };
+}
+
+function buildAnnualCashflowTotals({ cells, annualCells }) {
+  const years = new Set([
+    ...cells.map((cell) => Number(String(cell.yearMonth).slice(0, 4))),
+    ...annualCells.map((cell) => Number(cell.year)),
+  ].filter(Number.isSafeInteger));
+  return [...years]
+    .sort((left, right) => left - right)
+    .map((year) => {
+      const modeTotals = {};
+      for (const mode of ['projection', 'actual']) {
+        const weeklyCells = cells.filter((cell) => cell.mode === mode && Number(String(cell.yearMonth).slice(0, 4)) === year);
+        const annualCellsForMode = annualCells.filter((cell) => cell.mode === mode && cell.year === year);
+        modeTotals[mode] = summarizeAnnualMode(
+          weeklyCells.length > 0 ? weeklyCells : annualCellsForMode,
+          weeklyCells.length > 0 ? 'WEEKLY' : annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE',
+        );
+      }
+      return { year, ...modeTotals };
+    });
 }
 
 function matrixValue(matrix, rowIndex, columnIndex) {
@@ -144,7 +218,16 @@ function readWholeWon(
   return classified.amount;
 }
 
-function controlRow({ matrix, row, weekColumns, issues }) {
+function findControlColumnIndex(template, matrix, headerText, legacyColumnIndex) {
+  const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
+  if (!Number.isInteger(projectionSection?.headerRowIndex)) return legacyColumnIndex;
+  const header = matrix?.[projectionSection.headerRowIndex] || [];
+  const normalizedTarget = normalizedText(headerText).replace(/\s+/g, '').toLowerCase();
+  const found = header.findIndex((value) => normalizedText(value).replace(/\s+/g, '').toLowerCase() === normalizedTarget);
+  return found >= 0 ? found : null;
+}
+
+function controlRow({ matrix, row, weekColumns, issues, controlColumnIndex }) {
   const field = `${row.kind}:${row.lineId || row.derivedKind}`;
   const amounts = weekColumns.map((week) => readWholeWon(
     matrix,
@@ -157,7 +240,9 @@ function controlRow({ matrix, row, weekColumns, issues }) {
   const computed = amounts.some((amount) => amount === null)
     ? null
     : amounts.reduce((sum, amount) => sum + amount, 0);
-  const value = readWholeWon(matrix, row.rowIndex, 66, issues, field, { allowEmpty: false });
+  const value = controlColumnIndex === null
+    ? null
+    : readWholeWon(matrix, row.rowIndex, controlColumnIndex, issues, field, { allowEmpty: false });
   const annualValues = new Map();
   for (let index = 0; index < weekColumns.length; index += 1) {
     const year = Number(String(weekColumns[index].yearMonth).slice(0, 4));
@@ -167,10 +252,10 @@ function controlRow({ matrix, row, weekColumns, issues }) {
   return {
     kind: row.kind,
     ...(row.lineId ? { lineId: row.lineId } : { derivedKind: row.derivedKind }),
-    sourceCell: toA1(row.rowIndex, 66),
+    sourceCell: controlColumnIndex === null ? '' : toA1(row.rowIndex, controlColumnIndex),
     value,
     computed,
-    matches: value === null || computed === null ? false : value === computed,
+    matches: value === null || computed === null ? null : value === computed,
     annualValues: [...annualValues.entries()]
       .sort(([left], [right]) => left - right)
       .map(([year, annualValue]) => ({ year, value: annualValue })),
@@ -200,12 +285,13 @@ function annualSheetFinancialTotals({ depositScheduleRows, projectionControls })
     }));
 }
 
-export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
+export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = [], annualCells = [] } = {}) {
   const issues = [];
   const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
   const weekColumns = (projectionSection?.weekColumns || [])
-    .filter((week) => week.columnIndex >= 3 && week.columnIndex <= 62)
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
+  const depositControlColumnIndex = findControlColumnIndex(template, matrix, '입금Total', 66);
+  const unpaidControlColumnIndex = findControlColumnIndex(template, matrix, '미지급Total', 67);
   const depositScheduleRows = weekColumns.map((week) => {
     const taxInvoiceIssuedDate = normalizeDateCell(matrix?.[6]?.[week.columnIndex]);
     const expectedDepositDate = normalizeDateCell(matrix?.[7]?.[week.columnIndex]);
@@ -242,8 +328,14 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
   ].sort((left, right) => left.rowIndex - right.rowIndex);
   const modeControls = (mode) => {
     const section = template?.sections?.find((candidate) => candidate.mode === mode);
-    const columns = (section?.weekColumns || []).filter((week) => week.columnIndex >= 3 && week.columnIndex <= 62);
-    return controlRows(section).map((row) => controlRow({ matrix, row, weekColumns: columns, issues }));
+    const columns = section?.weekColumns || [];
+    return controlRows(section).map((row) => controlRow({
+      matrix,
+      row,
+      weekColumns: columns,
+      issues,
+      controlColumnIndex: depositControlColumnIndex,
+    }));
   };
   const depositValues = weekColumns.map((week) => readWholeWon(
     matrix,
@@ -256,7 +348,9 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
   const depositComputed = depositValues.some((amount) => amount === null)
     ? null
     : depositValues.reduce((sum, amount) => sum + amount, 0);
-  const depositValue = readWholeWon(matrix, 8, 66, issues, 'depositControl', { allowEmpty: false, nonNegative: true });
+  const depositValue = depositControlColumnIndex === null
+    ? null
+    : readWholeWon(matrix, 8, depositControlColumnIndex, issues, 'depositControl', { allowEmpty: false, nonNegative: true });
 
   const projectionControls = modeControls('projection');
   const actualControls = modeControls('actual');
@@ -270,16 +364,17 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [] } = {}) {
     },
     depositScheduleRows,
     annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
+    annualCashflowTotals: buildAnnualCashflowTotals({ cells, annualCells }),
     controlTotals: {
       deposit: {
-        sourceCell: 'BO9',
+        sourceCell: depositControlColumnIndex === null ? '' : toA1(8, depositControlColumnIndex),
         value: depositValue,
         computed: depositComputed,
-        matches: depositValue === null || depositComputed === null ? false : depositValue === depositComputed,
+        matches: depositValue === null || depositComputed === null ? null : depositValue === depositComputed,
       },
       unpaid: {
-        sourceCell: 'BP9',
-        value: readWholeWon(matrix, 8, 67, issues, 'unpaidControl'),
+        sourceCell: unpaidControlColumnIndex === null ? '' : toA1(8, unpaidControlColumnIndex),
+        value: unpaidControlColumnIndex === null ? null : readWholeWon(matrix, 8, unpaidControlColumnIndex, issues, 'unpaidControl'),
       },
       projection: projectionControls,
       actual: actualControls,
@@ -301,8 +396,12 @@ export function createCashflowPinnedSnapshot({
   capturedBy = {},
 } = {}) {
   const cells = mappings.map((mapping) => snapshotCell(mapping, matrix)).sort(compareCells);
-  const sheetFacts = extractCashflowSheetFacts({ template, matrix });
-  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, sheetFacts });
+  const annualCells = (template?.sections || [])
+    .flatMap((section) => section.annualMappings || [])
+    .map((mapping) => snapshotAnnualCell(mapping, matrix))
+    .sort(compareAnnualCells);
+  const sheetFacts = extractCashflowSheetFacts({ template, matrix, cells, annualCells });
+  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (cell.state === 'VALUE') counts.valueCount += 1;
@@ -327,8 +426,13 @@ export function createCashflowPinnedSnapshot({
       role: String(capturedBy?.role || ''),
     },
     yearMonths: [...new Set(cells.map((cell) => cell.yearMonth))].sort(),
+    years: [...new Set([
+      ...cells.map((cell) => Number(String(cell.yearMonth).slice(0, 4))),
+      ...annualCells.map((cell) => cell.year),
+    ].filter(Number.isSafeInteger))].sort((left, right) => left - right),
     summary,
     cells,
+    annualCells,
     sheetFacts,
   };
 }

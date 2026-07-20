@@ -27,6 +27,8 @@ const CASHFLOW_WEEK_BASIS = 'sheet_range';
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_SHEET_MIRRORS_COLLECTION_ID = 'cashflow_sheet_mirrors';
+const CASHFLOW_SHEET_WEEK_VALUES_COLLECTION_ID = 'cashflow_sheet_week_values';
+const CASHFLOW_SHEET_YEAR_TOTALS_COLLECTION_ID = 'cashflow_sheet_year_totals';
 const CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID = 'cashflow_sheet_refresh_runs';
 const CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID = 'cashflow_sheet_stage_runs';
 const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
@@ -242,6 +244,14 @@ function projectDocPath(tenantId, projectId) {
 
 function cashflowSheetMirrorDocPath(tenantId, projectId) {
   return `orgs/${tenantId}/${CASHFLOW_SHEET_MIRRORS_COLLECTION_ID}/${projectId}`;
+}
+
+function cashflowSheetWeekValueDocPath(tenantId, projectId, yearMonth) {
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_WEEK_VALUES_COLLECTION_ID}/${projectId}_${readOptionalText(yearMonth).replace('-', '_')}`;
+}
+
+function cashflowSheetYearTotalDocPath(tenantId, projectId, year) {
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_YEAR_TOTALS_COLLECTION_ID}/${projectId}_${Number(year)}`;
 }
 
 function cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey) {
@@ -727,7 +737,10 @@ async function completeCashflowSheetRefreshRun({
         latestRefreshGeneration: runGeneration,
         pendingRefreshConfigRevision: null,
       });
-    if (!superseded) transaction.set(mirrorRef, installedResponse);
+    if (!superseded) {
+      transaction.set(mirrorRef, installedResponse);
+      writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mirror: installedResponse });
+    }
     transaction.set(runRef, stripUndefinedDeep({
       status: 'COMPLETED',
       completedAt,
@@ -736,6 +749,39 @@ async function completeCashflowSheetRefreshRun({
     }), { merge: true });
     return installedResponse;
   });
+}
+
+function writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mirror }) {
+  if (readOptionalText(mirror?.status) !== 'FRESH') return;
+  const capturedAt = readOptionalText(mirror?.capturedAt);
+  const sourceRevision = readOptionalText(mirror?.sourceRevision);
+  const cellsByMonth = groupPinnedCellsByMonth(mirror?.cells || []);
+  for (const [yearMonth, cells] of cellsByMonth) {
+    transaction.set(db.doc(cashflowSheetWeekValueDocPath(tenantId, projectId, yearMonth)), stripUndefinedDeep({
+      tenantId,
+      projectId,
+      yearMonth,
+      source: 'cashflow_sheet_refresh',
+      sourceRevision,
+      capturedAt,
+      cells,
+    }));
+  }
+  for (const total of mirror?.sheetFacts?.annualCashflowTotals || []) {
+    if (!Number.isSafeInteger(total?.year)) continue;
+    transaction.set(db.doc(cashflowSheetYearTotalDocPath(tenantId, projectId, total.year)), stripUndefinedDeep({
+      tenantId,
+      projectId,
+      year: total.year,
+      source: 'cashflow_sheet_refresh',
+      sourceRevision,
+      capturedAt,
+      projection: total.projection,
+      actual: total.actual,
+    }));
+  }
+  // ponytail: the existing mirror still keeps all cells for the review/apply flow.
+  // Split its reads by month before a project needs more than three detailed years.
 }
 
 function setFiniteAmount(index, mapping, amount) {

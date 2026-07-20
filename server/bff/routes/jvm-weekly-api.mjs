@@ -969,7 +969,9 @@ function sheetControlBlockers(sheetFacts) {
       message: 'Projection/Actual BO control total이 불완전합니다. 시트값을 다시 불러와 주세요.',
     });
   }
-  if (controls?.deposit?.matches !== true || rows.some((row) => row?.matches !== true)) {
+  const comparableRows = rows.filter((row) => typeof row?.matches === 'boolean');
+  const depositComparable = typeof controls?.deposit?.matches === 'boolean';
+  if ((depositComparable && controls.deposit.matches !== true) || comparableRows.some((row) => row.matches !== true)) {
     blockers.push({
       code: 'SHEET_CONTROL_TOTAL_MISMATCH',
       message: '전체 주차 합계와 시트 BO control total이 다릅니다.',

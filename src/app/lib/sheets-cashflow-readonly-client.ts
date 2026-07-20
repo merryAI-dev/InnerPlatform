@@ -22,6 +22,12 @@ export interface CashflowSheetLabWeekColumn {
   a1: string;
 }
 
+export interface CashflowSheetLabAnnualColumn {
+  year: number;
+  columnIndex: number;
+  a1: string;
+}
+
 export interface CashflowSheetLabLineRow {
   rowIndex: number;
   label: string;
@@ -57,6 +63,7 @@ export interface CashflowSheetLabTemplateSection {
   headerRowIndex: number;
   weekRowIndex: number;
   weekColumns: CashflowSheetLabWeekColumn[];
+  annualColumns: CashflowSheetLabAnnualColumn[];
   lineRows: CashflowSheetLabLineRow[];
   derivedRows: Array<{
     rowIndex: number;
@@ -73,6 +80,10 @@ export interface CashflowSheetLabTemplateSection {
     reason: string;
   }>;
   mappings: CashflowSheetLabMappingCandidate[];
+  annualMappings: Array<Omit<CashflowSheetLabMappingCandidate, 'yearMonth' | 'weekNo' | 'source'> & {
+    year: number;
+    source: 'sheet_annual_total';
+  }>;
   missingLineIds: string[];
   duplicateLineIds: string[];
 }
@@ -226,6 +237,18 @@ export interface CashflowSheetLabMirrorCell {
   rawValue?: string;
 }
 
+export interface CashflowSheetLabAnnualCell {
+  mode: 'projection' | 'actual';
+  year: number;
+  lineId: string;
+  direction: 'IN' | 'OUT';
+  sourceCell: string;
+  sourceLabel: string;
+  state: 'VALUE' | 'EMPTY' | 'INVALID';
+  amount?: number;
+  rawValue?: string;
+}
+
 export interface CashflowSheetLabMirrorResult {
   schemaVersion?: number;
   projectId: string;
@@ -238,8 +261,10 @@ export interface CashflowSheetLabMirrorResult {
   capturedAt?: string;
   capturedBy?: { uid?: string; email?: string; role?: string };
   yearMonths?: string[];
+  years?: number[];
   summary?: { cellCount: number; valueCount: number; emptyCount: number; invalidCount: number };
   cells?: CashflowSheetLabMirrorCell[];
+  annualCells?: CashflowSheetLabAnnualCell[];
   sheetFacts?: {
     metadata?: {
       lastUpdateText?: { sourceCell: string; value: string };
@@ -266,6 +291,11 @@ export interface CashflowSheetLabMirrorResult {
       totalRevenueAmount: number;
       supportAmount: number;
     }>;
+    annualCashflowTotals?: Array<{
+      year: number;
+      projection: CashflowSheetLabAnnualModeTotal;
+      actual: CashflowSheetLabAnnualModeTotal;
+    }>;
   };
   financialYearChecks?: {
     years: Array<{
@@ -285,6 +315,17 @@ export interface CashflowSheetLabMirrorResult {
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
   lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
+}
+
+export interface CashflowSheetLabAnnualModeTotal {
+  source: 'WEEKLY' | 'ANNUAL' | 'NONE';
+  valueCellCount: number;
+  emptyCellCount: number;
+  invalidCellCount: number;
+  lineAmounts: Record<string, number>;
+  totalIn: number;
+  totalOut: number;
+  net: number;
 }
 
 export interface CashflowSheetLabStageResult {
