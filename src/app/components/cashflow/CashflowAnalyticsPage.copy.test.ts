@@ -30,6 +30,6 @@ describe('CashflowAnalyticsPage copy', () => {
 
   it('opens the planning office project registration and approval surface', () => {
     expect(source).toContain('프로젝트 등록·승인');
-    expect(source).toContain('<ProjectMigrationAuditPage embedded defaultInboxScope="ALL" workflowStage="planning" />');
+    expect(source).toContain('<ProjectMigrationAuditPage embedded reviewStage="managementPlanning" />');
   });
 });

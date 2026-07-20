@@ -2236,7 +2236,13 @@ export function CashflowProjectSheet({
   }
 
   function cashflowEventDetail(event: CashflowEvent): string {
-    if (event.type === 'sheet_refresh') return [event.sheetName, '시트값을 고정했습니다.'].filter(Boolean).join(' · ');
+    if (event.type === 'sheet_refresh') {
+      const actor = event.actorName
+        ? `${event.actorName}님이`
+        : event.actorEmail ? `${event.actorEmail} 계정으로` : '담당자가';
+      const action = `${actor} 시트의 최신 값을 불러와 기준값으로 저장했습니다.`;
+      return [event.sheetName, action].filter(Boolean).join(' · ');
+    }
     if (event.type === 'sheet_apply') {
       return `Google Sheet 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
     }
@@ -2380,7 +2386,7 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
-              <div className="text-[10px] text-slate-500">명시적 시트 불러오기와 월 결산 이력입니다.</div>
+              <div className="text-[10px] text-slate-500">누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
@@ -2404,7 +2410,7 @@ export function CashflowProjectSheet({
               <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
-                시트값 불러오기와 월 결산 이력이 여기에 기록됩니다.
+                시트 값을 불러오거나 월 결산하면 담당자와 시간이 여기에 남습니다.
               </div>
             ) : cashflowEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'

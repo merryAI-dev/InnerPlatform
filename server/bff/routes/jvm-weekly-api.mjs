@@ -278,6 +278,7 @@ async function readCashflowActivity(db, tenantId, projectId) {
       type: 'sheet_refresh',
       source: 'google_sheet_refresh',
       actorUid: readOptionalText(run.createdBy?.uid),
+      actorName: readOptionalText(run.createdBy?.name),
       actorEmail: readOptionalText(run.createdBy?.email),
       createdAt: readOptionalText(run.completedAt) || readOptionalText(run.createdAt),
       sheetName: readOptionalText(run.response?.selectedSheetName),

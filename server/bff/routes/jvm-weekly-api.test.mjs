@@ -397,7 +397,7 @@ describe('JVM weekly API BFF proxy', () => {
       cashflow_sheet_refresh_runs: [{
         id: 'refresh-1', projectId: 'project-a', idempotencyKey: 'refresh-key', status: 'COMPLETED',
         createdAt: '2026-07-01T00:00:00.000Z', completedAt: '2026-07-01T00:01:00.000Z',
-        createdBy: { uid: 'pm-1', email: 'pm@example.com' },
+        createdBy: { uid: 'pm-1', name: '변민욱(보람)', email: 'pm@example.com' },
         response: { status: 'FRESH', selectedSheetName: 'cashflow(사용내역 연동)' },
       }],
       weekly_api_audit_events: [{
@@ -424,7 +424,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => {
         expect(response.body.events).toMatchObject([
           { type: 'month_close', yearMonth: '2026-06', status: 'CLOSED' },
-          { type: 'sheet_refresh', sheetName: 'cashflow(사용내역 연동)' },
+          { type: 'sheet_refresh', sheetName: 'cashflow(사용내역 연동)', actorName: '변민욱(보람)', actorEmail: 'pm@example.com' },
         ]);
       });
   });

@@ -808,6 +808,7 @@ async function beginCashflowSheetRefreshRun({
       createdAt: attemptedAt,
       createdBy: {
         uid: readOptionalText(context?.actorId),
+        name: readOptionalText(context?.actorName),
         email: readOptionalText(context?.actorEmail),
         role: readOptionalText(context?.actorRole) || 'workspace_user',
       },

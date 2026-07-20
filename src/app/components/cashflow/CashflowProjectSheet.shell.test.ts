@@ -193,6 +193,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
   });
 
+  it('shows who explicitly loaded the sheet values in the activity timeline', () => {
+    expect(source).toContain('`${event.actorName}님이`');
+    expect(source).toContain('`${event.actorEmail} 계정으로`');
+    expect(source).toContain('시트의 최신 값을 불러와 기준값으로 저장했습니다.');
+    expect(source).toContain('누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.');
+  });
+
   it('places adjacent annual totals around weekly columns and lets users open each year view', () => {
     expect(source).toContain('data-cashflow-annual-summary="true"');
     expect(source).toContain('`${year}-01`');
