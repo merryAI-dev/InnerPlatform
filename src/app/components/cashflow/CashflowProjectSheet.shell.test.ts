@@ -189,6 +189,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
   });
 
+  it('places adjacent annual totals around weekly columns and lets users open each year view', () => {
+    expect(source).toContain('data-cashflow-annual-summary="true"');
+    expect(source).toContain('`${year}-01`');
+    expect(source).toContain('data-cashflow-year-view={year}');
+    expect(source).toContain('annualSourceLabel(total?.[mode]?.source)} · 보기');
+    expect(source).not.toContain("'서버 값'");
+    expect(source).not.toContain("'값 없음'");
+  });
+
   it('offers the exact three in-app exit choices and releases only on exit', () => {
     expect(source).toContain('임시저장 후 종료');
     expect(source).toContain('저장하지 않고 종료');

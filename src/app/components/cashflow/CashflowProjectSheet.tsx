@@ -56,6 +56,7 @@ import {
   refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabChangeCandidate,
+  type CashflowSheetLabAnnualModeTotal,
   type CashflowSheetLabMirrorResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
@@ -1679,6 +1680,33 @@ export function CashflowProjectSheet({
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
     };
+    const adjacentYearSummaries = [selectedYear - 1, selectedYear + 1].map((year) => (
+      multiYearCashflowTotals.find((item) => item.year === year) || { year, total: undefined }
+    ));
+    const annualSourceLabel = (source?: 'WEEKLY' | 'ANNUAL' | 'NONE') => (
+      source === 'WEEKLY' ? '주차값 집계' : source === 'ANNUAL' ? '연간 합계' : '미입력'
+    );
+    const renderAnnualSummaryCell = (input: {
+      year: number;
+      summary?: CashflowSheetLabAnnualModeTotal;
+      mode: 'projection' | 'actual';
+      lineId?: CashflowSheetLineId;
+      kind?: 'totalIn' | 'totalOut' | 'net';
+    }) => {
+      const hasValues = Boolean(input.summary?.valueCellCount);
+      const value = input.lineId
+        ? input.summary?.lineAmounts[input.lineId] || 0
+        : input.kind === 'totalIn'
+          ? input.summary?.totalIn || 0
+          : input.kind === 'totalOut'
+            ? input.summary?.totalOut || 0
+            : input.summary?.net || 0;
+      return (
+        <td key={`${input.mode}-${input.year}-${input.lineId || input.kind}`} className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50/70 px-2 py-1 align-middle">
+          <div className="text-right text-[8px] font-semibold tabular-nums text-slate-800">{hasValues ? fmt(value) : '-'}</div>
+        </td>
+      );
+    };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
       if (!container) return;
@@ -1706,12 +1734,14 @@ export function CashflowProjectSheet({
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-1.5 text-[9px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
             {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
+          {adjacentYearSummaries.map(({ year, total }) => year < selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, lineId }) : null)}
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
             return mode === 'projection'
               ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek })
               : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
           })}
+          {adjacentYearSummaries.map(({ year, total }) => year > selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, lineId }) : null)}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
             value: derived[mode].rowTotals[lineId] || 0,
@@ -1735,6 +1765,7 @@ export function CashflowProjectSheet({
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[9px] font-bold ${isIncome ? 'bg-emerald-50 text-emerald-950' : isExpense ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>
             {label}
           </td>
+          {adjacentYearSummaries.map(({ year, total }) => year < selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, kind }) : null)}
           {visibleWeeks.map((week, index) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
             value: derived[mode].weekTotals[index]?.[kind] || 0,
@@ -1743,6 +1774,7 @@ export function CashflowProjectSheet({
             emphasis,
             rowTone,
           }))}
+          {adjacentYearSummaries.map(({ year, total }) => year > selectedYear ? renderAnnualSummaryCell({ year, summary: total?.[mode], mode, kind }) : null)}
           {renderSummaryCell({
             keyName: `${mode}-${kind}-range`,
             value: derived[mode].monthTotals[kind],
@@ -1755,34 +1787,41 @@ export function CashflowProjectSheet({
       );
     };
     const renderModeTable = (mode: 'projection' | 'actual') => (
-      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + visibleWeeks.length * 84 + 84}px` }}>
+      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + visibleWeeks.length * 84 + 84 * 3}px` }}>
         <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
           <tr>
             <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[11px] font-bold text-slate-800">
               항목
             </th>
+            {adjacentYearSummaries.filter(({ year }) => year < selectedYear).map(({ year, total }) => (
+              <th key={`annual-before-${mode}-${year}`} data-cashflow-annual-summary="true" className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50 px-1 py-2 text-center align-top">
+                <button type="button" className="w-full rounded-md px-1 py-0.5 text-left hover:bg-amber-100" onClick={() => setYearMonth(`${year}-01`)}>
+                  <span className="block text-[10px] font-bold text-slate-800">{year}년 합계</span>
+                  <span className="block text-[8px] font-normal text-slate-500">{annualSourceLabel(total?.[mode]?.source)} · 보기</span>
+                </button>
+              </th>
+            ))}
             {visibleWeeks.map((week) => {
               const saveState = weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode, weekNo: week.weekNo })];
               const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
-              const hasServerValues = CASHFLOW_ALL_LINES.some((lineId) => getServerReadCell({
-                targetYearMonth: week.yearMonth,
-                mode,
-                weekNo: week.weekNo,
-                lineId,
-              }).hasValue);
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
                   <div className="min-h-5">
                     <span className="block truncate text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
                   </div>
                   <div className="truncate text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
-                  <Badge className={`mt-1 h-3.5 w-full justify-center rounded-full border-0 px-1 text-[7px] ${hasServerValues ? 'bg-white text-slate-700' : 'bg-rose-100 text-rose-700'}`}>
-                    {hasServerValues ? '서버 값' : '값 없음'}
-                  </Badge>
                   {saveState === 'dirty' ? <Badge className="mt-0.5 h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">미저장</Badge> : null}
                 </th>
               );
             })}
+            {adjacentYearSummaries.filter(({ year }) => year > selectedYear).map(({ year, total }) => (
+              <th key={`annual-after-${mode}-${year}`} data-cashflow-annual-summary="true" className="min-w-[96px] border-l-[6px] border-l-white bg-amber-50 px-1 py-2 text-center align-top">
+                <button type="button" className="w-full rounded-md px-1 py-0.5 text-left hover:bg-amber-100" onClick={() => setYearMonth(`${year}-01`)}>
+                  <span className="block text-[10px] font-bold text-slate-800">{year}년 합계</span>
+                  <span className="block text-[8px] font-normal text-slate-500">{annualSourceLabel(total?.[mode]?.source)} · 보기</span>
+                </button>
+              </th>
+            ))}
             <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
               범위 합계
             </th>
@@ -1851,10 +1890,10 @@ export function CashflowProjectSheet({
                 source === 'WEEKLY' ? '주차값 집계' : source === 'ANNUAL' ? '연간 합산값' : '미입력'
               );
               return (
-                <div key={year} className={`rounded-xl border px-3 py-2 shadow-sm ${year === selectedYear ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white'}`}>
+                <button type="button" key={year} data-cashflow-year-view={year} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-xl border px-3 py-2 text-left shadow-sm transition-colors ${year === selectedYear ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-slate-900">{year}년</span>
-                    <span className="text-[9px] font-semibold text-slate-500">{sourceLabel(projection?.source)}</span>
+                    <span className="text-[9px] font-semibold text-slate-500">{sourceLabel(projection?.source)} · 보기</span>
                   </div>
                   {hasValues ? (
                     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] text-slate-600">
@@ -1865,7 +1904,7 @@ export function CashflowProjectSheet({
                   ) : (
                     <p className="mt-2 text-[9px] leading-4 text-slate-500">시트에 입력된 값이 없습니다. 오류 없이 다음 불러오기 때 반영됩니다.</p>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
