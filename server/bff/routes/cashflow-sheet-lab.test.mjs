@@ -41,19 +41,25 @@ const ACTUAL_OUT_LABELS = [
 
 const JANUARY_FINANCE_WEEKS = ['26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5'];
 
-function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3']) {
-  const weekRow = ['', '', '', ...weekLabels];
+function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3'], annualYears = [], annualValue = '') {
+  const firstWeekColumn = annualYears.length > 0 ? 2 + annualYears.length : 3;
+  const header = [actual ? 'ACTUAL' : 'Projection'];
+  annualYears.forEach((year, index) => {
+    header[2 + index] = `${year}년`;
+  });
+  const weekRow = [...Array(firstWeekColumn).fill(''), ...weekLabels];
   const valueCells = weekLabels.map(() => '999');
+  const annualValueCells = annualYears.map((year) => (year === 2027 ? '' : annualValue));
   const inLabels = actual ? ACTUAL_IN_LABELS : PROJECTION_IN_LABELS;
   const outLabels = actual ? ACTUAL_OUT_LABELS : PROJECTION_OUT_LABELS;
   return [
-    [actual ? 'ACTUAL' : 'Projection'],
+    header,
     weekRow,
-    ...inLabels.map((label) => [label, '', '', ...valueCells]),
-    ['입금 합계', '', '', ...valueCells],
-    ...outLabels.map((label) => [label, '', '', ...valueCells]),
-    ['출금 합계', '', '', ...valueCells],
-    [actual ? '잔액' : '잔액 (※ 중요)', '', '', ...valueCells],
+    ...inLabels.map((label) => [label, '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells]),
+    ['입금 합계', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
+    ...outLabels.map((label) => [label, '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells]),
+    ['출금 합계', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
+    [actual ? '잔액' : '잔액 (※ 중요)', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
   ];
 }
 
@@ -72,6 +78,15 @@ function buildMatrixWithWeekLabels(weekLabels) {
     ...buildSection(false, weekLabels),
     [],
     ...buildSection(true, weekLabels),
+  ];
+}
+
+function buildMultiYearMatrix() {
+  return [
+    ['title'],
+    ...buildSection(false, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027], '100'),
+    [],
+    ...buildSection(true, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027], '50'),
   ];
 }
 
@@ -254,6 +269,46 @@ describe('cashflow sheet lab route', () => {
     expect(pinned.body.cells).toHaveLength(32);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
+  });
+
+  it('stores weekly values and annual totals without requiring a missing future year', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+    });
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          spreadsheetTitle: 'Cashflow workbook',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMultiYearMatrix(),
+        })),
+      },
+    });
+
+    const refreshed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'multi-year-refresh-001' })
+      .expect(200);
+
+    expect(refreshed.body.sheetFacts.annualCashflowTotals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ year: 2024, projection: expect.objectContaining({ source: 'ANNUAL' }) }),
+      expect.objectContaining({ year: 2025, actual: expect.objectContaining({ source: 'ANNUAL' }) }),
+      expect.objectContaining({ year: 2026, projection: expect.objectContaining({ source: 'WEEKLY' }) }),
+      expect.objectContaining({ year: 2027, projection: expect.objectContaining({ source: 'ANNUAL', valueCellCount: 0 }) }),
+    ]));
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_week_values/')).toHaveLength(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_year_totals/')).toHaveLength(4);
   });
 
   it('compares a pinned multi-year sheet total with registered financial years', async () => {

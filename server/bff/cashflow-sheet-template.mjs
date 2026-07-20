@@ -1,6 +1,7 @@
 import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
 
 const WEEK_LABEL_RE = /^(\d{2})-(\d{1,2})-(\d{1,2})$/;
+const ANNUAL_YEAR_LABEL_RE = /^(\d{4})년$/;
 const SUPPORTED_MODES = ['projection', 'actual'];
 const MIN_WEEK_LABELS_PER_SECTION = 2;
 const LINE_ENTRIES = Array.isArray(cashflowPolicyData.lineEntries) ? cashflowPolicyData.lineEntries : [];
@@ -103,6 +104,20 @@ function detectWeekColumns(row) {
     .filter(Boolean);
 }
 
+function detectAnnualYearColumns(row) {
+  return (row || [])
+    .map((cell, columnIndex) => {
+      const match = ANNUAL_YEAR_LABEL_RE.exec(normalizeText(cell));
+      if (!match) return null;
+      return {
+        year: Number.parseInt(match[1], 10),
+        columnIndex,
+        a1: toA1(0, columnIndex).replace(/\d+$/, ''),
+      };
+    })
+    .filter((column) => Number.isSafeInteger(column?.year));
+}
+
 function readRowLabel(row) {
   const searchLimit = Math.min(4, row?.length || 0);
   for (let index = 0; index < searchLimit; index += 1) {
@@ -189,6 +204,10 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
   const duplicateLineIds = new Set();
   const seenLineIds = new Set();
   const endRowIndex = nextCandidate?.headerRowIndex ?? rows.length;
+  const annualColumns = detectAnnualYearColumns(rows[candidate.headerRowIndex]).map((column) => ({
+    ...column,
+    a1: toA1(candidate.headerRowIndex, column.columnIndex),
+  }));
   let direction = 'IN';
 
   for (let rowIndex = candidate.rowIndex + 1; rowIndex < endRowIndex; rowIndex += 1) {
@@ -235,6 +254,7 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
   }
 
   const mappings = [];
+  const annualMappings = [];
   for (const lineRow of lineRows) {
     for (const week of candidate.weekColumns) {
       mappings.push({
@@ -251,6 +271,20 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
         source: 'sheet_layout',
       });
     }
+    for (const column of annualColumns) {
+      annualMappings.push({
+        mode,
+        lineId: lineRow.lineId,
+        label: lineRow.label,
+        canonicalLabel: lineRow.canonicalLabel,
+        direction: lineRow.direction,
+        year: column.year,
+        rowIndex: lineRow.rowIndex,
+        columnIndex: column.columnIndex,
+        a1: toA1(lineRow.rowIndex, column.columnIndex),
+        source: 'sheet_annual_total',
+      });
+    }
   }
 
   const missingLineIds = EXPECTED_LINE_IDS.filter((lineId) => !seenLineIds.has(lineId));
@@ -260,10 +294,12 @@ function analyzeSection({ rows, candidate, nextCandidate, mode }) {
     headerRowIndex: Math.max(0, candidate.rowIndex - 1),
     weekRowIndex: candidate.rowIndex,
     weekColumns: candidate.weekColumns,
+    annualColumns,
     lineRows,
     derivedRows,
     ignoredRows,
     mappings,
+    annualMappings,
     missingLineIds,
     duplicateLineIds: Array.from(duplicateLineIds),
   };

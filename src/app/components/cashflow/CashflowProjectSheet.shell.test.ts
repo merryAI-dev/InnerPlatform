@@ -178,6 +178,17 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
+  it('keeps the detailed board on one year while showing the adjacent annual source values', () => {
+    expect(source).toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
+    expect(source).toContain('[selectedYear - 1, selectedYear, selectedYear + 1]');
+    expect(source).toContain('data-cashflow-block="multi-year-view"');
+    expect(source).toContain("'주차값 집계'");
+    expect(source).toContain("'연간 합산값'");
+    expect(source).toContain('오류 없이 다음 불러오기 때 반영됩니다.');
+    expect(source).toContain("start: { yearMonth: `${selectedYear}-01`, weekNo: 1 }");
+    expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
+  });
+
   it('offers the exact three in-app exit choices and releases only on exit', () => {
     expect(source).toContain('임시저장 후 종료');
     expect(source).toContain('저장하지 않고 종료');

@@ -128,6 +128,7 @@ describe('cashflow sheet pinned snapshot', () => {
         totalRevenueAmount: 0,
         supportAmount: 0,
       }],
+      annualCashflowTotals: [],
       controlTotals: {
         deposit: { sourceCell: 'BO9', value: 15000, computed: 15000, matches: true },
         unpaid: { sourceCell: 'BP9', value: 85000 },
@@ -168,6 +169,36 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(facts.depositScheduleRows[1].expectedDepositAmount).toBeNull();
     expect(facts.controlTotals.deposit).toMatchObject({ computed: 1000, value: 1000, matches: true });
     expect(facts.controlTotals.projection[0]).toMatchObject({ computed: 100, value: 100, matches: true });
+  });
+
+  it('finds the moving Total columns and keeps week values beyond the 2026 layout', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 72 }, () => ''));
+    matrix[0][68] = '입금\nTotal';
+    matrix[0][69] = '미지급 Total';
+    const weekColumns = [
+      { yearMonth: '2027-01', weekNo: 4, columnIndex: 63 },
+      { yearMonth: '2027-01', weekNo: 5, columnIndex: 64 },
+    ];
+    matrix[8][63] = '1000';
+    matrix[8][64] = '2000';
+    matrix[8][68] = '3000';
+    matrix[13][63] = '100';
+    matrix[13][64] = '200';
+    matrix[13][68] = '300';
+
+    const facts = extractCashflowSheetFacts({
+      matrix,
+      template: {
+        sections: [
+          { mode: 'projection', headerRowIndex: 0, weekColumns, lineRows: [{ rowIndex: 13, lineId: 'SALES_IN' }], derivedRows: [] },
+          { mode: 'actual', headerRowIndex: 0, weekColumns, lineRows: [], derivedRows: [] },
+        ],
+      },
+    });
+
+    expect(facts.depositScheduleRows).toHaveLength(2);
+    expect(facts.controlTotals.deposit).toMatchObject({ sourceCell: 'BQ9', value: 3000, computed: 3000, matches: true });
+    expect(facts.controlTotals.projection[0]).toMatchObject({ sourceCell: 'BQ14', value: 300, computed: 300, matches: true });
   });
 
   it('groups sheet finance checks by calendar year using the registered cashflow lines', () => {

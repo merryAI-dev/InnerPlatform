@@ -200,32 +200,6 @@ function parseCashflowSheetWeekLabel(value: unknown): { year: number; month: num
   };
 }
 
-function normalizeActiveSheetWeeks(raw: unknown): MonthMondayWeek[] {
-  if (!Array.isArray(raw)) return [];
-  const weeks: MonthMondayWeek[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const source = item as { label?: unknown; yearMonth?: unknown; weekNo?: unknown; weekStart?: unknown; weekEnd?: unknown };
-    const label = String(source.label || '').trim();
-    const parsedLabel = parseCashflowSheetWeekLabel(label);
-    const yearMonth = String(source.yearMonth || parsedLabel?.yearMonth || '').trim();
-    const weekNo = Number(source.weekNo ?? parsedLabel?.weekNo);
-    if (!/^\d{4}-\d{2}$/.test(yearMonth) || !Number.isFinite(weekNo)) continue;
-    const key = `${yearMonth}:${weekNo}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    weeks.push({
-      yearMonth,
-      weekNo,
-      weekStart: String(source.weekStart || ''),
-      weekEnd: String(source.weekEnd || ''),
-      label: label || formatSheetWeekLabel(yearMonth, weekNo),
-    });
-  }
-  return weeks.sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
-}
-
 function isBffAuthRejection(error: unknown): boolean {
   const source = error as { status?: number; body?: { code?: string; error?: string } };
   const code = source.body?.code || source.body?.error || '';
@@ -314,10 +288,6 @@ export function CashflowProjectSheet({
   const [cashflowSheetRange, setCashflowSheetRange] = useState<{
     startWeek: string;
     endWeek: string;
-    startYearMonth: string;
-    endYearMonth: string;
-    label: string;
-    activeWeeks: MonthMondayWeek[];
   } | null>(null);
   const [cashflowSheetConfig, setCashflowSheetConfig] = useState<{
     value?: string;
@@ -381,19 +351,12 @@ export function CashflowProjectSheet({
     return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
   }, [yearMonth]);
   const cashflowSnapshotRange = useMemo(() => {
-    const configuredStart = parseCashflowSheetWeekLabel(cashflowSheetRange?.startWeek);
-    const configuredEnd = parseCashflowSheetWeekLabel(cashflowSheetRange?.endWeek);
     return {
-      start: configuredStart
-        ? { yearMonth: configuredStart.yearMonth, weekNo: configuredStart.weekNo }
-        : { yearMonth: `${selectedYear}-01`, weekNo: 1 },
-      end: configuredEnd
-        ? { yearMonth: configuredEnd.yearMonth, weekNo: configuredEnd.weekNo }
-        : { yearMonth: `${selectedYear}-12`, weekNo: 5 },
+      start: { yearMonth: `${selectedYear}-01`, weekNo: 1 },
+      end: { yearMonth: `${selectedYear}-12`, weekNo: 5 },
     };
-  }, [cashflowSheetRange?.endWeek, cashflowSheetRange?.startWeek, selectedYear]);
+  }, [selectedYear]);
   const yearWeeks = useMemo(() => getYearMondayWeeks(selectedYear), [selectedYear]);
-  const sheetRangeWeeks = cashflowSheetRange?.activeWeeks || [];
   const allProjectCashflowWeeks = useMemo(() => {
     const byKey = new Map<string, CashflowWeekSheet>();
     for (const week of [...weeks, ...rangeLoadedWeeks]) {
@@ -404,20 +367,14 @@ export function CashflowProjectSheet({
   }, [projectId, rangeLoadedWeeks, weeks]);
   const annualWeeks = useMemo<MonthMondayWeek[]>(() => {
     const byKey = new Map<string, MonthMondayWeek>();
-    const baseWeeks = sheetRangeWeeks.length > 0 ? sheetRangeWeeks : yearWeeks;
-    const rangeStart = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.startWeek) : null;
-    const rangeEnd = cashflowSheetRange ? parseCashflowSheetWeekLabel(cashflowSheetRange.endWeek) : null;
-    for (const week of baseWeeks) {
+    for (const week of yearWeeks) {
       byKey.set(`${week.yearMonth}:${week.weekNo}`, hydrateWeekDates(week));
     }
     for (const week of allProjectCashflowWeeks) {
       if (week.projectId !== projectId) continue;
       const weekNo = Number(week.weekNo);
       if (!Number.isFinite(weekNo)) continue;
-      const parsedWeek = parseCashflowSheetWeekLabel(formatSheetWeekLabel(week.yearMonth, weekNo));
-      if (rangeStart && rangeEnd) {
-        if (!parsedWeek || parsedWeek.sortKey < rangeStart.sortKey || parsedWeek.sortKey > rangeEnd.sortKey) continue;
-      } else if (!week.yearMonth?.startsWith(`${selectedYear}-`)) {
+      if (!week.yearMonth?.startsWith(`${selectedYear}-`)) {
         continue;
       }
       const key = `${week.yearMonth}:${weekNo}`;
@@ -432,7 +389,7 @@ export function CashflowProjectSheet({
     }
     return Array.from(byKey.values())
       .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth) || a.weekNo - b.weekNo);
-  }, [allProjectCashflowWeeks, cashflowSheetRange, projectId, selectedYear, sheetRangeWeeks, yearWeeks]);
+  }, [allProjectCashflowWeeks, projectId, selectedYear, yearWeeks]);
   const [showEmptyCashflowRows, setShowEmptyCashflowRows] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
@@ -658,9 +615,8 @@ export function CashflowProjectSheet({
       .then((snap) => {
         if (cancelled) return;
         const config = snap.exists()
-          ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; activeWeeks?: unknown; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
+          ? (snap.data() as { cashflowSheetLab?: { value?: string; sheetName?: string; spreadsheetId?: string; spreadsheetTitle?: string; startWeek?: string; endWeek?: string; lastAppliedAt?: string; lastAppliedBy?: { uid?: string; email?: string; role?: string } | null; lastAppliedLineCount?: number; lastProjectionLineCount?: number; lastActualLineCount?: number } }).cashflowSheetLab
           : null;
-        const activeWeeks = normalizeActiveSheetWeeks(config?.activeWeeks);
         recordDevtoolsLog({
           kind: 'cashflow_transaction',
           phase: 'info',
@@ -678,7 +634,6 @@ export function CashflowProjectSheet({
             sheetName: config?.sheetName || null,
             startWeek: config?.startWeek || null,
             endWeek: config?.endWeek || null,
-            activeWeekCount: activeWeeks.length,
             updatedAt: (config as { updatedAt?: string } | null)?.updatedAt || null,
             lastAppliedAt: config?.lastAppliedAt || null,
           },
@@ -698,17 +653,13 @@ export function CashflowProjectSheet({
         } : null);
         const start = parseCashflowSheetWeekLabel(config?.startWeek);
         const end = parseCashflowSheetWeekLabel(config?.endWeek);
-        if (!start || !end || start.sortKey > end.sortKey || activeWeeks.length === 0) {
+        if (!start || !end || start.sortKey > end.sortKey) {
           setCashflowSheetRange(null);
           return;
         }
         setCashflowSheetRange({
           startWeek: config?.startWeek || '',
           endWeek: config?.endWeek || '',
-          startYearMonth: start.yearMonth,
-          endYearMonth: end.yearMonth,
-          label: `${config?.startWeek} ~ ${config?.endWeek}`,
-          activeWeeks,
         });
       })
       .catch(() => {
@@ -867,8 +818,8 @@ export function CashflowProjectSheet({
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const q = query(
       base,
-      where('yearMonth', '>=', cashflowSheetRange.startYearMonth),
-      where('yearMonth', '<=', cashflowSheetRange.endYearMonth),
+      where('yearMonth', '>=', `${selectedYear}-01`),
+      where('yearMonth', '<=', `${selectedYear}-12`),
       limit(5000),
     );
     const snap = await getDocs(q);
@@ -877,7 +828,7 @@ export function CashflowProjectSheet({
         .map((d) => d.data() as CashflowWeekSheet)
         .filter((week) => week.projectId === projectId),
     );
-  }, [cashflowSheetRange, db, orgId, projectId]);
+  }, [cashflowSheetRange, db, orgId, projectId, selectedYear]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1456,7 +1407,15 @@ export function CashflowProjectSheet({
     };
   }, [annualWeeks, cashflowSnapshot, monthCloseResult?.dashboard?.comparison, yearMonth]);
 
-  const cashflowTotalPeriodLabel = cashflowSheetRange?.label || `${selectedYear}년`;
+  const cashflowTotalPeriodLabel = `${selectedYear}년`;
+  const multiYearCashflowTotals = useMemo(() => {
+    const totalsByYear = new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
+      .map((total) => [total.year, total]));
+    return [selectedYear - 1, selectedYear, selectedYear + 1].map((year) => ({
+      year,
+      total: totalsByYear.get(year),
+    }));
+  }, [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals, selectedYear]);
   const sheetRangeLabel = cashflowSheetConfig
     ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
     : '연결된 Google Sheet가 없습니다.';
@@ -1882,6 +1841,33 @@ export function CashflowProjectSheet({
                 </Button>
               ) : null}
             </div>
+          </div>
+          <div data-cashflow-block="multi-year-view" className="grid gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-3">
+            {multiYearCashflowTotals.map(({ year, total }) => {
+              const projection = total?.projection;
+              const actual = total?.actual;
+              const hasValues = Boolean((projection?.valueCellCount || 0) + (actual?.valueCellCount || 0));
+              const sourceLabel = (source?: 'WEEKLY' | 'ANNUAL' | 'NONE') => (
+                source === 'WEEKLY' ? '주차값 집계' : source === 'ANNUAL' ? '연간 합산값' : '미입력'
+              );
+              return (
+                <div key={year} className={`rounded-xl border px-3 py-2 shadow-sm ${year === selectedYear ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-900">{year}년</span>
+                    <span className="text-[9px] font-semibold text-slate-500">{sourceLabel(projection?.source)}</span>
+                  </div>
+                  {hasValues ? (
+                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] text-slate-600">
+                      <span>Projection 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(projection?.net || 0)}</span>
+                      <span>Actual 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(actual?.net || 0)}</span>
+                      <span>입금 / 출금</span><span className="text-right tabular-nums">{fmt((projection?.totalIn || 0) + (actual?.totalIn || 0))} / {fmt((projection?.totalOut || 0) + (actual?.totalOut || 0))}</span>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[9px] leading-4 text-slate-500">시트에 입력된 값이 없습니다. 오류 없이 다음 불러오기 때 반영됩니다.</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {financialYearChecks?.years.length ? (
             <div className="grid gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 sm:grid-cols-2 xl:grid-cols-4">
