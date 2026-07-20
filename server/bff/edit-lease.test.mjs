@@ -88,6 +88,9 @@ function createHarness({ createLeaseId } = {}) {
     'orgs/tenant-a/members/actor-admin': {
       uid: 'actor-admin', role: 'admin', status: 'ACTIVE', projectIds: [],
     },
+    'orgs/tenant-a/members/actor-viewer': {
+      uid: 'actor-viewer', role: 'viewer', status: 'ACTIVE', projectIds: ['project-a'],
+    },
     'orgs/tenant-a/projects/project-a': { id: 'project-a' },
   });
   const auditChainService = createAuditChainService(db, { now: () => new Date(serverNow).toISOString() });
@@ -136,15 +139,35 @@ async function expectHttpError(promise, statusCode, code) {
 }
 
 describe('edit lease service', () => {
-  it('allows only the project PM to acquire a cashflow edit session', async () => {
+  it('allows active project writers to acquire a cashflow edit session regardless of role', async () => {
     const { service, base } = createHarness();
-    await expectHttpError(service.acquire({
+    const adminLease = await command(service.acquire({
       ...base,
       resourceType: 'cashflow',
       actorId: 'actor-admin',
       sessionId: 'admin-session',
       idempotencyKey: 'admin-cashflow-acquire',
-    }), 403, 'forbidden');
+    }));
+    expect(adminLease).toMatchObject({ state: 'ACTIVE', canEdit: true });
+
+    await command(service.release({
+      ...base,
+      resourceType: 'cashflow',
+      actorId: 'actor-admin',
+      sessionId: 'admin-session',
+      leaseId: adminLease.leaseId,
+      fence: adminLease.fence,
+      idempotencyKey: 'admin-cashflow-release',
+    }));
+
+    const viewerLease = await command(service.acquire({
+      ...base,
+      resourceType: 'cashflow',
+      actorId: 'actor-viewer',
+      sessionId: 'viewer-session',
+      idempotencyKey: 'viewer-cashflow-acquire',
+    }));
+    expect(viewerLease).toMatchObject({ state: 'ACTIVE', canEdit: true });
   });
 
   it('reuses one acquire ID when Firestore retries the transaction', async () => {

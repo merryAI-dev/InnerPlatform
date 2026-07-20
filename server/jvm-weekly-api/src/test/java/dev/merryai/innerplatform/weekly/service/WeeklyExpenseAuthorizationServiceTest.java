@@ -56,6 +56,28 @@ class WeeklyExpenseAuthorizationServiceTest {
     }
 
     @Test
+    void assignedViewerCanApplyCashflowSheetWithoutReceivingOtherCashflowWritePermissions() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> "project-allowed".equals(projectId),
+            new SplitProjectExistenceRepository(true, true),
+            "strict"
+        );
+        TrustedActorContext viewer = new TrustedActorContext("tenant-a", "viewer-1", "viewer@example.com", "viewer");
+
+        assertThatCode(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            viewer,
+            "project-allowed"
+        )).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.UPSERT_PROJECTION_COMMAND,
+            viewer,
+            "project-allowed"
+        )).isInstanceOf(WeeklyExpenseForbiddenException.class);
+    }
+
+    @Test
     void tenantWideRolesStillRespectCommandRoleGate() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> false,
