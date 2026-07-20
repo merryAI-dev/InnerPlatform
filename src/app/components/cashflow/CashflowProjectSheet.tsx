@@ -1787,13 +1787,14 @@ export function CashflowProjectSheet({
                 <button type="button" key={year} data-cashflow-year-view={year} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-xl border px-3 py-2 text-left shadow-sm transition-colors ${year === selectedYear ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-slate-900">{year}년</span>
-                    <span className="text-[9px] font-semibold text-slate-500">{annualSourceLabel(projection)} · 보기</span>
+                    <span className="text-[9px] font-semibold text-slate-500">{annualSourceLabel(projection)} · 시트 기준 · 보기</span>
                   </div>
                   {hasValues ? (
                     <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] text-slate-600">
                       <span>Projection 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(projection?.net || 0)}</span>
                       <span>Actual 잔액</span><span className="text-right font-semibold tabular-nums text-slate-900">{fmt(actual?.net || 0)}</span>
-                      <span>입금 / 출금</span><span className="text-right tabular-nums">{fmt((projection?.totalIn || 0) + (actual?.totalIn || 0))} / {fmt((projection?.totalOut || 0) + (actual?.totalOut || 0))}</span>
+                      <span>Projection 입금 / 출금</span><span className="text-right tabular-nums">{fmt(projection?.totalIn || 0)} / {fmt(projection?.totalOut || 0)}</span>
+                      <span>Actual 입금 / 출금</span><span className="text-right tabular-nums">{fmt(actual?.totalIn || 0)} / {fmt(actual?.totalOut || 0)}</span>
                     </div>
                   ) : (
                     <p className="mt-2 text-[9px] leading-4 text-slate-500">시트에 입력된 값이 없습니다. 오류 없이 다음 불러오기 때 반영됩니다.</p>
