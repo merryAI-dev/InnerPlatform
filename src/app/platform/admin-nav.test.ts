@@ -56,6 +56,15 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('finance', '/projects/migration-audit')).toBe(false);
   });
 
+  it('shows management-planning project code issuance only to finance and admin', () => {
+    expect(canShowAdminNavItem('admin', '/management-planning/project-codes')).toBe(true);
+    expect(canShowAdminNavItem('finance', '/management-planning/project-codes')).toBe(true);
+    expect(canShowAdminNavItem('pm', '/management-planning/project-codes')).toBe(false);
+    expect(canShowAdminNavItem('viewer', '/management-planning/project-codes')).toBe(false);
+    expect(canAccessAdminPath('finance', '/management-planning/project-codes')).toBe(true);
+    expect(canAccessAdminPath('pm', '/management-planning/project-codes')).toBe(false);
+  });
+
   it('exposes user management only to admins in the visible nav', () => {
     expect(canShowAdminNavItem('admin', '/users')).toBe(true);
     expect(canShowAdminNavItem('finance', '/users')).toBe(false);

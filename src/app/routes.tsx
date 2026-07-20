@@ -47,6 +47,7 @@ const BoardFeedPage = lazyRoute(() => import('./components/board/BoardFeedPage')
 const BoardPostPage = lazyRoute(() => import('./components/board/BoardPostPage'), 'BoardPostPage');
 const ProjectListPage = lazyRoute(() => import('./components/projects/ProjectListPage'), 'ProjectListPage');
 const ProjectMigrationAuditPage = lazyRoute(() => import('./components/projects/ProjectMigrationAuditPage'), 'ProjectMigrationAuditPage');
+const ProjectCodeIssuancePage = lazyRoute(() => import('./components/projects/ProjectCodeIssuancePage'), 'ProjectCodeIssuancePage');
 const ProjectDetailPage = lazyRoute(() => import('./components/projects/ProjectDetailPage'), 'ProjectDetailPage');
 const ProjectWizardPage = lazyRoute(() => import('./components/projects/ProjectWizardPage'), 'ProjectWizardPage');
 const ProjectRegisterRedirectPage = lazyRoute(() => import('./components/projects/ProjectRegisterRedirectPage'), 'ProjectRegisterRedirectPage');
@@ -145,6 +146,7 @@ export const router = createBrowserRouter([
       },
       { path: 'projects', element: <S C={ProjectListPage} /> },
       { path: 'projects/migration-audit', element: <S C={ProjectMigrationAuditPage} /> },
+      { path: 'management-planning/project-codes', element: <S C={ProjectCodeIssuancePage} /> },
       { path: 'projects/new', element: <S C={ProjectRegisterRedirectPage} /> },
       { path: 'projects/:projectId', element: <S C={ProjectDetailPage} /> },
       { path: 'projects/:projectId/edit', element: <S C={ProjectWizardPage} /> },

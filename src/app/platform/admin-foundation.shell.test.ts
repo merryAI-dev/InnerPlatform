@@ -18,6 +18,8 @@ describe('admin monitoring foundation shell contract', () => {
     expect(navConfigSource).toContain("to: '/dashboard'");
     expect(navConfigSource).toContain("label: '캐시플로 모니터링'");
     expect(navConfigSource).toContain("label: '프로젝트 등록/승인'");
+    expect(navConfigSource).toContain("to: '/management-planning/project-codes'");
+    expect(navConfigSource).toContain("label: '프로젝트 코드 부여'");
     expect(navConfigSource).toContain("to: '/users'");
     expect(navConfigSource).toContain("label: '권한 관리'");
     expect(navConfigSource).not.toContain("to: '/settings?tab=org'");
@@ -39,5 +41,6 @@ describe('admin monitoring foundation shell contract', () => {
     expect(routesSource).toContain("{ path: 'cashflow/export', element: <S C={CashflowExportPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/weekly', element: <S C={CashflowWeeklyPage} /> }");
     expect(routesSource).toContain("{ path: 'cashflow/analytics', element: <S C={CashflowAnalyticsPage} /> }");
+    expect(routesSource).toContain("{ path: 'management-planning/project-codes', element: <S C={ProjectCodeIssuancePage} /> }");
   });
 });

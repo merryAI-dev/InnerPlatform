@@ -618,6 +618,13 @@ export interface Project {
   executiveReviewedByName?: string;
   executiveReviewComment?: string | null;
   executiveReviewHistory?: ProjectExecutiveReviewHistoryEntry[];
+  managementPlanningReviewStatus?: ProjectManagementPlanningReviewStatus;
+  managementPlanningReviewedAt?: string | null;
+  managementPlanningReviewedById?: string | null;
+  managementPlanningReviewedByName?: string | null;
+  managementPlanningReviewComment?: string | null;
+  managementPlanningReviewHistory?: ProjectManagementPlanningReviewHistoryEntry[];
+  projectCodeKey?: string | null;
   trashedAt?: string | null;
   trashedById?: string | null;
   trashedByEmail?: string | null;
@@ -730,6 +737,18 @@ export interface ProjectExecutiveReviewHistoryEntry {
   reviewComment?: string;
   projectCode?: string;
   changes?: ProjectReviewFieldChange[];
+}
+
+export type ProjectManagementPlanningReviewStatus = 'PENDING' | 'AGREED' | 'REVISION_REJECTED';
+
+export interface ProjectManagementPlanningReviewHistoryEntry {
+  status: ProjectManagementPlanningReviewStatus;
+  previousStatus?: ProjectManagementPlanningReviewStatus | null;
+  reviewedAt: string;
+  reviewedById: string;
+  reviewedByName: string;
+  reviewComment?: string | null;
+  projectCode?: string | null;
 }
 
 export interface FileAttachment {

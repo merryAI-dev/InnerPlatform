@@ -226,11 +226,13 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.audit.reviewComment).toBe('예산 근거 보완 필요');
     expect(dossier.audit.history).toHaveLength(2);
     expect(dossier.audit.history[0]).toMatchObject({
+      status: 'REVISION_REJECTED',
       statusLabel: '수정 요청 후 반려',
       reviewedByName: '임원B',
       reviewComment: '예산 근거 보완 필요',
     });
     expect(dossier.audit.history[1]).toMatchObject({
+      status: 'APPROVED',
       statusLabel: '승인 완료',
       reviewedByName: '임원A',
       reviewComment: '초안 승인',

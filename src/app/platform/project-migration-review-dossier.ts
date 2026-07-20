@@ -11,6 +11,7 @@ import {
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_CURRENCY_LABELS,
   PROJECT_TYPE_LABELS,
+  type ProjectExecutiveReviewStatus,
   type ProjectExecutiveReviewHistoryEntry,
   SETTLEMENT_TYPE_LABELS,
   type Project,
@@ -72,6 +73,7 @@ export interface MigrationReviewDossier {
     reviewedAt: string;
     reviewComment: string;
     history: Array<{
+      status: ProjectExecutiveReviewStatus;
       statusLabel: string;
       reviewedByName: string;
       reviewedAt: string;
@@ -166,6 +168,7 @@ function buildAuditHistory(project: Project, request: ProjectRequest | null) {
     return [...history]
       .sort((left, right) => String(right.reviewedAt || '').localeCompare(String(left.reviewedAt || '')))
       .map((entry: ProjectExecutiveReviewHistoryEntry) => ({
+        status: entry.status,
         statusLabel: getMigrationAuditStatusLabel(entry.status),
         reviewedByName: readable(entry.reviewedByName),
         reviewedAt: formatDate(entry.reviewedAt),
@@ -182,8 +185,10 @@ function buildAuditHistory(project: Project, request: ProjectRequest | null) {
     return [];
   }
 
+  const status = (fallbackStatus || 'PENDING') as ProjectExecutiveReviewStatus;
   return [{
-    statusLabel: getMigrationAuditStatusLabel((fallbackStatus || 'PENDING') as any),
+    status,
+    statusLabel: getMigrationAuditStatusLabel(status),
     reviewedByName: readable(fallbackReviewedByName),
     reviewedAt: formatDate(fallbackReviewedAt),
     reviewComment: readable(fallbackReviewComment),
@@ -220,15 +225,28 @@ function preferRequestPayloadForChange<T>(
     : (projectValue ?? payloadValue);
 }
 
+/**
+ * A pending change request is the source of truth while it is being reviewed;
+ * otherwise keep the registered project's contract as the primary preview.
+ */
+export function resolveMigrationReviewContractDocument(
+  project: Project,
+  request: ProjectRequest | null,
+) {
+  const payload = resolveProjectRequestPayload(request);
+  const useRequestDocument = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
+  return useRequestDocument
+    ? (payload?.contractDocument || project.contractDocument || null)
+    : (project.contractDocument || payload?.contractDocument || null);
+}
+
 export function buildMigrationReviewDossier(
   project: Project,
   request: ProjectRequest | null,
 ): MigrationReviewDossier {
   const payload = resolveProjectRequestPayload(request);
   const usePayloadAsCurrent = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
-  const contractDocument = usePayloadAsCurrent
-    ? (payload?.contractDocument || project.contractDocument || null)
-    : (project.contractDocument || payload?.contractDocument || null);
+  const contractDocument = resolveMigrationReviewContractDocument(project, request);
   const contractAnalysis = usePayloadAsCurrent
     ? (payload?.contractAnalysis || project.contractAnalysis || null)
     : (project.contractAnalysis || payload?.contractAnalysis || null);

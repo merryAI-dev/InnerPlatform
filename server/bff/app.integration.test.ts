@@ -205,18 +205,27 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     }));
   });
 
-  it('records planning agreement before the designated approver rejects, and posts Slack', async () => {
-    const projectRegistrationSlackService = {
-      enabled: true,
-      notifyMessage: vi.fn(async () => {}),
-    };
-    const reviewApi = request(createBffApp({
-      projectId,
-      workerSecret,
-      db,
-      projectRegistrationSlackService,
-    }));
+  it('requires organization-head approval before management planning can agree', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_management_gate_001`).set({
+      id: 'p_management_gate_001',
+      tenantId,
+      name: '경영기획실 승인 게이트',
+      executiveReviewStatus: 'PENDING',
+      executiveReviewHistory: [],
+    });
 
+    const response = await reviewApi
+      .post('/api/v1/projects/p_management_gate_001/management-planning-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-management-gate-001' })
+      .send({ reviewStatus: 'AGREED', projectCode: 'PRJ-2026-100' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('executive_review_required');
+  });
+
+  it('lets management planning issue a code only after organization-head approval', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
     await db.doc(`orgs/${tenantId}/projects/p_exec_review_001`).set({
       id: 'p_exec_review_001',
       tenantId,
@@ -225,97 +234,54 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       executiveReviewStatus: 'PENDING',
       executiveApproverId: actorId,
       executiveApproverName: '조직장A',
-      executiveReviewHistory: [
-        {
-          status: 'PENDING',
-          previousStatus: null,
-          reviewedAt: '2026-04-20T08:00:00.000Z',
-          reviewedById: 'u-old',
-          reviewedByName: '변민욱',
-          reviewComment: 'PM 신규 등록',
-        },
-      ],
+      executiveReviewHistory: [{
+        status: 'PENDING',
+        previousStatus: null,
+        reviewedAt: '2026-04-20T08:00:00.000Z',
+        reviewedById: 'u-old',
+        reviewedByName: '변민욱',
+        reviewComment: 'PM 신규 등록',
+      }],
       createdAt: '2026-04-20T08:00:00.000Z',
       updatedAt: '2026-04-20T09:00:00.000Z',
     }, { merge: true });
-
     await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_001`).set({
       id: 'pr_exec_review_001',
       tenantId,
-      status: 'APPROVED',
+      status: 'PENDING',
       approvedProjectId: 'p_exec_review_001',
-      requestedByName: '변민욱',
-      requestedByEmail: 'boram@example.com',
-      payload: {
-        name: '네팔 귀환노동자 재정착 사업',
-        officialContractName: '네팔 귀환노동자 재정착 사업',
-        clientOrg: 'KOICA',
-        department: 'CIC1',
-        managerName: '변민욱',
-        executiveApproverId: actorId,
-        teamName: 'AXR팀',
-      },
-      createdAt: '2026-04-20T08:00:00.000Z',
-      updatedAt: '2026-04-20T09:00:00.000Z',
+      payload: { executiveApproverId: actorId },
     }, { merge: true });
 
-    const agreement = await reviewApi
+    const approved = await reviewApi
       .post('/api/v1/projects/p_exec_review_001/executive-review')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-001' })
-      .send({
-        requestId: 'pr_exec_review_001',
-        reviewStatus: 'PLANNING_AGREED',
-        projectCode: 'PRJ-2026-001',
-        reviewerName: '무시되는 요청 본문 이름',
-      });
+      .send({ requestId: 'pr_exec_review_001', reviewStatus: 'APPROVED' });
+    expect(approved.status).toBe(200);
+
+    const agreement = await reviewApi
+      .post('/api/v1/projects/p_exec_review_001/management-planning-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-management-review-001' })
+      .send({ requestId: 'pr_exec_review_001', reviewStatus: 'AGREED', projectCode: ' prj-2026-001 ' });
     expect(agreement.status).toBe(200);
-    expect(agreement.body.reviewStatus).toBe('PLANNING_AGREED');
+    expect(agreement.body.reviewStatus).toBe('AGREED');
 
-    const response = await reviewApi
-      .post('/api/v1/projects/p_exec_review_001/executive-review')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-executive-review-001-reject' })
-      .send({
-        requestId: 'pr_exec_review_001',
-        reviewStatus: 'REVISION_REJECTED',
-        reviewComment: '예산 산출 근거 보완 필요',
-        reviewerName: '무시되는 요청 본문 이름',
-      });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      ok: true,
+    const project = (await db.doc(`orgs/${tenantId}/projects/p_exec_review_001`).get()).data();
+    expect(project).toMatchObject({
+      executiveReviewStatus: 'APPROVED',
+      projectCode: 'PRJ-2026-001',
+      projectCodeKey: 'PRJ-2026-001',
+      managementPlanningReviewStatus: 'AGREED',
+    });
+    expect(project?.executiveReviewHistory).toHaveLength(2);
+    expect(project?.managementPlanningReviewHistory).toEqual([expect.objectContaining({
+      status: 'AGREED',
+      previousStatus: 'PENDING',
+      projectCode: 'PRJ-2026-001',
+    })]);
+    expect((await db.doc(`orgs/${tenantId}/project_code_registry/PRJ-2026-001`).get()).data()).toMatchObject({
       projectId: 'p_exec_review_001',
-      requestId: 'pr_exec_review_001',
-      reviewStatus: 'REVISION_REJECTED',
-      slackDelivered: true,
     });
-
-    const projectSnap = await db.doc(`orgs/${tenantId}/projects/p_exec_review_001`).get();
-    expect(projectSnap.exists).toBe(true);
-    expect(projectSnap.data()).toMatchObject({
-      executiveReviewStatus: 'REVISION_REJECTED',
-      executiveReviewedByName: actorId,
-      executiveReviewComment: '예산 산출 근거 보완 필요',
-    });
-    expect(projectSnap.data()?.executiveReviewHistory).toHaveLength(3);
-    expect(projectSnap.data()?.executiveReviewHistory?.[2]).toMatchObject({
-      status: 'REVISION_REJECTED',
-      previousStatus: 'PLANNING_AGREED',
-      reviewedByName: actorId,
-      reviewComment: '예산 산출 근거 보완 필요',
-    });
-
-    const requestSnap = await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_001`).get();
-    expect(requestSnap.exists).toBe(true);
-    expect(requestSnap.data()).toMatchObject({
-      status: 'REJECTED',
-      reviewOutcome: 'REVISION_REJECTED',
-      reviewedByName: actorId,
-      rejectedReason: '예산 산출 근거 보완 필요',
-    });
-    expect(projectRegistrationSlackService.notifyMessage).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining('수정 요청 후 반려'),
-    }));
   });
 
   it('requires a rejection reason for executive rejection and discard', async () => {
@@ -347,65 +313,134 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(response.body.message).toMatch(/reviewComment/i);
   });
 
-  it('requires a code for planning agreement and locks it for final approval', async () => {
+  it('rejects new planning-before-exec but lets organization heads finalise existing planning agreements', async () => {
     const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
-    await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).set({
-      id: 'p_project_code_001', tenantId, name: '코드 부여 테스트', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+    await db.doc(`orgs/${tenantId}/projects/p_new_planning_001`).set({
+      id: 'p_new_planning_001', tenantId, name: '신규 역순 차단', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
     });
+    const newAgreement = await reviewApi
+      .post('/api/v1/projects/p_new_planning_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-new-planning-before-exec' })
+      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-legacy' });
+    expect(newAgreement.status).toBe(409);
+    expect(newAgreement.body.error).toBe('legacy_planning_agreement_read_only');
 
-    const missingCode = await reviewApi
-      .post('/api/v1/projects/p_project_code_001/executive-review')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-missing' })
-      .send({ reviewStatus: 'PLANNING_AGREED', reviewerName: '경영기획실' });
-    expect(missingCode.status).toBe(422);
-
-    const agreed = await reviewApi
-      .post('/api/v1/projects/p_project_code_001/executive-review')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-approved' })
-      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-001', reviewerName: '경영기획실' });
-    expect(agreed.status).toBe(200);
-
+    await db.doc(`orgs/${tenantId}/projects/p_legacy_planning_001`).set({
+      id: 'p_legacy_planning_001',
+      tenantId,
+      name: '기존 경영기획실 합의',
+      executiveApproverId: actorId,
+      executiveReviewStatus: 'PLANNING_AGREED',
+      executiveReviewHistory: [{ status: 'PLANNING_AGREED', projectCode: 'PRJ-2026-LEGACY' }],
+      projectCode: 'PRJ-2026-LEGACY',
+    });
     const approved = await reviewApi
-      .post('/api/v1/projects/p_project_code_001/executive-review')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-final-approved' })
+      .post('/api/v1/projects/p_legacy_planning_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-legacy-planning-final-approved' })
       .send({ reviewStatus: 'APPROVED' });
     expect(approved.status).toBe(200);
-
-    expect((await db.doc(`orgs/${tenantId}/projects/p_project_code_001`).get()).data()).toMatchObject({
-      executiveReviewStatus: 'APPROVED', projectCode: 'PRJ-2026-001',
-      executiveReviewHistory: expect.arrayContaining([expect.objectContaining({ projectCode: 'PRJ-2026-001' })]),
+    expect((await db.doc(`orgs/${tenantId}/projects/p_legacy_planning_001`).get()).data()).toMatchObject({
+      executiveReviewStatus: 'APPROVED',
+      projectCode: 'PRJ-2026-LEGACY',
     });
-    expect((await db.doc(`orgs/${tenantId}/project_code_registry/PRJ-2026-001`).get()).data()).toMatchObject({
-      projectId: 'p_project_code_001',
-    });
+    const alreadyAgreed = await reviewApi
+      .post('/api/v1/projects/p_legacy_planning_001/management-planning-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-legacy-planning-management-repeat' })
+      .send({ reviewStatus: 'AGREED', projectCode: 'PRJ-2026-LEGACY' });
+    expect(alreadyAgreed.status).toBe(409);
+    expect(alreadyAgreed.body.error).toBe('legacy_planning_agreement_already_finalized');
   });
 
-  it('rejects duplicate codes and final decisions by someone other than the designated approver', async () => {
+  it('rejects duplicate project codes from management planning', async () => {
     const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
     await db.doc(`orgs/${tenantId}/projects/p_code_owner_001`).set({
-      id: 'p_code_owner_001', tenantId, name: '코드 소유 프로젝트', executiveApproverId: 'u-other', executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
+      id: 'p_code_owner_001', tenantId, name: '코드 소유 프로젝트', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
     });
     await db.doc(`orgs/${tenantId}/projects/p_code_owner_002`).set({
       id: 'p_code_owner_002', tenantId, name: '코드 중복 프로젝트', executiveApproverId: actorId, executiveReviewStatus: 'PENDING', executiveReviewHistory: [],
     });
 
-    const agreed = await reviewApi
+    const firstApproval = await reviewApi
       .post('/api/v1/projects/p_code_owner_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-exec-001' })
+      .send({ reviewStatus: 'APPROVED' });
+    expect(firstApproval.status).toBe(200);
+    const secondApproval = await reviewApi
+      .post('/api/v1/projects/p_code_owner_002/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-exec-002' })
+      .send({ reviewStatus: 'APPROVED' });
+    expect(secondApproval.status).toBe(200);
+
+    const agreed = await reviewApi
+      .post('/api/v1/projects/p_code_owner_001/management-planning-review')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-agree' })
-      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-009' });
+      .send({ reviewStatus: 'AGREED', projectCode: 'PRJ-2026-009' });
     expect(agreed.status).toBe(200);
 
-    const wrongApprover = await reviewApi
-      .post('/api/v1/projects/p_code_owner_001/executive-review')
-      .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-owner-final' })
-      .send({ reviewStatus: 'APPROVED' });
-    expect(wrongApprover.status).toBe(403);
-
     const duplicate = await reviewApi
-      .post('/api/v1/projects/p_code_owner_002/executive-review')
+      .post('/api/v1/projects/p_code_owner_002/management-planning-review')
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-project-code-duplicate' })
-      .send({ reviewStatus: 'PLANNING_AGREED', projectCode: 'PRJ-2026-009' });
+      .send({ reviewStatus: 'AGREED', projectCode: 'PRJ-2026-009' });
     expect(duplicate.status).toBe(409);
+  });
+
+  it('requires the designated organization head for new executive decisions', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_designated_exec_001`).set({
+      id: 'p_designated_exec_001',
+      tenantId,
+      name: '조직장 지정 검증',
+      executiveApproverId: 'u-other',
+      executiveReviewStatus: 'PENDING',
+      executiveReviewHistory: [],
+    });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_designated_exec_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-designated-exec-001' })
+      .send({ reviewStatus: 'APPROVED' });
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('designated_approver_required');
+  });
+
+  it('uses the resubmitted change request approver instead of a stale project approver', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    await db.doc(`orgs/${tenantId}/projects/p_reassigned_exec_001`).set({
+      id: 'p_reassigned_exec_001',
+      tenantId,
+      name: '조직장 재지정',
+      version: 2,
+      executiveApproverId: 'u-previous-head',
+      executiveApproverName: '이전 조직장',
+      executiveReviewStatus: 'PENDING',
+      executiveReviewHistory: [],
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/pr_reassigned_exec_001`).set({
+      id: 'pr_reassigned_exec_001',
+      tenantId,
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      targetProjectId: 'p_reassigned_exec_001',
+      approvedProjectId: 'p_reassigned_exec_001',
+      baseProjectVersion: 1,
+      targetProjectVersion: 2,
+      proposedSnapshot: {
+        executiveApproverId: actorId,
+        executiveApproverName: '새 조직장',
+      },
+    });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_reassigned_exec_001/executive-review')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-reassigned-exec-001' })
+      .send({ requestId: 'pr_reassigned_exec_001', reviewStatus: 'APPROVED' });
+
+    expect(response.status).toBe(200);
+    expect((await db.doc(`orgs/${tenantId}/projects/p_reassigned_exec_001`).get()).data()).toMatchObject({
+      executiveApproverId: actorId,
+      executiveApproverName: '새 조직장',
+      executiveReviewStatus: 'APPROVED',
+    });
   });
 
   it('atomically trashes a project with its duplicate-discard review', async () => {
@@ -560,6 +595,66 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(requestSnap.data()?.proposedSnapshot?.contractDocument).toMatchObject({
       name: '보완_계약서.pdf',
       path: 'orgs/mysc/project-request-documents/u-new/contract.pdf',
+    });
+  });
+
+  it('resubmits a management-planning rejection without reopening organization-head review', async () => {
+    const reviewApi = request(createBffApp({ projectId, workerSecret, db }));
+    const executiveHistory = [{
+      status: 'APPROVED',
+      previousStatus: 'PENDING',
+      reviewedAt: '2026-07-12T00:00:00.000Z',
+      reviewedById: actorId,
+      reviewedByName: '조직장A',
+      reviewComment: null,
+    }];
+    const managementHistory = [{
+      status: 'REVISION_REJECTED',
+      previousStatus: 'PENDING',
+      reviewedAt: '2026-07-12T01:00:00.000Z',
+      reviewedById: 'finance-a',
+      reviewedByName: '경영기획실A',
+      reviewComment: '프로젝트 코드 기준을 보완해 주세요',
+    }];
+    await db.doc(`orgs/${tenantId}/projects/p_management_resubmit_001`).set({
+      id: 'p_management_resubmit_001',
+      tenantId,
+      name: '경영기획실 반려 재제출',
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewHistory: executiveHistory,
+      managementPlanningReviewStatus: 'REVISION_REJECTED',
+      managementPlanningReviewedAt: '2026-07-12T01:00:00.000Z',
+      managementPlanningReviewedById: 'finance-a',
+      managementPlanningReviewedByName: '경영기획실A',
+      managementPlanningReviewComment: '프로젝트 코드 기준을 보완해 주세요',
+      managementPlanningReviewHistory: managementHistory,
+    });
+    await db.doc(`orgs/${tenantId}/project_requests/pr_management_resubmit_001`).set({
+      id: 'pr_management_resubmit_001',
+      tenantId,
+      status: 'PENDING',
+      reviewOutcome: 'REVISION_REJECTED',
+      approvedProjectId: 'p_management_resubmit_001',
+      rejectedReason: '프로젝트 코드 기준을 보완해 주세요',
+      payload: { name: '경영기획실 반려 재제출' },
+    });
+
+    const response = await reviewApi
+      .post('/api/v1/projects/p_management_resubmit_001/executive-review/resubmit')
+      .set({ ...defaultHeaders, 'idempotency-key': 'idem-management-resubmit-001' })
+      .send({ requestId: 'pr_management_resubmit_001', reviewComment: '보완 후 재제출' });
+    expect(response.status).toBe(200);
+
+    const project = (await db.doc(`orgs/${tenantId}/projects/p_management_resubmit_001`).get()).data();
+    expect(project?.executiveReviewStatus).toBe('APPROVED');
+    expect(project?.executiveReviewHistory).toEqual(executiveHistory);
+    expect(project).toMatchObject({
+      managementPlanningReviewStatus: 'PENDING',
+      managementPlanningReviewedAt: null,
+      managementPlanningReviewedById: null,
+      managementPlanningReviewedByName: null,
+      managementPlanningReviewComment: null,
+      managementPlanningReviewHistory: managementHistory,
     });
   });
 

@@ -6,6 +6,7 @@ import {
   Clock3,
   Loader2,
   LockKeyhole,
+  MessageSquareText,
   Pencil,
   Save,
   SendHorizontal,
@@ -37,6 +38,11 @@ import {
   resolveProjectRequestKind,
   resolveProjectRequestPayload,
 } from '../../platform/project-change-request';
+import {
+  buildPortalProjectReviewFeedback,
+  hasManagementPlanningReview,
+} from '../../platform/portal-project-review-feedback';
+import { getManagementPlanningReview } from '../../platform/project-management-planning-review';
 import type { ProjectRequestDocumentKind } from '../../platform/project-contract-upload';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
@@ -63,7 +69,7 @@ function resolveExecutiveBanner(project: Project) {
   const reason = project.executiveReviewComment || '';
   if (status === 'APPROVED') return {
     tone: 'success', title: '승인 완료',
-    description: 'CIC 대표 검토가 승인된 프로젝트입니다. PM이 수정 저장하면 다시 검토 대기로 전환됩니다.',
+    description: '조직장 검토가 승인되었습니다. 경영기획실 합의가 완료될 때까지 조직장 승인 이력은 유지됩니다.',
   };
   if (status === 'REVISION_REJECTED') return {
     tone: 'danger', title: '수정 요청 후 반려',
@@ -84,6 +90,27 @@ function bannerClassName(tone: string) {
   if (tone === 'neutral') return 'border-slate-200 bg-slate-50 text-slate-900';
   if (tone === 'warning') return 'border-slate-200 bg-white text-red-700';
   return 'border-slate-200 bg-white text-slate-900';
+}
+
+function resolveManagementPlanningBanner(
+  status: ReturnType<typeof getManagementPlanningReview>['status'],
+  comment: string,
+) {
+  if (status === 'AGREED') return {
+    tone: 'success', title: '경영기획실 합의 완료', description: comment || '경영기획실 합의가 완료되었습니다.',
+  };
+  if (status === 'REVISION_REJECTED') return {
+    tone: 'danger', title: '경영기획실 반려', description: comment || '보완 요청을 확인한 뒤 수정 후 다시 제출해 주세요.',
+  };
+  return {
+    tone: 'warning', title: '경영기획실 합의 대기', description: comment || '조직장 승인 후 경영기획실 합의를 기다리고 있습니다.',
+  };
+}
+
+function managementPlanningBannerClassName(tone: string) {
+  if (tone === 'danger') return 'border-rose-200 bg-rose-50 text-rose-900';
+  if (tone === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  return 'border-amber-200 bg-amber-50 text-amber-900';
 }
 
 function attachmentDocument(attachment: ProjectInfoAttachment): FileAttachment {
@@ -137,6 +164,7 @@ function ProjectInfoEditor({
   draftClient,
   members,
   project,
+  requestDoc,
   session,
 }: {
   actor: ActorLike;
@@ -145,6 +173,7 @@ function ProjectInfoEditor({
   draftClient: DraftClient;
   members: ReturnType<typeof usePortalStore>['members'];
   project: Project;
+  requestDoc: ProjectRequest | null;
   session: EditSession;
 }) {
   const navigate = useNavigate();
@@ -164,9 +193,20 @@ function ProjectInfoEditor({
     resourceId: project.id,
   }), [actor, orgId, project.id, session.sessionId]);
   const lease = useEditLease({ client: leaseClient });
-  const canResubmit = project.executiveReviewStatus === 'REVISION_REJECTED'
+  const canExecutiveResubmit = project.executiveReviewStatus === 'REVISION_REJECTED'
     || project.executiveReviewStatus === 'DUPLICATE_DISCARDED';
+  const managementPlanningReview = useMemo(() => getManagementPlanningReview(project), [project]);
+  const hasExplicitManagementPlanningReview = useMemo(() => hasManagementPlanningReview(project), [project]);
+  const managementPlanningBanner = useMemo(
+    () => hasExplicitManagementPlanningReview
+      ? resolveManagementPlanningBanner(managementPlanningReview.status, managementPlanningReview.reviewComment)
+      : null,
+    [hasExplicitManagementPlanningReview, managementPlanningReview.reviewComment, managementPlanningReview.status],
+  );
+  const canManagementPlanningResubmit = managementPlanningReview.status === 'REVISION_REJECTED';
+  const canResubmit = canExecutiveResubmit || canManagementPlanningResubmit;
   const executiveBanner = useMemo(() => resolveExecutiveBanner(project), [project]);
+  const reviewFeedback = useMemo(() => buildPortalProjectReviewFeedback(project, requestDoc), [project, requestDoc]);
   const initialDraft = useMemo(
     () => (record ? editorDraftFromPrivate(record) : canonicalDraft),
     [canonicalDraft, record],
@@ -311,6 +351,19 @@ function ProjectInfoEditor({
     </div>
   );
 
+  const resubmitCommentField = (
+    <div className="mt-4">
+      <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
+      <Textarea
+        value={resubmitComment}
+        onChange={(event) => setResubmitComment(event.target.value)}
+        placeholder="보완한 내용을 짧게 남길 수 있습니다."
+        className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
+        disabled={!editorCanEdit}
+      />
+    </div>
+  );
+
   const topSlot = (
     <div className="space-y-3">
       {leaseBar}
@@ -318,27 +371,42 @@ function ProjectInfoEditor({
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">
-              {canResubmit ? '반려 사유' : '검토 상태'}
-            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">{canExecutiveResubmit ? '반려 사유' : '검토 상태'}</p>
             <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
-            {canResubmit ? (
-              <div className="mt-4">
-                <Label className="text-[11px] font-semibold uppercase tracking-[0.16em]">다시 제출 메모</Label>
-                <Textarea
-                  value={resubmitComment}
-                  onChange={(event) => setResubmitComment(event.target.value)}
-                  placeholder="보완한 내용을 짧게 남길 수 있습니다."
-                  className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
-                  disabled={!editorCanEdit}
-                />
-              </div>
-            ) : null}
+            {canExecutiveResubmit ? resubmitCommentField : null}
           </div>
           {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         </div>
       </div>
+      {managementPlanningBanner ? (
+        <div className={`rounded-2xl border px-4 py-4 ${managementPlanningBannerClassName(managementPlanningBanner.tone)}`} data-testid="portal-management-planning-review">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em]">경영기획실 검토</p>
+              <h2 className="mt-1 text-base font-semibold">{managementPlanningBanner.title}</h2>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{managementPlanningBanner.description}</p>
+              {canManagementPlanningResubmit ? resubmitCommentField : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {reviewFeedback.length > 0 ? (
+        <section className="rounded-xl border border-slate-200 bg-white px-4 py-3" data-testid="portal-project-review-feedback">
+          <div className="flex items-center gap-2 text-slate-900"><MessageSquareText className="h-4 w-4" /><h2 className="text-sm font-semibold">제출·처리 메모</h2></div>
+          <ol className="mt-3 space-y-3 border-l border-slate-200 pl-4">
+            {reviewFeedback.map((entry) => (
+              <li key={entry.id} className="relative">
+                <span className="absolute -left-[1.1rem] top-1.5 h-2 w-2 rounded-full border border-slate-300 bg-white" />
+                <p className="text-xs font-semibold text-slate-800">{entry.label}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{entry.comment}</p>
+                {entry.reviewerName || entry.reviewedAt ? <p className="mt-1 text-xs text-slate-500">{[entry.reviewerName, entry.reviewedAt].filter(Boolean).join(' · ')}</p> : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
     </div>
   );
 
@@ -438,15 +506,30 @@ export function PortalProjectEdit() {
       setRequestDoc(null);
       return undefined;
     }
-    const requestQuery = query(
-      collection(db, getOrgCollectionPath(orgId, 'projectRequests')),
-      where('approvedProjectId', '==', project.id),
-      orderBy('requestedAt', 'desc'),
-      limit(1),
-    );
-    return onSnapshot(requestQuery, (snapshot) => {
-      setRequestDoc(snapshot.docs[0]?.data() as ProjectRequest || null);
-    }, () => setRequestDoc(null));
+    const sourceRows = new Map<string, ProjectRequest>();
+    const publish = () => {
+      const latest = Array.from(sourceRows.values())
+        .sort((left, right) => String(right.requestedAt || '').localeCompare(String(left.requestedAt || '')))[0] || null;
+      setRequestDoc(latest);
+    };
+    const unsubscribers = (['project_requests', 'projectRequests'] as const).map((collectionName) => {
+      const requestQuery = query(
+        collection(db, getOrgCollectionPath(orgId, collectionName)),
+        where('approvedProjectId', '==', project.id),
+        orderBy('requestedAt', 'desc'),
+        limit(1),
+      );
+      return onSnapshot(requestQuery, (snapshot) => {
+        const request = snapshot.docs[0]?.data() as ProjectRequest | undefined;
+        if (request) sourceRows.set(collectionName, request);
+        else sourceRows.delete(collectionName);
+        publish();
+      }, () => {
+        sourceRows.delete(collectionName);
+        publish();
+      });
+    });
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [db, isOnline, orgId, project?.id]);
 
   useEffect(() => {
@@ -530,6 +613,7 @@ export function PortalProjectEdit() {
       draftClient={bootstrap.draftClient}
       members={members}
       project={project}
+      requestDoc={requestDoc}
       session={bootstrap.session}
     />
   );

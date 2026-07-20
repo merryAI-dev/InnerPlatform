@@ -14,6 +14,7 @@
       "/budget-summary",
       "/expense-management",
       "/approvals",
+      "/management-planning/project-codes",
       "/claude-sdk-help",
       "/portal"
     ],

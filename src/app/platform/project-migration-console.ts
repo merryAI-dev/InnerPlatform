@@ -3,6 +3,7 @@ import type {
   ProjectExecutiveReviewStatus,
   ProjectRequest,
 } from '../data/types';
+import { normalizeProjectDepartment } from './project-cic';
 import { resolveProjectRequestPayload } from './project-change-request';
 
 export type MigrationAuditConsoleStatus = ProjectExecutiveReviewStatus;
@@ -39,7 +40,7 @@ function normalizeText(value: unknown): string {
 }
 
 export function normalizeCicLabel(value: unknown): string {
-  const normalized = normalizeText(value);
+  const normalized = normalizeProjectDepartment(value);
   return normalized || '미지정';
 }
 
@@ -79,6 +80,8 @@ export function deriveMigrationAuditStatus(
   ) {
     return project.executiveReviewStatus;
   }
+  // A management-planning return reopens only that stage. The executive seal remains authoritative.
+  if (project.executiveReviewStatus === 'APPROVED') return 'APPROVED';
   if (request?.status === 'PENDING') return 'PENDING';
   if (project.executiveReviewStatus) return project.executiveReviewStatus;
   if (request?.status === 'REJECTED') return 'REVISION_REJECTED';

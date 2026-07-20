@@ -10,6 +10,7 @@ import {
   fetchProjectsViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
+  reviewProjectManagementPlanningStatusViaBff,
   reviewProjectExecutiveStatusViaBff,
   overrideTransactionEvidenceDriveCategoriesViaBff,
   previewGoogleSheetImportViaBff,
@@ -1019,6 +1020,47 @@ describe('platform-bff-client', () => {
       },
     }));
     expect(result.reviewStatus).toBe('PENDING');
+  });
+
+  it('calls the management-planning review endpoint with normalized code metadata', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          projectId: 'p-123',
+          requestId: 'pr-123',
+          reviewStatus: 'AGREED',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await reviewProjectManagementPlanningStatusViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'u-finance', role: 'finance', idToken: 'token-abc' },
+      projectId: 'p-123',
+      review: {
+        requestId: '  pr-123  ',
+        reviewStatus: 'AGREED',
+        projectCode: '  PRJ-2026-001  ',
+        reviewComment: '  코드 부여 완료  ',
+        reviewerName: '  경영기획실  ',
+      },
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/projects/p-123/management-planning-review', expect.objectContaining({
+      tenantId: 'mysc',
+      body: {
+        requestId: 'pr-123',
+        reviewStatus: 'AGREED',
+        projectCode: 'PRJ-2026-001',
+        reviewComment: '코드 부여 완료',
+        reviewerName: '경영기획실',
+      },
+    }));
+    expect(result.reviewStatus).toBe('AGREED');
   });
 
   it('omits blank optional text fields from project executive review resubmission requests', async () => {

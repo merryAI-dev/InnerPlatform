@@ -32,6 +32,7 @@ import {
   projectTrashSchema,
   projectExecutiveReviewSchema,
   projectExecutiveResubmitSchema,
+  projectManagementPlanningReviewSchema,
 } from '../schemas.mjs';
 
 function trimSlackText(value, maxLength = 200) {
@@ -79,6 +80,42 @@ function formatOptionalProjectAmount(value, explicit) {
 
 function normalizeProjectCode(value) {
   return readOptionalText(value).toUpperCase().replace(/\s+/g, '');
+}
+
+function requireProjectCode(value) {
+  const projectCode = normalizeProjectCode(value);
+  if (!projectCode) {
+    throw createHttpError(422, 'projectCode is required when agreeing a project', 'missing_project_code');
+  }
+  if (projectCode.length > 64 || !/^[A-Z0-9_-]+$/.test(projectCode)) {
+    throw createHttpError(422, 'projectCode must use letters, numbers, hyphens, or underscores', 'invalid_project_code');
+  }
+  return projectCode;
+}
+
+function hasLegacyPlanningAgreement(project) {
+  return Array.isArray(project?.executiveReviewHistory)
+    && project.executiveReviewHistory.some((entry) => readOptionalText(entry?.status) === 'PLANNING_AGREED');
+}
+
+function isManagementPlanningRevisionRejected(project) {
+  return readOptionalText(project?.executiveReviewStatus) === 'APPROVED'
+    && readOptionalText(project?.managementPlanningReviewStatus) === 'REVISION_REJECTED';
+}
+
+function isExecutiveRevisionRejected(project) {
+  const status = readOptionalText(project?.executiveReviewStatus);
+  return status === 'REVISION_REJECTED' || status === 'DUPLICATE_DISCARDED';
+}
+
+function buildManagementPlanningResubmissionPatch() {
+  return {
+    managementPlanningReviewStatus: 'PENDING',
+    managementPlanningReviewedAt: null,
+    managementPlanningReviewedById: null,
+    managementPlanningReviewedByName: null,
+    managementPlanningReviewComment: null,
+  };
 }
 
 export function buildProjectRegistrationSlackPayload(projectRequest) {
@@ -1078,6 +1115,8 @@ export function buildProjectRegistrationCanonicalDocuments({
       reviewedByName: actorName,
       reviewComment: 'PM 신규 등록',
     }],
+    managementPlanningReviewStatus: 'PENDING',
+    managementPlanningReviewHistory: [],
     registeredAt: timestamp,
     ...projectPatch,
     quoteDocument: documents.quoteDocument,
@@ -1506,25 +1545,33 @@ export function buildProjectInfoChangeSubmission({
   const requestVersion = Number.isInteger(previousRequest?.requestVersion) && previousRequest.requestVersion > 0
     ? previousRequest.requestVersion + 1
     : 1;
-  const projectPatch = resubmit ? {
-    executiveReviewStatus: 'PENDING',
-    executiveReviewedAt: timestamp,
-    executiveReviewedById: actorId,
-    executiveReviewedByName: actorName,
-    executiveReviewComment: readOptionalText(reviewComment) || null,
-    executiveReviewHistory: [
-      ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
-      {
-        status: 'PENDING',
-        previousStatus: readOptionalText(project.executiveReviewStatus) || 'PENDING',
-        reviewedAt: timestamp,
-        reviewedById: actorId,
-        reviewedByName: actorName,
-        reviewComment: readOptionalText(reviewComment) || null,
-        ...(changedFields.length ? { changes: changedFields } : {}),
-      },
-    ],
-  } : {};
+  const managementPlanningResubmission = isManagementPlanningRevisionRejected(project);
+  if (resubmit && !managementPlanningResubmission && !isExecutiveRevisionRejected(project)) {
+    throw createHttpError(409, 'Project is not awaiting resubmission', 'invalid_resubmit_state');
+  }
+  const projectPatch = resubmit
+    ? (managementPlanningResubmission
+      ? buildManagementPlanningResubmissionPatch()
+      : {
+        executiveReviewStatus: 'PENDING',
+        executiveReviewedAt: timestamp,
+        executiveReviewedById: actorId,
+        executiveReviewedByName: actorName,
+        executiveReviewComment: readOptionalText(reviewComment) || null,
+        executiveReviewHistory: [
+          ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
+          {
+            status: 'PENDING',
+            previousStatus: readOptionalText(project.executiveReviewStatus) || 'PENDING',
+            reviewedAt: timestamp,
+            reviewedById: actorId,
+            reviewedByName: actorName,
+            reviewComment: readOptionalText(reviewComment) || null,
+            ...(changedFields.length ? { changes: changedFields } : {}),
+          },
+        ],
+      })
+    : {};
   const projectRequestId = `change-${readOptionalText(project.id)}`;
   const projectRequest = stripUndefinedDeep({
     id: projectRequestId,
@@ -2629,6 +2676,13 @@ export function mountProjectRoutes(app, {
     }
 
     const parsed = parseWithSchema(projectExecutiveReviewSchema, req.body, 'Invalid executive review payload');
+    if (parsed.reviewStatus === 'PLANNING_AGREED') {
+      throw createHttpError(
+        409,
+        'New planning agreements must be completed after organization-head approval',
+        'legacy_planning_agreement_read_only',
+      );
+    }
     const projectPath = `orgs/${tenantId}/projects/${projectId}`;
     const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
@@ -2647,51 +2701,25 @@ export function mountProjectRoutes(app, {
         const reviewRequest = currentRequest || request;
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
-        const isPlanningAgreement = parsed.reviewStatus === 'PLANNING_AGREED';
+        const isLegacyPlanningAgreement = previousStatus === 'PLANNING_AGREED';
         const requestPayload = resolveProjectRequestPayloadForReview(reviewRequest);
-        const designatedApproverId = readOptionalText(currentProject.executiveApproverId)
-          || readOptionalText(requestPayload?.executiveApproverId);
-        const projectCode = normalizeProjectCode(
-          isPlanningAgreement ? parsed.projectCode : currentProject.projectCode,
-        );
-
-        if (isPlanningAgreement) {
-          if (!projectCode) {
-            throw createHttpError(422, 'projectCode is required when agreeing a project', 'missing_project_code');
-          }
-          if (previousStatus !== 'PENDING') {
-            throw createHttpError(409, 'Only submitted projects can be agreed', 'invalid_planning_agreement_state');
-          }
-          const existingProjectCode = normalizeProjectCode(currentProject.projectCode);
-          if (existingProjectCode && existingProjectCode !== projectCode) {
-            throw createHttpError(422, 'projectCode cannot change after it is assigned', 'project_code_locked');
-          }
-          const codeRef = db.doc(`orgs/${tenantId}/project_code_registry/${encodeURIComponent(projectCode)}`);
-          const codeSnap = await tx.get(codeRef);
-          if (codeSnap.exists && readOptionalText(codeSnap.data()?.projectId) !== projectId) {
-            throw createHttpError(409, `Project code '${projectCode}' is already assigned`, 'duplicate_project_code');
-          }
-          tx.set(codeRef, {
-            code: projectCode,
-            projectId,
-            agreedAt: now,
-            agreedById: actorId,
-            agreedByName: reviewerName,
-          }, { merge: true });
-        } else {
-          if (previousStatus !== 'PLANNING_AGREED') {
-            throw createHttpError(409, 'Planning agreement is required before final approval', 'planning_agreement_required');
-          }
-          if (!designatedApproverId || designatedApproverId !== actorId) {
-            throw createHttpError(403, 'Only the designated approver can make the final decision', 'designated_approver_required');
-          }
-          if (!projectCode) {
-            throw createHttpError(422, 'projectCode is required before final approval', 'missing_project_code');
-          }
-          const submittedCode = normalizeProjectCode(parsed.projectCode);
-          if (submittedCode && submittedCode !== projectCode) {
-            throw createHttpError(422, 'projectCode cannot change after planning agreement', 'project_code_locked');
-          }
+        const requestApproverId = readOptionalText(requestPayload?.executiveApproverId);
+        const designatedApproverId = !isLegacyPlanningAgreement && requestApproverId
+          ? requestApproverId
+          : readOptionalText(currentProject.executiveApproverId);
+        if (!['PENDING', 'PLANNING_AGREED'].includes(previousStatus)) {
+          throw createHttpError(409, 'Project is not awaiting an organization-head decision', 'invalid_executive_review_state');
+        }
+        if (!designatedApproverId || designatedApproverId !== actorId) {
+          throw createHttpError(403, 'Only the designated approver can make the final decision', 'designated_approver_required');
+        }
+        const legacyProjectCode = isLegacyPlanningAgreement ? requireProjectCode(currentProject.projectCode) : null;
+        const submittedCode = normalizeProjectCode(parsed.projectCode);
+        if (isLegacyPlanningAgreement && submittedCode && requireProjectCode(submittedCode) !== legacyProjectCode) {
+          throw createHttpError(422, 'projectCode cannot change after planning agreement', 'project_code_locked');
+        }
+        if (!isLegacyPlanningAgreement && submittedCode) {
+          throw createHttpError(422, 'projectCode is issued by management planning after approval', 'project_code_management_only');
         }
         const isApprovedChangeRequest = parsed.reviewStatus === 'APPROVED' && isProjectChangeRequest(reviewRequest);
         const requestChanges = Array.isArray(reviewRequest?.changedFields) ? reviewRequest.changedFields : [];
@@ -2705,7 +2733,13 @@ export function mountProjectRoutes(app, {
           executiveReviewedById: actorId,
           executiveReviewedByName: reviewerName,
           executiveReviewComment: readOptionalText(parsed.reviewComment) || null,
-          ...(isPlanningAgreement || projectCode ? { projectCode } : {}),
+          ...(legacyProjectCode ? { projectCode: legacyProjectCode, projectCodeKey: legacyProjectCode } : {}),
+          ...(parsed.reviewStatus === 'APPROVED' && !isLegacyPlanningAgreement && !readOptionalText(currentProject.managementPlanningReviewStatus) ? {
+            managementPlanningReviewStatus: 'PENDING',
+            managementPlanningReviewHistory: Array.isArray(currentProject.managementPlanningReviewHistory)
+              ? currentProject.managementPlanningReviewHistory
+              : [],
+          } : {}),
           executiveReviewHistory: [
             ...currentHistory,
             {
@@ -2715,7 +2749,7 @@ export function mountProjectRoutes(app, {
               reviewedById: actorId,
               reviewedByName: reviewerName,
               reviewComment: readOptionalText(parsed.reviewComment) || null,
-              ...(isPlanningAgreement || projectCode ? { projectCode } : {}),
+              ...(legacyProjectCode ? { projectCode: legacyProjectCode } : {}),
               ...(requestChanges.length > 0 ? { changes: requestChanges } : {}),
             },
           ],
@@ -2728,7 +2762,7 @@ export function mountProjectRoutes(app, {
         };
       },
       buildRequestPatch: (_currentProject, currentRequest, nextVersion) => (
-        parsed.reviewStatus === 'PLANNING_AGREED' || !resolvedRequestId
+        !resolvedRequestId
           ? null
           : ({
         status: parsed.reviewStatus === 'APPROVED' ? 'APPROVED' : 'REJECTED',
@@ -2789,6 +2823,128 @@ export function mountProjectRoutes(app, {
     };
   }));
 
+  app.post('/api/v1/projects/:projectId/management-planning-review', createMutatingRoute(idempotencyService, async (req) => {
+    const { tenantId, actorId, actorEmail, actorName } = req.context;
+    assertActorRoleAllowed(req, ['admin', 'finance'], 'review project management planning status');
+    const projectId = readOptionalText(req.params.projectId);
+    if (!projectId) {
+      throw createHttpError(400, 'project id is required', 'missing_project_id');
+    }
+
+    const parsed = parseWithSchema(
+      projectManagementPlanningReviewSchema,
+      req.body,
+      'Invalid management planning review payload',
+    );
+    const projectPath = `orgs/${tenantId}/projects/${projectId}`;
+    const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
+    const now = new Date().toISOString();
+    await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
+    const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
+      db,
+      tenantId,
+      requestId: parsed.requestId,
+      projectId,
+    });
+
+    await mergeProjectAndRequestDocs({
+      db,
+      projectPath,
+      buildProjectPatch: async (currentProject, _currentRequest, _nextVersion, tx) => {
+        if (readOptionalText(currentProject.executiveReviewStatus) !== 'APPROVED') {
+          throw createHttpError(409, 'Organization-head approval is required before management planning review', 'executive_review_required');
+        }
+        if (hasLegacyPlanningAgreement(currentProject)) {
+          throw createHttpError(
+            409,
+            'Legacy planning agreements are already finalised and cannot be reviewed again',
+            'legacy_planning_agreement_already_finalized',
+          );
+        }
+        const previousStatus = readOptionalText(currentProject.managementPlanningReviewStatus) || 'PENDING';
+        if (previousStatus !== 'PENDING') {
+          throw createHttpError(409, 'Project is not awaiting management planning review', 'invalid_management_planning_review_state');
+        }
+        const currentHistory = Array.isArray(currentProject.managementPlanningReviewHistory)
+          ? currentProject.managementPlanningReviewHistory
+          : [];
+        const isAgreed = parsed.reviewStatus === 'AGREED';
+        const projectCode = isAgreed ? requireProjectCode(parsed.projectCode) : null;
+        if (projectCode) {
+          const existingProjectCode = normalizeProjectCode(currentProject.projectCode);
+          if (existingProjectCode && existingProjectCode !== projectCode) {
+            throw createHttpError(422, 'projectCode cannot change after it is assigned', 'project_code_locked');
+          }
+          const codeRef = db.doc(`orgs/${tenantId}/project_code_registry/${encodeURIComponent(projectCode)}`);
+          const codeSnap = await tx.get(codeRef);
+          if (codeSnap.exists && readOptionalText(codeSnap.data()?.projectId) !== projectId) {
+            throw createHttpError(409, `Project code '${projectCode}' is already assigned`, 'duplicate_project_code');
+          }
+          tx.set(codeRef, {
+            code: projectCode,
+            projectId,
+            agreedAt: now,
+            agreedById: actorId,
+            agreedByName: reviewerName,
+          }, { merge: true });
+        }
+
+        return {
+          managementPlanningReviewStatus: parsed.reviewStatus,
+          managementPlanningReviewedAt: now,
+          managementPlanningReviewedById: actorId,
+          managementPlanningReviewedByName: reviewerName,
+          managementPlanningReviewComment: readOptionalText(parsed.reviewComment) || null,
+          ...(projectCode ? { projectCode, projectCodeKey: projectCode } : {}),
+          managementPlanningReviewHistory: [
+            ...currentHistory,
+            {
+              status: parsed.reviewStatus,
+              previousStatus,
+              reviewedAt: now,
+              reviewedById: actorId,
+              reviewedByName: reviewerName,
+              reviewComment: readOptionalText(parsed.reviewComment) || null,
+              ...(projectCode ? { projectCode } : {}),
+            },
+          ],
+        };
+      },
+      buildRequestPatch: () => {
+        if (!resolvedRequestId) return null;
+        const isAgreed = parsed.reviewStatus === 'AGREED';
+        return {
+          status: isAgreed ? 'APPROVED' : 'PENDING',
+          reviewOutcome: parsed.reviewStatus,
+          reviewedBy: actorId,
+          reviewedByName: reviewerName,
+          reviewedAt: now,
+          reviewComment: readOptionalText(parsed.reviewComment) || null,
+          rejectedReason: isAgreed ? null : readOptionalText(parsed.reviewComment),
+          approvedProjectId: projectId,
+          targetProjectId: projectId,
+          updatedAt: now,
+        };
+      },
+      requestRefs: resolvedRequestId ? refs : [],
+      tenantId,
+      actorId,
+      now,
+      notFoundMessage: `Project not found: ${projectId}`,
+    });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        projectId,
+        requestId: resolvedRequestId || null,
+        reviewStatus: parsed.reviewStatus,
+        reviewedAt: now,
+      },
+    };
+  }));
+
   app.post('/api/v1/projects/:projectId/executive-review/resubmit', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail } = req.context;
     assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'resubmit project for executive review');
@@ -2814,6 +2970,12 @@ export function mountProjectRoutes(app, {
       projectPath,
       buildProjectPatch: (currentProject) => {
         const previousStatus = readOptionalText(currentProject.executiveReviewStatus) || 'PENDING';
+        if (isManagementPlanningRevisionRejected(currentProject)) {
+          return buildManagementPlanningResubmissionPatch();
+        }
+        if (previousStatus !== 'REVISION_REJECTED') {
+          throw createHttpError(409, 'Project is not awaiting resubmission', 'invalid_resubmit_state');
+        }
         const currentHistory = Array.isArray(currentProject.executiveReviewHistory) ? currentProject.executiveReviewHistory : [];
         return {
           executiveReviewStatus: 'PENDING',
