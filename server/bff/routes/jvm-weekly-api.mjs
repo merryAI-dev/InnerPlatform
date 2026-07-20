@@ -301,7 +301,29 @@ async function readCashflowActivity(db, tenantId, projectId) {
         createdAt: readOptionalText(audit.createdAt),
       };
     });
-  return [...legacyEvents, ...refreshEvents, ...closeEvents]
+  const sheetApplyEvents = monthlyAudits
+    .filter((audit) => readOptionalText(audit.commandName) === 'weeklyExpense.cashflowSheetLab.apply')
+    .map((audit) => {
+      const metadata = parseAuditMetadata(audit.metadataJson);
+      const projectionLineCount = safeAmount(metadata.projectionLineCount);
+      const actualLineCount = safeAmount(metadata.actualLineCount);
+      return {
+        id: `sheet-apply:${audit.id}`,
+        projectId,
+        runId: readOptionalText(audit.idempotencyKey) || audit.id,
+        type: 'sheet_apply',
+        source: 'google_sheet_apply',
+        yearMonth: readOptionalText(metadata.yearMonth),
+        projectionLineCount,
+        actualLineCount,
+        appliedLineCount: projectionLineCount + actualLineCount,
+        actorUid: readOptionalText(audit.actorId),
+        actorEmail: readOptionalText(metadata.actorEmail),
+        actorName: readOptionalText(metadata.actorName),
+        createdAt: readOptionalText(audit.createdAt),
+      };
+    });
+  return [...legacyEvents, ...refreshEvents, ...sheetApplyEvents, ...closeEvents]
     .filter((event) => readOptionalText(event.createdAt))
     .sort((left, right) => readOptionalText(right.createdAt).localeCompare(readOptionalText(left.createdAt)))
     .slice(0, 200);
@@ -432,13 +454,6 @@ function canonicalPinnedSheetWeeks(pinnedSheetCells) {
 
 function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells) {
   const pinnedWeeks = canonicalPinnedSheetWeeks(pinnedSheetCells);
-  if (pinnedWeeks.length > 0) {
-    const byKey = new Map(pinnedWeeks.map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
-    if (completeMonthCloseCells(cells)) {
-      for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
-    }
-    return [...byKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
-  }
   const byKey = new Map();
   for (const month of Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : []) {
     const monthKey = readOptionalText(month?.yearMonth);
@@ -456,6 +471,20 @@ function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells) {
       });
     }
   }
+  if (byKey.size > 0) {
+    for (const pinnedWeek of pinnedWeeks) {
+      const key = `${pinnedWeek.yearMonth}:${pinnedWeek.weekNo}`;
+      if (!byKey.has(key)) byKey.set(key, { ...pinnedWeek, projection: {}, actual: {} });
+    }
+    return [...byKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
+  }
+  if (pinnedWeeks.length > 0) {
+    const pinnedByKey = new Map(pinnedWeeks.map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
+    if (completeMonthCloseCells(cells)) {
+      for (const week of monthWeeksFromCells(cells, yearMonth)) pinnedByKey.set(`${yearMonth}:${week.weekNo}`, week);
+    }
+    return [...pinnedByKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
+  }
   if (completeMonthCloseCells(cells)) {
     for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
   }
@@ -468,7 +497,33 @@ function cashflowCellKey(yearMonth, cell) {
   return `${yearMonth}:${cell.mode}:${cell.weekNo}:${cell.cashflowLine}`;
 }
 
-function canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells) {
+function canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells) {
+  const canonicalMonths = Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : [];
+  if (canonicalMonths.length > 0) {
+    const canonical = new Map();
+    for (const month of canonicalMonths) {
+      const monthKey = readOptionalText(month?.yearMonth);
+      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)) continue;
+      for (const mode of ['projection', 'actual']) {
+        for (const week of Array.isArray(month?.[mode]?.weeks) ? month[mode].weeks : []) {
+          const weekNo = Number(week?.weekNo);
+          const amounts = objectValue(week?.amounts);
+          if (!Number.isInteger(weekNo) || weekNo < 1 || weekNo > 5) continue;
+          for (const lineId of CASHFLOW_ALL_LINES) {
+            if (!Object.prototype.hasOwnProperty.call(amounts, lineId)) continue;
+            canonical.set(`${monthKey}:${mode}:${weekNo}:${lineId}`, {
+              mode,
+              weekNo,
+              cashflowLine: lineId,
+              cellState: 'VALUE',
+              amount: safeAmount(amounts[lineId]),
+            });
+          }
+        }
+      }
+    }
+    return canonical;
+  }
   const byKey = new Map();
   for (const sourceCell of Array.isArray(pinnedSheetCells) ? pinnedSheetCells : []) {
     const source = objectValue(sourceCell);
@@ -495,7 +550,13 @@ function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
     if (cashflowRangeSortKey({ yearMonth, weekNo: 3 }) > asOfKey) continue;
     const projection = cellStates.get(`${yearMonth}:projection:3:MYSC_LABOR_OUT`);
     if (!projection || projection.cellState === 'EMPTY') {
-      warnings.push(`${yearMonth} 3주차 · Projection 인건비 미기입`);
+      const otherWeeks = weeks
+        .filter((week) => week.yearMonth === yearMonth && week.weekNo !== 3)
+        .map((week) => ({ weekNo: week.weekNo, amount: safeAmount(week.projection?.MYSC_LABOR_OUT) }))
+        .filter((week) => week.amount !== 0);
+      warnings.push(otherWeeks.length > 0
+        ? `${yearMonth} 3주차 · Projection 인건비 미기입 · ${otherWeeks.map((week) => `${week.weekNo}주차 ${week.amount.toLocaleString('ko-KR')}원`).join(', ')} 입력됨`
+        : `${yearMonth} 3주차 · Projection 인건비 미기입`);
       continue;
     }
     const plannedAmount = safeAmount(projection.amount);
@@ -567,21 +628,39 @@ function negativeProjectionCheck(weeks) {
   let balance = 0;
   let prepay = 0;
   const findings = [];
+  let episode = null;
+  const closeEpisode = () => {
+    if (!episode) return;
+    const range = episode.startKey === episode.endKey
+      ? episode.startKey
+      : `${episode.startKey}부터 ${episode.endKey}까지`;
+    findings.push(`${range} · 최저 ${episode.minimum.toLocaleString('ko-KR')}원${episode.prepaySeen ? '' : ' · MYSC 선입금 Projection 없음'}`);
+    episode = null;
+  };
   for (const week of weeks) {
     const totalIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => week.projection?.[lineId])) || 0;
     const totalOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => week.projection?.[lineId])) || 0;
     balance += totalIn - totalOut;
     prepay += safeAmount(week.projection?.MYSC_PREPAY_IN);
     if (balance < 0) {
-      findings.push(`${week.yearMonth} ${week.weekNo}주차 · ${balance.toLocaleString('ko-KR')}원${prepay > 0 ? '' : ' · MYSC 선입금 Projection 없음'}`);
+      const key = `${week.yearMonth} ${week.weekNo}주차`;
+      if (!episode) episode = { startKey: key, endKey: key, minimum: balance, prepaySeen: prepay > 0 };
+      else {
+        episode.endKey = key;
+        episode.minimum = Math.min(episode.minimum, balance);
+        episode.prepaySeen ||= prepay > 0;
+      }
+    } else {
+      closeEpisode();
     }
   }
+  closeEpisode();
   if (findings.length > 0) {
     return managementCheck(
       'negative-projection-balance',
       'WARNING',
       'Projection 잔액 마이너스',
-      `${findings.length}개 주차에서 마이너스 · 최초 ${findings[0]}`,
+      `${findings.length}개 구간에서 마이너스 · 최초 ${findings[0]}`,
       findings,
     );
   }
@@ -605,7 +684,7 @@ function futurePrepayCheck(weeks, asOfKey) {
 
 export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells }) {
   const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells);
-  const cellStates = canonicalCashflowCellStates(cells, yearMonth, pinnedSheetCells);
+  const cellStates = canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells);
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
   const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({
     ...row,
@@ -798,6 +877,16 @@ function dashboardTotals(mode) {
     rowTotals: mode?.rowTotals || {},
     weeks: mode?.weeks || [],
   };
+}
+
+function canonicalProjectionTotalIn(cashflow, fallback) {
+  const months = Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : [];
+  const boundaries = cashflowReadModelBoundaries(months);
+  if (boundaries.length === 0) return fallback;
+  return buildCashflowRangeTotals(months, 'projection', {
+    start: boundaries[0],
+    end: boundaries.at(-1),
+  }).totalIn;
 }
 
 function validConfirmationKeys(confirmations) {
@@ -1114,6 +1203,8 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     else if (mirror.status !== 'FRESH') blockers.push({ code: 'SHEET_SOURCE_STALE', message: '시트값을 다시 불러와 주세요.' });
     else if ((mirror.projectId && mirror.projectId !== projectId) || !mirror.yearMonths?.includes(yearMonth)) {
       blockers.push({ code: 'SHEET_SOURCE_SCOPE_MISMATCH', message: '고정한 시트값의 프로젝트 또는 월이 다릅니다.' });
+    } else if (readOptionalText(mirror.appliedSourceRevision) !== readOptionalText(mirror.sourceRevision)) {
+      blockers.push({ code: 'SHEET_SOURCE_NOT_APPLIED', message: '불러온 시트값을 원장에 반영해 주세요.' });
     }
     blockers.push(...sheetControlBlockers(sheetFacts));
     if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
@@ -1131,9 +1222,10 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     }
   }
   const contractAmount = safeAmount(project?.contractAmount);
+  const projectionTotalIn = canonicalProjectionTotalIn(cashflow, projection.totalIn);
   const rawProjectionProgressPercent = contractAmount === 0
     ? 100
-    : Math.round((projection.totalIn / contractAmount) * 10_000) / 100;
+    : Math.round((projectionTotalIn / contractAmount) * 10_000) / 100;
   const projectionProgressPercent = Math.max(0, Math.min(100, rawProjectionProgressPercent));
   const requiredCellConfirmationCount = CASHFLOW_ALL_LINES.length * 2 * 5;
   const requiredManagementConfirmationCount = CASHFLOW_MANAGEMENT_CHECK_IDS.length;
@@ -1155,6 +1247,8 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     status: readOptionalText(mirror?.status) || 'EMPTY',
     sourceRevision: readOptionalText(mirror?.sourceRevision),
     targetRevision: readOptionalText(mirror?.targetRevisionAtFetch),
+    appliedSourceRevision: readOptionalText(mirror?.appliedSourceRevision),
+    appliedTargetRevision: readOptionalText(mirror?.appliedTargetRevision),
     capturedAt: readOptionalText(mirror?.capturedAt),
   };
   return {

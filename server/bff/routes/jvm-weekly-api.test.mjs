@@ -120,7 +120,7 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
       } },
     }],
     ['orgs/tenant-a/cashflow_sheet_mirrors/project-a', {
-      projectId: 'project-a', status: mirrorStatus, sourceRevision, targetRevisionAtFetch: targetRevision,
+      projectId: 'project-a', status: mirrorStatus, sourceRevision, appliedSourceRevision: sourceRevision, targetRevisionAtFetch: targetRevision,
       yearMonths: ['2026-06'], capturedAt: '2026-07-01T00:00:00.000Z', configRevision: `sha256:${'e'.repeat(64)}`,
       cells, sheetFacts,
     }],
@@ -164,7 +164,7 @@ function createMonthCloseDb() {
       } },
     }],
     ['orgs/tenant-a/cashflow_sheet_mirrors/project-a', {
-      projectId: 'project-a', status: 'FRESH', sourceRevision, targetRevisionAtFetch: targetRevision,
+      projectId: 'project-a', status: 'FRESH', sourceRevision, appliedSourceRevision: sourceRevision, targetRevisionAtFetch: targetRevision,
       yearMonths: ['2026-06'], capturedAt: '2026-07-01T00:00:00.000Z',
       sheetFacts: {
         metadata: {},
@@ -404,11 +404,21 @@ describe('JVM weekly API BFF proxy', () => {
         createdBy: { uid: 'pm-1', name: '변민욱(보람)', email: 'pm@example.com' },
         response: { status: 'FRESH', selectedSheetName: 'cashflow(사용내역 연동)' },
       }],
-      weekly_api_audit_events: [{
-        id: 'close-1', projectId: 'project-a', idempotencyKey: 'close-key', commandName: 'cashflowMonth.close',
-        actorId: 'pm-1', createdAt: '2026-07-02T00:00:00.000Z',
-        metadataJson: JSON.stringify({ yearMonth: '2026-06', status: 'CLOSED', actorEmail: 'pm@example.com' }),
-      }],
+      weekly_api_audit_events: [
+        {
+          id: 'close-1', projectId: 'project-a', idempotencyKey: 'close-key', commandName: 'cashflowMonth.close',
+          actorId: 'pm-1', createdAt: '2026-07-02T00:00:00.000Z',
+          metadataJson: JSON.stringify({ yearMonth: '2026-06', status: 'CLOSED', actorEmail: 'pm@example.com' }),
+        },
+        {
+          id: 'apply-1', projectId: 'project-a', idempotencyKey: 'apply-key', commandName: 'weeklyExpense.cashflowSheetLab.apply',
+          actorId: 'pm-1', createdAt: '2026-07-01T12:00:00.000Z',
+          metadataJson: JSON.stringify({
+            yearMonth: '2026-06', projectionLineCount: 8, actualLineCount: 7,
+            actorName: '변민욱(보람)', actorEmail: 'pm@example.com',
+          }),
+        },
+      ],
       cashflow_events: [],
     };
     const db = {
@@ -428,6 +438,10 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => {
         expect(response.body.events).toMatchObject([
           { type: 'month_close', yearMonth: '2026-06', status: 'CLOSED' },
+          {
+            type: 'sheet_apply', yearMonth: '2026-06', appliedLineCount: 15,
+            actorName: '변민욱(보람)', actorEmail: 'pm@example.com',
+          },
           { type: 'sheet_refresh', sheetName: 'cashflow(사용내역 연동)', actorName: '변민욱(보람)', actorEmail: 'pm@example.com' },
         ]);
       });
@@ -511,11 +525,30 @@ describe('JVM weekly API BFF proxy', () => {
         ? { ...row, actualDepositDate: '2026-06-30', actualDepositAmount: 1_000_000, actualSource: 'SHEET' }
         : row
     ));
+    const juneMonth = {
+      yearMonth: '2026-06',
+      projection: {
+        weeks: Array.from({ length: 5 }, (_, index) => ({
+          weekNo: index + 1,
+          amounts: Object.fromEntries(cells
+            .filter((cell) => cell.mode === 'projection' && cell.weekNo === index + 1)
+            .map((cell) => [cell.cashflowLine, cell.amount])),
+        })),
+      },
+      actual: {
+        weeks: Array.from({ length: 5 }, (_, index) => ({
+          weekNo: index + 1,
+          amounts: Object.fromEntries(cells
+            .filter((cell) => cell.mode === 'actual' && cell.weekNo === index + 1)
+            .map((cell) => [cell.cashflowLine, cell.amount])),
+        })),
+      },
+    };
     const checks = buildCashflowManagementChecks({
       project: {},
       cashflow: {
         readModel: {
-          months: [{
+          months: [juneMonth, {
             yearMonth: '2026-08',
             projection: { weeks: [{ weekNo: 1, amounts: { MYSC_PREPAY_IN: 1_000_001 } }] },
             actual: { weeks: [] },
@@ -537,8 +570,9 @@ describe('JVM weekly API BFF proxy', () => {
     expect(checks[1].detail).toContain('다음 주차 원장 없음');
     expect(checks[0].detail).toContain('실제 0원 · 실제 미이관');
     expect(checks[0].findings).toContain('2026-06 3주차 · 예정 10원 · 실제 0원 · 실제 미이관');
-    expect(checks[2].findings).toHaveLength(5);
+    expect(checks[2].findings).toHaveLength(1);
     expect(checks[2].findings[0]).toContain('2026-06 1주차');
+    expect(checks[2].findings[0]).toContain('2026-06 5주차까지');
     expect(checks[3].detail).toContain('1,000,001원');
   });
 
@@ -562,8 +596,8 @@ describe('JVM weekly API BFF proxy', () => {
       id: 'labor-transfer',
       status: 'WARNING',
       title: 'MYSC 인건비 이관',
-      detail: '2026-06 3주차 · Projection 인건비 미기입',
-      findings: ['2026-06 3주차 · Projection 인건비 미기입'],
+      detail: '2026-06 3주차 · Projection 인건비 미기입 · 1주차 10원, 2주차 10원, 4주차 10원, 5주차 10원 입력됨',
+      findings: ['2026-06 3주차 · Projection 인건비 미기입 · 1주차 10원, 2주차 10원, 4주차 10원, 5주차 10원 입력됨'],
     });
   });
 
@@ -599,7 +633,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(checks.find((check) => check.id === 'profit-vat-after-deposit')?.detail).toContain('2026-07 2주차 MYSC 수익·매출부가세');
   });
 
-  it('uses the manually pinned sheet range instead of legacy JVM months for negative Projection balance', () => {
+  it('uses the canonical JVM ledger instead of an unapplied pinned sheet for negative Projection balance', () => {
     const { documents } = fullMonthCloseSource();
     const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     const pinnedSheetCells = mirror.cells.map((cell) => ({
@@ -629,11 +663,11 @@ describe('JVM weekly API BFF proxy', () => {
       comparisonBoundary: { asOfWeek: { yearMonth: '2026-06', weekNo: 5 } },
     });
 
-    expect(checks.find((check) => check.id === 'negative-projection-balance')).toEqual({
+    expect(checks.find((check) => check.id === 'negative-projection-balance')).toMatchObject({
       id: 'negative-projection-balance',
-      status: 'OK',
+      status: 'WARNING',
       title: 'Projection 잔액 마이너스',
-      detail: 'Projection 누적 잔액이 0원 이상입니다.',
+      findings: [expect.stringContaining('2024-09 2주차')],
     });
   });
 

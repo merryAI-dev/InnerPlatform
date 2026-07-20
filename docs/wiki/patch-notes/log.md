@@ -4,6 +4,10 @@
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 프로젝트 등록/수정의 제출 서류와 결재선을 기획안 기준으로 정렬하고, 조직장 승인과 경영기획실 코드 부여를 분리했다. 지정 조직장 외 승인, PM self-approval, 코드 중복 부여를 BFF에서 차단하고, 경영기획실 반려는 PM 재제출 흐름으로 되돌린다.
 
+## [2026-07-20] patch-note | cashflow-source-consistency | 시트·JVM 원장 단일 기준 정렬
+- pages: [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
+- summary: 시트값 불러오기 뒤 변경 월을 JVM 원장에 순차 반영하고 응답 금액을 재검증한다. 대시보드와 주요 관리 항목은 반영된 원장을 우선 사용하며, 인건비 3주차 외 입력·Projection 마이너스 구간·수행자 감사 이력을 함께 표시한다.
+
 ## [2026-07-14] patch-note | project-management-deck-alignment | 프로젝트 관리 기획안 정렬
 - pages: [portal-onboarding](./pages/portal-onboarding.md)
 - summary: 프로젝트 목록을 등록 프로젝트와 계약 전 상태로 구분하고 상태·정산 유형·조직·검색 조건을 결합했다. 등록·승인 CTA는 역할 권한에 맞게 제한하고, workspace 선택과 기능 검색의 `PM 포털` 표기는 기획안 기준 `실무자 포털`로 통일했다.

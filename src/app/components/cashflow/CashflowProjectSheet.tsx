@@ -286,12 +286,14 @@ export function CashflowProjectSheet({
   const [reopenAction, setReopenAction] = useState<'request' | 'approve' | 'reject' | null>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
+  const [pendingAutoStageRevision, setPendingAutoStageRevision] = useState('');
   const [sheetRefreshResult, setSheetRefreshResult] = useState<{
     runId: string;
     stagedLineCount: number;
     projectionLineCount: number;
     actualLineCount: number;
     riskLineCount: number;
+    stagedMonths: string[];
   } | null>(null);
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
   const [sheetStageDialog, setSheetStageDialog] = useState<{
@@ -300,6 +302,7 @@ export function CashflowProjectSheet({
     projectionLineCount: number;
     actualLineCount: number;
     riskLineCount: number;
+    stagedMonths: string[];
     candidates: CashflowSheetLabChangeCandidate[];
     omittedCandidateCount: number;
     replaceAllActualSources: boolean;
@@ -585,6 +588,7 @@ export function CashflowProjectSheet({
   useEffect(() => {
     let cancelled = false;
     setCashflowSheetMirror(null);
+    setPendingAutoStageRevision('');
     if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
 
     const readMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
@@ -985,8 +989,9 @@ export function CashflowProjectSheet({
       setSheetRefreshResult(null);
       setSheetStageDialog(null);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+        setPendingAutoStageRevision(mirror.sourceRevision);
         void loadCashflowEvents();
-        toast.success('시트값을 고정했습니다. 저장할 값을 확인해 주세요.');
+        toast.success('시트값을 불러왔습니다. 원장 반영 전 금액을 확인합니다.');
       } else if (mirror.status === 'STALE') {
         toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
       } else {
@@ -1019,12 +1024,16 @@ export function CashflowProjectSheet({
     }
   }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor]);
 
-  const handleStagePinnedSheetValues = useCallback(async (replaceAllActualSources = false): Promise<void> => {
-    if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
+  const handleStagePinnedSheetValues = useCallback(async (
+    replaceAllActualSources = false,
+    mirrorOverride?: CashflowSheetLabMirrorResult,
+  ): Promise<void> => {
+    const sourceMirror = mirrorOverride || cashflowSheetMirror;
+    if (sourceMirror?.status !== 'FRESH' || !sourceMirror.sourceRevision) {
       toast.error('먼저 시트값 불러오기를 실행해 고정해 주세요.');
       return;
     }
-    const expectedMirrorRevision = cashflowSheetMirror.sourceRevision;
+    const expectedMirrorRevision = sourceMirror.sourceRevision;
     const stageIdempotencyKey = `cashflow-sheet-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const stageMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
       stageCashflowSheetLabViaBff({
@@ -1043,6 +1052,7 @@ export function CashflowProjectSheet({
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
         riskLineCount: result.riskLineCount,
+        stagedMonths: result.stagedMonths || [],
       });
       setSheetStageDialog({
         runId: result.runId,
@@ -1050,6 +1060,7 @@ export function CashflowProjectSheet({
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
         riskLineCount: result.riskLineCount,
+        stagedMonths: result.stagedMonths || [],
         candidates: result.candidates || [],
         omittedCandidateCount: result.omittedCandidateCount || 0,
         replaceAllActualSources: result.replaceAllActualSources === true,
@@ -1084,6 +1095,12 @@ export function CashflowProjectSheet({
     }
   }, [cashflowSheetMirror, orgId, projectId, resolveBffActor, yearMonth]);
 
+  useEffect(() => {
+    if (!pendingAutoStageRevision || cashflowSheetMirror?.sourceRevision !== pendingAutoStageRevision) return;
+    setPendingAutoStageRevision('');
+    void handleStagePinnedSheetValues(false, cashflowSheetMirror);
+  }, [cashflowSheetMirror, handleStagePinnedSheetValues, pendingAutoStageRevision]);
+
   const handleApplyStagedSheetValues = useCallback(async (): Promise<void> => {
     if (!sheetStageDialog?.runId) {
       toast.error('저장할 검토 값이 없습니다.');
@@ -1095,10 +1112,7 @@ export function CashflowProjectSheet({
       return;
     }
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    let finalMutationLease: Awaited<ReturnType<typeof cashflowLease.checkBeforeMutation>> | null = null;
     const apply = async (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => {
-      const mutationLease = finalMutationLease || await cashflowLease.checkBeforeMutation();
-      finalMutationLease = mutationLease;
       return applyCashflowSheetLabViaBff({
         tenantId: orgId,
         actor,
@@ -1106,14 +1120,13 @@ export function CashflowProjectSheet({
         stageRunId: sheetStageDialog.runId,
         applyRiskCandidates: false,
         idempotencyKey: applyIdempotencyKey,
-        lease: mutationLease,
-        finalize: true,
       });
     };
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
       await Promise.all([
         loadCashflowEvents(),
         loadCashflowComparison(),
+        loadCashflowMonthClose(),
       ]);
       setCashflowSheetConfig((current) => current ? {
         ...current,
@@ -1125,14 +1138,7 @@ export function CashflowProjectSheet({
       } : current);
       setSheetStageDialog(null);
       setSheetRefreshResult(null);
-      if (cashflowPrivateDraftClient && privateDraftRevision !== null && finalMutationLease) {
-        await cashflowPrivateDraftClient.complete(finalMutationLease, {
-          expectedDraftRevision: privateDraftRevision,
-        });
-        setPrivateDraftRevision(null);
-      }
-      await cashflowLease.checkStatus();
-      toast.success(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 캐시플로우 원장에 저장했습니다.`);
+      toast.success(`시트 값 ${result.appliedLineCount.toLocaleString()}건을 검증하고 원장에 반영했습니다.`);
     };
 
     setSheetStageApplyLoading(true);
@@ -1161,7 +1167,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetStageApplyLoading(false);
     }
-  }, [cashflowLease.checkBeforeMutation, cashflowLease.checkStatus, cashflowPrivateDraftClient, loadCashflowComparison, loadCashflowEvents, orgId, privateDraftRevision, projectId, resolveBffActor, sheetStageDialog]);
+  }, [loadCashflowComparison, loadCashflowEvents, loadCashflowMonthClose, orgId, projectId, resolveBffActor, sheetStageDialog]);
 
   const handleOpenSheetReviewDialog = useCallback(() => {
     if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
@@ -2096,11 +2102,12 @@ export function CashflowProjectSheet({
       const actor = event.actorName
         ? `${event.actorName}님이`
         : event.actorEmail ? `${event.actorEmail} 계정으로` : '담당자가';
-      const action = `${actor} 시트의 최신 값을 불러와 기준값으로 저장했습니다.`;
+      const action = `${actor} 시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.`;
       return [event.sheetName, action].filter(Boolean).join(' · ');
     }
     if (event.type === 'sheet_apply') {
-      return `Google Sheet 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
+      const actor = event.actorName || event.actorEmail || '담당자';
+      return `${actor} · ${event.yearMonth || ''} 원장 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
     }
     if (event.type === 'month_close') return [`${event.yearMonth || ''} 월`, event.status || '결산 완료', event.actorName || event.actorEmail || '사용자'].filter(Boolean).join(' · ');
     if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
@@ -2742,11 +2749,11 @@ export function CashflowProjectSheet({
       >
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[1100px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>{sheetStageDialog?.replaceAllActualSources ? `${yearMonth} 원장 덮어쓰기` : `시트 값 비교 ${sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건`}</AlertDialogTitle>
+            <AlertDialogTitle>{sheetStageDialog?.replaceAllActualSources ? `${yearMonth} 원장 덮어쓰기` : `시트 값 원장 반영 ${sheetStageDialog?.stagedLineCount.toLocaleString() || 0}건`}</AlertDialogTitle>
             <AlertDialogDescription>
               {sheetStageDialog?.replaceAllActualSources
                 ? '이 월의 Projection과 Actual 기존값을 모두 지우고, 고정한 시트 160개 셀로 교체합니다. 감사 이력은 유지됩니다.'
-                : '원장은 아직 변경되지 않았습니다. 아래 변경 범위를 확인한 뒤 이 팝업에서 바로 저장합니다.'}
+                : `원장은 아직 변경되지 않았습니다. ${sheetStageDialog?.stagedMonths.length || 0}개월의 시트값과 원장 차이를 확인한 뒤 한 번에 반영합니다.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {sheetStageDialog && (
@@ -2810,7 +2817,7 @@ export function CashflowProjectSheet({
               {sheetStageDialog && Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount) > 0
                 ? sheetStageDialog.replaceAllActualSources
                   ? `${yearMonth} 원장 전체 덮어쓰기`
-                  : `검토한 값 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 원장에 저장`
+                  : `검증한 값 ${Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건 원장에 반영`
                 : '저장할 변경 없음'}
             </Button>
           </AlertDialogFooter>
