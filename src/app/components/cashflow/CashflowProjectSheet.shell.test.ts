@@ -183,7 +183,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('[selectedYear - 1, selectedYear, selectedYear + 1]');
     expect(source).toContain('data-cashflow-block="multi-year-view"');
     expect(source).toContain("'주차값 집계'");
-    expect(source).toContain("'연간 합산값'");
+    expect(source).toContain("'일부 주차 합계'");
+    expect(source).toContain("'연간 합계'");
     expect(source).toContain('오류 없이 다음 불러오기 때 반영됩니다.');
     expect(source).toContain("start: { yearMonth: `${selectedYear}-01`, weekNo: 1 }");
     expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
@@ -193,7 +194,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('data-cashflow-annual-summary="true"');
     expect(source).toContain('`${year}-01`');
     expect(source).toContain('data-cashflow-year-view={year}');
-    expect(source).toContain('annualSourceLabel(total?.[mode]?.source)} · 보기');
+    expect(source).toContain('annualSourceLabel(total?.[mode])} · 보기');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
   });

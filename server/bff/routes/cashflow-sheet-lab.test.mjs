@@ -307,8 +307,13 @@ describe('cashflow sheet lab route', () => {
       expect.objectContaining({ year: 2026, projection: expect.objectContaining({ source: 'WEEKLY' }) }),
       expect.objectContaining({ year: 2027, projection: expect.objectContaining({ source: 'ANNUAL', valueCellCount: 0 }) }),
     ]));
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_week_values/')).toHaveLength(1);
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_year_totals/')).toHaveLength(4);
+    const mirror = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_mirrors/');
+    const snapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshots/');
+    expect(mirror[0].data).toMatchObject({ projectId: 'project-a', status: 'FRESH', snapshotSchemaVersion: 2 });
+    expect(mirror[0].data.snapshotId).toMatch(/^cfsnap_[a-f0-9]{32}$/);
+    expect(snapshots).toHaveLength(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_years/')).toHaveLength(4);
   });
 
   it('compares a pinned multi-year sheet total with registered financial years', async () => {

@@ -27,8 +27,9 @@ const CASHFLOW_WEEK_BASIS = 'sheet_range';
 const CASHFLOW_WEEKS_COLLECTION_ID = 'cashflow_weeks';
 const CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID = 'cashflow_change_candidates';
 const CASHFLOW_SHEET_MIRRORS_COLLECTION_ID = 'cashflow_sheet_mirrors';
-const CASHFLOW_SHEET_WEEK_VALUES_COLLECTION_ID = 'cashflow_sheet_week_values';
-const CASHFLOW_SHEET_YEAR_TOTALS_COLLECTION_ID = 'cashflow_sheet_year_totals';
+const CASHFLOW_SHEET_SNAPSHOTS_COLLECTION_ID = 'cashflow_sheet_snapshots';
+const CASHFLOW_SHEET_SNAPSHOT_MONTHS_COLLECTION_ID = 'cashflow_sheet_snapshot_months';
+const CASHFLOW_SHEET_SNAPSHOT_YEARS_COLLECTION_ID = 'cashflow_sheet_snapshot_years';
 const CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID = 'cashflow_sheet_refresh_runs';
 const CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID = 'cashflow_sheet_stage_runs';
 const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
@@ -246,12 +247,16 @@ function cashflowSheetMirrorDocPath(tenantId, projectId) {
   return `orgs/${tenantId}/${CASHFLOW_SHEET_MIRRORS_COLLECTION_ID}/${projectId}`;
 }
 
-function cashflowSheetWeekValueDocPath(tenantId, projectId, yearMonth) {
-  return `orgs/${tenantId}/${CASHFLOW_SHEET_WEEK_VALUES_COLLECTION_ID}/${projectId}_${readOptionalText(yearMonth).replace('-', '_')}`;
+function cashflowSheetSnapshotDocPath(tenantId, snapshotId) {
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_SNAPSHOTS_COLLECTION_ID}/${snapshotId}`;
 }
 
-function cashflowSheetYearTotalDocPath(tenantId, projectId, year) {
-  return `orgs/${tenantId}/${CASHFLOW_SHEET_YEAR_TOTALS_COLLECTION_ID}/${projectId}_${Number(year)}`;
+function cashflowSheetSnapshotMonthDocPath(tenantId, snapshotId, yearMonth) {
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_SNAPSHOT_MONTHS_COLLECTION_ID}/${snapshotId}_${readOptionalText(yearMonth).replace('-', '_')}`;
+}
+
+function cashflowSheetSnapshotYearDocPath(tenantId, snapshotId, year) {
+  return `orgs/${tenantId}/${CASHFLOW_SHEET_SNAPSHOT_YEARS_COLLECTION_ID}/${snapshotId}_${Number(year)}`;
 }
 
 function cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey) {
@@ -730,13 +735,15 @@ async function completeCashflowSheetRefreshRun({
     const currentMirror = mirrorSnap.exists ? mirrorSnap.data() || {} : {};
     const currentGeneration = Math.max(0, Number(currentMirror.latestRefreshGeneration) || 0);
     const superseded = currentGeneration > runGeneration;
-    const installedResponse = superseded
-      ? currentMirror
-      : stripUndefinedDeep({
-        ...response,
-        latestRefreshGeneration: runGeneration,
-        pendingRefreshConfigRevision: null,
-      });
+    const runId = readOptionalText(runRef?.id) || readOptionalText(runRef?.path).split('/').pop();
+    const snapshotId = `cfsnap_${stableHash({ tenantId, projectId, runId, sourceRevision: response?.sourceRevision }).slice(0, 32)}`;
+    const installedResponse = superseded ? currentMirror : stripUndefinedDeep({
+      ...response,
+      snapshotId,
+      snapshotSchemaVersion: 2,
+      latestRefreshGeneration: runGeneration,
+      pendingRefreshConfigRevision: null,
+    });
     if (!superseded) {
       transaction.set(mirrorRef, installedResponse);
       writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mirror: installedResponse });
@@ -753,11 +760,34 @@ async function completeCashflowSheetRefreshRun({
 
 function writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mirror }) {
   if (readOptionalText(mirror?.status) !== 'FRESH') return;
+  const snapshotId = readOptionalText(mirror?.snapshotId);
+  if (!/^cfsnap_[a-f0-9]{32}$/.test(snapshotId)) return;
   const capturedAt = readOptionalText(mirror?.capturedAt);
   const sourceRevision = readOptionalText(mirror?.sourceRevision);
+  transaction.set(db.doc(cashflowSheetSnapshotDocPath(tenantId, snapshotId)), stripUndefinedDeep({
+    schemaVersion: 2,
+    snapshotId,
+    tenantId,
+    projectId,
+    status: 'INSTALLED',
+    spreadsheetId: readOptionalText(mirror?.spreadsheetId),
+    spreadsheetTitle: readOptionalText(mirror?.spreadsheetTitle),
+    selectedSheetName: readOptionalText(mirror?.selectedSheetName),
+    configRevision: readOptionalText(mirror?.configRevision),
+    sourceRevision,
+    targetRevisionAtFetch: readOptionalText(mirror?.targetRevisionAtFetch),
+    capturedAt,
+    capturedBy: mirror?.capturedBy || {},
+    yearMonths: mirror?.yearMonths || [],
+    years: mirror?.years || [],
+    summary: mirror?.summary || {},
+    activeWeekRange: mirror?.activeWeekRange || {},
+  }));
   const cellsByMonth = groupPinnedCellsByMonth(mirror?.cells || []);
   for (const [yearMonth, cells] of cellsByMonth) {
-    transaction.set(db.doc(cashflowSheetWeekValueDocPath(tenantId, projectId, yearMonth)), stripUndefinedDeep({
+    transaction.set(db.doc(cashflowSheetSnapshotMonthDocPath(tenantId, snapshotId, yearMonth)), stripUndefinedDeep({
+      schemaVersion: 2,
+      snapshotId,
       tenantId,
       projectId,
       yearMonth,
@@ -769,7 +799,9 @@ function writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mi
   }
   for (const total of mirror?.sheetFacts?.annualCashflowTotals || []) {
     if (!Number.isSafeInteger(total?.year)) continue;
-    transaction.set(db.doc(cashflowSheetYearTotalDocPath(tenantId, projectId, total.year)), stripUndefinedDeep({
+    transaction.set(db.doc(cashflowSheetSnapshotYearDocPath(tenantId, snapshotId, total.year)), stripUndefinedDeep({
+      schemaVersion: 2,
+      snapshotId,
       tenantId,
       projectId,
       year: total.year,
@@ -778,10 +810,9 @@ function writeCashflowSheetReadModels({ transaction, db, tenantId, projectId, mi
       capturedAt,
       projection: total.projection,
       actual: total.actual,
+      annualCells: (mirror?.annualCells || []).filter((cell) => Number(cell?.year) === total.year),
     }));
   }
-  // ponytail: the existing mirror still keeps all cells for the review/apply flow.
-  // Split its reads by month before a project needs more than three detailed years.
 }
 
 function setFiniteAmount(index, mapping, amount) {

@@ -198,11 +198,17 @@ describe('firestore rules policy alignment', () => {
       'cashflowEditLocks',
       'cashflow_edit_locks',
       'cashflow_sheet_mirrors',
+      'cashflow_sheet_snapshots',
+      'cashflow_sheet_snapshot_months',
+      'cashflow_sheet_snapshot_years',
+      'cashflow_sheet_week_values',
+      'cashflow_sheet_year_totals',
       'cashflow_sheet_refresh_runs',
       'cashflow_sheet_stage_runs',
       'cashflow_sheet_stage_months',
       'cashflow_change_candidates',
       'monthly_closes',
+      'monthly_close_versions',
     ]) {
       expect(firestoreRulesText).toContain(`collection in ['${collection}']`);
       expect(firestoreRulesText).toMatch(

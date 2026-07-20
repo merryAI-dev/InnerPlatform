@@ -110,11 +110,17 @@ service cloud.firestore {
         || collection in ['cashflow_edit_locks']
         || collection in ['editLeases']
         || collection in ['cashflow_sheet_mirrors']
+        || collection in ['cashflow_sheet_snapshots']
+        || collection in ['cashflow_sheet_snapshot_months']
+        || collection in ['cashflow_sheet_snapshot_years']
+        || collection in ['cashflow_sheet_week_values']
+        || collection in ['cashflow_sheet_year_totals']
         || collection in ['cashflow_sheet_refresh_runs']
         || collection in ['cashflow_sheet_stage_runs']
         || collection in ['cashflow_sheet_stage_months']
         || collection in ['cashflow_change_candidates']
         || collection in ['monthly_closes']
+        || collection in ['monthly_close_versions']
         || collection in ['weekly_api_idempotency']
         || collection in ['weekly_api_audit_events']
         || collection in ['weekly_api_audit_exports']
@@ -251,6 +257,26 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /orgs/{orgId}/cashflow_sheet_snapshots/{snapshotId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_snapshot_months/{monthId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_snapshot_years/{yearId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_week_values/{monthId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_sheet_year_totals/{yearId} {
+      allow read, write: if false;
+    }
+
     match /orgs/{orgId}/cashflow_sheet_refresh_runs/{runId} {
       allow read, write: if false;
     }
@@ -290,6 +316,10 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/monthly_closes/{closeId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/monthly_close_versions/{versionId} {
       allow read, write: if false;
     }
 

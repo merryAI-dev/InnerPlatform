@@ -319,6 +319,13 @@ export interface CashflowSheetLabMirrorResult {
 
 export interface CashflowSheetLabAnnualModeTotal {
   source: 'WEEKLY' | 'ANNUAL' | 'NONE';
+  coverage: {
+    status: 'COMPLETE' | 'PARTIAL' | 'ANNUAL_ONLY' | 'NONE';
+    weekCount: number;
+    expectedWeekCount: number;
+    monthCount: number;
+    expectedMonthCount: number;
+  };
   valueCellCount: number;
   emptyCellCount: number;
   invalidCellCount: number;

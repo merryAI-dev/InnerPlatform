@@ -121,6 +121,33 @@ function compareAnnualCells(left, right) {
     || String(left.lineId).localeCompare(String(right.lineId));
 }
 
+function annualCoverage(cells, source) {
+  const weeks = new Set();
+  const months = new Set();
+  for (const cell of cells) {
+    const yearMonth = normalizedText(cell?.yearMonth);
+    const weekNo = Number(cell?.weekNo);
+    if (!yearMonth || !Number.isSafeInteger(weekNo)) continue;
+    months.add(yearMonth);
+    weeks.add(`${yearMonth}:${weekNo}`);
+  }
+  return {
+    status: source === 'WEEKLY'
+      ? (weeks.size === 60 && months.size === 12 ? 'COMPLETE' : 'PARTIAL')
+      : source === 'ANNUAL' ? 'ANNUAL_ONLY' : 'NONE',
+    weekCount: weeks.size,
+    expectedWeekCount: 60,
+    monthCount: months.size,
+    expectedMonthCount: 12,
+  };
+}
+
+function addWholeWon(left, right) {
+  const sum = left + right;
+  if (!Number.isSafeInteger(sum)) throw new RangeError('Cashflow annual total exceeds the safe whole-won range.');
+  return sum;
+}
+
 function summarizeAnnualMode(cells, source) {
   const lineAmounts = {};
   let totalIn = 0;
@@ -137,21 +164,26 @@ function summarizeAnnualMode(cells, source) {
       invalidCellCount += 1;
       continue;
     }
+    const amount = Number(cell.amount);
+    if (!Number.isSafeInteger(amount)) {
+      invalidCellCount += 1;
+      continue;
+    }
     valueCellCount += 1;
-    const amount = Number(cell.amount) || 0;
-    lineAmounts[cell.lineId] = amount;
-    if (cell.direction === 'IN') totalIn += amount;
-    if (cell.direction === 'OUT') totalOut += amount;
+    lineAmounts[cell.lineId] = addWholeWon(lineAmounts[cell.lineId] || 0, amount);
+    if (cell.direction === 'IN') totalIn = addWholeWon(totalIn, amount);
+    if (cell.direction === 'OUT') totalOut = addWholeWon(totalOut, amount);
   }
   return {
     source,
+    coverage: annualCoverage(cells, source),
     valueCellCount,
     emptyCellCount,
     invalidCellCount,
     lineAmounts,
     totalIn,
     totalOut,
-    net: totalIn - totalOut,
+    net: addWholeWon(totalIn, -totalOut),
   };
 }
 
