@@ -37,6 +37,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '경영기획실',
     items: [
       { to: '/cashflow/analytics', icon: BarChart3, label: '통합 관리' },
+      { to: '/management-planning/project-codes', icon: Hash, label: '프로젝트 코드 부여' },
       { to: '/approvals', icon: ListChecks, label: '등록/승인', accent: true },
       { to: '/management-planning/project-codes', icon: Hash, label: '프로젝트 코드 부여', accent: true },
     ],

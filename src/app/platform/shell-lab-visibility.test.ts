@@ -76,6 +76,7 @@ describe('shell LAB visibility', () => {
     expect(shouldShowShellRoute('/dashboard', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/projects', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/projects/migration-audit', 'admin', 'nav', { labEnabled: false })).toBe(true);
+    expect(shouldShowShellRoute('/management-planning/project-codes', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/cashflow', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/users', 'admin', 'nav', { labEnabled: false })).toBe(true);
   });

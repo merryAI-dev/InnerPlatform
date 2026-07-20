@@ -14,6 +14,8 @@ export function normalizeStoredCic(value: unknown): string | undefined {
 export function deriveProjectCicFromDepartment(department: unknown): string | undefined {
   const normalized = normalizeRaw(department);
   if (!normalized || normalized === '미지정') return undefined;
+  const teamMatch = normalized.match(/^([a-z]{2,10})\s*team$/i);
+  if (teamMatch) return `${teamMatch[1].toUpperCase()}팀`;
   return /^cic\s*\d+$/i.test(normalized)
     ? normalized.toUpperCase().replace(/\s+/g, '')
     : normalized;

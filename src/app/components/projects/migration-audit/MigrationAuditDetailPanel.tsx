@@ -257,7 +257,6 @@ export function MigrationAuditDetailPanel({
                 { label: '프로젝트명', value: dossier.headerTitle },
                 { label: '공식 계약명', value: dossier.identity.officialContractName },
                 { label: '계약 대상', value: dossier.identity.clientOrg },
-                { label: '그룹웨어 등록명', value: dossier.identity.groupwareName },
                 { label: '담당조직(CIC)', value: dossier.identity.cic },
                 { label: 'PM', value: dossier.identity.pmName },
               ]}
@@ -310,9 +309,9 @@ export function MigrationAuditDetailPanel({
             <ReviewFactGrid
               items={[
                 { label: '계약금액', value: dossier.budget.contractAmountLabel },
-                { label: '매출 부가세', value: dossier.budget.salesVatAmountLabel },
+                { label: '총매출부가세', value: dossier.budget.salesVatAmountLabel },
                 { label: '총수익', value: dossier.budget.totalRevenueAmountLabel },
-                { label: '지원금', value: dossier.budget.supportAmountLabel },
+                { label: '총지원금', value: dossier.budget.supportAmountLabel },
                 { label: '입금 계획', value: dossier.budget.paymentPlanDesc, wide: true },
                 { label: '입금 분할', value: dossier.budget.paymentPlanSplitLabel, wide: true },
                 { label: '최종 입금 메모', value: dossier.budget.finalPaymentNote, wide: true },

@@ -12,6 +12,7 @@ describe('project-cic', () => {
   it('derives cic from department-like values used in project registration', () => {
     expect(deriveProjectCicFromDepartment('CIC2')).toBe('CIC2');
     expect(deriveProjectCicFromDepartment('cic 3')).toBe('CIC3');
+    expect(deriveProjectCicFromDepartment('AXR Team')).toBe('AXR팀');
     expect(deriveProjectCicFromDepartment('C-스템CIC')).toBe('C-스템CIC');
     expect(deriveProjectCicFromDepartment('개발협력센터')).toBe('개발협력센터');
     expect(deriveProjectCicFromDepartment('공간플랫폼센터')).toBe('공간플랫폼센터');
@@ -20,6 +21,7 @@ describe('project-cic', () => {
 
   it('normalizes stored department labels before project writes', () => {
     expect(normalizeProjectDepartment('CIC 2')).toBe('CIC2');
+    expect(normalizeProjectDepartment('axr team')).toBe('AXR팀');
     expect(normalizeProjectDepartment(' 투자센터 ')).toBe('투자센터');
     expect(normalizeProjectDepartment('미지정')).toBe('');
   });

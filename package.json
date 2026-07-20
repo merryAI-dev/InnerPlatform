@@ -48,6 +48,8 @@
     "rust:settlement:test": "cargo test --manifest-path rust/spreadsheet-calculation-core/Cargo.toml",
     "workbook:extract:formulas": "npx tsx scripts/extract_workbook_formula_inventory.ts",
     "firestore:live-cutover": "npx tsx scripts/firestore_live_cutover.ts",
+    "firestore:audit:organization-labels": "npx tsx scripts/audit-project-organization-labels.ts",
+    "firestore:normalize:organization-labels": "npx tsx scripts/normalize-project-organization-labels.ts",
     "firestore:backup:schedule": "bash scripts/firestore_backup_schedule.sh",
     "firestore:backup:rehearsal": "bash scripts/firestore_backup_rehearsal.sh",
     "monitoring:setup:alerts": "bash scripts/setup_monitoring_alerts.sh",

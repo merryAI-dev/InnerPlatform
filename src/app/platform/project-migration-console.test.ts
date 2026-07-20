@@ -107,7 +107,9 @@ describe('project-migration-console', () => {
     expect(normalizeCicLabel('CIC-A')).toBe('CIC-A');
   });
 
-  it('matches equivalent CIC labels for a reviewer inbox without changing the displayed label', () => {
+  it('normalizes equivalent organization labels for display and reviewer matching', () => {
+    expect(normalizeCicLabel('CIC 2')).toBe('CIC2');
+    expect(normalizeCicLabel('AXR Team')).toBe('AXR팀');
     expect(isSameMigrationAuditCic('CIC2', 'CIC 2')).toBe(true);
     expect(isSameMigrationAuditCic('AXR팀', 'AXR Team')).toBe(true);
     expect(isSameMigrationAuditCic('CIC2', 'CIC3')).toBe(false);
@@ -150,6 +152,23 @@ describe('project-migration-console', () => {
 
     expect(records[0]?.status).toBe('PENDING');
     expect(isMigrationAuditPmRegistration(records[0])).toBe(true);
+  });
+
+  it('keeps an executive-approved project out of the organization-head pending queue after management planning returns its request to the PM', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [makeProject({
+        id: 'p-management-returned',
+        executiveReviewStatus: 'APPROVED',
+        managementPlanningReviewStatus: 'REVISION_REJECTED',
+      })],
+      [makeRequest({
+        id: 'pr-management-returned',
+        status: 'PENDING',
+        approvedProjectId: 'p-management-returned',
+      })],
+    );
+
+    expect(records[0]?.status).toBe('APPROVED');
   });
 
   it('keeps rejected projects rejected until the project is explicitly resubmitted', () => {

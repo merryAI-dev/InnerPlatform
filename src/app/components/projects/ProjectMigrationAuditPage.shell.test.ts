@@ -39,7 +39,7 @@ describe('ProjectMigrationAuditPage review flow', () => {
   it('uses a separate management-planning command only after organization approval', () => {
     expect(pageSource).toContain("reviewStage = 'executive'");
     expect(pageSource).toContain("reviewStage === 'managementPlanning'");
-    expect(pageSource).toContain("record.project.executiveReviewStatus === 'APPROVED'");
+    expect(pageSource).toContain('deriveMigrationAuditStatus(record.project, record.request)');
     expect(pageSource).toContain('reviewProjectManagementPlanningStatusViaBff');
     expect(pageSource).toContain("reviewStatus: actionMode === 'approve' ? 'AGREED' : 'REVISION_REJECTED'");
     expect(pageSource).toContain('프로젝트 코드를 입력해 주세요.');

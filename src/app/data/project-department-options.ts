@@ -45,6 +45,8 @@ export function normalizeProjectDepartmentOptionLabel(value: unknown): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
   if (/^cic\s*([1-4])$/i.test(raw)) return `CIC${raw.match(/[1-4]/)?.[0] || ''}`;
+  const teamMatch = raw.match(/^([a-z]{2,10})\s*team$/i);
+  if (teamMatch?.[1]) return `${teamMatch[1].toUpperCase()}팀`;
   return raw;
 }
 

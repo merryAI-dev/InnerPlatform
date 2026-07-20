@@ -31,11 +31,13 @@
 - [x] 포털 safe fetch 경로에서 주요 운영 컬렉션은 초기 fetch와 로컬 write mirror로 화면 흔들림을 줄임
 - [x] Cashflow Sheet Lab의 Google Sheets 연동은 서버 서비스 계정 전용으로 고정하고 사용자 OAuth token pass-through를 제거함
 - [x] `/portal/cashflow`는 route-scoped provider만 로딩하고, catalog 권한 오류가 있어도 배정 프로젝트 선택을 유지함
+- [x] 프로젝트 등록/수정은 지정 결재자, 조직장 승인, 경영기획실 코드 부여를 분리한 승인 흐름으로 정렬됨
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-07-20] 프로젝트 등록/수정 승인 흐름을 기획안 기준으로 재정렬했다. 실무자 제출 문서는 지정 조직장 승인 전 도장을 찍지 않고, 경영기획실은 조직장 승인 또는 레거시 승인 request가 있는 프로젝트만 코드 부여 대상으로 본다. 프로젝트 코드는 중복 claim을 통해 선점하고, 반려 메모는 PM 재제출 흐름으로 돌려보낸다.
 - [2026-07-13] 프로젝트 등록·수정과 cashflow의 canonical browser write를 Firestore rules에서 차단하고, BFF/JVM command만 lease·revision·audit 경계를 통과하도록 Stage 전용 리팩터링을 추가했다. 오류 복구는 강제 새로고침 없이 SPA 상태 복구로 바꿨다.
 - [2026-06-19] Cashflow Sheet Lab의 Google Sheets 접근을 서버 서비스 계정으로 고정하고, 설정 저장과 시트 검증/반영 액션을 분리했다. `/portal/cashflow`에서는 HR/Payroll/Board/Training/Career provider 로딩을 제외하고, projects catalog 권한 오류가 배정 프로젝트 선택을 지우지 않도록 했으며, labor risk 배경 요청 키를 사용자/프로젝트/날짜 기준으로 안정화했다.
 - [2026-06-19] Cashflow/사업비 주차 계산을 stage/live 공통 finance week core로 통합했다. 월 내부 Monday-based 5-slot 정책을 적용하고 raw 6주차는 financeWeek 5로 저장/집계되도록 BFF, 포털 저장, export 표면을 같은 로직으로 맞췄다.

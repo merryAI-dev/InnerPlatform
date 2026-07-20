@@ -587,6 +587,20 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       requestId: 'pr_exec_review_003',
       reviewStatus: 'PENDING',
     });
+    expect((await db.doc(`orgs/${tenantId}/projects/p_exec_review_003`).get()).data()).toMatchObject({
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+      executiveReviewComment: null,
+      executiveReviewHistory: expect.arrayContaining([
+        expect.objectContaining({
+          status: 'PENDING',
+          reviewedByName: '변민욱',
+          reviewComment: '계약서 보완 후 다시 제출',
+        }),
+      ]),
+    });
     const requestSnap = await db.doc(`orgs/${tenantId}/project_requests/pr_exec_review_003`).get();
     expect(requestSnap.data()?.payload?.contractDocument).toMatchObject({
       name: '보완_계약서.pdf',
@@ -723,6 +737,13 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       projectId: 'p_exec_review_legacy_001',
       requestId: 'pr_exec_review_legacy_001',
       reviewStatus: 'PENDING',
+    });
+    expect((await db.doc(`orgs/${tenantId}/projects/p_exec_review_legacy_001`).get()).data()).toMatchObject({
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+      executiveReviewComment: null,
     });
   });
 

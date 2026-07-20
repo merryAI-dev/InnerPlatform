@@ -13,7 +13,6 @@ export const PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS = Object.freeze([
   'contract',
   'customer_business_registration',
   'quote',
-  'rfp_request_evidence',
 ]);
 
 export const PROJECT_INFO_DOCUMENT_KINDS = Object.freeze([

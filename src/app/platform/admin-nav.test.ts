@@ -41,6 +41,13 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('viewer', '/approvals')).toBe(false);
   });
 
+  it('allows only admin and finance into management-planning project code issuance', () => {
+    expect(canAccessAdminPath('admin', '/management-planning/project-codes')).toBe(true);
+    expect(canAccessAdminPath('finance', '/management-planning/project-codes')).toBe(true);
+    expect(canAccessAdminPath('pm', '/management-planning/project-codes')).toBe(false);
+    expect(canAccessAdminPath('viewer', '/management-planning/project-codes')).toBe(false);
+  });
+
   it('allows every signed-in role into the business card capture route', () => {
     expect(canAccessAdminPath('admin', '/business-cards')).toBe(true);
     expect(canAccessAdminPath('finance', '/business-cards')).toBe(true);

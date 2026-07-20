@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProjectId, resolveServiceAccount } from './firestore.mjs';
+import { resolveFirestoreDatabaseId, resolveProjectId, resolveServiceAccount } from './firestore.mjs';
 
 describe('firestore config helpers', () => {
   it('resolves project id with explicit priority', () => {
@@ -17,6 +17,11 @@ describe('firestore config helpers', () => {
     expect(resolveProjectId({
       GCLOUD_PROJECT: 'p-3',
     } as any)).toBe('p-3');
+  });
+
+  it('uses the default Firestore database only when no named database is requested', () => {
+    expect(resolveFirestoreDatabaseId()).toBe('(default)');
+    expect(resolveFirestoreDatabaseId('  reh2607151200  ')).toBe('reh2607151200');
   });
 
   it('parses service account json and normalizes private key newlines', () => {

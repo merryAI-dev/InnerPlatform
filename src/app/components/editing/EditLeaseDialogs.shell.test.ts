@@ -5,7 +5,7 @@ import { editLeaseHolderMessage } from './EditLeaseDialogs';
 const source = readFileSync(new URL('./EditLeaseDialogs.tsx', import.meta.url), 'utf8');
 
 describe('EditLeaseDialogs', () => {
-  it('shows the holder name in the approved conflict wording', () => {
+  it('distinguishes another user holding an edit lease from the same user resuming one', () => {
     expect(editLeaseHolderMessage({
       holderDisplayName: '김메리',
       sameActor: false,
@@ -15,8 +15,9 @@ describe('EditLeaseDialogs', () => {
       holderDisplayName: '김메리',
       sameActor: true,
       expiresAt: '2026-07-10T00:30:00.000Z',
-    })).toBe('현재 김메리님이 수정 중입니다.');
+    })).toBe('이전 수정 세션이 남아 있습니다.');
     expect(source).toContain('지금은 수정은 불가능하지만 읽기/조회는 가능해요!');
+    expect(source).toContain('이어서 작성하면 기존 임시저장본을 계속 수정할 수 있습니다.');
     expect(source).toContain('이전 수정 세션 이어서 작성');
   });
 

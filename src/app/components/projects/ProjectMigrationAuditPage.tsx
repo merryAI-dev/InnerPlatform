@@ -18,6 +18,7 @@ import {
   type MigrationAuditConsoleStatus,
   buildMigrationAuditConsoleRecords,
   collectMigrationAuditCicOptions,
+  deriveMigrationAuditStatus,
   filterMigrationAuditConsoleRecords,
   summarizeMigrationAuditConsole,
 } from '../../platform/project-migration-console';
@@ -95,7 +96,7 @@ function toManagementPlanningConsoleStatus(project: Project): MigrationAuditCons
 
 function buildManagementPlanningRecords(records: MigrationAuditConsoleRecord[]): MigrationAuditConsoleRecord[] {
   return records
-    .filter((record) => record.project.executiveReviewStatus === 'APPROVED')
+    .filter((record) => deriveMigrationAuditStatus(record.project, record.request) === 'APPROVED')
     .map((record) => ({ ...record, status: toManagementPlanningConsoleStatus(record.project) }));
 }
 

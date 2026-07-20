@@ -143,7 +143,6 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       description: 'Description',
       clientOrg: 'Client',
       department: 'AXR',
-      groupwareName: 'Stage private project',
       currency: 'KRW',
       contractAmount: 100_000,
       salesVatAmount: 10_000,
@@ -166,11 +165,6 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         customerSettlementBasisConfirmed: true,
         modusignContractUsed: true,
         originalContractSubmitted: false,
-      },
-      registrationOptionalDocumentNotes: {
-        proposalWordOriginal: '해당 없음',
-        proposalPptOriginal: '해당 없음',
-        presentationPptOriginal: '해당 없음',
       },
       contractStart: '2026-07-01',
       contractEnd: '2026-12-31',
@@ -211,7 +205,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
   }
 
   async function uploadRequiredAttachments(created: any, keyPrefix: string) {
-    const kinds = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence'];
+    const kinds = ['contract', 'customer_business_registration', 'quote', 'proposal'];
     const responses = [];
     for (const [expectedDraftRevision, documentKind] of kinds.entries()) {
       responses.push(await api
@@ -577,7 +571,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         expect.objectContaining({ documentKind: 'contract', path: expect.stringContaining('/project-registration-drafts/') }),
         expect.objectContaining({ documentKind: 'customer_business_registration' }),
         expect.objectContaining({ documentKind: 'quote' }),
-        expect.objectContaining({ documentKind: 'rfp_request_evidence' }),
+        expect.objectContaining({ documentKind: 'proposal' }),
       ]));
     const lease = (await db.doc(
       `orgs/${tenantId}/editLeases/${resolveEditLeaseDocumentId('project-registration', created.body.draft.draftId)}`,

@@ -125,7 +125,7 @@ describe('project-request-review', () => {
       '계약 시작일',
       '계약 종료일',
       '계약금액',
-      '매출 부가세',
+      '총매출부가세',
     ]);
     expect(model.analysis.highlights.some((item) => item.status === 'needs-check')).toBe(true);
     expect(model.badges.some((badge) => badge.label.includes('AI'))).toBe(false);

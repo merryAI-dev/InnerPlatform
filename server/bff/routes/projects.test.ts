@@ -14,7 +14,7 @@ import {
   tryRenameManagedProjectRootFolder,
 } from './projects.mjs';
 
-const registrationV2AttachmentKinds = ['contract', 'customer_business_registration', 'quote', 'rfp_request_evidence'];
+const registrationV2AttachmentKinds = ['contract', 'customer_business_registration', 'quote', 'proposal'];
 
 function registrationV2Payload(overrides: Record<string, unknown> = {}) {
   return {
@@ -23,7 +23,6 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     clientOrg: '발주기관 주식회사',
     projectPurpose: '사내기업가 육성',
     description: '교육 운영 및 성과보고서 제출',
-    groupwareName: '2026 다년도 사업',
     type: 'D1',
     status: 'CONTRACT_PENDING',
     department: 'AXR',
@@ -73,9 +72,9 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
       originalContractSubmitted: true,
     },
     registrationOptionalDocumentNotes: {
-      proposalWordOriginal: '해당 없음',
-      proposalPptOriginal: '해당 없음',
-      presentationPptOriginal: '해당 없음',
+      proposalWordOriginal: '제안서 Word 원본은 고객사 제공 자료가 없어 제출 제외',
+      proposalPptOriginal: '제안서 PPT 원본은 고객사 제공 자료가 없어 제출 제외',
+      presentationPptOriginal: '발표자료 PPT 원본은 해당 없음',
     },
     ...overrides,
   };
@@ -104,7 +103,7 @@ function registrationV2Canonical(payload = registrationV2Payload(), requiredKind
 }
 
 describe('project route helpers', () => {
-  it('builds a registration v2 canonical record only after all years, four attachments and confirmations pass', () => {
+  it('builds a registration v2 canonical record after the PPT four-document contract and confirmations pass', () => {
     const canonical = registrationV2Canonical();
 
     expect(canonical.projectRequest.payload).toMatchObject({
@@ -120,43 +119,59 @@ describe('project route helpers', () => {
         modusignContractUsed: false,
         originalContractSubmitted: true,
       },
-      registrationOptionalDocumentNotes: {
-        proposalWordOriginal: '해당 없음',
-        proposalPptOriginal: '해당 없음',
-        presentationPptOriginal: '해당 없음',
-      },
-      groupwareName: '2026 다년도 사업',
       settlementSystem: 'BOTAEM_E',
       laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
       teamMembersDetailed: [{ role: '실무책임자', isDocumentOnly: true }],
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveApproverEmail: 'head-a@mysc.co.kr',
+    });
+    expect(canonical.projectRequest.payload).not.toHaveProperty('groupwareName');
+    expect(canonical.projectRequest.payload).toMatchObject({
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '제안서 Word 원본은 고객사 제공 자료가 없어 제출 제외',
+        proposalPptOriginal: '제안서 PPT 원본은 고객사 제공 자료가 없어 제출 제외',
+        presentationPptOriginal: '발표자료 PPT 원본은 해당 없음',
+      },
     });
     expect(canonical.project.customerBusinessRegistrationDocument).toBeNull();
+    expect(canonical.project.executiveReviewHistory?.[0]?.reviewComment).toBe('PM 신규 등록');
     expect(canonical.project).toMatchObject({
       registrationRequirementsVersion: 2,
       financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveApproverEmail: 'head-a@mysc.co.kr',
+    });
+    expect(canonical.project).not.toHaveProperty('groupwareName');
+    expect(canonical.project).toMatchObject({
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '제안서 Word 원본은 고객사 제공 자료가 없어 제출 제외',
+        proposalPptOriginal: '제안서 PPT 원본은 고객사 제공 자료가 없어 제출 제외',
+        presentationPptOriginal: '발표자료 PPT 원본은 해당 없음',
+      },
     });
   });
 
-  it('requires either each optional original file or its explicit omission note', () => {
+  it('accepts proposal/RFP evidence as optional context when original-file notes are present', () => {
+    const fixedDocumentKinds = ['contract', 'customer_business_registration', 'quote'];
+
+    expect(() => registrationV2Canonical(registrationV2Payload(), [...fixedDocumentKinds, 'proposal'])).not.toThrow();
+    expect(() => registrationV2Canonical(registrationV2Payload(), [...fixedDocumentKinds, 'rfp_request_evidence'])).not.toThrow();
+    expect(() => registrationV2Canonical(registrationV2Payload(), [
+      ...fixedDocumentKinds,
+      'proposal',
+      'rfp_request_evidence',
+    ])).not.toThrow();
+    expect(() => registrationV2Canonical(registrationV2Payload(), fixedDocumentKinds)).not.toThrow();
     expect(() => registrationV2Canonical(registrationV2Payload({
       registrationOptionalDocumentNotes: {
         proposalWordOriginal: '',
-        proposalPptOriginal: '해당 없음',
-        presentationPptOriginal: '해당 없음',
+        proposalPptOriginal: '',
+        presentationPptOriginal: '',
       },
-    }))).toThrowError('Project registration optional attachment note is missing: proposal_word_original');
-
-    expect(() => registrationV2Canonical(
-      registrationV2Payload({
-        registrationOptionalDocumentNotes: {
-          proposalWordOriginal: '',
-          proposalPptOriginal: '해당 없음',
-          presentationPptOriginal: '해당 없음',
-        },
-      }),
-      [...registrationV2AttachmentKinds, 'proposal_word_original'],
-    )).not.toThrow();
+    }), fixedDocumentKinds)).toThrowError('Project registration optional attachment note is missing: proposal_word_original');
   });
 
   it.each([undefined, 1])('rejects new canonical registration requirements version %s', (version) => {
@@ -180,7 +195,6 @@ describe('project route helpers', () => {
   });
 
   it.each([
-    ['groupware name', { groupwareName: '' }, 'Project registration groupwareName is required'],
     [
       'payment expected month',
       { paymentExpectedMonths: { contract: '', interim: '2026-06', final: '2027-12' } },
@@ -215,6 +229,15 @@ describe('project route helpers', () => {
     );
 
     expect(patch.registrationRequirementsVersion).toBe(1);
+  });
+
+  it('preserves a legacy groupware name when a v2 project change request omits the hidden field', () => {
+    const patch = buildProjectPatchFromChangeRequestPayload(
+      registrationV2Payload(),
+      { id: 'existing-project', groupwareName: '기존 그룹웨어 등록명' },
+    );
+
+    expect(patch.groupwareName).toBe('기존 그룹웨어 등록명');
   });
 
   it.each(['pm', 'viewer'])('requires the private draft flow when %s creates a project directly', async (actorRole) => {
@@ -544,7 +567,7 @@ describe('project route helpers', () => {
     });
   });
 
-  it('serves a pending project request attachment only to an active reviewer', async () => {
+  it('serves a historical rejected project request attachment only to an active reviewer', async () => {
     const path = 'orgs/mysc/project-registration-documents/project-a/pending-contract.pdf';
     const downloadProjectRegistrationAttachment = vi.fn(async () => ({
       buffer: Buffer.from('pending-private-pdf'), contentType: 'application/pdf', size: 19,
@@ -563,7 +586,7 @@ describe('project route helpers', () => {
               exists: true,
               data: () => ({
                 id: 'change-project-a',
-                status: 'PENDING',
+                status: 'REJECTED',
                 requestKind: 'CHANGE',
                 targetProjectId: 'project-a',
                 approvedProjectId: 'project-a',
@@ -598,6 +621,13 @@ describe('project route helpers', () => {
     expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
       tenantId: 'mysc', projectId: 'project-a', path,
     });
+  });
+
+  it('canonicalizes organization labels in registration documents before they are written', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({ department: 'AXR Team' }));
+
+    expect(canonical.projectRequest.payload.department).toBe('AXR팀');
+    expect(canonical.project).toMatchObject({ department: 'AXR팀', cic: 'AXR팀' });
   });
 
   it('denies a PM before reading pending project request attachment metadata', async () => {
@@ -818,6 +848,257 @@ describe('project route helpers', () => {
       approvedProjectId: 'p001',
     }, { merge: true });
     expect(result).toMatchObject({ version: 3, data: { executiveReviewStatus: 'APPROVED' } });
+  });
+
+  it('only lets the designated executive approver approve and records the server-side approver name', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
+    const project = {
+      id: 'p001',
+      version: 1,
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = { targetProjectId: 'p001', approvedProjectId: 'p001', payload: { name: '등록 요청' } };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === projectRef.path) return { exists: true, data: () => project };
+          if (path === requestRef.path) return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'head-a',
+        actorRole: 'admin',
+        actorEmail: 'head-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-a',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'pr001',
+      reviewStatus: 'APPROVED',
+      reviewerName: '조작된 이름',
+    });
+
+    expect(response.status).toBe(200);
+    expect(tx.set).toHaveBeenNthCalledWith(1, expect.objectContaining(projectRef), expect.objectContaining({
+      executiveReviewedById: 'head-a',
+      executiveReviewedByName: '조직장 A',
+    }), { merge: true });
+    expect(tx.set).toHaveBeenNthCalledWith(2, expect.objectContaining(requestRef), expect.objectContaining({
+      reviewedBy: 'head-a',
+      reviewedByName: '조직장 A',
+    }), { merge: true });
+  });
+
+  it('rejects executive approval from anyone except the designated approver', async () => {
+    const project = {
+      id: 'p001',
+      version: 1,
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = { targetProjectId: 'p001', approvedProjectId: 'p001', payload: { name: '등록 요청' } };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === 'orgs/mysc/projects/p001') return { exists: true, data: () => project };
+          if (path === 'orgs/mysc/project_requests/pr001') return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'admin-a',
+        actorRole: 'admin',
+        actorEmail: 'admin-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-denied',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'pr001',
+      reviewStatus: 'APPROVED',
+      reviewerName: '관리자',
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('executive_approver_mismatch');
+    expect(tx.set).not.toHaveBeenCalled();
+    expect(idempotencyService.fail).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects executive approval from a PM even when the PM is stored as the designated approver', async () => {
+    const db = {
+      doc: vi.fn(() => ({
+        get: vi.fn(async () => ({ exists: true, data: () => ({ id: 'p001', executiveApproverId: 'pm-a' }) })),
+      })),
+      runTransaction: vi.fn(),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'pm-a',
+        actorRole: 'pm',
+        actorEmail: 'pm-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-pm-self',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'pr001',
+      reviewStatus: 'APPROVED',
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(db.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps legacy pending projects reviewable when no designated approver is stored', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
+    const project = {
+      id: 'p001',
+      version: 1,
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = { targetProjectId: 'p001', approvedProjectId: 'p001', payload: { name: '레거시 등록 요청' } };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === projectRef.path) return { exists: true, data: () => project };
+          if (path === requestRef.path) return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'admin-a',
+        actorRole: 'admin',
+        actorEmail: 'admin-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-legacy',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'pr001',
+      reviewStatus: 'APPROVED',
+      reviewerName: '조작된 이름',
+    });
+
+    expect(response.status).toBe(200);
+    expect(tx.set).toHaveBeenNthCalledWith(1, expect.objectContaining(projectRef), expect.objectContaining({
+      executiveReviewedById: 'admin-a',
+      executiveReviewedByName: 'admin-a@example.com',
+    }), { merge: true });
+    expect(tx.set).toHaveBeenNthCalledWith(2, expect.objectContaining(requestRef), expect.objectContaining({
+      reviewedBy: 'admin-a',
+      reviewedByName: 'admin-a@example.com',
+    }), { merge: true });
   });
 
   it('rejects a stale change request inside the executive approval transaction', async () => {

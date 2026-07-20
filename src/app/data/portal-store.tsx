@@ -2552,7 +2552,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         reviewedAt: now,
         reviewedById: authUser.uid,
         reviewedByName: requesterName,
-        reviewComment: 'PM 신규 등록',
+        reviewComment: null,
       }],
       registeredById: ownerId,
       registeredByName: ownerName,

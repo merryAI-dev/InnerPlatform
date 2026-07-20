@@ -92,7 +92,7 @@ const ANALYSIS_FIELD_LABELS: Record<keyof ProjectRequestContractAnalysis['fields
   contractStart: '계약 시작일',
   contractEnd: '계약 종료일',
   contractAmount: '계약금액',
-  salesVatAmount: '매출 부가세',
+  salesVatAmount: '총매출부가세',
 };
 
 function isBlank(value: unknown): boolean {
@@ -293,9 +293,9 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
   const financialItems: ProjectRequestReviewItem[] = [
     buildTextItem('currency', '통화', PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(payload.currency)]),
     buildMoneyItem('contractAmount', '계약금액', payload.contractAmount, payload.financialInputFlags),
-    buildMoneyItem('salesVatAmount', '매출 부가세', payload.salesVatAmount, payload.financialInputFlags),
+    buildMoneyItem('salesVatAmount', '총매출부가세', payload.salesVatAmount, payload.financialInputFlags),
     buildMoneyItem('totalRevenueAmount', '총수익', payload.totalRevenueAmount, payload.financialInputFlags),
-    buildMoneyItem('supportAmount', '지원금', payload.supportAmount, payload.financialInputFlags),
+    buildMoneyItem('supportAmount', '총지원금', payload.supportAmount, payload.financialInputFlags),
     buildTextItem('paymentPlanDesc', '입금 계획', payload.paymentPlanDesc),
   ];
 
