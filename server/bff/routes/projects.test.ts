@@ -987,12 +987,43 @@ describe('project route helpers', () => {
     expect(idempotencyService.fail).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects executive approval from a PM even when the PM is stored as the designated approver', async () => {
+  it('rejects executive approval when the requester is stored as the designated approver', async () => {
+    const project = {
+      id: 'p001',
+      version: 1,
+      createdBy: 'pm-a',
+      registeredById: 'pm-a',
+      managerId: 'pm-a',
+      executiveApproverId: 'pm-a',
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = {
+      targetProjectId: 'p001',
+      approvedProjectId: 'p001',
+      requestedBy: 'pm-a',
+      payload: {
+        name: '셀프 승인 등록 요청',
+        registeredById: 'pm-a',
+        managerId: 'pm-a',
+        executiveApproverId: 'pm-a',
+      },
+    };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
     const db = {
-      doc: vi.fn(() => ({
-        get: vi.fn(async () => ({ exists: true, data: () => ({ id: 'p001', executiveApproverId: 'pm-a' }) })),
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === 'orgs/mysc/projects/p001') return { exists: true, data: () => project };
+          if (path === 'orgs/mysc/project_requests/pr001') return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
       })),
-      runTransaction: vi.fn(),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
     };
     const idempotencyService = {
       begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
@@ -1027,8 +1058,88 @@ describe('project route helpers', () => {
     });
 
     expect(response.status).toBe(403);
-    expect(response.body.error).toBe('forbidden');
-    expect(db.runTransaction).not.toHaveBeenCalled();
+    expect(response.body.error).toBe('self_approval_forbidden');
+    expect(tx.set).not.toHaveBeenCalled();
+  });
+
+  it('allows the designated approver through existing write permissions without a separate member role', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
+    const project = {
+      id: 'p001',
+      version: 1,
+      registeredById: 'pm-a',
+      managerId: 'pm-a',
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = {
+      targetProjectId: 'p001',
+      approvedProjectId: 'p001',
+      requestedBy: 'pm-a',
+      payload: {
+        name: '등록 요청',
+        registeredById: 'pm-a',
+        managerId: 'pm-a',
+        executiveApproverId: 'head-a',
+      },
+    };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === projectRef.path) return { exists: true, data: () => project };
+          if (path === requestRef.path) return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'head-a',
+        actorRole: 'pm',
+        actorEmail: 'head-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-designated-write-core',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'pr001',
+      reviewStatus: 'APPROVED',
+    });
+
+    expect(response.status).toBe(200);
+    expect(tx.set).toHaveBeenNthCalledWith(1, expect.objectContaining(projectRef), expect.objectContaining({
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedById: 'head-a',
+      executiveReviewedByName: '조직장 A',
+    }), { merge: true });
   });
 
   it('keeps legacy pending projects reviewable when no designated approver is stored', async () => {

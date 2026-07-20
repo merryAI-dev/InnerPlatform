@@ -2683,7 +2683,7 @@ export function mountProjectRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/executive-review', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail, actorName } = req.context;
-    assertActorRoleAllowed(req, ['admin', 'tenant_admin'], 'review project executive status');
+    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'review project executive status');
     const projectId = readOptionalText(req.params.projectId);
     if (!projectId) {
       throw createHttpError(400, 'project id is required', 'missing_project_id');
@@ -2726,6 +2726,17 @@ export function mountProjectRoutes(app, {
         }
         if (designatedApproverId && designatedApproverId !== actorId) {
           throw createHttpError(403, 'Only the designated executive approver can review this project', 'executive_approver_mismatch');
+        }
+        const requesterIds = new Set([
+          readOptionalText(currentProject.createdBy),
+          readOptionalText(currentProject.registeredById),
+          readOptionalText(currentProject.managerId),
+          readOptionalText(reviewRequest?.requestedBy),
+          readOptionalText(requestPayload?.registeredById),
+          readOptionalText(requestPayload?.managerId),
+        ].filter(Boolean));
+        if (designatedApproverId && requesterIds.has(actorId)) {
+          throw createHttpError(403, 'Requester cannot approve their own project registration', 'self_approval_forbidden');
         }
         reviewerName = readOptionalText(currentProject.executiveApproverName) || reviewerName;
         const legacyProjectCode = isLegacyPlanningAgreement ? requireProjectCode(currentProject.projectCode) : null;
