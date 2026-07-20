@@ -239,6 +239,10 @@ describe('project information private drafts', () => {
 
   it('submits request, metadata-only draft, canonical version, lease, audit, idempotency and outbox atomically', async () => {
     const h = harness();
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      ...h.db.documents.get('orgs/tenant-a/projects/project-a'),
+      executiveReviewStatus: 'REVISION_REJECTED',
+    });
     await openedDraft(h);
     await h.service.update({
       ...h.base, idempotencyKey: 'save-a', expectedDraftRevision: 0,
@@ -283,6 +287,97 @@ describe('project information private drafts', () => {
     expect([...h.db.documents.keys()].some((path) => path.includes('/idempotency_keys/'))).toBe(true);
     expect(h.auditChainService.appendManyInTransaction).toHaveBeenCalled();
     expect(replay).toEqual({ ...submitted, replayed: true });
+  });
+
+  it('does not reopen organization-head review while management planning is still pending', async () => {
+    const h = harness();
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      ...h.db.documents.get('orgs/tenant-a/projects/project-a'),
+      executiveReviewStatus: 'APPROVED',
+      managementPlanningReviewStatus: 'PENDING',
+    });
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'management-pending-save',
+      expectedDraftRevision: 0,
+      payload: validPayload({ name: 'Must not reopen review' }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'management-pending-resubmit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+      resubmit: true,
+      reviewComment: '잘못된 재제출',
+    })).rejects.toMatchObject({ statusCode: 409, code: 'invalid_resubmit_state' });
+    expect(h.db.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
+      executiveReviewStatus: 'APPROVED',
+      managementPlanningReviewStatus: 'PENDING',
+    });
+  });
+
+  it('resubmits a management-planning rejection without reopening executive review', async () => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    const executiveHistory = [{
+      status: 'APPROVED',
+      previousStatus: 'PENDING',
+      reviewedAt: '2026-07-11T00:00:00.000Z',
+      reviewedById: 'head-a',
+      reviewedByName: 'Head A',
+      reviewComment: null,
+    }];
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewHistory: executiveHistory,
+      managementPlanningReviewStatus: 'REVISION_REJECTED',
+      managementPlanningReviewHistory: [{
+        status: 'REVISION_REJECTED',
+        previousStatus: 'PENDING',
+        reviewedAt: '2026-07-11T01:00:00.000Z',
+        reviewedById: 'finance-a',
+        reviewedByName: 'Finance A',
+        reviewComment: '코드 기준을 보완해 주세요',
+      }],
+    });
+
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'management-reject-save',
+      expectedDraftRevision: 0,
+      payload: validPayload({ name: 'Management resubmission' }),
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'management-reject-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+      resubmit: true,
+      reviewComment: '기획실 보완사항 반영',
+    });
+
+    const project = h.db.documents.get(projectPath);
+    expect(project.executiveReviewStatus).toBe('APPROVED');
+    expect(project.executiveReviewHistory).toEqual(executiveHistory);
+    expect(project).toMatchObject({
+      managementPlanningReviewStatus: 'PENDING',
+      managementPlanningReviewedAt: null,
+      managementPlanningReviewedById: null,
+      managementPlanningReviewedByName: null,
+      managementPlanningReviewComment: null,
+    });
+    expect(project.managementPlanningReviewHistory).toEqual([{
+      status: 'REVISION_REJECTED',
+      previousStatus: 'PENDING',
+      reviewedAt: '2026-07-11T01:00:00.000Z',
+      reviewedById: 'finance-a',
+      reviewedByName: 'Finance A',
+      reviewComment: '코드 기준을 보완해 주세요',
+    }]);
   });
 
   it('preserves completed-project checkout and three private evidence PDFs in the change request', async () => {

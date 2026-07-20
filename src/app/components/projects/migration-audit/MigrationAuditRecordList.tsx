@@ -1,16 +1,17 @@
 import { FileText } from 'lucide-react';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import { getMigrationAuditStatusLabel } from '../../../platform/project-migration-console';
+import { getManagementPlanningReview } from '../../../platform/project-management-planning-review';
 import { Card, CardContent } from '../../ui/card';
 import { Button } from '../../ui/button';
 
 interface MigrationAuditRecordListProps {
   records: MigrationAuditConsoleRecord[];
   onOpen: (record: MigrationAuditConsoleRecord) => void;
+  reviewStage?: 'executive' | 'managementPlanning';
 }
 
 function statusClass(status: MigrationAuditConsoleRecord['status']) {
-  if (status === 'PLANNING_AGREED') return 'border-blue-300 text-blue-800';
   if (status === 'APPROVED') return 'border-emerald-300 text-emerald-800';
   if (status === 'REVISION_REJECTED') return 'border-rose-300 text-rose-800';
   if (status === 'DUPLICATE_DISCARDED') return 'border-slate-400 text-slate-700';
@@ -21,7 +22,15 @@ function formatDate(value: string) {
   return value ? value.slice(0, 10).replace(/-/g, '.') : '-';
 }
 
-export function MigrationAuditRecordList({ records, onOpen }: MigrationAuditRecordListProps) {
+export function MigrationAuditRecordList({ records, onOpen, reviewStage = 'executive' }: MigrationAuditRecordListProps) {
+  const isManagementPlanning = reviewStage === 'managementPlanning';
+  const statusLabel = (status: MigrationAuditConsoleRecord['status']) => {
+    if (!isManagementPlanning) return getMigrationAuditStatusLabel(status);
+    if (status === 'APPROVED') return '합의 완료';
+    if (status === 'REVISION_REJECTED') return '반려';
+    return '합의 대기';
+  };
+
   return (
     <Card className="overflow-hidden border-slate-300 bg-white shadow-sm" data-testid="migration-review-record-list">
       <CardContent className="p-0">
@@ -34,15 +43,14 @@ export function MigrationAuditRecordList({ records, onOpen }: MigrationAuditReco
                 <th className="px-4 py-3">프로젝트명</th>
                 <th className="px-4 py-3">등록자</th>
                 <th className="px-4 py-3">접수일</th>
+                {isManagementPlanning ? <th className="px-4 py-3">프로젝트 코드</th> : null}
                 <th className="px-4 py-3 text-right">문서</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {records.map((record) => (
                 <tr key={record.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold ${statusClass(record.status)}`}>{getMigrationAuditStatusLabel(record.status)}</span>
-                  </td>
+                  <td className="px-4 py-3"><span className={`inline-flex border px-2 py-1 text-[11px] font-semibold ${statusClass(record.status)}`}>{statusLabel(record.status)}</span></td>
                   <td className="px-4 py-3 text-[12px] text-slate-700">{record.cic}</td>
                   <td className="max-w-[330px] px-4 py-3">
                     <p className="truncate text-[13px] font-semibold text-slate-950">{record.title}</p>
@@ -50,6 +58,7 @@ export function MigrationAuditRecordList({ records, onOpen }: MigrationAuditReco
                   </td>
                   <td className="px-4 py-3 text-[12px] text-slate-700">{record.managerName || '-'}</td>
                   <td className="px-4 py-3 text-[12px] text-slate-600">{formatDate(record.requestedAt)}</td>
+                  {isManagementPlanning ? <td className="px-4 py-3 text-[12px] font-medium text-slate-700">{getManagementPlanningReview(record.project).projectCode || '부여 대기'}</td> : null}
                   <td className="px-4 py-3 text-right">
                     <Button type="button" variant="outline" size="sm" className="h-8 rounded-none border-slate-400 text-[11px]" onClick={() => onOpen(record)}>
                       <FileText className="mr-1 h-3.5 w-3.5" />문서 열기
@@ -57,11 +66,7 @@ export function MigrationAuditRecordList({ records, onOpen }: MigrationAuditReco
                   </td>
                 </tr>
               ))}
-              {records.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-14 text-center text-[12px] text-slate-500">현재 조건에 맞는 검토 문서가 없습니다.</td>
-                </tr>
-              ) : null}
+              {records.length === 0 ? <tr><td colSpan={isManagementPlanning ? 7 : 6} className="px-4 py-14 text-center text-[12px] text-slate-500">현재 조건에 맞는 검토 문서가 없습니다.</td></tr> : null}
             </tbody>
           </table>
         </div>

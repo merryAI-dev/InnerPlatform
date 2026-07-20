@@ -3,6 +3,7 @@ import type {
   AccountType,
   Project,
   ProjectExecutiveReviewStatus,
+  ProjectManagementPlanningReviewStatus,
   ProjectSheetSourceSnapshot,
   ProjectSheetSourceType,
   ProjectRequestContractAnalysis,
@@ -285,6 +286,22 @@ export interface ProjectExecutiveReviewResubmitResult {
   reviewedAt?: string;
 }
 
+export interface ProjectManagementPlanningReviewPayload {
+  requestId?: string;
+  reviewStatus: Exclude<ProjectManagementPlanningReviewStatus, 'PENDING'>;
+  reviewComment?: string;
+  reviewerName?: string;
+  projectCode?: string;
+}
+
+export interface ProjectManagementPlanningReviewResult {
+  ok: boolean;
+  projectId: string;
+  requestId: string | null;
+  reviewStatus: Exclude<ProjectManagementPlanningReviewStatus, 'PENDING'>;
+  reviewedAt?: string;
+}
+
 export type AuthGovernanceDriftFlag =
   | 'missing_auth'
   | 'missing_canonical_member'
@@ -383,6 +400,22 @@ function normalizeProjectExecutiveReviewResubmitPayload(
     ...(requestId ? { requestId } : {}),
     ...(reviewComment ? { reviewComment } : {}),
     ...(reviewerName ? { reviewerName } : {}),
+  };
+}
+
+function normalizeProjectManagementPlanningReviewPayload(
+  payload: ProjectManagementPlanningReviewPayload,
+): ProjectManagementPlanningReviewPayload {
+  const requestId = normalizeOptionalText(payload.requestId);
+  const reviewComment = normalizeOptionalText(payload.reviewComment);
+  const reviewerName = normalizeOptionalText(payload.reviewerName);
+  const projectCode = normalizeOptionalText(payload.projectCode);
+  return {
+    ...(requestId ? { requestId } : {}),
+    reviewStatus: payload.reviewStatus,
+    ...(reviewComment ? { reviewComment } : {}),
+    ...(reviewerName ? { reviewerName } : {}),
+    ...(projectCode ? { projectCode } : {}),
   };
 }
 
@@ -1831,6 +1864,27 @@ export async function resubmitProjectExecutiveReviewViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: normalizeProjectExecutiveReviewResubmitPayload(params.payload),
+      timeoutMs: 10000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function reviewProjectManagementPlanningStatusViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  review: ProjectManagementPlanningReviewPayload;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectManagementPlanningReviewResult> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.post<ProjectManagementPlanningReviewResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/management-planning-review`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: normalizeProjectManagementPlanningReviewPayload(params.review),
       timeoutMs: 10000,
       retries: 0,
     },

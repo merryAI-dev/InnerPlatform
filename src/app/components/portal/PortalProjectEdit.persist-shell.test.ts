@@ -19,6 +19,11 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).not.toContain('resubmitProjectExecutiveReviewViaBff');
   });
 
+  it('reads canonical and legacy project request collections so reviewer feedback is retained', () => {
+    expect(source).toContain("['project_requests', 'projectRequests']");
+    expect(source).toContain('const sourceRows = new Map<string, ProjectRequest>()');
+  });
+
   it('keeps the project edit draft key stable across request listener updates', () => {
     expect(source).toContain('const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`');
     expect(source).toContain('draftKey={autosaveKey}');

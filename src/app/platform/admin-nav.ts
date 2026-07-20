@@ -42,6 +42,9 @@ function canonicalizeAdminPath(pathname: string): string | undefined {
   if (pathname === '/projects/migration-audit' || pathname.startsWith('/projects/migration-audit/')) {
     return '/projects/migration-audit';
   }
+  if (pathname === '/management-planning/project-codes' || pathname.startsWith('/management-planning/project-codes/')) {
+    return '/management-planning/project-codes';
+  }
   if (pathname.startsWith('/projects/new')) return '/projects/new';
   if (pathname.startsWith('/projects/') && pathname.endsWith('/edit')) return '/projects/new';
   if (pathname === '/projects' || pathname.startsWith('/projects/')) return '/projects';

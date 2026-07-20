@@ -146,6 +146,29 @@ export const projectExecutiveResubmitSchema = z.object({
   reviewerName: z.string().trim().max(200).optional(),
 }).strict();
 
+export const projectManagementPlanningReviewSchema = z.object({
+  requestId: NON_EMPTY_STRING.optional(),
+  reviewStatus: z.enum(['AGREED', 'REVISION_REJECTED']),
+  reviewComment: z.string().trim().max(2000).optional(),
+  reviewerName: z.string().trim().max(200).optional(),
+  projectCode: z.string().trim().max(100).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.reviewStatus === 'AGREED' && !value.projectCode) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['projectCode'],
+      message: 'projectCode is required when management planning agrees a project',
+    });
+  }
+  if (value.reviewStatus === 'REVISION_REJECTED' && !value.reviewComment) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reviewComment'],
+      message: 'reviewComment is required when management planning rejects a project',
+    });
+  }
+});
+
 export const googleSheetImportPreviewSchema = z.object({
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),
