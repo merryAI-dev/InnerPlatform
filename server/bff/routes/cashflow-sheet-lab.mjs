@@ -96,6 +96,117 @@ function attachFinancialYearChecks(mirror, project) {
   };
 }
 
+function readSelectedYear(value) {
+  const text = readOptionalText(value);
+  const year = /^\d{4}$/.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isSafeInteger(year)) {
+    throw createHttpError(400, 'selectedYear must be a four-digit year.', 'cashflow_selected_year_invalid');
+  }
+  return year;
+}
+
+function cashflowAvailableYears(mirror, project, selectedYear) {
+  return [...new Set([
+    selectedYear - 1,
+    selectedYear,
+    selectedYear + 1,
+    ...(Array.isArray(project?.financialYears) ? project.financialYears.map((row) => Number(row?.year)) : []),
+    ...(Array.isArray(mirror?.years) ? mirror.years.map(Number) : []),
+    ...(mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => Number(row?.year)),
+  ].filter(Number.isSafeInteger))].sort((left, right) => left - right);
+}
+
+function cashflowReadModelHash(value) {
+  const canonicalize = (item) => {
+    if (Array.isArray(item)) return item.map(canonicalize);
+    if (!item || typeof item !== 'object') return item;
+    return Object.fromEntries(Object.keys(item)
+      .sort()
+      .map((key) => [key, canonicalize(item[key])]));
+  };
+  return stableHash(canonicalize(value));
+}
+
+async function readCashflowSheetYearView({ db, tenantId, projectId, project, selectedYear }) {
+  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+  const availableYears = cashflowAvailableYears(mirror, project, selectedYear);
+  const navigationYears = [selectedYear - 1, selectedYear, selectedYear + 1];
+  if (!mirror?.sourceRevision) {
+    return {
+      projectId,
+      status: 'EMPTY',
+      selectedYear,
+      availableYears,
+      navigationYears,
+      years: [],
+      readModelStatus: 'EMPTY',
+      fallbackYears: [],
+      mismatchYears: [],
+    };
+  }
+
+  const snapshotId = readOptionalText(mirror.snapshotId);
+  const mirrorTotals = new Map((mirror.sheetFacts?.annualCashflowTotals || [])
+    .filter((row) => Number.isSafeInteger(row?.year))
+    .map((row) => [row.year, row]));
+  const snapshotEnabled = /^cfsnap_[a-f0-9]{32}$/.test(snapshotId);
+  const snapshotDocs = snapshotEnabled
+    ? await Promise.all(availableYears.map(async (year) => {
+      const snap = await db.doc(cashflowSheetSnapshotYearDocPath(tenantId, snapshotId, year)).get();
+      return [year, snap.exists ? snap.data() || {} : null];
+    }))
+    : [];
+  const snapshotTotals = new Map(snapshotDocs);
+  const fallbackYears = [];
+  const mismatchYears = [];
+  const years = availableYears.flatMap((year) => {
+    const mirrorTotal = mirrorTotals.get(year);
+    const snapshotTotal = snapshotTotals.get(year);
+    const snapshotCurrent = snapshotTotal
+      && readOptionalText(snapshotTotal.snapshotId) === snapshotId
+      && readOptionalText(snapshotTotal.projectId) === projectId
+      && readOptionalText(snapshotTotal.sourceRevision) === readOptionalText(mirror.sourceRevision)
+      && Number(snapshotTotal.year) === year;
+    if (snapshotCurrent) {
+      if (mirrorTotal && cashflowReadModelHash({ projection: snapshotTotal.projection, actual: snapshotTotal.actual })
+        !== cashflowReadModelHash({ projection: mirrorTotal.projection, actual: mirrorTotal.actual })) {
+        mismatchYears.push(year);
+      }
+      return [{
+        year,
+        projection: snapshotTotal.projection,
+        actual: snapshotTotal.actual,
+        sourceRevision: snapshotTotal.sourceRevision,
+        capturedAt: snapshotTotal.capturedAt,
+        storage: 'SNAPSHOT',
+      }];
+    }
+    if (!mirrorTotal) return [];
+    fallbackYears.push(year);
+    return [{
+      ...mirrorTotal,
+      sourceRevision: mirror.sourceRevision,
+      capturedAt: mirror.capturedAt,
+      storage: 'MIRROR_FALLBACK',
+    }];
+  });
+
+  return {
+    projectId,
+    status: readOptionalText(mirror.status) || 'FRESH',
+    selectedYear,
+    availableYears,
+    navigationYears,
+    snapshotId: snapshotEnabled ? snapshotId : undefined,
+    sourceRevision: mirror.sourceRevision,
+    capturedAt: mirror.capturedAt,
+    years,
+    readModelStatus: mismatchYears.length > 0 ? 'MISMATCH' : fallbackYears.length > 0 ? 'FALLBACK' : 'CURRENT',
+    fallbackYears,
+    mismatchYears,
+  };
+}
+
 function readEditSession(req) {
   const sessionId = readOptionalText(req.header('x-edit-session-id'));
   const leaseId = readOptionalText(req.header('x-edit-lease-id'));
@@ -1696,6 +1807,21 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
     const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
     res.status(200).json(attachFinancialYearChecks(mirror, project) || { projectId, status: 'EMPTY' });
+  }));
+
+  app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/years', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const selectedYear = readSelectedYear(req.query.selectedYear);
+    const project = await readProjectDocument(db, tenantId, projectId);
+    res.status(200).json(await readCashflowSheetYearView({
+      db,
+      tenantId,
+      projectId,
+      project,
+      selectedYear,
+    }));
   }));
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {

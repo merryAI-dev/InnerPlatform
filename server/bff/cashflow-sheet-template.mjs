@@ -159,13 +159,16 @@ function detectSectionCandidates(rows) {
 
 function resolveModeFromRow(row) {
   const searchLimit = Math.min(6, row?.length || 0);
+  let hasProjection = false;
+  let hasActual = false;
   for (let index = 0; index < searchLimit; index += 1) {
     const normalized = normalizeLabelKey(row[index]).toLowerCase();
     if (!normalized) continue;
-    if (normalized.includes('projection')) return 'projection';
-    if (normalized.includes('actual')) return 'actual';
+    hasProjection ||= normalized.includes('projection');
+    hasActual ||= normalized.includes('actual');
   }
-  return null;
+  if (hasProjection === hasActual) return null;
+  return hasProjection ? 'projection' : 'actual';
 }
 
 function detectCashflowSectionCandidates(rows) {

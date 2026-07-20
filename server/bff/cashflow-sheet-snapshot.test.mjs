@@ -295,6 +295,30 @@ describe('cashflow sheet pinned snapshot', () => {
     });
   });
 
+  it('reports an item-level mismatch when a complete weekly year differs from its annual column', () => {
+    const cells = Array.from({ length: 60 }, (_, index) => ({
+      mode: 'projection',
+      yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
+      weekNo: (index % 5) + 1,
+      lineId: 'SALES_IN',
+      direction: 'IN',
+      state: 'VALUE',
+      amount: 10,
+    }));
+    const facts = extractCashflowSheetFacts({
+      cells,
+      annualCells: [
+        { mode: 'projection', year: 2026, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 599 },
+      ],
+    });
+
+    expect(facts.annualCashflowTotals[0].projection).toMatchObject({
+      source: 'WEEKLY',
+      totalIn: 600,
+      reconciliation: { status: 'MISMATCH', mismatchedLineIds: ['SALES_IN'] },
+    });
+  });
+
   it('computes the same target revision regardless of Firestore map and week order', () => {
     const first = computeCashflowTargetRevision({
       weeks: [

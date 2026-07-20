@@ -187,6 +187,20 @@ function summarizeAnnualMode(cells, source) {
   };
 }
 
+function reconcileAnnualMode(weekly, annual) {
+  if (weekly.source !== 'WEEKLY' || annual.source !== 'ANNUAL') {
+    return { status: 'NOT_APPLICABLE', mismatchedLineIds: [] };
+  }
+  if (weekly.coverage.status !== 'COMPLETE') {
+    return { status: 'PARTIAL_WEEKLY', mismatchedLineIds: [] };
+  }
+  const lineIds = new Set([...Object.keys(weekly.lineAmounts), ...Object.keys(annual.lineAmounts)]);
+  const mismatchedLineIds = [...lineIds]
+    .filter((lineId) => (weekly.lineAmounts[lineId] || 0) !== (annual.lineAmounts[lineId] || 0))
+    .sort(compareCodeUnits);
+  return { status: mismatchedLineIds.length > 0 ? 'MISMATCH' : 'MATCH', mismatchedLineIds };
+}
+
 function buildAnnualCashflowTotals({ cells, annualCells }) {
   const years = new Set([
     ...cells.map((cell) => Number(String(cell.yearMonth).slice(0, 4))),
@@ -199,10 +213,12 @@ function buildAnnualCashflowTotals({ cells, annualCells }) {
       for (const mode of ['projection', 'actual']) {
         const weeklyCells = cells.filter((cell) => cell.mode === mode && Number(String(cell.yearMonth).slice(0, 4)) === year);
         const annualCellsForMode = annualCells.filter((cell) => cell.mode === mode && cell.year === year);
-        modeTotals[mode] = summarizeAnnualMode(
-          weeklyCells.length > 0 ? weeklyCells : annualCellsForMode,
-          weeklyCells.length > 0 ? 'WEEKLY' : annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE',
-        );
+        const weekly = summarizeAnnualMode(weeklyCells, weeklyCells.length > 0 ? 'WEEKLY' : 'NONE');
+        const annual = summarizeAnnualMode(annualCellsForMode, annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE');
+        modeTotals[mode] = {
+          ...(weeklyCells.length > 0 ? weekly : annual),
+          reconciliation: reconcileAnnualMode(weekly, annual),
+        };
       }
       return { year, ...modeTotals };
     });

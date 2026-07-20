@@ -214,6 +214,21 @@ describe('cashflow sheet template mapping', () => {
     expect(result.sections[1].lineRows).toHaveLength(16);
   });
 
+  it('does not mistake the Projection - Actual difference heading for the Projection section', () => {
+    const matrix = buildTemplateMatrix({ weekCount: 4 });
+    const projectionHeaderIndex = matrix.findIndex((row) => row[0] === 'Projection');
+    matrix.splice(projectionHeaderIndex, 0, ['Projection - Actual 차이']);
+    const projectionHeader = matrix.find((row) => row[0] === 'Projection');
+    projectionHeader[1] = '2024년';
+    projectionHeader[2] = '2025년';
+
+    const result = analyzeCashflowSheetTemplate(matrix);
+
+    expect(result.supported).toBe(true);
+    expect(result.sections[0].headerRowIndex).toBe(matrix.indexOf(projectionHeader));
+    expect(result.sections[0].annualColumns.map((column) => column.year)).toEqual([2024, 2025]);
+  });
+
   it('scans weekly columns dynamically when the last column is not BK', () => {
     const result = analyzeCashflowSheetTemplate(buildTemplateMatrix({ weekCount: 8, firstWeekColumn: 5 }));
 
