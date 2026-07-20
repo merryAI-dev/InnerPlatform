@@ -8,16 +8,16 @@ const portalLayoutSource = readFileSync(
 );
 
 describe('PortalLayout shell actions', () => {
-  it('hides payroll and weekly-expense tabs from the primary portal navigation', () => {
+  it('hides payroll from the primary portal navigation', () => {
     expect(portalLayoutSource).toContain("label: '인건비/공지', accent: true, hidden: true");
-    expect(portalLayoutSource).toContain("label: '사업비 입력(주간)', hidden: true");
     expect(portalLayoutSource).not.toContain('monthlyCloses');
   });
 
-  it('puts budget first and pushes business cards behind operating work', () => {
-    expect(portalLayoutSource.indexOf("label: '예산 편집'")).toBeLessThan(
-      portalLayoutSource.indexOf("label: '인건비/공지'"),
-    );
+  it('hides budget and weekly expense entry from the global portal navigation', () => {
+    expect(portalLayoutSource).not.toContain("label: '예산 편집'");
+    expect(portalLayoutSource).not.toContain("label: '사업비 입력(주간)'");
+    expect(portalLayoutSource).toContain("label: '인건비/공지'");
+    expect(portalLayoutSource).toContain("label: '프로젝트 수정'");
     expect(portalLayoutSource.indexOf("label: '명함 DB'")).toBeGreaterThan(
       portalLayoutSource.indexOf("label: '프로젝트 등록 요청'"),
     );

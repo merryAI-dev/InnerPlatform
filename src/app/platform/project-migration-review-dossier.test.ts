@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMigrationReviewDossier } from './project-migration-review-dossier';
+import { buildMigrationReviewDossier, resolveMigrationReviewContractDocument } from './project-migration-review-dossier';
 import type { Project, ProjectRequest } from '../data/types';
 
 const project: Project = {
@@ -321,6 +321,39 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.contractDocument.name).toBe('제안_계약서.pdf');
     expect(dossier.contractDocument.downloadURL).toContain('proposed-contract.pdf');
     expect(dossier.analysis.summary).toBe('제안 계약서 분석');
+    expect(resolveMigrationReviewContractDocument(project, {
+      ...request,
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      proposedSnapshot: {
+        ...request.payload,
+        contractDocument: {
+          path: 'orgs/mysc/project-request-documents/u-1/proposed-contract.pdf',
+          name: '제안_계약서.pdf',
+          downloadURL: 'https://example.com/proposed-contract.pdf',
+          size: 5432,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-04-22T10:00:00Z',
+        },
+      },
+    })?.name).toBe('제안_계약서.pdf');
+
+    expect(resolveMigrationReviewContractDocument(project, {
+      ...request,
+      requestKind: 'CHANGE',
+      status: 'REJECTED',
+      proposedSnapshot: {
+        ...request.payload,
+        contractDocument: {
+          path: 'orgs/mysc/project-request-documents/u-1/proposed-contract.pdf',
+          name: '제안_계약서.pdf',
+          downloadURL: 'https://example.com/proposed-contract.pdf',
+          size: 5432,
+          contentType: 'application/pdf',
+          uploadedAt: '2026-04-22T10:00:00Z',
+        },
+      },
+    })?.name).toBe('제안_계약서.pdf');
   });
 
   it('prefers current project team members over stale request payload values', () => {

@@ -16,23 +16,24 @@ if [[ -z "$PROJECT_ID" ]]; then
   exit 1
 fi
 
-latest_backup="${FIRESTORE_SOURCE_BACKUP:-}"
-if [[ -z "$latest_backup" ]]; then
-  latest_backup="$(gcloud firestore backups list \
-    --project "$PROJECT_ID" \
-    --location "$BACKUP_LOCATION" \
-    --filter="state=READY" \
-    --sort-by='~createTime' \
-    --format='value(name)' \
-    --limit=1)"
+if [[ "$RESTORE_DATABASE_ID" == "(default)" || "$RESTORE_DATABASE_ID" == "$DATABASE_ID" ]]; then
+  printf "[firestore-backup-rehearsal] FIRESTORE_RESTORE_DATABASE_ID must be a new non-default database (source=%s destination=%s)\n" "$DATABASE_ID" "$RESTORE_DATABASE_ID"
+  exit 1
 fi
 
+if [[ "$DELETE_AFTER_VERIFY" == "true" ]]; then
+  printf "[firestore-backup-rehearsal] Automatic deletion is disabled. Validate first, then delete the rehearsal database with an explicit gcloud command.\n"
+  exit 1
+fi
+
+latest_backup="${FIRESTORE_SOURCE_BACKUP:-}"
 if [[ -z "$latest_backup" ]]; then
-  printf "[firestore-backup-rehearsal] No READY backup found in location '%s'\n" "$BACKUP_LOCATION"
+  printf "[firestore-backup-rehearsal] FIRESTORE_SOURCE_BACKUP is required to verify the source database before restore.\n"
+  printf "[firestore-backup-rehearsal] List READY backups with: gcloud firestore backups list --project %q --location %q --filter='state=READY' --format='table(name,database,state,createTime)'\n" "$PROJECT_ID" "$BACKUP_LOCATION"
   exit 2
 fi
 
-printf "[firestore-backup-rehearsal] source-backup=%s destination-db=%s\n" "$latest_backup" "$RESTORE_DATABASE_ID"
+printf "[firestore-backup-rehearsal] source-db=%s source-backup=%s destination-db=%s\n" "$DATABASE_ID" "$latest_backup" "$RESTORE_DATABASE_ID"
 
 restore_cmd=(
   gcloud firestore databases restore
@@ -52,11 +53,4 @@ fi
 "${restore_cmd[@]}"
 
 printf "[firestore-backup-rehearsal] Restore requested. Validate data in '%s' database, then optionally delete it.\n" "$RESTORE_DATABASE_ID"
-
-if [[ "$DELETE_AFTER_VERIFY" == "true" ]]; then
-  printf "[firestore-backup-rehearsal] Deleting rehearsal database '%s'...\n" "$RESTORE_DATABASE_ID"
-  gcloud firestore databases delete \
-    --project "$PROJECT_ID" \
-    --database "$RESTORE_DATABASE_ID" \
-    --quiet
-fi
+printf "[firestore-backup-rehearsal] After validation, delete explicitly if needed: gcloud firestore databases delete --project %q --database %q --quiet\n" "$PROJECT_ID" "$RESTORE_DATABASE_ID"

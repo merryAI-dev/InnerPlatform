@@ -23,9 +23,9 @@ describe('project department settings options', () => {
     expect(resolveProjectDepartmentSettingsOptions({ options: [] })).toEqual([...PROJECT_DEPARTMENT_OPTIONS]);
   });
 
-  it('normalizes spaced CIC labels before saving settings options', () => {
-    expect(buildProjectDepartmentSettingsOptions(['CIC 2', 'CIC2', '공간플랫폼센터']).map((option) => option.label))
-      .toEqual(['CIC2', '공간플랫폼센터']);
+  it('normalizes spaced legacy organization labels before saving settings options', () => {
+    expect(buildProjectDepartmentSettingsOptions(['CIC 2', 'CIC2', 'AXR Team', 'AXR팀', '공간플랫폼센터']).map((option) => option.label))
+      .toEqual(['CIC2', 'AXR팀', '공간플랫폼센터']);
   });
 
   it('keeps generated option ids unique when normalized ids collide', () => {

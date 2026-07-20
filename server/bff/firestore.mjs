@@ -6,7 +6,7 @@ import {
   initializeApp,
 } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-let firestoreSettingsApplied = false;
+const firestoreSettingsApplied = new WeakSet();
 
 export function resolveProjectId(env = process.env) {
   return env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID || env.GCLOUD_PROJECT || 'demo-mysc';
@@ -14,6 +14,11 @@ export function resolveProjectId(env = process.env) {
 
 export function isFirestoreEmulatorEnabled(env = process.env) {
   return !!env.FIRESTORE_EMULATOR_HOST;
+}
+
+export function resolveFirestoreDatabaseId(value) {
+  const databaseId = typeof value === 'string' ? value.trim() : '';
+  return databaseId || '(default)';
 }
 
 function normalizeServiceAccount(raw) {
@@ -95,10 +100,10 @@ export function getOrInitAdminApp({ projectId, appName } = {}) {
 
 export function createFirestoreDb(options = {}) {
   const app = getOrInitAdminApp(options);
-  const db = getFirestore(app);
-  if (!firestoreSettingsApplied) {
+  const db = getFirestore(app, resolveFirestoreDatabaseId(options.databaseId));
+  if (!firestoreSettingsApplied.has(db)) {
     db.settings({ ignoreUndefinedProperties: true });
-    firestoreSettingsApplied = true;
+    firestoreSettingsApplied.add(db);
   }
   return db;
 }

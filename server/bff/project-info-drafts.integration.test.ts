@@ -108,6 +108,10 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     });
     batch.set(db.doc(`orgs/${tenantId}/projects/project-a`), {
       id: 'project-a', tenantId, version: 3, executiveReviewStatus: 'APPROVED',
+      executiveReviewedAt: '2026-07-01T09:00:00.000Z',
+      executiveReviewedById: 'organization-head',
+      executiveReviewedByName: '조직장',
+      executiveReviewComment: '기존 승인 메모',
       executiveReviewHistory: [], ...validPayload(),
     });
     await batch.commit();
@@ -164,7 +168,15 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get(),
       db.collection(`orgs/${tenantId}/privateEditDrafts`).get(),
     ]);
-    expect(project.data()).toMatchObject({ name: 'Project A', version: 4 });
+    expect(project.data()).toMatchObject({
+      name: 'Project A',
+      version: 4,
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedAt: '2026-07-01T09:00:00.000Z',
+      executiveReviewedById: 'organization-head',
+      executiveReviewedByName: '조직장',
+      executiveReviewComment: '기존 승인 메모',
+    });
     expect(changeRequest.data()).toMatchObject({ status: 'PENDING', proposedSnapshot: { name: 'Private name' } });
     expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);
     expect(drafts.docs[0].data()).not.toHaveProperty('payload');

@@ -37,4 +37,12 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).not.toContain("toast.success('프로젝트 변경 요청을 저장했습니다.");
     expect(source).not.toContain("toast.success('프로젝트 변경 요청을 다시 제출했습니다.");
   });
+
+  it('keeps a management planning rejection distinct from the CIC review and enables resubmission', () => {
+    expect(source).toContain('getManagementPlanningReview(project)');
+    expect(source).toContain('hasManagementPlanningReview(project)');
+    expect(source).toContain("managementPlanningReview.status === 'REVISION_REJECTED'");
+    expect(source).toContain('data-testid="portal-management-planning-review"');
+    expect(source).toContain('buildPortalProjectReviewFeedback(project, requestDoc)');
+  });
 });

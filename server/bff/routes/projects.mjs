@@ -868,9 +868,6 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
       invalidRegistration(`Project registration ${field} is required`);
     }
   }
-  if (!readOptionalText(payload.groupwareName)) {
-    invalidRegistration('Project registration groupwareName is required');
-  }
   if (normalizeSettlementType(readOptionalText(payload.settlementType)) === 'NONE') {
     invalidRegistration('Project registration settlementType is required');
   }
@@ -1044,8 +1041,8 @@ export function buildProjectRegistrationCanonicalDocuments({
     phase: normalizeProjectPhase(readOptionalText(payload.phase)),
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
-    department: readOptionalText(payload.department),
-    groupwareName: readOptionalText(payload.groupwareName),
+    department: normalizeProjectOrganizationLabel(payload.department),
+    groupwareName: readOptionalText(payload.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
     contractAmount: registrationAmount(payload.contractAmount),
     salesVatAmount: registrationAmount(payload.salesVatAmount),
@@ -1183,6 +1180,15 @@ function normalizeProjectCurrency(value) {
   return value === 'USD' ? 'USD' : 'KRW';
 }
 
+export function normalizeProjectOrganizationLabel(value) {
+  const normalized = readOptionalText(value);
+  if (!normalized || normalized === '미지정') return '';
+  const teamMatch = normalized.match(/^([a-z]{2,10})\s*team$/i);
+  if (teamMatch) return `${teamMatch[1].toUpperCase()}팀`;
+  if (/^cic\s*\d+$/i.test(normalized)) return normalized.toUpperCase().replace(/\s+/g, '');
+  return normalized;
+}
+
 function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
   const teamMembersDetailed = Array.isArray(project?.teamMembersDetailed) && project.teamMembersDetailed.length > 0
     ? project.teamMembersDetailed
@@ -1280,10 +1286,21 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
 }
 
 function resolveProjectCicFromPayload(payload, currentProject = {}) {
-  return readOptionalText(payload?.cic)
+  return normalizeProjectOrganizationLabel(
+    readOptionalText(payload?.cic)
     || readOptionalText(payload?.department)
     || readOptionalText(currentProject?.cic)
-    || readOptionalText(currentProject?.department);
+    || readOptionalText(currentProject?.department),
+  );
+}
+
+function resolveProjectDepartmentFromPayload(payload, currentProject = {}) {
+  return normalizeProjectOrganizationLabel(
+    readOptionalText(payload?.department)
+    || readOptionalText(currentProject?.department)
+    || readOptionalText(payload?.cic)
+    || readOptionalText(currentProject?.cic),
+  );
 }
 
 export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentProject = {}) {
@@ -1304,9 +1321,9 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     phase: normalizeProjectPhase(readOptionalText(payload.phase) || currentProject.phase),
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
-    department: readOptionalText(payload.department),
+    department: resolveProjectDepartmentFromPayload(payload, currentProject),
     cic: resolveProjectCicFromPayload(payload, currentProject),
-    groupwareName: readOptionalText(payload.groupwareName),
+    groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(currentProject.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
     contractAmount: Number.isFinite(Number(payload.contractAmount)) ? Math.max(0, Math.round(Number(payload.contractAmount))) : 0,
     salesVatAmount: Number.isFinite(Number(payload.salesVatAmount)) ? Math.max(0, Math.round(Number(payload.salesVatAmount))) : 0,
@@ -2188,9 +2205,6 @@ export function mountProjectRoutes(app, {
     }
     const projectRequest = await readProjectRequestById(db, tenantId, requestId);
     if (!projectRequest) throw createHttpError(404, `Project request not found: ${requestId}`, 'not_found');
-    if (readOptionalText(projectRequest.status) !== 'PENDING') {
-      throw createHttpError(409, 'Project request attachment is not pending', 'project_request_attachment_not_pending');
-    }
     const projectId = readOptionalText(projectRequest.targetProjectId || projectRequest.approvedProjectId);
     const payload = resolveProjectRequestPayloadForReview(projectRequest);
     const attachment = payload?.[field];
@@ -2684,7 +2698,7 @@ export function mountProjectRoutes(app, {
       );
     }
     const projectPath = `orgs/${tenantId}/projects/${projectId}`;
-    const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
+    let reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
     await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
     const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
@@ -2710,9 +2724,21 @@ export function mountProjectRoutes(app, {
         if (!['PENDING', 'PLANNING_AGREED'].includes(previousStatus)) {
           throw createHttpError(409, 'Project is not awaiting an organization-head decision', 'invalid_executive_review_state');
         }
-        if (!designatedApproverId || designatedApproverId !== actorId) {
-          throw createHttpError(403, 'Only the designated approver can make the final decision', 'designated_approver_required');
+        if (designatedApproverId && designatedApproverId !== actorId) {
+          throw createHttpError(403, 'Only the designated executive approver can review this project', 'executive_approver_mismatch');
         }
+        const requesterIds = new Set([
+          readOptionalText(currentProject.createdBy),
+          readOptionalText(currentProject.registeredById),
+          readOptionalText(currentProject.managerId),
+          readOptionalText(reviewRequest?.requestedBy),
+          readOptionalText(requestPayload?.registeredById),
+          readOptionalText(requestPayload?.managerId),
+        ].filter(Boolean));
+        if (designatedApproverId && requesterIds.has(actorId)) {
+          throw createHttpError(403, 'Requester cannot approve their own project registration', 'self_approval_forbidden');
+        }
+        reviewerName = readOptionalText(currentProject.executiveApproverName) || reviewerName;
         const legacyProjectCode = isLegacyPlanningAgreement ? requireProjectCode(currentProject.projectCode) : null;
         const submittedCode = normalizeProjectCode(parsed.projectCode);
         if (isLegacyPlanningAgreement && submittedCode && requireProjectCode(submittedCode) !== legacyProjectCode) {
@@ -2839,6 +2865,10 @@ export function mountProjectRoutes(app, {
     const projectPath = `orgs/${tenantId}/projects/${projectId}`;
     const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
+    const projectCode = parsed.reviewStatus === 'AGREED' ? requireProjectCode(parsed.projectCode) : null;
+    const projectCodeClaimRef = projectCode
+      ? db.doc(`orgs/${tenantId}/projectCodeClaims/${projectCode}`)
+      : null;
     await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
     const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
       db,
@@ -2850,8 +2880,11 @@ export function mountProjectRoutes(app, {
     await mergeProjectAndRequestDocs({
       db,
       projectPath,
-      buildProjectPatch: async (currentProject, _currentRequest, _nextVersion, tx) => {
-        if (readOptionalText(currentProject.executiveReviewStatus) !== 'APPROVED') {
+      buildProjectPatch: async (currentProject, currentRequest, _nextVersion, tx) => {
+        const reviewRequest = currentRequest || request;
+        const hasExecutiveApproval = readOptionalText(currentProject.executiveReviewStatus) === 'APPROVED'
+          || readOptionalText(reviewRequest?.status) === 'APPROVED';
+        if (!hasExecutiveApproval) {
           throw createHttpError(409, 'Organization-head approval is required before management planning review', 'executive_review_required');
         }
         if (hasLegacyPlanningAgreement(currentProject)) {
@@ -2862,30 +2895,30 @@ export function mountProjectRoutes(app, {
           );
         }
         const previousStatus = readOptionalText(currentProject.managementPlanningReviewStatus) || 'PENDING';
-        if (previousStatus !== 'PENDING') {
+        if (!['PENDING', 'REVISION_REJECTED'].includes(previousStatus)) {
           throw createHttpError(409, 'Project is not awaiting management planning review', 'invalid_management_planning_review_state');
         }
         const currentHistory = Array.isArray(currentProject.managementPlanningReviewHistory)
           ? currentProject.managementPlanningReviewHistory
           : [];
         const isAgreed = parsed.reviewStatus === 'AGREED';
-        const projectCode = isAgreed ? requireProjectCode(parsed.projectCode) : null;
-        if (projectCode) {
+        if (isAgreed && projectCode && projectCodeClaimRef) {
           const existingProjectCode = normalizeProjectCode(currentProject.projectCode);
           if (existingProjectCode && existingProjectCode !== projectCode) {
             throw createHttpError(422, 'projectCode cannot change after it is assigned', 'project_code_locked');
           }
-          const codeRef = db.doc(`orgs/${tenantId}/project_code_registry/${encodeURIComponent(projectCode)}`);
-          const codeSnap = await tx.get(codeRef);
-          if (codeSnap.exists && readOptionalText(codeSnap.data()?.projectId) !== projectId) {
-            throw createHttpError(409, `Project code '${projectCode}' is already assigned`, 'duplicate_project_code');
+          const codeSnap = await tx.get(projectCodeClaimRef);
+          const claim = codeSnap.exists ? (codeSnap.data() || {}) : {};
+          if (codeSnap.exists && readOptionalText(claim.projectId) !== projectId) {
+            throw createHttpError(409, 'Project code is already assigned to another project', 'project_code_conflict');
           }
-          tx.set(codeRef, {
-            code: projectCode,
+          tx.set(projectCodeClaimRef, {
+            tenantId,
             projectId,
-            agreedAt: now,
-            agreedById: actorId,
-            agreedByName: reviewerName,
+            projectCode,
+            projectCodeKey: projectCode,
+            createdAt: readOptionalText(claim.createdAt) || now,
+            updatedAt: now,
           }, { merge: true });
         }
 
@@ -2913,14 +2946,29 @@ export function mountProjectRoutes(app, {
       buildRequestPatch: () => {
         if (!resolvedRequestId) return null;
         const isAgreed = parsed.reviewStatus === 'AGREED';
+        const reviewComment = readOptionalText(parsed.reviewComment);
+        if (!isAgreed) {
+          return {
+            status: 'PENDING',
+            reviewOutcome: null,
+            reviewedBy: null,
+            reviewedByName: null,
+            reviewedAt: null,
+            reviewComment,
+            rejectedReason: reviewComment,
+            approvedProjectId: projectId,
+            targetProjectId: projectId,
+            updatedAt: now,
+          };
+        }
         return {
-          status: isAgreed ? 'APPROVED' : 'PENDING',
-          reviewOutcome: parsed.reviewStatus,
+          status: 'APPROVED',
+          reviewOutcome: 'APPROVED',
           reviewedBy: actorId,
           reviewedByName: reviewerName,
           reviewedAt: now,
-          reviewComment: readOptionalText(parsed.reviewComment) || null,
-          rejectedReason: isAgreed ? null : readOptionalText(parsed.reviewComment),
+          reviewComment: reviewComment || null,
+          rejectedReason: null,
           approvedProjectId: projectId,
           targetProjectId: projectId,
           updatedAt: now,
@@ -2940,6 +2988,7 @@ export function mountProjectRoutes(app, {
         projectId,
         requestId: resolvedRequestId || null,
         reviewStatus: parsed.reviewStatus,
+        projectCode,
         reviewedAt: now,
       },
     };

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectPatchFromChangeRequestPayload } from './routes/projects.mjs';
+import {
+  buildProjectPatchFromChangeRequestPayload,
+  normalizeProjectOrganizationLabel,
+} from './routes/projects.mjs';
 
 describe('BFF project change request payload merge', () => {
   it('turns an approved change request payload into a concrete project patch', () => {
@@ -49,5 +52,19 @@ describe('BFF project change request payload merge', () => {
       note: '승인 전 수정값',
     });
     expect(patch.teamMembersDetailed).toHaveLength(1);
+  });
+
+  it('canonicalizes CIC and Team organization labels before persistence', () => {
+    expect(normalizeProjectOrganizationLabel('CIC 2')).toBe('CIC2');
+    expect(normalizeProjectOrganizationLabel('AXR Team')).toBe('AXR팀');
+
+    expect(buildProjectPatchFromChangeRequestPayload({ department: 'CIC 2' }, {})).toMatchObject({
+      department: 'CIC2',
+      cic: 'CIC2',
+    });
+    expect(buildProjectPatchFromChangeRequestPayload({ department: 'AXR Team' }, {})).toMatchObject({
+      department: 'AXR팀',
+      cic: 'AXR팀',
+    });
   });
 });

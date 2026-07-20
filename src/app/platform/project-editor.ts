@@ -414,7 +414,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'currency', label: '통화', before: (project) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency)] || '-', after: (draft) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(draft.currency)] || '-' },
   { key: 'contractAmount', label: '계약금액', before: (project) => formatAmountForChange(project.contractAmount), after: (draft) => formatAmountForChange(draft.contractAmount) },
   { key: 'totalRevenueAmount', label: '총수익', before: (project) => formatAmountForChange(project.totalRevenueAmount), after: (draft) => formatAmountForChange(draft.totalRevenueAmount) },
-  { key: 'supportAmount', label: '지원금', before: (project) => formatAmountForChange(project.supportAmount), after: (draft) => formatAmountForChange(draft.supportAmount) },
+  { key: 'supportAmount', label: '총지원금', before: (project) => formatAmountForChange(project.supportAmount), after: (draft) => formatAmountForChange(draft.supportAmount) },
   { key: 'settlementType', label: '정산 유형', before: (project) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType)] || '-', after: (draft) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(draft.settlementType)] || '-' },
   { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
   { key: 'accountType', label: '통장 유형', before: (project) => ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType)] || '-', after: (draft) => ACCOUNT_TYPE_LABELS[normalizeAccountType(draft.accountType)] || '-' },
@@ -859,10 +859,10 @@ export function buildProjectEditorProjectPatch(
     )
   ) {
     patch.executiveReviewStatus = 'PENDING';
-    patch.executiveReviewedAt = options.now;
-    patch.executiveReviewedById = options.actorId;
-    patch.executiveReviewedByName = options.actorName;
-    patch.executiveReviewComment = text(options.executiveReviewComment) || null;
+    patch.executiveReviewedAt = null;
+    patch.executiveReviewedById = null;
+    patch.executiveReviewedByName = null;
+    patch.executiveReviewComment = null;
     if (options.baseProject) {
       patch.executiveReviewHistory = appendPendingReviewHistory(options.baseProject, draft, options, reviewChanges);
     }
