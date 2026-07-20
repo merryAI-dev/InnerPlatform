@@ -11,6 +11,7 @@ import {
 } from '../ui/alert-dialog';
 
 export function editLeaseHolderMessage(holder: EditLeaseHolder | null): string {
+  if (holder?.sameActor) return '이전 수정 세션이 남아 있습니다.';
   return `현재 ${holder?.holderDisplayName.trim() || '다른 사용자'}님이 수정 중입니다.`;
 }
 
@@ -102,7 +103,9 @@ export function EditLeaseDialogs({
           <AlertDialogHeader>
             <AlertDialogTitle>{editLeaseHolderMessage(holder)}</AlertDialogTitle>
             <AlertDialogDescription>
-              지금은 수정은 불가능하지만 읽기/조회는 가능해요!
+              {holder?.sameActor
+                ? '이어서 작성하면 기존 임시저장본을 계속 수정할 수 있습니다.'
+                : '지금은 수정은 불가능하지만 읽기/조회는 가능해요!'}
               {formatLeaseExpiry(holder?.expiresAt) ? ` 수정 권한 만료 예정 ${formatLeaseExpiry(holder?.expiresAt)}` : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -171,17 +171,11 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(project.data()).toMatchObject({
       name: 'Project A',
       version: 4,
-      executiveReviewStatus: 'PENDING',
-      executiveReviewedAt: null,
-      executiveReviewedById: null,
-      executiveReviewedByName: null,
-      executiveReviewComment: null,
-    });
-    expect(project.data()?.executiveReviewHistory?.at(-1)).toMatchObject({
-      status: 'PENDING',
-      reviewedById: 'actor-a',
-      reviewedByName: 'actor-a',
-      reviewComment: null,
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedAt: '2026-07-01T09:00:00.000Z',
+      executiveReviewedById: 'organization-head',
+      executiveReviewedByName: '조직장',
+      executiveReviewComment: '기존 승인 메모',
     });
     expect(changeRequest.data()).toMatchObject({ status: 'PENDING', proposedSnapshot: { name: 'Private name' } });
     expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);

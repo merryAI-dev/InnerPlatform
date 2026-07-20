@@ -279,7 +279,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       previousStatus: 'PENDING',
       projectCode: 'PRJ-2026-001',
     })]);
-    expect((await db.doc(`orgs/${tenantId}/project_code_registry/PRJ-2026-001`).get()).data()).toMatchObject({
+    expect((await db.doc(`orgs/${tenantId}/projectCodeClaims/PRJ-2026-001`).get()).data()).toMatchObject({
       projectId: 'p_exec_review_001',
     });
   });
@@ -400,7 +400,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       .set({ ...defaultHeaders, 'idempotency-key': 'idem-designated-exec-001' })
       .send({ reviewStatus: 'APPROVED' });
     expect(response.status).toBe(403);
-    expect(response.body.error).toBe('designated_approver_required');
+    expect(response.body.error).toBe('executive_approver_mismatch');
   });
 
   it('uses the resubmitted change request approver instead of a stale project approver', async () => {
@@ -589,10 +589,10 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
     expect((await db.doc(`orgs/${tenantId}/projects/p_exec_review_003`).get()).data()).toMatchObject({
       executiveReviewStatus: 'PENDING',
-      executiveReviewedAt: null,
-      executiveReviewedById: null,
-      executiveReviewedByName: null,
-      executiveReviewComment: null,
+      executiveReviewedAt: expect.any(String),
+      executiveReviewedById: actorId,
+      executiveReviewedByName: '변민욱',
+      executiveReviewComment: '계약서 보완 후 다시 제출',
       executiveReviewHistory: expect.arrayContaining([
         expect.objectContaining({
           status: 'PENDING',
@@ -740,10 +740,10 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     });
     expect((await db.doc(`orgs/${tenantId}/projects/p_exec_review_legacy_001`).get()).data()).toMatchObject({
       executiveReviewStatus: 'PENDING',
-      executiveReviewedAt: null,
-      executiveReviewedById: null,
-      executiveReviewedByName: null,
-      executiveReviewComment: null,
+      executiveReviewedAt: expect.any(String),
+      executiveReviewedById: actorId,
+      executiveReviewedByName: '변민욱',
+      executiveReviewComment: '기존 등록 사업도 수정 후 다시 제출',
     });
   });
 

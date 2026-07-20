@@ -747,6 +747,7 @@ export function createProjectInfoDraftService({
           actorEmail: current.actorEmail,
           timestamp,
           targetProjectVersion: nextVersion,
+          resubmit: input?.resubmit === true,
           reviewComment: input?.reviewComment,
         });
         const submittedProjectRequest = {

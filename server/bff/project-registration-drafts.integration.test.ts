@@ -166,6 +166,11 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         modusignContractUsed: true,
         originalContractSubmitted: false,
       },
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '제안서 Word 원본 없음',
+        proposalPptOriginal: '제안서 PPT 원본 없음',
+        presentationPptOriginal: '발표자료 원본 없음',
+      },
       contractStart: '2026-07-01',
       contractEnd: '2026-12-31',
       contractType: '계약서(날인)',

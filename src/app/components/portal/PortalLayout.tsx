@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
-  Calculator,
   LogOut,
   FolderKanban, Menu,
   Plus, Pencil,
@@ -95,7 +94,6 @@ const NAV_SECTIONS: PortalNavSection[] = [
   {
     title: '마이메뉴',
     items: [
-      { to: '/portal/budget', icon: Calculator, label: '예산 편집' },
       { to: '/portal/payroll', icon: CircleDollarSign, label: '인건비/공지', accent: true, hidden: true },
     ],
   },
@@ -103,7 +101,6 @@ const NAV_SECTIONS: PortalNavSection[] = [
     title: '사업비관리',
     items: [
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
-      { to: '/portal/weekly-expenses', icon: FileSpreadsheet, label: '사업비 입력(주간)', hidden: true },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
       { to: '/portal/cashflow/sheets-lab', icon: FileSpreadsheet, label: '시트 연동 검토', hidden: true },
     ],

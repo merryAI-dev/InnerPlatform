@@ -234,7 +234,7 @@ export function resolveMigrationReviewContractDocument(
   request: ProjectRequest | null,
 ) {
   const payload = resolveProjectRequestPayload(request);
-  const useRequestDocument = resolveProjectRequestKind(request) === 'CHANGE' && request?.status === 'PENDING';
+  const useRequestDocument = resolveProjectRequestKind(request) === 'CHANGE' && Boolean(payload?.contractDocument);
   return useRequestDocument
     ? (payload?.contractDocument || project.contractDocument || null)
     : (project.contractDocument || payload?.contractDocument || null);

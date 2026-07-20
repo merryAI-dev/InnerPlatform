@@ -8,9 +8,8 @@ const portalLayoutSource = readFileSync(
 );
 
 describe('PortalLayout shell actions', () => {
-  it('hides payroll and weekly-expense tabs from the primary portal navigation', () => {
+  it('hides payroll from the primary portal navigation', () => {
     expect(portalLayoutSource).toContain("label: '인건비/공지', accent: true, hidden: true");
-    expect(portalLayoutSource).toContain("label: '사업비 입력(주간)', hidden: true");
     expect(portalLayoutSource).not.toContain('monthlyCloses');
   });
 
