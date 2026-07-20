@@ -508,6 +508,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String snapshotHash = hashCanonicalJson(snapshot);
         String previousSnapshotHash = text(current.get("snapshotHash"), "");
         boolean late = today.isAfter(targetMonth.plusMonths(1).atDay(10));
+        String versionId = projectId + "-" + request.yearMonth() + "-r" + revision;
         Map<String, Object> patch = new LinkedHashMap<>();
         patch.put("id", projectId + "-" + request.yearMonth());
         patch.put("contractVersion", CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION);
@@ -521,6 +522,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("previousSnapshot", nestedMap(current.get("snapshot")));
         patch.put("snapshotHash", snapshotHash);
         patch.put("previousSnapshotHash", previousSnapshotHash);
+        patch.put("latestVersionId", versionId);
         patch.put("late", late);
         patch.put("closedAt", now.toString());
         patch.put("closedByUid", actor.id());
@@ -530,6 +532,26 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("createdAt", text(current.get("createdAt"), now.toString()));
         patch.put("updatedAt", now.toString());
         set(closeRef, patch);
+        Map<String, Object> version = new LinkedHashMap<>();
+        version.put("id", versionId);
+        version.put("contractVersion", CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION);
+        version.put("schemaVersion", 1);
+        version.put("tenantId", actor.tenantId());
+        version.put("projectId", projectId);
+        version.put("yearMonth", request.yearMonth());
+        version.put("status", "CLOSED");
+        version.put("revision", revision);
+        version.put("reopenCount", reopenCount);
+        version.put("snapshot", snapshot);
+        version.put("snapshotHash", snapshotHash);
+        version.put("previousSnapshotHash", previousSnapshotHash);
+        version.put("sourceRevision", request.sourceRevision());
+        version.put("targetRevision", request.targetRevision());
+        version.put("late", late);
+        version.put("closedAt", now.toString());
+        version.put("closedByUid", actor.id());
+        version.put("closedByName", actor.name());
+        set(db.document(monthlyCloseVersionPath(actor.tenantId(), versionId)), version);
         submitValidatedPrivateDraft(actor, projectId, request, source, now);
         currentCashflowMonthStates.get().put(
             monthStateKey(actor.tenantId(), projectId, request.yearMonth()),
@@ -1047,6 +1069,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private String monthlyClosePath(String tenantId, String projectId, String yearMonth) {
         return "orgs/" + tenantId + "/monthly_closes/" + projectId + "-" + yearMonth;
+    }
+
+    private String monthlyCloseVersionPath(String tenantId, String versionId) {
+        return "orgs/" + tenantId + "/monthly_close_versions/" + versionId;
     }
 
     private String monthStateKey(String tenantId, String projectId, String yearMonth) {

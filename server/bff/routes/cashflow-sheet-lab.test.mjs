@@ -307,8 +307,66 @@ describe('cashflow sheet lab route', () => {
       expect.objectContaining({ year: 2026, projection: expect.objectContaining({ source: 'WEEKLY' }) }),
       expect.objectContaining({ year: 2027, projection: expect.objectContaining({ source: 'ANNUAL', valueCellCount: 0 }) }),
     ]));
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_week_values/')).toHaveLength(1);
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_year_totals/')).toHaveLength(4);
+    const mirror = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_mirrors/');
+    const snapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshots/');
+    expect(mirror[0].data).toMatchObject({ projectId: 'project-a', status: 'FRESH', snapshotSchemaVersion: 2 });
+    expect(mirror[0].data.snapshotId).toMatch(/^cfsnap_[a-f0-9]{32}$/);
+    expect(snapshots).toHaveLength(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(1);
+    const yearSnapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_years/');
+    expect(yearSnapshots).toHaveLength(4);
+    const reordered = yearSnapshots.find(({ data }) => data.year === 2025);
+    reordered.data.projection.lineAmounts = Object.fromEntries(
+      Object.entries(reordered.data.projection.lineAmounts).reverse(),
+    );
+    await db.doc(reordered.path).set(reordered.data);
+
+    const yearView = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
+      .expect(200);
+
+    expect(yearView.body).toMatchObject({
+      selectedYear: 2026,
+      availableYears: [2024, 2025, 2026, 2027],
+      navigationYears: [2025, 2026, 2027],
+      readModelStatus: 'CURRENT',
+      fallbackYears: [],
+      mismatchYears: [],
+    });
+    expect(yearView.body.years).toHaveLength(4);
+    expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
+  });
+
+  it('keeps legacy mirrors readable until the next explicit sheet refresh rebuilds year snapshots', async () => {
+    const db = createDb({
+      initialDocuments: {
+        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
+          projectId: 'project-a',
+          status: 'FRESH',
+          sourceRevision: 'sha256:legacy',
+          years: [2025],
+          sheetFacts: {
+            annualCashflowTotals: [{
+              year: 2025,
+              projection: { source: 'ANNUAL', totalIn: 100, totalOut: 20, net: 80, lineAmounts: {} },
+              actual: { source: 'ANNUAL', totalIn: 90, totalOut: 10, net: 80, lineAmounts: {} },
+            }],
+          },
+        },
+      },
+    });
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      availableYears: [2025, 2026, 2027],
+      navigationYears: [2025, 2026, 2027],
+      readModelStatus: 'FALLBACK',
+      fallbackYears: [2025],
+      years: [{ year: 2025, storage: 'MIRROR_FALLBACK' }],
+    });
   });
 
   it('compares a pinned multi-year sheet total with registered financial years', async () => {

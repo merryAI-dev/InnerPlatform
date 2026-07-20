@@ -121,6 +121,33 @@ function compareAnnualCells(left, right) {
     || String(left.lineId).localeCompare(String(right.lineId));
 }
 
+function annualCoverage(cells, source) {
+  const weeks = new Set();
+  const months = new Set();
+  for (const cell of cells) {
+    const yearMonth = normalizedText(cell?.yearMonth);
+    const weekNo = Number(cell?.weekNo);
+    if (!yearMonth || !Number.isSafeInteger(weekNo)) continue;
+    months.add(yearMonth);
+    weeks.add(`${yearMonth}:${weekNo}`);
+  }
+  return {
+    status: source === 'WEEKLY'
+      ? (weeks.size === 60 && months.size === 12 ? 'COMPLETE' : 'PARTIAL')
+      : source === 'ANNUAL' ? 'ANNUAL_ONLY' : 'NONE',
+    weekCount: weeks.size,
+    expectedWeekCount: 60,
+    monthCount: months.size,
+    expectedMonthCount: 12,
+  };
+}
+
+function addWholeWon(left, right) {
+  const sum = left + right;
+  if (!Number.isSafeInteger(sum)) throw new RangeError('Cashflow annual total exceeds the safe whole-won range.');
+  return sum;
+}
+
 function summarizeAnnualMode(cells, source) {
   const lineAmounts = {};
   let totalIn = 0;
@@ -137,22 +164,41 @@ function summarizeAnnualMode(cells, source) {
       invalidCellCount += 1;
       continue;
     }
+    const amount = Number(cell.amount);
+    if (!Number.isSafeInteger(amount)) {
+      invalidCellCount += 1;
+      continue;
+    }
     valueCellCount += 1;
-    const amount = Number(cell.amount) || 0;
-    lineAmounts[cell.lineId] = amount;
-    if (cell.direction === 'IN') totalIn += amount;
-    if (cell.direction === 'OUT') totalOut += amount;
+    lineAmounts[cell.lineId] = addWholeWon(lineAmounts[cell.lineId] || 0, amount);
+    if (cell.direction === 'IN') totalIn = addWholeWon(totalIn, amount);
+    if (cell.direction === 'OUT') totalOut = addWholeWon(totalOut, amount);
   }
   return {
     source,
+    coverage: annualCoverage(cells, source),
     valueCellCount,
     emptyCellCount,
     invalidCellCount,
     lineAmounts,
     totalIn,
     totalOut,
-    net: totalIn - totalOut,
+    net: addWholeWon(totalIn, -totalOut),
   };
+}
+
+function reconcileAnnualMode(weekly, annual) {
+  if (weekly.source !== 'WEEKLY' || annual.source !== 'ANNUAL') {
+    return { status: 'NOT_APPLICABLE', mismatchedLineIds: [] };
+  }
+  if (weekly.coverage.status !== 'COMPLETE') {
+    return { status: 'PARTIAL_WEEKLY', mismatchedLineIds: [] };
+  }
+  const lineIds = new Set([...Object.keys(weekly.lineAmounts), ...Object.keys(annual.lineAmounts)]);
+  const mismatchedLineIds = [...lineIds]
+    .filter((lineId) => (weekly.lineAmounts[lineId] || 0) !== (annual.lineAmounts[lineId] || 0))
+    .sort(compareCodeUnits);
+  return { status: mismatchedLineIds.length > 0 ? 'MISMATCH' : 'MATCH', mismatchedLineIds };
 }
 
 function buildAnnualCashflowTotals({ cells, annualCells }) {
@@ -167,10 +213,12 @@ function buildAnnualCashflowTotals({ cells, annualCells }) {
       for (const mode of ['projection', 'actual']) {
         const weeklyCells = cells.filter((cell) => cell.mode === mode && Number(String(cell.yearMonth).slice(0, 4)) === year);
         const annualCellsForMode = annualCells.filter((cell) => cell.mode === mode && cell.year === year);
-        modeTotals[mode] = summarizeAnnualMode(
-          weeklyCells.length > 0 ? weeklyCells : annualCellsForMode,
-          weeklyCells.length > 0 ? 'WEEKLY' : annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE',
-        );
+        const weekly = summarizeAnnualMode(weeklyCells, weeklyCells.length > 0 ? 'WEEKLY' : 'NONE');
+        const annual = summarizeAnnualMode(annualCellsForMode, annualCellsForMode.length > 0 ? 'ANNUAL' : 'NONE');
+        modeTotals[mode] = {
+          ...(weeklyCells.length > 0 ? weekly : annual),
+          reconciliation: reconcileAnnualMode(weekly, annual),
+        };
       }
       return { year, ...modeTotals };
     });

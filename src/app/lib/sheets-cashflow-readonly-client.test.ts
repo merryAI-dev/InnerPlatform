@@ -6,6 +6,7 @@ import {
   extractSpreadsheetIdFromSheetInput,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
+  getCashflowSheetLabYearViewViaBff,
   refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
@@ -196,6 +197,38 @@ describe('sheets cashflow readonly client', () => {
       expect.objectContaining({ tenantId: 'mysc' }),
     );
     expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('reads the server-owned annual view for the selected year', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          status: 'FRESH',
+          selectedYear: 2026,
+          availableYears: [2025, 2026, 2027],
+          navigationYears: [2025, 2026, 2027],
+          years: [],
+          readModelStatus: 'CURRENT',
+          fallbackYears: [],
+          mismatchYears: [],
+        },
+      })),
+    });
+
+    const result = await getCashflowSheetLabYearViewViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      selectedYear: 2026,
+      client,
+    });
+
+    expect(result.navigationYears).toEqual([2025, 2026, 2027]);
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/projects/p001/cashflow-sheet-lab/years?selectedYear=2026',
+      expect.objectContaining({ tenantId: 'mysc' }),
+    );
   });
 
   it('refreshes the mirror only on an explicit request and retains a stale last-good snapshot', async () => {

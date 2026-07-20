@@ -844,6 +844,7 @@ class FirestoreCashflowLeaseGuardTest {
         ));
 
         Map<String, Object> close = fixture.documents.get(monthClosePath("project-a", "2026-06"));
+        Map<String, Object> closeVersion = fixture.documents.get(monthCloseVersionPath("project-a", "2026-06", 1));
         assertThat(response.status()).isEqualTo("CLOSED");
         assertThat(response.revision()).isEqualTo(1);
         assertThat(response.reopenCount()).isZero();
@@ -868,6 +869,12 @@ class FirestoreCashflowLeaseGuardTest {
                 "managementChecks", "managementConfirmations", "deadlineSummary",
                 "weeklyTotals", "projectionTotal", "actualTotal"
             );
+        assertThat(closeVersion)
+            .containsEntry("projectId", "project-a")
+            .containsEntry("yearMonth", "2026-06")
+            .containsEntry("revision", 1L)
+            .containsEntry("snapshotHash", response.snapshotHash())
+            .containsKeys("snapshot", "closedAt", "closedByUid");
         assertThat(response.previousSnapshot()).isEmpty();
         assertThat((List<?>) ((Map<String, Object>) close.get("snapshot")).get("depositScheduleRows"))
             .hasSize(5);
@@ -1972,6 +1979,10 @@ class FirestoreCashflowLeaseGuardTest {
 
     private static String monthClosePath(String projectId, String yearMonth) {
         return "orgs/tenant-a/monthly_closes/" + projectId + "-" + yearMonth;
+    }
+
+    private static String monthCloseVersionPath(String projectId, String yearMonth, long revision) {
+        return "orgs/tenant-a/monthly_close_versions/" + projectId + "-" + yearMonth + "-r" + revision;
     }
 
     private static Map<String, Object> closedMonth(String yearMonth, long revision, long reopenCount) {

@@ -220,6 +220,31 @@
       "indexes": []
     },
     {
+      "collectionGroup": "monthly_close_versions",
+      "fieldPath": "snapshot",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "cashflow_sheet_snapshot_months",
+      "fieldPath": "cells",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "cashflow_sheet_snapshot_years",
+      "fieldPath": "annualCells",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "cashflow_sheet_snapshot_years",
+      "fieldPath": "projection",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "cashflow_sheet_snapshot_years",
+      "fieldPath": "actual",
+      "indexes": []
+    },
+    {
       "collectionGroup": "weekly_api_idempotency",
       "fieldPath": "responseJson",
       "indexes": []

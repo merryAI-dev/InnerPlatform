@@ -245,6 +245,80 @@ describe('cashflow sheet pinned snapshot', () => {
     ]);
   });
 
+  it('sums repeated weekly line values and marks an incomplete year as partial', () => {
+    const facts = extractCashflowSheetFacts({
+      cells: [
+        { mode: 'projection', yearMonth: '2026-01', weekNo: 1, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 100 },
+        { mode: 'projection', yearMonth: '2026-01', weekNo: 2, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 200 },
+        { mode: 'projection', yearMonth: '2026-01', weekNo: 2, lineId: 'DIRECT_COST_OUT', direction: 'OUT', state: 'VALUE', amount: 40 },
+      ],
+    });
+
+    expect(facts.annualCashflowTotals).toEqual([
+      expect.objectContaining({
+        year: 2026,
+        projection: expect.objectContaining({
+          source: 'WEEKLY',
+          lineAmounts: { SALES_IN: 300, DIRECT_COST_OUT: 40 },
+          totalIn: 300,
+          totalOut: 40,
+          net: 260,
+          coverage: {
+            status: 'PARTIAL',
+            weekCount: 2,
+            expectedWeekCount: 60,
+            monthCount: 1,
+            expectedMonthCount: 12,
+          },
+        }),
+      }),
+    ]);
+  });
+
+  it('keeps annual-only values distinct from weekly coverage', () => {
+    const facts = extractCashflowSheetFacts({
+      annualCells: [
+        { mode: 'actual', year: 2025, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 500 },
+      ],
+    });
+
+    expect(facts.annualCashflowTotals[0].actual).toMatchObject({
+      source: 'ANNUAL',
+      lineAmounts: { SALES_IN: 500 },
+      coverage: {
+        status: 'ANNUAL_ONLY',
+        weekCount: 0,
+        expectedWeekCount: 60,
+        monthCount: 0,
+        expectedMonthCount: 12,
+      },
+    });
+  });
+
+  it('reports an item-level mismatch when a complete weekly year differs from its annual column', () => {
+    const cells = Array.from({ length: 60 }, (_, index) => ({
+      mode: 'projection',
+      yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
+      weekNo: (index % 5) + 1,
+      lineId: 'SALES_IN',
+      direction: 'IN',
+      state: 'VALUE',
+      amount: 10,
+    }));
+    const facts = extractCashflowSheetFacts({
+      cells,
+      annualCells: [
+        { mode: 'projection', year: 2026, lineId: 'SALES_IN', direction: 'IN', state: 'VALUE', amount: 599 },
+      ],
+    });
+
+    expect(facts.annualCashflowTotals[0].projection).toMatchObject({
+      source: 'WEEKLY',
+      totalIn: 600,
+      reconciliation: { status: 'MISMATCH', mismatchedLineIds: ['SALES_IN'] },
+    });
+  });
+
   it('computes the same target revision regardless of Firestore map and week order', () => {
     const first = computeCashflowTargetRevision({
       weeks: [

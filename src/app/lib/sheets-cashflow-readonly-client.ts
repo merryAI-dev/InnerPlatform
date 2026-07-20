@@ -319,6 +319,13 @@ export interface CashflowSheetLabMirrorResult {
 
 export interface CashflowSheetLabAnnualModeTotal {
   source: 'WEEKLY' | 'ANNUAL' | 'NONE';
+  coverage: {
+    status: 'COMPLETE' | 'PARTIAL' | 'ANNUAL_ONLY' | 'NONE';
+    weekCount: number;
+    expectedWeekCount: number;
+    monthCount: number;
+    expectedMonthCount: number;
+  };
   valueCellCount: number;
   emptyCellCount: number;
   invalidCellCount: number;
@@ -326,6 +333,32 @@ export interface CashflowSheetLabAnnualModeTotal {
   totalIn: number;
   totalOut: number;
   net: number;
+  reconciliation: {
+    status: 'NOT_APPLICABLE' | 'PARTIAL_WEEKLY' | 'MATCH' | 'MISMATCH';
+    mismatchedLineIds: string[];
+  };
+}
+
+export interface CashflowSheetLabYearViewResult {
+  projectId: string;
+  status: 'EMPTY' | 'FRESH' | 'STALE';
+  selectedYear: number;
+  availableYears: number[];
+  navigationYears: number[];
+  snapshotId?: string;
+  sourceRevision?: string;
+  capturedAt?: string;
+  years: Array<{
+    year: number;
+    projection: CashflowSheetLabAnnualModeTotal;
+    actual: CashflowSheetLabAnnualModeTotal;
+    sourceRevision: string;
+    capturedAt?: string;
+    storage: 'SNAPSHOT' | 'MIRROR_FALLBACK';
+  }>;
+  readModelStatus: 'EMPTY' | 'CURRENT' | 'FALLBACK' | 'MISMATCH';
+  fallbackYears: number[];
+  mismatchYears: number[];
 }
 
 export interface CashflowSheetLabStageResult {
@@ -511,6 +544,26 @@ export async function getCashflowSheetLabMirrorViaBff(params: {
   const apiClient = params.client || createSameOriginBffClient();
   const response = await apiClient.get<CashflowSheetLabMirrorResult>(
     `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/mirror`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function getCashflowSheetLabYearViewViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  selectedYear: number;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabYearViewResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.get<CashflowSheetLabYearViewResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/years?selectedYear=${params.selectedYear}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
