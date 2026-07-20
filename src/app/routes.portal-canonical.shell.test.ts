@@ -26,7 +26,7 @@ describe('portal canonical edit resource routes', () => {
   it('lets the route project win and replaces ID-less cashflow URLs in the SPA', () => {
     expect(cashflowSource).toContain('useParams');
     expect(cashflowSource).toContain('resolvePortalProjectResourceId(routeProjectId');
-    expect(cashflowSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true })");
+    expect(cashflowSource).toContain('<Navigate to={resolvePortalProjectResourcePath(currentPath, projectId)} replace />');
     expect(sheetLabSource).toContain('useParams');
     expect(sheetLabSource).toContain('routeProjectId');
     expect(sheetLabSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true })");
