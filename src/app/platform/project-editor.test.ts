@@ -232,7 +232,7 @@ describe('project editor draft mapping', () => {
       { memberName: '변민욱', memberNickname: '보람', role: '실무책임자', participationRate: 40, isDocumentOnly: true },
     ]);
     expect(payload.teamMembers).toBe('김다은 (데이나) / 총괄책임자 / 60% / 실제 참여 / 인건비 2026-04~2026-09, 변민욱 (보람) / 실무책임자 / 40% / 서류상 인력');
-    expect(payload.groupwareName).toBe('기후테크GW');
+    expect(payload.groupwareName).toBe('기후테크');
     expect(payload.settlementSystem).toBe('KOCCA_PMS');
     expect(payload.laborSettlementBasis).toBe('FIXED_AMOUNT');
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });

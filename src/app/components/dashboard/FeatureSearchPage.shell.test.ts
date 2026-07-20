@@ -42,9 +42,9 @@ describe('FeatureSearchPage shell contract', () => {
     expect(searchSource).not.toContain("'CIC'");
   });
 
-  it('keeps only the registration request in practitioner quick links', () => {
+  it('exposes project selection and registration in practitioner quick links', () => {
+    expect(source).toContain("{ label: '프로젝트 선택', to: '/portal/project-select' }");
     expect(source).toContain("{ label: '프로젝트 등록 요청', to: '/portal/register-project' }");
-    expect(source).not.toContain("{ label: '프로젝트 선택', to: '/portal/project-select' }");
     expect(source).not.toContain("{ label: '예산 편집', to: '/portal/budget' }");
     expect(source).not.toContain("{ label: '사업비 입력', to: '/portal/weekly-expenses' }");
   });

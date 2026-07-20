@@ -1131,7 +1131,6 @@ export function ProjectEditorWizard({
     if (usesRegistrationV2) {
       if (!draft.officialContractName.trim()) issues.push({ step: 'basic', label: '공식 계약명' });
       if (!draft.clientOrg.trim()) issues.push({ step: 'basic', label: '계약 대상' });
-      if (!draft.groupwareName.trim()) issues.push({ step: 'basic', label: '그룹웨어 등록명' });
       if (!draft.projectPurpose.trim()) issues.push({ step: 'basic', label: '프로젝트 목적' });
       if (!draft.description.trim()) issues.push({ step: 'basic', label: '프로젝트 주요 내용' });
       if (!draft.contractDocument) issues.push({ step: 'financial', label: '계약서 PDF' });
@@ -1260,7 +1259,7 @@ export function ProjectEditorWizard({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div>
         <div>
           <Label className="text-xs">계약 대상{usesRegistrationV2 ? ' *' : ''}</Label>
           <Input
@@ -1271,18 +1270,6 @@ export function ProjectEditorWizard({
           />
           <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
             사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
-          </p>
-        </div>
-        <div>
-          <Label className="text-xs">그룹웨어 등록명{usesRegistrationV2 ? ' *' : ''}</Label>
-          <Input
-            value={draft.groupwareName}
-            onChange={(event) => update('groupwareName', event.target.value)}
-            placeholder="예: 2026 IBS그린임팩트펀드"
-            className="mt-1 h-9 text-sm"
-          />
-          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-            계약연도+프로젝트명으로 입력합니다. 재경팀 코드는 직접 입력하지 않으며, 다년도 사업도 동일 이름을 사용합니다.
           </p>
         </div>
       </div>
@@ -2165,7 +2152,6 @@ export function ProjectEditorWizard({
             <ReviewRow label="프로젝트 유형" value={PROJECT_TYPE_LABELS[draft.type]} />
             <ReviewRow label="계약서 유형" value={normalizeProjectContractType(draft.contractType)} />
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
-            <ReviewRow label="그룹웨어 등록명" value={draft.groupwareName} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
             <ReviewRow label="프로젝트 주요 내용" value={draft.description} />
             {canEditProjectStatus(mode) ? (

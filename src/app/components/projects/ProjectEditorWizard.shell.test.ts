@@ -142,9 +142,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('lastInitialDraftFingerprintRef');
   });
 
-  it('keeps project and groupware names separate with the PPT registration guidance', () => {
+  it('uses the project name as the single PPT registration name', () => {
     expect(source).toContain('프로젝트명 *');
-    expect(source).toContain("그룹웨어 등록명{usesRegistrationV2 ? ' *' : ''}");
+    expect(source).not.toContain('그룹웨어 등록명');
     expect(source).toContain('계약서에 기재된 계약명 그대로 입력');
     expect(source).toContain('띄어쓰기를 포함해 계약서 표기와 동일하게 입력해 주세요.');
     expect(source).toContain('예: 26농식품AC');
@@ -159,7 +159,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('2. 사업제안서 작성 - 25개팀 이상 1:1 코칭');
     expect(source).toContain('3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅');
     expect(source).toContain("{ id: 'team', label: '팀/인력', icon: Users }");
-    expect(source).toContain('<ReviewRow label="그룹웨어 등록명"');
     expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
