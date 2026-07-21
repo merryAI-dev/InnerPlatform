@@ -255,6 +255,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public String requireCashflowWritePermission(TrustedActorContext actor, String projectId) {
+        return requireCashflowPermission(actor, projectId, false);
+    }
+
+    @Override
+    public String requireCashflowMonthClosePermission(TrustedActorContext actor, String projectId) {
+        return requireCashflowPermission(actor, projectId, true);
+    }
+
+    private String requireCashflowPermission(TrustedActorContext actor, String projectId, boolean monthCloseOnly) {
         if (currentTransaction.get() == null) {
             throw leaseError(
                 503,
@@ -273,7 +282,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
         DocumentSnapshot memberSnap = get(db.document("orgs/" + actor.tenantId() + "/members/" + actor.id()));
         Map<String, Object> member = memberSnap.exists() ? data(memberSnap) : Map.of();
-        String storedRole = requireStoredCashflowWriter(member, actor, projectId);
+        String storedRole = requireStoredCashflowWriter(
+            member,
+            actor,
+            projectId,
+            monthCloseOnly && actor.id().equals(text(project.get("executiveApproverId"), ""))
+        );
         currentCashflowWriteScope.set(new CashflowWriteScope(actor.tenantId(), projectId, actor.id()));
         return storedRole;
     }
@@ -1092,7 +1106,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private String requireStoredCashflowWriter(
         Map<String, Object> member,
         TrustedActorContext actor,
-        String projectId
+        String projectId,
+        boolean designatedExecutiveApprover
     ) {
         String memberUid = text(member.get("uid"), "");
         String storedRole = text(member.get("role"), "").toLowerCase(Locale.ROOT);
@@ -1100,7 +1115,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !"ACTIVE".equals(text(member.get("status"), "").toUpperCase(Locale.ROOT))
             || (!memberUid.isBlank() && !actor.id().equals(memberUid))
             || !CASHFLOW_WRITE_ROLES.contains(storedRole)
-            || (!CASHFLOW_CROSS_PROJECT_ROLES.contains(storedRole) && !memberProjectIds(member).contains(projectId))) {
+            || (!CASHFLOW_CROSS_PROJECT_ROLES.contains(storedRole)
+                && !memberProjectIds(member).contains(projectId)
+                && !designatedExecutiveApprover)) {
             throw leaseError(403, "cashflow_project_write_forbidden", "Stored project assignment is required for cashflow writes.");
         }
         return storedRole;

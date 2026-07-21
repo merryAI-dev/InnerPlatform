@@ -68,6 +68,7 @@ export function resolvePortalProjectCandidates(input: {
     assignedProjectIds.has(project.id)
     || (authUid && project.registeredById === authUid)
     || (authUid && project.managerId === authUid)
+    || (authUid && project.executiveApproverId === authUid)
   ));
 
   return {

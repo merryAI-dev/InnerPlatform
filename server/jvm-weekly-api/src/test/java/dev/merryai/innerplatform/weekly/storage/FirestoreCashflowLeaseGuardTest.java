@@ -359,6 +359,50 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void allowsActiveDesignatedOrganizationHeadForMonthCloseWithoutOpeningGeneralWrites() {
+        Fixture fixture = fixture(
+            member(Map.of("role", "viewer", "projectIds", List.of())),
+            activeLease()
+        );
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a",
+            "tenantId", "tenant-a",
+            "executiveApproverId", "pm-1"
+        ));
+
+        assertThat(fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.requireCashflowMonthClosePermission(ACTOR, "project-a")
+        )).isEqualTo("viewer");
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a")
+        ))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .extracting(error -> ((WeeklyExpenseEditLeaseException) error).statusCode())
+            .isEqualTo(403);
+    }
+
+    @Test
+    void rejectsInactiveDesignatedOrganizationHeadForMonthClose() {
+        Fixture fixture = fixture(
+            member(Map.of("role", "viewer", "status", "INACTIVE", "projectIds", List.of())),
+            activeLease()
+        );
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a",
+            "tenantId", "tenant-a",
+            "executiveApproverId", "pm-1"
+        ));
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.requireCashflowMonthClosePermission(ACTOR, "project-a")
+        ))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .extracting(error -> ((WeeklyExpenseEditLeaseException) error).statusCode())
+            .isEqualTo(403);
+    }
+
+    @Test
     void usesStoredRoleForCrossProjectAccessAndRequiresCanonicalProjectInTransaction() {
         Fixture finance = fixture(member(Map.of("role", "finance", "projectIds", List.of())), activeLease());
         assertThatCode(() -> finance.persistence.runCommandTransaction(() -> {

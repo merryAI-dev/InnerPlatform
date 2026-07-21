@@ -63,8 +63,8 @@ public class WeeklyExpenseAuthorizationService {
         Map.entry(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
         Map.entry(WeeklyExpenseCommandService.CASHFLOW_VARIANCE_COMMAND, Set.of("admin", "finance", "pm", "tenant_admin")),
         Map.entry(WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND, Set.of("admin", "finance", "pm", "auditor", "viewer", "tenant_admin", "support", "security")),
-        Map.entry(WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND, Set.of("admin", "finance", "pm")),
-        Map.entry(WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance", "pm")),
+        Map.entry(WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND, Set.of("admin", "finance", "pm", "viewer")),
+        Map.entry(WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance", "pm", "viewer")),
         Map.entry(WeeklyExpenseCommandService.DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.CLOSE_WEEK_COMMAND, Set.of("admin", "finance")),
         Map.entry(WeeklyExpenseCommandService.AUDIT_EXPORT_CREATE_COMMAND, Set.of("admin", "finance"))

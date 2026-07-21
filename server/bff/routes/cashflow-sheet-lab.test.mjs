@@ -537,7 +537,7 @@ describe('cashflow sheet lab route', () => {
     ]));
   });
 
-  it('blocks final review when a complete weekly year conflicts with its annual total', async () => {
+  it('warns but does not block when a complete weekly year conflicts with its annual total', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -566,11 +566,14 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'conflicting-year-refresh' })
       .expect(200);
 
+    expect(mirror.body.reconciliationWarnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ year: 2026, mode: 'projection', status: 'MISMATCH' }),
+    ]));
+
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'conflicting-year-stage' })
-      .expect(409)
-      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_annual_weekly_reconciliation_failed'));
+      .expect(200);
   });
 
   it('keeps legacy mirrors readable until the next explicit sheet refresh rebuilds year snapshots', async () => {
@@ -971,6 +974,60 @@ describe('cashflow sheet lab route', () => {
     });
     expect(previewSpreadsheet).not.toHaveBeenCalled();
     expect(db.__getDocument().cashflowSheetLab).toMatchObject(response.body.config);
+  });
+
+  it('keeps one explicit source per project year and replaces only that year on refresh', async () => {
+    const db = createDb({
+      project: { id: 'project-a', contractStart: '2026-01-01', contractEnd: '2027-12-31' },
+    });
+    const previewSpreadsheet = vi.fn(async ({ value }) => {
+      const year = String(value).includes('2027') ? 2027 : 2026;
+      const labels = Array.from({ length: 5 }, (_, index) => `${String(year).slice(2)}-1-${index + 1}`);
+      return {
+        spreadsheetId: `spreadsheet-${year}`,
+        spreadsheetTitle: `${year} cashflow`,
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrixWithWeekLabels(labels),
+      };
+    });
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    for (const year of [2026, 2027]) {
+      await request(app)
+        .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+        .send({
+          sourceYear: year,
+          value: `https://docs.google.com/spreadsheets/d/spreadsheet-${year}/edit`,
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: `${String(year).slice(2)}-1-1`,
+          endWeek: `${String(year).slice(2)}-1-5`,
+        })
+        .expect(200);
+      await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+        .send({ sourceYear: year, idempotencyKey: `refresh-${year}` })
+        .expect(200);
+    }
+
+    const config = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/config?sourceYear=2026')
+      .expect(200);
+    expect(config.body.projectYears).toEqual([2026, 2027]);
+    expect(config.body.config).toMatchObject({ sourceYear: 2026, spreadsheetId: 'spreadsheet-2026' });
+    expect(config.body.configs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceYear: 2026, spreadsheetId: 'spreadsheet-2026' }),
+      expect.objectContaining({ sourceYear: 2027, spreadsheetId: 'spreadsheet-2027' }),
+    ]));
+
+    const mirror = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+    expect(mirror.body.sources).toMatchObject({
+      2026: { sourceYear: 2026, spreadsheetId: 'spreadsheet-2026' },
+      2027: { sourceYear: 2027, spreadsheetId: 'spreadsheet-2027' },
+    });
+    expect([...new Set(mirror.body.cells.map((cell) => Number(cell.yearMonth.slice(0, 4))))]).toEqual([2026, 2027]);
   });
 
   it('invalidates the pinned mirror and staged run when the saved sheet config changes', async () => {

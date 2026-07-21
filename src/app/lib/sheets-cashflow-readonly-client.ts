@@ -257,6 +257,15 @@ export interface CashflowSheetLabMirrorResult {
   schemaVersion?: number;
   projectId: string;
   status: 'EMPTY' | 'FRESH' | 'STALE' | 'ERROR';
+  sourceYear?: number;
+  sources?: Record<string, {
+    sourceYear: number;
+    spreadsheetId?: string;
+    spreadsheetTitle?: string;
+    selectedSheetName?: string;
+    sourceRevision?: string;
+    capturedAt?: string;
+  }>;
   spreadsheetId?: string;
   spreadsheetTitle?: string;
   selectedSheetName?: string;
@@ -320,6 +329,12 @@ export interface CashflowSheetLabMirrorResult {
       sheet: Record<'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount', number>;
     };
   };
+  reconciliationWarnings?: Array<{
+    year: number;
+    mode: 'projection' | 'actual';
+    status: 'MISMATCH' | 'PARTIAL_WEEKLY';
+    mismatchedLineIds: string[];
+  }>;
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
   lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
@@ -416,6 +431,7 @@ export interface CashflowSheetLabShareAccountResult {
   projectId: string;
   configured?: boolean;
   config?: {
+    sourceYear?: number;
     value?: string;
     sheetName?: string;
     spreadsheetId?: string;
@@ -433,6 +449,8 @@ export interface CashflowSheetLabShareAccountResult {
     lastProjectionLineCount?: number;
     lastActualLineCount?: number;
   } | null;
+  configs?: NonNullable<CashflowSheetLabShareAccountResult['config']>[];
+  projectYears?: number[];
   systemAccountEmail?: string;
   accessPolicy?: {
     googleAuth: 'service_account';
@@ -456,6 +474,7 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  sourceYear?: number;
   value: string;
   sheetName?: string;
   startWeek?: string;
@@ -470,6 +489,7 @@ export async function saveCashflowSheetLabConfigViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
+        ...(params.sourceYear ? { sourceYear: params.sourceYear } : {}),
         value: params.value,
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
@@ -599,6 +619,7 @@ export async function refreshCashflowSheetLabMirrorViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  sourceYear?: number;
   value?: string;
   sheetName?: string;
   startWeek?: string;
@@ -613,6 +634,7 @@ export async function refreshCashflowSheetLabMirrorViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: {
+        ...(params.sourceYear ? { sourceYear: params.sourceYear } : {}),
         ...(params.value ? { value: params.value } : {}),
         ...(params.sheetName ? { sheetName: params.sheetName } : {}),
         ...(params.startWeek ? { startWeek: params.startWeek } : {}),
@@ -631,11 +653,12 @@ export async function getCashflowSheetLabShareAccountViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  sourceYear?: number;
   client?: PlatformApiClientLike;
 }): Promise<CashflowSheetLabShareAccountResult> {
   const apiClient = params.client || createSameOriginBffClient();
   const response = await apiClient.get<CashflowSheetLabShareAccountResult>(
-    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config`,
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/config${params.sourceYear ? `?sourceYear=${params.sourceYear}` : ''}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

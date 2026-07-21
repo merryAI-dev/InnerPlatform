@@ -43,6 +43,60 @@ async function listMemberDocs(db, tenantId) {
   }));
 }
 
+async function listProjectPermissionDocs(db, tenantId) {
+  const snap = await db.collection(`orgs/${tenantId}/projects`).get();
+  return snap.docs.map((doc) => {
+    const data = doc.data() || {};
+    return {
+      id: String(data.id || doc.id || '').trim(),
+      name: String(data.name || data.shortName || data.id || doc.id || '').trim(),
+      registeredById: String(data.registeredById || '').trim(),
+      managerId: String(data.managerId || '').trim(),
+      executiveApproverId: String(data.executiveApproverId || '').trim(),
+      trashedAt: data.trashedAt || null,
+    };
+  }).filter((project) => project.id && !project.trashedAt);
+}
+
+function textList(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+export function buildMemberPermissionOverview(entry, projects) {
+  const member = {
+    ...(entry.legacyMembers[0]?.data || {}),
+    ...(entry.canonicalMember?.data || {}),
+  };
+  const profile = member.portalProfile && typeof member.portalProfile === 'object'
+    ? member.portalProfile
+    : {};
+  const assignedIds = new Set(textList([
+    member.projectId,
+    ...(Array.isArray(member.projectIds) ? member.projectIds : []),
+    profile.projectId,
+    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+  ]));
+  const actorId = String(entry.authUid || entry.canonicalMember?.uid || member.uid || '').trim();
+  const role = normalizeRole(entry.effectiveRole);
+  const isActive = !entry.authDisabled && String(member.status || '').trim().toUpperCase() === 'ACTIVE';
+  const crossProject = role === 'admin' || role === 'finance';
+  const organizationHeadProjects = projects.filter((project) => actorId && project.executiveApproverId === actorId);
+  const accessibleProjects = projects.filter((project) => (
+    crossProject
+    || assignedIds.has(project.id)
+    || (actorId && (project.registeredById === actorId || project.managerId === actorId || project.executiveApproverId === actorId))
+  ));
+
+  return {
+    isActive,
+    accessibleProjects: accessibleProjects.map(({ id, name }) => ({ id, name })),
+    organizationHeadProjects: organizationHeadProjects.map(({ id, name }) => ({ id, name })),
+    canRequestCashflowClose: isActive && accessibleProjects.length > 0,
+    canApproveProjectRegistration: isActive && organizationHeadProjects.length > 0,
+    canDecideCashflowReopen: isActive && (role === 'admin' || role === 'finance'),
+  };
+}
+
 function buildGovernanceSummary(entries) {
   return {
     total: entries.length,
@@ -60,15 +114,20 @@ export function mountMemberRoutes(app, {
   app.get('/api/v1/admin/auth-governance/users', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, ROUTE_ROLES.memberWrite, 'read auth governance users');
     const { tenantId } = req.context;
-    const [authUsers, memberDocs] = await Promise.all([
+    const [authUsers, memberDocs, projects] = await Promise.all([
       listAllAuthUsers(authAdminService),
       listMemberDocs(db, tenantId),
+      listProjectPermissionDocs(db, tenantId),
     ]);
-    const items = mergeAuthGovernanceDirectory({
+    const directory = mergeAuthGovernanceDirectory({
       authUsers,
       memberDocs,
       bootstrapAdminEmails: parseBootstrapAdminEmails(process.env),
     });
+    const items = directory.map((entry) => ({
+      ...entry,
+      permissionOverview: buildMemberPermissionOverview(entry, projects),
+    }));
     res.status(200).json({
       items,
       summary: buildGovernanceSummary(items),

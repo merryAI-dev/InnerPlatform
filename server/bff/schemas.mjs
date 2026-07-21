@@ -187,6 +187,7 @@ export const cashflowSheetLabPreviewSchema = z.object({
 }).strict();
 
 export const cashflowSheetLabMirrorRefreshSchema = z.object({
+  sourceYear: z.number().int().min(2000).max(2100).optional(),
   value: NON_EMPTY_STRING.optional(),
   sheetName: NON_EMPTY_STRING.optional(),
   startWeek: NON_EMPTY_STRING.optional(),
@@ -229,6 +230,7 @@ export const cashflowSheetLabWritebackApplySchema = z.object({
 }).strict();
 
 export const cashflowSheetLabConfigSchema = z.object({
+  sourceYear: z.number().int().min(2000).max(2100).optional(),
   value: NON_EMPTY_STRING,
   sheetName: NON_EMPTY_STRING.optional(),
   startWeek: NON_EMPTY_STRING.optional(),

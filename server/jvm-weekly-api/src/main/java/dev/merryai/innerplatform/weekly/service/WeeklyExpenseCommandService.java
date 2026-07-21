@@ -778,7 +778,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CloseCashflowMonthRequest request
     ) {
-        TrustedActorContext writer = requireCashflowWritePermission(
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
             CLOSE_CASHFLOW_MONTH_COMMAND,
             actor,
             projectId
@@ -839,7 +839,7 @@ public class WeeklyExpenseCommandService {
         if (request.reason().isBlank()) {
             throw new IllegalArgumentException("A reason is required to request a cashflow month reopen.");
         }
-        TrustedActorContext writer = requireCashflowWritePermissionWithoutLeaseRuntime(
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
             REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND,
             actor,
             projectId
@@ -2788,6 +2788,19 @@ public class WeeklyExpenseCommandService {
             actor.email(),
             storedRole,
             actor.name()
+        );
+        authorizationService.requireAllowed(commandName, storedActor);
+        return storedActor;
+    }
+
+    private TrustedActorContext requireCashflowMonthClosePermission(
+        String commandName,
+        TrustedActorContext actor,
+        String projectId
+    ) {
+        String storedRole = persistence.requireCashflowMonthClosePermission(actor, projectId);
+        TrustedActorContext storedActor = new TrustedActorContext(
+            actor.tenantId(), actor.id(), actor.email(), storedRole, actor.name()
         );
         authorizationService.requireAllowed(commandName, storedActor);
         return storedActor;

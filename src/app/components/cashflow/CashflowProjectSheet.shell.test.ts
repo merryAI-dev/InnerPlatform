@@ -48,7 +48,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('expectedDepositAmount: row.expectedDepositAmount');
     expect(source).toContain('readOnly');
     expect(source).toContain('hasSheetSource');
-    expect(source).toContain('disabled={!canEdit || hasSheetSource}');
+    expect(source).toContain('disabled={!canFinalizeMonth || hasSheetSource}');
     expect(source).toContain('actualDepositDate: event.target.value');
     expect(source).toContain('actualDepositAmount: value');
   });
@@ -168,6 +168,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('keeps the board action next to the settlement status without a manual temporary-save button', () => {
     const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('data-cashflow-block="multi-year-view"'));
     expect(boardHeader).toContain('월 결산');
+    expect(boardHeader).toContain('closeDeadline');
+    expect(boardHeader).toContain('!monthCloseResult.closeEligible');
     expect(boardHeader).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
   });
 
@@ -185,7 +187,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-annual-summary="true"');
-    expect(source).toContain('[selectedYear - 1, selectedYear, selectedYear + 1]');
+    expect(source).toContain('cashflowYearView.navigationYears');
+    expect(source).toContain(': [selectedYear]');
     expect(source).toContain('canonicalAnnualTotal');
     expect(source).toContain('주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.');
     expect(source).toContain('data-cashflow-block="multi-year-view"');
@@ -232,8 +235,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('저장되지 않은 변경사항이 있습니다');
   });
 
-  it('allows PM, Finance, and Admin to close or request reopen while decisions stay Finance/Admin only', () => {
+  it('allows every active project-access role to close or request reopen while decisions stay Finance/Admin only', () => {
     expect(source).toContain("const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin'");
+    expect(source).toContain("const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin'");
+    expect(source).toContain('const canRequestMonthReopen = canFinalizeMonth');
     expect(source).toContain("role === 'finance' || role === 'admin'");
     expect(source).toContain("monthCloseResult?.status === 'OPEN'");
     expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');

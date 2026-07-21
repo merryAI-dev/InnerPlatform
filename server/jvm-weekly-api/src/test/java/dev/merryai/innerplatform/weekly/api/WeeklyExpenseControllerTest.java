@@ -85,6 +85,8 @@ class WeeklyExpenseControllerTest {
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWritePermission(any(), any());
+        doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
+            .when(weeklyExpensePersistence).requireCashflowMonthClosePermission(any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
     }
 
@@ -1554,10 +1556,10 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowMonthCloseAllowsAdminFinanceAndPmButRejectsViewer() throws Exception {
+    void cashflowMonthCloseAllowsEveryActiveProjectAccessRole() throws Exception {
         String body = validCashflowMonthCloseBody("month-close-role-001");
 
-        for (String role : List.of("admin", "finance", "pm")) {
+        for (String role : List.of("admin", "finance", "pm", "viewer")) {
             mockMvc.perform(asActor(
                     post("/api/v1/cashflow/project-month-close-role/month-close"),
                     "tenant-month-close-role",
@@ -1571,16 +1573,6 @@ class WeeklyExpenseControllerTest {
                 .andExpect(jsonPath("$.code").value("cashflow_month_close_backend_unavailable"));
         }
 
-        mockMvc.perform(asActor(
-                post("/api/v1/cashflow/project-month-close-role/month-close"),
-                "tenant-month-close-role",
-                "viewer-month-close",
-                "viewer"
-            )
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
     }
 
     @Test

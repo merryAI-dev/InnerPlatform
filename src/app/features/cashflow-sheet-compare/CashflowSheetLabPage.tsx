@@ -42,6 +42,7 @@ import {
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
+import { resolveFinanceWeekForDate } from '../../platform/cashflow-weeks';
 
 function formatAmount(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
@@ -220,12 +221,14 @@ function isBffAuthError(error: unknown): boolean {
 
 function buildSourceKey({
   projectId,
+  sourceYear,
   value,
   sheetName,
   startWeek,
   endWeek,
 }: {
   projectId: string;
+  sourceYear: number;
   value: string;
   sheetName: string;
   startWeek: string;
@@ -233,6 +236,7 @@ function buildSourceKey({
 }) {
   return JSON.stringify({
     projectId: projectId.trim(),
+    sourceYear,
     value: value.trim(),
     sheetName: sheetName.trim(),
     startWeek: startWeek.trim(),
@@ -284,6 +288,26 @@ export function CashflowSheetLabPage({
     || ''
   ), [authUser?.projectId, authUser?.projectIds, portalProjectId, projectIdOverride, routeProjectId, searchParams]);
   const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
+  const projectYears = useMemo(() => {
+    const startYear = /^\d{4}-/.test(myProject?.contractStart || '') ? Number(myProject?.contractStart.slice(0, 4)) : Number.NaN;
+    const endYear = /^\d{4}-/.test(myProject?.contractEnd || '') ? Number(myProject?.contractEnd.slice(0, 4)) : Number.NaN;
+    if (Number.isSafeInteger(startYear) && Number.isSafeInteger(endYear) && startYear <= endYear) {
+      return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+    }
+    const financialYears = (myProject?.financialYears || []).map((row) => row.year).filter(Number.isSafeInteger);
+    return financialYears.length > 0 ? financialYears : [2026];
+  }, [myProject?.contractEnd, myProject?.contractStart, myProject?.financialYears]);
+  const projectWeekRange = useCallback((year: number) => {
+    const firstYear = projectYears[0];
+    const lastYear = projectYears.at(-1);
+    const startDate = year === firstYear && myProject?.contractStart ? myProject.contractStart : `${year}-01-01`;
+    const endDate = year === lastYear && myProject?.contractEnd ? myProject.contractEnd : `${year}-12-31`;
+    return {
+      startWeek: resolveFinanceWeekForDate(startDate)?.label || `${String(year).slice(2)}-1-1`,
+      endWeek: resolveFinanceWeekForDate(endDate)?.label || `${String(year).slice(2)}-12-5`,
+    };
+  }, [myProject?.contractEnd, myProject?.contractStart, projectYears]);
+  const [sourceYear, setSourceYear] = useState(2026);
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('');
   const [startWeek, setStartWeek] = useState('');
@@ -291,6 +315,7 @@ export function CashflowSheetLabPage({
   const [mirror, setMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
+  const [savedConfigs, setSavedConfigs] = useState<NonNullable<CashflowSheetLabShareAccountResult['config']>[]>([]);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
   const [stageResult, setStageResult] = useState<{
     runId: string;
@@ -327,11 +352,12 @@ export function CashflowSheetLabPage({
   const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim() || startWeek.trim() || endWeek.trim());
   const sourceKey = useMemo(() => buildSourceKey({
     projectId,
+    sourceYear,
     value: sheetLink,
     sheetName,
     startWeek,
     endWeek,
-  }), [endWeek, projectId, sheetLink, sheetName, startWeek]);
+  }), [endWeek, projectId, sheetLink, sheetName, sourceYear, startWeek]);
   const detectedYearModes = useMemo(() => (mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => {
     const sources = new Set([row.projection.source, row.actual.source]);
     const valueCellCount = row.projection.valueCellCount + row.actual.valueCellCount;
@@ -344,13 +370,14 @@ export function CashflowSheetLabPage({
     savedConfig?.value
       ? buildSourceKey({
           projectId,
+          sourceYear,
           value: savedConfig.value,
           sheetName: savedConfig.sheetName || '',
           startWeek: savedConfig.startWeek || '',
           endWeek: savedConfig.endWeek || '',
         })
       : ''
-  ), [projectId, savedConfig]);
+  ), [projectId, savedConfig, sourceYear]);
   const actor = useMemo(() => ({
     uid: authUser?.uid || 'workspace-user',
     email: authUser?.email || '',
@@ -489,6 +516,18 @@ export function CashflowSheetLabPage({
   }, [projectId]);
 
   useEffect(() => {
+    if (projectYears.includes(sourceYear)) return;
+    setSourceYear(projectYears[0] || 2026);
+  }, [projectYears, sourceYear]);
+
+  useEffect(() => {
+    if (savedConfig?.sourceYear === sourceYear || startWeek || endWeek) return;
+    const range = projectWeekRange(sourceYear);
+    setStartWeek(range.startWeek);
+    setEndWeek(range.endWeek);
+  }, [endWeek, projectWeekRange, savedConfig?.sourceYear, sourceYear, startWeek]);
+
+  useEffect(() => {
     if (routeProjectId || !projectId) return;
     navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true });
   }, [currentPath, navigate, projectId, routeProjectId]);
@@ -523,6 +562,22 @@ export function CashflowSheetLabPage({
     setTutorialOpen(true);
   }
 
+  function handleSourceYearChange(nextYear: number) {
+    const nextConfig = savedConfigs.find((config) => config.sourceYear === nextYear) || null;
+    const range = projectWeekRange(nextYear);
+    setSourceYear(nextYear);
+    setSavedConfig(nextConfig);
+    setSheetLink(nextConfig?.value || '');
+    setSheetName(nextConfig?.sheetName || 'cashflow(사용내역 연동)');
+    setStartWeek(nextConfig?.startWeek || range.startWeek);
+    setEndWeek(nextConfig?.endWeek || range.endWeek);
+    setReviewedSourceKey('');
+    setStageResult(null);
+    setReflectResult(null);
+    setStatusMessage('');
+    setErrorMessage('');
+  }
+
   async function handleLoadShareAccount() {
     if (!projectId || accountLoading) return;
     setAccountLoading(true);
@@ -533,6 +588,7 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
+          sourceYear,
         })
       ));
       if (!result) return;
@@ -543,7 +599,8 @@ export function CashflowSheetLabPage({
       }
       setSystemAccountEmail(email);
       setSavedConfig(result.config || null);
-      if (result.config?.value && !hasSheetDraft) {
+      setSavedConfigs(result.configs || []);
+      if (result.config?.value && (!hasSheetDraft || result.config.sourceYear !== savedConfig?.sourceYear)) {
         setSheetLink(result.config.value);
         setSheetName(result.config.sheetName || '');
         setStartWeek(result.config.startWeek || '');
@@ -587,6 +644,7 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
+          sourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
           startWeek: startWeek || undefined,
@@ -595,6 +653,7 @@ export function CashflowSheetLabPage({
       ));
       if (!result) return;
       setSavedConfig(result.config || null);
+      setSavedConfigs(result.configs || []);
       setStatusMessage('시트 정보를 저장했습니다. 금액은 아직 MYSCube에 반영되지 않았습니다.');
       logCashflowLab('settings.save.ok', { projectId, spreadsheetId, sheetName: sheetName || null });
     } catch (error) {
@@ -624,6 +683,7 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
+          sourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
           startWeek: startWeek || undefined,
@@ -841,8 +901,23 @@ export function CashflowSheetLabPage({
             <div className="min-w-0 space-y-2 pb-1">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-[19px] font-bold text-slate-950">시트 연결</h2>
-                <HelpMemo>링크, 탭 이름, 주차 범위를 저장합니다. 이 단계에서는 금액을 저장하지 않습니다.</HelpMemo>
+                <HelpMemo>사업기간의 연도마다 해당 연도 주차 시트를 연결합니다. 이 단계에서는 금액을 저장하지 않습니다.</HelpMemo>
               </div>
+              <label className="block text-[12px] font-semibold text-slate-700">
+                연동 연도
+                <select
+                  value={sourceYear}
+                  onChange={(event) => handleSourceYearChange(Number(event.target.value))}
+                  className="mt-1 h-10 w-full rounded-none border border-slate-300 bg-white px-3 text-[13px] text-slate-900"
+                  aria-label="연동 연도"
+                >
+                  {projectYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}년{savedConfigs.some((config) => config.sourceYear === year) ? ' · 연결됨' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <Input
                 ref={sheetLinkRef}
                 value={sheetLink}
@@ -887,7 +962,7 @@ export function CashflowSheetLabPage({
                   {isCurrentSheetConfigSaved ? '저장됨' : '시트 정보 저장'}
                 </Button>
                 <div className="text-[12px] text-slate-500">
-                  링크, 탭 이름, 시작·종료 주차를 입력하세요.
+                  {sourceYear}년 링크와 {String(sourceYear).slice(2)}-1-1 ~ {String(sourceYear).slice(2)}-12-5 범위를 입력하세요.
                 </div>
               </div>
               <details className="pt-2 text-[12px] text-slate-600">
@@ -930,6 +1005,15 @@ export function CashflowSheetLabPage({
               {mirror?.lastRefreshError?.message ? (
                 <div className="border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-900">
                   <span className="font-bold">시트 연동 오류</span> · {mirror.lastRefreshError.message}
+                </div>
+              ) : null}
+              {(mirror?.reconciliationWarnings?.length || 0) > 0 ? (
+                <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                  {mirror?.reconciliationWarnings?.map((warning) => (
+                    <div key={`${warning.year}-${warning.mode}`}>
+                      {warning.year}년 {warning.mode === 'projection' ? 'Projection' : 'Actual'} 주차 합계와 연간 합계가 다릅니다. 저장은 가능하며 해당 연도 주차 원장을 기준으로 사용합니다.
+                    </div>
+                  ))}
                 </div>
               ) : null}
             </div>

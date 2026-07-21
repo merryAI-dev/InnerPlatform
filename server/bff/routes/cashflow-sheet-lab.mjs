@@ -8,7 +8,11 @@ import {
 } from '../bff-utils.mjs';
 import { GoogleSheetsServiceError, extractSpreadsheetId } from '../google-sheets.mjs';
 import { analyzeCashflowSheetTemplate, cashflowMappingKey, parseCashflowWeekLabel } from '../cashflow-sheet-template.mjs';
-import { computeCashflowTargetRevision, createCashflowPinnedSnapshot } from '../cashflow-sheet-snapshot.mjs';
+import {
+  buildAnnualCashflowTotals,
+  computeCashflowTargetRevision,
+  createCashflowPinnedSnapshot,
+} from '../cashflow-sheet-snapshot.mjs';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
@@ -44,6 +48,40 @@ const FINANCIAL_YEAR_FIELDS = [
   'totalRevenueAmount',
   'supportAmount',
 ];
+
+function projectCashflowYears(project = {}) {
+  const startText = readOptionalText(project.contractStart);
+  const endText = readOptionalText(project.contractEnd);
+  const startYear = /^\d{4}-/.test(startText) ? Number(startText.slice(0, 4)) : Number.NaN;
+  const endYear = /^\d{4}-/.test(endText) ? Number(endText.slice(0, 4)) : Number.NaN;
+  if (Number.isSafeInteger(startYear) && Number.isSafeInteger(endYear) && startYear <= endYear && endYear - startYear <= 20) {
+    return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+  }
+  return [...new Set((Array.isArray(project.financialYears) ? project.financialYears : [])
+    .map((row) => Number(row?.year))
+    .filter(Number.isSafeInteger))].sort((left, right) => left - right);
+}
+
+function inferLegacySourceYear(config = {}, project = {}) {
+  const parsed = parseCashflowWeekLabel(readOptionalText(config.startWeek));
+  if (Number.isSafeInteger(parsed?.year)) return parsed.year;
+  const years = projectCashflowYears(project);
+  if (years.length === 1) return years[0];
+  // All legacy cashflow sources were introduced with the 2026 template.
+  return 2026;
+}
+
+function resolveSourceYear(value, config = {}, project = {}) {
+  const requested = Number(value);
+  const year = Number.isSafeInteger(requested) && requested >= 2000 && requested <= 2100
+    ? requested
+    : inferLegacySourceYear(config, project);
+  const projectYears = projectCashflowYears(project);
+  if (projectYears.length > 0 && !projectYears.includes(year)) {
+    throw createHttpError(400, `${year}년은 프로젝트 사업기간에 포함되지 않습니다.`, 'cashflow_sheet_source_year_out_of_period');
+  }
+  return year;
+}
 
 function wholeWon(value) {
   return Number.isSafeInteger(value) ? value : 0;
@@ -108,6 +146,8 @@ function readSelectedYear(value) {
 }
 
 function cashflowAvailableYears(mirror, project, selectedYear) {
+  const registeredYears = projectCashflowYears(project);
+  if (registeredYears.length > 0) return registeredYears;
   return [...new Set([
     selectedYear - 1,
     selectedYear,
@@ -118,6 +158,13 @@ function cashflowAvailableYears(mirror, project, selectedYear) {
     ...(Array.isArray(mirror?.appliedWeeklyYears) ? mirror.appliedWeeklyYears.map(Number) : []),
     ...(mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => Number(row?.year)),
   ].filter(Number.isSafeInteger))].sort((left, right) => left - right);
+}
+
+function cashflowNavigationYears(availableYears, selectedYear) {
+  if (availableYears.length <= 3) return availableYears;
+  const selectedIndex = Math.max(0, availableYears.indexOf(selectedYear));
+  const start = Math.min(Math.max(0, selectedIndex - 1), availableYears.length - 3);
+  return availableYears.slice(start, start + 3);
 }
 
 function summarizeCanonicalAnnualMode(document, mode) {
@@ -183,7 +230,7 @@ function cashflowReadModelHash(value) {
 async function readCashflowSheetYearView({ db, tenantId, projectId, project, selectedYear }) {
   const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
   const availableYears = cashflowAvailableYears(mirror, project, selectedYear);
-  const navigationYears = [selectedYear - 1, selectedYear, selectedYear + 1];
+  const navigationYears = cashflowNavigationYears(availableYears, selectedYear);
   const canonicalAnnualDocs = await Promise.all(navigationYears.map((year) => (
     readCanonicalAnnualTotal(db, tenantId, projectId, year)
   )));
@@ -394,12 +441,21 @@ async function readProjectDocument(db, tenantId, projectId) {
   return ensureDocumentExists(db, projectDocPath(tenantId, projectId), `Project not found: ${projectId}`);
 }
 
-function readCashflowSheetLabConfig(project = {}) {
-  const config = project?.cashflowSheetLab;
+function readCashflowSheetLabConfig(project = {}, sourceYear) {
+  const requestedYear = Number(sourceYear);
+  const hasRequestedYear = Number.isSafeInteger(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100;
+  const configured = hasRequestedYear
+    ? project?.cashflowSheetLabSources?.[String(requestedYear)]
+    : null;
+  const legacy = project?.cashflowSheetLab;
+  const config = configured || (legacy && (
+    !hasRequestedYear || inferLegacySourceYear(legacy, project) === requestedYear
+  ) ? legacy : null);
   if (!config || typeof config !== 'object') return null;
   const value = readOptionalText(config.value);
   if (!value) return null;
   return {
+    sourceYear: resolveSourceYear(config.sourceYear || sourceYear, config, project),
     value,
     sheetName: readOptionalText(config.sheetName),
     spreadsheetId: readOptionalText(config.spreadsheetId),
@@ -424,6 +480,16 @@ function readCashflowSheetLabConfig(project = {}) {
     lastProjectionLineCount: Number.isFinite(Number(config.lastProjectionLineCount)) ? Number(config.lastProjectionLineCount) : undefined,
     lastActualLineCount: Number.isFinite(Number(config.lastActualLineCount)) ? Number(config.lastActualLineCount) : undefined,
   };
+}
+
+function readCashflowSheetLabConfigs(project = {}) {
+  const configs = Object.entries(project?.cashflowSheetLabSources || {}).flatMap(([year, config]) => {
+    const parsed = readCashflowSheetLabConfig({ ...project, cashflowSheetLabSources: { [year]: config }, cashflowSheetLab: null }, Number(year));
+    return parsed ? [parsed] : [];
+  });
+  const legacy = readCashflowSheetLabConfig(project);
+  if (legacy && !configs.some((config) => config.sourceYear === legacy.sourceYear)) configs.push(legacy);
+  return configs.sort((left, right) => left.sourceYear - right.sourceYear);
 }
 
 function weekLabelsFromTemplate(template) {
@@ -456,12 +522,14 @@ function resolveSystemAccountEmail(googleSheetsService) {
   return readOptionalText(googleSheetsService?.serviceAccountEmail);
 }
 
-function buildConfigResponse(projectId, config, systemAccountEmail = '') {
+function buildConfigResponse(projectId, config, systemAccountEmail = '', project = {}) {
   const serviceAccountEmail = readOptionalText(systemAccountEmail);
   return {
     projectId,
     configured: Boolean(config),
     config,
+    configs: readCashflowSheetLabConfigs(project),
+    projectYears: projectCashflowYears(project),
     ...(serviceAccountEmail ? {
       systemAccountEmail: serviceAccountEmail,
       accessPolicy: {
@@ -477,6 +545,7 @@ function resolvePreviewSource(parsed, savedConfig) {
   const value = readOptionalText(parsed.value);
   if (value) {
     return {
+      sourceYear: Number(parsed.sourceYear || savedConfig?.sourceYear),
       value,
       sheetName: readOptionalText(parsed.sheetName) || undefined,
       startWeek: readOptionalText(parsed.startWeek),
@@ -486,6 +555,7 @@ function resolvePreviewSource(parsed, savedConfig) {
   }
   if (savedConfig?.value) {
     return {
+      sourceYear: Number(savedConfig.sourceYear),
       value: savedConfig.value,
       sheetName: readOptionalText(parsed.sheetName) || savedConfig.sheetName || undefined,
       startWeek: readOptionalText(parsed.startWeek) || savedConfig.startWeek,
@@ -531,6 +601,7 @@ function computeCashflowSheetConfigRevision(config = {}) {
   const weekRange = normalizeWeekRange(config);
   const rawValue = readOptionalText(config?.value);
   return `sha256:${stableHash({
+    sourceYear: Number(config?.sourceYear) || null,
     spreadsheetId: extractSpreadsheetId(rawValue) || rawValue,
     sheetName: readOptionalText(config?.sheetName),
     startWeek: weekRange.startWeek,
@@ -590,11 +661,116 @@ function buildActiveWeeksFromTemplate(template, weekRange) {
     .filter(Boolean);
 }
 
-async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, context, existingConfig = null }) {
+function mergeCashflowSourceMirror(previous, next, sourceYear) {
+  const weeklyYears = [...new Set((next.cells || [])
+    .map((cell) => Number(readOptionalText(cell?.yearMonth).slice(0, 4)))
+    .filter(Number.isSafeInteger))];
+  if (weeklyYears.some((year) => year !== sourceYear)) {
+    throw createHttpError(
+      400,
+      `${sourceYear}년 시트에는 ${sourceYear}-1-1 형식의 주차만 사용할 수 있습니다.`,
+      'cashflow_sheet_source_year_mismatch',
+    );
+  }
+
+  const previousCells = readOptionalText(previous?.sourceRevision)
+    ? (previous.cells || []).filter((cell) => Number(readOptionalText(cell?.yearMonth).slice(0, 4)) !== sourceYear)
+    : [];
+  const previousSourceYear = Number(previous?.sourceYear)
+    || Number(readOptionalText(previous?.yearMonths?.[0]).slice(0, 4))
+    || 2026;
+  const previousAnnualCells = readOptionalText(previous?.sourceRevision)
+    ? (previous.annualCells || [])
+      .map((cell) => ({ ...cell, sourceYear: Number(cell?.sourceYear) || previousSourceYear }))
+      .filter((cell) => cell.sourceYear !== sourceYear)
+    : [];
+  const cells = [...previousCells, ...(next.cells || [])]
+    .sort((left, right) => readOptionalText(left.yearMonth).localeCompare(readOptionalText(right.yearMonth))
+      || Number(left.weekNo) - Number(right.weekNo)
+      || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
+      || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
+  const annualCells = [
+    ...previousAnnualCells,
+    ...(next.annualCells || []).map((cell) => ({ ...cell, sourceYear })),
+  ].sort((left, right) => Number(left.year) - Number(right.year)
+    || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
+    || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
+  const replaceYearRows = (previousRows, nextRows, yearOf) => [
+    ...(previousRows || []).filter((row) => yearOf(row) !== sourceYear),
+    ...(nextRows || []).filter((row) => yearOf(row) === sourceYear),
+  ].sort((left, right) => yearOf(left) - yearOf(right));
+  const sources = {
+    ...(previous?.sources && typeof previous.sources === 'object' ? previous.sources : {}),
+    [String(sourceYear)]: {
+      sourceYear,
+      spreadsheetId: next.spreadsheetId,
+      spreadsheetTitle: next.spreadsheetTitle,
+      selectedSheetName: next.selectedSheetName,
+      sourceRevision: next.sourceRevision,
+      configRevision: next.configRevision,
+      capturedAt: next.capturedAt,
+      activeWeekRange: next.activeWeekRange,
+    },
+  };
+  const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells })}`;
+  const summary = cells.reduce((counts, cell) => {
+    counts.cellCount += 1;
+    if (cell.state === 'VALUE') counts.valueCount += 1;
+    if (cell.state === 'EMPTY') counts.emptyCount += 1;
+    if (cell.state === 'INVALID') counts.invalidCount += 1;
+    return counts;
+  }, { cellCount: 0, valueCount: 0, emptyCount: 0, invalidCount: 0 });
+  const depositScheduleRows = replaceYearRows(
+    previous?.sheetFacts?.depositScheduleRows,
+    next?.sheetFacts?.depositScheduleRows,
+    (row) => Number(readOptionalText(row?.yearMonth).slice(0, 4)),
+  );
+  const annualFinancialTotals = replaceYearRows(
+    previous?.sheetFacts?.annualFinancialTotals,
+    next?.sheetFacts?.annualFinancialTotals,
+    (row) => Number(row?.year),
+  );
+  const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells });
+  const reconciliationWarnings = annualCashflowTotals.flatMap((row) => ['projection', 'actual'].flatMap((mode) => (
+    ['MISMATCH', 'PARTIAL_WEEKLY'].includes(readOptionalText(row?.[mode]?.reconciliation?.status))
+      ? [{ year: row.year, mode, ...row[mode].reconciliation }]
+      : []
+  )));
+
+  return stripUndefinedDeep({
+    ...next,
+    schemaVersion: 2,
+    sourceYear,
+    sources,
+    sourceRevision,
+    cells,
+    annualCells,
+    yearMonths: [...new Set(cells.map((cell) => readOptionalText(cell.yearMonth)).filter(Boolean))].sort(),
+    years: [...new Set([
+      ...cells.map((cell) => Number(readOptionalText(cell.yearMonth).slice(0, 4))),
+      ...annualCells.map((cell) => Number(cell.year)),
+    ].filter(Number.isSafeInteger))].sort((left, right) => left - right),
+    summary,
+    sheetFacts: {
+      ...(next.sheetFacts || {}),
+      depositScheduleRows,
+      annualFinancialTotals,
+      annualCashflowTotals,
+    },
+    reconciliationWarnings,
+    appliedSourceRevision: previous?.appliedSourceRevision,
+    appliedTargetRevision: previous?.appliedTargetRevision,
+    appliedAnnualYears: previous?.appliedAnnualYears,
+    appliedWeeklyYears: previous?.appliedWeeklyYears,
+  });
+}
+
+async function saveCashflowSheetLabConfig({ db, tenantId, projectId, project, parsed, context, existingConfig = null }) {
   if (!db) {
     throw createHttpError(503, 'Firestore is required to save cashflow sheet config.', 'firestore_unconfigured');
   }
   const now = new Date().toISOString();
+  const sourceYear = resolveSourceYear(parsed.sourceYear, existingConfig || parsed, project);
   const spreadsheetId = extractSpreadsheetId(parsed.value);
   const existingSpreadsheetId = readOptionalText(existingConfig?.spreadsheetId);
   const shouldKeepVerifiedMetadata = Boolean(existingConfig)
@@ -602,6 +778,7 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, con
     && existingSpreadsheetId === spreadsheetId
     && readOptionalText(existingConfig?.sheetName) === readOptionalText(parsed.sheetName);
   const config = {
+    sourceYear,
     value: parsed.value,
     sheetName: readOptionalText(parsed.sheetName),
     spreadsheetId,
@@ -618,6 +795,14 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, con
     },
   };
   const configRevision = computeCashflowSheetConfigRevision(config);
+  const legacyConfig = readCashflowSheetLabConfig(project);
+  const sourceConfigs = {
+    ...(project?.cashflowSheetLabSources && typeof project.cashflowSheetLabSources === 'object'
+      ? project.cashflowSheetLabSources
+      : {}),
+    ...(legacyConfig ? { [String(legacyConfig.sourceYear)]: legacyConfig } : {}),
+    [String(sourceYear)]: config,
+  };
   const projectRef = db.doc(projectDocPath(tenantId, projectId));
   const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
   await db.runTransaction(async (transaction) => {
@@ -625,20 +810,22 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, parsed, con
     const mirror = mirrorSnap.exists ? mirrorSnap.data() || {} : null;
     transaction.set(projectRef, stripUndefinedDeep({
       cashflowSheetLab: config,
+      cashflowSheetLabSources: sourceConfigs,
       updatedAt: now,
     }), { merge: true });
-    const hasInstalledSource = Boolean(readOptionalText(mirror?.sourceRevision));
-    const installedConfigMismatch = hasInstalledSource
-      && readOptionalText(mirror?.configRevision) !== configRevision;
+    const installedSource = mirror?.sources?.[String(sourceYear)];
+    const hasInstalledSource = Boolean(readOptionalText(installedSource?.sourceRevision))
+      || (Number(mirror?.sourceYear) === sourceYear && Boolean(readOptionalText(mirror?.sourceRevision)));
+    const installedConfigRevision = readOptionalText(installedSource?.configRevision)
+      || (Number(mirror?.sourceYear) === sourceYear ? readOptionalText(mirror?.configRevision) : '');
+    const installedConfigMismatch = hasInstalledSource && installedConfigRevision !== configRevision;
     const pendingConfigRevision = readOptionalText(mirror?.pendingRefreshConfigRevision);
     const pendingConfigMismatch = Boolean(pendingConfigRevision)
       && pendingConfigRevision !== configRevision;
     if (installedConfigMismatch || pendingConfigMismatch) {
       const latestRefreshGeneration = Math.max(0, Number(mirror.latestRefreshGeneration) || 0) + 1;
       const invalidation = {
-        status: hasInstalledSource
-          ? (installedConfigMismatch ? 'STALE' : readOptionalText(mirror.status) || 'STALE')
-          : 'EMPTY',
+        status: installedConfigMismatch ? 'STALE' : readOptionalText(mirror.status) || (hasInstalledSource ? 'STALE' : 'EMPTY'),
         latestRefreshGeneration,
         pendingRefreshConfigRevision: null,
         lastRefreshAttemptAt: now,
@@ -1260,22 +1447,6 @@ async function buildPinnedAnnualChangeCandidates({
   const annualYears = [...new Set((mirror?.annualCells || [])
     .map((cell) => Number(cell?.year))
     .filter(Number.isSafeInteger))].sort((left, right) => left - right);
-  const totalsByYear = new Map((mirror?.sheetFacts?.annualCashflowTotals || [])
-    .filter((row) => Number.isSafeInteger(row?.year))
-    .map((row) => [row.year, row]));
-
-  for (const year of annualYears.filter((candidateYear) => weeklyYears.has(candidateYear))) {
-    const total = totalsByYear.get(year);
-    const statuses = CASHFLOW_MODES.map((mode) => readOptionalText(total?.[mode]?.reconciliation?.status));
-    if (statuses.some((status) => status === 'MISMATCH' || status === 'PARTIAL_WEEKLY')) {
-      throw createHttpError(
-        409,
-        `${year}년 주차 합계와 연간 합계를 함께 확인할 수 없습니다. 시트 값을 맞춘 뒤 다시 가져와 주세요.`,
-        'cashflow_sheet_annual_weekly_reconciliation_failed',
-      );
-    }
-  }
-
   const years = annualYears.filter((year) => !weeklyYears.has(year));
   const documents = [];
   const candidates = [];
@@ -2173,8 +2344,9 @@ export function mountCashflowSheetLabRoutes(app, {
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const project = await readProjectDocument(db, tenantId, projectId);
-    const config = readCashflowSheetLabConfig(project);
-    res.status(200).json(buildConfigResponse(projectId, config, systemAccountEmail));
+    const sourceYear = resolveSourceYear(req.query.sourceYear, project?.cashflowSheetLab || {}, project);
+    const config = readCashflowSheetLabConfig(project, sourceYear);
+    res.status(200).json(buildConfigResponse(projectId, config, systemAccountEmail, project));
   }));
 
   app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror', asyncHandler(async (req, res) => {
@@ -2211,11 +2383,16 @@ export function mountCashflowSheetLabRoutes(app, {
       'Invalid cashflow sheet mirror refresh payload',
     );
     const project = await readProjectDocument(db, tenantId, projectId);
-    const source = resolvePreviewSource(parsed, readCashflowSheetLabConfig(project));
+    const sourceYear = resolveSourceYear(parsed.sourceYear, parsed, project);
+    const source = resolvePreviewSource(
+      { ...parsed, sourceYear },
+      readCashflowSheetLabConfig(project, sourceYear),
+    );
     const weekRange = normalizeWeekRange(source);
     const configRevision = computeCashflowSheetConfigRevision({ ...source, ...weekRange });
     const previousMirror = await readCashflowSheetMirror(db, tenantId, projectId);
     const refreshRequestHash = stableHash({
+      sourceYear,
       value: source.value,
       sheetName: source.sheetName || '',
       startWeek: weekRange.startWeek,
@@ -2312,6 +2489,7 @@ export function mountCashflowSheetLabRoutes(app, {
       mirror.lastRefreshAttemptAt = attemptedAt;
       mirror.lastRefreshIdempotencyKey = parsed.idempotencyKey;
       mirror.lastRefreshRequestHash = refreshRequestHash;
+      const mergedMirror = mergeCashflowSourceMirror(previousMirror, mirror, sourceYear);
       const completedMirror = await completeCashflowSheetRefreshRun({
         db,
         tenantId,
@@ -2319,7 +2497,7 @@ export function mountCashflowSheetLabRoutes(app, {
         runRef: refreshRun.runRef,
         requestHash: refreshRequestHash,
         generation: refreshRun.generation,
-        response: mirror,
+        response: mergedMirror,
         completedAt: new Date().toISOString(),
       });
       logCashflowSheetLab('mirror.refresh.ok', req, {
@@ -2397,9 +2575,10 @@ export function mountCashflowSheetLabRoutes(app, {
         db,
         tenantId,
         projectId,
+        project,
         parsed,
         context: req.context,
-        existingConfig: readCashflowSheetLabConfig(project),
+        existingConfig: readCashflowSheetLabConfig(project, parsed.sourceYear),
       });
       logCashflowSheetLab('config.save.ok', req, {
         projectId,
@@ -2408,7 +2587,14 @@ export function mountCashflowSheetLabRoutes(app, {
         selectedSheetName: config.sheetName,
         weekBasis: CASHFLOW_WEEK_BASIS,
       });
-      res.status(200).json(buildConfigResponse(projectId, config, systemAccountEmail));
+      res.status(200).json(buildConfigResponse(projectId, config, systemAccountEmail, {
+        ...project,
+        cashflowSheetLab: config,
+        cashflowSheetLabSources: {
+          ...(project.cashflowSheetLabSources || {}),
+          [String(config.sourceYear)]: config,
+        },
+      }));
     } catch (error) {
       logCashflowSheetLab('config.save.error', req, {
         projectId,

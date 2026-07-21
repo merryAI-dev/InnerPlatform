@@ -31,7 +31,7 @@ function normalizeText(value: string | undefined): string {
 export function getRecommendedGovernanceRole(row: AuthGovernanceUserRow): UserRole {
   const effective = (row.effectiveRole || '').trim().toLowerCase();
   if (row.bootstrapAdmin) return 'admin';
-  if (effective === 'admin' || effective === 'finance' || effective === 'pm') {
+  if (effective === 'admin' || effective === 'finance' || effective === 'pm' || effective === 'viewer') {
     return effective as UserRole;
   }
   return 'pm';

@@ -145,6 +145,14 @@ public interface WeeklyExpensePersistence {
         );
     }
 
+    default String requireCashflowMonthClosePermission(TrustedActorContext actor, String projectId) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_close_permission_backend_unavailable",
+            "Cashflow month-close permission checks require the Firestore transaction backend."
+        );
+    }
+
     default void requireCashflowMonthsOpen(
         String tenantId,
         String projectId,

@@ -56,6 +56,21 @@ describe('portal project selection helpers', () => {
     expect(result.searchProjects.map((project) => project.id)).toEqual(['p-legacy', 'p-owner']);
   });
 
+  it('prioritizes projects where the user is the designated organization head', () => {
+    const result = resolvePortalProjectCandidates({
+      role: 'viewer',
+      authUid: 'head-1',
+      assignedProjectIds: [],
+      projects: [
+        { id: 'p-other', name: '다른 사업', executiveApproverId: 'head-2' },
+        { id: 'p-head', name: '조직장 승인 사업', executiveApproverId: 'head-1' },
+      ] as unknown as Project[],
+    });
+
+    expect(result.priorityProjects.map((project) => project.id)).toEqual(['p-head']);
+    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-other', 'p-head']);
+  });
+
   it('lets admin and finance search the full project pool', () => {
     const adminResult = resolvePortalProjectCandidates({
       role: 'admin',

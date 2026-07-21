@@ -771,7 +771,7 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('caps Projection progress at 100 percent and keeps the zero-contract rule', async () => {
+  it('shows Projection overage and keeps the zero-contract rule', async () => {
     for (const contractAmount of [100, 0]) {
       const { db } = fullMonthCloseSource({ contractAmount });
       const fetchImpl = vi.fn(async () => ({
@@ -792,9 +792,64 @@ describe('JVM weekly API BFF proxy', () => {
         .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
         .expect(200)
         .expect((response) => {
-          expect(response.body.dashboard.summary.projectionProgressPercent).toBe(100);
+          expect(response.body.dashboard.summary.projectionProgressPercent).toBe(contractAmount === 0 ? 100 : 350);
         });
     }
+  });
+
+  it('adds future annual Projection until that year has a weekly ledger', async () => {
+    const { db, documents } = fullMonthCloseSource({ contractAmount: 1000 });
+    const project = documents.get('orgs/tenant-a/projects/project-a');
+    project.contractStart = '2026-01-01';
+    project.contractEnd = '2027-12-31';
+    const annualId = Buffer.from('project-a\n2027', 'utf8').toString('base64url');
+    documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
+      projectId: 'project-a',
+      year: 2027,
+      projection: { SALES_IN: 650 },
+      projectionStates: { SALES_IN: 'VALUE' },
+    });
+    const cashflow = {
+      projectId: 'project-a',
+      readModel: {
+        months: [{
+          yearMonth: '2026-06',
+          projection: { weeks: [{ weekNo: 1, amounts: { SALES_IN: 350 } }] },
+          actual: { weeks: [] },
+        }],
+      },
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      }, cashflow)),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.summary).toMatchObject({
+          projectionProgressPercent: 100,
+          projectionTotalIn: 1000,
+          projectionContractAmount: 1000,
+          projectionYears: [
+            { year: 2026, source: 'WEEKLY' },
+            { year: 2027, source: 'ANNUAL', totalIn: 650 },
+          ],
+        });
+        expect(response.body.dashboard.validation.warnings).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ code: 'CONTRACT_PROJECTION_MISMATCH' }),
+        ]));
+      });
   });
 
   it('uses the CLOSED snapshot instead of current project or mirror values', async () => {
@@ -909,7 +964,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each(['pm', 'finance', 'admin'])('forwards a reviewed %s month close without edit-lease headers', async (actorRole) => {
+  it.each(['viewer', 'pm', 'finance', 'admin'])('forwards a reviewed %s month close without edit-lease headers', async (actorRole) => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,

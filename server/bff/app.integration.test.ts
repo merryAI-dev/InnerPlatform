@@ -2139,6 +2139,12 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       email: 'jslee@mysc.co.kr',
       name: 'Canonical JS',
       status: 'ACTIVE',
+      projectIds: ['p-governance'],
+    });
+    await db.doc(`orgs/${tenantId}/projects/p-governance`).set({
+      id: 'p-governance',
+      name: '권한 점검 사업',
+      executiveApproverId: 'u-jslee',
     });
 
     const governanceApi = request(createBffApp({
@@ -2169,6 +2175,14 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
       authUid: 'u-jslee',
       effectiveRole: 'pm',
       driftFlags: expect.arrayContaining(['duplicate_member_docs', 'legacy_role_mismatch', 'bootstrap_admin_not_adopted']),
+      permissionOverview: {
+        isActive: true,
+        accessibleProjects: [{ id: 'p-governance', name: '권한 점검 사업' }],
+        organizationHeadProjects: [{ id: 'p-governance', name: '권한 점검 사업' }],
+        canRequestCashflowClose: true,
+        canApproveProjectRegistration: true,
+        canDecideCashflowReopen: false,
+      },
     });
     expect(response.body.summary.duplicateMemberDocs).toBeGreaterThanOrEqual(1);
   });

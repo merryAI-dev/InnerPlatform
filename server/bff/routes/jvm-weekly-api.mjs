@@ -932,14 +932,55 @@ function dashboardTotals(mode) {
   };
 }
 
-function canonicalProjectionTotalIn(cashflow, fallback) {
+function canonicalWeeklyProjection(cashflow, fallback) {
   const months = Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : [];
   const boundaries = cashflowReadModelBoundaries(months);
-  if (boundaries.length === 0) return fallback;
-  return buildCashflowRangeTotals(months, 'projection', {
+  if (boundaries.length === 0) return { totalIn: fallback, weeklyYears: [] };
+  return {
+    totalIn: buildCashflowRangeTotals(months, 'projection', {
     start: boundaries[0],
     end: boundaries.at(-1),
-  }).totalIn;
+    }).totalIn,
+    weeklyYears: [...new Set(months
+      .map((month) => Number(readOptionalText(month?.yearMonth).slice(0, 4)))
+      .filter(Number.isSafeInteger))],
+  };
+}
+
+function projectFinancialYears(project = {}) {
+  const startText = readOptionalText(project.contractStart);
+  const endText = readOptionalText(project.contractEnd);
+  const startYear = /^\d{4}-/.test(startText) ? Number(startText.slice(0, 4)) : Number.NaN;
+  const endYear = /^\d{4}-/.test(endText) ? Number(endText.slice(0, 4)) : Number.NaN;
+  if (Number.isSafeInteger(startYear) && Number.isSafeInteger(endYear) && startYear <= endYear && endYear - startYear <= 20) {
+    return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+  }
+  return [...new Set((Array.isArray(project.financialYears) ? project.financialYears : [])
+    .map((row) => Number(row?.year))
+    .filter(Number.isSafeInteger))].sort((left, right) => left - right);
+}
+
+async function composeProjectionTotal({ db, tenantId, projectId, project, cashflow, fallback, weeklyYearsHint = [] }) {
+  const weekly = canonicalWeeklyProjection(cashflow, fallback);
+  weekly.weeklyYears = [...new Set([...weekly.weeklyYears, ...weeklyYearsHint])].sort((left, right) => left - right);
+  const annualYears = projectFinancialYears(project).filter((year) => !weekly.weeklyYears.includes(year));
+  const annual = await Promise.all(annualYears.map(async (year) => {
+    const id = Buffer.from(`${projectId}\n${year}`, 'utf8').toString('base64url');
+    const document = await readDocument(db, `orgs/${tenantId}/cashflow_sheet_year_totals/${id}`);
+    const values = objectValue(document?.projection) || {};
+    const states = objectValue(document?.projectionStates) || {};
+    const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => (
+      sum + (readOptionalText(states[lineId]) === 'VALUE' ? safeAmount(values[lineId]) : 0)
+    ), 0);
+    return { year, source: document ? 'ANNUAL' : 'MISSING', totalIn };
+  }));
+  return {
+    totalIn: weekly.totalIn + annual.reduce((sum, row) => sum + row.totalIn, 0),
+    years: [
+      ...weekly.weeklyYears.map((year) => ({ year, source: 'WEEKLY' })),
+      ...annual,
+    ].sort((left, right) => left.year - right.year),
+  };
 }
 
 function validConfirmationKeys(confirmations) {
@@ -1245,11 +1286,22 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
   }
   const contractAmount = safeAmount(project?.contractAmount);
-  const projectionTotalIn = canonicalProjectionTotalIn(cashflow, projection.totalIn);
+  const projectionComposition = await composeProjectionTotal({
+    db,
+    tenantId,
+    projectId,
+    project,
+    cashflow,
+    fallback: projection.totalIn,
+    weeklyYearsHint: (Array.isArray(mirror?.appliedWeeklyYears) ? mirror.appliedWeeklyYears : mirror?.cells?.map((cell) => (
+      Number(readOptionalText(cell?.yearMonth).slice(0, 4))
+    )) || []).map(Number).filter(Number.isSafeInteger),
+  });
+  const projectionTotalIn = projectionComposition.totalIn;
   const rawProjectionProgressPercent = contractAmount === 0
     ? 100
     : Math.round((projectionTotalIn / contractAmount) * 10_000) / 100;
-  const projectionProgressPercent = Math.max(0, Math.min(100, rawProjectionProgressPercent));
+  const projectionProgressPercent = Math.max(0, rawProjectionProgressPercent);
   const requiredCellConfirmationCount = CASHFLOW_ALL_LINES.length * 2 * 5;
   const requiredManagementConfirmationCount = CASHFLOW_MANAGEMENT_CHECK_IDS.length;
   const confirmationProgressPercent = Math.round(
@@ -1275,6 +1327,13 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     appliedTargetRevision: readOptionalText(mirror?.appliedTargetRevision),
     capturedAt: readOptionalText(mirror?.capturedAt),
   };
+  const warnings = closedSnapshot ? [] : projectSheetWarnings(project, sheetFacts?.metadata);
+  if (contractAmount !== projectionTotalIn) {
+    warnings.push({
+      code: 'CONTRACT_PROJECTION_MISMATCH',
+      message: `계약금액 ${contractAmount.toLocaleString('ko-KR')}원과 전체 사업기간 Projection ${projectionTotalIn.toLocaleString('ko-KR')}원이 다릅니다.`,
+    });
+  }
   return {
     source,
     project,
@@ -1297,6 +1356,9 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     comparison,
     summary: {
       projectionProgressPercent,
+      projectionTotalIn,
+      projectionContractAmount: contractAmount,
+      projectionYears: projectionComposition.years,
       actualProgressPercent: actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary),
       confirmationProgressPercent,
       settlementProgressPercent: settlement.percent,
@@ -1313,7 +1375,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     validation: {
       canClose: readOptionalText(close?.status) === 'OPEN' && blockers.length === 0,
       blockers,
-      warnings: closedSnapshot ? [] : projectSheetWarnings(project, sheetFacts?.metadata),
+      warnings,
     },
     canonical: cashflow?.readModel || null,
   };
@@ -1676,7 +1738,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close', createJavaMutatingProxyRoute(async (req) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm'], 'close cashflow month', authMode, workspaceEmailDomain);
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'close cashflow month', authMode, workspaceEmailDomain);
     const rawProjectId = readOptionalText(req.params.projectId);
     const projectId = encodeURIComponent(rawProjectId);
     const requested = commandBody(req);
@@ -1712,7 +1774,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close/reopen-request', createJavaMutatingProxyRoute(async (req) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm'], 'request cashflow month reopen', authMode, workspaceEmailDomain);
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'request cashflow month reopen', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(
       req,

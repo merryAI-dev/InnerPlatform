@@ -3246,7 +3246,7 @@ export function mountProjectRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/executive-review', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail, actorName } = req.context;
-    assertActorRoleAllowed(req, ROUTE_ROLES.writeCore, 'review project executive status');
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'review project executive status');
     const projectId = readOptionalText(req.params.projectId);
     if (!projectId) {
       throw createHttpError(400, 'project id is required', 'missing_project_id');

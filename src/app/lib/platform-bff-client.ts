@@ -321,6 +321,20 @@ export interface AuthGovernanceMemberSnapshot {
   name: string;
 }
 
+export interface AuthGovernanceProjectPermission {
+  id: string;
+  name: string;
+}
+
+export interface AuthGovernancePermissionOverview {
+  isActive: boolean;
+  accessibleProjects: AuthGovernanceProjectPermission[];
+  organizationHeadProjects: AuthGovernanceProjectPermission[];
+  canRequestCashflowClose: boolean;
+  canApproveProjectRegistration: boolean;
+  canDecideCashflowReopen: boolean;
+}
+
 export interface AuthGovernanceUserRow {
   identityKey: string;
   email: string;
@@ -335,6 +349,7 @@ export interface AuthGovernanceUserRow {
   effectiveRole: string;
   driftFlags: AuthGovernanceDriftFlag[];
   needsDeepSync: boolean;
+  permissionOverview?: AuthGovernancePermissionOverview;
 }
 
 export interface AuthGovernanceSummary {

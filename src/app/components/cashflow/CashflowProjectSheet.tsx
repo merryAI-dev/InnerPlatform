@@ -202,6 +202,8 @@ export function CashflowProjectSheet({
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
   const canReviewReopen = role === 'finance' || role === 'admin';
   const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin';
+  const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin';
+  const canRequestMonthReopen = canFinalizeMonth;
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
@@ -240,6 +242,7 @@ export function CashflowProjectSheet({
   } = useCashflowWeeks();
 
   const [cashflowSheetConfig, setCashflowSheetConfig] = useState<{
+    sourceYear?: number;
     value?: string;
     sheetName?: string;
     spreadsheetId?: string;
@@ -387,12 +390,12 @@ export function CashflowProjectSheet({
         if (!actor?.idToken) return;
         let response: CashflowSheetLabShareAccountResult;
         try {
-          response = await getCashflowSheetLabShareAccountViaBff({ tenantId: orgId, actor, projectId });
+          response = await getCashflowSheetLabShareAccountViaBff({ tenantId: orgId, actor, projectId, sourceYear: selectedYear });
         } catch (error) {
           if (!isBffAuthRejection(error)) throw error;
           actor = await resolveBffActor({ forceRefresh: true });
           if (!actor?.idToken) throw error;
-          response = await getCashflowSheetLabShareAccountViaBff({ tenantId: orgId, actor, projectId });
+          response = await getCashflowSheetLabShareAccountViaBff({ tenantId: orgId, actor, projectId, sourceYear: selectedYear });
         }
         if (!cancelled) setCashflowSheetConfig(response.config?.value ? response.config : null);
       } catch {
@@ -405,7 +408,7 @@ export function CashflowProjectSheet({
     return () => {
       cancelled = true;
     };
-  }, [orgId, projectId, resolveBffActor, user?.uid]);
+  }, [orgId, projectId, resolveBffActor, selectedYear, user?.uid]);
 
   useEffect(() => {
     if (!cashflowSheetConfigLoaded || cashflowSheetConfig || !projectId || typeof window === 'undefined') return;
@@ -693,8 +696,8 @@ export function CashflowProjectSheet({
   }), [managementDecisions, monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows, monthCloseResult?.dashboard?.managementChecks]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
-    if (!canUseCashflowActions || monthCloseResult?.status !== 'OPEN') {
-      toast.error('결산 권한이 있는 프로젝트 담당자만 최종저장할 수 있습니다.');
+    if (!canFinalizeMonth || monthCloseResult?.status !== 'OPEN') {
+      toast.error('프로젝트 접근 권한이 있는 활성 사용자만 월 결산할 수 있습니다.');
       return;
     }
     let monthCloseInput: CashflowMonthCloseDraftInput;
@@ -763,7 +766,7 @@ export function CashflowProjectSheet({
       setMonthCloseBusy(false);
     }
   }, [
-    canUseCashflowActions,
+    canFinalizeMonth,
     drafts,
     monthClosePinnedSource,
     loadCashflowComparison,
@@ -785,8 +788,8 @@ export function CashflowProjectSheet({
       toast.error('사유를 입력해 주세요.');
       return;
     }
-    if (reopenAction === 'request' && !canUseCashflowActions) {
-      toast.error('결산 권한이 있는 프로젝트 담당자만 재오픈을 요청할 수 있습니다.');
+    if (reopenAction === 'request' && !canRequestMonthReopen) {
+      toast.error('프로젝트 접근 권한이 있는 활성 사용자만 재오픈을 요청할 수 있습니다.');
       return;
     }
     if (reopenAction !== 'request' && !canReviewReopen) {
@@ -833,7 +836,7 @@ export function CashflowProjectSheet({
     } finally {
       setMonthCloseBusy(false);
     }
-  }, [canReviewReopen, canUseCashflowActions, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canRequestMonthReopen, canReviewReopen, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
@@ -846,6 +849,7 @@ export function CashflowProjectSheet({
         tenantId: orgId,
         actor,
         projectId,
+        sourceYear: selectedYear,
         value: cashflowSheetConfig.value,
         sheetName: cashflowSheetConfig.sheetName || undefined,
         startWeek: cashflowSheetConfig.startWeek || undefined,
@@ -900,7 +904,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetRefreshLoading(false);
     }
-  }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor]);
+  }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor, selectedYear]);
 
   const handleStagePinnedSheetValues = useCallback(async (
     replaceAllActualSources = false,
@@ -1148,9 +1152,9 @@ export function CashflowProjectSheet({
   }, [annualWeeks, cashflowSnapshot, monthCloseResult?.dashboard?.comparison, yearMonth]);
 
   const cashflowTotalPeriodLabel = `${selectedYear}년`;
-  const navigationYears = cashflowYearView?.navigationYears?.length === 3
+  const navigationYears = cashflowYearView?.navigationYears?.length
     ? cashflowYearView.navigationYears
-    : [selectedYear - 1, selectedYear, selectedYear + 1];
+    : [selectedYear];
   const hasWeeklyYearData = Boolean(
     cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear)
     ||
@@ -1205,7 +1209,7 @@ export function CashflowProjectSheet({
         ? 'review' as const
         : 'ready' as const;
     const tone: CashflowOpsTone = kind === 'blocked' ? 'danger' : kind === 'review' ? 'warning' : 'success';
-    const rate = (percent: number) => ({ percent: Math.min(100, Math.max(0, Number(percent) || 0)) });
+    const rate = (percent: number) => ({ percent: Math.max(0, Number(percent) || 0) });
     return {
       status: {
         kind,
@@ -1616,13 +1620,18 @@ export function CashflowProjectSheet({
               <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
-              {canUseCashflowActions && monthCloseResult?.status === 'OPEN' ? (
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || monthCloseBusy}>
+              {monthCloseResult?.dashboard?.summary?.closeDeadline ? (
+                <span className="text-[10px] text-slate-500">
+                  {monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산
+                </span>
+              ) : null}
+              {canFinalizeMonth && monthCloseResult?.status === 'OPEN' ? (
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={monthCloseBusy || !monthCloseResult.closeEligible} title={monthCloseResult.closeEligible ? '확인한 월 데이터를 최종 확정합니다.' : '대상 월이 끝난 뒤 월 결산할 수 있습니다.'}>
                   <CheckCircle2 className="mr-1 h-3 w-3" />
                   월 결산
                 </Button>
               ) : null}
-              {canUseCashflowActions && monthCloseResult?.status === 'CLOSED' ? (
+              {canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
                 <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                   재오픈 요청
                 </Button>
@@ -1797,7 +1806,7 @@ export function CashflowProjectSheet({
           <span className="text-[22px] font-bold leading-6 tabular-nums text-blue-700">
             {rate.percent}%
           </span>
-          <span className="truncate text-right text-[9px] font-semibold leading-3 text-blue-700">{rate.percent >= 100 ? 'OK' : '확인 중'}</span>
+          <span className="truncate text-right text-[9px] font-semibold leading-3 text-blue-700">{rate.percent === 100 ? 'OK' : '확인 중'}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
@@ -1977,7 +1986,7 @@ export function CashflowProjectSheet({
                             size="sm"
                             variant={decision === 'CONFIRMED' ? 'default' : 'outline'}
                             className="h-6 rounded-full px-2 text-[9px]"
-                            disabled={!canEdit}
+                            disabled={!canFinalizeMonth}
                             onClick={() => {
                               setManagementDecisions((current) => ({ ...current, [check.id]: 'CONFIRMED' }));
                               setMonthCloseReviewDirty(true);
@@ -1988,7 +1997,7 @@ export function CashflowProjectSheet({
                             size="sm"
                             variant={decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
                             className="h-6 rounded-full px-2 text-[9px]"
-                            disabled={!canEdit}
+                            disabled={!canFinalizeMonth}
                             onClick={() => {
                               setManagementDecisions((current) => ({ ...current, [check.id]: 'NOT_APPLICABLE' }));
                               setMonthCloseReviewDirty(true);
@@ -2385,7 +2394,7 @@ export function CashflowProjectSheet({
                       value={row.taxInvoiceIssuedDate}
                       className="h-8 bg-slate-100 text-[10px]"
                       readOnly
-                      disabled={!canEdit}
+                      disabled={!canFinalizeMonth}
                     />
                   </label>
                   <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
@@ -2395,7 +2404,7 @@ export function CashflowProjectSheet({
                       value={row.expectedDepositDate}
                       className="h-8 bg-slate-100 text-[10px]"
                       readOnly
-                      disabled={!canEdit}
+                      disabled={!canFinalizeMonth}
                     />
                   </label>
                   <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
@@ -2405,7 +2414,7 @@ export function CashflowProjectSheet({
                       value={row.expectedDepositAmount == null ? '' : formatAmountInput(String(row.expectedDepositAmount))}
                       className="h-8 bg-slate-100 text-right text-[10px]"
                       readOnly
-                      disabled={!canEdit}
+                      disabled={!canFinalizeMonth}
                     />
                   </label>
                   <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
@@ -2414,7 +2423,7 @@ export function CashflowProjectSheet({
                       type="date"
                       value={row.actualDepositDate}
                       className="h-8 bg-white text-[10px]"
-                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
                       onChange={(event) => {
                         setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
                           ? { ...candidate, actualDepositDate: event.target.value, decision: null }
@@ -2429,7 +2438,7 @@ export function CashflowProjectSheet({
                       inputMode="numeric"
                       value={row.actualDepositAmount == null ? '' : formatAmountInput(String(row.actualDepositAmount))}
                       className="h-8 bg-white text-right text-[10px]"
-                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
                       onChange={(event) => {
                         const value = event.target.value.trim() ? parseAmount(event.target.value) : null;
                         setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
@@ -2444,7 +2453,7 @@ export function CashflowProjectSheet({
                     <select
                       value={row.actualSource}
                       className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[10px]"
-                      disabled={!canEdit || row.decision === 'NOT_APPLICABLE'}
+                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
                       onChange={(event) => {
                         const actualSource = event.target.value as CashflowMonthCloseDepositReviewRow['actualSource'];
                         setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
@@ -2465,7 +2474,7 @@ export function CashflowProjectSheet({
                       size="sm"
                       variant={row.decision === 'CONFIRMED' ? 'default' : 'outline'}
                       className="h-8 px-2 text-[10px]"
-                      disabled={!canEdit}
+                      disabled={!canFinalizeMonth}
                       onClick={() => {
                         setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
                           ? { ...candidate, decision: 'CONFIRMED' }
@@ -2478,7 +2487,7 @@ export function CashflowProjectSheet({
                       size="sm"
                       variant={row.decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
                       className="h-8 px-2 text-[10px]"
-                      disabled={!canEdit || hasSheetSource}
+                      disabled={!canFinalizeMonth || hasSheetSource}
                       onClick={() => {
                         setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
                           ? {
@@ -2531,7 +2540,7 @@ export function CashflowProjectSheet({
                                 size="sm"
                                 variant={selected ? 'default' : 'outline'}
                                 className="h-7 shrink-0 px-2 text-[9px]"
-                                disabled={!canEdit}
+                                disabled={!canFinalizeMonth}
                                 onClick={() => {
                                   setMonthCloseDecisions((current) => ({ ...current, [key]: requiredDecision }));
                                   setMonthCloseReviewDirty(true);
@@ -2553,7 +2562,7 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
             <AlertDialogAction
-              disabled={!canEdit || monthCloseBusy || !monthCloseProgress.complete || Boolean(monthCloseCellsState.error)}
+              disabled={!canFinalizeMonth || monthCloseBusy || !monthCloseProgress.complete || Boolean(monthCloseCellsState.error)}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();

@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Separator } from '../ui/separator';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import {
   emptyGovernanceSummary,
   filterGovernanceRows,
@@ -49,12 +50,14 @@ const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
   { value: 'admin', label: '관리자' },
   { value: 'finance', label: '경영기획실' },
   { value: 'pm', label: 'PM' },
+  { value: 'viewer', label: '실무자' },
 ];
 
 const ROLE_BADGE_CLASS: Record<string, string> = {
   admin: 'bg-stone-900 text-white',
   finance: 'bg-stone-700 text-white',
   pm: 'bg-stone-200 text-stone-900',
+  viewer: 'bg-stone-100 text-stone-700',
 };
 
 const OPERATOR_STATUS_CLASS = {
@@ -115,6 +118,17 @@ function SourceBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
     <Badge className={ok ? 'bg-white text-stone-700 border border-stone-300' : 'bg-white text-red-700 border border-stone-300'}>
       {label}
+    </Badge>
+  );
+}
+
+function PermissionBadge({ allowed, label }: { allowed: boolean; label: string }) {
+  return (
+    <Badge className={allowed
+      ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+      : 'border border-stone-200 bg-white text-stone-400'}
+    >
+      {label} {allowed ? '가능' : '불가'}
     </Badge>
   );
 }
@@ -267,7 +281,7 @@ export function UserManagementPage() {
         icon={UserCog}
         iconGradient="linear-gradient(135deg, #44403c 0%, #0c0a09 100%)"
         title="권한 관리"
-        description="사용자가 어떤 권한으로 로그인되는지 확인하고, 필요한 권한을 즉시 반영합니다."
+        description="전체 멤버의 로그인 역할, 프로젝트 접근, 조직장 지정과 재무 승인 권한을 한 화면에서 교차검증합니다."
         badge={`${summary.total}건`}
         actions={(
           <div className="flex items-center gap-2">
@@ -369,6 +383,72 @@ export function UserManagementPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card className="border-stone-200" data-testid="member-permission-dashboard">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-stone-900">전체 멤버 권한 대시보드</CardTitle>
+          <p className="text-xs text-stone-500">
+            활성 사용자만 배정된 프로젝트의 결산·재오픈을 요청할 수 있습니다. 프로젝트 등록 승인은 지정 조직장, 재오픈 승인·반려는 Finance/Admin만 가능합니다.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[1120px]">
+              <TableHeader>
+                <TableRow className="bg-stone-50">
+                  <TableHead>멤버</TableHead>
+                  <TableHead>상태·기본 역할</TableHead>
+                  <TableHead>프로젝트 접근</TableHead>
+                  <TableHead>지정 조직장</TableHead>
+                  <TableHead>결산·재오픈 요청</TableHead>
+                  <TableHead>등록 승인</TableHead>
+                  <TableHead>재오픈 승인·반려</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredRows.map((row) => {
+                  const permission = row.permissionOverview;
+                  const projectNames = permission?.accessibleProjects.map((project) => project.name) || [];
+                  const headProjectNames = permission?.organizationHeadProjects.map((project) => project.name) || [];
+                  return (
+                    <TableRow key={`permission-${row.identityKey}`}>
+                      <TableCell>
+                        <div className="font-medium text-stone-950">{row.displayName}</div>
+                        <div className="text-xs text-stone-500">{row.email}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge className={permission?.isActive ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500'}>
+                            {permission?.isActive ? '활성' : '비활성'}
+                          </Badge>
+                          <Badge className={ROLE_BADGE_CLASS[row.effectiveRole] || 'bg-stone-100 text-stone-700'}>
+                            {roleLabel(row.effectiveRole)}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[260px]">
+                        <div className="text-sm text-stone-700">{projectNames.length}개</div>
+                        <div className="truncate text-xs text-stone-500" title={projectNames.join(', ')}>
+                          {projectNames.join(', ') || '배정 없음'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[220px]">
+                        <div className="text-sm text-stone-700">{headProjectNames.length}개</div>
+                        <div className="truncate text-xs text-stone-500" title={headProjectNames.join(', ')}>
+                          {headProjectNames.join(', ') || '지정 없음'}
+                        </div>
+                      </TableCell>
+                      <TableCell><PermissionBadge allowed={Boolean(permission?.canRequestCashflowClose)} label="요청" /></TableCell>
+                      <TableCell><PermissionBadge allowed={Boolean(permission?.canApproveProjectRegistration)} label="승인" /></TableCell>
+                      <TableCell><PermissionBadge allowed={Boolean(permission?.canDecideCashflowReopen)} label="처리" /></TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.9fr)]">
         <Card className="border-stone-200">

@@ -112,7 +112,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('변경값 비교표 만들기');
     expect(pageSource).toContain('시트 연결');
     expect(pageSource).toContain('시트 정보 저장');
-    expect(pageSource).toContain('result.config?.value && !hasSheetDraft');
+    expect(pageSource).toContain('result.config?.value && (!hasSheetDraft || result.config.sourceYear !== savedConfig?.sourceYear)');
+    expect(pageSource).toContain('연동 연도');
     expect(pageSource).not.toContain('캐시플로우 값은 바뀌지 않습니다.');
     expect(pageSource).toContain('시트 값 가져오기');
     expect(pageSource).toContain('시트 값 다시 가져오기');

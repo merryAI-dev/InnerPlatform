@@ -201,7 +201,7 @@ function reconcileAnnualMode(weekly, annual) {
   return { status: mismatchedLineIds.length > 0 ? 'MISMATCH' : 'MATCH', mismatchedLineIds };
 }
 
-function buildAnnualCashflowTotals({ cells, annualCells }) {
+export function buildAnnualCashflowTotals({ cells, annualCells }) {
   const years = new Set([
     ...cells.map((cell) => Number(String(cell.yearMonth).slice(0, 4))),
     ...annualCells.map((cell) => Number(cell.year)),

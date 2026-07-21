@@ -114,7 +114,7 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
     @Test
     void monthReopenIsRejectedOutsideTheStageRuntimeWithoutLeaseHeaders() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
-        when(persistence.requireCashflowWritePermission(any(), any())).thenReturn("pm");
+        when(persistence.requireCashflowMonthClosePermission(any(), any())).thenReturn("pm");
         WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
             persistence,
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
