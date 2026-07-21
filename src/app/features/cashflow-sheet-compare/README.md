@@ -109,6 +109,23 @@ The primary delay is avoidable network round trips, not cashflow arithmetic:
   against the baseline above. Cold starts remain included in the first run and
   should be reported separately from a second warm run.
 
+**Stage evidence after deployment**
+
+- Revision `innerplatform-jvm-weekly-api-lease-stage-00013-5q5` served the
+  2026-07-21 manual retry for project `p1773817948751`; the browser received a
+  successful apply response instead of the previous 30-second timeout.
+- The stage request started 3.344 seconds before the apply request. The remaining
+  two JVM apply calls returned HTTP 200 in 6.432 seconds and 3.850 seconds; their
+  first-start-to-last-finish server span was 10.623 seconds.
+- This was a residual retry after the earlier timed-out request had continued on
+  the server. It is evidence that the retry path completes, but it is not a
+  valid replacement for the original four-annual/eight-month baseline.
+- The already-open browser tab still served the previous JavaScript asset, so
+  this run did not expose the new browser wall-clock label. After reloading the
+  Stage page, the next full import must record
+  `cashflow.sheet_lab.overwrite.sheet_values.ok durationMs`; only that value can
+  close the 12-month Stage acceptance check.
+
 **Decision threshold**
 
 Keep this design if a normal 12-month import completes inside the 30-second UI
