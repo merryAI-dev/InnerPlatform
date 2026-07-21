@@ -729,6 +729,7 @@ export function ProjectEditorWizard({
 
   useEffect(() => {
     const resetKey = `${draftKey}::${autosave?.key || ''}`;
+    const isNewEditorSession = lastResetKeyRef.current !== resetKey;
     const currentFingerprint = JSON.stringify(createProjectEditorDraft(draftRef.current));
     if (!shouldResetProjectEditorDraft({
       lastResetKey: lastResetKeyRef.current,
@@ -742,7 +743,7 @@ export function ProjectEditorWizard({
     lastPersistedFingerprintRef.current = JSON.stringify(createProjectEditorDraft(nextDraft));
     draftRef.current = nextDraft;
     setDraft(nextDraft);
-    setStepIndex(0);
+    if (isNewEditorSession) setStepIndex(0);
     setDocumentUploadState({
       contract: 'idle',
       customer_business_registration: 'idle',
@@ -1691,8 +1692,21 @@ export function ProjectEditorWizard({
     );
   };
 
+  const renderRegistrationConfirmations = () => usesRegistrationV2 ? (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <div><Label className="text-xs font-semibold">등록 전 확인사항 *</Label><p className="mt-1 text-[11px] text-muted-foreground">계약 및 정산 기준을 사람이 직접 대조한 뒤 체크해 주세요.</p></div>
+      {requiresSettlementConfirmations ? <>
+        <label className="flex items-center gap-2 text-[12px] text-slate-700"><Checkbox checked={draft.registrationConfirmations.laborIncludesFourInsurance === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, laborIncludesFourInsurance: checked === true })} />인건비에 4대보험 사업주 부담분이 포함되어 있습니다.</label>
+        <label className="flex items-center gap-2 text-[12px] text-slate-700"><Checkbox checked={draft.registrationConfirmations.laborIncludesRetirementPay === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, laborIncludesRetirementPay: checked === true })} />인건비에 퇴직급여 충당액이 포함되어 있습니다.</label>
+        <label className="flex items-center gap-2 text-[12px] text-slate-700"><Checkbox checked={draft.registrationConfirmations.customerSettlementBasisConfirmed} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, customerSettlementBasisConfirmed: checked === true })} />고객사와 정산 기준을 확인했습니다.</label>
+      </> : <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-600">정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.</p>}
+      <div className="grid gap-3 lg:grid-cols-2"><div><Label className="text-xs">모두싸인으로 계약했나요? *</Label><Select value={draft.registrationConfirmations.modusignContractUsed === null ? undefined : (draft.registrationConfirmations.modusignContractUsed ? 'yes' : 'no')} onValueChange={(value) => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value === 'yes', originalContractSubmitted: value === 'yes' ? false : draft.registrationConfirmations.originalContractSubmitted })}><SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="선택" /></SelectTrigger><SelectContent><SelectItem value="yes">예</SelectItem><SelectItem value="no">아니요</SelectItem></SelectContent></Select></div>{draft.registrationConfirmations.modusignContractUsed === false ? <label className="mt-6 flex items-center gap-2 text-[12px] text-slate-700"><Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />계약서 원본을 Sunny에게 제출했습니다.</label> : null}</div>
+    </div>
+  ) : null;
+
   const renderFinancialStep = () => (
     <div className="space-y-4">
+      {renderRegistrationConfirmations()}
       {onContractFileUpload || onProjectDocumentFileUpload ? (
         <div className="space-y-3">
           {usesRegistrationV2 && onProjectDocumentFileUpload ? (
@@ -2277,7 +2291,7 @@ export function ProjectEditorWizard({
           />
         </div>
       ) : null}
-      {usesRegistrationV2 ? (
+      {false && usesRegistrationV2 ? (
         <div>
           <Label className="text-xs">특이사항 (메모란)</Label>
           <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
