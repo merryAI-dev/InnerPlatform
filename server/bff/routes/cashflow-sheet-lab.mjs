@@ -1663,6 +1663,10 @@ function monthApplyIdempotencyKey({ idempotencyKey, stagedRunId, yearMonth }) {
   return `cf-sheet-month-${stableHash({ idempotencyKey, stagedRunId, yearMonth }).slice(0, 48)}`;
 }
 
+function monthBatchApplyIdempotencyKey({ idempotencyKey, stagedRunId, yearMonths }) {
+  return `cf-sheet-month-batch-${stableHash({ idempotencyKey, stagedRunId, yearMonths }).slice(0, 42)}`;
+}
+
 function yearApplyIdempotencyKey({ idempotencyKey, stagedRunId, year }) {
   return `cf-sheet-year-${stableHash({ idempotencyKey, stagedRunId, year }).slice(0, 48)}`;
 }
@@ -1924,7 +1928,7 @@ async function applyStagedCashflowSheetLab({
     const resolvedEditSession = typeof resolveEditSession === 'function'
       ? await resolveEditSession()
       : editSession;
-    const operationCount = stagedYears.length + stagedMonths.length;
+    const operationCount = stagedYears.length + (stagedMonths.length > 0 ? 1 : 0);
     for (const yearBatch of chunkArray(stagedYears.map((stagedYear, index) => ({ stagedYear, index })), 4)) {
       const settled = await Promise.allSettled(yearBatch.map(async ({ stagedYear, index }) => {
         const operationStartedAt = Date.now();
@@ -1962,9 +1966,9 @@ async function applyStagedCashflowSheetLab({
       }
       if (rejected) throw rejected.reason;
     }
-    for (let index = 0; index < stagedMonths.length; index += 1) {
+    if (stagedMonths.length === 1) {
       const operationStartedAt = Date.now();
-      const month = stagedMonths[index];
+      const month = stagedMonths[0];
       const isLastOperation = completedOperationCount === operationCount - 1;
       const monthEditSession = resolvedEditSession
         ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
@@ -1988,6 +1992,65 @@ async function applyStagedCashflowSheetLab({
       verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, projectId);
       logger('month.ok', { projectId, yearMonth: month.yearMonth, durationMs: Date.now() - operationStartedAt });
       javaResults.push(javaResult);
+      completedOperationCount += 1;
+    } else if (stagedMonths.length > 1) {
+      const operationStartedAt = Date.now();
+      const batchTargetRevision = targetRevision;
+      const isLastOperation = completedOperationCount === operationCount - 1;
+      const monthEditSession = resolvedEditSession
+        ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
+        : null;
+      const batchResult = await javaWeeklyClient.applyCashflowSheetBatch({
+        context,
+        projectId,
+        idempotencyKey: monthBatchApplyIdempotencyKey({
+          idempotencyKey: effectiveIdempotencyKey,
+          stagedRunId,
+          yearMonths: stagedMonths.map((month) => month.yearMonth),
+        }),
+        editSession: monthEditSession,
+        sourceRevision: stageRun.sourceRevision,
+        targetRevision,
+        months: stagedMonths.map((month) => ({ yearMonth: month.yearMonth, cells: month.cells })),
+        replaceAllActualSources,
+      });
+      if (
+        readOptionalText(batchResult?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+        || readOptionalText(batchResult?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+        || readOptionalText(batchResult?.targetRevision) !== batchTargetRevision
+      ) {
+        throw createHttpError(502, 'JVM 월 배치 저장 계약이 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+      }
+      targetRevision = assertResultingTargetRevision(batchResult);
+      const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
+        .map((month) => [readOptionalText(month?.yearMonth), month]));
+      if (returnedMonths.size !== stagedMonths.length) {
+        throw createHttpError(502, 'JVM 월 배치 저장 건수가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+      }
+      for (const month of stagedMonths) {
+        const monthResult = returnedMonths.get(month.yearMonth);
+        if (!monthResult) {
+          throw createHttpError(502, 'JVM 월 배치 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+        }
+        const compatibleResult = {
+          ...monthResult,
+          commandName: batchResult.commandName,
+          projectId: batchResult.projectId,
+          sourceSheetKey: batchResult.sourceSheetKey,
+          sourceRevision: batchResult.sourceRevision,
+          targetRevision: batchResult.targetRevision,
+          resultingTargetRevision: batchResult.resultingTargetRevision,
+          auditId: batchResult.auditId,
+        };
+        verifiedLineCount += verifyJavaMonthAppliedCells(compatibleResult, month, projectId);
+        javaResults.push(compatibleResult);
+      }
+      logger('months.ok', {
+        projectId,
+        monthCount: stagedMonths.length,
+        durationMs: Date.now() - operationStartedAt,
+        jvmDurationMs: Number(batchResult?.durationMs) || 0,
+      });
       completedOperationCount += 1;
     }
   } catch (error) {

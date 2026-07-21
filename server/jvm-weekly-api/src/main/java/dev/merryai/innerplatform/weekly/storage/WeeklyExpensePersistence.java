@@ -8,6 +8,7 @@ import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
@@ -43,6 +44,20 @@ public interface WeeklyExpensePersistence {
         List<WeeklyExpenseProjectionEntity> projection,
         List<WeeklyExpenseActualEntity> actual,
         List<CashflowMonthWeekSnapshot> weeks,
+        String resultingTargetRevision
+    ) {
+    }
+
+    record CashflowSheetBatchMonthReplacement(
+        String yearMonth,
+        List<WeeklyExpenseProjectionEntity> projection,
+        List<WeeklyExpenseActualEntity> actual,
+        List<CashflowMonthWeekSnapshot> weeks
+    ) {
+    }
+
+    record CashflowSheetBatchReplacement(
+        List<CashflowSheetBatchMonthReplacement> months,
         String resultingTargetRevision
     ) {
     }
@@ -261,6 +276,20 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_month_replace_backend_unavailable",
             "Authoritative monthly cashflow replacement requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSheetBatchReplacement replaceCashflowSheetMonths(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String targetRevision,
+        CashflowSheetBatchApplyRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_batch_replace_backend_unavailable",
+            "Authoritative multi-month cashflow replacement requires the Firestore transaction backend."
         );
     }
 

@@ -16,6 +16,7 @@ import com.google.cloud.firestore.Transaction;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
@@ -57,6 +58,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -800,21 +802,77 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CashflowSheetLabApplyRequest.Cell> cells,
         boolean replaceAllActualSources
     ) {
+        NavigableMap<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = new TreeMap<>();
+        cellsByMonth.put(yearMonth, CashflowSheetLabApplyRequest.requireCompleteMonth(cells));
+        CashflowSheetBatchReplacement replacement = replaceCashflowSheetMonthsInternal(
+            tenantId,
+            projectId,
+            sourceSheetKey,
+            targetRevision,
+            cellsByMonth,
+            replaceAllActualSources
+        );
+        CashflowSheetBatchMonthReplacement month = replacement.months().getFirst();
+        return new CashflowSheetMonthReplacement(
+            month.projection(),
+            month.actual(),
+            month.weeks(),
+            replacement.resultingTargetRevision()
+        );
+    }
+
+    @Override
+    public CashflowSheetBatchReplacement replaceCashflowSheetMonths(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String targetRevision,
+        CashflowSheetBatchApplyRequest request
+    ) {
+        return replaceCashflowSheetMonthsInternal(
+            tenantId,
+            projectId,
+            sourceSheetKey,
+            targetRevision,
+            CashflowSheetBatchApplyRequest.requireCompleteMonths(request.months()),
+            request.replaceAllActualSources()
+        );
+    }
+
+    private CashflowSheetBatchReplacement replaceCashflowSheetMonthsInternal(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String targetRevision,
+        NavigableMap<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth,
+        boolean replaceAllActualSources
+    ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
-        cells = CashflowSheetLabApplyRequest.requireCompleteMonth(cells);
-        requireCashflowMonthsOpen(tenantId, projectId, List.of(yearMonth));
-        Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
-        DocumentReference[] targetWeekRefs = java.util.stream.IntStream
-            .rangeClosed(1, CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
-            .mapToObj(weekNo -> cashflowWeekRef(tenantId, cashflowWeekId(projectId, yearMonth, weekNo)))
+        requireCashflowMonthsOpen(tenantId, projectId, cellsByMonth.navigableKeySet());
+
+        Map<String, Map<String, Map<String, Object>>> targetDocsByMonth = new TreeMap<>();
+        cellsByMonth.keySet().forEach(yearMonth -> targetDocsByMonth.put(yearMonth, new TreeMap<>()));
+        DocumentReference[] targetWeekRefs = cellsByMonth.keySet().stream()
+            .flatMap(yearMonth -> java.util.stream.IntStream
+                .rangeClosed(1, CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
+                .mapToObj(weekNo -> cashflowWeekRef(tenantId, cashflowWeekId(projectId, yearMonth, weekNo))))
             .toArray(DocumentReference[]::new);
         for (DocumentSnapshot snap : getAll(targetWeekRefs)) {
             if (!snap.exists()) continue;
             Map<String, Object> document = data(snap);
             WeekDocParts parts = parseCashflowWeekId(projectId, snap.getId());
-            requireCanonicalCashflowMonthDocument(projectId, yearMonth, parts.weekNo(), snap.getId(), document);
+            Map<String, Map<String, Object>> targetMonthDocs = targetDocsByMonth.get(parts.yearMonth());
+            if (targetMonthDocs == null) throw malformedCashflowMonth();
+            requireCanonicalCashflowMonthDocument(
+                projectId,
+                parts.yearMonth(),
+                parts.weekNo(),
+                snap.getId(),
+                document
+            );
             targetMonthDocs.put(snap.getId(), document);
         }
+
         QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
         for (DocumentSnapshot doc : existingSnapshot.getDocuments()) {
@@ -824,9 +882,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Map<String, Object> document = entry.getValue();
             String storedYearMonth = text(document.get("yearMonth"), "");
             WeekDocParts parts = parseCashflowWeekId(projectId, entry.getKey());
-            if (!yearMonth.equals(storedYearMonth) && !yearMonth.equals(parts.yearMonth())) {
+            Map<String, Map<String, Object>> targetMonthDocs = targetDocsByMonth.get(parts.yearMonth());
+            if (targetMonthDocs == null && !targetDocsByMonth.containsKey(storedYearMonth)) {
                 continue;
             }
+            String yearMonth = targetMonthDocs == null ? storedYearMonth : parts.yearMonth();
             requireCanonicalCashflowMonthDocument(
                 projectId,
                 yearMonth,
@@ -834,9 +894,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 entry.getKey(),
                 document
             );
-            targetMonthDocs.put(entry.getKey(), document);
+            targetDocsByMonth.get(yearMonth).put(entry.getKey(), document);
         }
-        allProjectWeeks.putAll(targetMonthDocs);
+        targetDocsByMonth.values().forEach(allProjectWeeks::putAll);
         String currentRevision = computeCashflowTargetRevision(allProjectWeeks.values());
         if (!currentRevision.equals(targetRevision)) {
             throw new WeeklyExpenseConflictException("Cashflow target revision changed. Refresh the sheet before applying.");
@@ -848,92 +908,116 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         boolean mirrorTracksTargetRevision = mirrorSnapshot.exists()
             && targetRevision.equals(text(data(mirrorSnapshot).get("targetRevisionAtFetch"), ""));
 
-        Map<Integer, List<CashflowSheetLabApplyRequest.Cell>> cellsByWeek = new LinkedHashMap<>();
-        for (CashflowSheetLabApplyRequest.Cell cell : cells) {
-            cellsByWeek.computeIfAbsent(cell.weekNo(), ignored -> new ArrayList<>()).add(cell);
-        }
-        for (Integer weekNo : cellsByWeek.keySet()) {
-            String docId = cashflowWeekId(projectId, yearMonth, weekNo);
-            targetMonthDocs.putIfAbsent(docId, baseCashflowWeekDoc(tenantId, projectId, docId));
-        }
-
         Instant now = clock.instant();
         Map<String, Map<String, Object>> replacements = new LinkedHashMap<>();
-        for (Map.Entry<String, Map<String, Object>> entry : targetMonthDocs.entrySet()) {
-            String docId = entry.getKey();
-            Map<String, Object> existing = entry.getValue();
-            WeekDocParts parts = parseCashflowWeekId(projectId, docId);
-            int weekNo = intValue(existing.get("weekNo"), parts.weekNo());
-            List<CashflowSheetLabApplyRequest.Cell> weekCells = cellsByWeek.getOrDefault(weekNo, List.of());
-
-            Map<String, BigDecimal> projectionAmounts = new LinkedHashMap<>();
-            List<SaveDraftResponse.ActualDelta> actualDeltas = new ArrayList<>();
-            for (CashflowSheetLabApplyRequest.Cell cell : weekCells) {
-                if (!"VALUE".equals(cell.cellState())) continue;
-                if ("projection".equals(cell.mode())) {
-                    projectionAmounts.put(cell.cashflowLine(), amount(cell.amount()));
-                } else {
-                    actualDeltas.add(new SaveDraftResponse.ActualDelta(
-                        yearMonth,
-                        weekNo,
-                        cell.cashflowLine(),
-                        amount(cell.amount())
-                    ));
-                }
-            }
-
-            Map<String, Object> replacement = new LinkedHashMap<>(existing);
-            replacement.put("id", docId);
-            replacement.put("tenantId", tenantId);
-            replacement.put("projectId", projectId);
-            replacement.put("yearMonth", yearMonth);
-            replacement.put("weekNo", weekNo);
-            replacement.put("projection", FirestoreCashflowWeekActualMerge.numberMap(projectionAmounts));
-            replacement.put("projectionTotals", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionAmounts));
-            replacement.put("projectionUpdated", true);
-            replacement.put("projectionUpdatedAt", now.toString());
-            replacement.putAll(FirestoreCashflowWeekActualMerge.buildPatch(
-                tenantId,
-                projectId,
-                sourceSheetKey,
-                existing,
-                actualDeltas,
-                now,
-                replaceAllActualSources
-            ));
-            replacements.put(docId, replacement);
-        }
-
-        for (Map.Entry<String, Map<String, Object>> replacement : replacements.entrySet()) {
-            replaceDocument(cashflowWeekRef(tenantId, replacement.getKey()), replacement.getValue());
-        }
-
-        List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
-        List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
-        for (CashflowSheetLabApplyRequest.Cell cell : cells) {
-            if (!"VALUE".equals(cell.cellState())) continue;
-            if ("projection".equals(cell.mode())) {
-                WeeklyExpenseProjectionEntity line = new WeeklyExpenseProjectionEntity(
-                    tenantId, projectId, yearMonth, cell.weekNo(), cell.cashflowLine()
-                );
-                line.setAmount(cell.amount());
-                projection.add(line);
-            } else {
-                WeeklyExpenseActualEntity line = new WeeklyExpenseActualEntity(
-                    tenantId, projectId, sourceSheetKey, yearMonth, cell.weekNo(), cell.cashflowLine()
-                );
-                line.setAmount(cell.amount());
-                actual.add(line);
-            }
-        }
         Comparator<WeeklyExpenseProjectionEntity> projectionOrder = Comparator
             .comparingInt(WeeklyExpenseProjectionEntity::getWeekNo)
             .thenComparing(WeeklyExpenseProjectionEntity::getCashflowLine);
         Comparator<WeeklyExpenseActualEntity> actualOrder = Comparator
             .comparingInt(WeeklyExpenseActualEntity::getWeekNo)
             .thenComparing(WeeklyExpenseActualEntity::getCashflowLine);
-        projection.sort(projectionOrder);
-        actual.sort(actualOrder);
+        List<CashflowSheetBatchMonthReplacement> monthResults = new ArrayList<>();
+
+        for (Map.Entry<String, List<CashflowSheetLabApplyRequest.Cell>> monthEntry : cellsByMonth.entrySet()) {
+            String yearMonth = monthEntry.getKey();
+            List<CashflowSheetLabApplyRequest.Cell> cells = monthEntry.getValue();
+            Map<String, Map<String, Object>> targetMonthDocs = targetDocsByMonth.get(yearMonth);
+            Map<Integer, List<CashflowSheetLabApplyRequest.Cell>> cellsByWeek = new TreeMap<>();
+            for (CashflowSheetLabApplyRequest.Cell cell : cells) {
+                cellsByWeek.computeIfAbsent(cell.weekNo(), ignored -> new ArrayList<>()).add(cell);
+            }
+            for (Integer weekNo : cellsByWeek.keySet()) {
+                String docId = cashflowWeekId(projectId, yearMonth, weekNo);
+                targetMonthDocs.putIfAbsent(docId, baseCashflowWeekDoc(tenantId, projectId, docId));
+            }
+
+            Map<String, Map<String, Object>> monthReplacements = new TreeMap<>();
+            for (Map.Entry<String, Map<String, Object>> entry : targetMonthDocs.entrySet()) {
+                String docId = entry.getKey();
+                Map<String, Object> existing = entry.getValue();
+                WeekDocParts parts = parseCashflowWeekId(projectId, docId);
+                int weekNo = intValue(existing.get("weekNo"), parts.weekNo());
+                List<CashflowSheetLabApplyRequest.Cell> weekCells = cellsByWeek.getOrDefault(weekNo, List.of());
+
+                Map<String, BigDecimal> projectionAmounts = new LinkedHashMap<>();
+                List<SaveDraftResponse.ActualDelta> actualDeltas = new ArrayList<>();
+                for (CashflowSheetLabApplyRequest.Cell cell : weekCells) {
+                    if (!"VALUE".equals(cell.cellState())) continue;
+                    if ("projection".equals(cell.mode())) {
+                        projectionAmounts.put(cell.cashflowLine(), amount(cell.amount()));
+                    } else {
+                        actualDeltas.add(new SaveDraftResponse.ActualDelta(
+                            yearMonth,
+                            weekNo,
+                            cell.cashflowLine(),
+                            amount(cell.amount())
+                        ));
+                    }
+                }
+
+                Map<String, Object> replacement = new LinkedHashMap<>(existing);
+                replacement.put("id", docId);
+                replacement.put("tenantId", tenantId);
+                replacement.put("projectId", projectId);
+                replacement.put("yearMonth", yearMonth);
+                replacement.put("weekNo", weekNo);
+                replacement.put("projection", FirestoreCashflowWeekActualMerge.numberMap(projectionAmounts));
+                replacement.put("projectionTotals", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionAmounts));
+                replacement.put("projectionUpdated", true);
+                replacement.put("projectionUpdatedAt", now.toString());
+                replacement.putAll(FirestoreCashflowWeekActualMerge.buildPatch(
+                    tenantId,
+                    projectId,
+                    sourceSheetKey,
+                    existing,
+                    actualDeltas,
+                    now,
+                    replaceAllActualSources
+                ));
+                monthReplacements.put(docId, replacement);
+                replacements.put(docId, replacement);
+            }
+
+            List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
+            List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
+            for (CashflowSheetLabApplyRequest.Cell cell : cells) {
+                if (!"VALUE".equals(cell.cellState())) continue;
+                if ("projection".equals(cell.mode())) {
+                    WeeklyExpenseProjectionEntity line = new WeeklyExpenseProjectionEntity(
+                        tenantId, projectId, yearMonth, cell.weekNo(), cell.cashflowLine()
+                    );
+                    line.setAmount(cell.amount());
+                    projection.add(line);
+                } else {
+                    WeeklyExpenseActualEntity line = new WeeklyExpenseActualEntity(
+                        tenantId, projectId, sourceSheetKey, yearMonth, cell.weekNo(), cell.cashflowLine()
+                    );
+                    line.setAmount(cell.amount());
+                    actual.add(line);
+                }
+            }
+            projection.sort(projectionOrder);
+            actual.sort(actualOrder);
+            List<CashflowMonthWeekSnapshot> canonicalWeeks = monthReplacements.values().stream()
+                .sorted(Comparator.comparingInt(document -> intValue(document.get("weekNo"), 0)))
+                .map(document -> new CashflowMonthWeekSnapshot(
+                    intValue(document.get("weekNo"), 0),
+                    nestedMap(document.get("projection")),
+                    nestedMap(document.get("actual"))
+                ))
+                .toList();
+            monthResults.add(new CashflowSheetBatchMonthReplacement(
+                yearMonth,
+                List.copyOf(projection),
+                List.copyOf(actual),
+                canonicalWeeks
+            ));
+        }
+
+        for (Map.Entry<String, Map<String, Object>> replacement : replacements.entrySet()) {
+            replaceDocument(cashflowWeekRef(tenantId, replacement.getKey()), replacement.getValue());
+        }
+
         Map<String, Map<String, Object>> resultingWeeks = new LinkedHashMap<>(allProjectWeeks);
         resultingWeeks.putAll(replacements);
         String resultingTargetRevision = computeCashflowTargetRevision(resultingWeeks.values());
@@ -944,18 +1028,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "targetRevisionUpdateSource", "JVM_CANONICAL_APPLY"
             ));
         }
-        List<CashflowMonthWeekSnapshot> canonicalWeeks = replacements.values().stream()
-            .sorted(Comparator.comparingInt(document -> intValue(document.get("weekNo"), 0)))
-            .map(document -> new CashflowMonthWeekSnapshot(
-                intValue(document.get("weekNo"), 0),
-                nestedMap(document.get("projection")),
-                nestedMap(document.get("actual"))
-            ))
-            .toList();
-        return new CashflowSheetMonthReplacement(
-            List.copyOf(projection),
-            List.copyOf(actual),
-            canonicalWeeks,
+        return new CashflowSheetBatchReplacement(
+            List.copyOf(monthResults),
             resultingTargetRevision
         );
     }

@@ -25,18 +25,18 @@ idempotency keys, and the JVM transaction boundary.
 - Annual totals are independent documents. The BFF applies them with a maximum
   concurrency of four and records fulfilled operations before surfacing a
   partial failure, so the same staged run can resume safely.
-- Monthly ledgers stay ordered. Each result produces the target revision for the
-  next month, so parallel monthly writes would bypass drift detection.
-- The JVM validates the five canonical target documents with one `getAll`, then
-  runs the project-wide query required for target-revision calculation. It must
-  not issue five serial direct reads before that query.
+- Two or more monthly ledgers use one JVM batch command. The JVM sorts months in
+  a `TreeMap`, reads every target week with one `getAll`, reads the project ledger
+  with one query, validates the target revision once, and commits all months in
+  the existing Firestore command transaction.
+- A single month keeps the existing endpoint for compatibility, but uses the
+  same storage implementation as the batch command.
 - Ordered arrays preserve apply order. `Map`/`Set` indexes are used only for
   identity, deduplication, and verification; finance order never depends on hash
   iteration.
-- BFF logs `annual.ok` and `month.ok` with `durationMs`. Reconsider a JVM
-  multi-month command if a 12-month Stage import still exceeds the 30-second UI
-  budget after this optimization. Do not solve that condition by adding Redis or
-  merely increasing the browser timeout.
+- BFF logs `annual.ok`, `month.ok`, and `months.ok` with `durationMs`.
+  `months.ok` also exposes the JVM service `jvmDurationMs`. Do not solve a
+  remaining latency problem by merely increasing the browser timeout.
 
 Rationale: Firestore recommends asynchronous calls for independent operations,
 but transactions require all reads before writes and can be retried on
@@ -126,9 +126,78 @@ The primary delay is avoidable network round trips, not cashflow arithmetic:
   `cashflow.sheet_lab.overwrite.sheet_values.ok durationMs`; only that value can
   close the 12-month Stage acceptance check.
 
-**Decision threshold**
+**Decision threshold at that revision**
 
 Keep this design if a normal 12-month import completes inside the 30-second UI
 budget on Stage. If it does not, the next change is one JVM multi-month command
 that reads the project revision once and commits one bounded transaction—not
 Redis and not another timeout increase.
+
+### 2026-07-21: multi-month atomic command
+
+**Planning**
+
+The remaining monthly cost was linear in the number of months because the BFF
+called the JVM once per month. Every call repeated a project-wide query and a
+target-revision calculation. Parallel monthly calls were rejected because each
+call depended on the preceding resulting revision, while Redis would add a
+second consistency system without removing those reads.
+
+**Hypothesis**
+
+One bounded JVM command can preserve compare-and-set safety and remove repeated
+network/query work if it:
+
+1. normalizes input into `TreeMap<yearMonth, cells>` to reject duplicate months
+   and fix finance order;
+2. indexes target documents by month and canonical document ID;
+3. performs one target-week `getAll`, one project-ledger query, and one revision
+   comparison;
+4. schedules every monthly replacement inside the existing Firestore command
+   transaction; and
+5. records one idempotency result and one audit event.
+
+**Execution**
+
+- Added `POST /api/v1/cashflow/{projectId}/sheet-lab/batch/apply` for up to 12
+  complete finance months, matching one annual source sheet. At five week
+  documents per month, the maximum remains well below Firestore's 500-write
+  transaction limit and keeps the idempotency response bounded.
+- The BFF now uses the batch endpoint whenever two or more months are staged.
+  One-month requests retain the old endpoint.
+- The JVM uses a `TreeMap` for deterministic month ordering and maps keyed by
+  canonical week document IDs for replacement and verification. It issues one
+  `getAll` for all target weeks and one project query, validates the starting
+  target revision once, then writes every month atomically.
+- Annual totals remain independent and bounded to four concurrent requests.
+- Redis, an external queue, a generic DAG executor, and a new snapshot pointer
+  collection were not added. The existing Firestore transaction already owns
+  atomicity and retry semantics; Redis is reserved for a measured distributed
+  queue or rate-limit requirement.
+
+**Local evaluation**
+
+- BFF route/client: 66 tests passed. A two- or three-month staged run makes one
+  JVM batch call, verifies every returned cell, and keeps single-month replay
+  behavior.
+- JVM service/storage: 59 tests passed. A reversed two-month input is returned
+  in ascending month order, reads ten canonical week documents in one `getAll`,
+  and commits both months in one command transaction. A batch containing a
+  closed month writes no weekly documents. Existing revision-drift, provenance,
+  explicit-zero, and single-month tests remain green.
+- The complete JVM module regression suite passed 167/167, and the production
+  Vite build completed successfully.
+- This local result proves the call/query shape and transaction contract, not
+  production-like latency. After Stage deployment, a fresh full-year import must
+  record browser `overwrite.sheet_values.ok durationMs`, BFF `months.ok
+  durationMs`, and JVM `jvmDurationMs` before/after values here.
+
+**Stage deployment evidence**
+
+- Cloud Build `231f133f-2cc4-42d1-9ac9-c3003d2adb04` reran the complete JVM
+  suite (167/167), built image tag `d7fd8bd`, and deployed Cloud Run revision
+  `innerplatform-jvm-weekly-api-lease-stage-00014-psl` with 100% Stage traffic.
+- The BFF/frontend deployment is intentionally separate and must run through
+  the guarded GitHub Actions Stage workflow. Until that workflow deploys this
+  BFF change, the Stage browser cannot call the new multi-month endpoint and no
+  full-year before/after latency claim should be made.

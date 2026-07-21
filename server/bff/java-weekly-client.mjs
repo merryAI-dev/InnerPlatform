@@ -198,6 +198,48 @@ export function createJavaWeeklyClient({
     return result;
   }
 
+  async function applyCashflowSheetBatch({
+    context,
+    projectId,
+    idempotencyKey,
+    sourceRevision,
+    targetRevision,
+    months,
+    replaceAllActualSources = false,
+  }) {
+    const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
+    if (!normalizedProjectId) {
+      throw createHttpError(400, 'projectId is required.', 'project_id_required');
+    }
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+    }
+    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
+      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+    }
+    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+    if (bffDataProjectId === liveProjectId) {
+      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+    }
+    const result = await requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/batch/apply`,
+      dataProjectId: bffDataProjectId,
+      body: {
+        idempotencyKey,
+        sourceRevision,
+        targetRevision,
+        months,
+        ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
+      },
+    });
+    if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
+      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+    }
+    return result;
+  }
+
   async function applyCashflowSheetAnnualTotal({
     context,
     projectId,
@@ -236,6 +278,7 @@ export function createJavaWeeklyClient({
     requestJson,
     getCashflowSnapshot,
     applyCashflowSheetLab,
+    applyCashflowSheetBatch,
     applyCashflowSheetAnnualTotal,
     authMode,
     workspaceEmailDomain,

@@ -12,6 +12,8 @@ import com.google.cloud.firestore.Transaction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
@@ -576,6 +578,80 @@ class FirestoreCashflowLeaseGuardTest {
             argThat(ref -> ref.getPath().endsWith("-w4")),
             argThat(ref -> ref.getPath().endsWith("-w5"))
         );
+    }
+
+    @Test
+    void multiMonthApplySortsMonthsAndCommitsEveryMonthInOneCommandTransaction() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest july = monthlyRequest("july-source", targetRevision, "2026-07", "");
+        CashflowSheetLabApplyRequest august = monthlyRequest("august-source", targetRevision, "2026-08", "");
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "batch-july-august",
+            SOURCE_REVISION,
+            targetRevision,
+            false,
+            List.of(
+                new CashflowSheetBatchApplyRequest.Month("2026-08", august.cells()),
+                new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells())
+            )
+        );
+
+        CashflowSheetBatchApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
+            .containsExactly("2026-07", "2026-08");
+        assertThat(response.savedProjectionLineCount()).isEqualTo(160);
+        assertThat(response.savedActualLineCount()).isEqualTo(160);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-07-w")))
+            .hasSize(5);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-08-w")))
+            .hasSize(5);
+        verify(fixture.transaction).getAll(
+            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
+            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
+            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
+            any(DocumentReference.class)
+        );
+    }
+
+    @Test
+    void multiMonthApplyWritesNothingWhenAnyRequestedMonthIsClosed() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-08", Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-08",
+            "status", "CLOSED",
+            "revision", 1L,
+            "reopenCount", 0L
+        ));
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest july = monthlyRequest("july-source", targetRevision, "2026-07", "");
+        CashflowSheetLabApplyRequest august = monthlyRequest("august-source", targetRevision, "2026-08", "");
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "batch-with-closed-august",
+            SOURCE_REVISION,
+            targetRevision,
+            false,
+            List.of(
+                new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells()),
+                new CashflowSheetBatchApplyRequest.Month("2026-08", august.cells())
+            )
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request)))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("closed");
+
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
     }
 
     @Test
@@ -1864,14 +1940,11 @@ class FirestoreCashflowLeaseGuardTest {
             when(snapshot.getReference()).thenReturn(document);
             return ApiFutures.immediateFuture(snapshot);
         });
-        when(transaction.getAll(
-            any(DocumentReference.class),
-            any(DocumentReference.class),
-            any(DocumentReference.class),
-            any(DocumentReference.class),
-            any(DocumentReference.class)
-        )).thenAnswer(invocation -> {
-            DocumentReference[] documents = java.util.Arrays.stream(invocation.getArguments())
+        when(transaction.getAll(any(DocumentReference[].class))).thenAnswer(invocation -> {
+            Object[] arguments = invocation.getArguments();
+            DocumentReference[] documents = arguments.length == 1 && arguments[0] instanceof DocumentReference[] refsArgument
+                ? refsArgument
+                : java.util.Arrays.stream(arguments)
                 .map(DocumentReference.class::cast)
                 .toArray(DocumentReference[]::new);
             List<DocumentSnapshot> snapshots = java.util.Arrays.stream(documents).map(document -> {

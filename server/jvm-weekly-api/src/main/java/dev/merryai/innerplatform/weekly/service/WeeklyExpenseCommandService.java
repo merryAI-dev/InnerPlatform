@@ -9,6 +9,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
@@ -90,6 +92,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -1095,6 +1098,122 @@ public class WeeklyExpenseCommandService {
             actual.size(),
             projection,
             actual,
+            auditEvent.getId()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowSheetBatchApplyResponse applyCashflowSheetBatch(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowEditSession editSession,
+        CashflowSheetBatchApplyRequest request
+    ) {
+        long startedAt = System.nanoTime();
+        TrustedActorContext writer = requireCashflowWritePermission(
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowSheetBatchApplyResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowSheetBatchApplyResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        Map<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = CashflowSheetBatchApplyRequest
+            .requireCompleteMonths(request.months());
+        assertAtomicWriteBudget(
+            Math.multiplyExact(cellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
+            3,
+            "Cashflow sheet batch apply"
+        );
+        String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
+        WeeklyExpensePersistence.CashflowSheetBatchReplacement replacement = persistence.replaceCashflowSheetMonths(
+            writer.tenantId(),
+            projectId,
+            sourceSheetKey,
+            request.targetRevision(),
+            request
+        );
+        List<String> requestedMonths = List.copyOf(cellsByMonth.keySet());
+        List<String> replacedMonths = replacement.months().stream()
+            .map(WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement::yearMonth)
+            .toList();
+        if (!replacedMonths.equals(requestedMonths)) {
+            throw new IllegalStateException("Cashflow sheet batch replacement scope does not match the request.");
+        }
+        List<CashflowSheetBatchApplyResponse.MonthResult> months = replacement.months().stream()
+            .map(month -> new CashflowSheetBatchApplyResponse.MonthResult(
+                month.yearMonth(),
+                month.projection().size(),
+                month.actual().size(),
+                month.projection().stream().map(line -> new CashflowSnapshotResponse.ProjectionLine(
+                    line.getYearMonth(),
+                    line.getWeekNo(),
+                    line.getCashflowLine(),
+                    line.getAmount()
+                )).toList(),
+                month.actual().stream().map(line -> new CashflowSnapshotResponse.ActualLine(
+                    line.getSheetKey(),
+                    line.getYearMonth(),
+                    line.getWeekNo(),
+                    line.getCashflowLine(),
+                    line.getAmount()
+                )).toList()
+            ))
+            .toList();
+        int projectionLineCount = months.stream().mapToInt(CashflowSheetBatchApplyResponse.MonthResult::savedProjectionLineCount).sum();
+        int actualLineCount = months.stream().mapToInt(CashflowSheetBatchApplyResponse.MonthResult::savedActualLineCount).sum();
+        long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("sourceSheetKey", sourceSheetKey);
+        metadata.put("scope", "multi-month");
+        metadata.put("months", months.stream().map(CashflowSheetBatchApplyResponse.MonthResult::yearMonth).toList());
+        metadata.put("sourceRevision", request.sourceRevision());
+        metadata.put("targetRevision", request.targetRevision());
+        metadata.put("resultingTargetRevision", replacement.resultingTargetRevision());
+        metadata.put("projectionLineCount", projectionLineCount);
+        metadata.put("actualLineCount", actualLineCount);
+        metadata.put("durationMs", durationMs);
+        putActorMetadata(metadata, writer);
+        WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(),
+            projectId,
+            sourceSheetKey,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            writer.id(),
+            normalizeRole(writer.role()),
+            request.idempotencyKey(),
+            writeJson(metadata)
+        ));
+        CashflowSheetBatchApplyResponse response = new CashflowSheetBatchApplyResponse(
+            true,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            projectId,
+            sourceSheetKey,
+            request.sourceRevision(),
+            request.targetRevision(),
+            replacement.resultingTargetRevision(),
+            projectionLineCount,
+            actualLineCount,
+            months,
+            durationMs,
             auditEvent.getId()
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(

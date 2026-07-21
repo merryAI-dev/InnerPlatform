@@ -92,6 +92,40 @@ describe('Java weekly cashflow client', () => {
     });
   });
 
+  it('forwards multiple months in one JVM batch request without a cashflow edit lease', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', months: [] }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const months = [
+      { yearMonth: '2026-07', cells: monthlyContract.cells },
+      { yearMonth: '2026-08', cells: monthlyContract.cells },
+    ];
+
+    await client.applyCashflowSheetBatch({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-batch-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      targetRevision: monthlyContract.targetRevision,
+      months,
+      replaceAllActualSources: true,
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toContain('/api/v1/cashflow/project-a/sheet-lab/batch/apply');
+    expect(init.headers['x-edit-session-id']).toBeUndefined();
+    expect(JSON.parse(init.body)).toEqual({
+      idempotencyKey: 'apply-batch-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      targetRevision: monthlyContract.targetRevision,
+      months,
+      replaceAllActualSources: true,
+    });
+  });
+
   it('fails before network when BFF and JVM data projects differ', async () => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({
