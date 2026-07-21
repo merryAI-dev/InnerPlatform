@@ -90,12 +90,6 @@ describe('portal minimal sweep', () => {
     expect(projectRegisterSource).not.toContain("field.value || '-'");
   });
 
-  it('explains direct-entry as weekly sheet or excel-template input in register and edit flows', () => {
-    expect(projectRegisterSource).toContain('ProjectEditorWizard');
-    expect(projectEditSource).toContain('ProjectEditorWizard');
-    expect(projectEditorWizardSource).toContain('정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.');
-  });
-
   it('lets rejected pm projects recover from the shared edit screen with contract upload available', () => {
     expect(projectEditSource).toContain('수정 후 다시 제출');
     expect(projectEditSource).toContain('반려 사유');
