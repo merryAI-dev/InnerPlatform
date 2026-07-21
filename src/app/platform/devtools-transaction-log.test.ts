@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   clearDevtoolsLogs,
+  formatDevtoolsConsoleLabel,
   getDevtoolsLogs,
   recordDevtoolsLog,
   sanitizeDevtoolsValue,
@@ -64,5 +65,16 @@ describe('devtools transaction log', () => {
         safe: 'visible',
       },
     });
+  });
+
+  it('shows elapsed time in the collapsed console label', () => {
+    expect(formatDevtoolsConsoleLabel({
+      id: 'log_1',
+      ts: '2026-07-21T00:00:00.000Z',
+      kind: 'cashflow_transaction',
+      phase: 'success',
+      operation: 'cashflow.sheet_lab.overwrite.sheet_values.ok',
+      durationMs: 12_345,
+    })).toBe('[MYSCube:cashflow_transaction] success cashflow.sheet_lab.overwrite.sheet_values.ok 12345ms');
   });
 });

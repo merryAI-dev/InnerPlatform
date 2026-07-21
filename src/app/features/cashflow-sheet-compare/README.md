@@ -27,9 +27,9 @@ idempotency keys, and the JVM transaction boundary.
   partial failure, so the same staged run can resume safely.
 - Monthly ledgers stay ordered. Each result produces the target revision for the
   next month, so parallel monthly writes would bypass drift detection.
-- The JVM loads the project's weekly documents once per month and derives the
-  five target weeks from that result. It must not issue five direct week reads
-  followed by the same project-wide query.
+- The JVM validates the five canonical target documents with one `getAll`, then
+  runs the project-wide query required for target-revision calculation. It must
+  not issue five serial direct reads before that query.
 - Ordered arrays preserve apply order. `Map`/`Set` indexes are used only for
   identity, deduplication, and verification; finance order never depends on hash
   iteration.
@@ -85,6 +85,12 @@ The primary delay is avoidable network round trips, not cashflow arithmetic:
   staged run and per-year idempotency keys to resume safely.
 - Monthly apply remains an ordered loop.
 - Per-operation `annual.ok` and `month.ok` logs include `durationMs`.
+- Stage browser logs expose conservative user-perceived timing without sheet
+  values or credentials:
+  - `overwrite.sheet_values.ok`: click-to-completion total.
+  - `stage.sheet_values.ok`: snapshot validation/staging step.
+  - `apply.sheet_values.ok`: JVM ledger apply step.
+  - `overwrite.sheet_values.error`: click-to-error total and failed `step`.
 - Redis, background queues, and a larger browser timeout were deliberately not
   added.
 
@@ -97,8 +103,11 @@ The primary delay is avoidable network round trips, not cashflow arithmetic:
   month-close locks, target-revision drift, and the assertion that five direct
   week reads were replaced by one five-reference `getAll`.
 - Stage acceptance is not inferred from local tests. After deployment, rerun the
-  same explicit import and compare total request latency plus every
-  `annual.ok/month.ok durationMs` against the baseline above.
+  same explicit import and use `overwrite.sheet_values.ok durationMs` as the
+  conservative browser wall-clock. Compare its `stageDurationMs` and
+  `applyDurationMs`, plus every server-side `annual.ok/month.ok durationMs`,
+  against the baseline above. Cold starts remain included in the first run and
+  should be reported separately from a second warm run.
 
 **Decision threshold**
 

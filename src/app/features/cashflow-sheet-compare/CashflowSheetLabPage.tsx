@@ -610,6 +610,7 @@ export function CashflowSheetLabPage({
   }
   async function handleRefreshSheetMirror() {
     if (!projectId || loading || !spreadsheetId) return;
+    const startedAt = Date.now();
     const refreshIdempotencyKey = `cashflow-sheet-lab-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
@@ -664,10 +665,16 @@ export function CashflowSheetLabPage({
         mirrorStatus: result.status,
         sourceRevision: result.sourceRevision,
         cellCount: result.summary?.cellCount || 0,
+        durationMs: Date.now() - startedAt,
       });
       if (!sheetName && result.selectedSheetName) setSheetName(result.selectedSheetName);
     } catch (error) {
-      logCashflowLab('mirror.refresh.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
+      logCashflowLab('mirror.refresh.error', {
+        projectId,
+        spreadsheetId,
+        durationMs: Date.now() - startedAt,
+        ...errorDiagnostics(error),
+      }, 'warn');
       setErrorMessage(formatError(error));
       if (getErrorCode(error) === 'google_sheet_service_account_forbidden') {
         void handleLoadShareAccount();
@@ -682,16 +689,22 @@ export function CashflowSheetLabPage({
     const startedAt = Date.now();
     const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    let activeStep: 'stage' | 'apply' = 'stage';
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
     setClosedMonthWarning([]);
     setReflectResult(null);
+    logCashflowLab('overwrite.sheet_values.start', {
+      projectId,
+      spreadsheetId,
+    });
     logCashflowLab('stage.sheet_values.start', {
       projectId,
       spreadsheetId,
     });
     try {
+      const stageStartedAt = Date.now();
       const staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
         stageCashflowSheetLabViaBff({
           tenantId: orgId,
@@ -701,7 +714,16 @@ export function CashflowSheetLabPage({
           idempotencyKey: stageIdempotencyKey,
         })
       ));
-      if (!staged) return;
+      if (!staged) {
+        logCashflowLab('overwrite.sheet_values.cancelled', {
+          projectId,
+          spreadsheetId,
+          step: activeStep,
+          durationMs: Date.now() - startedAt,
+        }, 'warn');
+        return;
+      }
+      const stageDurationMs = Date.now() - stageStartedAt;
       setReviewedSourceKey(sourceKey);
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
@@ -711,9 +733,16 @@ export function CashflowSheetLabPage({
         projectionLineCount: staged.projectionLineCount,
         actualLineCount: staged.actualLineCount,
         riskLineCount: staged.riskLineCount,
-        durationMs: Date.now() - startedAt,
+        durationMs: stageDurationMs,
+        totalDurationMs: Date.now() - startedAt,
       });
       if (staged.status === 'BLOCKED' || staged.riskLineCount > 0) {
+        logCashflowLab('overwrite.sheet_values.blocked', {
+          projectId,
+          spreadsheetId,
+          riskLineCount: staged.riskLineCount,
+          durationMs: Date.now() - startedAt,
+        }, 'warn');
         if ((staged.closedMonthDifferences || []).length > 0) {
           setClosedMonthWarning(staged.closedMonthDifferences || []);
         } else {
@@ -725,14 +754,22 @@ export function CashflowSheetLabPage({
       if (staged.stagedLineCount === 0) {
         setReflectResult({ appliedLineCount: 0, projectionLineCount: 0, actualLineCount: 0 });
         setStatusMessage('MYSCube가 이미 시트 최신값과 같습니다.');
-        logCashflowLab('overwrite.sheet_values.noop', { projectId, spreadsheetId });
+        logCashflowLab('overwrite.sheet_values.noop', {
+          projectId,
+          spreadsheetId,
+          durationMs: Date.now() - startedAt,
+          stageDurationMs,
+        });
         return;
       }
+      activeStep = 'apply';
+      const applyStartedAt = Date.now();
       logCashflowLab('apply.sheet_values.start', {
         projectId,
         spreadsheetId,
         stageRunId: staged.runId,
         stagedLineCount: staged.stagedLineCount,
+        elapsedMs: applyStartedAt - startedAt,
       });
       const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
         applyCashflowSheetLabViaBff({
@@ -743,7 +780,18 @@ export function CashflowSheetLabPage({
           idempotencyKey: applyIdempotencyKey,
         })
       ));
-      if (!result) return;
+      if (!result) {
+        logCashflowLab('overwrite.sheet_values.cancelled', {
+          projectId,
+          spreadsheetId,
+          step: activeStep,
+          durationMs: Date.now() - startedAt,
+          stageDurationMs,
+        }, 'warn');
+        return;
+      }
+      const applyDurationMs = Date.now() - applyStartedAt;
+      const totalDurationMs = Date.now() - startedAt;
       setReflectResult({
         appliedLineCount: result.appliedLineCount,
         projectionLineCount: result.projectionLineCount,
@@ -759,10 +807,28 @@ export function CashflowSheetLabPage({
         appliedLineCount: result.appliedLineCount,
         projectionLineCount: result.projectionLineCount,
         actualLineCount: result.actualLineCount,
-        durationMs: Date.now() - startedAt,
+        durationMs: applyDurationMs,
+        totalDurationMs,
+        stageDurationMs,
+      });
+      logCashflowLab('overwrite.sheet_values.ok', {
+        projectId,
+        spreadsheetId: result.spreadsheetId,
+        appliedLineCount: result.appliedLineCount,
+        durationMs: totalDurationMs,
+        totalDurationMs,
+        stageDurationMs,
+        applyDurationMs,
       });
     } catch (error) {
-      logCashflowLab('overwrite.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      logCashflowLab('overwrite.sheet_values.error', {
+        projectId,
+        spreadsheetId,
+        step: activeStep,
+        durationMs: Date.now() - startedAt,
+        totalDurationMs: Date.now() - startedAt,
+        ...errorDiagnostics(error),
+      }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);

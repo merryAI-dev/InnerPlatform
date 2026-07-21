@@ -177,10 +177,14 @@ function ensureDevtoolsApi(): DevtoolsApi {
   return globalState.__MYSCUBE_DEVTOOLS__;
 }
 
+export function formatDevtoolsConsoleLabel(entry: DevtoolsLogEntry): string {
+  return `[MYSCube:${entry.kind}] ${entry.phase} ${entry.operation}${entry.requestId ? ` (${entry.requestId})` : ''}${typeof entry.durationMs === 'number' ? ` ${entry.durationMs}ms` : ''}`;
+}
+
 function writeConsole(entry: DevtoolsLogEntry): void {
   if (!isDevtoolsConsoleEnabled() || typeof console === 'undefined') return;
   const level = entry.phase === 'error' ? 'error' : entry.phase === 'retry' ? 'warn' : 'info';
-  const label = `[MYSCube:${entry.kind}] ${entry.phase} ${entry.operation}${entry.requestId ? ` (${entry.requestId})` : ''}`;
+  const label = formatDevtoolsConsoleLabel(entry);
   if (typeof console.groupCollapsed === 'function') {
     console.groupCollapsed(label);
     console[level](entry);

@@ -204,6 +204,15 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('finalize: true');
   });
 
+  it('records conservative end-to-end and step timings for manual Stage QA', () => {
+    expect(pageSource).toContain("logCashflowLab('overwrite.sheet_values.start'");
+    expect(pageSource).toContain('stageDurationMs');
+    expect(pageSource).toContain('applyDurationMs');
+    expect(pageSource).toContain('totalDurationMs');
+    expect(pageSource).toContain("logCashflowLab('overwrite.sheet_values.ok'");
+    expect(pageSource).toContain("logCashflowLab('overwrite.sheet_values.error'");
+  });
+
   it('guides each project through the sheet workflow once per browser session', () => {
     expect(pageSource).toContain('cashflow-sheet-tutorial:');
     expect(pageSource).toContain('sessionStorage.getItem');
