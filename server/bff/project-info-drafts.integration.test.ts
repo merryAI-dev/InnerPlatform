@@ -106,6 +106,9 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       teamName: 'AXR', teamMembers: '', teamMembersDetailed: [{
         memberName: 'actor-a', memberNickname: 'Actor', role: '운영매니저',
         participationRate: 100, isDocumentOnly: false,
+      }, {
+        memberName: 'Executive A', memberNickname: 'Executive', role: '사업 최종 책임자',
+        participationRate: 0, isDocumentOnly: false,
       }], participantCondition: '', note: '',
       contractDocument: {
         path: `orgs/${tenantId}/project-registration-documents/project-a/contract.pdf`,

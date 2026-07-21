@@ -195,6 +195,11 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
         role: '운영매니저',
         participationRate: 100,
         isDocumentOnly: false,
+      }, {
+        memberName: 'Executive A',
+        role: '사업 최종 책임자',
+        participationRate: 0,
+        isDocumentOnly: false,
       }],
       projectPurpose: 'Purpose',
       arbitraryBrowserField: 'must-not-persist',
