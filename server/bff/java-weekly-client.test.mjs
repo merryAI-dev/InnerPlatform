@@ -210,6 +210,38 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl.mock.calls[1][1].body).toBe(fetchImpl.mock.calls[0][1].body);
   });
 
+  it('uses the Stage invoker credential instead of the GCP metadata server', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+    }));
+    const serviceAccountJson = JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' });
+    const resolveIdentityToken = vi.fn(async () => 'stage-id-token');
+    const client = createJavaWeeklyClient({
+      env: stageEnv({
+        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example',
+        JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: serviceAccountJson,
+      }),
+      fetchImpl,
+      jvmWeeklyApiIdentityTokenResolver: resolveIdentityToken,
+    });
+
+    await client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-stage-invoker-1',
+      ...monthlyContract,
+    });
+
+    expect(resolveIdentityToken).toHaveBeenCalledWith({
+      audience: 'https://stage-jvm.example',
+      serviceAccountJson,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer stage-id-token');
+  });
+
   it('returns a clear retryable service error when JVM transport remains unavailable', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('fetch failed');
