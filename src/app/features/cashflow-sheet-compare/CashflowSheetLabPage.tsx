@@ -266,7 +266,7 @@ export function CashflowSheetLabPage({
   }, [myProject?.contractEnd, myProject?.contractStart, projectYears]);
   const [sourceYear, setSourceYear] = useState(2026);
   const [sheetLink, setSheetLink] = useState('');
-  const [sheetName, setSheetName] = useState('');
+  const [sheetName, setSheetName] = useState('cashflow(사용내역 연동)');
   const [startWeek, setStartWeek] = useState('');
   const [endWeek, setEndWeek] = useState('');
   const [mirror, setMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
@@ -548,7 +548,7 @@ export function CashflowSheetLabPage({
       setSavedConfigs(result.configs || []);
       if (result.config?.value && (!hasSheetDraft || result.config.sourceYear !== savedConfig?.sourceYear)) {
         setSheetLink(result.config.value);
-        setSheetName(result.config.sheetName || '');
+        setSheetName(result.config.sheetName || 'cashflow(사용내역 연동)');
         setStartWeek(result.config.startWeek || '');
         setEndWeek(result.config.endWeek || '');
       }

@@ -189,6 +189,42 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it('retries a transient JVM transport failure with the same request body', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      });
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-retry-1',
+      ...monthlyContract,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[1][1].body).toBe(fetchImpl.mock.calls[0][1].body);
+  });
+
+  it('returns a clear retryable service error when JVM transport remains unavailable', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-unreachable-1',
+      ...monthlyContract,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('preserves the JVM atomic write count on client errors', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: false,

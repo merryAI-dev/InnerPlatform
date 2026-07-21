@@ -157,24 +157,41 @@ export function createJavaWeeklyClient({
     if (!baseUrl) {
       throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
     }
-    const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
-      method,
-      headers: await buildJavaWeeklyTrustedHeaders({
-        fetchImpl,
-        context,
-        serviceToken,
-        idTokenAudience,
-        authMode,
-        workspaceEmailDomain,
-        editSession,
-        dataProjectId,
-      }),
-      body: method === 'GET' ? undefined : JSON.stringify(body || {}),
-    });
+    const send = async () => {
+      const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
+        method,
+        headers: await buildJavaWeeklyTrustedHeaders({
+          fetchImpl,
+          context,
+          serviceToken,
+          idTokenAudience,
+          authMode,
+          workspaceEmailDomain,
+          editSession,
+          dataProjectId,
+        }),
+        body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+      });
+      const payload = await readJsonResponse(response);
+      if (!response.ok) throw readJavaError(response.status, payload);
+      return payload;
+    };
 
-    const payload = await readJsonResponse(response);
-    if (!response.ok) throw readJavaError(response.status, payload);
-    return payload;
+    try {
+      return await send();
+    } catch (error) {
+      if (Number.isInteger(error?.statusCode)) throw error;
+      try {
+        return await send();
+      } catch (retryError) {
+        if (Number.isInteger(retryError?.statusCode)) throw retryError;
+        throw createHttpError(
+          503,
+          '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+          'jvm_weekly_api_unreachable',
+        );
+      }
+    }
   }
 
   async function getCashflowSnapshot({ context, projectId }) {
