@@ -231,7 +231,10 @@ async function readCashflowSheetYearView({ db, tenantId, projectId, project, sel
   const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
   const availableYears = cashflowAvailableYears(mirror, project, selectedYear);
   const navigationYears = cashflowNavigationYears(availableYears, selectedYear);
-  const canonicalAnnualDocs = await Promise.all(navigationYears.map((year) => (
+  // The ledger renders every project year around the selected year's weekly columns.
+  // Keep the compact navigation separately, but load all annual totals in one read model.
+  const ledgerYears = availableYears;
+  const canonicalAnnualDocs = await Promise.all(ledgerYears.map((year) => (
     readCanonicalAnnualTotal(db, tenantId, projectId, year)
   )));
   const hasAppliedSourceMarkers = Array.isArray(mirror?.appliedAnnualYears) || Array.isArray(mirror?.appliedWeeklyYears);
@@ -260,7 +263,7 @@ async function readCashflowSheetYearView({ db, tenantId, projectId, project, sel
     .map((row) => [row.year, row]));
   const snapshotEnabled = /^cfsnap_[a-f0-9]{32}$/.test(snapshotId);
   const snapshotDocs = snapshotEnabled
-    ? await Promise.all(navigationYears.map(async (year) => {
+    ? await Promise.all(ledgerYears.map(async (year) => {
       const snap = await db.doc(cashflowSheetSnapshotYearDocPath(tenantId, snapshotId, year)).get();
       return [year, snap.exists ? snap.data() || {} : null];
     }))
@@ -268,7 +271,7 @@ async function readCashflowSheetYearView({ db, tenantId, projectId, project, sel
   const snapshotTotals = new Map(snapshotDocs);
   const fallbackYears = [];
   const mismatchYears = [];
-  const years = navigationYears.flatMap((year) => {
+  const years = ledgerYears.flatMap((year) => {
     const mirrorTotal = mirrorTotals.get(year);
     const snapshotTotal = snapshotTotals.get(year);
     const snapshotCurrent = snapshotTotal

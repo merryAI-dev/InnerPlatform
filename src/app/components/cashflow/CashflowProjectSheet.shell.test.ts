@@ -218,11 +218,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.');
   });
 
-  it('lets users open each adjacent year without annual amount columns', () => {
+  it('places prior annual totals before and later annual totals after the selected year weeks', () => {
     expect(source).toContain('`${year}-01`');
     expect(source).toContain('data-cashflow-year-view={year}');
-    expect(source).not.toContain('annualSourceLabel');
-    expect(source).not.toContain('renderAnnualSummaryCell');
+    expect(source).toContain('previousAnnualYears');
+    expect(source).toContain('followingAnnualYears');
+    expect(source).toContain('renderAnnualSummaryCell');
+    expect(source).toContain('{year}년');
+    expect(source).toContain('누적');
+    expect(source).toContain('합계');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
   });
