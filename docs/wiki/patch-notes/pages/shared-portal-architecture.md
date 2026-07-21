@@ -32,11 +32,14 @@
 - [x] Cashflow Sheet Lab의 Google Sheets 연동은 서버 서비스 계정 전용으로 고정하고 사용자 OAuth token pass-through를 제거함
 - [x] `/portal/cashflow`는 route-scoped provider만 로딩하고, catalog 권한 오류가 있어도 배정 프로젝트 선택을 유지함
 - [x] 프로젝트 등록/수정은 지정 결재자, 조직장 승인, 경영기획실 코드 부여를 분리한 승인 흐름으로 정렬됨
+- [x] 다년도 프로젝트의 연도별 재무 입력과 BFF 합계 검증이 같은 계약으로 동작함
+- [x] 프로젝트 등록/수정에서 사업관리 Google Drive 폴더 링크를 프로젝트·검토 요청에 함께 보존함
 - [ ] admin summary surface cutover까지 완료됨
 - [ ] 포털의 broad Firestore direct read가 완전히 제거됨
 
 ## Recent Changes
 
+- [2026-07-21] 프로젝트 등록·수정 기본 정보의 계약 대상 아래에 사업관리 Google Drive 폴더 링크를 추가했다. 다년도 사업은 연도별 계약금액·매출부가세·수익·지원금을 입력·확인한 값만 상단 총계로 반영하며, 연도 누락·미확인·합계 불일치는 BFF가 저장 전에 거절한다. 단년도 사업은 총계 직접 입력을 유지한다.
 - [2026-07-20] 프로젝트 등록/수정 승인 흐름을 기획안 기준으로 재정렬했다. 실무자 제출 문서는 지정 조직장 승인 전 도장을 찍지 않고, 경영기획실은 조직장 승인 또는 레거시 승인 request가 있는 프로젝트만 코드 부여 대상으로 본다. 프로젝트 코드는 중복 claim을 통해 선점하고, 반려 메모는 PM 재제출 흐름으로 돌려보낸다.
 - [2026-07-13] 프로젝트 등록·수정과 cashflow의 canonical browser write를 Firestore rules에서 차단하고, BFF/JVM command만 lease·revision·audit 경계를 통과하도록 Stage 전용 리팩터링을 추가했다. 오류 복구는 강제 새로고침 없이 SPA 상태 복구로 바꿨다.
 - [2026-06-19] Cashflow Sheet Lab의 Google Sheets 접근을 서버 서비스 계정으로 고정하고, 설정 저장과 시트 검증/반영 액션을 분리했다. `/portal/cashflow`에서는 HR/Payroll/Board/Training/Career provider 로딩을 제외하고, projects catalog 권한 오류가 배정 프로젝트 선택을 지우지 않도록 했으며, labor risk 배경 요청 키를 사용자/프로젝트/날짜 기준으로 안정화했다.

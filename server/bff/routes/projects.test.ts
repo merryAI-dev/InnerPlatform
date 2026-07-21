@@ -213,6 +213,26 @@ describe('project route helpers', () => {
     });
   });
 
+  it('preserves the business-management Google folder link in both review and project records', () => {
+    const link = 'https://drive.google.com/drive/folders/project-management-folder';
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      businessManagementGoogleFolderLink: link,
+    }));
+
+    expect(canonical.projectRequest.payload.businessManagementGoogleFolderLink).toBe(link);
+    expect(canonical.project.businessManagementGoogleFolderLink).toBe(link);
+  });
+
+  it('allows a single-year registration without annual financial rows', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      contractEnd: '2026-12-31',
+      paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2026-12' },
+      financialYears: [],
+    }));
+
+    expect(canonical.projectRequest.payload.financialYears).toEqual([]);
+  });
+
   it('derives annual profit rates and removes settlement-only values when the v2 settlement basis is none', () => {
     const canonical = registrationV2Canonical(registrationV2Payload({
       settlementType: 'TYPE1',

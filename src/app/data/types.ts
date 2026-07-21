@@ -666,6 +666,7 @@ export interface Project {
   paymentPlanDesc: string;       // 입금계획 텍스트 (e.g. "선금80%, 잔금20%")
   // MYSC-specific fields
   clientOrg: string;             // 발주기관(계약기관)
+  businessManagementGoogleFolderLink?: string;
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
   note?: string;                  // PM/관리자 참고 메모
@@ -849,6 +850,7 @@ export interface ProjectRequestPayload {
   phase?: ProjectPhase;
   description: string;
   clientOrg: string;
+  businessManagementGoogleFolderLink?: string;
   department: string;
   groupwareName?: string;
   currency?: ProjectCurrency;

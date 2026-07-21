@@ -254,6 +254,7 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
     buildTextItem('clientOrg', '계약 대상', payload.clientOrg, {
       status: analysisStatusByKey.get('clientOrg') || undefined,
     }),
+    buildTextItem('businessManagementGoogleFolderLink', '사업관리 구글폴더링크', payload.businessManagementGoogleFolderLink || ''),
     buildTextItem('department', '담당조직(CIC)', payload.department),
     buildTextItem('managerName', 'PM', payload.managerName),
   ];

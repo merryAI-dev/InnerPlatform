@@ -1169,39 +1169,44 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
   }
   const startYear = Number(contractStart.slice(0, 4));
   const endYear = Number(contractEnd.slice(0, 4));
-  if (endYear - startYear > 20 || !Array.isArray(payload.financialYears)) {
+  if (endYear - startYear > 20) {
     invalidRegistration('Project registration financialYears are invalid');
   }
-  const rows = new Map();
-  for (const row of payload.financialYears) {
-    if (!row || typeof row !== 'object' || Array.isArray(row)) {
-      invalidRegistration('Project registration financial year row is invalid');
+  if (endYear > startYear) {
+    if (!Array.isArray(payload.financialYears)) {
+      invalidRegistration('Project registration financialYears are invalid');
     }
-    const year = row.year;
-    if (!Number.isSafeInteger(year) || year < startYear || year > endYear || rows.has(year)) {
+    const rows = new Map();
+    for (const row of payload.financialYears) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        invalidRegistration('Project registration financial year row is invalid');
+      }
+      const year = row.year;
+      if (!Number.isSafeInteger(year) || year < startYear || year > endYear || rows.has(year)) {
+        invalidRegistration('Project registration financial year coverage is invalid');
+      }
+      for (const field of REGISTRATION_AMOUNT_FIELDS) {
+        assertRegistrationAmount(row[field], `financialYears.${year}.${field}`, { required: true });
+      }
+      if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
+        invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
+      }
+      if (row.confirmed !== true) {
+        invalidRegistration(`Project registration financialYears.${year} requires human confirmation`);
+      }
+      rows.set(year, row);
+    }
+    for (let year = startYear; year <= endYear; year += 1) {
+      if (!rows.has(year)) invalidRegistration(`Project registration financial year is missing: ${year}`);
+    }
+    if (rows.size !== endYear - startYear + 1) {
       invalidRegistration('Project registration financial year coverage is invalid');
     }
     for (const field of REGISTRATION_AMOUNT_FIELDS) {
-      assertRegistrationAmount(row[field], `financialYears.${year}.${field}`, { required: true });
-    }
-    if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
-      invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
-    }
-    if (row.confirmed !== true) {
-      invalidRegistration(`Project registration financialYears.${year} requires human confirmation`);
-    }
-    rows.set(year, row);
-  }
-  for (let year = startYear; year <= endYear; year += 1) {
-    if (!rows.has(year)) invalidRegistration(`Project registration financial year is missing: ${year}`);
-  }
-  if (rows.size !== endYear - startYear + 1) {
-    invalidRegistration('Project registration financial year coverage is invalid');
-  }
-  for (const field of REGISTRATION_AMOUNT_FIELDS) {
-    const annualTotal = [...rows.values()].reduce((sum, row) => sum + row[field], 0);
-    if (!Number.isSafeInteger(annualTotal) || annualTotal !== payload[field]) {
-      invalidRegistration(`Project registration financialYears ${field} total does not match`);
+      const annualTotal = [...rows.values()].reduce((sum, row) => sum + row[field], 0);
+      if (!Number.isSafeInteger(annualTotal) || annualTotal !== payload[field]) {
+        invalidRegistration(`Project registration financialYears ${field} total does not match`);
+      }
     }
   }
 
@@ -1410,6 +1415,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     phase: normalizeProjectPhase(readOptionalText(payload.phase)),
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
+    businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     department: normalizeProjectOrganizationLabel(payload.department),
     groupwareName: readOptionalText(payload.groupwareName) || undefined,
     currency: normalizeProjectCurrency(readOptionalText(payload.currency)),
@@ -1588,6 +1594,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     phase: normalizeProjectPhase(pickText('phase')),
     description: pickText('description'),
     clientOrg: pickText('clientOrg'),
+    businessManagementGoogleFolderLink: pickText('businessManagementGoogleFolderLink'),
     department: pickText('department'),
     groupwareName: pickText('groupwareName'),
     currency: normalizeProjectCurrency(pickText('currency')),
@@ -1703,6 +1710,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     phase: normalizeProjectPhase(readOptionalText(payload.phase) || currentProject.phase),
     description: readOptionalText(payload.description),
     clientOrg: readOptionalText(payload.clientOrg),
+    businessManagementGoogleFolderLink: readOptionalText(payload.businessManagementGoogleFolderLink) || undefined,
     department: resolveProjectDepartmentFromPayload(payload, currentProject),
     cic: resolveProjectCicFromPayload(payload, currentProject),
     groupwareName: readOptionalText(payload.groupwareName) || readOptionalText(currentProject.groupwareName) || undefined,
@@ -1775,6 +1783,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   name: '프로젝트명',
   officialContractName: '공식 계약명',
   clientOrg: '계약 대상',
+  businessManagementGoogleFolderLink: '사업관리 구글폴더링크',
   department: '담당조직(CIC)',
   type: '프로젝트 유형',
   contractStart: '계약 시작일',
@@ -1821,7 +1830,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
 };
 
 const PROJECT_INFO_PAYLOAD_FIELDS = [
-  'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg',
+  'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg', 'businessManagementGoogleFolderLink',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
   'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',

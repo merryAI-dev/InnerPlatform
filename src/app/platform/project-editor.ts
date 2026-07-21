@@ -81,6 +81,7 @@ export interface ProjectEditorDraft {
   type: ProjectType;
   description: string;
   clientOrg: string;
+  businessManagementGoogleFolderLink: string;
   department: string;
   projectPurpose: string;
   status: ProjectStatus;
@@ -160,6 +161,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   type: 'D1',
   description: '',
   clientOrg: '',
+  businessManagementGoogleFolderLink: '',
   department: '',
   projectPurpose: '',
   status: 'CONTRACT_PENDING',
@@ -295,6 +297,7 @@ function projectFinancialYears(
   const startYear = dateYear(contractStart);
   const endYear = dateYear(contractEnd);
   if (!startYear || !endYear || startYear > endYear || endYear - startYear > 20) return [];
+  if (startYear === endYear) return [];
   return Array.from({ length: endYear - startYear + 1 }, (_, offset) => {
     const year = startYear + offset;
     return normalized.get(year) || {
@@ -435,6 +438,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'name', label: '프로젝트명', before: (project) => normalizeChangeValue(project.name), after: (draft) => normalizeChangeValue(draft.name) },
   { key: 'officialContractName', label: '공식 계약명', before: (project) => normalizeChangeValue(project.officialContractName), after: (draft) => normalizeChangeValue(draft.officialContractName) },
   { key: 'clientOrg', label: '계약 대상', before: (project) => normalizeChangeValue(project.clientOrg), after: (draft) => normalizeChangeValue(draft.clientOrg) },
+  { key: 'businessManagementGoogleFolderLink', label: '사업관리 구글폴더링크', before: (project) => normalizeChangeValue(project.businessManagementGoogleFolderLink), after: (draft) => normalizeChangeValue(draft.businessManagementGoogleFolderLink) },
   { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
   { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
   { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
@@ -591,6 +595,9 @@ export function buildProjectEditorDraftFromProject(
     type: normalizeProjectType(normalizedProject.type || payload?.type),
     description: text(normalizedProject.description || payload?.description),
     clientOrg: text(normalizedProject.clientOrg || payload?.clientOrg),
+    businessManagementGoogleFolderLink: text(
+      normalizedProject.businessManagementGoogleFolderLink || payload?.businessManagementGoogleFolderLink,
+    ),
     department: normalizeProjectDepartment(
       normalizedProject.department || normalizedProject.cic || payload?.department,
     ),
@@ -692,6 +699,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     phase: normalizeProjectPhase(draft.phase),
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
+    businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
     department: normalizeProjectDepartment(draft.department),
     groupwareName: text(draft.name),
     currency: normalizeProjectCurrency(draft.currency),
@@ -829,6 +837,7 @@ export function buildProjectEditorProjectPatch(
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
+    businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
     groupwareName: text(draft.name),
     participantCondition: text(draft.participantCondition),
     note: text(draft.note),

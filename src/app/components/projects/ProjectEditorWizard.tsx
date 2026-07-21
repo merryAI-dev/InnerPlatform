@@ -974,6 +974,11 @@ export function ProjectEditorWizard({
   const hasTotalRevenueAmountInput = financialInputFlags.totalRevenueAmount;
   const hasSupportAmountInput = financialInputFlags.supportAmount;
   const usesRegistrationV2 = draft.registrationRequirementsVersion === 2;
+  const hasMultiYearContract = Boolean(
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.contractStart)
+    && /^\d{4}-\d{2}-\d{2}$/.test(draft.contractEnd)
+    && draft.contractStart.slice(0, 4) !== draft.contractEnd.slice(0, 4),
+  );
   const settlementDetailsEnabled = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
   const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
   const showProjectCheckout = draft.status === 'COMPLETED' || draft.status === 'COMPLETED_PENDING_PAYMENT';
@@ -1316,7 +1321,9 @@ export function ProjectEditorWizard({
         && annualTotal('salesVatAmount') === draft.salesVatAmount
         && annualTotal('totalRevenueAmount') === draft.totalRevenueAmount
         && annualTotal('supportAmount') === draft.supportAmount;
-      if (!financialYearsComplete || !annualTotalsMatch) issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
+      if (hasMultiYearContract && (!financialYearsComplete || !annualTotalsMatch)) {
+        issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
+      }
       if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' });
       if (requiresSettlementConfirmations) {
         if (draft.registrationConfirmations.laborIncludesFourInsurance !== true) issues.push({ step: 'payment', label: '4대보험 포함 확인' });
@@ -1374,7 +1381,7 @@ export function ProjectEditorWizard({
       issues.push({ step: 'team', label: '인건비 투입 종료월은 시작월 이후여야 합니다.' });
     }
     return issues;
-  }, [departmentOptionSet, draft, hasContractAmountInput, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
+  }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -1446,6 +1453,20 @@ export function ProjectEditorWizard({
             사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
           </p>
         </div>
+      </div>
+
+      <div>
+        <Label className="text-xs">사업관리 구글폴더링크</Label>
+        <Input
+          type="url"
+          value={draft.businessManagementGoogleFolderLink}
+          onChange={(event) => update('businessManagementGoogleFolderLink', event.target.value)}
+          placeholder="https://drive.google.com/drive/folders/..."
+          className="mt-1 h-9 text-sm"
+        />
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          사업관리용 Google Drive 폴더 링크를 입력해 주세요.
+        </p>
       </div>
 
       <div>
@@ -1770,9 +1791,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
             onChange={(event) => updateAmount('contractAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
             {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
@@ -1787,9 +1808,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
             onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1798,9 +1819,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
             onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1809,9 +1830,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
             onChange={(event) => updateAmount('supportAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1823,12 +1844,12 @@ export function ProjectEditorWizard({
         </div>
       </div>
 
-      {usesRegistrationV2 ? (
+      {usesRegistrationV2 && hasMultiYearContract ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
           <div>
             <Label className="text-xs font-semibold">연도별 계약·재무 *</Label>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
+              다년도 사업은 계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
             </p>
           </div>
           {draft.financialYears.length === 0 ? (
@@ -1842,7 +1863,7 @@ export function ProjectEditorWizard({
                 {([
                   ['contractAmount', '계약금액'],
                   ['salesVatAmount', '매출 부가세'],
-                  ['totalRevenueAmount', '총수익'],
+                  ['totalRevenueAmount', '수익'],
                   ['supportAmount', '지원금'],
                 ] as const).map(([field, label]) => (
                   <div key={field}>
@@ -2530,6 +2551,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="프로젝트 유형" value={PROJECT_TYPE_LABELS[draft.type]} />
             <ReviewRow label="계약서 유형" value={normalizeProjectContractType(draft.contractType)} />
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
+            <ReviewRow label="사업관리 구글폴더링크" value={draft.businessManagementGoogleFolderLink} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
             <ReviewRow label="프로젝트 주요 내용" value={draft.description} />
             {canEditProjectStatus(mode) ? (
@@ -2551,7 +2573,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="총지원금" value={formatStoredProjectAmount(draft.supportAmount, financialInputFlags.supportAmount)} />
             <ReviewRow label="총수익률" value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
             <ReviewRow label={usesRegistrationV2 ? '사업유형' : '정산 유형'} value={SETTLEMENT_TYPE_LABELS[draft.settlementType]} />
-            {usesRegistrationV2 ? (
+            {usesRegistrationV2 && hasMultiYearContract ? (
               <ReviewRow label="정산 기준" value={REGISTRATION_V2_BASIS_LABELS[draft.basis as Exclude<Basis, '기타'>]} />
             ) : settlementDetailsEnabled ? (
               <ReviewRow label="정산 기준" value={draft.basis === 'NONE' ? '-' : BASIS_LABELS[draft.basis]} />

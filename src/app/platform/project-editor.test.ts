@@ -135,7 +135,7 @@ describe('project editor draft mapping', () => {
     const draft = createProjectEditorDraft({
       registrationRequirementsVersion: 2,
       contractStart: '2026-01-01',
-      contractEnd: '2026-12-31',
+      contractEnd: '2027-12-31',
       contractAmount: 120_000,
       totalRevenueAmount: 90_000,
       financialYears: [{
@@ -161,6 +161,35 @@ describe('project editor draft mapping', () => {
       accountType: 'NONE',
       settlementSystem: 'NONE',
       laborSettlementBasis: 'NONE',
+    });
+  });
+
+  it('keeps single-year totals as the source of truth without annual rows', () => {
+    const draft = createProjectEditorDraft({
+      registrationRequirementsVersion: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      contractAmount: 120_000,
+      salesVatAmount: 12_000,
+      totalRevenueAmount: 90_000,
+      supportAmount: 5_000,
+      financialYears: [{
+        year: 2026,
+        contractAmount: 120_000,
+        salesVatAmount: 12_000,
+        totalRevenueAmount: 90_000,
+        supportAmount: 5_000,
+        profitRate: 0.75,
+        confirmed: true,
+      }],
+    });
+
+    expect(draft.financialYears).toEqual([]);
+    expect(draft).toMatchObject({
+      contractAmount: 120_000,
+      salesVatAmount: 12_000,
+      totalRevenueAmount: 90_000,
+      supportAmount: 5_000,
     });
   });
 
@@ -302,6 +331,7 @@ describe('project editor draft mapping', () => {
       paymentExpectedMonths: { contract: '2026-04', interim: '2026-06', final: '2026-10' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
       finalPaymentNote: '잔금은 검수 후 2주 이내',
+      businessManagementGoogleFolderLink: 'https://drive.google.com/drive/folders/project-folder',
       quoteDocument: {
         path: 'orgs/mysc/project-request-documents/u001/quote.pdf',
         name: 'quote.pdf',
@@ -331,6 +361,7 @@ describe('project editor draft mapping', () => {
     ]);
     expect(payload.teamMembers).toBe('김다은 (데이나) / 총괄책임자 / 60% / 실제 참여 / 인건비 2026-04~2026-09, 변민욱 (보람) / 실무책임자 / 40% / 서류상 인력');
     expect(payload.groupwareName).toBe('기후테크');
+    expect(payload.businessManagementGoogleFolderLink).toBe('https://drive.google.com/drive/folders/project-folder');
     expect(payload.settlementSystem).toBe('KOCCA_PMS');
     expect(payload.laborSettlementBasis).toBe('FIXED_AMOUNT');
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
