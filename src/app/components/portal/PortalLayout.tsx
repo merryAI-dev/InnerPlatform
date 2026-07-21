@@ -102,6 +102,7 @@ const NAV_SECTIONS: PortalNavSection[] = [
     title: '사업비관리',
     items: [
       { to: '/portal/bank-statements', icon: FileSpreadsheet, label: '통장내역' },
+      { to: '/portal/budget', icon: BarChart3, label: '예산총괄' },
       { to: '/portal/cashflow', icon: BarChart3, label: '캐시플로(주간)' },
       { to: '/portal/cashflow/sheets-lab', icon: FileSpreadsheet, label: '시트 연동 검토', hidden: true },
     ],
@@ -109,7 +110,6 @@ const NAV_SECTIONS: PortalNavSection[] = [
   {
     title: '프로젝트 배정 및 등록',
     items: [
-      { to: '/portal/project-approvals', icon: ClipboardCheck, label: '프로젝트 등록/승인' },
       { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
       { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
       { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
