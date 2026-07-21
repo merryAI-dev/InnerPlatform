@@ -22,7 +22,6 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('SETTLEMENT_TYPE_LABELS');
     expect(source).toContain('BASIS_LABELS');
     expect(source).toContain('ACCOUNT_TYPE_LABELS');
-    expect(source).toContain('PROJECT_FUND_INPUT_MODE_LABELS');
     expect(source).toContain('PROJECT_CURRENCY_LABELS');
     expect(source).toContain('ContractDocumentPreview');
     expect(source).toContain('draft.contractDocument');

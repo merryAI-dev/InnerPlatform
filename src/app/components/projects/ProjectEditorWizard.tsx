@@ -26,12 +26,9 @@ import {
   BASIS_LABELS,
   LABOR_SETTLEMENT_BASIS_LABELS,
   getProjectContractTypeSelectableOptions,
-  getDefaultSettlementSheetPolicyForFundInputMode,
   getProjectTypeSelectableOptions,
   normalizeProjectContractType,
-  normalizeSettlementSheetPolicy,
   PROJECT_CURRENCY_LABELS,
-  PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_PHASE_LABELS,
   REGISTRATION_V2_BASIS_LABELS,
   PROJECT_STATUS_LABELS,
@@ -45,7 +42,6 @@ import {
   type FileAttachment,
   type ProjectCurrency,
   type ProjectFinancialInputFlags,
-  type ProjectFundInputMode,
   type ProjectPhase,
   type ProjectRequestContractAnalysis,
   type ProjectStatus,
@@ -1106,21 +1102,6 @@ export function ProjectEditorWizard({
     });
   };
 
-  const updateFundInputMode = (modeValue: ProjectFundInputMode) => {
-    setDraft((prev) => {
-      const oldDefault = getDefaultSettlementSheetPolicyForFundInputMode(prev.fundInputMode);
-      const currentPolicy = normalizeSettlementSheetPolicy(prev.settlementSheetPolicy, prev.fundInputMode);
-      const shouldResetPolicy = currentPolicy.preset === oldDefault.preset;
-      return createProjectEditorWizardDraft({
-        ...prev,
-        fundInputMode: modeValue,
-        settlementSheetPolicy: shouldResetPolicy
-          ? getDefaultSettlementSheetPolicyForFundInputMode(modeValue)
-          : currentPolicy,
-      });
-    });
-  };
-
   const addTeamMember = () => {
     setDraft((prev) => ({
       ...prev,
@@ -1988,22 +1969,6 @@ export function ProjectEditorWizard({
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label className="text-xs">자금 입력 방식</Label>
-              <Select value={draft.fundInputMode} onValueChange={(value) => updateFundInputMode(value as ProjectFundInputMode)}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.entries(PROJECT_FUND_INPUT_MODE_LABELS) as [ProjectFundInputMode, string][]).map(([key, value]) => (
-                    <SelectItem key={key} value={key}>{value}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {draft.fundInputMode === 'DIRECT_ENTRY'
-                  ? '정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
-                  : '통장내역 업로드 후 정산 시트로 이어서 입력합니다.'}
-              </p>
-            </div>
           </>
         ) : usesRegistrationV2 ? (
           <div className="lg:col-span-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[12px] text-muted-foreground">
@@ -2583,7 +2548,6 @@ export function ProjectEditorWizard({
                 <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[draft.accountType]} />
                 <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
                 <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
-                <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]} />
               </>
             ) : null}
             {usesRegistrationV2 ? (
