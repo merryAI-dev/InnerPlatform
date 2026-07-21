@@ -31,6 +31,9 @@ const protectedCollections = [
   'weekly_api_audit_exports',
   'projectRequestDrafts',
   'privateEditDrafts',
+  'project_requests',
+  'projectRequests',
+  'projectCodeClaims',
   'cashflowEditLocks',
   'cashflow_edit_locks',
   'cashflow_sheet_mirrors',
@@ -48,8 +51,6 @@ const protectedCollections = [
 ] as const;
 const canonicalRootCollections = [
   'projects',
-  'project_requests',
-  'projectRequests',
   'cashflow_weeks',
   'weekly_submission_status',
   'transactions',
@@ -97,7 +98,13 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
         ...actors.map((actor) => setDoc(doc(db, `orgs/${tenantId}/members/${actor.uid}`), {
           uid: actor.uid,
           role: actor.role,
+          status: 'ACTIVE',
         })),
+        setDoc(doc(db, `orgs/${tenantId}/members/inactive-member`), {
+          uid: 'inactive-member',
+          role: 'admin',
+          status: 'INACTIVE',
+        }),
         setDoc(doc(db, `orgs/${tenantId}/members/self-member`), {
           uid: 'self-member',
           name: 'Self Member',
@@ -165,6 +172,7 @@ describeIfEmulator('BFF-only Firestore collection rules (Firestore emulator)', (
       });
     }
   }
+
 
   for (const collection of canonicalProjectSubcollections) {
     for (const actor of actors.filter(({ role }) => role !== 'viewer')) {

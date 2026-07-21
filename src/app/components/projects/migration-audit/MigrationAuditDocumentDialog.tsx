@@ -1,10 +1,10 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { FileAttachment, ProjectRegistrationOptionalDocumentNotes } from '../../../data/types';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import { getMigrationAuditStatusLabel } from '../../../platform/project-migration-console';
 import { resolveProjectRequestPayload } from '../../../platform/project-change-request';
-import {
-  buildMigrationReviewDossier,
-  resolveMigrationReviewContractDocument,
-} from '../../../platform/project-migration-review-dossier';
+import type { ProjectRequestDocumentKind } from '../../../platform/project-contract-upload';
+import { buildMigrationReviewDossier } from '../../../platform/project-migration-review-dossier';
 import {
   getManagementPlanningReview,
   getManagementPlanningReviewLabel,
@@ -24,12 +24,107 @@ interface MigrationAuditDocumentDialogProps {
   record: MigrationAuditConsoleRecord | null;
   acting: boolean;
   canFinalize: boolean;
-  contractDocumentDownloadURL?: string;
-  contractDocumentError?: string;
+  documentPreviewUrls?: Partial<Record<ProjectRequestDocumentKind, string>>;
+  documentPreviewStates?: Partial<Record<ProjectRequestDocumentKind, {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    error?: string;
+  }>>;
   reviewStage?: 'executive' | 'managementPlanning';
+  onLoadDocumentPreview?: (kind: ProjectRequestDocumentKind) => void | Promise<void>;
   onOpenChange: (open: boolean) => void;
   onApprove: () => void;
   onReject: () => void;
+}
+
+type ReviewDocumentField =
+  | 'contractDocument'
+  | 'customerBusinessRegistrationDocument'
+  | 'quoteDocument'
+  | 'proposalDocument'
+  | 'rfpRequestEvidenceDocument'
+  | 'proposalWordOriginalDocument'
+  | 'proposalPptOriginalDocument'
+  | 'presentationPptOriginalDocument';
+
+type ReviewDocumentDefinition = {
+  kind: ProjectRequestDocumentKind;
+  field: ReviewDocumentField;
+  label: string;
+};
+
+type ReviewDocumentSlotDefinition = {
+  number: number;
+  label: string;
+  kinds: ProjectRequestDocumentKind[];
+  noteField?: keyof ProjectRegistrationOptionalDocumentNotes;
+};
+
+type ReviewDocumentEntry = ReviewDocumentDefinition & {
+  document: FileAttachment;
+};
+
+type ReviewDocumentSlot = ReviewDocumentSlotDefinition & {
+  entries: ReviewDocumentEntry[];
+  note: string;
+  conflict: boolean;
+};
+
+const REVIEW_DOCUMENT_DEFINITIONS: ReviewDocumentDefinition[] = [
+  { kind: 'contract', field: 'contractDocument', label: '계약서 PDF' },
+  { kind: 'customer_business_registration', field: 'customerBusinessRegistrationDocument', label: '고객사 사업자등록증 PDF' },
+  { kind: 'quote', field: 'quoteDocument', label: '견적서 PDF' },
+  { kind: 'proposal', field: 'proposalDocument', label: '제안서 PDF' },
+  { kind: 'rfp_request_evidence', field: 'rfpRequestEvidenceDocument', label: 'RFP/요청 메일 증빙' },
+  { kind: 'proposal_word_original', field: 'proposalWordOriginalDocument', label: '제안서 Word 원본' },
+  { kind: 'proposal_ppt_original', field: 'proposalPptOriginalDocument', label: '제안서 PPT 원본' },
+  { kind: 'presentation_ppt_original', field: 'presentationPptOriginalDocument', label: '발표자료 PPT 원본' },
+];
+
+const REVIEW_DOCUMENT_SLOTS: ReviewDocumentSlotDefinition[] = [
+  { number: 1, label: '계약서 PDF', kinds: ['contract'] },
+  { number: 2, label: '고객사 사업자등록증 PDF', kinds: ['customer_business_registration'] },
+  { number: 3, label: '견적서 PDF', kinds: ['quote'] },
+  { number: 4, label: '제안서 PDF 또는 RFP/요청 메일 증빙', kinds: ['proposal', 'rfp_request_evidence'] },
+  { number: 5, label: '제안서 Word 원본', kinds: ['proposal_word_original'], noteField: 'proposalWordOriginal' },
+  { number: 6, label: '제안서 PPT 원본', kinds: ['proposal_ppt_original'], noteField: 'proposalPptOriginal' },
+  { number: 7, label: '발표자료 PPT 원본', kinds: ['presentation_ppt_original'], noteField: 'presentationPptOriginal' },
+];
+
+function isFileAttachment(value: unknown): value is FileAttachment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const attachment = value as Partial<FileAttachment>;
+  return Boolean(String(attachment.path || attachment.downloadURL || '').trim());
+}
+
+export function buildMigrationReviewDocumentSlots(record: MigrationAuditConsoleRecord): ReviewDocumentSlot[] {
+  const payload = resolveProjectRequestPayload(record.request);
+  const requestNotes = payload?.registrationOptionalDocumentNotes;
+  const notes: Partial<ProjectRegistrationOptionalDocumentNotes> = requestNotes !== undefined
+    ? (requestNotes || {})
+    : (record.project.registrationOptionalDocumentNotes || {});
+  const documentByKind = new Map<ProjectRequestDocumentKind, ReviewDocumentEntry>();
+
+  REVIEW_DOCUMENT_DEFINITIONS.forEach((definition) => {
+    const requestDocument = payload?.[definition.field];
+    const document = requestDocument !== undefined
+      ? requestDocument
+      : record.project[definition.field];
+    if (!isFileAttachment(document)) return;
+    documentByKind.set(definition.kind, { ...definition, document });
+  });
+
+  return REVIEW_DOCUMENT_SLOTS.map((slot) => {
+    const entries = slot.kinds.flatMap((kind) => {
+      const entry = documentByKind.get(kind);
+      return entry ? [entry] : [];
+    });
+    return {
+      ...slot,
+      entries,
+      note: slot.noteField ? String(notes[slot.noteField] || '').trim() : '',
+      conflict: slot.number === 4 && entries.length > 1,
+    };
+  });
 }
 
 function formatDateTime(value?: string) {
@@ -74,18 +169,37 @@ export function MigrationAuditDocumentDialog({
   record,
   acting,
   canFinalize,
-  contractDocumentDownloadURL = '',
-  contractDocumentError = '',
+  documentPreviewUrls = {},
+  documentPreviewStates = {},
   reviewStage = 'executive',
+  onLoadDocumentPreview,
   onOpenChange,
   onApprove,
   onReject,
 }: MigrationAuditDocumentDialogProps) {
+  const documentSlots = useMemo(
+    () => record ? buildMigrationReviewDocumentSlots(record) : [],
+    [record],
+  );
+  const documentEntries = useMemo(
+    () => documentSlots.flatMap((slot) => slot.entries),
+    [documentSlots],
+  );
+  const [selectedDocumentKind, setSelectedDocumentKind] = useState<ProjectRequestDocumentKind>('contract');
+
+  useEffect(() => {
+    if (!open) return;
+    const preferredKind = documentEntries.some((entry) => entry.kind === 'contract')
+      ? 'contract'
+      : documentEntries[0]?.kind;
+    if (preferredKind) setSelectedDocumentKind(preferredKind);
+  }, [documentEntries, open, record?.id]);
+
   if (!record) return null;
 
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const requestPayload = resolveProjectRequestPayload(record.request);
-  const designatedApproverName = record.project.executiveApproverName || requestPayload?.executiveApproverName || '';
+  const designatedApproverName = requestPayload?.executiveApproverName || record.project.executiveApproverName || '';
   const isManagementPlanning = reviewStage === 'managementPlanning';
   const organizationReviewStatus = record.project.executiveReviewStatus;
   const organizationDecisionState = organizationReviewStatus === 'APPROVED'
@@ -109,10 +223,11 @@ export function MigrationAuditDocumentDialog({
     : undefined;
   const managementReviewedByName = latestManagementDecision?.reviewedByName || managementReview.reviewedByName;
   const managementReviewedAt = latestManagementDecision?.reviewedAt || managementReview.reviewedAt;
-  const contractDocument = resolveMigrationReviewContractDocument(record.project, record.request);
-  const contractDocumentUrl = contractDocumentDownloadURL || contractDocument?.downloadURL || '';
-  const attachmentNames = [contractDocument?.name, requestPayload?.quoteDocument?.name, requestPayload?.proposalDocument?.name]
-    .filter((name): name is string => Boolean(name?.trim()));
+  const selectedDocument = documentEntries.find((entry) => entry.kind === selectedDocumentKind) || null;
+  const selectedPreviewUrl = selectedDocument
+    ? documentPreviewUrls[selectedDocument.kind] || selectedDocument.document.downloadURL || ''
+    : '';
+  const selectedPreviewState = selectedDocument ? documentPreviewStates[selectedDocument.kind] : undefined;
   const reviewMessages = dossier.audit.history.filter((entry) => entry.reviewComment !== '-' && entry.reviewComment !== 'PM 신규 등록');
   const managementMessages = managementReview.history.filter((entry) => Boolean(entry.reviewComment?.trim()));
   const requestReviewComment = String(record.request?.reviewComment || '').trim();
@@ -191,9 +306,105 @@ export function MigrationAuditDocumentDialog({
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 내용</h3><dl className="border border-t-0 border-slate-400">
             <DocumentCell label="프로젝트 목적" value={dossier.notes.projectPurpose} /><DocumentCell label="상세 설명" value={dossier.notes.description} /><DocumentCell label="참여 조건" value={dossier.notes.participantCondition} /><DocumentCell label="비고" value={dossier.notes.note} />
           </dl></section>
-          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">첨부자료</h3>
-            <div className="border border-t-0 border-slate-400 px-4 py-3 text-[12px] leading-6 text-slate-800">{attachmentNames.length > 0 ? attachmentNames.join(' · ') : '등록된 첨부자료가 없습니다.'}{contractDocumentError ? <p className="mt-1 text-[11px] text-rose-700">{contractDocumentError}</p> : null}</div>
-            <ContractDocumentPreview document={contractDocument ? { ...contractDocument, downloadURL: contractDocumentUrl } : null} title="계약서 PDF 원문" description="등록 요청에 첨부된 계약서 원문을 문서 안에서 확인합니다." className="rounded-none border-t-0 border-slate-400" />
+          <section className="mt-6">
+            <h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 제출서류 7종</h3>
+            <div className="border border-t-0 border-slate-400" data-testid="migration-review-document-slots">
+              <div className="hidden grid-cols-[48px_220px_minmax(0,1fr)_108px] border-b border-slate-400 bg-slate-100 text-[11px] font-semibold text-slate-700 md:grid">
+                <div className="border-r border-slate-400 px-2 py-2 text-center">번호</div>
+                <div className="border-r border-slate-400 px-3 py-2">구분</div>
+                <div className="border-r border-slate-400 px-3 py-2">제출 파일 / 미첨부 사유</div>
+                <div className="px-3 py-2 text-center">원문</div>
+              </div>
+              {documentSlots.map((slot) => (
+                <div
+                  key={slot.number}
+                  className="grid border-b border-slate-300 last:border-b-0 md:grid-cols-[48px_220px_minmax(0,1fr)_108px]"
+                  data-testid={`migration-review-document-slot-${slot.number}`}
+                >
+                  <div className="flex items-center justify-center border-b border-slate-300 bg-slate-50 px-2 py-3 text-[11px] font-semibold text-slate-800 md:border-r md:border-b-0 md:border-slate-400">
+                    {slot.number}
+                  </div>
+                  <div className="flex items-center border-b border-slate-300 px-3 py-3 text-[11px] font-semibold leading-5 text-slate-800 md:border-r md:border-b-0 md:border-slate-400">
+                    {slot.label}
+                  </div>
+                  <div className="min-w-0 border-b border-slate-300 px-3 py-3 text-[12px] leading-5 text-slate-800 md:border-r md:border-b-0 md:border-slate-400">
+                    {slot.entries.length > 0 ? (
+                      <div className="space-y-2">
+                        {slot.entries.map((entry) => {
+                          const state = documentPreviewStates[entry.kind];
+                          return (
+                            <div key={entry.kind} data-document-kind={entry.kind}>
+                              <p className="break-all font-medium">{entry.document.name || entry.label}</p>
+                              {slot.entries.length > 1 ? <p className="text-[10px] text-slate-500">{entry.label}</p> : null}
+                              {state?.status === 'error' ? (
+                                <p className="mt-1 text-[10px] text-rose-700">{state.error || '원문을 불러오지 못했습니다.'}</p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                        {slot.conflict ? (
+                          <p className="border-t border-amber-300 pt-2 text-[10px] font-semibold text-amber-800">
+                            제출 규칙 불일치 · 제안서와 RFP/요청 증빙이 함께 등록되었습니다. 두 원문을 모두 확인해 주세요.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : slot.note ? (
+                      <p><span className="font-semibold text-slate-600">미첨부 사유</span> · {slot.note}</p>
+                    ) : (
+                      <p className="text-rose-700">미제출</p>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-center px-3 py-3">
+                    {slot.entries.length > 0 ? (
+                      <div className="flex flex-wrap justify-center gap-1.5">
+                        {slot.entries.map((entry) => {
+                          const previewUrl = documentPreviewUrls[entry.kind] || entry.document.downloadURL || '';
+                          const state = documentPreviewStates[entry.kind];
+                          return (
+                            <Button
+                              key={entry.kind}
+                              type="button"
+                              variant={selectedDocumentKind === entry.kind ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-8 rounded-none px-2.5 text-[11px]"
+                              disabled={state?.status === 'loading'}
+                              onClick={() => {
+                                setSelectedDocumentKind(entry.kind);
+                                if (!previewUrl) void onLoadDocumentPreview?.(entry.kind);
+                              }}
+                            >
+                              {state?.status === 'loading' ? '불러오는 중' : state?.status === 'error' ? '다시 열기' : '원문 보기'}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">해당 없음</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {selectedDocument ? (
+              <ContractDocumentPreview
+                document={{ ...selectedDocument.document, downloadURL: selectedPreviewUrl }}
+                title={`${selectedDocument.label} 원문`}
+                description={selectedPreviewState?.status === 'loading'
+                  ? '제출 원문을 안전하게 불러오는 중입니다.'
+                  : selectedPreviewState?.status === 'error'
+                    ? (selectedPreviewState.error || '원문을 불러오지 못했습니다. 다시 열기를 시도해 주세요.')
+                    : 'PDF 미리보기가 비어 있으면 새 탭에서 원문을 확인하고, Word·PPT·메일 원본도 새 탭에서 내려받아 대조합니다.'}
+                descriptionClassName={selectedPreviewState?.status === 'error' ? 'text-rose-700' : 'text-slate-600'}
+                className="rounded-none border-t-0 border-slate-400"
+                privateDraftAttachment={!selectedPreviewUrl}
+                previewState={selectedPreviewState}
+                onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview(selectedDocument.kind) : undefined}
+              />
+            ) : (
+              <div className="border border-t-0 border-slate-400 bg-slate-50 px-4 py-8 text-center text-[12px] text-slate-500">
+                검토할 수 있는 제출 원문이 없습니다.
+              </div>
+            )}
           </section>
 
           {isActionPending && canFinalize ? <footer className="mt-7 flex justify-end gap-2 border-t border-slate-300 pt-4"><Button type="button" variant="outline" className="rounded-none border-slate-500" onClick={onReject} disabled={acting}>반려</Button><Button type="button" className="rounded-none bg-[#174a7c] hover:bg-[#103a63]" onClick={onApprove} disabled={acting}>{isManagementPlanning ? '합의' : '승인'}</Button></footer> : null}

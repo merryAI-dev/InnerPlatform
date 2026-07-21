@@ -1,5 +1,9 @@
 import { createFirestoreDb, resolveProjectId } from './firestore.mjs';
-import { processOutboxBatch } from './outbox.mjs';
+import { DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE, processOutboxBatch } from './outbox.mjs';
+import {
+  createDraftAttachmentCleanupOutboxHandler,
+  createProjectRequestContractStorageService,
+} from './project-request-contract-storage.mjs';
 import {
   assertBffStandaloneWorkerExecutionAllowed,
   parseBffAllowedOrigins,
@@ -12,6 +16,9 @@ assertBffStandaloneWorkerExecutionAllowed(resolveBffRuntimeSafetyConfig({
   allowedOrigins: parseBffAllowedOrigins(process.env.BFF_ALLOWED_ORIGINS),
 }), 'outbox worker');
 const db = createFirestoreDb({ projectId });
+const draftAttachmentCleanupOutboxHandler = createDraftAttachmentCleanupOutboxHandler({
+  draftStorageService: createProjectRequestContractStorageService({ projectId }),
+});
 
 const batchSize = Number.parseInt(process.env.BFF_OUTBOX_BATCH || '50', 10);
 const maxAttempts = Number.parseInt(process.env.BFF_OUTBOX_MAX_ATTEMPTS || '8', 10);
@@ -22,6 +29,9 @@ async function runOnce() {
   const result = await processOutboxBatch(db, {
     limit: batchSize,
     maxAttempts,
+    eventHandlers: {
+      [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
+    },
   });
   // eslint-disable-next-line no-console
   console.log(`[bff-outbox] project=${projectId} processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed} dead=${result.dead}`);

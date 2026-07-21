@@ -60,12 +60,28 @@ import { normalizeProjectDepartment, resolveProjectCic } from './project-cic';
 
 export type ProjectEditorMode = 'portal-register' | 'portal-edit' | 'admin';
 
+function isRealIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
+export function hasInvalidProjectContractPeriod(startValue: unknown, endValue: unknown) {
+  const start = String(startValue || '').trim();
+  const end = String(endValue || '').trim();
+  return !isRealIsoDate(start) || !isRealIsoDate(end) || start > end;
+}
+
 export interface ProjectEditorDraft {
   name: string;
   officialContractName: string;
   type: ProjectType;
   description: string;
   clientOrg: string;
+  businessManagementGoogleFolderLink: string;
   department: string;
   projectPurpose: string;
   status: ProjectStatus;
@@ -145,6 +161,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   type: 'D1',
   description: '',
   clientOrg: '',
+  businessManagementGoogleFolderLink: '',
   department: '',
   projectPurpose: '',
   status: 'CONTRACT_PENDING',
@@ -245,6 +262,11 @@ function dateYear(value: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function projectFinancialYearProfitRate(contractAmount: number, totalRevenueAmount: number): number {
+  if (contractAmount <= 0) return 0;
+  return Math.min(1, totalRevenueAmount / contractAmount);
+}
+
 function projectFinancialYears(
   value: unknown,
   contractStart: unknown,
@@ -259,13 +281,15 @@ function projectFinancialYears(
     const source = row as Partial<ProjectFinancialYear>;
     const year = Number(source.year);
     if (!Number.isSafeInteger(year) || year < 2000 || year > 2099 || normalized.has(year)) continue;
+    const contractAmount = nonNegativeAmount(source.contractAmount);
+    const totalRevenueAmount = nonNegativeAmount(source.totalRevenueAmount);
     normalized.set(year, {
       year,
-      contractAmount: nonNegativeAmount(source.contractAmount),
+      contractAmount,
       salesVatAmount: nonNegativeAmount(source.salesVatAmount),
-      totalRevenueAmount: nonNegativeAmount(source.totalRevenueAmount),
+      totalRevenueAmount,
       supportAmount: nonNegativeAmount(source.supportAmount),
-      profitRate: Math.min(1, Math.max(0, Number(source.profitRate) || 0)),
+      profitRate: projectFinancialYearProfitRate(contractAmount, totalRevenueAmount),
       confirmed: source.confirmed === true,
     });
   }
@@ -273,6 +297,7 @@ function projectFinancialYears(
   const startYear = dateYear(contractStart);
   const endYear = dateYear(contractEnd);
   if (!startYear || !endYear || startYear > endYear || endYear - startYear > 20) return [];
+  if (startYear === endYear) return [];
   return Array.from({ length: endYear - startYear + 1 }, (_, offset) => {
     const year = startYear + offset;
     return normalized.get(year) || {
@@ -281,7 +306,12 @@ function projectFinancialYears(
       salesVatAmount: offset === 0 ? nonNegativeAmount(totals.salesVatAmount) : 0,
       totalRevenueAmount: offset === 0 ? nonNegativeAmount(totals.totalRevenueAmount) : 0,
       supportAmount: offset === 0 ? nonNegativeAmount(totals.supportAmount) : 0,
-      profitRate: offset === 0 ? Math.min(1, Math.max(0, Number(totals.profitRate) || 0)) : 0,
+      profitRate: offset === 0
+        ? projectFinancialYearProfitRate(
+          nonNegativeAmount(totals.contractAmount),
+          nonNegativeAmount(totals.totalRevenueAmount),
+        )
+        : 0,
       confirmed: false,
     };
   });
@@ -408,6 +438,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'name', label: '프로젝트명', before: (project) => normalizeChangeValue(project.name), after: (draft) => normalizeChangeValue(draft.name) },
   { key: 'officialContractName', label: '공식 계약명', before: (project) => normalizeChangeValue(project.officialContractName), after: (draft) => normalizeChangeValue(draft.officialContractName) },
   { key: 'clientOrg', label: '계약 대상', before: (project) => normalizeChangeValue(project.clientOrg), after: (draft) => normalizeChangeValue(draft.clientOrg) },
+  { key: 'businessManagementGoogleFolderLink', label: '사업관리 구글폴더링크', before: (project) => normalizeChangeValue(project.businessManagementGoogleFolderLink), after: (draft) => normalizeChangeValue(draft.businessManagementGoogleFolderLink) },
   { key: 'department', label: '담당조직(CIC)', before: (project) => normalizeChangeValue(project.department), after: (draft) => normalizeChangeValue(draft.department) },
   { key: 'type', label: '프로젝트 유형', before: (project) => PROJECT_TYPE_LABELS[normalizeProjectType(project.type)] || '-', after: (draft) => PROJECT_TYPE_LABELS[normalizeProjectType(draft.type)] || '-' },
   { key: 'contractPeriod', label: '계약 기간', before: (project) => formatDateRangeForChange(project.contractStart, project.contractEnd), after: (draft) => formatDateRangeForChange(draft.contractStart, draft.contractEnd) },
@@ -424,7 +455,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
   { key: 'executiveApproverName', label: '지정 결재자', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
-  { key: 'teamMembersDetailed', label: '서류상 참여인력', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
+  { key: 'teamMembersDetailed', label: '참여인력 (서류상·실제)', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
   { key: 'paymentExpectedMonths', label: '입금 예상월', before: (project) => formatPaymentExpectedMonthsForChange(project.paymentExpectedMonths), after: (draft) => formatPaymentExpectedMonthsForChange(draft.paymentExpectedMonths) },
   { key: 'advanceInterimBelow70Reason', label: '선금·중도금 70% 미만 사유', before: (project) => normalizeChangeValue(project.advanceInterimBelow70Reason), after: (draft) => normalizeChangeValue(draft.advanceInterimBelow70Reason) },
@@ -440,7 +471,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'proposalPptOriginalDocument', label: '제안서 PPT 원본', before: (project) => normalizeChangeValue(project.proposalPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalPptOriginalDocument?.name) },
   { key: 'presentationPptOriginalDocument', label: '발표자료 PPT 원본', before: (project) => normalizeChangeValue(project.presentationPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.presentationPptOriginalDocument?.name) },
   { key: 'rfpRequestEvidenceDocument', label: 'RFP 또는 요청 메일 증빙', before: (project) => normalizeChangeValue(project.rfpRequestEvidenceDocument?.name), after: (draft) => normalizeChangeValue(draft.rfpRequestEvidenceDocument?.name) },
-  { key: 'customerBusinessRegistrationDocument', label: '발주처 사업자등록증 PDF', before: (project) => normalizeChangeValue(project.customerBusinessRegistrationDocument?.name), after: (draft) => normalizeChangeValue(draft.customerBusinessRegistrationDocument?.name) },
+  { key: 'customerBusinessRegistrationDocument', label: '고객사 사업자등록증 PDF', before: (project) => normalizeChangeValue(project.customerBusinessRegistrationDocument?.name), after: (draft) => normalizeChangeValue(draft.customerBusinessRegistrationDocument?.name) },
   { key: 'performanceCertificateDocument', label: '수행확인서 PDF', before: (project) => normalizeChangeValue(project.performanceCertificateDocument?.name), after: (draft) => normalizeChangeValue(draft.performanceCertificateDocument?.name) },
   { key: 'taxInvoiceDocument', label: '세금계산서 PDF', before: (project) => normalizeChangeValue(project.taxInvoiceDocument?.name), after: (draft) => normalizeChangeValue(draft.taxInvoiceDocument?.name) },
   { key: 'finalSettlementReportDocument', label: '최종 정산보고서 PDF', before: (project) => normalizeChangeValue(project.finalSettlementReportDocument?.name), after: (draft) => normalizeChangeValue(draft.finalSettlementReportDocument?.name) },
@@ -448,6 +479,9 @@ const REVIEW_CHANGE_FIELDS: Array<{
 
 export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> = {}): ProjectEditorDraft {
   const version = registrationRequirementsVersion(overrides.registrationRequirementsVersion);
+  const settlementType = normalizeSettlementType(overrides.settlementType ?? DEFAULT_DRAFT.settlementType);
+  const basis = normalizeBasis(overrides.basis ?? DEFAULT_DRAFT.basis);
+  const settlementDetailsEnabled = version === 2 ? basis !== 'NONE' : settlementType !== 'NONE';
   const totals = {
     contractAmount: nonNegativeAmount(overrides.contractAmount ?? DEFAULT_DRAFT.contractAmount),
     salesVatAmount: nonNegativeAmount(overrides.salesVatAmount ?? DEFAULT_DRAFT.salesVatAmount),
@@ -470,13 +504,17 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     type: normalizeProjectType(overrides.type ?? DEFAULT_DRAFT.type),
     status: normalizeProjectStatus(overrides.status ?? DEFAULT_DRAFT.status),
     phase: normalizeProjectPhase(overrides.phase ?? DEFAULT_DRAFT.phase),
-    settlementType: normalizeSettlementType(overrides.settlementType ?? DEFAULT_DRAFT.settlementType),
-    basis: normalizeBasis(overrides.basis ?? DEFAULT_DRAFT.basis),
-    accountType: normalizeAccountType(overrides.accountType ?? DEFAULT_DRAFT.accountType),
-    settlementSystem: normalizeSettlementSystemCode(overrides.settlementSystem ?? DEFAULT_DRAFT.settlementSystem),
-    laborSettlementBasis: normalizeLaborSettlementBasis(
-      overrides.laborSettlementBasis ?? DEFAULT_DRAFT.laborSettlementBasis,
-    ),
+    settlementType,
+    basis: version === 2 || settlementDetailsEnabled ? basis : 'NONE',
+    accountType: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeAccountType(overrides.accountType ?? DEFAULT_DRAFT.accountType),
+    settlementSystem: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeSettlementSystemCode(overrides.settlementSystem ?? DEFAULT_DRAFT.settlementSystem),
+    laborSettlementBasis: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeLaborSettlementBasis(overrides.laborSettlementBasis ?? DEFAULT_DRAFT.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(overrides.fundInputMode ?? DEFAULT_DRAFT.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(
       overrides.settlementSheetPolicy ?? DEFAULT_DRAFT.settlementSheetPolicy,
@@ -557,6 +595,9 @@ export function buildProjectEditorDraftFromProject(
     type: normalizeProjectType(normalizedProject.type || payload?.type),
     description: text(normalizedProject.description || payload?.description),
     clientOrg: text(normalizedProject.clientOrg || payload?.clientOrg),
+    businessManagementGoogleFolderLink: text(
+      normalizedProject.businessManagementGoogleFolderLink || payload?.businessManagementGoogleFolderLink,
+    ),
     department: normalizeProjectDepartment(
       normalizedProject.department || normalizedProject.cic || payload?.department,
     ),
@@ -658,6 +699,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     phase: normalizeProjectPhase(draft.phase),
     description: text(draft.description),
     clientOrg: text(draft.clientOrg),
+    businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
     department: normalizeProjectDepartment(draft.department),
     groupwareName: text(draft.name),
     currency: normalizeProjectCurrency(draft.currency),
@@ -795,6 +837,7 @@ export function buildProjectEditorProjectPatch(
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
+    businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
     groupwareName: text(draft.name),
     participantCondition: text(draft.participantCondition),
     note: text(draft.note),

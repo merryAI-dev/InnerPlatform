@@ -55,7 +55,7 @@ function harness() {
         outbox: { id: 'outbox-a', status: 'PENDING' },
       } }),
     patch: vi.fn(async () => ({ data: { draft: { ...DRAFT, draftRevision: 3 } } })),
-    request: vi.fn(),
+    request: vi.fn(async () => ({ data: { draft: { ...DRAFT, draftRevision: 5 } } })),
   } as unknown as ProjectRegistrationDraftApiClient;
   const client = createProjectRegistrationDraftClient({
     tenantId: 'mysc',
@@ -83,7 +83,7 @@ describe('project registration draft client', () => {
     }));
   });
 
-  it('saves, uploads, and submits with the exact revision and lease fence', async () => {
+  it('saves, uploads, removes, and submits with the exact revision and lease fence', async () => {
     const { api, client } = harness();
     const ownership = { leaseId: 'lease-a', fence: 3 };
     await client.create({ payload: {}, stepIndex: 0 });
@@ -93,12 +93,16 @@ describe('project registration draft client', () => {
       documentKind: 'contract',
       file: {
         name: 'contract.pdf',
-        type: 'application/pdf',
+        type: 'application/octet-stream',
         size: 3,
         arrayBuffer: async () => new Uint8Array([0x70, 0x64, 0x66]).buffer,
       },
     });
-    const submitted = await client.submit('draft-a', ownership, { expectedDraftRevision: 4 });
+    const removed = await client.removeAttachment('draft-a', ownership, {
+      expectedDraftRevision: 4,
+      documentKind: 'contract',
+    });
+    const submitted = await client.submit('draft-a', ownership, { expectedDraftRevision: 5 });
 
     const headers = {
       'x-edit-session-id': '11111111-1111-4111-8111-111111111111',
@@ -111,13 +115,26 @@ describe('project registration draft client', () => {
     }));
     expect(api.post).toHaveBeenNthCalledWith(2, '/api/v1/project-registration-drafts/draft-a/attachments', expect.objectContaining({
       headers,
-      body: expect.objectContaining({ contentBase64: 'cGRm', fileSize: 3 }),
+      body: expect.objectContaining({
+        contentBase64: 'cGRm',
+        fileSize: 3,
+        mimeType: 'application/pdf',
+      }),
     }));
     expect(api.post).toHaveBeenNthCalledWith(3, '/api/v1/project-registration-drafts/draft-a/submit', expect.objectContaining({
       headers,
-      body: { expectedDraftRevision: 4 },
+      body: { expectedDraftRevision: 5 },
     }));
+    expect(api.request).toHaveBeenCalledWith(
+      '/api/v1/project-registration-drafts/draft-a/attachments/contract',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers,
+        body: { expectedDraftRevision: 4 },
+      }),
+    );
     expect(uploaded.attachment.path).toContain('/draft-a/');
+    expect(removed.draft.draftRevision).toBe(5);
     expect(submitted).toMatchObject({ status: 'SUBMITTED', projectId: 'project-a' });
   });
 

@@ -11,6 +11,11 @@ describe('project-request-contract-ai', () => {
     expect(sanitizeProjectName('뷰티풀 커넥트 운영 계약서')).toBe('뷰티풀커넥트');
   });
 
+  it('does not truncate a suggested project name to ten characters', () => {
+    expect(sanitizeProjectName('2026 지역사회 문제해결 프로젝트 운영 계약서'))
+      .toBe('2026지역사회문제해결프로젝트');
+  });
+
   it('strips document form words from official contract name', () => {
     expect(sanitizeOfficialContractName('뷰티풀 커넥트 운영 협약서')).toBe('뷰티풀 커넥트 운영');
     expect(sanitizeOfficialContractName('청년 창업 지원 사업 계약서 최종본')).toBe('청년 창업 지원 사업');

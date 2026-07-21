@@ -251,6 +251,28 @@ describe('firestore rules policy alignment', () => {
     );
   });
 
+  it('keeps both project request collections behind BFF-only Firestore rules', () => {
+    const catchallExclusionRule = firestoreRulesText.match(
+      /function isCatchallExcludedCollection\(collection\) \{[\s\S]*?\n    \}/,
+    )?.[0] || '';
+    for (const collection of ['project_requests', 'projectRequests']) {
+      expect(catchallExclusionRule).toContain(`collection in ['${collection}']`);
+      expect(firestoreRulesText).toMatch(
+        new RegExp(`match /orgs/\\{orgId\\}/${collection}/\\{requestId\\} \\{\\s*allow read, write: if false;\\s*\\}`),
+      );
+    }
+  });
+
+  it('keeps project code uniqueness claims behind BFF-only Firestore rules', () => {
+    const catchallExclusionRule = firestoreRulesText.match(
+      /function isCatchallExcludedCollection\(collection\) \{[\s\S]*?\n    \}/,
+    )?.[0] || '';
+    expect(catchallExclusionRule).toContain("collection in ['projectCodeClaims']");
+    expect(firestoreRulesText).toMatch(
+      /match \/orgs\/\{orgId\}\/projectCodeClaims\/\{claimId\} \{\s*allow read, write: if false;\s*\}/,
+    );
+  });
+
   it('keeps edit lease secrets behind BFF-only Firestore rules', () => {
     expect(firestoreRulesText).toContain("|| collection in ['editLeases']");
     expect(firestoreRulesText).toMatch(

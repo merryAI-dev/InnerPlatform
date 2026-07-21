@@ -73,14 +73,60 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       status: 'IN_PROGRESS', phase: 'CONFIRMED', description: 'Before', clientOrg: 'Client',
       department: 'AXR', currency: 'KRW', contractAmount: 100000, salesVatAmount: 10000,
       totalRevenueAmount: 40000, supportAmount: 0, financialInputFlags: { contractAmount: true },
+      registrationRequirementsVersion: 2,
+      financialYears: [{
+        year: 2026,
+        contractAmount: 100000,
+        salesVatAmount: 10000,
+        totalRevenueAmount: 40000,
+        supportAmount: 0,
+        profitRate: 0.4,
+        confirmed: true,
+      }],
+      registrationConfirmations: {
+        laborIncludesFourInsurance: true,
+        laborIncludesRetirementPay: true,
+        customerSettlementBasisConfirmed: true,
+        modusignContractUsed: true,
+        originalContractSubmitted: null,
+      },
+      registrationOptionalDocumentNotes: {
+        proposalWordOriginal: '고객사 미제공',
+        proposalPptOriginal: '해당 없음',
+        presentationPptOriginal: '해당 없음',
+      },
       contractStart: '2026-07-01', contractEnd: '2026-12-31', contractType: '계약서(날인)',
       settlementType: 'TYPE1', basis: '공급가액', accountType: 'OPERATING', fundInputMode: 'BANK_UPLOAD',
       paymentPlan: { contract: 100000, interim: 0, final: 0 }, paymentPlanDesc: '선금 100%',
+      paymentExpectedMonths: { contract: '2026-07', interim: '', final: '' },
+      advanceInterimBelow70Reason: '',
       settlementGuide: '', finalPaymentNote: '', projectPurpose: 'Purpose',
       registeredById: 'actor-a', registeredByName: 'actor-a', managerId: 'actor-a', managerName: 'actor-a',
       executiveApproverId: 'executive-a', executiveApproverName: 'Executive A', executiveApproverEmail: 'executive-a@example.com',
-      teamName: 'AXR', teamMembers: '', teamMembersDetailed: [], participantCondition: '', note: '',
-      contractDocument: null, quoteDocument: null, proposalDocument: null, contractAnalysis: null,
+      teamName: 'AXR', teamMembers: '', teamMembersDetailed: [{
+        memberName: 'actor-a', memberNickname: 'Actor', role: '운영매니저',
+        participationRate: 100, isDocumentOnly: false,
+      }, {
+        memberName: 'Executive A', memberNickname: 'Executive', role: '사업 최종 책임자',
+        participationRate: 0, isDocumentOnly: false,
+      }], participantCondition: '', note: '',
+      contractDocument: {
+        path: `orgs/${tenantId}/project-registration-documents/project-a/contract.pdf`,
+      },
+      customerBusinessRegistrationDocument: {
+        path: `orgs/${tenantId}/project-registration-documents/project-a/customer-business-registration.pdf`,
+      },
+      quoteDocument: {
+        path: `orgs/${tenantId}/project-registration-documents/project-a/quote.pdf`,
+      },
+      proposalDocument: {
+        path: `orgs/${tenantId}/project-registration-documents/project-a/proposal.pdf`,
+      },
+      proposalWordOriginalDocument: null,
+      proposalPptOriginalDocument: null,
+      presentationPptOriginalDocument: null,
+      rfpRequestEvidenceDocument: null,
+      contractAnalysis: null,
       ...overrides,
     };
   }
@@ -122,10 +168,10 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     vi.clearAllMocks();
   }
 
-  async function acquire() {
+  async function acquire(idempotencyKey = 'lease-acquire-a') {
     return api
       .post('/api/v1/edit-leases/project-info/project-a/acquire')
-      .set({ ...actorHeaders(), 'x-edit-session-id': 'session-a', 'idempotency-key': 'lease-acquire-a' })
+      .set({ ...actorHeaders(), 'x-edit-session-id': 'session-a', 'idempotency-key': idempotencyKey })
       .send({});
   }
 
@@ -171,12 +217,27 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(project.data()).toMatchObject({
       name: 'Project A',
       version: 4,
-      executiveReviewStatus: 'APPROVED',
-      executiveReviewedAt: '2026-07-01T09:00:00.000Z',
-      executiveReviewedById: 'organization-head',
-      executiveReviewedByName: '조직장',
-      executiveReviewComment: '기존 승인 메모',
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+      executiveReviewComment: null,
     });
+    expect(project.data()?.executiveReviewHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'APPROVED',
+        reviewedAt: '2026-07-01T09:00:00.000Z',
+        reviewedById: 'organization-head',
+        reviewedByName: '조직장',
+        reviewComment: '기존 승인 메모',
+      }),
+      expect.objectContaining({
+        status: 'PENDING',
+        previousStatus: 'APPROVED',
+        reviewedAt: '2026-07-12T00:00:00.000Z',
+        reviewedById: 'actor-a',
+      }),
+    ]));
     expect(changeRequest.data()).toMatchObject({ status: 'PENDING', proposedSnapshot: { name: 'Private name' } });
     expect((await db.doc(`orgs/${tenantId}/projectRequests/change-project-a`).get()).exists).toBe(false);
     expect(drafts.docs[0].data()).not.toHaveProperty('payload');
@@ -216,6 +277,57 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(relocated).toHaveLength(1);
     expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).data())
       .toMatchObject({ proposedSnapshot: { contractDocument: { path: relocated[0] } } });
+  });
+
+  it('publishes inherited private attachments from the newest submission when the older outbox event is stale', async () => {
+    const firstLease = await acquire('lease-acquire-race-v1');
+    const firstHeaders = mutationHeaders(firstLease.body, 'draft-open-race-v1');
+    const firstDraft = await api.post('/api/v1/project-info-drafts/project-a/open').set(firstHeaders).send({});
+    const uploaded = await api.post('/api/v1/project-info-drafts/project-a/attachments')
+      .set({ ...firstHeaders, 'idempotency-key': 'draft-upload-race-v1' })
+      .send({
+        expectedDraftRevision: firstDraft.body.draft.draftRevision,
+        documentKind: 'contract', fileName: 'race-contract.pdf', mimeType: 'application/pdf',
+        fileSize: VALID_PDF.byteLength, contentBase64: VALID_PDF.toString('base64'),
+      });
+    expect(uploaded.status).toBe(200);
+    const firstSubmit = await api.post('/api/v1/project-info-drafts/project-a/submit')
+      .set({ ...firstHeaders, 'idempotency-key': 'draft-submit-race-v1' })
+      .send({ expectedDraftRevision: 1, expectedVersion: 3 });
+    expect(firstSubmit.status).toBe(200);
+
+    const secondLease = await acquire('lease-acquire-race-v2');
+    expect(secondLease.status).toBe(200);
+    const secondHeaders = mutationHeaders(secondLease.body, 'draft-open-race-v2');
+    const secondDraft = await api.post('/api/v1/project-info-drafts/project-a/open').set(secondHeaders).send({});
+    expect(secondDraft.status).toBe(200);
+    const secondSubmit = await api.post('/api/v1/project-info-drafts/project-a/submit')
+      .set({ ...secondHeaders, 'idempotency-key': 'draft-submit-race-v2' })
+      .send({ expectedDraftRevision: 0, expectedVersion: 4 });
+    expect(secondSubmit.status).toBe(200);
+
+    const secondOutbox = await db.doc('outbox/project-info-outbox-2').get();
+    expect(secondOutbox.data()?.payload?.attachmentRefs).toEqual([
+      expect.objectContaining({
+        documentKind: 'contract',
+        path: uploaded.body.attachment.path,
+      }),
+    ]);
+    const worker = await api.post('/api/internal/workers/outbox/run')
+      .set({ 'x-worker-secret': 'project-info-worker-secret' })
+      .send({ limit: 10 });
+
+    expect(worker.status).toBe(200);
+    expect(worker.body).toMatchObject({ succeeded: 2, failed: 0 });
+    expect(storage.relocateDraftAttachments).toHaveBeenCalledOnce();
+    expect(relocated).toHaveLength(1);
+    expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).data())
+      .toMatchObject({
+        requestVersion: 2,
+        submittedOutboxId: 'project-info-outbox-2',
+        proposedSnapshot: { contractDocument: { path: relocated[0] } },
+        attachmentsPublishedAt: expect.any(String),
+      });
   });
 
   it('lets the persisted project owner acquire without a duplicated member assignment', async () => {

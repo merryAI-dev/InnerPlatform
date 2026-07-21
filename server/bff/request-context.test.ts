@@ -40,4 +40,30 @@ describe('resolveApiRequestContext', () => {
     expect(context.actorRole).toBe('admin');
     expect(context.actorEmail).toBe('member@mysc.co.kr');
   });
+
+  it('uses the persisted member name when the firebase token has no display name', async () => {
+    const req = createReq({
+      authorization: 'Bearer token',
+      'x-tenant-id': 'mysc',
+      'x-actor-id': 'u-member',
+      'idempotency-key': 'idem-request-context-name',
+    });
+
+    const context = await resolveApiRequestContext(req as any, {
+      authMode: 'firebase_required',
+      verifyToken: vi.fn(async () => ({
+        uid: 'u-member',
+        tenantId: 'mysc',
+        role: 'viewer',
+        email: 'member@mysc.co.kr',
+      })),
+      resolveMemberIdentity: vi.fn(async () => ({
+        role: 'viewer',
+        email: 'member@mysc.co.kr',
+        name: '인증된 조직장 A',
+      })),
+    });
+
+    expect(context.actorName).toBe('인증된 조직장 A');
+  });
 });

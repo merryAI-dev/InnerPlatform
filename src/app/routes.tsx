@@ -47,6 +47,7 @@ const BoardFeedPage = lazyRoute(() => import('./components/board/BoardFeedPage')
 const BoardPostPage = lazyRoute(() => import('./components/board/BoardPostPage'), 'BoardPostPage');
 const ProjectListPage = lazyRoute(() => import('./components/projects/ProjectListPage'), 'ProjectListPage');
 const ProjectMigrationAuditPage = lazyRoute(() => import('./components/projects/ProjectMigrationAuditPage'), 'ProjectMigrationAuditPage');
+const ProjectAssigneeApprovalPage = lazyRoute(() => import('./components/projects/ProjectMigrationAuditPage'), 'ProjectAssigneeApprovalPage');
 const ProjectCodeIssuancePage = lazyRoute(() => import('./components/projects/ProjectCodeIssuancePage'), 'ProjectCodeIssuancePage');
 const ProjectDetailPage = lazyRoute(() => import('./components/projects/ProjectDetailPage'), 'ProjectDetailPage');
 const ProjectWizardPage = lazyRoute(() => import('./components/projects/ProjectWizardPage'), 'ProjectWizardPage');
@@ -202,6 +203,7 @@ export const router = createBrowserRouter([
       { path: 'bank-statements', element: <S C={PortalBankStatementPage} /> },
       { path: 'personnel', element: <S C={PortalPersonnel} /> },
       { path: 'change-requests', element: <S C={PortalChangeRequests} /> },
+      { path: 'project-approvals', element: <S C={ProjectAssigneeApprovalPage} /> },
       { path: 'register-project', element: <S C={PortalProjectRegister} /> },
       { path: 'register-project/:draftId', element: <S C={PortalProjectRegister} /> },
       { path: 'edit-project', element: <S C={PortalProjectEdit} /> },

@@ -49,13 +49,13 @@ export function resolveProjectDocumentMimeType(
   kind: ProjectRequestDocumentKind,
   file: Pick<File, 'name' | 'type'>,
 ): string {
-  if (file.type.trim()) return file.type.trim().toLowerCase();
   const name = file.name.trim().toLowerCase();
   if (name.endsWith('.docx')) return DOCX_MIME;
   if (name.endsWith('.pptx')) return PPTX_MIME;
   if (name.endsWith('.eml')) return 'message/rfc822';
   if (name.endsWith('.msg')) return 'application/vnd.ms-outlook';
-  return 'application/pdf';
+  if (name.endsWith('.pdf') || PDF_ONLY_KINDS.has(kind)) return 'application/pdf';
+  return file.type.trim().toLowerCase() || 'application/octet-stream';
 }
 
 function readText(value: unknown): string {

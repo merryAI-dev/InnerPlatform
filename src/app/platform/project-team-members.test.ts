@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatProjectTeamMembersSummary,
+  hasInvalidProjectTeamMemberLaborPeriod,
   hasIncompleteProjectTeamMembers,
+  hasInvalidProjectSettlementSupportMember,
+  hasProjectFinalResponsibleMember,
+  hasProjectOperatingManager,
   normalizeProjectTeamMemberDraftRows,
   normalizeProjectTeamMembers,
   parseProjectTeamMemberIdentityInput,
@@ -94,6 +98,69 @@ describe('project-team-members', () => {
       { memberName: '김다은', memberNickname: '데이나', role: '', participationRate: 50 },
     ]);
     expect(hasIncompleteProjectTeamMembers(members)).toBe(true);
+  });
+
+  it('rejects a reversed labor allocation period before submit', () => {
+    expect(hasInvalidProjectTeamMemberLaborPeriod([{
+      memberName: '김다은',
+      memberNickname: '',
+      role: '운영매니저',
+      participationRate: 50,
+      isDocumentOnly: false,
+      laborAllocationStartMonth: '2026-09',
+      laborAllocationEndMonth: '2026-03',
+    }])).toBe(true);
+    expect(hasInvalidProjectTeamMemberLaborPeriod([{
+      memberName: '김다은',
+      memberNickname: '',
+      role: '운영매니저',
+      participationRate: 50,
+      isDocumentOnly: false,
+      laborAllocationStartMonth: '2026-03',
+      laborAllocationEndMonth: '2026-09',
+    }])).toBe(false);
+    expect(hasInvalidProjectTeamMemberLaborPeriod([{
+      memberName: '김다은',
+      memberNickname: '',
+      role: '운영매니저',
+      participationRate: 50,
+      isDocumentOnly: false,
+      laborAllocationStartMonth: '2026-13',
+      laborAllocationEndMonth: '2027-01',
+    }])).toBe(true);
+  });
+
+  it('requires at least one operating manager for registration v2', () => {
+    expect(hasProjectOperatingManager([])).toBe(false);
+    expect(hasProjectOperatingManager([
+      { memberName: '김다은', memberNickname: '', role: '실무책임자', participationRate: 50, isDocumentOnly: false },
+    ])).toBe(false);
+    expect(hasProjectOperatingManager([
+      { memberName: '김다은', memberNickname: '', role: '운영매니저', participationRate: 50, isDocumentOnly: false },
+    ])).toBe(true);
+    expect(hasProjectOperatingManager([
+      { memberName: '김다은', memberNickname: '', role: '운영매니저', participationRate: 0, isDocumentOnly: true },
+    ])).toBe(false);
+  });
+
+  it('requires an actual project final responsible member for registration v2', () => {
+    expect(hasProjectFinalResponsibleMember([])).toBe(false);
+    expect(hasProjectFinalResponsibleMember([
+      { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: true },
+    ])).toBe(false);
+    expect(hasProjectFinalResponsibleMember([
+      { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false },
+    ])).toBe(true);
+  });
+
+  it('allows only 도담 or 써니 as settlement support', () => {
+    expect(hasInvalidProjectSettlementSupportMember([
+      { memberName: '송성미', memberNickname: '도담', role: '정산지원', participationRate: 0, isDocumentOnly: false },
+      { memberName: '최지윤', memberNickname: '써니', role: '정산지원', participationRate: 0, isDocumentOnly: false },
+    ])).toBe(false);
+    expect(hasInvalidProjectSettlementSupportMember([
+      { memberName: '다른 구성원', memberNickname: '', role: '정산지원', participationRate: 0, isDocumentOnly: false },
+    ])).toBe(true);
   });
 
   it('parses manual identity input in 이름(별명) format', () => {

@@ -134,6 +134,7 @@ describe('member document helpers', () => {
       name: '홍길동',
       email: 'hong@mysc.co.kr',
       role: 'pm',
+      status: 'ACTIVE',
       avatarUrl: undefined,
     }]);
   });

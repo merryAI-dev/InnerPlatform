@@ -1,4 +1,4 @@
-import { ExternalLink, FileText } from 'lucide-react';
+import { ExternalLink, FileText, Loader2 } from 'lucide-react';
 import type { FileAttachment } from '../../data/types';
 import { Button } from '../ui/button';
 
@@ -11,6 +11,11 @@ interface ContractDocumentPreviewProps {
   descriptionClassName?: string;
   className?: string;
   privateDraftAttachment?: boolean;
+  previewState?: {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    error?: string;
+  };
+  onLoadPreview?: () => void | Promise<void>;
 }
 
 function isPdfDocument(document: ContractDocumentPreviewAttachment) {
@@ -26,9 +31,12 @@ export function ContractDocumentPreview({
   descriptionClassName = 'text-slate-600',
   className = '',
   privateDraftAttachment = false,
+  previewState,
+  onLoadPreview,
 }: ContractDocumentPreviewProps) {
   const downloadURL = String(document?.downloadURL || '').trim();
   const canPreviewPdf = !!document && !!downloadURL && isPdfDocument(document);
+  const canLoadPrivatePreview = !!document && !downloadURL && privateDraftAttachment && !!onLoadPreview;
 
   return (
     <div className={`overflow-hidden rounded-3xl border border-slate-200 bg-white ${className}`} data-testid="contract-document-preview">
@@ -64,25 +72,47 @@ export function ContractDocumentPreview({
         />
       ) : (
         <div className="flex min-h-[220px] items-center justify-center bg-slate-50 px-5 py-8 text-center">
-          <div>
+          <div aria-live="polite">
             <p className="text-[13px] font-semibold text-slate-800">
               {downloadURL
                 ? '이 파일 형식은 화면 미리보기를 지원하지 않습니다.'
-                : document && privateDraftAttachment
-                  ? '첨부 파일이 안전하게 임시저장되었습니다.'
-                  : document
-                    ? '첨부 파일 원문을 불러올 수 없습니다.'
-                  : '첨부된 계약서 파일이 없습니다.'}
+                : canLoadPrivatePreview && previewState?.status === 'loading'
+                  ? '첨부 파일 원문을 안전하게 불러오는 중입니다.'
+                  : canLoadPrivatePreview && previewState?.status === 'error'
+                    ? '첨부 파일 원문을 불러오지 못했습니다.'
+                    : canLoadPrivatePreview
+                      ? '원문을 불러와 검토할 수 있습니다.'
+                      : document && privateDraftAttachment
+                        ? '첨부 파일이 안전하게 임시저장되었습니다.'
+                        : document
+                          ? '첨부 파일 원문을 불러올 수 없습니다.'
+                          : '첨부된 계약서 파일이 없습니다.'}
             </p>
             <p className="mt-2 text-[12px] text-slate-500">
               {downloadURL
                 ? '새 탭에서 원문 파일을 확인해 주세요.'
-                : document && privateDraftAttachment
-                  ? '최종 저장 후 권한이 있는 사용자만 원문을 열 수 있습니다.'
-                  : document
-                    ? '파일 권한 또는 원문 링크 상태를 확인해 주세요.'
-                  : '계약서가 첨부되면 이 영역에 PDF 원문이 표시됩니다.'}
+                : canLoadPrivatePreview && previewState?.status === 'error'
+                  ? (previewState.error || '잠시 후 다시 시도해 주세요.')
+                  : canLoadPrivatePreview
+                    ? '검토할 때만 다운로드하며, 불러온 원문은 이 화면을 벗어나면 정리됩니다.'
+                    : document && privateDraftAttachment
+                      ? '최종 저장 후 권한이 있는 사용자만 원문을 열 수 있습니다.'
+                      : document
+                        ? '파일 권한 또는 원문 링크 상태를 확인해 주세요.'
+                        : '계약서가 첨부되면 이 영역에 PDF 원문이 표시됩니다.'}
             </p>
+            {canLoadPrivatePreview ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 h-9 gap-1.5 px-4 text-[12px]"
+                disabled={previewState?.status === 'loading'}
+                onClick={() => void onLoadPreview?.()}
+              >
+                {previewState?.status === 'loading' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {previewState?.status === 'error' ? '원문 다시 불러오기' : previewState?.status === 'loading' ? '불러오는 중' : '원문 불러오기'}
+              </Button>
+            ) : null}
           </div>
         </div>
       )}

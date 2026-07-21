@@ -215,6 +215,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       initialDraft={initialDraft}
       draftKey={`admin-${editProject?.id || 'new'}-${editProject?.updatedAt || initialPhase}`}
       members={members}
+      requesterId={currentUser?.uid}
       departmentOptions={departmentOptions}
       actions={editProject ? [
         { id: 'save', label: '수정 저장', icon: Save },

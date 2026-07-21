@@ -35,7 +35,7 @@ describe('portal project status editing contract', () => {
 
   it('uses PM-facing settlement labels instead of X-style wording', () => {
     expect(typesSource).toContain("NONE: '정산 없음'");
-    expect(typesSource).toContain("NONE: '정산 기준 없음'");
+    expect(typesSource).not.toContain("NONE: '정산 기준 없음'");
     expect(typesSource).not.toContain("NONE: '해당없음(정산대상 아님)'");
     expect(typesSource).not.toContain('정산 X');
   });

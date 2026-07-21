@@ -227,6 +227,7 @@ export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMe
       name: String(merged.name || ''),
       email: String(merged.email || ''),
       role: (merged.role || 'pm') as OrgMember['role'],
+      status: typeof merged.status === 'string' ? merged.status.trim().toUpperCase() : undefined,
       avatarUrl: typeof merged.avatarUrl === 'string' ? merged.avatarUrl : undefined,
     };
   }).filter((member) => member.uid);

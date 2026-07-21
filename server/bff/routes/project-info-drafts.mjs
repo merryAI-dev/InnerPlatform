@@ -15,13 +15,17 @@ import {
 } from '../edit-lease.mjs';
 import {
   parseWithSchema,
+  projectDraftAttachmentDeleteSchema,
   projectInfoDraftAttachmentSchema,
   projectInfoDraftOpenSchema,
   projectInfoDraftPatchSchema,
   projectInfoDraftSubmitSchema,
 } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
-import { createOutboxEvent as createOutboxEventRecord } from '../outbox.mjs';
+import {
+  DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+  createOutboxEvent as createOutboxEventRecord,
+} from '../outbox.mjs';
 import {
   buildProjectInfoChangeSubmission,
   buildProjectInfoDraftSeed,
@@ -34,6 +38,19 @@ import {
 const RESOURCE_TYPE = 'project-info';
 const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
 const DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
+const DOCUMENT_FIELD_BY_KIND = {
+  contract: 'contractDocument',
+  customer_business_registration: 'customerBusinessRegistrationDocument',
+  quote: 'quoteDocument',
+  proposal: 'proposalDocument',
+  proposal_word_original: 'proposalWordOriginalDocument',
+  proposal_ppt_original: 'proposalPptOriginalDocument',
+  presentation_ppt_original: 'presentationPptOriginalDocument',
+  rfp_request_evidence: 'rfpRequestEvidenceDocument',
+  performance_certificate: 'performanceCertificateDocument',
+  tax_invoice: 'taxInvoiceDocument',
+  final_settlement_report: 'finalSettlementReportDocument',
+};
 const MAX_DRAFT_BYTES = 900 * 1024;
 const MAX_ATTACHMENT_REFS = 100;
 const MAX_PAYLOAD_DEPTH = 20;
@@ -84,6 +101,22 @@ function draftDocumentId(projectId, actorId) {
   return id;
 }
 
+function draftIdFromTrustedAttachmentPath(tenantId, path) {
+  const normalizedPath = readOptionalText(path);
+  const prefix = `orgs/${tenantId}/project-registration-drafts/`;
+  const relative = normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : '';
+  const [draftId, objectName, ...extra] = relative.split('/');
+  if (
+    extra.length
+    || !draftId
+    || !objectName
+    || draftId === '.'
+    || draftId === '..'
+    || !/^[A-Za-z0-9._-]+$/.test(draftId)
+  ) return '';
+  return draftId;
+}
+
 function memberProjectIds(member = {}) {
   const profile = member.portalProfile && typeof member.portalProfile === 'object'
     ? member.portalProfile
@@ -104,6 +137,56 @@ function draftAttachments(draft = {}) {
   return Array.isArray(draft.attachmentRefs) ? draft.attachmentRefs : [];
 }
 
+function publicAttachmentRefs(draft = {}) {
+  return draftAttachments(draft).map((attachment) => Object.fromEntries(
+    Object.entries(attachment || {}).filter(([key]) => key !== 'inheritedFromProjectRequest'),
+  ));
+}
+
+function resumableDraftAttachments(tenantId, draftId, request = {}) {
+  if (
+    readOptionalText(request.requestKind) !== 'CHANGE'
+    || !['PENDING', 'REJECTED'].includes(readOptionalText(request.status))
+  ) return [];
+  const source = request.proposedSnapshot && typeof request.proposedSnapshot === 'object'
+    ? request.proposedSnapshot
+    : request.payload;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return [];
+  return Object.entries(DOCUMENT_FIELD_BY_KIND).flatMap(([documentKind, field]) => {
+    const document = source[field];
+    const path = readOptionalText(document?.path);
+    if (!path || draftIdFromTrustedAttachmentPath(tenantId, path) !== draftId) return [];
+    const attachmentId = readOptionalText(document?.attachmentId);
+    return [{
+      ...(attachmentId ? { attachmentId } : {}),
+      documentKind,
+      path,
+      name: readOptionalText(document?.name),
+      size: Number.isSafeInteger(document?.size) && document.size >= 0 ? document.size : 0,
+      contentType: readOptionalText(document?.contentType) || 'application/octet-stream',
+      ...(readOptionalText(document?.uploadedAt) ? { uploadedAt: readOptionalText(document.uploadedAt) } : {}),
+      inheritedFromProjectRequest: true,
+    }];
+  });
+}
+
+function replacementDocumentKinds(documentKind) {
+  return ['proposal', 'rfp_request_evidence'].includes(documentKind)
+    ? ['proposal', 'rfp_request_evidence']
+    : [documentKind];
+}
+
+function payloadWithoutAttachment(payload, documentKind, removedAttachments) {
+  const next = { ...(payload || {}) };
+  const field = DOCUMENT_FIELD_BY_KIND[documentKind];
+  const removedPaths = new Set(removedAttachments.map((attachment) => readOptionalText(attachment?.path)).filter(Boolean));
+  if (field && removedPaths.has(readOptionalText(next[field]?.path))) {
+    next[field] = null;
+  }
+  if (documentKind === 'contract') next.contractAnalysis = null;
+  return next;
+}
+
 function draftContract(draft = {}) {
   return {
     projectId: readOptionalText(draft.resourceId),
@@ -114,7 +197,7 @@ function draftContract(draft = {}) {
     payload: draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload)
       ? draft.payload
       : {},
-    attachmentRefs: draftAttachments(draft),
+    attachmentRefs: publicAttachmentRefs(draft),
     stepIndex: Number.isInteger(draft.stepIndex) && draft.stepIndex >= 0 ? draft.stepIndex : 0,
     status: readOptionalText(draft.status) || 'ACTIVE',
     createdAt: draft.createdAt,
@@ -253,6 +336,20 @@ function auditEntry(current, actorRole, action, revision, timestamp, metadata = 
   };
 }
 
+function attachmentCleanupEvent(createEvent, current, paths, timestamp) {
+  const uniquePaths = [...new Set(paths.map(readOptionalText).filter(Boolean))];
+  if (uniquePaths.length === 0) return null;
+  return createEvent({
+    tenantId: current.tenantId,
+    requestId: current.requestId,
+    eventType: DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+    entityType: 'project_info_draft',
+    entityId: current.draftDocumentId,
+    payload: { draftId: current.draftDocumentId, paths: uniquePaths },
+    createdAt: timestamp,
+  });
+}
+
 export function createProjectInfoSubmittedOutboxHandler({
   db,
   draftStorageService,
@@ -331,6 +428,7 @@ export function createProjectInfoDraftService({
   now = () => new Date().toISOString(),
   createAttachmentId = () => `att_${randomUUID().replace(/-/g, '')}`,
   createOutboxEvent = createOutboxEventRecord,
+  createAttachmentCleanupOutboxEvent = createOutboxEventRecord,
   auditChainService,
   idempotencyService,
   draftStorageService,
@@ -461,6 +559,7 @@ export function createProjectInfoDraftService({
         if (lockError) throw lockError;
         await assertLease(tx, current, nowDate);
         const existing = draftSnap.exists ? (draftSnap.data() || {}) : null;
+        const previousRequest = requestSnap.exists ? (requestSnap.data() || {}) : {};
         const draft = existing?.status === 'ACTIVE' && readOptionalText(existing.ownerUid) === current.actorId
           ? existing
           : {
@@ -470,8 +569,12 @@ export function createProjectInfoDraftService({
               resourceId: current.projectId,
               draftRevision: 0,
               baseCanonicalVersion: Number.isInteger(project.version) && project.version > 0 ? project.version : 1,
-              payload: buildProjectInfoDraftSeed(project, requestSnap.exists ? (requestSnap.data() || {}) : null),
-              attachmentRefs: [],
+              payload: buildProjectInfoDraftSeed(project, previousRequest),
+              attachmentRefs: resumableDraftAttachments(
+                current.tenantId,
+                current.draftDocumentId,
+                previousRequest,
+              ),
               stepIndex: 0,
               status: 'ACTIVE',
               createdAt: timestamp,
@@ -496,6 +599,60 @@ export function createProjectInfoDraftService({
         const { draft } = await ownedDraft(tx, current);
         return { draft: draftContract(draft) };
       });
+    },
+
+    async readAttachment(input) {
+      if (!draftStorageService) {
+        throw new Error('Draft attachment storage service is required');
+      }
+      const current = context(input, { ownership: false, idempotency: false });
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const field = DOCUMENT_FIELD_BY_KIND[documentKind];
+      const stored = await db.runTransaction(async (tx) => {
+        const { draft, project } = await ownedDraft(tx, current);
+        const match = draftAttachments(draft).findLast((item) => item?.documentKind === documentKind);
+        if (match && readOptionalText(match.path)) {
+          return { source: 'draft', attachment: match };
+        }
+
+        const payloadDocument = draft.payload?.[field];
+        const payloadPath = readOptionalText(payloadDocument?.path);
+        const canonicalDocument = project?.[field];
+        if (payloadPath && payloadPath === readOptionalText(canonicalDocument?.path)) {
+          return { source: 'project', attachment: canonicalDocument };
+        }
+
+        const requestSnap = await tx.get(refs(current).request);
+        const previousRequest = requestSnap.exists ? (requestSnap.data() || {}) : {};
+        const resumableChange = readOptionalText(previousRequest.requestKind) === 'CHANGE'
+          && ['PENDING', 'REJECTED'].includes(readOptionalText(previousRequest.status));
+        const requestDocument = resumableChange
+          ? (previousRequest.proposedSnapshot?.[field] || previousRequest.payload?.[field])
+          : null;
+        if (payloadPath && payloadPath === readOptionalText(requestDocument?.path)) {
+          const sourceDraftId = draftIdFromTrustedAttachmentPath(current.tenantId, payloadPath);
+          return sourceDraftId
+            ? { source: 'draft', draftId: sourceDraftId, attachment: requestDocument }
+            : { source: 'project', attachment: requestDocument };
+        }
+
+        throw createHttpError(404, 'Project information draft attachment not found', 'not_found');
+      });
+      const downloaded = stored.source === 'draft'
+        ? await draftStorageService.downloadDraftAttachment({
+          tenantId: current.tenantId,
+          draftId: stored.draftId || current.draftDocumentId,
+          path: stored.attachment.path,
+        })
+        : await draftStorageService.downloadProjectRegistrationAttachment({
+          tenantId: current.tenantId,
+          projectId: current.projectId,
+          path: stored.attachment.path,
+        });
+      return { ...downloaded, name: readOptionalText(stored.attachment.name) || 'attachment.pdf' };
     },
 
     async update(input) {
@@ -564,6 +721,7 @@ export function createProjectInfoDraftService({
       if (!DOCUMENT_KINDS.includes(documentKind)) {
         throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
       }
+      const replacedDocumentKinds = replacementDocumentKinds(documentKind);
       const fileName = requiredText(input?.fileName, 'fileName');
       const mimeType = requiredText(input?.mimeType, 'mimeType');
       assertProjectAttachment(buffer, mimeType, fileName, documentKind);
@@ -588,9 +746,9 @@ export function createProjectInfoDraftService({
         assertActive(draft);
         await assertLease(tx, current, nowDate);
         assertRevision(draft, expectedDraftRevision);
-        const replacesSameKind = draftAttachments(draft)
-          .some((attachment) => attachment.documentKind === documentKind);
-        if (draftAttachments(draft).length >= MAX_ATTACHMENT_REFS && !replacesSameKind) {
+        const replacesExistingKind = draftAttachments(draft)
+          .some((attachment) => replacedDocumentKinds.includes(attachment.documentKind));
+        if (draftAttachments(draft).length >= MAX_ATTACHMENT_REFS && !replacesExistingKind) {
           throw createHttpError(422, 'Draft attachment limit exceeded', 'draft_attachment_limit_exceeded');
         }
         return null;
@@ -641,11 +799,12 @@ export function createProjectInfoDraftService({
           await assertLease(tx, current, nowDate);
           const revision = assertRevision(draft, expectedDraftRevision) + 1;
           replacedAttachments = draftAttachments(draft)
-            .filter((currentAttachment) => currentAttachment.documentKind === documentKind);
+            .filter((currentAttachment) => replacedDocumentKinds.includes(currentAttachment.documentKind));
           const next = {
             ...draft,
+            payload: payloadWithoutAttachment(draft.payload, documentKind, replacedAttachments),
             attachmentRefs: [
-              ...draftAttachments(draft).filter((currentAttachment) => currentAttachment.documentKind !== documentKind),
+              ...draftAttachments(draft).filter((currentAttachment) => !replacedDocumentKinds.includes(currentAttachment.documentKind)),
               attachment,
             ],
             draftRevision: revision,
@@ -660,12 +819,31 @@ export function createProjectInfoDraftService({
           ]);
           tx.set(draftRef, next);
           completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+          const cleanupEvent = attachmentCleanupEvent(
+            createAttachmentCleanupOutboxEvent,
+            current,
+            replacedAttachments
+              .filter((replaced) => (
+                replaced?.inheritedFromProjectRequest !== true
+                && readOptionalText(replaced?.path)
+                && replaced.path !== attachment.path
+              ))
+              .map((replaced) => replaced.path),
+            timestamp,
+          );
+          if (cleanupEvent) {
+            tx.create(db.doc(`outbox/${documentId(cleanupEvent.id, 'outboxId')}`), cleanupEvent);
+          }
           return { status: 200, body, replayed: false };
         });
         if (outcome.replayed) await cleanup();
         else {
           await Promise.all(replacedAttachments.map(async (replaced) => {
-            if (!readOptionalText(replaced?.path) || replaced.path === attachment.path) return;
+            if (
+              replaced?.inheritedFromProjectRequest === true
+              || !readOptionalText(replaced?.path)
+              || replaced.path === attachment.path
+            ) return;
             try {
               await draftStorageService.deleteDraftAttachment({
                 tenantId: current.tenantId,
@@ -684,6 +862,102 @@ export function createProjectInfoDraftService({
         await cleanup();
         throw error;
       }
+    },
+
+    async removeAttachment(input) {
+      if (!draftStorageService?.deleteDraftAttachment) {
+        throw new Error('Draft attachment storage service is required');
+      }
+      const current = context(input);
+      const expectedDraftRevision = Number(input?.expectedDraftRevision);
+      if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+        throw createHttpError(400, 'expectedDraftRevision is invalid', 'draft_request_invalid');
+      }
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const method = 'DELETE';
+      const path = `/api/v1/project-info-drafts/${current.projectId}/attachments/${documentKind}`;
+      const fingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId: current.leaseId,
+          fence: current.fence,
+          expectedDraftRevision,
+          documentKind,
+        },
+      });
+
+      const result = await db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, draftRef, draft } = await ownedDraft(tx, current);
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') {
+          return { outcome: { status: lock.status, body: lock.body, replayed: true }, removedAttachments: [] };
+        }
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        assertActive(draft);
+        await assertLease(tx, current, nowDate);
+        const revision = assertRevision(draft, expectedDraftRevision) + 1;
+        const removedAttachments = draftAttachments(draft)
+          .filter((attachment) => attachment?.documentKind === documentKind && readOptionalText(attachment?.path));
+        if (removedAttachments.length === 0) {
+          throw createHttpError(404, 'Project information draft attachment not found', 'not_found');
+        }
+        const next = {
+          ...draft,
+          payload: payloadWithoutAttachment(draft.payload, documentKind, removedAttachments),
+          attachmentRefs: draftAttachments(draft).filter((attachment) => attachment?.documentKind !== documentKind),
+          draftRevision: revision,
+          updatedAt: timestamp,
+        };
+        assertDraftSize(next);
+        const body = { draft: draftContract(next) };
+        await auditChainService.appendManyInTransaction(tx, [
+          auditEntry(current, actorRole, 'PROJECT_INFO_DRAFT_ATTACHMENT_REMOVE', revision, timestamp, {
+            fence: current.fence,
+            documentKind,
+            attachmentIds: removedAttachments.map((attachment) => readOptionalText(attachment?.attachmentId)).filter(Boolean),
+          }),
+        ]);
+        tx.set(draftRef, next);
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        const cleanupEvent = attachmentCleanupEvent(
+          createAttachmentCleanupOutboxEvent,
+          current,
+          removedAttachments
+            .filter((attachment) => attachment?.inheritedFromProjectRequest !== true)
+            .map((attachment) => attachment.path),
+          timestamp,
+        );
+        if (cleanupEvent) {
+          tx.create(db.doc(`outbox/${documentId(cleanupEvent.id, 'outboxId')}`), cleanupEvent);
+        }
+        return { outcome: { status: 200, body, replayed: false }, removedAttachments };
+      });
+
+      await Promise.all(result.removedAttachments.map(async (attachment) => {
+        if (attachment?.inheritedFromProjectRequest === true) return;
+        try {
+          await draftStorageService.deleteDraftAttachment({
+            tenantId: current.tenantId,
+            draftId: current.draftDocumentId,
+            path: attachment.path,
+          });
+        } catch {
+          console.warn('[bff] removed project info draft attachment cleanup failed', {
+            requestId: current.requestId,
+            errorCode: 'draft_attachment_remove_cleanup_failed',
+          });
+        }
+      }));
+      return result.outcome;
     },
 
     async submit(input) {
@@ -795,7 +1069,7 @@ export function createProjectInfoDraftService({
             draftId: current.draftDocumentId,
             requestVersion: submittedProjectRequest.requestVersion,
             targetProjectVersion: submittedProjectRequest.targetProjectVersion,
-            attachmentRefs: draftAttachments(draft),
+            attachmentRefs: publicAttachmentRefs(draft),
           },
           createdAt: timestamp,
           nextAttemptAt: timestamp,
@@ -865,6 +1139,21 @@ function sendOutcome(res, outcome) {
   res.status(outcome.status).json(outcome.body);
 }
 
+function sendPrivateDraftAttachment(res, attachment) {
+  const buffer = Buffer.isBuffer(attachment?.buffer)
+    ? attachment.buffer
+    : Buffer.from(attachment?.buffer || []);
+  const contentType = readOptionalText(attachment?.contentType);
+  res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
+    ? contentType
+    : 'application/octet-stream');
+  res.setHeader('content-length', String(buffer.byteLength));
+  res.setHeader('cache-control', 'private, no-store');
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(readOptionalText(attachment?.name) || 'attachment.pdf')}`);
+  res.status(200).send(buffer);
+}
+
 function decodeBase64(value, expectedSize) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw createHttpError(400, 'contentBase64 is invalid', 'draft_attachment_invalid');
@@ -891,6 +1180,15 @@ export function mountProjectInfoDraftRoutes(app, {
     }));
   }));
 
+  app.get('/api/v1/project-info-drafts/:projectId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'read a project information draft attachment');
+    sendPrivateDraftAttachment(res, await projectInfoDraftService.readAttachment({
+      ...await routeContext(req, piiProtector),
+      projectId: routeProjectId(req),
+      documentKind: requiredText(req.params?.documentKind, 'documentKind'),
+    }));
+  }));
+
   app.post('/api/v1/project-info-drafts/:projectId/open', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'open a project information draft');
     parseWithSchema(projectInfoDraftOpenSchema, req.body);
@@ -913,6 +1211,18 @@ export function mountProjectInfoDraftRoutes(app, {
     sendOutcome(res, await projectInfoDraftService.addAttachment({
       ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
       ...parsed, buffer: decodeBase64(parsed.contentBase64, parsed.fileSize),
+    }));
+  }));
+
+  app.delete('/api/v1/project-info-drafts/:projectId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'remove a project information draft file');
+    const parsed = parseWithSchema(projectDraftAttachmentDeleteSchema, req.body);
+    sendOutcome(res, await projectInfoDraftService.removeAttachment({
+      ...await routeContext(req, piiProtector),
+      ...routeOwnership(req),
+      projectId: routeProjectId(req),
+      documentKind: requiredText(req.params?.documentKind, 'documentKind'),
+      ...parsed,
     }));
   }));
 

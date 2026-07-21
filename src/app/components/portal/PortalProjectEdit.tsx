@@ -11,22 +11,29 @@ import {
   Save,
   SendHorizontal,
 } from 'lucide-react';
-import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
 import { useProjectDepartmentSettings } from '../../data/project-department-settings';
 import { usePortalStore } from '../../data/portal-store';
 import type { FileAttachment, Project, ProjectRequest } from '../../data/types';
-import { getAuthInstance, getOrgCollectionPath } from '../../lib/firebase';
+import { getAuthInstance } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
+import { extractTextFromPdf } from '../../lib/pdf-extract';
 import { createEditLeaseClient } from '../../lib/edit-lease-client';
+import { downloadProjectInfoDraftAttachmentViaBff } from '../../lib/project-request-attachment-client';
 import {
   createProjectInfoDraftClient,
   type ProjectInfoAttachment,
+  type ProjectInfoDocumentKind,
   type ProjectInfoDraft,
   type ProjectInfoFileLike,
 } from '../../lib/project-info-draft-client';
-import type { ActorLike } from '../../lib/platform-bff-client';
+import {
+  analyzeProjectRequestContractViaBff,
+  fetchLatestProjectRequestViaBff,
+  isPlatformApiEnabled,
+  type ActorLike,
+} from '../../lib/platform-bff-client';
 import { openEditSession, type EditSession } from '../../platform/edit-session';
 import {
   buildProjectEditorDraftFromProject,
@@ -61,8 +68,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
+import { usePrivateDraftDocumentPreviews } from './usePrivateDraftDocumentPreviews';
 
 type DraftClient = ReturnType<typeof createProjectInfoDraftClient>;
+
+const PROJECT_INFO_PREVIEW_FIELDS: Array<{
+  documentKind: ProjectRequestDocumentKind;
+  field: keyof ProjectEditorDraft;
+}> = [
+  { documentKind: 'contract', field: 'contractDocument' },
+  { documentKind: 'customer_business_registration', field: 'customerBusinessRegistrationDocument' },
+  { documentKind: 'quote', field: 'quoteDocument' },
+  { documentKind: 'proposal', field: 'proposalDocument' },
+  { documentKind: 'proposal_word_original', field: 'proposalWordOriginalDocument' },
+  { documentKind: 'proposal_ppt_original', field: 'proposalPptOriginalDocument' },
+  { documentKind: 'presentation_ppt_original', field: 'presentationPptOriginalDocument' },
+  { documentKind: 'rfp_request_evidence', field: 'rfpRequestEvidenceDocument' },
+  { documentKind: 'performance_certificate', field: 'performanceCertificateDocument' },
+  { documentKind: 'tax_invoice', field: 'taxInvoiceDocument' },
+  { documentKind: 'final_settlement_report', field: 'finalSettlementReportDocument' },
+];
 
 function resolveExecutiveBanner(project: Project) {
   const status = project.executiveReviewStatus || 'PENDING';
@@ -124,14 +149,27 @@ function attachmentDocument(attachment: ProjectInfoAttachment): FileAttachment {
   };
 }
 
+function latestPrivateAlternativeDocumentKind(attachmentRefs: ProjectInfoAttachment[]) {
+  let latest: 'proposal' | 'rfp_request_evidence' | null = null;
+  for (const attachment of attachmentRefs) {
+    if (attachment.documentKind === 'proposal' || attachment.documentKind === 'rfp_request_evidence') {
+      latest = attachment.documentKind;
+    }
+  }
+  return latest;
+}
+
 function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
   const documents: Partial<Record<ProjectRequestDocumentKind, FileAttachment>> = {};
   for (const attachment of record.attachmentRefs) documents[attachment.documentKind] = attachmentDocument(attachment);
+  const latestAlternativeKind = latestPrivateAlternativeDocumentKind(record.attachmentRefs);
   return createProjectEditorDraft({
     ...(record.payload as Partial<ProjectEditorDraft>),
     ...(documents.contract ? { contractDocument: documents.contract } : {}),
     ...(documents.quote ? { quoteDocument: documents.quote } : {}),
-    ...(documents.proposal ? { proposalDocument: documents.proposal } : {}),
+    ...(latestAlternativeKind === 'proposal'
+      ? { proposalDocument: documents.proposal }
+      : latestAlternativeKind === 'rfp_request_evidence' ? { proposalDocument: null } : {}),
     ...(documents.proposal_word_original
       ? { proposalWordOriginalDocument: documents.proposal_word_original }
       : {}),
@@ -141,9 +179,9 @@ function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
     ...(documents.presentation_ppt_original
       ? { presentationPptOriginalDocument: documents.presentation_ppt_original }
       : {}),
-    ...(documents.rfp_request_evidence
+    ...(latestAlternativeKind === 'rfp_request_evidence'
       ? { rfpRequestEvidenceDocument: documents.rfp_request_evidence }
-      : {}),
+      : latestAlternativeKind === 'proposal' ? { rfpRequestEvidenceDocument: null } : {}),
     ...(documents.customer_business_registration
       ? { customerBusinessRegistrationDocument: documents.customer_business_registration }
       : {}),
@@ -154,7 +192,29 @@ function editorDraftFromPrivate(record: ProjectInfoDraft): ProjectEditorDraft {
     ...(documents.final_settlement_report
       ? { finalSettlementReportDocument: documents.final_settlement_report }
       : {}),
+    registrationRequirementsVersion: 2,
   });
+}
+
+function previewAttachmentsFromPrivateDraft(record: ProjectInfoDraft | null) {
+  if (!record) return [];
+  const attachments = new Map<ProjectRequestDocumentKind, { documentKind: ProjectRequestDocumentKind; path: string }>();
+  const payload = record.payload as Partial<ProjectEditorDraft>;
+  for (const { documentKind, field } of PROJECT_INFO_PREVIEW_FIELDS) {
+    const document = payload[field] as FileAttachment | null | undefined;
+    const path = String(document?.path || '').trim();
+    if (path) attachments.set(documentKind, { documentKind, path });
+  }
+  for (const attachment of record.attachmentRefs) {
+    if (attachment.path) attachments.set(attachment.documentKind, {
+      documentKind: attachment.documentKind,
+      path: attachment.path,
+    });
+  }
+  const latestAlternativeKind = latestPrivateAlternativeDocumentKind(record.attachmentRefs);
+  if (latestAlternativeKind === 'rfp_request_evidence') attachments.delete('proposal');
+  if (latestAlternativeKind === 'proposal') attachments.delete('rfp_request_evidence');
+  return [...attachments.values()];
 }
 
 function ProjectInfoEditor({
@@ -179,6 +239,7 @@ function ProjectInfoEditor({
   const navigate = useNavigate();
   const { orgId } = useFirebase();
   const [record, setRecord] = useState<ProjectInfoDraft | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
   const [resubmitComment, setResubmitComment] = useState('');
@@ -212,7 +273,27 @@ function ProjectInfoEditor({
     [canonicalDraft, record],
   );
   const autosaveKey = `portal-edit-${orgId}-${project.id}-${actor.uid}`;
-  const editorCanEdit = lease.canEdit && record !== null;
+  const editorCanEdit = lease.canEdit && record !== null && !submitted;
+  const previewAttachments = useMemo(() => previewAttachmentsFromPrivateDraft(record), [record]);
+  const loadDraftDocumentPreview = useCallback(({ documentKind, signal }: {
+    documentKind: ProjectRequestDocumentKind;
+    signal: AbortSignal;
+  }) => downloadProjectInfoDraftAttachmentViaBff({
+    tenantId: orgId,
+    actor,
+    projectId: project.id,
+    documentKind,
+    signal,
+  }), [actor, orgId, project.id]);
+  const {
+    documentPreviewUrls,
+    documentPreviewStates,
+    loadDocumentPreview,
+  } = usePrivateDraftDocumentPreviews({
+    attachments: previewAttachments,
+    enabled: record !== null && !submitted,
+    loadAttachment: loadDraftDocumentPreview,
+  });
   const releaseLeaseAfterDraftOpenFailure = useCallback(async (error: unknown, fallback: string) => {
     recordLoadedRef.current = false;
     setRecord(null);
@@ -294,7 +375,36 @@ function ProjectInfoEditor({
       });
       revisionRef.current = uploaded.draft.draftRevision;
       setRecord(uploaded.draft);
-      return { document: attachmentDocument(uploaded.attachment), contractAnalysis: null };
+      let contractAnalysis = null;
+      if (kind === 'contract') {
+        try {
+          const documentText = await extractTextFromPdf(file);
+          contractAnalysis = await analyzeProjectRequestContractViaBff({
+            tenantId: orgId,
+            actor,
+            fileName: file.name,
+            documentText,
+          });
+        } catch (error) {
+          console.error('[PortalProjectEdit] contract analysis failed:', error);
+          toast.warning('계약서는 저장했지만 자동 분석에 실패했습니다. 입력값을 직접 확인해 주세요.');
+        }
+      }
+      return { document: attachmentDocument(uploaded.attachment), contractAnalysis };
+    })
+  )), [actor, draftClient, enqueueMutation, orgId, record, withOwnership]);
+
+  const removeDocument = useCallback((kind: ProjectRequestDocumentKind) => enqueueMutation(() => (
+    withOwnership(async (ownership) => {
+      if (!record) throw new Error('수정 임시저장이 준비되지 않았습니다.');
+      const hasPrivateAttachment = record.attachmentRefs.some((attachment) => attachment.documentKind === kind);
+      if (!hasPrivateAttachment) return;
+      const removed = await draftClient.removeAttachment(ownership, {
+        expectedDraftRevision: revisionRef.current,
+        documentKind: kind as ProjectInfoDocumentKind,
+      });
+      revisionRef.current = removed.draft.draftRevision;
+      setRecord(removed.draft);
     })
   )), [draftClient, enqueueMutation, record, withOwnership]);
 
@@ -306,15 +416,20 @@ function ProjectInfoEditor({
     }
     setBusyActionId(actionId);
     try {
+      const shouldResubmit = canResubmit || actionId === 'resubmit';
       await enqueueMutation(() => withOwnership((ownership) => draftClient.submit(ownership, {
         expectedDraftRevision: revisionRef.current,
         expectedVersion: Number.isInteger(project.version) && Number(project.version) > 0 ? Number(project.version) : 1,
-        resubmit: actionId === 'resubmit',
-        ...(actionId === 'resubmit' && resubmitComment.trim() ? { reviewComment: resubmitComment.trim() } : {}),
+        resubmit: shouldResubmit,
+        ...(shouldResubmit && resubmitComment.trim() ? { reviewComment: resubmitComment.trim() } : {}),
       })));
       await lease.checkStatus();
-      if (actionId === 'resubmit') setResubmitComment('');
+      if (shouldResubmit) setResubmitComment('');
+      setSubmitted(true);
+      recordLoadedRef.current = false;
+      setRecord(null);
       setSaveSuccessDialogOpen(true);
+      void lease.release();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
       throw error;
@@ -357,10 +472,12 @@ function ProjectInfoEditor({
       <Textarea
         value={resubmitComment}
         onChange={(event) => setResubmitComment(event.target.value)}
+        maxLength={2000}
         placeholder="보완한 내용을 짧게 남길 수 있습니다."
         className="mt-2 min-h-[88px] border-white/70 bg-white/85 text-sm text-slate-900"
         disabled={!editorCanEdit}
       />
+      <p className="mt-1 text-right text-[10px] text-slate-500">{resubmitComment.length.toLocaleString()}/2,000자</p>
     </div>
   );
 
@@ -420,17 +537,23 @@ function ProjectInfoEditor({
         initialDraft={initialDraft}
         draftKey={autosaveKey}
         members={members}
+        requesterId={actor.uid}
         departmentOptions={departmentOptions}
         topSlot={topSlot}
         readOnly={!editorCanEdit}
-        canRemoveContractDocument={false}
-        canRemoveProjectDocuments={false}
-        autosave={record ? { key: autosaveKey, disabled: !editorCanEdit, onSave: persistDraft } : undefined}
-        actions={[
-          { id: 'save', label: '최종 저장', icon: Save },
-          ...(canResubmit ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }] : []),
-        ]}
+        canRemoveContractDocument={Boolean(record?.attachmentRefs.some((attachment) => attachment.documentKind === 'contract'))}
+        canRemoveProjectDocuments
+        onRemoveProjectDocument={removeDocument}
+        autosave={record && !submitted ? { key: autosaveKey, disabled: !editorCanEdit, onSave: persistDraft } : undefined}
+        actions={submitted ? [] : (
+          canResubmit
+            ? [{ id: 'resubmit', label: '수정 후 다시 제출', icon: SendHorizontal, variant: 'secondary' as const }]
+            : [{ id: 'save', label: '최종 저장', icon: Save }]
+        )}
         busyActionId={busyActionId}
+        documentPreviewUrls={documentPreviewUrls}
+        documentPreviewStates={documentPreviewStates}
+        onLoadDocumentPreview={loadDocumentPreview}
         onContractFileUpload={async (file) => {
           const uploaded = await uploadDocument('contract', file);
           return { contractDocument: uploaded.document, contractAnalysis: uploaded.contractAnalysis };
@@ -454,7 +577,12 @@ function ProjectInfoEditor({
         onReacquire={() => { void startEditing(); }}
         onTakeover={() => { void lease.takeover(); }}
       />
-      <AlertDialog open={saveSuccessDialogOpen} onOpenChange={setSaveSuccessDialogOpen}>
+      <AlertDialog open={saveSuccessDialogOpen}
+        onOpenChange={(open) => {
+          setSaveSuccessDialogOpen(open);
+          if (!open && submitted) navigate('/portal/project-select');
+        }}
+      >
         <AlertDialogContent className="max-w-md border border-slate-200 bg-white">
           <AlertDialogHeader className="items-center text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
@@ -462,11 +590,13 @@ function ProjectInfoEditor({
             </div>
             <AlertDialogTitle className="text-xl text-slate-950">프로젝트 수정 요청이 등록되었습니다</AlertDialogTitle>
             <AlertDialogDescription className="text-sm leading-6 text-slate-600">
-              관리자 승인 전까지 프로젝트 원장은 바뀌지 않으며, 승인 대기열에서 최신 수정 요청으로 검토됩니다.
+              {canManagementPlanningResubmit
+                ? '기존 조직장 승인 이력은 유지되며, 보완한 요청은 경영기획실 재검토 화면에 표시됩니다.'
+                : '조직장 승인 전까지 프로젝트 원장은 바뀌지 않으며, 조직장 검토 화면에서 최신 수정 요청으로 확인됩니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:justify-center">
-            <AlertDialogAction onClick={() => setSaveSuccessDialogOpen(false)}>확인</AlertDialogAction>
+            <AlertDialogAction onClick={() => navigate('/portal/project-select')}>프로젝트 목록으로</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -480,7 +610,7 @@ export function PortalProjectEdit() {
   const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
   const routeProjectId = routeProjectIdParam?.trim() || '';
   const { user } = useAuth();
-  const { db, isOnline, orgId } = useFirebase();
+  const { orgId } = useFirebase();
   const { activeProjectId, isLoading: portalLoading, members, myProject: sessionProject, projects } = usePortalStore();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const routeProject = routeProjectId ? projects.find((project) => project.id === routeProjectId) || null : null;
@@ -502,35 +632,27 @@ export function PortalProjectEdit() {
   }, [currentPath, navigate, project?.id, routeProjectId]);
 
   useEffect(() => {
-    if (!db || !isOnline || !project?.id) {
+    if (!project?.id || !user?.uid || !isPlatformApiEnabled()) {
       setRequestDoc(null);
       return undefined;
     }
-    const sourceRows = new Map<string, ProjectRequest>();
-    const publish = () => {
-      const latest = Array.from(sourceRows.values())
-        .sort((left, right) => String(right.requestedAt || '').localeCompare(String(left.requestedAt || '')))[0] || null;
-      setRequestDoc(latest);
-    };
-    const unsubscribers = (['project_requests', 'projectRequests'] as const).map((collectionName) => {
-      const requestQuery = query(
-        collection(db, getOrgCollectionPath(orgId, collectionName)),
-        where('approvedProjectId', '==', project.id),
-        orderBy('requestedAt', 'desc'),
-        limit(1),
-      );
-      return onSnapshot(requestQuery, (snapshot) => {
-        const request = snapshot.docs[0]?.data() as ProjectRequest | undefined;
-        if (request) sourceRows.set(collectionName, request);
-        else sourceRows.delete(collectionName);
-        publish();
-      }, () => {
-        sourceRows.delete(collectionName);
-        publish();
-      });
-    });
-    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [db, isOnline, orgId, project?.id]);
+    let disposed = false;
+    void (async () => {
+      try {
+        const idToken = user.idToken || await getAuthInstance()?.currentUser?.getIdToken() || undefined;
+        const request = await fetchLatestProjectRequestViaBff({
+          tenantId: orgId,
+          actor: { uid: user.uid, email: user.email, role: user.role, idToken },
+          projectId: project.id,
+        });
+        if (!disposed) setRequestDoc(request);
+      } catch (cause) {
+        console.error('[PortalProjectEdit] latest project request fetch failed:', cause);
+        if (!disposed) setRequestDoc(null);
+      }
+    })();
+    return () => { disposed = true; };
+  }, [orgId, project?.id, user?.email, user?.idToken, user?.role, user?.uid]);
 
   useEffect(() => {
     if (!user?.uid || !project?.id) {
@@ -582,7 +704,10 @@ export function PortalProjectEdit() {
   const canonicalDraft = useMemo(() => {
     if (!project) return createProjectEditorDraft();
     const pendingChange = requestDoc?.status === 'PENDING' && resolveProjectRequestKind(requestDoc) === 'CHANGE';
-    return buildProjectEditorDraftFromProject(project, pendingChange ? resolveProjectRequestPayload(requestDoc) : undefined);
+    return createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(project, pendingChange ? resolveProjectRequestPayload(requestDoc) : undefined),
+      registrationRequirementsVersion: 2,
+    });
   }, [project, requestDoc]);
 
   if (!project && portalLoading) {

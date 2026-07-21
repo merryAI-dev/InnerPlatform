@@ -8,7 +8,9 @@ import { usePortalStore } from '../../data/portal-store';
 import type { FileAttachment } from '../../data/types';
 import { getAuthInstance } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
+import { extractTextFromPdf } from '../../lib/pdf-extract';
 import { createEditLeaseClient } from '../../lib/edit-lease-client';
+import { downloadProjectRegistrationDraftAttachmentViaBff } from '../../lib/project-request-attachment-client';
 import {
   createProjectRegistrationDraftClient,
   type ProjectRegistrationAttachment,
@@ -16,7 +18,7 @@ import {
   type ProjectRegistrationFileLike,
   type ProjectRegistrationDocumentKind,
 } from '../../lib/project-registration-draft-client';
-import type { ActorLike } from '../../lib/platform-bff-client';
+import { analyzeProjectRequestContractViaBff, type ActorLike } from '../../lib/platform-bff-client';
 import { openEditSession, type EditSession } from '../../platform/edit-session';
 import {
   buildProjectRequestPayloadFromDraft,
@@ -29,6 +31,7 @@ import { useEditLease } from '../editing/useEditLease';
 import { ProjectEditorWizard } from '../projects/ProjectEditorWizard';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
+import { usePrivateDraftDocumentPreviews } from './usePrivateDraftDocumentPreviews';
 
 type DraftClient = ReturnType<typeof createProjectRegistrationDraftClient>;
 
@@ -58,6 +61,7 @@ function draftForEditor(record: ProjectRegistrationDraft): ProjectEditorDraft {
     presentationPptOriginalDocument: documents.presentation_ppt_original || null,
     rfpRequestEvidenceDocument: documents.rfp_request_evidence || null,
     customerBusinessRegistrationDocument: documents.customer_business_registration || null,
+    registrationRequirementsVersion: 2,
   });
 }
 
@@ -89,6 +93,25 @@ function RegistrationEditor({
     resourceId: record.draftId,
   }), [actor, orgId, record.draftId, session.sessionId]);
   const lease = useEditLease({ client: leaseClient });
+  const loadDraftDocumentPreview = useCallback(({ documentKind, signal }: {
+    documentKind: ProjectRequestDocumentKind;
+    signal: AbortSignal;
+  }) => downloadProjectRegistrationDraftAttachmentViaBff({
+    tenantId: orgId,
+    actor,
+    draftId: record.draftId,
+    documentKind,
+    signal,
+  }), [actor, orgId, record.draftId]);
+  const {
+    documentPreviewUrls,
+    documentPreviewStates,
+    loadDocumentPreview,
+  } = usePrivateDraftDocumentPreviews({
+    attachments: record.attachmentRefs,
+    enabled: !submitted,
+    loadAttachment: loadDraftDocumentPreview,
+  });
 
   useEffect(() => {
     void lease.checkStatus();
@@ -144,9 +167,48 @@ function RegistrationEditor({
       });
       revisionRef.current = uploaded.draft.draftRevision;
       setRecord(uploaded.draft);
-      return { document: attachmentDocument(uploaded.attachment), contractAnalysis: null };
+      let contractAnalysis = null;
+      if (kind === 'contract') {
+        try {
+          const documentText = await extractTextFromPdf(file);
+          contractAnalysis = await analyzeProjectRequestContractViaBff({
+            tenantId: orgId,
+            actor,
+            fileName: file.name,
+            documentText,
+          });
+        } catch (error) {
+          console.error('[PortalProjectRegister] contract analysis failed:', error);
+          toast.warning('계약서는 저장했지만 자동 분석에 실패했습니다. 입력값을 직접 확인해 주세요.');
+        }
+      }
+      return { document: attachmentDocument(uploaded.attachment), contractAnalysis };
+    })
+  )), [actor, draftClient, enqueueMutation, orgId, record.draftId, withOwnership]);
+
+  const removeDocument = useCallback((kind: ProjectRequestDocumentKind) => enqueueMutation(() => (
+    withOwnership(async (ownership) => {
+      if (![
+        'contract',
+        'customer_business_registration',
+        'quote',
+        'proposal',
+        'proposal_word_original',
+        'proposal_ppt_original',
+        'presentation_ppt_original',
+        'rfp_request_evidence',
+      ].includes(kind)) {
+        throw new Error('신규 등록에서 지원하지 않는 첨부 종류입니다.');
+      }
+      const removed = await draftClient.removeAttachment(record.draftId, ownership, {
+        expectedDraftRevision: revisionRef.current,
+        documentKind: kind as ProjectRegistrationDocumentKind,
+      });
+      revisionRef.current = removed.draft.draftRevision;
+      setRecord(removed.draft);
     })
   )), [draftClient, enqueueMutation, record.draftId, withOwnership]);
+
   const editorDraft = useMemo(() => draftForEditor(record), [record]);
   const autosave = useMemo(() => ({
     key: `portal-register-${record.draftId}`,
@@ -178,7 +240,7 @@ function RegistrationEditor({
             </div>
             <div>
               <h1 className="text-xl font-semibold text-slate-950">프로젝트 등록 요청이 최종 저장되었습니다</h1>
-              <p className="mt-2 text-sm text-slate-600">이제 관리자 검토 화면에 표시됩니다.</p>
+              <p className="mt-2 text-sm text-slate-600">이제 지정 결재자의 조직장 검토 화면에 표시됩니다.</p>
             </div>
             <Button onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
           </CardContent>
@@ -215,19 +277,25 @@ function RegistrationEditor({
       <ProjectEditorWizard
         mode="portal-register"
         title="프로젝트 등록"
-        description="임시저장 내용은 본인에게만 보이며, 최종 저장 후 관리자에게 표시됩니다."
+        description="임시저장 내용은 본인에게만 보이며, 최종 저장 후 지정 결재자의 조직장 검토 화면에 표시됩니다."
         embeddedInShell
         initialDraft={editorDraft}
         draftKey={`portal-register-${record.draftId}`}
         members={members}
+        requesterId={actor.uid}
         departmentOptions={departmentOptions}
         topSlot={topSlot}
         readOnly={!lease.canEdit}
         autosave={autosave}
         actions={[{ id: 'submit', label: '최종 저장', icon: Send }]}
         busyActionId={busyActionId}
+        documentPreviewUrls={documentPreviewUrls}
+        documentPreviewStates={documentPreviewStates}
+        onLoadDocumentPreview={loadDocumentPreview}
         onProjectDocumentFileUpload={({ kind, file }) => uploadDocument(kind, file)}
-        canRemoveProjectDocuments={false}
+        canRemoveContractDocument
+        canRemoveProjectDocuments
+        onRemoveProjectDocument={removeDocument}
         onLeave={async () => {
           if (!await lease.release()) throw new Error('edit lease release failed');
         }}

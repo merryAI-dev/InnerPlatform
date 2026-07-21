@@ -2578,6 +2578,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       advanceInterimBelow70Reason: requestPayload.advanceInterimBelow70Reason,
       paymentPlanDesc: requestPayload.paymentPlanDesc,
       clientOrg: requestPayload.clientOrg,
+      businessManagementGoogleFolderLink: requestPayload.businessManagementGoogleFolderLink || '',
       groupwareName: requestPayload.groupwareName || '',
       participantCondition: requestPayload.participantCondition,
       teamMembersDetailed: requestPayload.teamMembersDetailed || [],

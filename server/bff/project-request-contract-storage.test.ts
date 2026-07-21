@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createDraftAttachmentCleanupOutboxHandler,
   createProjectRequestContractStorageService,
   normalizeSafeFileName,
 } from './project-request-contract-storage.mjs';
@@ -96,6 +97,58 @@ describe('project-request-contract-storage', () => {
 
     expect(bucket.file).toHaveBeenCalledWith(path);
     expect(deleteFile).toHaveBeenCalledWith({ ignoreNotFound: true });
+  });
+
+  it('deletes every path in a validated cleanup outbox payload', async () => {
+    const deleteDraftAttachment = vi.fn(async () => undefined);
+    const handler = createDraftAttachmentCleanupOutboxHandler({
+      draftStorageService: { deleteDraftAttachment },
+    });
+
+    await handler({
+      tenantId: 'tenant-a',
+      payload: {
+        draftId: 'draft-a',
+        paths: [
+          'orgs/tenant-a/project-registration-drafts/draft-a/contract.pdf',
+          'orgs/tenant-a/project-registration-drafts/draft-a/quote.pdf',
+        ],
+      },
+    });
+
+    expect(deleteDraftAttachment).toHaveBeenCalledTimes(2);
+    expect(deleteDraftAttachment).toHaveBeenNthCalledWith(1, {
+      tenantId: 'tenant-a',
+      draftId: 'draft-a',
+      path: 'orgs/tenant-a/project-registration-drafts/draft-a/contract.pdf',
+    });
+    await expect(handler({ tenantId: 'tenant-a', payload: { draftId: 'draft-a', paths: [] } }))
+      .rejects.toThrow('Draft attachment cleanup payload is invalid');
+  });
+
+  it('downloads only an attachment within the exact tenant and draft prefix', async () => {
+    const download = vi.fn(async () => [Buffer.from('private-draft-pdf')]);
+    const getMetadata = vi.fn(async () => [{ contentType: 'application/pdf', size: '17' }]);
+    const bucket = { file: vi.fn(() => ({ download, getMetadata })) };
+    const service = createProjectRequestContractStorageService({
+      projectId: 'demo-bff-it',
+      bucketName: 'demo-bff-it.firebasestorage.app',
+      storage: { bucket: vi.fn(() => bucket) },
+    });
+    const path = 'orgs/tenant-a/project-registration-drafts/draft-a/attachment-a-contract.pdf';
+
+    await expect(service.downloadDraftAttachment({
+      tenantId: 'tenant-a', draftId: 'draft-a', path,
+    })).resolves.toMatchObject({
+      buffer: Buffer.from('private-draft-pdf'),
+      contentType: 'application/pdf',
+      size: 17,
+    });
+    await expect(service.downloadDraftAttachment({
+      tenantId: 'tenant-a',
+      draftId: 'draft-a',
+      path: 'orgs/tenant-a/project-registration-drafts/draft-b/attachment-a-contract.pdf',
+    })).rejects.toThrow('draft attachment path is outside its draft prefix');
   });
 
   it('refuses to delete an object outside the owned draft prefix', async () => {

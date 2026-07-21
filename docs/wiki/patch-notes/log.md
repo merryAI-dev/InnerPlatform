@@ -266,3 +266,7 @@
 ## [2026-05-21] patch-note | portal-onboarding-feature-search | 로그인 후 검색 엔트리 정리
 - pages: [portal-onboarding](./pages/portal-onboarding.md)
 - summary: 로그인 성공 후 빈 화면 대신 짧은 전환 화면을 거쳐 기능 검색 엔트리로 이동하게 하고, 업무 화면 진입 후에는 `기능 검색` 자기 참조 메뉴를 제거했으며, 프로젝트 등록 검색은 기능 결과만 노출되도록 정리했다.
+
+## [2026-07-21] patch-note | portal-project-registration | 사업관리 폴더와 다년도 재무 입력 복구
+- pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
+- summary: 프로젝트 등록·수정의 계약 대상 아래에 사업관리 Google Drive 폴더 링크를 추가하고, 다년도 사업은 연도별 계약금액·매출부가세·수익·지원금의 합계만 상단에 반영하도록 정리했다. 계약기간의 한 해라도 빠지거나 확인하지 않으면 BFF가 저장을 거절한다.

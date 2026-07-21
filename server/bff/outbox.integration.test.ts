@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFirestoreDb } from './firestore.mjs';
-import { createOutboxEvent, enqueueOutboxEvent, processOutboxBatch } from './outbox.mjs';
+import {
+  DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+  createOutboxEvent,
+  enqueueOutboxEvent,
+  processOutboxBatch,
+} from './outbox.mjs';
 import { buildNotificationId } from './notifications.mjs';
 import { createProjectRegistrationSubmittedOutboxHandler } from './routes/projects.mjs';
 
@@ -429,7 +434,11 @@ describeIfEmulator('outbox worker integration (Firestore emulator)', () => {
     });
   });
 
-  it.each(['project.registration.submitted', 'project.info.submitted'])(
+  it.each([
+    'project.registration.submitted',
+    'project.info.submitted',
+    DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+  ])(
     'does not mark %s side effects done without an event handler', async (eventType) => {
     const event = createOutboxEvent({
       tenantId,

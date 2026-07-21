@@ -33,6 +33,7 @@ import {
   PROJECT_CURRENCY_LABELS,
   PROJECT_FUND_INPUT_MODE_LABELS,
   PROJECT_PHASE_LABELS,
+  REGISTRATION_V2_BASIS_LABELS,
   PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_TYPE_LABELS,
@@ -54,7 +55,10 @@ import {
   type SettlementSystemCode,
 } from '../../data/types';
 import { PROJECT_DEPARTMENT_OPTIONS, dedupeProjectDepartmentLabels } from '../../data/project-department-options';
-import { PROJECT_TEAM_MEMBER_OPTION_MAP, PROJECT_TEAM_MEMBER_OPTIONS } from '../../data/project-team-member-options';
+import {
+  buildProjectTeamMemberOptions,
+  type ProjectTeamMemberOption,
+} from '../../data/project-team-member-options';
 import {
   formatProjectAmountInput,
   formatStoredProjectAmount,
@@ -73,7 +77,12 @@ import {
   type ProjectRequestDocumentKind,
 } from '../../platform/project-contract-upload';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
-import { createProjectEditorDraft, type ProjectEditorDraft, type ProjectEditorMode } from '../../platform/project-editor';
+import {
+  createProjectEditorDraft,
+  hasInvalidProjectContractPeriod,
+  type ProjectEditorDraft,
+  type ProjectEditorMode,
+} from '../../platform/project-editor';
 import { normalizeProjectDepartment } from '../../platform/project-cic';
 import {
   AlertDialog,
@@ -87,7 +96,12 @@ import {
 } from '../ui/alert-dialog';
 import {
   formatProjectTeamMembersSummary,
+  hasInvalidProjectTeamMemberLaborPeriod,
+  hasInvalidProjectSettlementSupportMember,
   hasIncompleteProjectTeamMembers,
+  hasProjectFinalResponsibleMember,
+  hasProjectOperatingManager,
+  isProjectSettlementSupportMember,
   normalizeProjectTeamMemberDraftRows,
   parseProjectTeamMemberIdentityInput,
   PROJECT_TEAM_MEMBER_ROLES,
@@ -139,6 +153,7 @@ interface ProjectEditorWizardProps {
   description?: string;
   embeddedInShell?: boolean;
   members?: OrgMember[];
+  requesterId?: string;
   departmentOptions?: string[];
   topSlot?: ReactNode;
   actions: ProjectEditorAction[];
@@ -152,6 +167,13 @@ interface ProjectEditorWizardProps {
     document: FileAttachment;
     contractAnalysis: ProjectRequestContractAnalysis | null;
   }>;
+  documentPreviewUrls?: Partial<Record<ProjectRequestDocumentKind, string>>;
+  documentPreviewStates?: Partial<Record<ProjectRequestDocumentKind, {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    error?: string;
+  }>>;
+  onLoadDocumentPreview?: (kind: ProjectRequestDocumentKind) => void | Promise<void>;
+  onRemoveProjectDocument?: (kind: ProjectRequestDocumentKind) => void | Promise<void>;
   contractAnalysisMergeMode?: 'fill-empty' | 'none';
   canRemoveContractDocument?: boolean;
   canRemoveProjectDocuments?: boolean;
@@ -174,6 +196,9 @@ const REGISTRATION_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
   'customer_business_registration',
   'quote',
   'proposal',
+  'proposal_word_original',
+  'proposal_ppt_original',
+  'presentation_ppt_original',
   'rfp_request_evidence',
 ];
 const CHECKOUT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
@@ -183,13 +208,13 @@ const CHECKOUT_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
 ];
 const PROJECT_DOCUMENT_LABELS: Record<ProjectRequestDocumentKind, string> = {
   contract: '계약서 PDF',
-  customer_business_registration: '발주처 사업자등록증 PDF',
+  customer_business_registration: '고객사 사업자등록증 PDF',
   quote: '견적서 PDF',
-  proposal: '제안서 PDF *',
-  proposal_word_original: '제안서 Word 원본 (선택)',
-  proposal_ppt_original: '제안서 PPT 원본 (선택)',
-  presentation_ppt_original: '발표자료 PPT 원본 (선택)',
-  rfp_request_evidence: 'RFP 또는 요청 메일 증빙 (제안서가 없는 경우) *',
+  proposal: '제안서 PDF',
+  proposal_word_original: '제안서 Word 원본',
+  proposal_ppt_original: '제안서 PPT 원본',
+  presentation_ppt_original: '발표자료 PPT 원본',
+  rfp_request_evidence: 'RFP/요청 메일 증빙',
   performance_certificate: '수행확인서 PDF',
   tax_invoice: '세금계산서 PDF',
   final_settlement_report: '최종 정산보고서 PDF',
@@ -225,6 +250,73 @@ const OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD = {
   proposal_ppt_original: 'proposalPptOriginal',
   presentation_ppt_original: 'presentationPptOriginal',
 } as const;
+const OPTIONAL_REGISTRATION_DOCUMENT_REQUIREMENTS = [
+  {
+    kind: 'proposal_word_original',
+    noteField: 'proposalWordOriginal',
+    issueLabel: '제안서 Word 원본 파일 또는 미첨부 사유',
+  },
+  {
+    kind: 'proposal_ppt_original',
+    noteField: 'proposalPptOriginal',
+    issueLabel: '제안서 PPT 원본 파일 또는 미첨부 사유',
+  },
+  {
+    kind: 'presentation_ppt_original',
+    noteField: 'presentationPptOriginal',
+    issueLabel: '발표자료 PPT 원본 파일 또는 미첨부 사유',
+  },
+] as const;
+type RegistrationDocumentSlot = {
+  number: number;
+  label: string;
+  description: string;
+  kinds: ProjectRequestDocumentKind[];
+};
+const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
+  {
+    number: 1,
+    label: '계약서 PDF *',
+    description: '등록하려는 계약서 원문을 제출해 주세요.',
+    kinds: ['contract'],
+  },
+  {
+    number: 2,
+    label: '고객사 사업자등록증 PDF *',
+    description: '계약 대상 고객사의 사업자등록증을 제출해 주세요.',
+    kinds: ['customer_business_registration'],
+  },
+  {
+    number: 3,
+    label: '견적서 PDF *',
+    description: '계약 금액과 범위를 확인할 수 있는 견적서를 제출해 주세요.',
+    kinds: ['quote'],
+  },
+  {
+    number: 4,
+    label: '제안서 PDF 또는 RFP/요청 메일 증빙 *',
+    description: '4번은 제안서 PDF 또는 RFP/요청 메일 증빙 중 하나만 제출하면 됩니다.',
+    kinds: ['proposal', 'rfp_request_evidence'],
+  },
+  {
+    number: 5,
+    label: '제안서 Word 원본',
+    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    kinds: ['proposal_word_original'],
+  },
+  {
+    number: 6,
+    label: '제안서 PPT 원본',
+    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    kinds: ['proposal_ppt_original'],
+  },
+  {
+    number: 7,
+    label: '발표자료 PPT 원본',
+    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    kinds: ['presentation_ppt_original'],
+  },
+];
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
 type StoredProjectEditorDraft = {
   schemaVersion: number;
@@ -291,6 +383,15 @@ function writeStoredProjectEditorDraft(key: string, value: StoredProjectEditorDr
 function removeStoredProjectEditorDraft(key: string) {
   if (typeof localStorage === 'undefined') return;
   localStorage.removeItem(getProjectEditorAutosaveStorageKey(key));
+}
+
+function normalizeRestoredProjectEditorDraft(draft: ProjectEditorDraft, mode: ProjectEditorMode) {
+  return createProjectEditorWizardDraft({
+    ...draft,
+    ...(mode === 'portal-register' || mode === 'portal-edit'
+      ? { registrationRequirementsVersion: 2 as const }
+      : {}),
+  });
 }
 
 function formatAutosaveTime(value: string) {
@@ -401,6 +502,8 @@ function createProjectEditorWizardDraft(overrides: Partial<ProjectEditorDraft> =
 
 interface TeamMemberSearchComboboxProps {
   member: ProjectTeamMemberAssignment;
+  options: ProjectTeamMemberOption[];
+  optionMap: Record<string, ProjectTeamMemberOption>;
   selectedNames: Set<string>;
   currentTeamMemberOptionExists: boolean;
   onSelect: (patch: Partial<ProjectTeamMemberAssignment>) => void;
@@ -408,6 +511,8 @@ interface TeamMemberSearchComboboxProps {
 
 function TeamMemberSearchCombobox({
   member,
+  options,
+  optionMap,
   selectedNames,
   currentTeamMemberOptionExists,
   onSelect,
@@ -423,7 +528,7 @@ function TeamMemberSearchCombobox({
       setOpen(false);
       return;
     }
-    const option = PROJECT_TEAM_MEMBER_OPTION_MAP[value];
+    const option = optionMap[value];
     onSelect({
       inputMode: 'search',
       identityInput: undefined,
@@ -462,7 +567,7 @@ function TeamMemberSearchCombobox({
               </CommandItem>
             </CommandGroup>
             <CommandSeparator />
-            <CommandGroup heading={`${PROJECT_TEAM_MEMBER_OPTIONS.length}명 중 검색`}>
+            <CommandGroup heading={`${options.length}명 중 검색`}>
               {!currentTeamMemberOptionExists && member.memberName ? (
                 <CommandItem
                   value={`${member.memberName} ${member.memberNickname}`}
@@ -480,7 +585,7 @@ function TeamMemberSearchCombobox({
                   </span>
                 </CommandItem>
               ) : null}
-              {PROJECT_TEAM_MEMBER_OPTIONS.map((option) => {
+              {options.map((option) => {
                 const disabled = selectedNames.has(option.value);
                 const selected = option.value === member.memberName;
                 return (
@@ -514,6 +619,7 @@ export function ProjectEditorWizard({
   description,
   embeddedInShell = false,
   members = [],
+  requesterId,
   departmentOptions,
   topSlot,
   actions,
@@ -521,6 +627,10 @@ export function ProjectEditorWizard({
   readOnly = false,
   onContractFileUpload,
   onProjectDocumentFileUpload,
+  documentPreviewUrls,
+  documentPreviewStates,
+  onLoadDocumentPreview,
+  onRemoveProjectDocument,
   contractAnalysisMergeMode = 'fill-empty',
   canRemoveContractDocument,
   canRemoveProjectDocuments = true,
@@ -680,6 +790,7 @@ export function ProjectEditorWizard({
     nextDraft: ProjectEditorDraft,
     nextStepIndex: number,
   ) => {
+    if (uploadInProgress || hasPendingRetryFile) return false;
     if (readOnly || !autosave?.key || autosave.disabled) return false;
     const now = new Date().toISOString();
     const storedDraft: StoredProjectEditorDraft = {
@@ -703,7 +814,7 @@ export function ProjectEditorWizard({
       setAutosaveState('error');
       return false;
     }
-  }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, readOnly]);
+  }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, hasPendingRetryFile, readOnly, uploadInProgress]);
 
   const saveDraftAndRelease = useCallback(async () => {
     if (uploadInProgress || hasPendingRetryFile) {
@@ -794,7 +905,7 @@ export function ProjectEditorWizard({
   }, [blocker]);
 
   useEffect(() => {
-    if (readOnly || !autosave?.key || autosave.disabled || restoreCandidate) return undefined;
+    if (readOnly || !autosave?.key || autosave.disabled || restoreCandidate || uploadInProgress || hasPendingRetryFile) return undefined;
     const isInitialDraft = stepIndex === 0 && JSON.stringify(createProjectEditorDraft(draft)) === initialDraftFingerprint;
     if (isInitialDraft) return undefined;
 
@@ -802,11 +913,11 @@ export function ProjectEditorWizard({
       void persistAutosaveSnapshot(draft, stepIndex);
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [autosave?.disabled, autosave?.key, draft, initialDraftFingerprint, persistAutosaveSnapshot, readOnly, restoreCandidate, stepIndex]);
+  }, [autosave?.disabled, autosave?.key, draft, hasPendingRetryFile, initialDraftFingerprint, persistAutosaveSnapshot, readOnly, restoreCandidate, stepIndex, uploadInProgress]);
 
   const restoreLocalDraft = () => {
     if (!restoreCandidate) return;
-    setDraft(createProjectEditorWizardDraft(restoreCandidate.draft));
+    setDraft(normalizeRestoredProjectEditorDraft(restoreCandidate.draft, mode));
     setStepIndex(Math.max(0, Math.min(STEPS.length - 1, restoreCandidate.stepIndex || 0)));
     setLastAutosavedAt(restoreCandidate.updatedAt);
     setAutosaveState('saved');
@@ -820,6 +931,10 @@ export function ProjectEditorWizard({
   };
 
   const handleManualAutosave = async () => {
+    if (uploadInProgress || hasPendingRetryFile) {
+      toast.error('첨부파일 처리를 완료한 뒤 임시저장해 주세요.');
+      return;
+    }
     const saved = await persistAutosaveSnapshot(draft, stepIndex);
     if (saved) toast.success('임시저장되었습니다.');
     else toast.error('임시저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
@@ -827,6 +942,10 @@ export function ProjectEditorWizard({
 
   const handleActionSubmit = async (actionId: string) => {
     if (submitInFlightRef.current) return;
+    if (uploadInProgress || hasPendingRetryFile) {
+      toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.');
+      return;
+    }
     submitInFlightRef.current = true;
     try {
       if (autosave?.key && !await persistAutosaveSnapshot(draft, stepIndex)) {
@@ -855,6 +974,13 @@ export function ProjectEditorWizard({
   const hasTotalRevenueAmountInput = financialInputFlags.totalRevenueAmount;
   const hasSupportAmountInput = financialInputFlags.supportAmount;
   const usesRegistrationV2 = draft.registrationRequirementsVersion === 2;
+  const hasMultiYearContract = Boolean(
+    /^\d{4}-\d{2}-\d{2}$/.test(draft.contractStart)
+    && /^\d{4}-\d{2}-\d{2}$/.test(draft.contractEnd)
+    && draft.contractStart.slice(0, 4) !== draft.contractEnd.slice(0, 4),
+  );
+  const settlementDetailsEnabled = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
+  const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE';
   const showProjectCheckout = draft.status === 'COMPLETED' || draft.status === 'COMPLETED_PENDING_PAYMENT';
   const paymentPlanTotal = draft.paymentPlan.contract + draft.paymentPlan.interim + draft.paymentPlan.final;
   const advanceInterimRatio = draft.contractAmount > 0
@@ -867,23 +993,41 @@ export function ProjectEditorWizard({
   const teamMembersSummary = formatProjectTeamMembersSummary(draft.teamMembersDetailed, '', '\n');
   const projectTypeOptions = getProjectTypeSelectableOptions(draft.type);
   const contractTypeOptions = getProjectContractTypeSelectableOptions(draft.contractType);
+  const teamMemberOptions = useMemo(() => buildProjectTeamMemberOptions(members), [members]);
+  const teamMemberOptionMap = useMemo(() => Object.fromEntries(
+    teamMemberOptions.map((option) => [option.value, option]),
+  ) as Record<string, ProjectTeamMemberOption>, [teamMemberOptions]);
   const ownerOptions = useMemo(
     () => [...members]
       .filter((member) => String(member.uid || '').trim())
       .sort((left, right) => String(left.name || left.email || left.uid).localeCompare(String(right.name || right.email || right.uid), 'ko')),
     [members],
   );
+  const executiveApproverOptions = useMemo(
+    () => ownerOptions.filter((member) => (
+      member.uid !== draft.registeredById && member.uid !== requesterId
+    )),
+    [draft.registeredById, requesterId, ownerOptions],
+  );
   const selectedOwner = useMemo(
     () => ownerOptions.find((member) => member.uid === draft.registeredById) || null,
     [draft.registeredById, ownerOptions],
   );
-  const selectedExecutiveApprover = useMemo(
+  const linkedExecutiveApprover = useMemo(
     () => ownerOptions.find((member) => member.uid === draft.executiveApproverId) || null,
     [draft.executiveApproverId, ownerOptions],
   );
+  const selectedExecutiveApprover = useMemo(
+    () => executiveApproverOptions.find((member) => member.uid === draft.executiveApproverId) || null,
+    [draft.executiveApproverId, executiveApproverOptions],
+  );
+  const isSelfExecutiveApprover = Boolean(
+    draft.executiveApproverId
+      && (draft.executiveApproverId === draft.registeredById || draft.executiveApproverId === requesterId),
+  );
   const hasUnlinkedStoredOwner = Boolean(draft.registeredById && !selectedOwner);
   const hasUnlinkedStoredExecutiveApprover = Boolean(
-    draft.executiveApproverId && !selectedExecutiveApprover,
+    draft.executiveApproverId && !linkedExecutiveApprover,
   );
 
   useEffect(() => {
@@ -935,7 +1079,7 @@ export function ProjectEditorWizard({
 
   const updateFinancialYear = (
     index: number,
-    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount' | 'profitRate' | 'confirmed',
+    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount' | 'confirmed',
     value: number | boolean,
   ) => {
     setDraft((prev) => {
@@ -1054,6 +1198,8 @@ export function ProjectEditorWizard({
         return createProjectEditorWizardDraft({
           ...prev,
           [PROJECT_DOCUMENT_FIELD[kind]]: processed.document,
+          rfpRequestEvidenceDocument: kind === 'proposal' ? null : prev.rfpRequestEvidenceDocument,
+          proposalDocument: kind === 'rfp_request_evidence' ? null : prev.proposalDocument,
           ...(noteField ? {
             registrationOptionalDocumentNotes: {
               ...prev.registrationOptionalDocumentNotes,
@@ -1095,29 +1241,33 @@ export function ProjectEditorWizard({
     await processProjectDocument(kind, file, input);
   };
 
-  const removeContractDocument = () => {
-    setDraft((prev) => createProjectEditorWizardDraft({
-      ...prev,
-      contractDocument: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
-        ? initialContractDocument
-        : null,
-      contractAnalysis: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
-        ? initialContractAnalysis
-        : null,
-    }));
-    setDocumentUploadState((prev) => ({ ...prev, contract: 'idle' }));
-    setDocumentUploadError((prev) => ({ ...prev, contract: '' }));
-    delete retryDocumentFileRef.current.contract;
-  };
-
-  const removeSupplementalDocument = (kind: Exclude<ProjectRequestDocumentKind, 'contract'>) => {
-    setDraft((prev) => createProjectEditorWizardDraft({
-      ...prev,
-      [PROJECT_DOCUMENT_FIELD[kind]]: null,
-    }));
-    setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
+  const removeProjectDocument = async (kind: ProjectRequestDocumentKind) => {
+    setDocumentUploadState((prev) => ({ ...prev, [kind]: 'extracting' }));
     setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
-    delete retryDocumentFileRef.current[kind];
+    try {
+      await onRemoveProjectDocument?.(kind);
+      setDraft((prev) => createProjectEditorWizardDraft({
+        ...prev,
+        ...(kind === 'contract'
+          ? {
+              contractDocument: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
+                ? initialContractDocument
+                : null,
+              contractAnalysis: initialContractDocument && !contractDocumentEditPolicy.canRemoveExistingContractDocument
+                ? initialContractAnalysis
+                : null,
+            }
+          : { [PROJECT_DOCUMENT_FIELD[kind]]: null }),
+      }));
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
+      delete retryDocumentFileRef.current[kind];
+      toast.success(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 첨부를 제거했습니다.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 첨부 제거에 실패했습니다.`;
+      setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
+      setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
+      toast.error('첨부 제거 실패', { description: message });
+    }
   };
 
   const submitIssues = useMemo(() => {
@@ -1134,10 +1284,27 @@ export function ProjectEditorWizard({
       if (!draft.projectPurpose.trim()) issues.push({ step: 'basic', label: '프로젝트 목적' });
       if (!draft.description.trim()) issues.push({ step: 'basic', label: '프로젝트 주요 내용' });
       if (!draft.contractDocument) issues.push({ step: 'financial', label: '계약서 PDF' });
-      if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '발주처 사업자등록증 PDF' });
-      if (!draft.quoteDocument) issues.push({ step: 'financial', label: '견적서 PDF' });
-      if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument) {
-        issues.push({ step: 'financial', label: '제안서 또는 RFP/요청 메일 증빙' });
+      if (onProjectDocumentFileUpload) {
+        if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '고객사 사업자등록증 PDF' });
+        if (!draft.quoteDocument) issues.push({ step: 'financial', label: '견적서 PDF' });
+        if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument) {
+          issues.push({ step: 'financial', label: '제안서 또는 RFP/요청 메일 증빙' });
+        }
+        if (draft.proposalDocument && draft.rfpRequestEvidenceDocument) {
+          issues.push({ step: 'financial', label: '제안서와 RFP/요청 메일 중 하나만 남겨주세요.' });
+        }
+        OPTIONAL_REGISTRATION_DOCUMENT_REQUIREMENTS.forEach(({ kind, noteField, issueLabel }) => {
+          if (!draft[PROJECT_DOCUMENT_FIELD[kind]] && !draft.registrationOptionalDocumentNotes[noteField].trim()) {
+            issues.push({ step: 'financial', label: issueLabel });
+          }
+        });
+      }
+      if (
+        draft.contractStart.trim()
+        && draft.contractEnd.trim()
+        && hasInvalidProjectContractPeriod(draft.contractStart, draft.contractEnd)
+      ) {
+        issues.push({ step: 'financial', label: '계약 종료일은 시작일 이후여야 합니다.' });
       }
       const startYear = Number(draft.contractStart.slice(0, 4));
       const endYear = Number(draft.contractEnd.slice(0, 4));
@@ -1154,10 +1321,15 @@ export function ProjectEditorWizard({
         && annualTotal('salesVatAmount') === draft.salesVatAmount
         && annualTotal('totalRevenueAmount') === draft.totalRevenueAmount
         && annualTotal('supportAmount') === draft.supportAmount;
-      if (!financialYearsComplete || !annualTotalsMatch) issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
-      if (draft.registrationConfirmations.laborIncludesFourInsurance !== true) issues.push({ step: 'payment', label: '4대보험 포함 확인' });
-      if (draft.registrationConfirmations.laborIncludesRetirementPay !== true) issues.push({ step: 'payment', label: '퇴직급여 포함 확인' });
-      if (!draft.registrationConfirmations.customerSettlementBasisConfirmed) issues.push({ step: 'payment', label: '발주처 정산 기준 확인' });
+      if (hasMultiYearContract && (!financialYearsComplete || !annualTotalsMatch)) {
+        issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
+      }
+      if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' });
+      if (requiresSettlementConfirmations) {
+        if (draft.registrationConfirmations.laborIncludesFourInsurance !== true) issues.push({ step: 'payment', label: '4대보험 포함 확인' });
+        if (draft.registrationConfirmations.laborIncludesRetirementPay !== true) issues.push({ step: 'payment', label: '퇴직급여 포함 확인' });
+        if (!draft.registrationConfirmations.customerSettlementBasisConfirmed) issues.push({ step: 'payment', label: '고객사 정산 기준 확인' });
+      }
       if (draft.registrationConfirmations.modusignContractUsed === null) issues.push({ step: 'payment', label: '모두싸인 사용 여부' });
       if (
         draft.registrationConfirmations.modusignContractUsed === false
@@ -1188,14 +1360,28 @@ export function ProjectEditorWizard({
       }
     }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
-    if (!draft.executiveApproverId || !selectedExecutiveApprover) {
+    if (isSelfExecutiveApprover) {
+      issues.push({ step: 'team', label: '사업 담당자와 지정 결재자는 달라야 합니다.' });
+    } else if (!draft.executiveApproverId || !selectedExecutiveApprover) {
       issues.push({ step: 'team', label: '지정 결재자' });
     }
     if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
       issues.push({ step: 'team', label: '참여인력 이름·역할·서류상 여부' });
     }
+    if (usesRegistrationV2 && !hasProjectOperatingManager(draft.teamMembersDetailed)) {
+      issues.push({ step: 'team', label: '실제 투입 운영 매니저 1인 이상' });
+    }
+    if (usesRegistrationV2 && !hasProjectFinalResponsibleMember(draft.teamMembersDetailed)) {
+      issues.push({ step: 'team', label: '실제 투입 사업 최종 책임자' });
+    }
+    if (usesRegistrationV2 && hasInvalidProjectSettlementSupportMember(draft.teamMembersDetailed)) {
+      issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 실제 투입인력으로 선택' });
+    }
+    if (usesRegistrationV2 && hasInvalidProjectTeamMemberLaborPeriod(draft.teamMembersDetailed)) {
+      issues.push({ step: 'team', label: '인건비 투입 종료월은 시작월 이후여야 합니다.' });
+    }
     return issues;
-  }, [departmentOptionSet, draft, hasContractAmountInput, requiresAdvanceInterimReason, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
+  }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
 
@@ -1245,18 +1431,13 @@ export function ProjectEditorWizard({
         <Label className="text-xs">프로젝트명 *</Label>
         <Input
           value={draft.name}
-          onChange={(event) => update('name', event.target.value.slice(0, mode === 'portal-register' ? 10 : 80))}
+          onChange={(event) => update('name', event.target.value)}
           placeholder="예: 26농식품AC"
           className="mt-1 h-9 text-sm"
         />
-        <div className="mt-1 flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-          <p className="max-w-3xl text-[11px] leading-5 text-muted-foreground">
-            계약연도+프로젝트명 형식으로 입력해 주세요. 재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다. 다년도 사업은 같은 프로젝트명을 사용해 주세요.
-          </p>
-          {mode === 'portal-register' ? (
-            <p className="shrink-0 text-[10px] text-muted-foreground">{draft.name.length}/10자</p>
-          ) : null}
-        </div>
+        <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
+          계약연도+프로젝트명 형식으로 입력해 주세요. 재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다. 다년도 사업은 같은 프로젝트명을 사용해 주세요.
+        </p>
       </div>
 
       <div>
@@ -1272,6 +1453,20 @@ export function ProjectEditorWizard({
             사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.
           </p>
         </div>
+      </div>
+
+      <div>
+        <Label className="text-xs">사업관리 구글폴더링크</Label>
+        <Input
+          type="url"
+          value={draft.businessManagementGoogleFolderLink}
+          onChange={(event) => update('businessManagementGoogleFolderLink', event.target.value)}
+          placeholder="https://drive.google.com/drive/folders/..."
+          className="mt-1 h-9 text-sm"
+        />
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          사업관리용 Google Drive 폴더 링크를 입력해 주세요.
+        </p>
       </div>
 
       <div>
@@ -1313,8 +1508,19 @@ export function ProjectEditorWizard({
     </div>
   );
 
-  const renderProjectDocumentUpload = (kind: ProjectRequestDocumentKind) => {
+  const renderProjectDocumentUpload = (
+    kind: ProjectRequestDocumentKind,
+    options: {
+      slotNumber?: number;
+      label?: string;
+      description?: string;
+      embedded?: boolean;
+      disabled?: boolean;
+    } = {},
+  ) => {
     const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
+    const documentDownloadURL = document ? (documentPreviewUrls?.[kind] || document.downloadURL) : '';
+    const previewState = documentPreviewStates?.[kind];
     const uploadState = documentUploadState[kind];
     const uploadError = documentUploadError[kind];
     const inputRef = getDocumentInputRef(kind);
@@ -1322,31 +1528,43 @@ export function ProjectEditorWizard({
       ? contractDocumentEditPolicy.canRemoveCurrentContractDocument
       : Boolean(document));
     const removeLabel = kind === 'contract' ? contractDocumentEditPolicy.removeButtonLabel : '첨부 제거';
-    const remove = kind === 'contract' ? removeContractDocument : () => removeSupplementalDocument(kind);
+    const remove = () => { void removeProjectDocument(kind); };
     const optionalNoteField = OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD[
       kind as keyof typeof OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD
     ];
+    const description = options.description || (kind === 'contract'
+      ? (contractAnalysisMergeMode === 'none'
+          ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
+          : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.')
+      : kind === 'proposal_word_original'
+        ? '원본 DOCX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
+        : kind === 'proposal_ppt_original' || kind === 'presentation_ppt_original'
+          ? '원본 PPTX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
+          : kind === 'rfp_request_evidence'
+            ? 'RFP 또는 요청 메일 원본을 PDF, DOCX, EML, MSG 중 하나로 올려주세요.'
+            : 'PDF를 올리면 검토용 첨부로 저장합니다.');
 
     return (
-      <div key={kind} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      <div
+        key={kind}
+        className={cn(
+          options.embedded
+            ? 'rounded-lg border border-slate-200 bg-white p-3'
+            : 'rounded-xl border border-slate-200 bg-slate-50/70 p-4',
+        )}
+      >
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-slate-600" />
-              <Label className="text-xs font-semibold">{PROJECT_DOCUMENT_LABELS[kind]}</Label>
+              {options.slotNumber ? (
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
+                  {options.slotNumber}
+                </span>
+              ) : <FileText className="h-4 w-4 text-slate-600" />}
+              <Label className="text-xs font-semibold">{options.label || PROJECT_DOCUMENT_LABELS[kind]}</Label>
             </div>
             <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-              {kind === 'contract'
-                ? (contractAnalysisMergeMode === 'none'
-                    ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
-                    : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.')
-                : kind === 'proposal_word_original'
-                  ? '원본 DOCX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
-                  : kind === 'proposal_ppt_original' || kind === 'presentation_ppt_original'
-                    ? '원본 PPTX를 올립니다. 파일이 없으면 아래에 미첨부 사유 또는 해당 없음을 적어주세요.'
-                    : kind === 'rfp_request_evidence'
-                      ? 'RFP 또는 요청 메일 원본을 PDF, DOCX, EML, MSG 중 하나로 올려주세요.'
-                      : 'PDF를 올리면 검토용 첨부로 저장합니다.'}
+              {description}
             </p>
             {document ? (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
@@ -1354,13 +1572,32 @@ export function ProjectEditorWizard({
                 <span className="text-muted-foreground">
                   {(document.size / 1024 / 1024).toFixed(2)} MB
                 </span>
-                {document.downloadURL ? (
+                {documentDownloadURL ? (
                   <Button asChild type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]">
-                    <a href={document.downloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+                    <a href={documentDownloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+                  </Button>
+                ) : document && previewState && onLoadDocumentPreview ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={previewState.status === 'loading'}
+                    onClick={() => void onLoadDocumentPreview(kind)}
+                  >
+                    {previewState.status === 'loading' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                    {previewState.status === 'error' ? '원문 다시 불러오기' : previewState.status === 'loading' ? '불러오는 중' : '원문 불러오기'}
                   </Button>
                 ) : null}
                 {canRemove ? (
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-rose-600" onClick={remove}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-rose-600"
+                    disabled={uploadState === 'extracting'}
+                    onClick={remove}
+                  >
                     <X className="mr-1 h-3.5 w-3.5" />
                     {removeLabel}
                   </Button>
@@ -1376,7 +1613,7 @@ export function ProjectEditorWizard({
                     ...draft.registrationOptionalDocumentNotes,
                     [optionalNoteField]: event.target.value,
                   })}
-                  placeholder="예: 해당 없음 / 발주처에서 원본을 제공하지 않음"
+                  placeholder="예: 해당 없음 / 고객사에서 원본을 제공하지 않음"
                   className="mt-1 h-9 bg-white text-sm"
                 />
               </div>
@@ -1395,6 +1632,11 @@ export function ProjectEditorWizard({
             {uploadError ? (
               <p className="mt-2 text-[11px] text-rose-600">{uploadError}</p>
             ) : null}
+            {previewState?.status === 'error' ? (
+              <p className="mt-2 text-[11px] text-rose-600" role="alert">
+                {previewState.error || '첨부 파일을 불러오지 못했습니다.'}
+              </p>
+            ) : null}
           </div>
           <div className="shrink-0">
             <input
@@ -1408,7 +1650,7 @@ export function ProjectEditorWizard({
               type="button"
               variant="outline"
               className="w-full gap-2 lg:w-auto"
-              disabled={uploadState === 'extracting'}
+              disabled={uploadState === 'extracting' || options.disabled}
               onClick={() => {
                 const retryFile = retryDocumentFileRef.current[kind];
                 if (retryFile) void processProjectDocument(kind, retryFile, inputRef.current || undefined);
@@ -1428,11 +1670,61 @@ export function ProjectEditorWizard({
     );
   };
 
+  const renderRegistrationDocumentSlot = (slot: RegistrationDocumentSlot) => {
+    if (slot.kinds.length === 1) {
+      return renderProjectDocumentUpload(slot.kinds[0], {
+        slotNumber: slot.number,
+        label: slot.label,
+        description: slot.description,
+      });
+    }
+
+    return (
+      <div key={slot.number} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="flex items-start gap-2">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
+            {slot.number}
+          </span>
+          <div>
+            <Label className="text-xs font-semibold">{slot.label}</Label>
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{slot.description}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {slot.kinds.map((kind) => {
+            const alternativeDocumentAttached = kind === 'proposal'
+              ? Boolean(draft.rfpRequestEvidenceDocument)
+              : kind === 'rfp_request_evidence'
+                ? Boolean(draft.proposalDocument)
+                : false;
+            return renderProjectDocumentUpload(kind, {
+              embedded: true,
+              label: PROJECT_DOCUMENT_LABELS[kind],
+              description: alternativeDocumentAttached
+                ? '업로드하면 기존 대체서류를 교체합니다.'
+                : undefined,
+            });
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const renderFinancialStep = () => (
     <div className="space-y-4">
       {onContractFileUpload || onProjectDocumentFileUpload ? (
         <div className="space-y-3">
-          {registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
+          {usesRegistrationV2 && onProjectDocumentFileUpload ? (
+            <>
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p className="text-sm font-semibold text-[#001e46]">등록 제출서류 7종</p>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                  1~3번은 필수이며, 4번은 두 문서 중 하나를 제출합니다. 5~7번은 원본 파일 또는 미첨부 사유를 남겨주세요.
+                </p>
+              </div>
+              {REGISTRATION_DOCUMENT_SLOTS.map(renderRegistrationDocumentSlot)}
+            </>
+          ) : registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
         </div>
       ) : null}
 
@@ -1499,9 +1791,9 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.contractAmount, hasContractAmountInput)}
             onChange={(event) => updateAmount('contractAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
             {hasContractAmountInput ? `${PROJECT_CURRENCY_LABELS[draft.currency]} ${fmtKRW(draft.contractAmount)}` : '미입력'}
@@ -1511,14 +1803,14 @@ export function ProjectEditorWizard({
 
       <div className="grid gap-4 lg:grid-cols-4">
         <div>
-          <Label className="text-xs">매출 부가세</Label>
+          <Label className="text-xs">총매출부가세</Label>
           <Input
             inputMode="numeric"
             value={formatProjectAmountInput(draft.salesVatAmount, hasSalesVatAmountInput)}
             onChange={(event) => updateAmount('salesVatAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
@@ -1527,24 +1819,24 @@ export function ProjectEditorWizard({
             inputMode="numeric"
             value={formatProjectAmountInput(draft.totalRevenueAmount, hasTotalRevenueAmountInput)}
             onChange={(event) => updateAmount('totalRevenueAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
-          <Label className="text-xs">지원금</Label>
+          <Label className="text-xs">총지원금</Label>
           <Input
             inputMode="numeric"
             value={formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)}
             onChange={(event) => updateAmount('supportAmount', event.target.value)}
-            readOnly={usesRegistrationV2}
+            readOnly={usesRegistrationV2 && hasMultiYearContract}
             placeholder="0"
-            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && 'bg-muted/40')}
+            className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
         </div>
         <div>
-          <Label className="text-xs">수익률</Label>
+          <Label className="text-xs">총수익률</Label>
           <Input value={profitRateLabel ? `${profitRateLabel}%` : '-'} readOnly className="mt-1 h-9 bg-muted/40 text-sm" />
           <p className="mt-1 text-[10px] text-muted-foreground">
             총수익 / 계약금액 기준 자동 계산
@@ -1552,12 +1844,12 @@ export function ProjectEditorWizard({
         </div>
       </div>
 
-      {usesRegistrationV2 ? (
+      {usesRegistrationV2 && hasMultiYearContract ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
           <div>
             <Label className="text-xs font-semibold">연도별 계약·재무 *</Label>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
+              다년도 사업은 계약기간의 모든 연도를 각각 입력하고 확인해야 하며, 위 합계는 연도별 입력값으로 자동 계산됩니다.
             </p>
           </div>
           {draft.financialYears.length === 0 ? (
@@ -1571,7 +1863,7 @@ export function ProjectEditorWizard({
                 {([
                   ['contractAmount', '계약금액'],
                   ['salesVatAmount', '매출 부가세'],
-                  ['totalRevenueAmount', '총수익'],
+                  ['totalRevenueAmount', '수익'],
                   ['supportAmount', '지원금'],
                 ] as const).map(([field, label]) => (
                   <div key={field}>
@@ -1587,18 +1879,13 @@ export function ProjectEditorWizard({
                 <div>
                   <Label className="text-[11px]">수익률(%)</Label>
                   <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="0.01"
-                    value={Number((row.profitRate * 100).toFixed(2))}
-                    onChange={(event) => updateFinancialYear(
-                      index,
-                      'profitRate',
-                      Math.min(1, Math.max(0, Number(event.target.value) / 100 || 0)),
-                    )}
-                    className="mt-1 h-9 text-sm"
+                    value={`${(row.profitRate * 100).toFixed(2)}%`}
+                    readOnly
+                    className="mt-1 h-9 bg-muted/40 text-sm"
                   />
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    연도별 계약금액과 총수익으로 자동 계산
+                  </p>
                 </div>
               </div>
               <label className="mt-3 flex items-center gap-2 text-[12px] text-slate-700">
@@ -1646,86 +1933,111 @@ export function ProjectEditorWizard({
 
       <div className="grid gap-4 lg:grid-cols-4">
         <div>
-          <Label className="text-xs">정산 유형</Label>
+          <Label className="text-xs">{usesRegistrationV2 ? '사업유형' : '정산 유형'}</Label>
           <Select
-            value={draft.settlementType}
+            value={usesRegistrationV2 && draft.settlementType === 'NONE' ? undefined : draft.settlementType}
             onValueChange={(value) => update('settlementType', value as SettlementType)}
           >
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 유형 선택" /></SelectTrigger>
+            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder={usesRegistrationV2 ? '사업유형 선택' : '정산 유형 선택'} /></SelectTrigger>
             <SelectContent>
-              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs">정산 기준</Label>
-          <Select
-            value={draft.basis}
-            onValueChange={(value) => update('basis', value as Basis)}
-          >
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(BASIS_LABELS) as [Basis, string][]).map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs">통장 유형</Label>
-          <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
+              {(Object.entries(SETTLEMENT_TYPE_LABELS) as [SettlementType, string][]).filter(([key]) => !usesRegistrationV2 || key !== 'NONE').map(([key, value]) => (
                 <SelectItem key={key} value={key}>{value}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div>
-          <Label className="text-xs">자금 입력 방식</Label>
-          <Select value={draft.fundInputMode} onValueChange={(value) => updateFundInputMode(value as ProjectFundInputMode)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(PROJECT_FUND_INPUT_MODE_LABELS) as [ProjectFundInputMode, string][]).map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {draft.fundInputMode === 'DIRECT_ENTRY'
-              ? '정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
-              : '통장내역 업로드 후 정산 시트로 이어서 입력합니다.'}
-          </p>
-        </div>
+        {usesRegistrationV2 ? (
+          <div>
+            <Label className="text-xs">정산 기준</Label>
+            <Select value={draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key]) => (
+                  <SelectItem key={key} value={key}>{REGISTRATION_V2_BASIS_LABELS[key as Exclude<Basis, '기타'>]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : draft.settlementType === 'NONE' ? (
+          <div className="lg:col-span-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[12px] text-muted-foreground">
+            정산 없음은 정산 기준·통장·정산 시스템 입력이 필요하지 않습니다.
+          </div>
+        ) : (
+          <div>
+            <Label className="text-xs">정산 기준</Label>
+            <Select value={draft.basis === 'NONE' ? undefined : draft.basis} onValueChange={(value) => update('basis', value as Basis)}>
+              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="정산 기준 선택" /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(BASIS_LABELS) as [Basis, string][]).filter(([key]) => usesRegistrationV2 ? key !== '기타' : key !== 'NONE').map(([key, value]) => (
+                  <SelectItem key={key} value={key}>{value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {settlementDetailsEnabled ? (
+          <>
+            <div>
+              <Label className="text-xs">통장 유형</Label>
+              <Select value={draft.accountType} onValueChange={(value) => update('accountType', value as AccountType)}>
+                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">자금 입력 방식</Label>
+              <Select value={draft.fundInputMode} onValueChange={(value) => updateFundInputMode(value as ProjectFundInputMode)}>
+                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(PROJECT_FUND_INPUT_MODE_LABELS) as [ProjectFundInputMode, string][]).map(([key, value]) => (
+                    <SelectItem key={key} value={key}>{value}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {draft.fundInputMode === 'DIRECT_ENTRY'
+                  ? '정산 시트 또는 엑셀 템플릿으로 직접 입력합니다.'
+                  : '통장내역 업로드 후 정산 시트로 이어서 입력합니다.'}
+              </p>
+            </div>
+          </>
+        ) : usesRegistrationV2 ? (
+          <div className="lg:col-span-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-[12px] text-muted-foreground">
+            정산 기준이 정산없음이면 통장·정산 시스템 입력이 필요하지 않습니다.
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div>
-          <Label className="text-xs">정산 시스템</Label>
-          <Select value={draft.settlementSystem} onValueChange={(value) => update('settlementSystem', value as SettlementSystemCode)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(SETTLEMENT_SYSTEM_LABELS) as [SettlementSystemCode, string][]).map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {settlementDetailsEnabled ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <Label className="text-xs">정산 시스템</Label>
+            <Select value={draft.settlementSystem} onValueChange={(value) => update('settlementSystem', value as SettlementSystemCode)}>
+              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(SETTLEMENT_SYSTEM_LABELS) as [SettlementSystemCode, string][]).map(([key, value]) => (
+                  <SelectItem key={key} value={key}>{value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">인건비 정산 기준</Label>
+            <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
+              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
+                  <SelectItem key={key} value={key}>{value}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div>
-          <Label className="text-xs">인건비 정산 기준</Label>
-          <Select value={draft.laborSettlementBasis} onValueChange={(value) => update('laborSettlementBasis', value as LaborSettlementBasis)}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.entries(LABOR_SETTLEMENT_BASIS_LABELS) as [LaborSettlementBasis, string][]).map(([key, value]) => (
-                <SelectItem key={key} value={key}>{value}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      ) : null}
 
     </div>
   );
@@ -1771,7 +2083,7 @@ export function ProjectEditorWizard({
         <div>
           <Label className="text-xs">지정 결재자 *</Label>
           <Select value={selectedExecutiveApprover?.uid} onValueChange={(value) => {
-            const member = ownerOptions.find((item) => item.uid === value);
+            const member = executiveApproverOptions.find((item) => item.uid === value);
             if (!member) return;
             setDraft((prev) => createProjectEditorDraft({
               ...prev,
@@ -1779,15 +2091,15 @@ export function ProjectEditorWizard({
               executiveApproverName: member.name || member.email || member.uid,
               executiveApproverEmail: member.email || '',
             }));
-          }} disabled={ownerOptions.length === 0}>
+          }} disabled={executiveApproverOptions.length === 0}>
             <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="구성원 원장에서 선택" /></SelectTrigger>
             <SelectContent>
-              {ownerOptions.map((member) => (
+              {executiveApproverOptions.map((member) => (
                 <SelectItem key={member.uid} value={member.uid}>
                   {member.email ? `${member.name || member.uid} (${member.email})` : (member.name || member.uid)}
                 </SelectItem>
               ))}
-              {ownerOptions.length === 0 ? (
+              {executiveApproverOptions.length === 0 ? (
                 <SelectItem value="__no_org_members__" disabled>구성원 원장을 불러오는 중입니다</SelectItem>
               ) : null}
             </SelectContent>
@@ -1795,7 +2107,11 @@ export function ProjectEditorWizard({
           <p className="mt-1 text-[11px] text-muted-foreground">
             선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.
           </p>
-          {hasUnlinkedStoredExecutiveApprover ? (
+          {isSelfExecutiveApprover ? (
+            <p className="mt-1 text-[11px] text-red-700">
+              사업 담당자와 지정 결재자는 달라야 합니다.
+            </p>
+          ) : hasUnlinkedStoredExecutiveApprover ? (
             <p className="mt-1 text-[11px] text-red-700">
               현재 저장된 결재자 값이 구성원 원장에 없습니다. 원장에서 다시 선택해야 저장 후 연결됩니다.
             </p>
@@ -1804,7 +2120,7 @@ export function ProjectEditorWizard({
       </div>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <Label className="text-xs">서류상 참여인력</Label>
+          <Label className="text-xs">참여인력 (서류상·실제)</Label>
           <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력, 역할, 참여율을 같은 구조로 저장합니다.</p>
         </div>
         <Button type="button" onClick={addTeamMember} className="gap-2">
@@ -1826,8 +2142,17 @@ export function ProjectEditorWizard({
                 .map((item, itemIndex) => (itemIndex === index ? '' : item.memberName))
                 .filter(Boolean),
             );
+            const availableTeamMemberOptions = member.role === '정산지원'
+              ? teamMemberOptions.filter((option) => isProjectSettlementSupportMember({
+                memberName: option.name,
+                memberNickname: option.nickname,
+              }))
+              : teamMemberOptions;
+            const availableTeamMemberOptionMap = member.role === '정산지원'
+              ? Object.fromEntries(availableTeamMemberOptions.map((option) => [option.value, option])) as Record<string, ProjectTeamMemberOption>
+              : teamMemberOptionMap;
             const currentTeamMemberOptionExists = !member.memberName
-              || PROJECT_TEAM_MEMBER_OPTIONS.some((option) => option.value === member.memberName);
+              || availableTeamMemberOptions.some((option) => option.value === member.memberName);
             return (
               <div key={`team-member-${index}`} className="rounded-xl border border-border/60 bg-background/70 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1836,7 +2161,7 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2 xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]">
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div>
                     <Label className="text-xs">입력 방식</Label>
                     <Select
@@ -1862,6 +2187,8 @@ export function ProjectEditorWizard({
                     {teamMemberInputMode === 'search' ? (
                       <TeamMemberSearchCombobox
                         member={member}
+                        options={availableTeamMemberOptions}
+                        optionMap={availableTeamMemberOptionMap}
                         selectedNames={selectedNames}
                         currentTeamMemberOptionExists={currentTeamMemberOptionExists}
                         onSelect={(patch) => updateTeamMember(index, patch)}
@@ -1887,6 +2214,9 @@ export function ProjectEditorWizard({
                         {PROJECT_TEAM_MEMBER_ROLES.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    {member.role === '정산지원' && !isProjectSettlementSupportMember(member) ? (
+                      <p className="mt-1 text-[10px] text-red-700">정산지원은 도담 또는 써니를 선택해 주세요.</p>
+                    ) : null}
                   </div>
                   <div>
                     <Label className="text-xs">참여율(%)</Label>
@@ -1900,13 +2230,19 @@ export function ProjectEditorWizard({
                       className="mt-1 h-9 text-sm"
                     />
                   </div>
-                  <label className="flex items-center gap-2 self-end pb-2 text-[12px] text-slate-700">
-                    <Checkbox
-                      checked={member.isDocumentOnly === true}
-                      onCheckedChange={(checked) => updateTeamMember(index, { isDocumentOnly: checked === true })}
-                    />
-                    서류상 인력
-                  </label>
+                  <div>
+                    <Label className="text-xs">참여 구분</Label>
+                    <Select
+                      value={member.isDocumentOnly === true ? 'document' : 'actual'}
+                      onValueChange={(value) => updateTeamMember(index, { isDocumentOnly: value === 'document' })}
+                    >
+                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="actual">실제 투입인력</SelectItem>
+                        <SelectItem value="document">서류상 참여인력</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div>
                     <Label className="text-xs">인건비 시작월</Label>
                     <Input
@@ -1971,73 +2307,90 @@ export function ProjectEditorWizard({
           <Textarea
             value={draft.advanceInterimBelow70Reason}
             onChange={(event) => update('advanceInterimBelow70Reason', event.target.value)}
-            placeholder="발주처 지급 조건 등 70% 미만인 이유를 입력"
+            placeholder="고객사 지급 조건 등 70% 미만인 이유를 입력"
             className="mt-1 min-h-[72px] text-sm"
           />
         </div>
       ) : null}
-      <div>
-        <Label className="text-xs">입금 계획 설명</Label>
-        <Textarea
-          value={draft.paymentPlanDesc}
-          onChange={(event) => update('paymentPlanDesc', event.target.value)}
-          placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
-          className="mt-1 min-h-[92px] text-sm"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">입금/정산 안내</Label>
-        <Textarea
-          value={draft.settlementGuide}
-          onChange={(event) => update('settlementGuide', event.target.value)}
-          placeholder="예: 이나라도움 수령, 공급가액 기준, 선지급 후 정산"
-          className="mt-1 min-h-[92px] text-sm"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">최종 입금 메모</Label>
-        <Textarea value={draft.finalPaymentNote} onChange={(event) => update('finalPaymentNote', event.target.value)} className="mt-1 min-h-[72px] text-sm" />
-      </div>
-      <div>
-        <Label className="text-xs">기타 참고사항</Label>
-        <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
-      </div>
+      {usesRegistrationV2 ? (
+        <div>
+          <Label className="text-xs">특이사항 (메모란)</Label>
+          <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
+        </div>
+      ) : (
+        <>
+          <div>
+            <Label className="text-xs">입금 계획 설명</Label>
+            <Textarea
+              value={draft.paymentPlanDesc}
+              onChange={(event) => update('paymentPlanDesc', event.target.value)}
+              placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
+              className="mt-1 min-h-[92px] text-sm"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">입금/정산 안내</Label>
+            <Textarea
+              value={draft.settlementGuide}
+              onChange={(event) => update('settlementGuide', event.target.value)}
+              placeholder="예: 이나라도움 수령, 공급가액 기준, 선지급 후 정산"
+              className="mt-1 min-h-[92px] text-sm"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">최종 입금 메모</Label>
+            <Textarea value={draft.finalPaymentNote} onChange={(event) => update('finalPaymentNote', event.target.value)} className="mt-1 min-h-[72px] text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs">기타 참고사항</Label>
+            <Textarea value={draft.note} onChange={(event) => update('note', event.target.value)} className="mt-1 min-h-[88px] text-sm" />
+          </div>
+        </>
+      )}
       {usesRegistrationV2 ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
           <div>
             <Label className="text-xs font-semibold">등록 전 확인사항 *</Label>
             <p className="mt-1 text-[11px] text-muted-foreground">계약 및 정산 기준을 사람이 직접 대조한 뒤 체크해 주세요.</p>
           </div>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox
-              checked={draft.registrationConfirmations.laborIncludesFourInsurance === true}
-              onCheckedChange={(checked) => update('registrationConfirmations', {
-                ...draft.registrationConfirmations,
-                laborIncludesFourInsurance: checked === true,
-              })}
-            />
-            인건비에 4대보험 사업주 부담분이 포함되어 있습니다.
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox
-              checked={draft.registrationConfirmations.laborIncludesRetirementPay === true}
-              onCheckedChange={(checked) => update('registrationConfirmations', {
-                ...draft.registrationConfirmations,
-                laborIncludesRetirementPay: checked === true,
-              })}
-            />
-            인건비에 퇴직급여 충당액이 포함되어 있습니다.
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox
-              checked={draft.registrationConfirmations.customerSettlementBasisConfirmed}
-              onCheckedChange={(checked) => update('registrationConfirmations', {
-                ...draft.registrationConfirmations,
-                customerSettlementBasisConfirmed: checked === true,
-              })}
-            />
-            발주처와 정산 기준을 확인했습니다.
-          </label>
+          {requiresSettlementConfirmations ? (
+            <>
+              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.registrationConfirmations.laborIncludesFourInsurance === true}
+                  onCheckedChange={(checked) => update('registrationConfirmations', {
+                    ...draft.registrationConfirmations,
+                    laborIncludesFourInsurance: checked === true,
+                  })}
+                />
+                인건비에 4대보험 사업주 부담분이 포함되어 있습니다.
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.registrationConfirmations.laborIncludesRetirementPay === true}
+                  onCheckedChange={(checked) => update('registrationConfirmations', {
+                    ...draft.registrationConfirmations,
+                    laborIncludesRetirementPay: checked === true,
+                  })}
+                />
+                인건비에 퇴직급여 충당액이 포함되어 있습니다.
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.registrationConfirmations.customerSettlementBasisConfirmed}
+                  onCheckedChange={(checked) => update('registrationConfirmations', {
+                    ...draft.registrationConfirmations,
+                    customerSettlementBasisConfirmed: checked === true,
+                  })}
+                />
+                고객사와 정산 기준을 확인했습니다.
+              </label>
+            </>
+          ) : (
+            <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-600">
+              정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.
+            </p>
+          )}
           <div className="grid gap-3 lg:grid-cols-2">
             <div>
               <Label className="text-xs">모두싸인으로 계약했나요? *</Label>
@@ -2128,10 +2481,56 @@ export function ProjectEditorWizard({
     </div>
   );
 
-  const ReviewRow = ({ label, value }: { label: string; value: ReactNode }) => (
-    <div className="flex items-start justify-between gap-3 border-b border-border/50 py-2 last:border-0">
+  const registrationDocumentReviewItems = [
+    { number: 1, label: '계약서 PDF', value: draft.contractDocument?.name || '미첨부' },
+    { number: 2, label: '고객사 사업자등록증 PDF', value: draft.customerBusinessRegistrationDocument?.name || '미첨부' },
+    { number: 3, label: '견적서 PDF', value: draft.quoteDocument?.name || '미첨부' },
+    {
+      number: 4,
+      label: '제안서 PDF 또는 RFP/요청 메일 증빙',
+      value: [
+        draft.proposalDocument ? `제안서: ${draft.proposalDocument.name}` : '',
+        draft.rfpRequestEvidenceDocument ? `RFP/요청 메일: ${draft.rfpRequestEvidenceDocument.name}` : '',
+      ].filter(Boolean).join(' · ') || '미첨부',
+    },
+    {
+      number: 5,
+      label: '제안서 Word 원본',
+      value: draft.proposalWordOriginalDocument?.name
+        || (draft.registrationOptionalDocumentNotes.proposalWordOriginal
+          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.proposalWordOriginal}`
+          : '미첨부'),
+    },
+    {
+      number: 6,
+      label: '제안서 PPT 원본',
+      value: draft.proposalPptOriginalDocument?.name
+        || (draft.registrationOptionalDocumentNotes.proposalPptOriginal
+          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.proposalPptOriginal}`
+          : '미첨부'),
+    },
+    {
+      number: 7,
+      label: '발표자료 PPT 원본',
+      value: draft.presentationPptOriginalDocument?.name
+        || (draft.registrationOptionalDocumentNotes.presentationPptOriginal
+          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.presentationPptOriginal}`
+          : '미첨부'),
+    },
+  ];
+
+  const ReviewRow = ({ label, value, stacked = false }: { label: string; value: ReactNode; stacked?: boolean }) => (
+    <div className={cn(
+      'border-b border-border/50 last:border-0',
+      stacked ? 'py-3' : 'flex items-start justify-between gap-3 py-2',
+    )}>
       <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
-      <span className="whitespace-pre-line text-right text-[12px] font-medium text-slate-900">{value || '-'}</span>
+      <div className={cn(
+        'whitespace-pre-line text-[12px] font-medium text-slate-900',
+        stacked ? 'mt-2 w-full text-left' : 'text-right',
+      )}>
+        {value || '-'}
+      </div>
     </div>
   );
 
@@ -2142,8 +2541,8 @@ export function ProjectEditorWizard({
           제출 전 {submitIssues.map((issue) => issue.label).join(', ')} 입력이 필요합니다.
         </div>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="shadow-none">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <Card className="shadow-none lg:col-start-1 lg:row-start-1 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className="text-sm">기본 정보</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="담당조직(CIC)" value={draft.department} />
@@ -2152,6 +2551,7 @@ export function ProjectEditorWizard({
             <ReviewRow label="프로젝트 유형" value={PROJECT_TYPE_LABELS[draft.type]} />
             <ReviewRow label="계약서 유형" value={normalizeProjectContractType(draft.contractType)} />
             <ReviewRow label="계약 대상" value={draft.clientOrg} />
+            <ReviewRow label="사업관리 구글폴더링크" value={draft.businessManagementGoogleFolderLink} />
             <ReviewRow label="프로젝트 목적" value={draft.projectPurpose} />
             <ReviewRow label="프로젝트 주요 내용" value={draft.description} />
             {canEditProjectStatus(mode) ? (
@@ -2162,22 +2562,30 @@ export function ProjectEditorWizard({
             ) : null}
           </CardContent>
         </Card>
-        <Card className="shadow-none">
+        <Card className="shadow-none lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className="text-sm">계약/재무</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="기간" value={`${draft.contractStart || '-'} ~ ${draft.contractEnd || '-'}`} />
             <ReviewRow label="통화" value={PROJECT_CURRENCY_LABELS[draft.currency]} />
             <ReviewRow label="계약금액" value={formatStoredProjectAmount(draft.contractAmount, financialInputFlags.contractAmount)} />
-            <ReviewRow label="매출 부가세" value={formatStoredProjectAmount(draft.salesVatAmount, financialInputFlags.salesVatAmount)} />
+            <ReviewRow label="총매출부가세" value={formatStoredProjectAmount(draft.salesVatAmount, financialInputFlags.salesVatAmount)} />
             <ReviewRow label="총수익" value={formatStoredProjectAmount(draft.totalRevenueAmount, financialInputFlags.totalRevenueAmount)} />
-            <ReviewRow label="지원금" value={formatStoredProjectAmount(draft.supportAmount, financialInputFlags.supportAmount)} />
-            <ReviewRow label="수익률" value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
-            <ReviewRow label="정산 유형" value={SETTLEMENT_TYPE_LABELS[draft.settlementType]} />
-            <ReviewRow label="정산 기준" value={BASIS_LABELS[draft.basis]} />
-            <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[draft.accountType]} />
-            <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
-            <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
-            <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]} />
+            <ReviewRow label="총지원금" value={formatStoredProjectAmount(draft.supportAmount, financialInputFlags.supportAmount)} />
+            <ReviewRow label="총수익률" value={profitRateLabel ? `${profitRateLabel}%` : '-'} />
+            <ReviewRow label={usesRegistrationV2 ? '사업유형' : '정산 유형'} value={SETTLEMENT_TYPE_LABELS[draft.settlementType]} />
+            {usesRegistrationV2 && hasMultiYearContract ? (
+              <ReviewRow label="정산 기준" value={REGISTRATION_V2_BASIS_LABELS[draft.basis as Exclude<Basis, '기타'>]} />
+            ) : settlementDetailsEnabled ? (
+              <ReviewRow label="정산 기준" value={draft.basis === 'NONE' ? '-' : BASIS_LABELS[draft.basis]} />
+            ) : null}
+            {settlementDetailsEnabled ? (
+              <>
+                <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[draft.accountType]} />
+                <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
+                <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
+                <ReviewRow label="자금 입력 방식" value={PROJECT_FUND_INPUT_MODE_LABELS[draft.fundInputMode]} />
+              </>
+            ) : null}
             {usesRegistrationV2 ? (
               <>
                 <ReviewRow
@@ -2187,28 +2595,41 @@ export function ProjectEditorWizard({
                   )).join('\n')}
                 />
                 <ReviewRow
-                  label="등록 필수 첨부"
-                  value={[
-                    `1. 계약서: ${draft.contractDocument?.name || '미첨부'}`,
-                    `2. 사업자등록증: ${draft.customerBusinessRegistrationDocument?.name || '미첨부'}`,
-                    `3. 견적서: ${draft.quoteDocument?.name || '미첨부'}`,
-                    `4. 제안서 또는 RFP/요청 메일: ${draft.proposalDocument?.name || draft.rfpRequestEvidenceDocument?.name || '미첨부'}`,
-                  ].join('\n')}
+                  label="등록 제출서류 7종"
+                  stacked
+                  value={(
+                    <div className="grid gap-1.5 text-left">
+                      {registrationDocumentReviewItems.map((item) => (
+                        <div
+                          key={item.number}
+                          className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 rounded-md bg-slate-50 px-2.5 py-2"
+                        >
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-[#001e46] text-[10px] font-semibold text-white">
+                            {item.number}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-semibold text-slate-700">{item.label}</p>
+                            <p className="mt-0.5 break-words text-[12px] text-slate-950">{item.value}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 />
               </>
             ) : null}
           </CardContent>
         </Card>
-        <Card className="shadow-none">
+        <Card className="shadow-none lg:col-start-1 lg:row-start-2 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className="text-sm">팀/인력</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
             <ReviewRow label="지정 결재자" value={draft.executiveApproverName} />
-            <ReviewRow label="서류상 참여인력" value={teamMembersSummary} />
+            <ReviewRow label="참여인력 (서류상·실제)" value={teamMembersSummary} />
           </CardContent>
         </Card>
-        <Card className="shadow-none">
+        <Card className="shadow-none lg:col-start-1 lg:row-start-3 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className="text-sm">입금/정산</CardTitle></CardHeader>
           <CardContent>
             <ReviewRow label="선금/계약금" value={formatPaymentPlanAmount(draft.paymentPlan.contract, draft.contractAmount)} />
@@ -2219,17 +2640,29 @@ export function ProjectEditorWizard({
             <ReviewRow label="잔금 예상월" value={draft.paymentExpectedMonths.final} />
             <ReviewRow label="선금+중도금 비율" value={advanceInterimRatio === null ? '-' : `${(advanceInterimRatio * 100).toFixed(1)}%`} />
             {requiresAdvanceInterimReason ? <ReviewRow label="70% 미만 사유" value={draft.advanceInterimBelow70Reason} /> : null}
-            <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />
-            <ReviewRow label="입금/정산 안내" value={draft.settlementGuide} />
-            <ReviewRow label="최종 입금 메모" value={draft.finalPaymentNote} />
-            <ReviewRow label="기타 참고사항" value={draft.note} />
+            {usesRegistrationV2 ? (
+              <ReviewRow label="특이사항" value={draft.note} />
+            ) : (
+              <>
+                <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />
+                <ReviewRow label="입금/정산 안내" value={draft.settlementGuide} />
+                <ReviewRow label="최종 입금 메모" value={draft.finalPaymentNote} />
+                <ReviewRow label="기타 참고사항" value={draft.note} />
+              </>
+            )}
             {usesRegistrationV2 ? (
               <ReviewRow
                 label="등록 확인사항"
                 value={[
-                  `4대보험 ${draft.registrationConfirmations.laborIncludesFourInsurance ? '확인' : '미확인'}`,
-                  `퇴직급여 ${draft.registrationConfirmations.laborIncludesRetirementPay ? '확인' : '미확인'}`,
-                  `발주처 정산기준 ${draft.registrationConfirmations.customerSettlementBasisConfirmed ? '확인' : '미확인'}`,
+                  requiresSettlementConfirmations
+                    ? `4대보험 ${draft.registrationConfirmations.laborIncludesFourInsurance ? '확인' : '미확인'}`
+                    : '인건비·고객사 정산 확인 해당 없음',
+                  requiresSettlementConfirmations
+                    ? `퇴직급여 ${draft.registrationConfirmations.laborIncludesRetirementPay ? '확인' : '미확인'}`
+                    : '',
+                  requiresSettlementConfirmations
+                    ? `고객사 정산기준 ${draft.registrationConfirmations.customerSettlementBasisConfirmed ? '확인' : '미확인'}`
+                    : '',
                   `모두싸인 ${draft.registrationConfirmations.modusignContractUsed === null ? '미선택' : draft.registrationConfirmations.modusignContractUsed ? '사용' : '미사용'}`,
                   draft.registrationConfirmations.modusignContractUsed === false
                     ? `원본 제출 ${draft.registrationConfirmations.originalContractSubmitted ? '확인' : '미확인'}`
@@ -2248,8 +2681,13 @@ export function ProjectEditorWizard({
         {draft.contractDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.contractDocument}
-              privateDraftAttachment={mode === 'portal-register' && !draft.contractDocument.downloadURL}
+              document={{
+                ...draft.contractDocument,
+                downloadURL: documentPreviewUrls?.contract || draft.contractDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.contract) && !(documentPreviewUrls?.contract || draft.contractDocument.downloadURL)}
+              previewState={documentPreviewStates?.contract}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('contract') : undefined}
               title="계약서 원문"
               description="등록하려는 계약서가 맞는지 꼭 확인해주세요!"
               descriptionClassName="text-rose-600"
@@ -2259,8 +2697,13 @@ export function ProjectEditorWizard({
         {draft.quoteDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.quoteDocument}
-              privateDraftAttachment={mode === 'portal-register' && !draft.quoteDocument.downloadURL}
+              document={{
+                ...draft.quoteDocument,
+                downloadURL: documentPreviewUrls?.quote || draft.quoteDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.quote) && !(documentPreviewUrls?.quote || draft.quoteDocument.downloadURL)}
+              previewState={documentPreviewStates?.quote}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('quote') : undefined}
               title="견적서 원문"
               description="첨부한 견적서가 맞는지 확인해주세요."
             />
@@ -2269,28 +2712,58 @@ export function ProjectEditorWizard({
         {draft.proposalDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.proposalDocument}
-              privateDraftAttachment={mode === 'portal-register' && !draft.proposalDocument.downloadURL}
+              document={{
+                ...draft.proposalDocument,
+                downloadURL: documentPreviewUrls?.proposal || draft.proposalDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.proposal) && !(documentPreviewUrls?.proposal || draft.proposalDocument.downloadURL)}
+              previewState={documentPreviewStates?.proposal}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('proposal') : undefined}
               title="제안서 원문"
               description="첨부한 제안서가 맞는지 확인해주세요."
+            />
+          </div>
+        ) : null}
+        {draft.rfpRequestEvidenceDocument ? (
+          <div className="lg:col-span-2">
+            <ContractDocumentPreview
+              document={{
+                ...draft.rfpRequestEvidenceDocument,
+                downloadURL: documentPreviewUrls?.rfp_request_evidence || draft.rfpRequestEvidenceDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.rfp_request_evidence) && !(documentPreviewUrls?.rfp_request_evidence || draft.rfpRequestEvidenceDocument.downloadURL)}
+              previewState={documentPreviewStates?.rfp_request_evidence}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('rfp_request_evidence') : undefined}
+              title="RFP/요청 메일 증빙 원문"
+              description="첨부한 RFP 또는 요청 메일 증빙이 맞는지 확인해주세요."
             />
           </div>
         ) : null}
         {draft.customerBusinessRegistrationDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.customerBusinessRegistrationDocument}
-              privateDraftAttachment={!draft.customerBusinessRegistrationDocument.downloadURL}
-              title="발주처 사업자등록증 원문"
-              description="첨부한 발주처 사업자등록증이 맞는지 확인해주세요."
+              document={{
+                ...draft.customerBusinessRegistrationDocument,
+                downloadURL: documentPreviewUrls?.customer_business_registration || draft.customerBusinessRegistrationDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.customer_business_registration) && !(documentPreviewUrls?.customer_business_registration || draft.customerBusinessRegistrationDocument.downloadURL)}
+              previewState={documentPreviewStates?.customer_business_registration}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('customer_business_registration') : undefined}
+              title="고객사 사업자등록증 원문"
+              description="첨부한 고객사 사업자등록증이 맞는지 확인해주세요."
             />
           </div>
         ) : null}
         {showProjectCheckout && draft.performanceCertificateDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.performanceCertificateDocument}
-              privateDraftAttachment={!draft.performanceCertificateDocument.downloadURL}
+              document={{
+                ...draft.performanceCertificateDocument,
+                downloadURL: documentPreviewUrls?.performance_certificate || draft.performanceCertificateDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.performance_certificate) && !(documentPreviewUrls?.performance_certificate || draft.performanceCertificateDocument.downloadURL)}
+              previewState={documentPreviewStates?.performance_certificate}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('performance_certificate') : undefined}
               title="수행확인서 원문"
               description="종료사업 수행확인서 증빙입니다."
             />
@@ -2299,8 +2772,13 @@ export function ProjectEditorWizard({
         {showProjectCheckout && draft.taxInvoiceDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.taxInvoiceDocument}
-              privateDraftAttachment={!draft.taxInvoiceDocument.downloadURL}
+              document={{
+                ...draft.taxInvoiceDocument,
+                downloadURL: documentPreviewUrls?.tax_invoice || draft.taxInvoiceDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.tax_invoice) && !(documentPreviewUrls?.tax_invoice || draft.taxInvoiceDocument.downloadURL)}
+              previewState={documentPreviewStates?.tax_invoice}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('tax_invoice') : undefined}
               title="세금계산서 원문"
               description="종료사업 세금계산서 증빙입니다."
             />
@@ -2309,8 +2787,13 @@ export function ProjectEditorWizard({
         {showProjectCheckout && draft.finalSettlementReportDocument ? (
           <div className="lg:col-span-2">
             <ContractDocumentPreview
-              document={draft.finalSettlementReportDocument}
-              privateDraftAttachment={!draft.finalSettlementReportDocument.downloadURL}
+              document={{
+                ...draft.finalSettlementReportDocument,
+                downloadURL: documentPreviewUrls?.final_settlement_report || draft.finalSettlementReportDocument.downloadURL,
+              }}
+              privateDraftAttachment={Boolean(documentPreviewStates?.final_settlement_report) && !(documentPreviewUrls?.final_settlement_report || draft.finalSettlementReportDocument.downloadURL)}
+              previewState={documentPreviewStates?.final_settlement_report}
+              onLoadPreview={onLoadDocumentPreview ? () => onLoadDocumentPreview('final_settlement_report') : undefined}
               title="최종 정산보고서 원문"
               description="종료사업 최종 정산보고서 증빙입니다."
             />
@@ -2409,15 +2892,15 @@ export function ProjectEditorWizard({
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
-      <Card className="border-slate-200/80 shadow-sm lg:sticky lg:top-4">
+      <div className="space-y-4">
+      <Card className="border-slate-200/80 shadow-sm">
         <CardContent className="p-3">
           <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
             <span>{stepIndex + 1} / {STEPS.length}</span>
             <span>{step.label}</span>
           </div>
           <Progress value={((stepIndex + 1) / STEPS.length) * 100} />
-          <div className="mt-4 grid gap-1.5">
+          <div className="mt-4 grid gap-1.5 lg:grid-cols-5">
             {STEPS.map((item, index) => {
               const Icon = item.icon;
               const active = index === stepIndex;
@@ -2426,7 +2909,7 @@ export function ProjectEditorWizard({
                   key={item.id}
                   type="button"
                   onClick={() => setStepIndex(index)}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors lg:justify-center lg:py-3 ${
                     active ? 'border-[#001e46] bg-slate-50 text-[#001e46]' : 'border-border bg-white text-muted-foreground hover:bg-muted/40'
                   }`}
                 >
@@ -2454,7 +2937,7 @@ export function ProjectEditorWizard({
       </Card>
       </div>
 
-      <div className="z-20 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur lg:sticky lg:bottom-4">
+      <div className="z-20 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <CalendarRange className="h-4 w-4" />
@@ -2482,7 +2965,7 @@ export function ProjectEditorWizard({
                 type="button"
                 variant="outline"
                 onClick={() => void handleManualAutosave()}
-                disabled={readOnly || autosaveState === 'saving'}
+                disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile}
                 className="gap-2"
               >
                 {autosaveState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -2512,7 +2995,7 @@ export function ProjectEditorWizard({
                     key={action.id}
                     type="button"
                     variant={action.variant || 'default'}
-                    disabled={readOnly || autosaveState === 'saving' || !!busyActionId || action.disabled || !canSubmit}
+                    disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId || action.disabled || !canSubmit}
                     onClick={() => void handleActionSubmit(action.id)}
                     className="gap-2"
                   >

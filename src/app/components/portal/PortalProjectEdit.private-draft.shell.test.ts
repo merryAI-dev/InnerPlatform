@@ -42,4 +42,56 @@ describe('PortalProjectEdit private draft boundary', () => {
     expect(source).not.toContain('resubmitProjectExecutiveReviewViaBff');
     expect(source).not.toContain('uploadProjectRequestContractFile');
   });
+
+  it('loads private edit-draft attachment blobs through the owner-authorized BFF for review previews', () => {
+    expect(source).toContain('downloadProjectInfoDraftAttachmentViaBff');
+    expect(source).toContain('usePrivateDraftDocumentPreviews');
+    expect(source).toContain('enabled: record !== null');
+    expect(source).toContain('signal,');
+    expect(source).toContain('documentPreviewUrls={documentPreviewUrls}');
+    expect(source).toContain('documentPreviewStates={documentPreviewStates}');
+    expect(source).toContain('onLoadDocumentPreview={loadDocumentPreview}');
+    expect(source).not.toContain('Promise.all(attachments');
+  });
+
+  it('analyzes a replacement contract without creating a second public upload', () => {
+    expect(source).toContain('extractTextFromPdf(file)');
+    expect(source).toContain('analyzeProjectRequestContractViaBff({');
+    expect(source).toContain("kind === 'contract'");
+    expect(source).toMatch(/return\s*\{\s*document:\s*attachmentDocument\(uploaded\.attachment\),\s*contractAnalysis\s*\}/);
+    expect(source).not.toContain('processProjectRequestContractViaBff');
+    expect(source).not.toContain('contractAnalysis: null }');
+  });
+
+  it('upgrades canonical and private legacy edit drafts to the registration-v2 contract', () => {
+    expect(source).toContain('registrationRequirementsVersion: 2');
+    expect(source).toContain('...buildProjectEditorDraftFromProject(');
+    expect(source).toContain('previewAttachmentsFromPrivateDraft');
+    expect(source).toContain('attachments: previewAttachments');
+    expect(source).toContain('[...attachments.values()]');
+  });
+
+  it('restores only the latest private proposal alternative after a refresh', () => {
+    expect(source).toContain('latestPrivateAlternativeDocumentKind');
+    expect(source).toContain("latestAlternativeKind === 'rfp_request_evidence' ? { proposalDocument: null }");
+    expect(source).toContain("latestAlternativeKind === 'proposal' ? { rfpRequestEvidenceDocument: null }");
+    expect(source).toContain("attachments.delete('proposal')");
+    expect(source).toContain("attachments.delete('rfp_request_evidence')");
+  });
+
+  it('removes private replacement attachments through the fenced draft API before clearing editor state', () => {
+    expect(source).toContain('const removeDocument = useCallback');
+    expect(source).toContain('draftClient.removeAttachment(ownership');
+    expect(source).toContain('onRemoveProjectDocument={removeDocument}');
+    expect(source).toContain('canRemoveProjectDocuments');
+  });
+
+  it('closes the editable session and private previews after a successful submission', () => {
+    expect(source).toContain('const [submitted, setSubmitted] = useState(false)');
+    expect(source).toContain('lease.canEdit && record !== null && !submitted');
+    expect(source).toContain('enabled: record !== null && !submitted');
+    expect(source).toContain('setSubmitted(true)');
+    expect(source).toContain('setRecord(null)');
+    expect(source).toContain("navigate('/portal/project-select')");
+  });
 });

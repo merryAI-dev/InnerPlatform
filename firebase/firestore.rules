@@ -106,6 +106,9 @@ service cloud.firestore {
         || collection in ['members']
         || collection in ['projectRequestDrafts']
         || collection in ['privateEditDrafts']
+        || collection in ['project_requests']
+        || collection in ['projectRequests']
+        || collection in ['projectCodeClaims']
         || collection in ['cashflowEditLocks']
         || collection in ['cashflow_edit_locks']
         || collection in ['editLeases']
@@ -317,6 +320,18 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/privateEditDrafts/{draftId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/project_requests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/projectRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/projectCodeClaims/{claimId} {
       allow read, write: if false;
     }
 

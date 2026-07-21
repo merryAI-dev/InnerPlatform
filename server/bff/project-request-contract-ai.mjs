@@ -41,7 +41,7 @@ function sanitizeProjectName(value) {
     .replace(/\s+/g, ' ')
     .trim();
   if (!normalized) return '';
-  return normalized.replace(/\s+/g, '').slice(0, 10);
+  return normalized.replace(/\s+/g, '');
 }
 
 function sanitizeOfficialContractName(value) {
@@ -185,7 +185,7 @@ function buildFallbackProjectRequestContractAnalysis(input, timestamp = nowIso()
   }
 
   nextActions.push('계약서 초안을 확인한 뒤, 담당팀·정산유형·통장 유형은 사람이 직접 선택해 주세요.');
-  nextActions.push('등록 프로젝트명은 10자 이내 별칭이라서 공식 계약명과 다를 수 있습니다. 팀에서 쓰는 짧은 이름으로 조정해 주세요.');
+  nextActions.push('등록 프로젝트명은 공식 계약명과 다를 수 있습니다. 팀에서 사용하는 이름으로 조정해 주세요.');
 
   return {
     provider: 'heuristic',
@@ -335,7 +335,7 @@ function buildPrompt(input, fallback) {
     '<field_rules>',
     '<rule>officialContractName은 계약서 상의 공식 명칭입니다.</rule>',
     '<rule>officialContractName에서는 협약서, 계약서, 제안서처럼 문서 형식/종류를 나타내는 단어를 제외합니다.</rule>',
-    '<rule>suggestedProjectName은 내부 등록용 10자 이내 짧은 이름입니다.</rule>',
+    '<rule>suggestedProjectName은 내부에서 사용하는 프로젝트명이며 글자 수를 임의로 줄이지 않습니다.</rule>',
     '<rule>department, settlementType, accountType은 추측하지 않습니다.</rule>',
     '<rule>날짜는 YYYY-MM-DD 형식입니다.</rule>',
     '<rule>금액은 숫자만 반환합니다.</rule>',

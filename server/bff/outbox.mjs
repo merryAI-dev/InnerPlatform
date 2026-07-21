@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { createNotificationsForOutboxEvent } from './notifications.mjs';
 
-const HANDLER_REQUIRED_EVENT_TYPES = new Set(['project.registration.submitted', 'project.info.submitted']);
+export const DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE = 'draft.attachments.cleanup';
+
+const HANDLER_REQUIRED_EVENT_TYPES = new Set([
+  'project.registration.submitted',
+  'project.info.submitted',
+  DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+]);
 const DEFAULT_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000;
 
 function toIso(value = new Date()) {

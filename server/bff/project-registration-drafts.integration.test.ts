@@ -192,8 +192,13 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       teamName: 'AXR',
       teamMembersDetailed: [{
         memberName: 'Actor A',
-        role: '실무책임자',
+        role: '운영매니저',
         participationRate: 100,
+        isDocumentOnly: false,
+      }, {
+        memberName: 'Executive A',
+        role: '사업 최종 책임자',
+        participationRate: 0,
         isDocumentOnly: false,
       }],
       projectPurpose: 'Purpose',
@@ -605,7 +610,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
     expect((await db.doc(`orgs/${tenantId}/project_requests/${first.body.projectRequestId}`).get()).data()?.payload?.contractDocument)
       .toMatchObject({ path: expect.stringContaining('/project-registration-documents/'), visibility: 'PRIVATE' });
-    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(1);
+    expect(await count(`orgs/${tenantId}/partEntries`)).toBe(2);
     expect((await db.doc(`outbox/${first.body.outbox.id}`).get()).data()?.status).toBe('DONE');
     expect((await db.doc(`orgs/${tenantId}/outbox_deliveries/${first.body.outbox.id}`).get()).exists).toBe(true);
   }, 60_000);

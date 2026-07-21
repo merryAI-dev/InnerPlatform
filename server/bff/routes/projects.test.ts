@@ -3,6 +3,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildProjectRegistrationCanonicalDocuments,
+  buildProjectInfoChangeSubmission,
   buildProjectPatchFromChangeRequestPayload,
   formatProjectTypeSlackLabel,
   mergeProjectAndRequestDocs,
@@ -46,13 +47,22 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     paymentPlan: { contract: 150_000, interim: 60_000, final: 90_000 },
     paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
     advanceInterimBelow70Reason: '',
-    teamMembersDetailed: [{
-      memberName: '변민욱',
-      memberNickname: '보람',
-      role: '실무책임자',
-      participationRate: 50,
-      isDocumentOnly: true,
-    }],
+    teamMembersDetailed: [
+      {
+        memberName: '변민욱',
+        memberNickname: '보람',
+        role: '운영매니저',
+        participationRate: 50,
+        isDocumentOnly: false,
+      },
+      {
+        memberName: '김세은',
+        memberNickname: '람쥐',
+        role: '사업 최종 책임자',
+        participationRate: 0,
+        isDocumentOnly: false,
+      },
+    ],
     financialInputFlags: {
       contractAmount: true,
       salesVatAmount: true,
@@ -80,14 +90,24 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function registrationV2Canonical(payload = registrationV2Payload(), requiredKinds = registrationV2AttachmentKinds) {
+function registrationV2Canonical(
+  payload = registrationV2Payload(),
+  requiredKinds = registrationV2AttachmentKinds,
+  attachmentKinds: string[] = [],
+) {
   return buildProjectRegistrationCanonicalDocuments({
     tenantId: 'mysc',
     projectId: 'project-v2',
     projectRequestId: 'request-v2',
     sourceDraftId: 'draft-v2',
     payload,
-    attachmentRefs: [],
+    attachmentRefs: attachmentKinds.map((documentKind) => ({
+      documentKind,
+      path: `orgs/mysc/project-registration-drafts/draft-v2/${documentKind}.pdf`,
+      name: `${documentKind}.pdf`,
+      size: 3,
+      contentType: 'application/pdf',
+    })),
     requirementsAttachmentRefs: requiredKinds.map((documentKind) => ({
       documentKind,
       path: `orgs/mysc/project-registration-drafts/draft-v2/${documentKind}.pdf`,
@@ -103,6 +123,42 @@ function registrationV2Canonical(payload = registrationV2Payload(), requiredKind
 }
 
 describe('project route helpers', () => {
+  it('does not restore canonical contract analysis when a private replacement omits analysis', () => {
+    const canonical = registrationV2Canonical(
+      registrationV2Payload({ contractAnalysis: { summary: 'canonical contract A analysis' } }),
+      registrationV2AttachmentKinds,
+      registrationV2AttachmentKinds,
+    );
+    const privateContract = {
+      documentKind: 'contract',
+      path: 'orgs/mysc/project-registration-drafts/change-v2/contract-b.pdf',
+      name: 'contract-b.pdf',
+      size: 3,
+      contentType: 'application/pdf',
+    };
+    const payload = {
+      ...canonical.projectRequest.payload,
+      contractDocument: { path: privateContract.path },
+    };
+    delete payload.contractAnalysis;
+
+    const submission = buildProjectInfoChangeSubmission({
+      tenantId: 'mysc',
+      project: canonical.project,
+      previousRequest: null,
+      payload,
+      attachmentRefs: [privateContract],
+      actorId: 'pm-a',
+      actorName: 'PM A',
+      actorEmail: 'pm-a@example.com',
+      timestamp: '2026-07-14T00:00:00.000Z',
+      targetProjectVersion: 2,
+    });
+
+    expect(submission.projectRequest.proposedSnapshot.contractAnalysis).toBeNull();
+    expect(submission.projectRequest.payload.contractAnalysis).toBeNull();
+  });
+
   it('builds a registration v2 canonical record after the PPT four-document contract and confirmations pass', () => {
     const canonical = registrationV2Canonical();
 
@@ -122,7 +178,10 @@ describe('project route helpers', () => {
       settlementSystem: 'BOTAEM_E',
       laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
-      teamMembersDetailed: [{ role: '실무책임자', isDocumentOnly: true }],
+      teamMembersDetailed: [
+        { role: '운영매니저', isDocumentOnly: false },
+        { role: '사업 최종 책임자', isDocumentOnly: false },
+      ],
       executiveApproverId: 'head-a',
       executiveApproverName: '조직장 A',
       executiveApproverEmail: 'head-a@mysc.co.kr',
@@ -154,7 +213,223 @@ describe('project route helpers', () => {
     });
   });
 
-  it('accepts proposal/RFP evidence as optional context when original-file notes are present', () => {
+  it('preserves the business-management Google folder link in both review and project records', () => {
+    const link = 'https://drive.google.com/drive/folders/project-management-folder';
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      businessManagementGoogleFolderLink: link,
+    }));
+
+    expect(canonical.projectRequest.payload.businessManagementGoogleFolderLink).toBe(link);
+    expect(canonical.project.businessManagementGoogleFolderLink).toBe(link);
+  });
+
+  it('allows a single-year registration without annual financial rows', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      contractEnd: '2026-12-31',
+      paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2026-12' },
+      financialYears: [],
+    }));
+
+    expect(canonical.projectRequest.payload.financialYears).toEqual([]);
+  });
+
+  it('derives annual profit rates and removes settlement-only values when the v2 settlement basis is none', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'DEDICATED',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+      financialYears: [
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.9, confirmed: true },
+      ],
+    }));
+
+    expect(canonical.projectRequest.payload.financialYears).toEqual([
+      expect.objectContaining({ year: 2026, profitRate: 0.4 }),
+      expect.objectContaining({ year: 2027, profitRate: 0.4 }),
+    ]);
+    expect(canonical.projectRequest.payload).toMatchObject({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'NONE',
+      settlementSystem: 'NONE',
+      laborSettlementBasis: 'NONE',
+    });
+  });
+
+  it('rejects a registration whose requester is also the designated organization-head approver', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      executiveApproverId: 'pm-a',
+      executiveApproverName: 'PM A',
+      executiveApproverEmail: 'pm-a@example.com',
+    }))).toThrow(/designated executive approver must differ from the requester/i);
+  });
+
+  it('preserves a new registration project name longer than 10 characters', () => {
+    expect(registrationV2Canonical(registrationV2Payload({
+      name: '26프로젝트이름글자수제한없는테스트',
+    })).projectRequest.payload.name).toBe('26프로젝트이름글자수제한없는테스트');
+  });
+
+  it('requires an actual project final responsible member', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      teamMembersDetailed: [{
+        memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50, isDocumentOnly: false,
+      }],
+    }))).toThrowError('Project registration requires an actual project final responsible member');
+  });
+
+  it('allows only 도담 or 써니 as settlement support', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      teamMembersDetailed: [
+        {
+          memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50, isDocumentOnly: false,
+        },
+        {
+          memberName: '김세은', memberNickname: '람쥐', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false,
+        },
+        {
+          memberName: '다른 구성원', memberNickname: '', role: '정산지원', participationRate: 0, isDocumentOnly: false,
+        },
+      ],
+    }))).toThrowError('Project registration settlement support must be 도담 or 써니');
+  });
+
+  it('rejects a change request whose submitter is also the designated organization-head approver', () => {
+    const payload = registrationV2Payload({
+      executiveApproverId: 'pm-a',
+      executiveApproverName: 'PM A',
+      executiveApproverEmail: 'pm-a@example.com',
+    });
+    const attachmentRefs = registrationV2AttachmentKinds.map((documentKind) => ({
+      documentKind,
+      path: `orgs/mysc/project-registration-drafts/change-v2/${documentKind}.pdf`,
+      name: `${documentKind}.pdf`,
+      size: 3,
+      contentType: 'application/pdf',
+    }));
+
+    expect(() => buildProjectInfoChangeSubmission({
+      tenantId: 'mysc',
+      project: { id: 'project-v2', version: 4, registeredById: 'pm-a', managerId: 'pm-a' },
+      previousRequest: null,
+      payload,
+      attachmentRefs,
+      actorId: 'pm-a',
+      actorName: 'PM A',
+      actorEmail: 'pm-a@example.com',
+      timestamp: '2026-07-14T00:00:00.000Z',
+      targetProjectVersion: 5,
+    })).toThrow(/designated executive approver must differ from the requester/i);
+  });
+
+  it('forces an organization-head rejection back to the organization-head queue even when a client omits resubmit', () => {
+    const canonical = registrationV2Canonical(
+      registrationV2Payload(),
+      registrationV2AttachmentKinds,
+      registrationV2AttachmentKinds,
+    );
+    const submission = buildProjectInfoChangeSubmission({
+      tenantId: 'mysc',
+      project: {
+        ...canonical.project,
+        executiveReviewStatus: 'REVISION_REJECTED',
+        executiveReviewedAt: '2026-07-13T00:00:00.000Z',
+        executiveReviewedById: 'head-a',
+        executiveReviewedByName: '조직장 A',
+        executiveReviewComment: '계약 기간을 보완해 주세요.',
+      },
+      previousRequest: null,
+      payload: { ...canonical.projectRequest.payload, description: '조직장 반려 보완본' },
+      attachmentRefs: [],
+      actorId: 'pm-a',
+      actorName: 'PM A',
+      actorEmail: 'pm-a@example.com',
+      timestamp: '2026-07-14T00:00:00.000Z',
+      targetProjectVersion: 2,
+      resubmit: false,
+      reviewComment: '계약 기간을 보완했습니다.',
+    });
+
+    expect(submission.projectPatch).toMatchObject({
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+    });
+  });
+
+  it('preserves the organization-head approval and returns a planning rejection only to planning review when a client omits resubmit', () => {
+    const canonical = registrationV2Canonical(
+      registrationV2Payload(),
+      registrationV2AttachmentKinds,
+      registrationV2AttachmentKinds,
+    );
+    const submission = buildProjectInfoChangeSubmission({
+      tenantId: 'mysc',
+      project: {
+        ...canonical.project,
+        executiveReviewStatus: 'APPROVED',
+        executiveReviewedAt: '2026-07-12T00:00:00.000Z',
+        executiveReviewedById: 'head-a',
+        executiveReviewedByName: '조직장 A',
+        managementPlanningReviewStatus: 'REVISION_REJECTED',
+        managementPlanningReviewedAt: '2026-07-13T00:00:00.000Z',
+        managementPlanningReviewedById: 'planning-a',
+        managementPlanningReviewedByName: '경영기획실 A',
+        managementPlanningReviewComment: '프로젝트 코드를 확인해 주세요.',
+      },
+      previousRequest: null,
+      payload: { ...canonical.projectRequest.payload, description: '경영기획실 반려 보완본' },
+      attachmentRefs: [],
+      actorId: 'pm-a',
+      actorName: 'PM A',
+      actorEmail: 'pm-a@example.com',
+      timestamp: '2026-07-14T00:00:00.000Z',
+      targetProjectVersion: 2,
+      resubmit: false,
+      reviewComment: '프로젝트 코드 확인 내용을 보완했습니다.',
+    });
+
+    expect(submission.projectPatch).toEqual({
+      managementPlanningReviewStatus: 'PENDING',
+      managementPlanningReviewedAt: null,
+      managementPlanningReviewedById: null,
+      managementPlanningReviewedByName: null,
+      managementPlanningReviewComment: null,
+    });
+    expect(submission.projectPatch).not.toHaveProperty('executiveReviewStatus');
+  });
+
+  it('allows a v2 settlement-none basis without labor or customer settlement confirmations', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      settlementSystem: 'NONE',
+      laborSettlementBasis: 'NONE',
+      registrationConfirmations: {
+        laborIncludesFourInsurance: null,
+        laborIncludesRetirementPay: null,
+        customerSettlementBasisConfirmed: false,
+        modusignContractUsed: false,
+        originalContractSubmitted: true,
+      },
+    }));
+
+    expect(canonical.projectRequest.payload).toMatchObject({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      registrationConfirmations: {
+        laborIncludesFourInsurance: null,
+        laborIncludesRetirementPay: null,
+        customerSettlementBasisConfirmed: false,
+      },
+    });
+  });
+
+  it('requires proposal or RFP evidence while accepting either alternative', () => {
     const fixedDocumentKinds = ['contract', 'customer_business_registration', 'quote'];
 
     expect(() => registrationV2Canonical(registrationV2Payload(), [...fixedDocumentKinds, 'proposal'])).not.toThrow();
@@ -163,15 +438,54 @@ describe('project route helpers', () => {
       ...fixedDocumentKinds,
       'proposal',
       'rfp_request_evidence',
-    ])).not.toThrow();
-    expect(() => registrationV2Canonical(registrationV2Payload(), fixedDocumentKinds)).not.toThrow();
+    ])).toThrowError('Project registration requires exactly one of proposal or RFP evidence');
+    expect(() => registrationV2Canonical(registrationV2Payload(), fixedDocumentKinds))
+      .toThrowError('Project registration requires proposal or RFP evidence');
     expect(() => registrationV2Canonical(registrationV2Payload({
       registrationOptionalDocumentNotes: {
         proposalWordOriginal: '',
         proposalPptOriginal: '',
         presentationPptOriginal: '',
       },
-    }), fixedDocumentKinds)).toThrowError('Project registration optional attachment note is missing: proposal_word_original');
+    }), [...fixedDocumentKinds, 'proposal']))
+      .toThrowError('Project registration optional attachment note is missing: proposal_word_original');
+  });
+
+  it('accepts the PPT settlement-none basis for registration v2', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+    }))).not.toThrow();
+  });
+
+  it('rejects the removed settlement-none business type for a new registration', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      settlementType: 'NONE',
+    }))).toThrowError('Project registration settlementType NONE is not available in requirements version 2');
+  });
+
+  it('rejects the removed 기타 settlement basis for registration v2', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      basis: '기타',
+    }))).toThrowError('Project registration basis is invalid for requirements version 2');
+  });
+
+  it('preserves the PPT 기타 bank-account type for registration v2', () => {
+    const canonical = registrationV2Canonical(registrationV2Payload({
+      accountType: 'OTHER',
+    }));
+
+    expect(canonical.projectRequest.payload.accountType).toBe('OTHER');
+  });
+
+  it.each([
+    ['settlement type', { settlementType: 'TYPE9' }, 'Project registration settlementType is invalid'],
+    ['settlement basis', { basis: 'garbage' }, 'Project registration basis is invalid'],
+    ['account type', { accountType: 'garbage' }, 'Project registration accountType is invalid'],
+    ['settlement system', { settlementSystem: 'garbage' }, 'Project registration settlementSystem is invalid'],
+    ['labor settlement basis', { laborSettlementBasis: 'garbage' }, 'Project registration laborSettlementBasis is invalid'],
+  ])('rejects an unknown %s instead of normalizing it to NONE', (_label, overrides, message) => {
+    expect(() => registrationV2Canonical(registrationV2Payload(overrides))).toThrowError(message);
   });
 
   it.each([undefined, 1])('rejects new canonical registration requirements version %s', (version) => {
@@ -217,6 +531,16 @@ describe('project route helpers', () => {
       'team document-only choice',
       { teamMembersDetailed: [{ memberName: '변민욱', role: '실무책임자', participationRate: 50 }] },
       'Project registration teamMembersDetailed.0.isDocumentOnly is required',
+    ],
+    [
+      'operating manager',
+      { teamMembersDetailed: [{ memberName: '변민욱', role: '실무책임자', participationRate: 50, isDocumentOnly: false }] },
+      'Project registration requires at least one operating manager',
+    ],
+    [
+      'actual operating manager',
+      { teamMembersDetailed: [{ memberName: '변민욱', role: '운영매니저', participationRate: 0, isDocumentOnly: true }] },
+      'Project registration requires at least one actual operating manager',
     ],
   ])('rejects registration v2 with incomplete %s', (_label, overrides, message) => {
     expect(() => registrationV2Canonical(registrationV2Payload(overrides))).toThrowError(message);
@@ -623,6 +947,60 @@ describe('project route helpers', () => {
     });
   });
 
+  it('allows the designated organization-head approver to read a pending request contract regardless of member role', async () => {
+    const path = 'orgs/mysc/project-registration-documents/project-a/pending-contract.pdf';
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('approver-request-pdf'), contentType: 'application/pdf', size: 20,
+    }));
+    const db = {
+      doc: vi.fn((documentPath: string) => ({
+        get: vi.fn(async () => {
+          if (documentPath.includes('/members/')) {
+            return {
+              exists: true,
+              data: () => ({ uid: 'head-a', role: 'pm', status: 'ACTIVE' }),
+            };
+          }
+          if (documentPath.includes('/project_requests/')) {
+            return {
+              exists: true,
+              data: () => ({
+                id: 'request-a',
+                status: 'PENDING',
+                targetProjectId: 'project-a',
+                payload: {
+                  executiveApproverId: 'head-a',
+                  contractDocument: { path, name: 'pending-contract.pdf', contentType: 'application/pdf' },
+                },
+              }),
+            };
+          }
+          return { exists: false, data: () => null };
+        }),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'head-a', actorRole: 'pm' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-10T00:00:00.000Z',
+      idempotencyService: {},
+      projectRequestContractStorageService: { downloadProjectRegistrationAttachment },
+    } as any);
+
+    const response = await request(app)
+      .get('/api/v1/project-requests/request-a/attachments/contract');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(Buffer.from('approver-request-pdf'));
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
+      tenantId: 'mysc', projectId: 'project-a', path,
+    });
+  });
+
   it('canonicalizes organization labels in registration documents before they are written', () => {
     const canonical = registrationV2Canonical(registrationV2Payload({ department: 'AXR Team' }));
 
@@ -630,8 +1008,22 @@ describe('project route helpers', () => {
     expect(canonical.project).toMatchObject({ department: 'AXR팀', cic: 'AXR팀' });
   });
 
-  it('denies a PM before reading pending project request attachment metadata', async () => {
-    const requestGet = vi.fn();
+  it('denies an unrelated PM after checking the request approver without downloading the attachment', async () => {
+    const requestGet = vi.fn(async () => ({
+      exists: true,
+      data: () => ({
+        id: 'request-a',
+        status: 'PENDING',
+        targetProjectId: 'project-a',
+        payload: {
+          executiveApproverId: 'head-a',
+          contractDocument: {
+            path: 'orgs/mysc/project-registration-documents/project-a/contract.pdf',
+            name: 'contract.pdf',
+          },
+        },
+      }),
+    }));
     const db = {
       doc: vi.fn((documentPath: string) => ({
         get: documentPath.includes('/members/')
@@ -663,7 +1055,7 @@ describe('project route helpers', () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('forbidden');
-    expect(requestGet).not.toHaveBeenCalled();
+    expect(requestGet).toHaveBeenCalledOnce();
     expect(downloadProjectRegistrationAttachment).not.toHaveBeenCalled();
   });
 
@@ -769,6 +1161,72 @@ describe('project route helpers', () => {
     });
   });
 
+  it('rejects an explicit change request whose target project belongs to another project', async () => {
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => ({
+          exists: path.includes('/project_requests/'),
+          data: () => ({ targetProjectId: 'p-other', requestKind: 'CHANGE', payload: { name: 'Wrong target' } }),
+        })),
+      })),
+    };
+
+    await expect(resolveProjectRequestDocuments({
+      db,
+      tenantId: 'mysc',
+      requestId: 'change-pr001',
+      projectId: 'p001',
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'request_project_mismatch',
+    });
+  });
+
+  it('rejects an explicit request without any project binding', async () => {
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => ({
+          exists: path.includes('/project_requests/'),
+          data: () => ({ requestKind: 'CHANGE', payload: { name: 'Unbound request' } }),
+        })),
+      })),
+    };
+
+    await expect(resolveProjectRequestDocuments({
+      db,
+      tenantId: 'mysc',
+      requestId: 'unbound-pr001',
+      projectId: 'p001',
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'request_project_mismatch',
+    });
+  });
+
+  it('rejects an explicit request when its project bindings disagree', async () => {
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => ({
+          exists: path.includes('/project_requests/'),
+          data: () => ({ approvedProjectId: 'p001', targetProjectId: 'p-other', payload: { name: 'Split binding' } }),
+        })),
+      })),
+    };
+
+    await expect(resolveProjectRequestDocuments({
+      db,
+      tenantId: 'mysc',
+      requestId: 'split-pr001',
+      projectId: 'p001',
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'request_project_mismatch',
+    });
+  });
+
   it('falls back to approvedProjectId lookup without requestedAt ordering for old request docs', async () => {
     const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
     const orderedGet = vi.fn(async () => ({ empty: true, docs: [] }));
@@ -857,7 +1315,7 @@ describe('project route helpers', () => {
       id: 'p001',
       version: 1,
       executiveApproverId: 'head-a',
-      executiveApproverName: '조직장 A',
+      executiveApproverName: '제출자가 입력한 이름',
       executiveReviewStatus: 'PENDING',
     };
     const projectRequest = { targetProjectId: 'p001', approvedProjectId: 'p001', payload: { name: '등록 요청' } };
@@ -891,6 +1349,7 @@ describe('project route helpers', () => {
         actorId: 'head-a',
         actorRole: 'admin',
         actorEmail: 'head-a@example.com',
+        actorName: '인증된 조직장 A',
         requestId: 'request-a',
         idempotencyKey: 'executive-review-a',
       };
@@ -914,11 +1373,243 @@ describe('project route helpers', () => {
     expect(response.status).toBe(200);
     expect(tx.set).toHaveBeenNthCalledWith(1, expect.objectContaining(projectRef), expect.objectContaining({
       executiveReviewedById: 'head-a',
-      executiveReviewedByName: '조직장 A',
+      executiveReviewedByName: '인증된 조직장 A',
     }), { merge: true });
     expect(tx.set).toHaveBeenNthCalledWith(2, expect.objectContaining(requestRef), expect.objectContaining({
       reviewedBy: 'head-a',
-      reviewedByName: '조직장 A',
+      reviewedByName: '인증된 조직장 A',
+    }), { merge: true });
+  });
+
+  it.each([
+    {
+      label: 'change request with private draft paths',
+      requestId: 'change-p001',
+      projectRequest: {
+        requestKind: 'CHANGE',
+        targetProjectId: 'p001',
+        approvedProjectId: 'p001',
+        requestedBy: 'pm-a',
+        status: 'PENDING',
+        baseProjectVersion: 2,
+        targetProjectVersion: 3,
+        payload: {
+          executiveApproverId: 'head-a',
+          contractDocument: {
+            path: 'orgs/mysc/project-registration-drafts/private-change/contract.pdf',
+            name: 'contract.pdf',
+          },
+        },
+        proposedSnapshot: {
+          executiveApproverId: 'head-a',
+          contractDocument: {
+            path: 'orgs/mysc/project-registration-drafts/private-change/contract.pdf',
+            name: 'contract.pdf',
+          },
+        },
+        submittedOutboxId: 'outbox-change-p001',
+      },
+    },
+    {
+      label: 'new registration before canonical attachments are published',
+      requestId: 'registration-p001',
+      projectRequest: {
+        requestKind: 'REGISTRATION',
+        targetProjectId: 'p001',
+        approvedProjectId: 'p001',
+        requestedBy: 'pm-a',
+        status: 'PENDING',
+        payload: {
+          registrationRequirementsVersion: 2,
+          executiveApproverId: 'head-a',
+          contractDocument: null,
+          customerBusinessRegistrationDocument: null,
+          quoteDocument: null,
+          proposalDocument: null,
+        },
+        submittedOutboxId: 'outbox-registration-p001',
+      },
+    },
+    {
+      label: 'markerless v2 registration missing the three original-document slots',
+      requestId: 'registration-p001',
+      projectRequest: {
+        requestKind: 'REGISTRATION',
+        targetProjectId: 'p001',
+        approvedProjectId: 'p001',
+        requestedBy: 'pm-a',
+        status: 'PENDING',
+        payload: {
+          registrationRequirementsVersion: 2,
+          executiveApproverId: 'head-a',
+          contractDocument: {
+            path: 'orgs/mysc/project-registration-documents/p001/contract.pdf',
+            name: 'contract.pdf',
+          },
+          customerBusinessRegistrationDocument: {
+            path: 'orgs/mysc/project-registration-documents/p001/customer.pdf',
+            name: 'customer.pdf',
+          },
+          quoteDocument: {
+            path: 'orgs/mysc/project-registration-documents/p001/quote.pdf',
+            name: 'quote.pdf',
+          },
+          proposalDocument: {
+            path: 'orgs/mysc/project-registration-documents/p001/proposal.pdf',
+            name: 'proposal.pdf',
+          },
+          rfpRequestEvidenceDocument: null,
+        },
+        submittedOutboxId: 'outbox-registration-p001',
+      },
+    },
+  ])('blocks organization-head approval until attachments are published: $label', async ({ requestId, projectRequest }) => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: `orgs/mysc/project_requests/${requestId}` };
+    const project = {
+      id: 'p001',
+      version: 3,
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveReviewStatus: 'PENDING',
+    };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === projectRef.path) return { exists: true, data: () => project };
+          if (path === requestRef.path) return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'head-a',
+        actorRole: 'pm',
+        actorEmail: 'head-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-pending-attachments',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId,
+      reviewStatus: 'APPROVED',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('project_attachments_processing');
+    expect(tx.set).not.toHaveBeenCalled();
+  });
+
+  it('allows a legacy v2 registration without a publication marker when all seven document slots are canonical or explained', async () => {
+    const projectRef = { path: 'orgs/mysc/projects/p001' };
+    const requestRef = { path: 'orgs/mysc/project_requests/registration-p001' };
+    const canonicalPrefix = 'orgs/mysc/project-registration-documents/p001/';
+    const project = {
+      id: 'p001',
+      version: 3,
+      executiveApproverId: 'head-a',
+      executiveApproverName: '조직장 A',
+      executiveReviewStatus: 'PENDING',
+    };
+    const projectRequest = {
+      requestKind: 'REGISTRATION',
+      approvedProjectId: 'p001',
+      requestedBy: 'pm-a',
+      status: 'PENDING',
+      payload: {
+        registrationRequirementsVersion: 2,
+        executiveApproverId: 'head-a',
+        contractDocument: { path: `${canonicalPrefix}contract.pdf`, name: 'contract.pdf' },
+        customerBusinessRegistrationDocument: { path: `${canonicalPrefix}customer.pdf`, name: 'customer.pdf' },
+        quoteDocument: { path: `${canonicalPrefix}quote.pdf`, name: 'quote.pdf' },
+        proposalDocument: { path: `${canonicalPrefix}proposal.pdf`, name: 'proposal.pdf' },
+        rfpRequestEvidenceDocument: null,
+        registrationOptionalDocumentNotes: {
+          proposalWordOriginal: '고객사 미제공',
+          proposalPptOriginal: '해당 없음',
+          presentationPptOriginal: '해당 없음',
+        },
+      },
+    };
+    const tx = {
+      get: vi.fn(async (ref: { path: string }) => ref.path.includes('/projects/')
+        ? { exists: true, data: () => project }
+        : { exists: true, data: () => projectRequest }),
+      set: vi.fn(),
+    };
+    const db = {
+      doc: vi.fn((path: string) => ({
+        path,
+        get: vi.fn(async () => {
+          if (path === projectRef.path) return { exists: true, data: () => project };
+          if (path === requestRef.path) return { exists: true, data: () => projectRequest };
+          return { exists: false, data: () => null };
+        }),
+      })),
+      runTransaction: vi.fn(async (handler) => handler(tx)),
+    };
+    const idempotencyService = {
+      begin: vi.fn(async () => ({ mode: 'acquired', requestFingerprint: 'fingerprint-a' })),
+      complete: vi.fn(),
+      fail: vi.fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = {
+        tenantId: 'mysc',
+        actorId: 'head-a',
+        actorRole: 'pm',
+        actorEmail: 'head-a@example.com',
+        requestId: 'request-a',
+        idempotencyKey: 'executive-review-legacy-canonical',
+      };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-14T00:00:00.000Z',
+      idempotencyService,
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).post('/api/v1/projects/p001/executive-review').send({
+      requestId: 'registration-p001',
+      reviewStatus: 'APPROVED',
+    });
+
+    expect(response.status).toBe(200);
+    expect(tx.set).toHaveBeenCalledWith(expect.objectContaining(projectRef), expect.objectContaining({
+      executiveReviewStatus: 'APPROVED',
     }), { merge: true });
   });
 
@@ -1062,7 +1753,7 @@ describe('project route helpers', () => {
     expect(tx.set).not.toHaveBeenCalled();
   });
 
-  it('allows the designated approver through existing write permissions without a separate member role', async () => {
+  it('allows a designated viewer approver without introducing a separate member role', async () => {
     const projectRef = { path: 'orgs/mysc/projects/p001' };
     const requestRef = { path: 'orgs/mysc/project_requests/pr001' };
     const project = {
@@ -1113,10 +1804,11 @@ describe('project route helpers', () => {
       req.context = {
         tenantId: 'mysc',
         actorId: 'head-a',
-        actorRole: 'pm',
+        actorRole: 'viewer',
         actorEmail: 'head-a@example.com',
+        actorName: '조직장 A',
         requestId: 'request-a',
-        idempotencyKey: 'executive-review-designated-write-core',
+        idempotencyKey: 'executive-review-designated-viewer',
       };
       next();
     });
@@ -1384,5 +2076,407 @@ describe('project route helpers', () => {
       existingFolderId: '',
     });
     expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns only project requests assigned to the authenticated active reviewer', async () => {
+    const collectionRows = {
+      projects: [
+        { id: 'project-a', executiveApproverId: 'head-a' },
+        { id: 'project-change', executiveApproverId: 'head-a' },
+        { id: 'project-legacy', executiveApproverId: 'head-a' },
+        { id: 'project-processing', executiveApproverId: 'head-a' },
+        { id: 'project-payload-only', executiveApproverId: 'head-b', name: '요청 기준 배정 프로젝트' },
+        { id: 'project-other', executiveApproverId: 'head-b' },
+      ],
+      project_requests: [
+        {
+          id: 'request-assigned',
+          approvedProjectId: 'project-a',
+          requestedAt: '2026-07-20T02:00:00.000Z',
+          payload: { executiveApproverId: 'head-a', contractAmount: 100_000 },
+        },
+        {
+          id: 'request-processing',
+          requestKind: 'REGISTRATION',
+          approvedProjectId: 'project-processing',
+          requestedAt: '2026-07-20T04:30:00.000Z',
+          status: 'PENDING',
+          payload: { executiveApproverId: 'head-a', registrationRequirementsVersion: 2 },
+        },
+        {
+          id: 'request-change-assigned',
+          requestKind: 'CHANGE',
+          targetProjectId: 'project-change',
+          requestedAt: '2026-07-20T04:00:00.000Z',
+          payload: { executiveApproverId: 'head-b', contractAmount: 500_000 },
+          proposedSnapshot: { executiveApproverId: 'head-a', contractAmount: 200_000 },
+        },
+        {
+          id: 'request-other',
+          approvedProjectId: 'project-other',
+          requestedAt: '2026-07-20T03:00:00.000Z',
+          payload: { executiveApproverId: 'head-b', contractAmount: 999_000 },
+        },
+        {
+          id: 'request-payload-only',
+          targetProjectId: 'project-payload-only',
+          requestedAt: '2026-07-20T03:30:00.000Z',
+          payload: { executiveApproverId: 'head-a', contractAmount: 300_000 },
+        },
+        {
+          id: 'request-shadowed',
+          approvedProjectId: 'project-other',
+          requestedAt: '2026-07-20T05:00:00.000Z',
+          payload: { executiveApproverId: 'head-b', contractAmount: 777_000 },
+        },
+      ],
+      projectRequests: [
+        {
+          id: 'request-legacy-assigned',
+          approvedProjectId: 'project-legacy',
+          requestedAt: '2026-07-20T01:00:00.000Z',
+          payload: { name: '기존 요청' },
+        },
+        {
+          id: 'request-shadowed',
+          approvedProjectId: 'project-a',
+          requestedAt: '2026-07-20T06:00:00.000Z',
+          payload: { executiveApproverId: 'head-a', contractAmount: 666_000 },
+        },
+      ],
+    };
+    const readField = (row: Record<string, any>, field: string) => field
+      .split('.')
+      .reduce((value: any, key) => value?.[key], row);
+    const queryCalls: Array<{ path: string; clauses: Array<[string, string, unknown]> }> = [];
+    const requestQueryLimits: number[] = [];
+    const makeQuery = (path: string, clauses: Array<[string, string, unknown]> = []): any => ({
+      where: (field: string, operator: string, value: unknown) => makeQuery(path, [...clauses, [field, operator, value]]),
+      limit: (value: number) => {
+        requestQueryLimits.push(value);
+        return makeQuery(path, clauses);
+      },
+      get: vi.fn(async () => {
+        queryCalls.push({ path, clauses });
+        if (!clauses.length) throw new Error(`unbounded collection read: ${path}`);
+        const collectionName = path.split('/').at(-1) as keyof typeof collectionRows;
+        const rows = collectionRows[collectionName] || [];
+        const matches = rows.filter((row) => clauses.every(([field, operator, value]) => {
+          const actual = readField(row, field);
+          if (operator === '==') return actual === value;
+          if (operator === 'in') return Array.isArray(value) && value.includes(actual);
+          return false;
+        }));
+        return { docs: matches.map((row) => ({ id: row.id, data: () => row })) };
+      }),
+    });
+    const db = {
+      collection: vi.fn((path: string) => makeQuery(path)),
+      doc: vi.fn((path: string) => ({
+        get: vi.fn(async () => {
+          if (path === 'orgs/mysc/members/head-a') {
+            return { exists: true, data: () => ({ uid: 'head-a', role: 'pm', status: 'ACTIVE' }) };
+          }
+          const [collectionName, id] = path.split('/').slice(-2) as [keyof typeof collectionRows, string];
+          const row = collectionRows[collectionName]?.find((item) => item.id === id);
+          if (row) {
+            return { exists: true, id, data: () => row };
+          }
+          return { exists: false, data: () => null };
+        }),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'head-a', actorRole: 'pm' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-20T00:00:00.000Z',
+      idempotencyService: {},
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).get('/api/v1/project-requests/assigned-to-me');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'request-change-assigned',
+      'request-payload-only',
+      'request-assigned',
+      'request-legacy-assigned',
+    ]);
+    expect(JSON.stringify(response.body)).not.toContain('request-other');
+    expect(JSON.stringify(response.body)).not.toContain('999000');
+    expect(JSON.stringify(response.body)).not.toContain('666000');
+    expect(response.body.projects.map((project: { id: string }) => project.id)).toEqual([
+      'project-a',
+      'project-change',
+      'project-legacy',
+      'project-payload-only',
+      'project-processing',
+    ]);
+    expect(queryCalls).not.toContainEqual(expect.objectContaining({ clauses: [] }));
+    expect(requestQueryLimits.length).toBeGreaterThan(0);
+    expect(new Set(requestQueryLimits)).toEqual(new Set([500]));
+  });
+
+  it('serves latest, pending-summary, and review-inbox views without client Firestore access', async () => {
+    const collectionRows = {
+      project_requests: [
+        {
+          id: 'change-pending',
+          requestKind: 'CHANGE',
+          targetProjectId: 'project-a',
+          approvedProjectId: 'project-a',
+          status: 'PENDING',
+          requestedAt: '2026-07-20T01:00:00.000Z',
+          targetProjectVersion: 4,
+          payload: { contractAmount: 999_000 },
+        },
+        {
+          id: 'registration-latest',
+          requestKind: 'REGISTRATION',
+          targetProjectId: 'project-a',
+          approvedProjectId: 'project-a',
+          status: 'APPROVED',
+          requestedAt: '2026-07-20T02:00:00.000Z',
+          payload: { name: '프로젝트 A' },
+        },
+        {
+          id: 'registration-processing',
+          requestKind: 'REGISTRATION',
+          targetProjectId: 'project-a',
+          approvedProjectId: 'project-a',
+          status: 'PENDING',
+          requestedAt: '2026-07-20T00:30:00.000Z',
+          payload: { name: '게시 중 프로젝트', registrationRequirementsVersion: 2 },
+        },
+        {
+          id: 'shadowed-cross-project',
+          requestKind: 'CHANGE',
+          targetProjectId: 'project-b',
+          approvedProjectId: 'project-b',
+          status: 'PENDING',
+          requestedAt: '2026-07-20T04:00:00.000Z',
+          payload: { contractAmount: 555_000 },
+        },
+      ],
+      projectRequests: [
+        {
+          id: 'legacy-other',
+          requestKind: 'CHANGE',
+          approvedProjectId: 'project-b',
+          status: 'PENDING',
+          requestedAt: '2026-07-20T03:00:00.000Z',
+          payload: { contractAmount: 777_000 },
+        },
+        {
+          id: 'shadowed-cross-project',
+          requestKind: 'CHANGE',
+          targetProjectId: 'project-a',
+          approvedProjectId: 'project-a',
+          status: 'PENDING',
+          requestedAt: '2026-07-20T04:00:00.000Z',
+          payload: { contractAmount: 444_000 },
+        },
+      ],
+    };
+    const queryCalls: Array<{ path: string; field: string; operator: string; value: unknown }> = [];
+    const requestQueryLimits: number[] = [];
+    const readField = (row: Record<string, any>, field: string) => field
+      .split('.')
+      .reduce((value: any, key) => value?.[key], row);
+    const db = {
+      collection: vi.fn((path: string) => ({
+        where: (field: string, operator: string, value: unknown) => ({
+          limit: (queryLimit: number) => ({ get: vi.fn(async () => {
+            requestQueryLimits.push(queryLimit);
+            queryCalls.push({ path, field, operator, value });
+            const rows = path.endsWith('/project_requests')
+              ? collectionRows.project_requests
+              : collectionRows.projectRequests;
+            const matches = rows.filter((row) => {
+              const actual = readField(row, field);
+              if (operator === '==') return actual === value;
+              if (operator === 'in') return Array.isArray(value) && value.includes(actual);
+              return false;
+            });
+            return { docs: matches.map((row) => ({ id: row.id, data: () => row })) };
+          }) }),
+        }),
+      })),
+      doc: vi.fn((path: string) => ({
+        get: vi.fn(async () => {
+          if (path === 'orgs/mysc/members/finance-a') {
+            return { exists: true, data: () => ({ uid: 'finance-a', role: 'finance', status: 'ACTIVE' }) };
+          }
+          if (path === 'orgs/mysc/projects/project-a') {
+            return { exists: true, data: () => ({ id: 'project-a', managerId: 'pm-a' }) };
+          }
+          const id = path.split('/').at(-1);
+          const canonical = collectionRows.project_requests.find((row) => row.id === id);
+          return canonical
+            ? { exists: true, id, data: () => canonical }
+            : { exists: false, data: () => null };
+        }),
+      })),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'finance-a', actorRole: 'finance' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-20T00:00:00.000Z',
+      idempotencyService: {},
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const pending = await request(app)
+      .post('/api/v1/project-requests/pending-changes')
+      .send({ projectIds: ['project-a'] });
+    const oversizedPending = await request(app)
+      .post('/api/v1/project-requests/pending-changes')
+      .send({ projectIds: Array.from({ length: 201 }, (_, index) => `project-${index}`) });
+    const inbox = await request(app).post('/api/v1/project-requests/review-inbox').send({ projectIds: ['project-a'] });
+    const latest = await request(app).get('/api/v1/projects/project-a/latest-request');
+
+    expect(pending.status).toBe(200);
+    expect(oversizedPending.status).toBe(400);
+    expect(oversizedPending.body.error).toBe('project_request_query_invalid');
+    expect(pending.body.items).toEqual([expect.objectContaining({ id: 'change-pending' })]);
+    expect(JSON.stringify(pending.body)).not.toContain('999000');
+    expect(JSON.stringify(pending.body)).not.toContain('777000');
+    expect(JSON.stringify(pending.body)).not.toContain('shadowed-cross-project');
+    expect(inbox.status).toBe(200);
+    expect(inbox.body.items.map((item: { id: string }) => item.id)).toEqual(['registration-latest', 'change-pending']);
+    expect(JSON.stringify(inbox.body)).not.toContain('shadowed-cross-project');
+    expect(latest.status).toBe(200);
+    expect(latest.body.item).toEqual(expect.objectContaining({ id: 'registration-latest' }));
+    expect(queryCalls.every((call) => call.field && call.operator)).toBe(true);
+    expect(new Set(requestQueryLimits)).toEqual(new Set([500]));
+  });
+
+  it('denies pending change summaries for project IDs outside an ACTIVE PM assignment', async () => {
+    const db = {
+      collection: vi.fn((path: string) => ({
+        where: (_field: string, _operator: string, _value: unknown) => ({
+          limit: (_queryLimit: number) => ({
+            get: vi.fn(async () => ({
+              docs: path.endsWith('/project_requests')
+                ? [{
+                    id: 'change-project-a',
+                    data: () => ({
+                      requestKind: 'CHANGE',
+                      targetProjectId: 'project-a',
+                      status: 'PENDING',
+                      requestedAt: '2026-07-20T01:00:00.000Z',
+                    }),
+                  }]
+                : [],
+            })),
+          }),
+        }),
+      })),
+      doc: vi.fn((path: string) => ({
+        get: vi.fn(async () => {
+          if (path === 'orgs/mysc/members/pm-a') {
+            return {
+              exists: true,
+              data: () => ({ uid: 'pm-a', role: 'pm', status: 'ACTIVE', projectIds: ['project-b'] }),
+            };
+          }
+          if (path === 'orgs/mysc/projects/project-a') {
+            return { exists: true, data: () => ({ managerId: 'pm-b', executiveApproverId: 'head-a' }) };
+          }
+          return { exists: false, data: () => null };
+        }),
+      })),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'pm-a', actorRole: 'pm' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-20T00:00:00.000Z',
+      idempotencyService: {},
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app)
+      .post('/api/v1/project-requests/pending-changes')
+      .send({ projectIds: ['project-a'] });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(db.collection).not.toHaveBeenCalled();
+  });
+
+  it('chunks legacy request fallback queries within the Firestore in-query limit', async () => {
+    const inQuerySizes: number[] = [];
+    const db = {
+      collection: vi.fn((path: string) => ({
+        where: (field: string, operator: string, value: unknown) => ({
+          get: vi.fn(async () => {
+            if (operator === 'in') inQuerySizes.push(Array.isArray(value) ? value.length : 0);
+            if (path.endsWith('/projects') && field === 'executiveApproverId') {
+              return {
+                docs: Array.from({ length: 31 }, (_, index) => ({
+                  id: `project-${String(index + 1).padStart(2, '0')}`,
+                  data: () => ({ executiveApproverId: 'head-a' }),
+                })),
+              };
+            }
+            return { docs: [] };
+          }),
+          limit: (_queryLimit: number) => ({
+            get: vi.fn(async () => {
+              if (operator === 'in') inQuerySizes.push(Array.isArray(value) ? value.length : 0);
+              return { docs: [] };
+            }),
+          }),
+        }),
+      })),
+      doc: vi.fn((path: string) => ({
+        get: vi.fn(async () => path === 'orgs/mysc/members/head-a'
+          ? { exists: true, data: () => ({ uid: 'head-a', role: 'pm', status: 'ACTIVE' }) }
+          : { exists: false, data: () => null }),
+      })),
+    };
+    const app = express();
+    app.use((req: any, _res, next) => {
+      req.context = { tenantId: 'mysc', actorId: 'head-a', actorRole: 'pm' };
+      next();
+    });
+    mountProjectRoutes(app, {
+      db,
+      now: () => '2026-07-20T00:00:00.000Z',
+      idempotencyService: {},
+    } as any);
+    app.use((error: any, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app).get('/api/v1/project-requests/assigned-to-me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toEqual([]);
+    expect(inQuerySizes).toContain(30);
+    expect(inQuerySizes).toContain(1);
+    expect(Math.max(...inQuerySizes)).toBe(30);
   });
 });

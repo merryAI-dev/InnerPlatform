@@ -16,7 +16,7 @@ function toRate(value: unknown) {
 
 function toMonth(value: unknown) {
   const normalized = String(value || '').trim();
-  return /^\d{4}-\d{2}$/.test(normalized) ? normalized : '';
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(normalized) ? normalized : '';
 }
 
 export function parseProjectTeamMemberIdentityInput(value: string) {
@@ -95,6 +95,50 @@ export function hasIncompleteProjectTeamMembers(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ) {
   return normalizeProjectTeamMembers(members).some((member) => !isProjectTeamMemberComplete(member));
+}
+
+export function hasProjectOperatingManager(
+  members: ProjectTeamMemberAssignment[] | null | undefined,
+) {
+  return normalizeProjectTeamMembers(members).some((member) => (
+    member.role === '운영매니저' && member.isDocumentOnly === false
+  ));
+}
+
+export function hasProjectFinalResponsibleMember(
+  members: ProjectTeamMemberAssignment[] | null | undefined,
+) {
+  return normalizeProjectTeamMembers(members).some((member) => (
+    member.role === '사업 최종 책임자' && member.isDocumentOnly === false
+  ));
+}
+
+export function isProjectSettlementSupportMember(
+  member: Pick<ProjectTeamMemberAssignment, 'memberName' | 'memberNickname'>,
+) {
+  const name = String(member.memberName || '').trim();
+  const nickname = String(member.memberNickname || '').trim();
+  return name === '송성미' || name === '최지윤' || nickname === '도담' || nickname === '써니';
+}
+
+export function hasInvalidProjectSettlementSupportMember(
+  members: ProjectTeamMemberAssignment[] | null | undefined,
+) {
+  return normalizeProjectTeamMembers(members).some((member) => (
+    member.role === '정산지원'
+    && (member.isDocumentOnly !== false || !isProjectSettlementSupportMember(member))
+  ));
+}
+
+export function hasInvalidProjectTeamMemberLaborPeriod(
+  members: ProjectTeamMemberAssignment[] | null | undefined,
+) {
+  return (Array.isArray(members) ? members : []).some((member) => {
+    const start = String(member?.laborAllocationStartMonth || '').trim();
+    const end = String(member?.laborAllocationEndMonth || '').trim();
+    if ((start && !toMonth(start)) || (end && !toMonth(end))) return true;
+    return Boolean(start && end && start > end);
+  });
 }
 
 export function formatProjectTeamMemberLine(member: ProjectTeamMemberAssignment) {

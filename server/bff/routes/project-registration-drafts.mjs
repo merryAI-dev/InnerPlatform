@@ -17,13 +17,14 @@ import {
 } from '../edit-lease.mjs';
 import {
   parseWithSchema,
+  projectDraftAttachmentDeleteSchema,
   projectRegistrationDraftAttachmentSchema,
   projectRegistrationDraftCreateSchema,
   projectRegistrationDraftPatchSchema,
   projectRegistrationDraftSubmitSchema,
 } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
-import { createOutboxEvent } from '../outbox.mjs';
+import { DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE, createOutboxEvent } from '../outbox.mjs';
 import { buildProjectRegistrationCanonicalDocuments } from './projects.mjs';
 import {
   PROJECT_REGISTRATION_DOCUMENT_KINDS,
@@ -31,6 +32,16 @@ import {
 } from '../project-document-validation.mjs';
 
 const RESOURCE_TYPE = 'project-registration';
+const DOCUMENT_FIELD_BY_KIND = {
+  contract: 'contractDocument',
+  customer_business_registration: 'customerBusinessRegistrationDocument',
+  quote: 'quoteDocument',
+  proposal: 'proposalDocument',
+  proposal_word_original: 'proposalWordOriginalDocument',
+  proposal_ppt_original: 'proposalPptOriginalDocument',
+  presentation_ppt_original: 'presentationPptOriginalDocument',
+  rfp_request_evidence: 'rfpRequestEvidenceDocument',
+};
 const MAX_DRAFT_DOCUMENT_BYTES = 900 * 1024;
 const MAX_ATTACHMENT_REFS = 100;
 const MAX_DRAFT_PAYLOAD_DEPTH = 20;
@@ -87,6 +98,23 @@ function ownerId(draft = {}) {
 
 function attachmentRefs(draft = {}) {
   return Array.isArray(draft.attachmentRefs) ? draft.attachmentRefs : [];
+}
+
+function replacementDocumentKinds(documentKind) {
+  return documentKind === 'proposal' || documentKind === 'rfp_request_evidence'
+    ? ['proposal', 'rfp_request_evidence']
+    : [documentKind];
+}
+
+function payloadWithoutAttachment(payload, documentKind, removedAttachments) {
+  const next = { ...(payload || {}) };
+  const field = DOCUMENT_FIELD_BY_KIND[documentKind];
+  const removedPaths = new Set(removedAttachments.map((attachment) => readOptionalText(attachment?.path)).filter(Boolean));
+  if (field && removedPaths.has(readOptionalText(next[field]?.path))) {
+    next[field] = null;
+  }
+  if (documentKind === 'contract') next.contractAnalysis = null;
+  return next;
 }
 
 function relocationAttachmentRefs(draft, current) {
@@ -343,6 +371,20 @@ function draftAudit(current, actorRole, action, revision, timestamp, metadata = 
   };
 }
 
+function attachmentCleanupEvent(createEvent, current, paths, timestamp) {
+  const uniquePaths = [...new Set(paths.map(readOptionalText).filter(Boolean))];
+  if (uniquePaths.length === 0) return null;
+  return createEvent({
+    tenantId: current.tenantId,
+    requestId: current.requestId,
+    eventType: DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
+    entityType: 'project_registration_draft',
+    entityId: current.draftId,
+    payload: { draftId: current.draftId, paths: uniquePaths },
+    createdAt: timestamp,
+  });
+}
+
 export function createProjectRegistrationDraftService({
   db,
   now = () => new Date().toISOString(),
@@ -352,6 +394,7 @@ export function createProjectRegistrationDraftService({
   createProjectId = defaultProjectId,
   createProjectRequestId = defaultProjectRequestId,
   createRegistrationOutboxEvent = createOutboxEvent,
+  createAttachmentCleanupOutboxEvent = createOutboxEvent,
   auditChainService,
   idempotencyService,
   draftStorageService,
@@ -587,6 +630,31 @@ export function createProjectRegistrationDraftService({
         const { draft } = await ownedDraft(tx, current);
         return { draft: draftContract(draft) };
       });
+    },
+
+    async readAttachment(input) {
+      if (!draftStorageService?.downloadDraftAttachment) {
+        throw new Error('Draft attachment storage service is required');
+      }
+      const current = context(input, { sessionRequired: false, idempotencyRequired: false });
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!PROJECT_REGISTRATION_DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const attachment = await db.runTransaction(async (tx) => {
+        const { draft } = await ownedDraft(tx, current);
+        const match = attachmentRefs(draft).findLast((item) => item?.documentKind === documentKind);
+        if (!match || !readOptionalText(match.path)) {
+          throw createHttpError(404, 'Project registration draft attachment not found', 'not_found');
+        }
+        return match;
+      });
+      const downloaded = await draftStorageService.downloadDraftAttachment({
+        tenantId: current.tenantId,
+        draftId: current.draftId,
+        path: attachment.path,
+      });
+      return { ...downloaded, name: readOptionalText(attachment.name) || 'attachment.pdf' };
     },
 
     async update(input) {
@@ -862,6 +930,7 @@ export function createProjectRegistrationDraftService({
       if (!PROJECT_REGISTRATION_DOCUMENT_KINDS.includes(documentKind)) {
         throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
       }
+      const replacedDocumentKinds = replacementDocumentKinds(documentKind);
       assertProjectAttachment(buffer, mimeType, fileName, documentKind);
       const attachmentId = documentId(createAttachmentId(), 'attachmentId');
       const method = 'POST';
@@ -906,7 +975,7 @@ export function createProjectRegistrationDraftService({
         assertRevision(draft, expectedDraftRevision);
         if (
           attachmentRefs(draft).length >= MAX_ATTACHMENT_REFS
-          && !attachmentRefs(draft).some((attachment) => attachment?.documentKind === documentKind)
+          && !attachmentRefs(draft).some((attachment) => replacedDocumentKinds.includes(attachment?.documentKind))
         ) {
           throw createHttpError(422, 'Draft attachment limit exceeded', 'draft_attachment_limit_exceeded');
         }
@@ -982,11 +1051,14 @@ export function createProjectRegistrationDraftService({
           });
           const revision = assertRevision(draft, expectedDraftRevision) + 1;
           replacedAttachments = attachmentRefs(draft)
-            .filter((currentAttachment) => currentAttachment?.documentKind === documentKind);
+            .filter((currentAttachment) => replacedDocumentKinds.includes(currentAttachment?.documentKind));
           const next = {
             ...draft,
+            payload: payloadWithoutAttachment(draft.payload, documentKind, replacedAttachments),
             attachmentRefs: [
-              ...attachmentRefs(draft).filter((currentAttachment) => currentAttachment?.documentKind !== documentKind),
+              ...attachmentRefs(draft).filter(
+                (currentAttachment) => !replacedDocumentKinds.includes(currentAttachment?.documentKind),
+              ),
               attachment,
             ],
             draftRevision: revision,
@@ -1002,6 +1074,17 @@ export function createProjectRegistrationDraftService({
           ]);
           tx.set(ref, next);
           completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+          const cleanupEvent = attachmentCleanupEvent(
+            createAttachmentCleanupOutboxEvent,
+            current,
+            replacedAttachments
+              .filter((replaced) => readOptionalText(replaced?.path) && replaced.path !== attachment.path)
+              .map((replaced) => replaced.path),
+            timestamp,
+          );
+          if (cleanupEvent) {
+            tx.create(db.doc(`outbox/${documentId(cleanupEvent.id, 'outboxEvent.id')}`), cleanupEvent);
+          }
           return { status: 200, body, replayed: false };
         });
         if (outcome.replayed) await cleanup();
@@ -1028,6 +1111,112 @@ export function createProjectRegistrationDraftService({
         await cleanup();
         throw error;
       }
+    },
+
+    async removeAttachment(input) {
+      if (!draftStorageService?.deleteDraftAttachment) {
+        throw new Error('Draft attachment storage service is required');
+      }
+      const current = context(input);
+      const leaseId = documentId(input?.leaseId, 'leaseId');
+      const fence = positiveFence(input?.fence);
+      const expectedDraftRevision = Number(input?.expectedDraftRevision);
+      if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+        throw createHttpError(400, 'expectedDraftRevision must be a non-negative integer', 'draft_request_invalid');
+      }
+      const documentKind = requiredText(input?.documentKind, 'documentKind');
+      if (!PROJECT_REGISTRATION_DOCUMENT_KINDS.includes(documentKind)) {
+        throw createHttpError(400, 'documentKind is invalid', 'draft_attachment_invalid');
+      }
+      const method = 'DELETE';
+      const path = `/api/v1/project-registration-drafts/${current.draftId}/attachments/${documentKind}`;
+      const requestFingerprint = buildRequestFingerprint({
+        method,
+        path,
+        body: {
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId,
+          fence,
+          expectedDraftRevision,
+          documentKind,
+        },
+      });
+
+      const result = await db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, ref, draft } = await ownedDraft(tx, current);
+        const lock = await checkIdempotency(tx, current, requestFingerprint, nowDate);
+        if (lock.mode === 'replay') {
+          return { outcome: { status: lock.status, body: lock.body, replayed: true }, removedAttachments: [] };
+        }
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        assertActive(draft);
+        await assertOwnedInTransaction({
+          tx,
+          leaseRef: leaseRef(current),
+          tenantId: current.tenantId,
+          resourceType: RESOURCE_TYPE,
+          resourceId: current.draftId,
+          actorId: current.actorId,
+          sessionId: current.sessionId,
+          leaseId,
+          fence,
+          serverNow: nowDate,
+        });
+        const revision = assertRevision(draft, expectedDraftRevision) + 1;
+        const removedAttachments = attachmentRefs(draft)
+          .filter((attachment) => attachment?.documentKind === documentKind && readOptionalText(attachment?.path));
+        if (removedAttachments.length === 0) {
+          throw createHttpError(404, 'Project registration draft attachment not found', 'not_found');
+        }
+        const next = {
+          ...draft,
+          payload: payloadWithoutAttachment(draft.payload, documentKind, removedAttachments),
+          attachmentRefs: attachmentRefs(draft).filter((attachment) => attachment?.documentKind !== documentKind),
+          draftRevision: revision,
+          updatedAt: timestamp,
+        };
+        assertDraftSize(next);
+        const body = { draft: draftContract(next) };
+        await auditChainService.appendManyInTransaction(tx, [
+          draftAudit(current, actorRole, 'PROJECT_REGISTRATION_DRAFT_ATTACHMENT_REMOVE', revision, timestamp, {
+            fence,
+            documentKind,
+            attachmentIds: removedAttachments.map((attachment) => readOptionalText(attachment?.attachmentId)).filter(Boolean),
+          }),
+        ]);
+        tx.set(ref, next);
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        const cleanupEvent = attachmentCleanupEvent(
+          createAttachmentCleanupOutboxEvent,
+          current,
+          removedAttachments.map((attachment) => attachment.path),
+          timestamp,
+        );
+        if (cleanupEvent) {
+          tx.create(db.doc(`outbox/${documentId(cleanupEvent.id, 'outboxEvent.id')}`), cleanupEvent);
+        }
+        return { outcome: { status: 200, body, replayed: false }, removedAttachments };
+      });
+
+      await Promise.all(result.removedAttachments.map(async (attachment) => {
+        try {
+          await draftStorageService.deleteDraftAttachment({
+            tenantId: current.tenantId,
+            draftId: current.draftId,
+            path: attachment.path,
+          });
+        } catch {
+          console.warn('[bff] removed draft attachment cleanup failed', {
+            requestId: current.requestId,
+            errorCode: 'draft_attachment_remove_cleanup_failed',
+          });
+        }
+      }));
+      return result.outcome;
     },
   };
 }
@@ -1073,6 +1262,21 @@ function sendOutcome(res, outcome) {
   res.status(outcome.status).json(outcome.body);
 }
 
+function sendPrivateDraftAttachment(res, attachment) {
+  const buffer = Buffer.isBuffer(attachment?.buffer)
+    ? attachment.buffer
+    : Buffer.from(attachment?.buffer || []);
+  const contentType = readOptionalText(attachment?.contentType);
+  res.setHeader('content-type', /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType)
+    ? contentType
+    : 'application/octet-stream');
+  res.setHeader('content-length', String(buffer.byteLength));
+  res.setHeader('cache-control', 'private, no-store');
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(readOptionalText(attachment?.name) || 'attachment.pdf')}`);
+  res.status(200).send(buffer);
+}
+
 function decodeBase64(value, expectedSize) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw createHttpError(400, 'contentBase64 is invalid', 'draft_attachment_invalid');
@@ -1112,6 +1316,16 @@ export function mountProjectRegistrationDraftRoutes(app, {
     }));
   }));
 
+  app.get('/api/v1/project-registration-drafts/:draftId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'read a project registration draft attachment');
+    const current = await routeContext(req, piiProtector);
+    sendPrivateDraftAttachment(res, await projectRegistrationDraftService.readAttachment({
+      ...current,
+      draftId: routeDraftId(req),
+      documentKind: requiredText(req.params?.documentKind, 'documentKind'),
+    }));
+  }));
+
   app.patch('/api/v1/project-registration-drafts/:draftId', asyncHandler(async (req, res) => {
     assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'save a project registration draft');
     const parsed = parseWithSchema(projectRegistrationDraftPatchSchema, req.body);
@@ -1134,6 +1348,19 @@ export function mountProjectRegistrationDraftRoutes(app, {
       draftId: routeDraftId(req),
       ...parsed,
       buffer: decodeBase64(parsed.contentBase64, parsed.fileSize),
+    }));
+  }));
+
+  app.delete('/api/v1/project-registration-drafts/:draftId/attachments/:documentKind', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'remove a project registration draft file');
+    const parsed = parseWithSchema(projectDraftAttachmentDeleteSchema, req.body);
+    const current = await routeContext(req, piiProtector);
+    sendOutcome(res, await projectRegistrationDraftService.removeAttachment({
+      ...current,
+      ...routeOwnership(req),
+      draftId: routeDraftId(req),
+      documentKind: requiredText(req.params?.documentKind, 'documentKind'),
+      ...parsed,
     }));
   }));
 

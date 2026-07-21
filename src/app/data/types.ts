@@ -29,7 +29,7 @@ export type SettlementType = 'TYPE1' | 'TYPE2' | 'TYPE3' | 'TYPE4' | 'TYPE5' | '
 export type Basis = '공급가액' | '공급대가' | '기타' | 'NONE';
 export type ProjectCurrency = 'KRW' | 'USD';
 
-export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업
+export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE' | 'OTHER'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업 / 기타
 export type ProjectFundInputMode = 'BANK_UPLOAD' | 'DIRECT_ENTRY';
 export type SettlementSheetPolicyPreset = 'STANDARD' | 'DIRECT_ENTRY' | 'BALANCE_TRACKING';
 export type SettlementSheetDerivedField = 'balance' | 'expenseAmount' | 'bankAmount' | 'vatIn';
@@ -159,7 +159,13 @@ export const BASIS_LABELS: Record<Basis, string> = {
   '공급가액': '공급가액 기준',
   '공급대가': '공급대가 기준',
   기타: '기타',
-  NONE: '정산 기준 없음',
+  NONE: '정산 없음',
+};
+
+export const REGISTRATION_V2_BASIS_LABELS: Record<Exclude<Basis, '기타'>, string> = {
+  '공급가액': '공급가액 정산',
+  '공급대가': '공급대가 정산',
+  NONE: '정산 없음',
 };
 
 export function normalizeSettlementType(raw: unknown): SettlementType {
@@ -179,10 +185,11 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   DEDICATED: '전용계좌 사업(이나라도움)',
   OPERATING: '전용계좌(이나라도움x)',
   NONE: '일반 사업',
+  OTHER: '기타',
 };
 
 export function normalizeAccountType(raw: unknown): AccountType {
-  if (raw === 'DEDICATED' || raw === 'OPERATING') return raw;
+  if (raw === 'DEDICATED' || raw === 'OPERATING' || raw === 'OTHER') return raw;
   return 'NONE';
 }
 
@@ -450,7 +457,7 @@ export const SETTLEMENT_SYSTEM_LABELS: Record<SettlementSystemCode, string> = {
   NIPA: 'NIPA (정보통신산업진흥원)',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간사업',
-  NONE: '미정',
+  NONE: '정산없음',
 };
 
 export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
@@ -468,14 +475,14 @@ export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
   NIPA: 'NIPA',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간',
-  NONE: '미정',
+  NONE: '정산없음',
 };
 
 export const LABOR_SETTLEMENT_BASIS_LABELS: Record<LaborSettlementBasis, string> = {
-  INCLUDE_ACTUAL_SALARY: '포함 실급여',
-  EXCLUDE_ACTUAL_SALARY: '제외 실급여',
+  INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금포함 실급여',
+  EXCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 제외 실급여',
   FIXED_AMOUNT: '정액정산',
-  NONE: '미정',
+  NONE: '정산없음',
 };
 
 export function normalizeSettlementSystemCode(raw: unknown): SettlementSystemCode {
@@ -540,6 +547,7 @@ export interface OrgMember {
   name: string;
   email: string;
   role: UserRole;
+  status?: string;
   avatarUrl?: string;
 }
 
@@ -658,6 +666,7 @@ export interface Project {
   paymentPlanDesc: string;       // 입금계획 텍스트 (e.g. "선금80%, 잔금20%")
   // MYSC-specific fields
   clientOrg: string;             // 발주기관(계약기관)
+  businessManagementGoogleFolderLink?: string;
   groupwareName: string;         // 그룹웨어 프로젝트등록명
   participantCondition: string;  // 참여기업 조건
   note?: string;                  // PM/관리자 참고 메모
@@ -841,6 +850,7 @@ export interface ProjectRequestPayload {
   phase?: ProjectPhase;
   description: string;
   clientOrg: string;
+  businessManagementGoogleFolderLink?: string;
   department: string;
   groupwareName?: string;
   currency?: ProjectCurrency;

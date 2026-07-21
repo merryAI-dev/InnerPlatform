@@ -2,6 +2,7 @@ import { featureFlags, parseFeatureFlag } from '../config/feature-flags';
 import type {
   AccountType,
   Project,
+  ProjectRequest,
   ProjectExecutiveReviewStatus,
   ProjectManagementPlanningReviewStatus,
   ProjectSheetSourceSnapshot,
@@ -1424,6 +1425,110 @@ export async function fetchProjectsViaBff(params: {
     seenCursors.add(nextCursor);
     cursor = nextCursor;
   }
+}
+
+export async function fetchAssignedProjectRequestsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<{ requests: ProjectRequest[]; projects: Project[] }> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<{ items: ProjectRequest[]; projects: Project[] }>(
+    '/api/v1/project-requests/assigned-to-me',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
+    },
+  );
+  return {
+    requests: Array.isArray(response.data?.items) ? response.data.items : [],
+    projects: Array.isArray(response.data?.projects) ? response.data.projects : [],
+  };
+}
+
+const PROJECT_REQUEST_PROJECT_ID_BATCH_SIZE = 200;
+
+async function fetchProjectRequestsByProjectIds(params: {
+  apiClient: PlatformApiClientLike;
+  path: string;
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+}): Promise<ProjectRequest[]> {
+  const projectIds = Array.from(new Set(params.projectIds.map((id) => id.trim()).filter(Boolean)));
+  const batches: string[][] = [];
+  for (let index = 0; index < projectIds.length; index += PROJECT_REQUEST_PROJECT_ID_BATCH_SIZE) {
+    batches.push(projectIds.slice(index, index + PROJECT_REQUEST_PROJECT_ID_BATCH_SIZE));
+  }
+  const responses = await Promise.all(batches.map((batch) => params.apiClient.post<{ items: ProjectRequest[] }>(
+    params.path,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { projectIds: batch },
+      timeoutMs: 10000,
+    },
+  )));
+  const requestsById = new Map<string, ProjectRequest>();
+  responses.forEach((response) => {
+    if (!Array.isArray(response.data?.items)) return;
+    response.data.items.forEach((request) => requestsById.set(request.id, request));
+  });
+  return Array.from(requestsById.values()).sort((left, right) => (
+    String(right.requestedAt || '').localeCompare(String(left.requestedAt || ''))
+    || String(left.id).localeCompare(String(right.id))
+  ));
+}
+
+export async function fetchPendingProjectChangeRequestsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequest[]> {
+  const apiClient = resolveClient(params.client);
+  return fetchProjectRequestsByProjectIds({
+    apiClient,
+    path: '/api/v1/project-requests/pending-changes',
+    tenantId: params.tenantId,
+    actor: params.actor,
+    projectIds: params.projectIds,
+  });
+}
+
+export async function fetchProjectReviewInboxViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequest[]> {
+  const apiClient = resolveClient(params.client);
+  return fetchProjectRequestsByProjectIds({
+    apiClient,
+    path: '/api/v1/project-requests/review-inbox',
+    tenantId: params.tenantId,
+    actor: params.actor,
+    projectIds: params.projectIds,
+  });
+}
+
+export async function fetchLatestProjectRequestViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<ProjectRequest | null> {
+  const apiClient = resolveClient(params.client);
+  const response = await apiClient.get<{ item: ProjectRequest | null }>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/latest-request`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 10000,
+    },
+  );
+  return response.data?.item || null;
 }
 
 function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {

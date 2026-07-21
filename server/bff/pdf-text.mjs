@@ -1,6 +1,12 @@
+export function toPdfJsData(buffer) {
+  return new Uint8Array(buffer);
+}
+
 export async function extractTextFromPdfBuffer(buffer) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  // Node.js Buffer extends Uint8Array, but pdfjs explicitly rejects Buffer.
+  // Always create a plain Uint8Array copy before handing binary data to pdfjs.
+  const data = toPdfJsData(buffer);
   const pdf = await pdfjsLib.getDocument({ data }).promise;
 
   const pages = [];
