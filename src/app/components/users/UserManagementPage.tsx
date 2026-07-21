@@ -192,6 +192,10 @@ export function UserManagementPage() {
     () => filterGovernanceRows(items, filters),
     [items, filters],
   );
+  const organizationHeadCount = useMemo(
+    () => items.filter((row) => (row.permissionOverview?.organizationHeadProjects.length || 0) > 0).length,
+    [items],
+  );
 
   const selectedRow = useMemo(
     () => filteredRows.find((row) => row.identityKey === selectedIdentityKey)
@@ -308,8 +312,9 @@ export function UserManagementPage() {
         )}
       />
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         <KpiCard icon={Users} label="전체 사용자" value={summary.total} />
+        <KpiCard icon={Shield} label="지정 조직장" value={organizationHeadCount} />
         <KpiCard icon={GitMerge} label="권한 반영 필요" value={summary.needsDeepSync} tone={summary.needsDeepSync > 0 ? 'danger' : 'default'} />
         <KpiCard icon={KeyRound} label="로그인 계정 없음" value={summary.missingAuth} tone={summary.missingAuth > 0 ? 'danger' : 'default'} />
         <KpiCard icon={Database} label="직원 권한 기록 없음" value={summary.missingCanonicalMember} tone={summary.missingCanonicalMember > 0 ? 'danger' : 'default'} />
@@ -424,6 +429,9 @@ export function UserManagementPage() {
                           <Badge className={ROLE_BADGE_CLASS[row.effectiveRole] || 'bg-stone-100 text-stone-700'}>
                             {roleLabel(row.effectiveRole)}
                           </Badge>
+                          {headProjectNames.length > 0 ? (
+                            <Badge className="border border-blue-200 bg-blue-50 text-blue-800">조직장</Badge>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell className="max-w-[260px]">

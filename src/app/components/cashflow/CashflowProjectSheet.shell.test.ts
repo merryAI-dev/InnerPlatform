@@ -25,8 +25,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('savePrivateCashflowDraft');
     expect(source).not.toContain('cashflowLease');
     expect(source).not.toContain('saveCashflowProjectionBatchViaBff');
-    expect(source).toContain('projectionDrafts: drafts');
-    expect(source).toContain('applyCashflowMonthCloseProjectionDrafts');
+    expect(source).toContain('normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth)');
+    expect(source).not.toContain('projectionDrafts: drafts');
+    expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
   it('requires explicit human decisions for 160 cells, five deposit rows, and four management checks', () => {
@@ -165,6 +166,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('재오픈 요청');
   });
 
+  it('provides a Stage-only QA clock and an explicit persisted weekly settlement action', () => {
+    expect(source).toContain('type="datetime-local"');
+    expect(source).toContain('Stage QA 기준시각');
+    expect(source).toContain('setCashflowMonthCloseQaDateTimeViaBff');
+    expect(source).toContain('completeCashflowWeeklyUpdateViaBff');
+    expect(source).toContain('주간 정산 완료');
+    expect(source).toContain('completedBy');
+    expect(source).toContain('기한 후 완료');
+  });
+
   it('keeps the board action next to the settlement status without a manual temporary-save button', () => {
     const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('data-cashflow-block="multi-year-view"'));
     expect(boardHeader).toContain('월 결산');
@@ -173,12 +184,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(boardHeader).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
   });
 
-  it('opens only the selected Projection week without annual amount cards', () => {
+  it('keeps Projection read-only and accepts values only through sheet import', () => {
     expect(source).toContain('현금흐름 관리시트');
     expect(source).not.toContain('캐시플로 진단시트');
     expect(source).not.toContain('수정 시작');
     expect(source).not.toContain('서버 확정 원장 합계');
-    expect(source).toContain('openProjectionWeekEditing');
+    expect(source).toContain('조회 전용 · 값은 시트 값 불러오기로만 반영됩니다.');
+    expect(source).not.toContain('openProjectionWeekEditing');
+    expect(source).not.toContain('projectionDrafts: drafts');
     expect(source).not.toContain('financialYearChecks?.years.length');
     expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });

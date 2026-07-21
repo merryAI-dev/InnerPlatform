@@ -847,7 +847,8 @@ export interface CashflowDeadlineSummary {
     weekNo: number;
     deadline: string;
     completedAt: string | null;
-    status: 'COMPLETED' | 'MISSED' | 'PENDING';
+    completedBy?: string | null;
+    status: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
   } | null;
 }
 
@@ -997,6 +998,23 @@ export interface CashflowMonthCloseResult {
   reopenDecidedByUid: string | null;
   auditId: string | null;
   dashboard?: CashflowMonthCloseDashboard;
+}
+
+export interface CashflowMonthCloseQaDateTimeSetting {
+  projectId: string;
+  active: boolean;
+  qaDateTime: string | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface CashflowWeeklyUpdateCompletionResult {
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  completedAt: string;
+  completedBy: string | null;
+  alreadyCompleted: boolean;
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -2418,6 +2436,63 @@ export async function fetchCashflowMonthCloseViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowMonthCloseQaDateTimeViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseQaDateTimeSetting> {
+  const response = await resolveClient(params.client).get<CashflowMonthCloseQaDateTimeSetting>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/qa-date`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function setCashflowMonthCloseQaDateTimeViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  qaDateTime: string | null;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseQaDateTimeSetting> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseQaDateTimeSetting>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/qa-date`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { qaDateTime: params.qaDateTime },
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function completeCashflowWeeklyUpdateViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyUpdateCompletionResult> {
+  const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-complete`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {},
       retries: 0,
       timeoutMs: 12000,
     },

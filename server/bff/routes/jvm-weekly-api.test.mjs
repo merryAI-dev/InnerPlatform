@@ -135,6 +135,18 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
           const value = documents.get(path);
           return { exists: value !== undefined, data: () => value };
         },
+        set: async (value) => documents.set(path, value),
+      }),
+      collection: (path) => ({
+        where: (_field, _operator, projectId) => ({
+          limit: () => ({
+            get: async () => ({
+              docs: [...documents.entries()]
+                .filter(([documentPath, value]) => documentPath.startsWith(`${path}/`) && value.projectId === projectId)
+                .map(([_documentPath, value]) => ({ data: () => value })),
+            }),
+          }),
+        }),
       }),
     },
     documents,
@@ -194,6 +206,7 @@ function createMonthCloseDb() {
         const value = documents.get(path);
         return { exists: value !== undefined, data: () => value };
       },
+      set: async (value) => documents.set(path, value),
     }),
   };
 }
@@ -211,7 +224,6 @@ const weeklyLeaseWriterRoutes = [
 ];
 
 const unlockedCashflowWriterRoutes = [
-  '/api/v1/cashflow/project-a/projection',
   '/api/v1/cashflow-metadata/project-a/variance',
 ];
 
@@ -514,6 +526,119 @@ describe('JVM weekly API BFF proxy', () => {
       });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores and resets a project-scoped Stage QA date-time for Finance', async () => {
+    const db = createMonthCloseDb();
+    const { app } = createApp(vi.fn(), createIdempotencyService(), { actorRole: 'finance' }, { env: stageEnv, db });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/qa-date')
+      .send({ qaDateTime: '2026-07-16T23:59' })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        projectId: 'project-a', active: true, qaDateTime: '2026-07-16T23:59',
+      }));
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close/qa-date')
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({ active: true, qaDateTime: '2026-07-16T23:59' }));
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/qa-date')
+      .send({ qaDateTime: null })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({ active: false, qaDateTime: null }));
+  });
+
+  it('uses the Stage QA time on both sides of the Thursday midnight deadline', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
+      projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
+    });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const qaPath = 'orgs/tenant-a/cashflow_month_close_qa_dates/project-a';
+    source.documents.set(qaPath, { active: true, qaDateTime: '2026-07-16T23:59:00+09:00' });
+    const before = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+    await request(before.app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({ status: 'PENDING' }));
+
+    source.documents.set(qaPath, { active: true, qaDateTime: '2026-07-17T00:01:00+09:00' });
+    const after = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+    await request(after.app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.deadlineSummary.current).toMatchObject({ status: 'MISSED' });
+        expect(response.body.dashboard.deadlineSummary.missedCount).toBeGreaterThan(0);
+      });
+  });
+
+  it('persists the explicit weekly settlement completion with its actor and exposes it in the dashboard', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
+      projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
+    });
+    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
+      active: true, qaDateTime: '2026-07-16T18:00:00+09:00',
+    });
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (init.method === 'POST' && url.endsWith('/api/v1/cashflow/project-a/weekly-update-complete')) {
+        const body = JSON.parse(init.body);
+        source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3', {
+          projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
+          completedAt: body.completedAt, completedByEmail: 'pm@example.com',
+        });
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true, projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
+            completedAt: body.completedAt, completedBy: 'pm@example.com', alreadyCompleted: false,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(monthDashboardSource({
+          ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+          reopenCount: 0, projectWarningCount: 0, snapshot: {},
+        })),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        projectId: 'project-a', yearMonth: '2026-07', weekNo: 3, alreadyCompleted: false,
+      }));
+
+    const saved = source.documents.get('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3');
+    expect(saved).toMatchObject({ projectId: 'project-a', yearMonth: '2026-07', weekNo: 3 });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/weekly-update-complete',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({
+        yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED',
+      }));
   });
 
   it('returns the four PPT 38 management checks from canonical server values', () => {
@@ -1197,13 +1322,13 @@ describe('JVM weekly API BFF proxy', () => {
       }, { env: stageEnv });
 
       await request(app)
-        .post('/api/v1/cashflow/project-a/projection')
+        .post('/api/v1/cashflow-metadata/project-a/variance')
         .set({
           'idempotency-key': `bad-finalize-${finalize}`,
           ...editLeaseHeaders,
           'x-edit-finalize': finalize,
         })
-        .send({ lines: [] })
+        .send({ yearMonth: '2026-07', weekNo: 1, reason: 'test' })
         .expect(200);
 
       expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -1234,126 +1359,20 @@ describe('JVM weekly API BFF proxy', () => {
     },
   );
 
-  it('preserves the JVM atomic write count in the BFF 422 error contract', async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: false,
-      status: 422,
-      text: async () => JSON.stringify({
-        code: 'atomic_write_limit_exceeded',
-        message: 'Projection command requires 501 writes.',
-        expectedWriteCount: 501,
-      }),
-    }));
+  it('rejects direct Projection writes and keeps Google Sheet import as the only user write path', async () => {
+    const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), {
-      actorId: 'pm-1',
-      actorRole: 'pm',
+      actorId: 'finance-1',
+      actorRole: 'finance',
     }, { env: stageEnv });
 
     await request(app)
       .post('/api/v1/cashflow/project-a/projection')
-      .set({ 'idempotency-key': 'atomic-limit-1', ...editLeaseHeaders })
-      .send({ lines: [] })
-      .expect(422)
-      .expect((response) => {
-        expect(response.body).toMatchObject({
-          code: 'atomic_write_limit_exceeded',
-          details: { expectedWriteCount: 501 },
-        });
-      });
-  });
-
-  it('preserves a non-JSON Cloud Run 403 instead of turning it into a BFF 500', async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: false,
-      status: 403,
-      text: async () => 'The request was not authenticated.',
-    }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {
-      actorId: 'pm-1',
-      actorRole: 'pm',
-    }, { env: stageEnv });
-
-    await request(app)
-      .post('/api/v1/cashflow/project-a/projection')
-      .set({ 'idempotency-key': 'projection-auth-403', ...editLeaseHeaders })
-      .send({ lines: [] })
-      .expect(403)
-      .expect((response) => {
-        expect(response.body).toMatchObject({
-          code: 'java_weekly_api_error',
-          message: 'The request was not authenticated.',
-        });
-      });
-  });
-
-  it('forwards Stage cashflow projection without lease headers and rejects caller source context', async () => {
-    const calls = [];
-    const fetchImpl = vi.fn(async (url, init) => {
-      calls.push({ url, init });
-      return {
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
-      };
-    });
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {
-      actorId: 'finance-1',
-      actorRole: 'finance',
-    }, {
-      env: {
-        BFF_DEPLOY_ENV: 'stage',
-        BFF_EDIT_LEASES_ENABLED: 'true',
-        FIREBASE_PROJECT_ID: 'stage-data-project',
-        JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
-      },
-    });
-
-    await request(app)
-      .post('/api/v1/cashflow/project-a/projection')
-      .set({
-        'idempotency-key': 'projection-stage-1',
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
-      .send({
-        sourceSheetKey: 'caller-controlled',
-        actor: { id: 'spoofed', role: 'admin' },
-        tenantId: 'spoofed',
-        lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
-      })
-      .expect(200);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].init.headers).toMatchObject({
-      'x-data-project-id': 'stage-data-project',
-    });
-    expect(calls[0].init.headers['x-edit-session-id']).toBeUndefined();
-    expect(calls[0].init.headers['x-edit-lease-id']).toBeUndefined();
-    expect(calls[0].init.headers['x-edit-fence']).toBeUndefined();
-    expect(JSON.parse(calls[0].init.body)).toEqual({
-      idempotencyKey: 'projection-stage-1',
-      lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }],
-    });
-  });
-
-  it('keeps cashflow projection available when edit leases are disabled', async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
-    }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {
-      actorId: 'finance-1',
-      actorRole: 'finance',
-    }, { env: { ...stageEnv, BFF_EDIT_LEASES_ENABLED: 'false' } });
-
-    await request(app)
-      .post('/api/v1/cashflow/project-a/projection')
-      .set('idempotency-key', 'projection-disabled-1')
       .send({ lines: [{ yearMonth: '2026-07', weekNo: 1, cashflowLine: 'SALES_IN', amount: 1000 }] })
-      .expect(200);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+      .expect(410)
+      .expect((response) => expect(response.body.code).toBe('cashflow_projection_sheet_import_only'));
+
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('forwards only trusted context headers and strips client actor/tenant body fields', async () => {

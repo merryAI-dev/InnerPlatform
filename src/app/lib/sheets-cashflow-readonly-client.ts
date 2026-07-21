@@ -414,6 +414,11 @@ export interface CashflowSheetLabStageResult {
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
   blockedMonths?: string[];
+  closedMonthDifferences?: Array<{
+    yearMonth: string;
+    differenceCount: number;
+    weeks: number[];
+  }>;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;

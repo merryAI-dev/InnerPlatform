@@ -4,6 +4,7 @@ import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
+import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
@@ -107,6 +108,16 @@ public interface WeeklyExpensePersistence {
         }
     }
 
+    record CashflowWeeklyUpdateCompletionRecord(
+        String projectId,
+        String yearMonth,
+        int weekNo,
+        String completedAt,
+        String completedBy,
+        boolean alreadyCompleted
+    ) {
+    }
+
     default <T> T runCommandTransaction(Callable<T> action) {
         try {
             return action.call();
@@ -199,6 +210,18 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_month_close_backend_unavailable",
             "Cashflow month close requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowWeeklyUpdateCompletionRecord completeCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        CompleteCashflowWeeklyUpdateRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_weekly_completion_backend_unavailable",
+            "Cashflow weekly completion requires the Firestore transaction backend."
         );
     }
 

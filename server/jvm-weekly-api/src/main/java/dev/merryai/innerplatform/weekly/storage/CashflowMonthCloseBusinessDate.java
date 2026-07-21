@@ -13,26 +13,45 @@ public final class CashflowMonthCloseBusinessDate {
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
 
     private final LocalDate qaDate;
+    private final boolean runtimeOverrideAllowed;
 
     @Autowired
     public CashflowMonthCloseBusinessDate(
         @Value("${weekly.deploy-env:local}") String deployEnv,
         @Value("${weekly.cashflow-month-close-qa-date:}") String value
     ) {
-        this(parseQaDate(deployEnv, value));
+        this(parseQaDate(deployEnv, value), "stage".equalsIgnoreCase(deployEnv == null ? "" : deployEnv.trim()));
     }
 
     CashflowMonthCloseBusinessDate(LocalDate qaDate) {
+        this(qaDate, qaDate != null);
+    }
+
+    CashflowMonthCloseBusinessDate(LocalDate qaDate, boolean runtimeOverrideAllowed) {
         this.qaDate = qaDate;
+        this.runtimeOverrideAllowed = runtimeOverrideAllowed;
     }
 
     LocalDate currentDate(Clock clock) {
+        return currentDate(clock, null);
+    }
+
+    LocalDate currentDate(Clock clock, LocalDate runtimeQaDate) {
         if (qaDate != null) return qaDate;
+        if (runtimeOverrideAllowed && runtimeQaDate != null) return runtimeQaDate;
         return LocalDate.now(clock.withZone(BUSINESS_ZONE));
     }
 
     boolean qaOverrideActive() {
         return qaDate != null;
+    }
+
+    boolean qaOverrideActive(LocalDate runtimeQaDate) {
+        return qaDate != null || (runtimeOverrideAllowed && runtimeQaDate != null);
+    }
+
+    boolean runtimeOverrideAllowed() {
+        return runtimeOverrideAllowed;
     }
 
     static LocalDate parseQaDate(String deployEnv, String value) {

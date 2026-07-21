@@ -1374,14 +1374,47 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
     ))
     .map((week) => readOptionalText(week?.yearMonth))
     .filter(Boolean));
-  for (const yearMonth of closedMonths) blockedMonths.add(yearMonth);
-  const riskLineCount = (mirror?.cells || []).filter((cell) => (
-    closedMonths.has(readOptionalText(cell?.yearMonth))
-    && (cell?.state === 'VALUE' || cell?.state === 'EMPTY')
-  )).length;
+  const closedDifferences = (mirror?.cells || []).filter((cell) => {
+    if (!closedMonths.has(readOptionalText(cell?.yearMonth))) return false;
+    if (cell?.state !== 'VALUE' && cell?.state !== 'EMPTY') return false;
+    const mapping = {
+      mode: cell.mode,
+      yearMonth: cell.yearMonth,
+      weekNo: cell.weekNo,
+      lineId: cell.lineId,
+    };
+    const beforeHadValue = hasIndexedSnapshotAmount(amountIndex, mapping);
+    const proposedHadValue = cell.state === 'VALUE';
+    if (beforeHadValue !== proposedHadValue) return true;
+    if (!proposedHadValue) return false;
+    return normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping))
+      !== normalizeAppliedAmount(cell.amount);
+  });
+  const closedMonthDifferenceMap = new Map();
+  for (const cell of closedDifferences) {
+    const yearMonth = readOptionalText(cell.yearMonth);
+    const summary = closedMonthDifferenceMap.get(yearMonth) || {
+      yearMonth,
+      differenceCount: 0,
+      weeks: new Set(),
+    };
+    summary.differenceCount += 1;
+    summary.weeks.add(Number(cell.weekNo));
+    closedMonthDifferenceMap.set(yearMonth, summary);
+    blockedMonths.add(yearMonth);
+  }
+  const closedMonthDifferences = [...closedMonthDifferenceMap.values()]
+    .map((summary) => ({
+      yearMonth: summary.yearMonth,
+      differenceCount: summary.differenceCount,
+      weeks: [...summary.weeks].filter(Number.isSafeInteger).sort((left, right) => left - right),
+    }))
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
+  const riskLineCount = closedDifferences.length;
+  const nonWritableMonths = new Set([...blockedMonths, ...closedMonths]);
 
   const candidates = (mirror?.cells || [])
-    .filter((cell) => !blockedMonths.has(readOptionalText(cell.yearMonth)))
+    .filter((cell) => !nonWritableMonths.has(readOptionalText(cell.yearMonth)))
     .filter((cell) => cell.state === 'VALUE' || cell.state === 'EMPTY')
     .map((cell) => {
       const mapping = {
@@ -1428,7 +1461,12 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
     })
     .filter(Boolean);
 
-  return { candidates, blockedMonths: [...blockedMonths].sort(), riskLineCount };
+  return {
+    candidates,
+    blockedMonths: [...blockedMonths].sort(),
+    riskLineCount,
+    closedMonthDifferences,
+  };
 }
 
 async function buildPinnedAnnualChangeCandidates({
@@ -2172,6 +2210,7 @@ async function stagePinnedCashflowSheetLab({
     actualLineCount,
     riskLineCount,
     blockedMonths,
+    closedMonthDifferences: weekly.closedMonthDifferences,
     stagedMonths,
     stagedYears: annual.stagedYears,
     annualLineCount: annual.candidates.length,
@@ -2197,6 +2236,7 @@ async function stagePinnedCashflowSheetLab({
     status: response.status,
     stagedLineCount: candidates.length,
     blockedMonths,
+    closedMonthDifferences: weekly.closedMonthDifferences,
     stagedMonths,
     stagedYears: annual.stagedYears,
     appliedAnnualYears: Array.isArray(mirror.appliedAnnualYears) ? mirror.appliedAnnualYears.map(Number) : [],

@@ -17,6 +17,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
 import dev.merryai.innerplatform.weekly.api.CloseWeekResponse;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
+import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionResponse;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsResponse;
@@ -113,6 +115,7 @@ public class WeeklyExpenseCommandService {
     public static final String CASHFLOW_VARIANCE_COMMAND = "cashflowVariance.update";
     public static final String CASHFLOW_MONTH_CLOSE_READ_COMMAND = "cashflowMonth.read";
     public static final String CLOSE_CASHFLOW_MONTH_COMMAND = "cashflowMonth.close";
+    public static final String COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.complete";
     public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
     public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
@@ -823,6 +826,71 @@ public class WeeklyExpenseCommandService {
             projectId,
             request.idempotencyKey(),
             CLOSE_CASHFLOW_MONTH_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional
+    public CashflowWeeklyUpdateCompletionResponse completeCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        CompleteCashflowWeeklyUpdateRequest request
+    ) {
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowWeeklyUpdateCompletionResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord saved = persistence.completeCashflowWeeklyUpdate(
+            writer,
+            projectId,
+            request
+        );
+        if (!saved.alreadyCompleted()) {
+            persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+                writer.tenantId(),
+                projectId,
+                projectId + "-" + saved.yearMonth() + "-w" + saved.weekNo(),
+                COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+                writer.id(),
+                normalizeRole(writer.role()),
+                request.idempotencyKey(),
+                writeJson(Map.of(
+                    "yearMonth", saved.yearMonth(),
+                    "weekNo", saved.weekNo(),
+                    "completedAt", saved.completedAt(),
+                    "completedBy", saved.completedBy()
+                ))
+            ));
+        }
+        CashflowWeeklyUpdateCompletionResponse response = new CashflowWeeklyUpdateCompletionResponse(
+            true,
+            COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            saved.projectId(),
+            saved.yearMonth(),
+            saved.weekNo(),
+            saved.completedAt(),
+            saved.completedBy(),
+            saved.alreadyCompleted()
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
             requestHash,
             writeJson(response)
         ));

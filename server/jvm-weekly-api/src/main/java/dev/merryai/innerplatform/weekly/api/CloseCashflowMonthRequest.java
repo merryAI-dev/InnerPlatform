@@ -110,10 +110,12 @@ public record CloseCashflowMonthRequest(
         @Min(1) @Max(CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) int weekNo,
         @NotBlank @Size(max = 64) String deadline,
         @Size(max = 64) String completedAt,
-        @NotBlank @Pattern(regexp = "COMPLETED|MISSED|PENDING") String status
+        @Size(max = 200) String completedBy,
+        @NotBlank @Pattern(regexp = "COMPLETED|COMPLETED_LATE|MISSED|PENDING") String status
     ) {
         public CurrentDeadline {
             completedAt = completedAt == null ? "" : completedAt.trim();
+            completedBy = completedBy == null ? "" : completedBy.trim();
         }
     }
 

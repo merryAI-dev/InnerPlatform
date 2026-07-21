@@ -27,7 +27,6 @@ import { getSeoulTodayIso } from '../../platform/business-days';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
 import { getMonthMondayWeeks, getYearMondayWeeks, type MonthMondayWeek } from '../../platform/cashflow-weeks';
 import { useAuth } from '../../data/auth-store';
-import { hasUnsavedChanges } from './cashflow-unsaved';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
@@ -35,12 +34,16 @@ import {
   fetchCashflowSnapshotViaBff,
   fetchCashflowActivityViaBff,
   closeCashflowMonthViaBff,
+  completeCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
+  fetchCashflowMonthCloseQaDateTimeViaBff,
   requestCashflowMonthReopenViaBff,
+  setCashflowMonthCloseQaDateTimeViaBff,
   type CashflowMonthCloseCell,
   type CashflowMonthCloseDraftInput,
   type CashflowMonthCloseResult,
+  type CashflowMonthCloseQaDateTimeSetting,
   type CashflowDeadlineSummary,
   type CashflowSnapshotResult,
   type CashflowActivityEvent,
@@ -61,7 +64,6 @@ import {
   type CashflowSheetLabYearViewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
-  applyCashflowMonthCloseProjectionDrafts,
   buildCashflowMonthCloseDraftInput,
   cashflowMonthCloseConfirmationKey,
   cashflowMonthCloseReviewProgress,
@@ -90,6 +92,13 @@ function formatSheetAppliedAt(value?: string): string {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date);
+}
+
+function weeklyCompletionStatusLabel(status?: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING'): string {
+  if (status === 'COMPLETED') return '기한 내 완료';
+  if (status === 'COMPLETED_LATE') return '기한 후 완료';
+  if (status === 'MISSED') return '기한 지남';
+  return '완료 대기';
 }
 
 type CashflowEvent = CashflowActivityEvent & { revertedAt?: string };
@@ -204,6 +213,8 @@ export function CashflowProjectSheet({
   const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin';
   const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin';
   const canRequestMonthReopen = canFinalizeMonth;
+  const isStageHost = typeof window !== 'undefined'
+    && (/stage/i.test(window.location.hostname) || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
@@ -267,6 +278,11 @@ export function CashflowProjectSheet({
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
   const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
   const [monthCloseBusy, setMonthCloseBusy] = useState(false);
+  const [qaClockOpen, setQaClockOpen] = useState(false);
+  const [qaClockBusy, setQaClockBusy] = useState(false);
+  const [qaClockInput, setQaClockInput] = useState('');
+  const [qaClockSetting, setQaClockSetting] = useState<CashflowMonthCloseQaDateTimeSetting | null>(null);
+  const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
   const [monthCloseDecisions, setMonthCloseDecisions] = useState<CashflowMonthCloseDecisionMap>({});
   const [managementDecisions, setManagementDecisions] = useState<CashflowManagementDecisionMap>({});
@@ -321,21 +337,10 @@ export function CashflowProjectSheet({
     () => yearWeeks.map(hydrateWeekDates),
     [yearWeeks],
   );
-  const [showEmptyCashflowRows, setShowEmptyCashflowRows] = useState(false);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [editingWeekModes, setEditingWeekModes] = useState<Record<string, boolean>>({});
   const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
-
-  type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
-  const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
   const [exitBusy, setExitBusy] = useState(false);
-  const canEdit = canUseCashflowActions
-    && monthCloseResult?.status === 'OPEN';
 
-  const hasDirty = useMemo(
-    () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0 || monthCloseReviewDirty,
-    [drafts, monthCloseReviewDirty, weekSaveState],
-  );
+  const hasDirty = monthCloseReviewDirty;
   const blocker = useBlocker(hasDirty);
 
   useEffect(() => {
@@ -350,9 +355,6 @@ export function CashflowProjectSheet({
   }, [hasDirty]);
 
   useEffect(() => {
-    setDrafts({});
-    setEditingWeekModes({});
-    setWeekSaveState({});
     setMonthCloseResult(null);
     setMonthCloseDecisions({});
     setManagementDecisions({});
@@ -364,9 +366,6 @@ export function CashflowProjectSheet({
     if (blocker.state !== 'blocked') return;
     setExitBusy(true);
     try {
-      setDrafts({});
-      setEditingWeekModes({});
-      setWeekSaveState({});
       setMonthCloseReviewDirty(false);
       blocker.proceed?.();
     } catch (error) {
@@ -588,6 +587,95 @@ export function CashflowProjectSheet({
     void loadCashflowMonthClose();
   }, [loadCashflowMonthClose]);
 
+  const loadQaClockSetting = useCallback(async (): Promise<void> => {
+    if (!isStageHost || !canReviewReopen || !projectId || !orgId || !user?.uid) return;
+    const readSetting = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
+      fetchCashflowMonthCloseQaDateTimeViaBff({ tenantId: orgId, actor, projectId })
+    );
+    try {
+      let actor = await resolveBffActor();
+      if (!actor?.idToken) return;
+      try {
+        setQaClockSetting(await readSetting(actor));
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        actor = await resolveBffActor({ forceRefresh: true });
+        if (!actor?.idToken) throw error;
+        setQaClockSetting(await readSetting(actor));
+      }
+    } catch {
+      setQaClockSetting(null);
+    }
+  }, [canReviewReopen, isStageHost, orgId, projectId, resolveBffActor, user?.uid]);
+
+  useEffect(() => {
+    void loadQaClockSetting();
+  }, [loadQaClockSetting]);
+
+  const handleSetQaClock = useCallback(async (qaDateTime: string | null): Promise<void> => {
+    if (!canReviewReopen || !isStageHost) return;
+    setQaClockBusy(true);
+    try {
+      let actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const saveSetting = (targetActor: typeof actor) => setCashflowMonthCloseQaDateTimeViaBff({
+        tenantId: orgId,
+        actor: targetActor,
+        projectId,
+        qaDateTime,
+      });
+      let setting: CashflowMonthCloseQaDateTimeSetting;
+      try {
+        setting = await saveSetting(actor);
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        actor = await resolveBffActor({ forceRefresh: true });
+        if (!actor?.idToken) throw error;
+        setting = await saveSetting(actor);
+      }
+      setQaClockSetting(setting);
+      setQaClockInput(setting.qaDateTime || '');
+      setQaClockOpen(false);
+      await Promise.all([loadCashflowMonthClose(), loadCashflowComparison()]);
+      toast.success(setting.active ? 'QA 기준시각을 적용했습니다.' : '실제 서버 시각으로 복구했습니다.');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, 'QA 기준시각을 저장하지 못했습니다.'));
+    } finally {
+      setQaClockBusy(false);
+    }
+  }, [canReviewReopen, isStageHost, loadCashflowComparison, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
+
+  const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
+    if (!canFinalizeMonth) return;
+    setWeeklyCompletionBusy(true);
+    try {
+      let actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const complete = (targetActor: typeof actor) => completeCashflowWeeklyUpdateViaBff({
+        tenantId: orgId,
+        actor: targetActor,
+        projectId,
+      });
+      let result;
+      try {
+        result = await complete(actor);
+      } catch (error) {
+        if (!isBffAuthRejection(error)) throw error;
+        actor = await resolveBffActor({ forceRefresh: true });
+        if (!actor?.idToken) throw error;
+        result = await complete(actor);
+      }
+      await loadCashflowMonthClose();
+      toast.success(result.alreadyCompleted
+        ? `${result.yearMonth} ${result.weekNo}주차는 이미 정산 완료되었습니다.`
+        : `${result.yearMonth} ${result.weekNo}주차 정산을 완료했습니다.`);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.'));
+    } finally {
+      setWeeklyCompletionBusy(false);
+    }
+  }, [canFinalizeMonth, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
+
   const loadCashflowEvents = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
       setCashflowEvents([]);
@@ -672,11 +760,7 @@ export function CashflowProjectSheet({
   const monthCloseCellsState = useMemo(() => {
     try {
       return {
-        cells: applyCashflowMonthCloseProjectionDrafts(
-          normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth),
-          drafts,
-          yearMonth,
-        ),
+        cells: normalizeCashflowMonthCloseCells(monthClosePinnedSource, yearMonth),
         error: null as string | null,
       };
     } catch (error) {
@@ -685,7 +769,7 @@ export function CashflowProjectSheet({
         error: error instanceof Error ? error.message : '결산 대상 시트 셀을 확인하지 못했습니다.',
       };
     }
-  }, [drafts, monthClosePinnedSource, yearMonth]);
+  }, [monthClosePinnedSource, yearMonth]);
 
   const monthCloseProgress = useMemo(() => cashflowMonthCloseReviewProgress({
     cells: monthCloseCellsState.cells,
@@ -707,7 +791,6 @@ export function CashflowProjectSheet({
         yearMonth,
         decisions: monthCloseDecisions,
         depositScheduleRows: monthCloseDepositRows,
-        projectionDrafts: drafts,
         managementChecks: monthCloseResult?.dashboard?.managementChecks || [],
         managementDecisions,
         deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
@@ -749,9 +832,6 @@ export function CashflowProjectSheet({
       });
       setMonthCloseResult(result);
       setMonthCloseReviewOpen(false);
-      setDrafts({});
-      setEditingWeekModes({});
-      setWeekSaveState({});
       setManagementDecisions({});
       setMonthCloseReviewDirty(false);
       await Promise.all([
@@ -767,7 +847,6 @@ export function CashflowProjectSheet({
     }
   }, [
     canFinalizeMonth,
-    drafts,
     monthClosePinnedSource,
     loadCashflowComparison,
     loadCashflowEvents,
@@ -1075,37 +1154,6 @@ export function CashflowProjectSheet({
     toast.info('되돌리기는 서버 검증 경로가 준비될 때까지 읽기 전용입니다.');
   }, []);
 
-  function resolveWeekKey(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number }): string {
-    return `${params.yearMonth}:${params.mode}:${params.weekNo}`;
-  }
-
-  function resolveCellKey(params: {
-    yearMonth: string;
-    mode: 'projection' | 'actual';
-    weekNo: number;
-    lineId: CashflowSheetLineId;
-  }): string {
-    return `${resolveWeekKey(params)}:${params.lineId}`;
-  }
-
-  function isWeekModeEditing(params: { yearMonth: string; mode: 'projection' | 'actual'; weekNo: number }): boolean {
-    return editingWeekModes[resolveWeekKey(params)] === true;
-  }
-
-  const openProjectionWeekEditing = useCallback(async (targetYearMonth: string, weekNo: number) => {
-    if (!canEdit) {
-      toast.info(monthCloseResult?.status === 'CLOSED'
-        ? '월 결산 완료 후에는 수정할 수 없습니다. 재오픈을 요청해 주세요.'
-        : '프로젝트 현금흐름 수정 권한을 확인해 주세요.');
-      return;
-    }
-    setShowEmptyCashflowRows(true);
-    setEditingWeekModes((current) => ({
-      ...current,
-      [resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })]: true,
-    }));
-  }, [canEdit, monthCloseResult?.status]);
-
   function getWeekLabel(weekNo: number, targetYearMonth = yearMonth): string {
     return annualWeeks.find((week) => week.yearMonth === targetYearMonth && week.weekNo === weekNo)?.label
       || monthWeeks.find((week) => week.weekNo === weekNo)?.label
@@ -1235,11 +1283,6 @@ export function CashflowProjectSheet({
     };
   }, [canonicalAnnualTotal, monthCloseError, monthCloseLoading, monthCloseResult?.dashboard, selectedYearUsesAnnualStructure]);
 
-  const markDirty = useCallback((input: { yearMonth?: string; weekNo: number; mode: 'projection' | 'actual' }) => {
-    const wkKey = resolveWeekKey({ yearMonth: input.yearMonth || yearMonth, mode: input.mode, weekNo: input.weekNo });
-    setWeekSaveState((prev) => ({ ...prev, [wkKey]: 'dirty' }));
-  }, [resolveWeekKey, yearMonth]);
-
   function diffTextClass(diff: number): string {
     return diff === 0 ? 'text-slate-400' : 'text-slate-800';
   }
@@ -1285,15 +1328,7 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): number {
-    const persisted = getServerReadCell(params);
-    const key = resolveCellKey({
-      yearMonth: params.targetYearMonth,
-      mode: params.mode,
-      weekNo: params.weekNo,
-      lineId: params.lineId,
-    });
-    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-    return params.mode === 'projection' && raw !== undefined ? parseAmount(raw) : persisted.amount;
+    return getServerReadCell(params).amount;
   }
 
   function renderProjectionCell(input: {
@@ -1303,51 +1338,20 @@ export function CashflowProjectSheet({
     isThisWeek: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'projection' });
-    const key = resolveCellKey({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
-    const raw = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : undefined;
-    const projectionValue = raw !== undefined ? raw : (persisted.hasValue ? formatAmountInput(String(persisted.amount)) : '');
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const shouldHighlightMismatch = persisted.mismatch;
-    const isEditing = isWeekModeEditing({ yearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo }) || raw !== undefined;
     const bgClass = input.isThisWeek ? 'bg-blue-50/70' : 'bg-white';
-    const isCollapsedEmpty = !showEmptyCashflowRows && !isEditing && projection === 0 && actual === 0 && raw === undefined;
+    const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <button
-            type="button"
-            className="w-full py-0.5 text-center text-[9px] text-slate-300"
-            onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
-            disabled={!canUseCashflowActions || monthCloseResult?.status !== 'OPEN'}
-            aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
-          >
-            -
-          </button>
-        ) : isEditing ? (
-          <Input
-            value={projectionValue}
-            inputMode="numeric"
-            className={`h-6 rounded-lg border-slate-200 bg-white px-1.5 py-0 text-right text-[8px] tabular-nums shadow-[0_1px_2px_rgba(15,23,42,0.04)] focus-visible:ring-1 focus-visible:ring-blue-400 ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}
-            placeholder="0"
-            disabled={!canEdit}
-            onChange={(e) => {
-              const formatted = formatAmountInput(e.target.value);
-              setDrafts((prev) => ({ ...prev, [key]: formatted }));
-              markDirty({ yearMonth: input.targetYearMonth, weekNo: input.weekNo, mode: 'projection' });
-            }}
-          />
+          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
         ) : (
-          <button
-            type="button"
-            className={`h-5 w-full rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}
-            onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
-            disabled={!canUseCashflowActions || monthCloseResult?.status !== 'OPEN'}
-            aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
-          >
+          <div className={`h-5 px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
             {fmt(projection)}
-          </button>
+          </div>
         )}
       </td>
     );
@@ -1363,7 +1367,7 @@ export function CashflowProjectSheet({
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const bgClass = input.isThisWeek ? 'bg-blue-50/80' : 'bg-slate-50/80';
-    const isCollapsedEmpty = !showEmptyCashflowRows && projection === 0 && actual === 0 && !persisted.hasValue;
+    const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
@@ -1527,7 +1531,6 @@ export function CashflowProjectSheet({
               항목
             </th>
             {visibleWeeks.map((week) => {
-              const saveState = weekSaveState[resolveWeekKey({ yearMonth: week.yearMonth, mode, weekNo: week.weekNo })];
               const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-week-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
@@ -1535,7 +1538,6 @@ export function CashflowProjectSheet({
                     <span className="block truncate text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
                   </div>
                   <div className="truncate text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
-                  {saveState === 'dirty' ? <Badge className="mt-0.5 h-3.5 rounded-full border-0 bg-sky-100 px-1 text-[7px] text-sky-700">미저장</Badge> : null}
                 </th>
               );
             })}
@@ -1600,6 +1602,7 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">현금흐름 관리시트</div>
+              <div className="mt-1 text-[10px] text-slate-500">조회 전용 · 값은 시트 값 불러오기로만 반영됩니다.</div>
             </div>
             {canonicalAnnualTotal ? (
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1624,6 +1627,20 @@ export function CashflowProjectSheet({
                 <span className="text-[10px] text-slate-500">
                   {monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산
                 </span>
+              ) : null}
+              {isStageHost && canReviewReopen ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 max-w-[150px] rounded-full border-amber-200 bg-amber-50 px-3 text-[10px] text-amber-900 shadow-sm"
+                  onClick={() => {
+                    setQaClockInput(qaClockSetting?.qaDateTime || `${todayIso}T10:00`);
+                    setQaClockOpen(true);
+                  }}
+                >
+                  QA {qaClockSetting?.active && qaClockSetting.qaDateTime ? qaClockSetting.qaDateTime.slice(5).replace('T', ' ') : '기준시각'}
+                </Button>
               ) : null}
               {canFinalizeMonth && monthCloseResult?.status === 'OPEN' ? (
                 <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={monthCloseBusy || !monthCloseResult.closeEligible} title={monthCloseResult.closeEligible ? '확인한 월 데이터를 최종 확정합니다.' : '대상 월이 끝난 뒤 월 결산할 수 있습니다.'}>
@@ -2013,16 +2030,35 @@ export function CashflowProjectSheet({
 
             <div className="space-y-3">
               <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-                <div className="text-[11px] font-bold text-slate-900">목요일 자정 업데이트</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-bold text-slate-900">목요일 자정 업데이트</div>
+                  {canFinalizeMonth ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 shrink-0 rounded-full px-2.5 text-[9px]"
+                      disabled={weeklyCompletionBusy || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
+                      onClick={() => void handleCompleteWeeklyUpdate()}
+                    >
+                      {weeklyCompletionBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
+                      {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? '주간 정산 완료됨' : '주간 정산 완료'}
+                    </Button>
+                  ) : null}
+                </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
                   <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">누적 미준수</div><div className="mt-1 font-bold text-rose-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
                   <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">기한 내 완료</div><div className="mt-1 font-bold text-emerald-700">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
                 </div>
                 <div className="mt-2 text-[9px] leading-4 text-slate-500">
                   {monthCloseResult?.dashboard?.deadlineSummary?.current
-                    ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${monthCloseResult.dashboard.deadlineSummary.current.status}`
+                    ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${weeklyCompletionStatusLabel(monthCloseResult.dashboard.deadlineSummary.current.status)}`
                     : '첫 시트 검토 완료 시점부터 집계합니다.'}
                 </div>
+                {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? (
+                  <div className="mt-1 truncate text-[9px] text-slate-400">
+                    {monthCloseResult.dashboard.deadlineSummary.current.completedBy || '사용자'} · {formatSheetAppliedAt(monthCloseResult.dashboard.deadlineSummary.current.completedAt)}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2338,6 +2374,41 @@ export function CashflowProjectSheet({
       </section>
 
       {renderUnifiedMonthlyBoard()}
+
+      <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stage QA 기준시각</AlertDialogTitle>
+            <AlertDialogDescription>
+              이 프로젝트의 월 결산 가능일과 목요일 자정 주간 마감을 선택한 시각 기준으로 확인합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="grid gap-1.5 text-[11px] font-semibold text-slate-700">
+            테스트 날짜와 시간
+            <Input
+              type="datetime-local"
+              value={qaClockInput}
+              disabled={qaClockBusy}
+              onChange={(event) => setQaClockInput(event.target.value)}
+            />
+          </label>
+          <div className="rounded-xl bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-900">
+            Stage 전용이며 이 프로젝트에만 적용됩니다. 운영 데이터와 실제 서버 시각은 바뀌지 않습니다.
+          </div>
+          <AlertDialogFooter>
+            {qaClockSetting?.active ? (
+              <Button type="button" variant="outline" disabled={qaClockBusy} onClick={() => void handleSetQaClock(null)}>
+                실제 시각으로 복구
+              </Button>
+            ) : null}
+            <AlertDialogCancel disabled={qaClockBusy}>취소</AlertDialogCancel>
+            <Button type="button" disabled={qaClockBusy || !qaClockInput} onClick={() => void handleSetQaClock(qaClockInput)}>
+              {qaClockBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              적용
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={monthCloseReviewOpen}

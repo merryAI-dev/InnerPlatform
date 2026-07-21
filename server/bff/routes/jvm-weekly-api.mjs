@@ -73,6 +73,35 @@ function resolveBffDataProjectId(env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
+function cashflowMonthCloseQaDatePath(tenantId, projectId) {
+  return `orgs/${tenantId}/cashflow_month_close_qa_dates/${projectId}`;
+}
+
+function normalizeCashflowMonthCloseQaDateTime(value) {
+  const qaDateTime = readOptionalText(value);
+  if (!qaDateTime) return null;
+  if (!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d$/.test(qaDateTime)) {
+    throw createHttpError(400, 'QA 기준시각은 YYYY-MM-DDTHH:mm 형식이어야 합니다.', 'cashflow_month_close_qa_date_invalid');
+  }
+  const [qaDate, qaTime] = qaDateTime.split('T');
+  const parsedDate = new Date(`${qaDate}T00:00:00Z`);
+  if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== qaDate) {
+    throw createHttpError(400, 'QA 기준시각은 실제 날짜와 시간이어야 합니다.', 'cashflow_month_close_qa_date_invalid');
+  }
+  return `${qaDate}T${qaTime}:00+09:00`;
+}
+
+async function readCashflowMonthCloseQaClock({ db, tenantId, projectId, fallbackNow }) {
+  if (!db?.doc) return { active: false, qaDateTime: null, now: fallbackNow };
+  const snapshot = await db.doc(cashflowMonthCloseQaDatePath(tenantId, projectId)).get();
+  const setting = snapshot.exists ? snapshot.data() || {} : {};
+  const qaDateTime = setting.active === true ? readOptionalText(setting.qaDateTime) : '';
+  const parsed = qaDateTime ? new Date(qaDateTime) : null;
+  return parsed && !Number.isNaN(parsed.getTime())
+    ? { active: true, qaDateTime, now: parsed }
+    : { active: false, qaDateTime: null, now: fallbackNow };
+}
+
 function isWorkspaceAuthMode(authMode) {
   const normalized = readOptionalText(authMode).toLowerCase();
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
@@ -1100,21 +1129,37 @@ function monthsBetween(startYearMonth, endYearMonth) {
 
 async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
   if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
-  const snap = await db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
-    .where('projectId', '==', projectId)
-    .limit(500)
-    .get();
-  const runs = snap.docs.map((doc) => doc.data() || {})
+  const [runSnap, completionSnap] = await Promise.all([
+    db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
+      .where('projectId', '==', projectId)
+      .limit(500)
+      .get(),
+    db.collection(`orgs/${tenantId}/cashflow_weekly_update_completions`)
+      .where('projectId', '==', projectId)
+      .limit(500)
+      .get(),
+  ]);
+  const runs = runSnap.docs.map((doc) => doc.data() || {})
     .filter((run) => run.status === 'APPLIED' || (run.status === 'READY' && safeAmount(run.stagedLineCount) === 0))
     .map((run) => readOptionalText(run.appliedAt) || readOptionalText(run.createdAt))
     .filter((value) => Number.isFinite(Date.parse(value)))
     .sort();
-  if (runs.length === 0) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
-  const trackingStartedAt = runs[0];
+  const completionRows = completionSnap.docs.map((doc) => doc.data() || {});
+  const completions = new Map(completionRows.map((value) => {
+    return [`${readOptionalText(value.yearMonth)}:${Number(value.weekNo)}`, value];
+  }));
+  const completionDates = completionRows
+    .map((value) => readOptionalText(value.completedAt))
+    .filter((value) => Number.isFinite(Date.parse(value)))
+    .sort();
+  const trackingStartedAt = [...runs, ...completionDates].sort()[0] || null;
+  if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
   const asOfDate = readOptionalText(comparisonBoundary?.asOfDate);
   const startYearMonth = trackingStartedAt.slice(0, 7);
   const endYearMonth = asOfDate.slice(0, 7);
-  const asOfMs = Date.parse(`${asOfDate}T23:59:59+09:00`);
+  const asOfMs = Number.isFinite(comparisonBoundary?.asOfMs)
+    ? comparisonBoundary.asOfMs
+    : Date.parse(`${asOfDate}T23:59:59+09:00`);
   const weeks = monthsBetween(startYearMonth, endYearMonth).flatMap(getMonthFinanceWeeks)
     .filter((week) => Date.parse(`${week.weekEnd}T23:59:59+09:00`) >= Date.parse(trackingStartedAt));
   let missedCount = 0;
@@ -1123,20 +1168,21 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
   for (const week of weeks) {
     const deadlineMs = thursdayDeadlineMs(week);
     const startMs = Date.parse(`${week.weekStart}T00:00:00+09:00`);
-    const completedAt = runs.find((value) => {
-      const time = Date.parse(value);
-      return time >= startMs && time <= deadlineMs;
-    }) || null;
+    const completion = completions.get(`${week.yearMonth}:${week.weekNo}`) || null;
+    const recordedAt = readOptionalText(completion?.completedAt) || null;
+    const completionMs = recordedAt ? Date.parse(recordedAt) : Number.NaN;
+    const completedOnTime = Number.isFinite(completionMs) && completionMs >= startMs && completionMs <= deadlineMs;
     const deadlinePassed = asOfMs >= deadlineMs;
-    if (deadlinePassed && completedAt) completedCount += 1;
-    if (deadlinePassed && !completedAt) missedCount += 1;
+    if (completedOnTime) completedCount += 1;
+    if (deadlinePassed && !completedOnTime) missedCount += 1;
     if (week.yearMonth === comparisonBoundary?.asOfWeek?.yearMonth && week.weekNo === comparisonBoundary?.asOfWeek?.weekNo) {
       current = {
         yearMonth: week.yearMonth,
         weekNo: week.weekNo,
         deadline: new Date(deadlineMs).toISOString(),
-        completedAt,
-        status: completedAt ? 'COMPLETED' : deadlinePassed ? 'MISSED' : 'PENDING',
+        completedAt: recordedAt,
+        completedBy: readOptionalText(completion?.completedByEmail) || readOptionalText(completion?.completedByUid) || null,
+        status: completedOnTime ? 'COMPLETED' : recordedAt ? 'COMPLETED_LATE' : deadlinePassed ? 'MISSED' : 'PENDING',
       };
     }
   }
@@ -1658,19 +1704,12 @@ export function mountJvmWeeklyApiRoutes(app, {
     return { status: 200, body: result };
   }));
 
-  app.post('/api/v1/cashflow/:projectId/projection', createJavaMutatingProxyRoute(async (req) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm'], 'write Java weekly projection', authMode, workspaceEmailDomain);
-    const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
-    const result = await proxyMutation(
-      req,
-      `/api/v1/cashflow/${projectId}/projection`,
-      commandBody(req),
-      { cashflowWrite: true },
+  app.post('/api/v1/cashflow/:projectId/projection', asyncHandler(async (_req, _res) => {
+    throw createHttpError(
+      410,
+      'Projection 직접 입력은 사용하지 않습니다. 시트 값 불러오기로 반영해 주세요.',
+      'cashflow_projection_sheet_import_only',
     );
-    if (readOptionalText(result?.projectId) !== readOptionalText(req.params.projectId)) {
-      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
-    }
-    return { status: 200, body: result };
   }));
 
   app.post('/api/v1/cashflow-metadata/:projectId/variance', createJavaMutatingProxyRoute(async (req) => {
@@ -1708,7 +1747,16 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
       throw createHttpError(400, 'Cashflow month close yearMonth must use YYYY-MM.', 'cashflow_month_close_request_invalid');
     }
-    const comparisonBoundary = resolveCashflowComparisonAsOf('', now());
+    const qaClock = await readCashflowMonthCloseQaClock({
+      db,
+      tenantId: req.context.tenantId,
+      projectId: rawProjectId,
+      fallbackNow: now(),
+    });
+    const comparisonBoundary = {
+      ...resolveCashflowComparisonAsOf('', qaClock.now),
+      asOfMs: qaClock.now.getTime(),
+    };
     const source = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',
@@ -1737,6 +1785,83 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json({ ...result, dashboard });
   }));
 
+  app.get('/api/v1/cashflow/:projectId/month-close/qa-date', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'read cashflow month-close QA date', authMode, workspaceEmailDomain);
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
+    }
+    if (!db?.doc) throw createHttpError(503, 'QA 기준시각 저장소를 사용할 수 없습니다.', 'cashflow_qa_clock_unavailable');
+    const projectId = readOptionalText(req.params.projectId);
+    const snapshot = await db.doc(cashflowMonthCloseQaDatePath(req.context.tenantId, projectId)).get();
+    const setting = snapshot.exists ? snapshot.data() || {} : {};
+    res.status(200).json({
+      projectId,
+      active: setting.active === true && Boolean(readOptionalText(setting.qaDateTime)),
+      qaDateTime: setting.active === true ? readOptionalText(setting.qaDateTime)?.slice(0, 16) || null : null,
+      updatedAt: readOptionalText(setting.updatedAt) || null,
+      updatedBy: readOptionalText(setting.updatedByEmail) || readOptionalText(setting.updatedByUid) || null,
+    });
+  }));
+
+  app.post('/api/v1/cashflow/:projectId/month-close/qa-date', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'set cashflow month-close QA date', authMode, workspaceEmailDomain);
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
+    }
+    if (!db?.doc) throw createHttpError(503, 'QA 기준시각 저장소를 사용할 수 없습니다.', 'cashflow_qa_clock_unavailable');
+    const projectId = readOptionalText(req.params.projectId);
+    const qaDateTime = normalizeCashflowMonthCloseQaDateTime(commandBody(req).qaDateTime);
+    const nowIso = now().toISOString();
+    const setting = {
+      projectId,
+      active: Boolean(qaDateTime),
+      qaDateTime,
+      updatedAt: nowIso,
+      updatedByUid: readOptionalText(req.context.actorId),
+      updatedByEmail: readOptionalText(req.context.actorEmail),
+    };
+    await db.doc(cashflowMonthCloseQaDatePath(req.context.tenantId, projectId)).set(setting);
+    res.status(200).json({
+      projectId,
+      active: setting.active,
+      qaDateTime: qaDateTime?.slice(0, 16) || null,
+      updatedAt: nowIso,
+      updatedBy: setting.updatedByEmail || setting.updatedByUid || null,
+    });
+  }));
+
+  app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
+    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
+      throw createHttpError(503, '현금흐름 쓰기는 Stage에서만 사용할 수 있습니다.', 'unsafe_bff_runtime');
+    }
+    const projectId = readOptionalText(req.params.projectId);
+    const qaClock = await readCashflowMonthCloseQaClock({
+      db,
+      tenantId: req.context.tenantId,
+      projectId,
+      fallbackNow: now(),
+    });
+    const boundary = resolveCashflowComparisonAsOf('', qaClock.now);
+    const requestKey = (
+      readOptionalText(req.context.idempotencyKey)
+      || readOptionalText(req.context.requestId)
+      || String(qaClock.now.getTime())
+    ).slice(0, 96);
+    const result = await proxyMutation(
+      req,
+      `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete`,
+      {
+        idempotencyKey: `cashflow-weekly:${requestKey}`,
+        yearMonth: boundary.asOfWeek.yearMonth,
+        weekNo: boundary.asOfWeek.weekNo,
+        completedAt: qaClock.now.toISOString(),
+      },
+      { cashflowWrite: true },
+    );
+    res.status(200).json(result);
+  }));
+
   app.post('/api/v1/cashflow/:projectId/month-close', createJavaMutatingProxyRoute(async (req) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'close cashflow month', authMode, workspaceEmailDomain);
     const rawProjectId = readOptionalText(req.params.projectId);
@@ -1751,7 +1876,16 @@ export function mountJvmWeeklyApiRoutes(app, {
     ) {
       throw createHttpError(400, 'Cashflow month close review input is required.', 'cashflow_month_close_request_invalid');
     }
-    const comparisonBoundary = resolveCashflowComparisonAsOf('', now());
+    const qaClock = await readCashflowMonthCloseQaClock({
+      db,
+      tenantId: req.context.tenantId,
+      projectId: rawProjectId,
+      fallbackNow: now(),
+    });
+    const comparisonBoundary = {
+      ...resolveCashflowComparisonAsOf('', qaClock.now),
+      asOfMs: qaClock.now.getTime(),
+    };
     const cashflow = await proxyJavaWeeklyRequest({
       context: req.context,
       method: 'GET',

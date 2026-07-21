@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Copy, HelpCircle, Loader2, RefreshCw, Save, Search, UserPlus } from 'lucide-react';
+import { AlertCircle, BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Copy, HelpCircle, Loader2, RefreshCw, Save, UserPlus } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
-import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import {
@@ -15,8 +14,8 @@ import {
   saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabShareAccountResult,
-  type CashflowSheetLabChangeCandidate,
   type CashflowSheetLabMirrorResult,
+  type CashflowSheetLabStageResult,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -29,25 +28,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../../components/ui/alert-dialog';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { resolveFinanceWeekForDate } from '../../platform/cashflow-weeks';
-
-function formatAmount(value: number | null) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
-  return `${value.toLocaleString('ko-KR')}원`;
-}
 
 function formatError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
@@ -97,39 +81,6 @@ function errorDiagnostics(error: unknown) {
   };
 }
 
-function formatDiffAmount(value: number) {
-  if (!Number.isFinite(value)) return '-';
-  if (value === 0) return '0원';
-  return `${value > 0 ? '+' : '-'}${Math.abs(value).toLocaleString('ko-KR')}원`;
-}
-
-function formatCandidateAmount(value: number | null, hadValue: boolean) {
-  return hadValue ? formatAmount(value) : '미작성';
-}
-
-function formatCandidateWeek(candidate: CashflowSheetLabChangeCandidate) {
-  if (candidate.scope === 'annual' && Number.isSafeInteger(candidate.year)) return `${candidate.year}년 합계`;
-  const match = /^(\d{4})-(\d{1,2})$/.exec(candidate.yearMonth || '');
-  if (!match) return '기간 미확인';
-  return `${match[1].slice(2)}-${Number(match[2])}-${candidate.weekNo}`;
-}
-
-function getCandidateLineLabel(candidate: CashflowSheetLabChangeCandidate) {
-  return CASHFLOW_SHEET_LINE_LABELS[candidate.lineId as CashflowSheetLineId] || candidate.sourceLabel || candidate.lineId;
-}
-
-function getCandidateDiff(candidate: CashflowSheetLabChangeCandidate) {
-  const before = candidate.beforeHadValue ? Number(candidate.beforeAmount || 0) : 0;
-  const proposed = candidate.proposedHadValue ? Number(candidate.proposedAmount || 0) : 0;
-  return proposed - before;
-}
-
-function formatRiskFlag(flag: string) {
-  if (flag === 'closed_week_change') return '결산 주차';
-  if (flag === 'existing_actual_value') return '기존 Actual';
-  return flag;
-}
-
 function CashflowSheetHeroAnimation() {
   const tiles = [
     { kind: 'excel', label: 'XLS', x: -112, y: -104, rotate: -16, size: 82, delay: 0 },
@@ -145,7 +96,7 @@ function CashflowSheetHeroAnimation() {
         사업비 관리시트 연동
       </div>
       <div className="mt-2 motion-safe:animate-[cashflow-hero-fade_0.45s_ease-out_0.12s_both] text-[14px] leading-relaxed text-slate-500">
-        사업비 관리시트를<br />필요할 때 가져와 검토 후 반영
+        사업비 관리시트를<br />필요할 때 가져와 MYSCube에 반영
       </div>
       <div className="relative mx-auto mt-12 h-[330px] w-[330px] motion-safe:animate-[cashflow-hero-scale_0.55s_ease-out_0.18s_both]">
         <div className="absolute left-1/2 top-1/2 flex h-[188px] w-[188px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-[#4f7cff] to-[#00c4a0] shadow-[0_24px_64px_rgba(79,124,255,0.42),0_6px_20px_rgba(15,23,42,0.16)] motion-safe:animate-[spin_6s_linear_infinite]">
@@ -263,6 +214,12 @@ function HelpMemo({ children }: { children: ReactNode }) {
   );
 }
 
+function formatClosedMonthDifference(summary: NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>[number]) {
+  const visibleWeeks = summary.weeks.slice(0, 2).map((week) => `${week}주차`).join(', ');
+  const hiddenWeekCount = Math.max(0, summary.weeks.length - 2);
+  return `${summary.yearMonth} · ${visibleWeeks}${hiddenWeekCount > 0 ? ` 외 ${hiddenWeekCount}개 주차` : ''}`;
+}
+
 export function CashflowSheetLabPage({
   projectIdOverride,
 }: {
@@ -317,15 +274,6 @@ export function CashflowSheetLabPage({
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
   const [savedConfigs, setSavedConfigs] = useState<NonNullable<CashflowSheetLabShareAccountResult['config']>[]>([]);
   const [systemAccountEmail, setSystemAccountEmail] = useState('');
-  const [stageResult, setStageResult] = useState<{
-    runId: string;
-    stagedLineCount: number;
-    projectionLineCount: number;
-    actualLineCount: number;
-    riskLineCount: number;
-    candidates: CashflowSheetLabChangeCandidate[];
-    omittedCandidateCount: number;
-  } | null>(null);
   const [reflectResult, setReflectResult] = useState<{
     appliedLineCount: number;
     projectionLineCount: number;
@@ -335,16 +283,15 @@ export function CashflowSheetLabPage({
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
+  const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
-  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialSlide, setTutorialSlide] = useState(0);
   const sheetLinkRef = useRef<HTMLInputElement>(null);
   const saveConfigButtonRef = useRef<HTMLButtonElement>(null);
   const refreshButtonRef = useRef<HTMLButtonElement>(null);
   const stageButtonRef = useRef<HTMLButtonElement>(null);
-  const applyButtonRef = useRef<HTMLButtonElement>(null);
   const projectId = projectIdInput.trim();
   const tutorialStorageKey = projectId ? `cashflow-sheet-tutorial:${projectId}` : '';
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
@@ -572,7 +519,6 @@ export function CashflowSheetLabPage({
     setStartWeek(nextConfig?.startWeek || range.startWeek);
     setEndWeek(nextConfig?.endWeek || range.endWeek);
     setReviewedSourceKey('');
-    setStageResult(null);
     setReflectResult(null);
     setStatusMessage('');
     setErrorMessage('');
@@ -636,7 +582,6 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
-    setStageResult(null);
     setReflectResult(null);
     try {
       const result = await runWithBffAuthRetry('settings.save', (requestActor) => (
@@ -670,7 +615,6 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
-    setStageResult(null);
     setReflectResult(null);
     try {
       logCashflowLab('mirror.refresh.start', {
@@ -704,10 +648,10 @@ export function CashflowSheetLabPage({
           }
         : result);
       setReviewedSourceKey(result.status === 'FRESH' && result.sourceRevision
-        ? buildSourceKey({ projectId, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })
+        ? buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })
         : '');
       if (result.status === 'FRESH' && result.sourceRevision) {
-        setStatusMessage('시트 최신값을 고정했습니다. 저장할 값을 확인해 주세요.');
+        setStatusMessage('시트 최신값을 고정했습니다. 시트 값으로 덮어쓸 수 있습니다.');
       } else if (result.status === 'STALE') {
         setStatusMessage('');
       } else {
@@ -733,19 +677,22 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handleStageSheetValues() {
+  async function handleOverwriteSheetValues() {
     if (!projectId || loading || !spreadsheetId || mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey) return;
     const startedAt = Date.now();
     const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+    const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
+    setClosedMonthWarning([]);
+    setReflectResult(null);
     logCashflowLab('stage.sheet_values.start', {
       projectId,
       spreadsheetId,
     });
     try {
-      const result = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
+      const staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
         stageCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
@@ -754,59 +701,45 @@ export function CashflowSheetLabPage({
           idempotencyKey: stageIdempotencyKey,
         })
       ));
-      if (!result) return;
-      setStageResult({
-        runId: result.runId,
-        stagedLineCount: result.stagedLineCount,
-        projectionLineCount: result.projectionLineCount,
-        actualLineCount: result.actualLineCount,
-        riskLineCount: result.riskLineCount,
-        candidates: result.candidates || [],
-        omittedCandidateCount: result.omittedCandidateCount || 0,
-      });
-      setReflectResult(null);
+      if (!staged) return;
       setReviewedSourceKey(sourceKey);
-      setApplyDialogOpen(true);
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
-        spreadsheetId: result.spreadsheetId,
-        sheetName: result.selectedSheetName,
-        stagedLineCount: result.stagedLineCount,
-        projectionLineCount: result.projectionLineCount,
-        actualLineCount: result.actualLineCount,
-        riskLineCount: result.riskLineCount,
+        spreadsheetId: staged.spreadsheetId,
+        sheetName: staged.selectedSheetName,
+        stagedLineCount: staged.stagedLineCount,
+        projectionLineCount: staged.projectionLineCount,
+        actualLineCount: staged.actualLineCount,
+        riskLineCount: staged.riskLineCount,
         durationMs: Date.now() - startedAt,
       });
-    } catch (error) {
-      logCashflowLab('stage.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
-      setErrorMessage(formatError(error));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleReflectSheetValues() {
-    if (!projectId || loading || !spreadsheetId || !stageResult || reviewedSourceKey !== sourceKey) return;
-    const startedAt = Date.now();
-    const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    setLoading(true);
-    setErrorMessage('');
-    setStatusMessage('');
+      if (staged.status === 'BLOCKED' || staged.riskLineCount > 0) {
+        if ((staged.closedMonthDifferences || []).length > 0) {
+          setClosedMonthWarning(staged.closedMonthDifferences || []);
+        } else {
+          const blockedMonths = staged.blockedMonths?.join(', ');
+          setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
+        }
+        return;
+      }
+      if (staged.stagedLineCount === 0) {
+        setReflectResult({ appliedLineCount: 0, projectionLineCount: 0, actualLineCount: 0 });
+        setStatusMessage('MYSCube가 이미 시트 최신값과 같습니다.');
+        logCashflowLab('overwrite.sheet_values.noop', { projectId, spreadsheetId });
+        return;
+      }
       logCashflowLab('apply.sheet_values.start', {
         projectId,
         spreadsheetId,
-        stageRunId: stageResult.runId,
-        safeStageLineCount,
-        riskLineCount: stageResult.riskLineCount,
+        stageRunId: staged.runId,
+        stagedLineCount: staged.stagedLineCount,
       });
-    try {
       const result = await runWithBffAuthRetry('apply.sheet_values', (requestActor) => (
         applyCashflowSheetLabViaBff({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          stageRunId: stageResult.runId,
-          applyRiskCandidates: false,
+          stageRunId: staged.runId,
           idempotencyKey: applyIdempotencyKey,
         })
       ));
@@ -818,8 +751,7 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
-      setApplyDialogOpen(false);
-      setStatusMessage(`검토한 값 ${result.appliedLineCount.toLocaleString()}건을 MYSCube에 저장했습니다.${result.skippedRiskLineCount ? ` 확인 필요 ${result.skippedRiskLineCount.toLocaleString()}건은 남겨두었습니다.` : ''}`);
+      setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
         spreadsheetId: result.spreadsheetId,
@@ -830,7 +762,7 @@ export function CashflowSheetLabPage({
         durationMs: Date.now() - startedAt,
       });
     } catch (error) {
-      logCashflowLab('apply.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
+      logCashflowLab('overwrite.sheet_values.error', { projectId, durationMs: Date.now() - startedAt, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
       setLoading(false);
@@ -841,21 +773,9 @@ export function CashflowSheetLabPage({
   const canRefresh = Boolean(projectId && spreadsheetId && isCurrentSheetConfigSaved && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
-  const canStage = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !loading);
-  const safeStageLineCount = stageResult ? Math.max(0, stageResult.stagedLineCount - stageResult.riskLineCount) : 0;
-  const stageCandidates = useMemo(() => {
-    if (!stageResult) return [];
-    return [...stageResult.candidates].sort((a, b) => (
-      a.yearMonth.localeCompare(b.yearMonth)
-      || a.weekNo - b.weekNo
-      || a.mode.localeCompare(b.mode)
-      || a.lineDirection.localeCompare(b.lineDirection)
-      || a.lineId.localeCompare(b.lineId)
-    ));
-  }, [stageResult]);
-  const canReflect = Boolean(projectId && spreadsheetId && stageResult && safeStageLineCount > 0 && reviewedSourceKey === sourceKey && !reflectResult && !loading);
+  const canOverwrite = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !reflectResult && !loading);
   const hasSavedConfig = Boolean(savedConfig?.value);
-  const currentStep = stageResult || reflectResult ? 3 : hasCurrentFreshMirror ? 3 : isCurrentSheetConfigSaved ? 2 : 1;
+  const currentStep = reflectResult || hasCurrentFreshMirror ? 3 : isCurrentSheetConfigSaved ? 2 : 1;
   const stepNumberClass = (step: number) =>
     `z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-bold ${
       step <= currentStep
@@ -871,7 +791,7 @@ export function CashflowSheetLabPage({
         ? (spreadsheetId ? saveConfigButtonRef.current : sheetLinkRef.current)
         : currentStep === 2
           ? refreshButtonRef.current
-          : (stageResult ? applyButtonRef.current : stageButtonRef.current);
+          : stageButtonRef.current;
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       if (target && !target.disabled) target.focus({ preventScroll: true });
     }, 150);
@@ -1023,63 +943,40 @@ export function CashflowSheetLabPage({
             <span className={stepNumberClass(3)}>3</span>
             <div className="min-w-0 space-y-3 pb-1">
               <div className="flex items-center gap-1.5">
-                <h2 className="text-[19px] font-bold text-slate-950">값 확인 및 저장</h2>
-                <HelpMemo>고정된 시트 값과 MYSCube값 차이를 확인한 뒤 팝업에서 저장합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.</HelpMemo>
+                <h2 className="text-[19px] font-bold text-slate-950">시트 값으로 덮어쓰기</h2>
+                <HelpMemo>고정한 시트의 Projection과 Actual로 MYSCube 값을 덮어씁니다. 별도 운영자 검토는 없으며, 월 결산된 기간만 보호됩니다.</HelpMemo>
               </div>
-              {stageResult ? (
+              {reflectResult ? (
                 <div className="space-y-3">
-                  <div className="text-[13px] font-semibold text-emerald-800">
-                      비교 결과 {stageResult.stagedLineCount.toLocaleString()}건
-                      {stageResult.stagedLineCount > 0 ? (
-                        <>
-                      {' · '}Projection {stageResult.projectionLineCount.toLocaleString()}건
-                      {' · '}Actual {stageResult.actualLineCount.toLocaleString()}건
-                      {stageResult.riskLineCount > 0 ? ` · 확인 필요 ${stageResult.riskLineCount.toLocaleString()}건` : ''}
-                      {' · '}바로 저장 가능 {safeStageLineCount.toLocaleString()}건
-                        </>
-                      ) : null}
+                  <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
+                    {reflectResult.appliedLineCount > 0 ? (
+                      <>
+                        덮어쓰기 완료 · {reflectResult.appliedLineCount.toLocaleString()}건
+                        {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
+                        {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
+                      </>
+                    ) : '이미 시트 최신값과 같습니다.'}
                   </div>
-                  {reflectResult ? (
-                    <div className="space-y-3">
-                      <div className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-900">
-                          저장 완료 · 실제 저장 {reflectResult.appliedLineCount.toLocaleString()}건
-                          {' · '}Projection {reflectResult.projectionLineCount.toLocaleString()}건
-                          {' · '}Actual {reflectResult.actualLineCount.toLocaleString()}건
-                          {reflectResult.skippedRiskLineCount ? ` · 확인 필요 ${reflectResult.skippedRiskLineCount.toLocaleString()}건 남김` : ''}
-                      </div>
-                      <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
-                        <Link to={resolvePortalProjectResourcePath('/portal/cashflow', projectId)}>캐시플로우로 이동</Link>
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                          저장 팝업에서 최종 확인 후 MYSCube에 저장합니다.
-                      </div>
-                      <Button
-                        ref={applyButtonRef}
-                        type="button"
-                        className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
-                        disabled={!canReflect}
-                        onClick={() => setApplyDialogOpen(true)}
-                      >
-                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                          {safeStageLineCount > 0 ? `검토한 값 ${safeStageLineCount.toLocaleString()}건 저장 확인` : '저장할 변경 없음'}
-                      </Button>
-                    </div>
-                  )}
+                  <Button asChild variant="outline" className="h-9 rounded-none px-3 text-[12px]">
+                    <Link to={resolvePortalProjectResourcePath('/portal/cashflow', projectId)}>캐시플로우로 이동</Link>
+                  </Button>
                 </div>
               ) : (
-                <Button
-                  ref={stageButtonRef}
-                  type="button"
-                  className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
-                  disabled={!canStage}
-                  onClick={() => void handleStageSheetValues()}
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                  저장할 값 확인
-                </Button>
+                <div className="space-y-2">
+                  <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
+                    버튼을 누르면 별도 검토 없이 시트 값으로 덮어씁니다. 월 결산된 기간은 변경되지 않습니다.
+                  </div>
+                  <Button
+                    ref={stageButtonRef}
+                    type="button"
+                    className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
+                    disabled={!canOverwrite}
+                    onClick={() => void handleOverwriteSheetValues()}
+                  >
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    시트 값으로 덮어쓰기
+                  </Button>
+                </div>
               )}
             </div>
           </li>
@@ -1098,6 +995,38 @@ export function CashflowSheetLabPage({
           </div>
         )}
       </section>
+
+      <Dialog open={closedMonthWarning.length > 0} onOpenChange={(open) => !open && setClosedMonthWarning([])}>
+        <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
+          <DialogHeader className="space-y-1 text-left">
+            <DialogTitle className="text-[17px]">결산 후 값이 달라요</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
+              결산 원장과 시트값이 다른 주차입니다. 급한 수정은 월 결산을 재오픈한 뒤 다시 반영해 주세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
+            {closedMonthWarning.slice(0, 3).map((summary) => (
+              <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
+            ))}
+            {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthWarning([])}>
+              닫기
+            </Button>
+            <Button
+              type="button"
+              className="h-9"
+              onClick={() => {
+                setClosedMonthWarning([]);
+                navigate(`/portal/cashflow/${encodeURIComponent(projectId)}`);
+              }}
+            >
+              월 결산으로 이동
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={tutorialOpen} onOpenChange={handleTutorialOpenChange}>
         <DialogContent
@@ -1140,7 +1069,7 @@ export function CashflowSheetLabPage({
                   {[
                     ['1', '시트 정보 저장', '링크와 탭 이름을 기억해요.'],
                     ['2', '시트 값 가져오기', '버튼을 누른 시점의 값을 고정해요.'],
-                    ['3', '저장할 값 확인', '차이를 보고 MYSCube에 저장해요.'],
+                    ['3', '시트 값으로 덮어쓰기', '별도 검토 없이 MYSCube에 반영해요.'],
                   ].map(([number, title, description]) => (
                     <div key={number} className="border border-slate-200 bg-slate-50 p-4">
                       <div className="mb-5 flex h-8 w-8 items-center justify-center rounded-full bg-[#001e46] text-[12px] font-black text-white">
@@ -1220,15 +1149,14 @@ export function CashflowSheetLabPage({
                     버튼 문구만 보고 순서대로 눌러주세요
                   </DialogTitle>
                   <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    자동 동기화하지 않으므로 검토하기 전까지 MYSCube 값은 바뀌지 않습니다.
+                    자동 동기화하지 않으며, 마지막 버튼을 누를 때만 시트 값으로 덮어씁니다.
                   </DialogDescription>
                 </DialogHeader>
                 <ol className="mt-6 space-y-3">
                   {[
                     ['1', '시트 정보 저장', '어느 시트를 읽을지 저장'],
                     ['2', '시트 값 가져오기', '가져온 값을 서버에 고정'],
-                    ['3', '저장할 값 확인', '기존 값과 차이 확인'],
-                    ['4', '전체 MYSCube에 저장', '확인한 값만 최종 반영'],
+                    ['3', '시트 값으로 덮어쓰기', 'Projection과 Actual을 바로 반영'],
                   ].map(([number, title, description]) => (
                     <li key={number} className="flex items-center gap-3 border border-slate-200 px-4 py-3">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-black text-blue-800">{number}</span>
@@ -1271,107 +1199,6 @@ export function CashflowSheetLabPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={applyDialogOpen} onOpenChange={setApplyDialogOpen}>
-        <AlertDialogContent className="flex h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[1280px] flex-col">
-          <AlertDialogHeader>
-            <AlertDialogTitle>전체 MYSCube에 저장할까요?</AlertDialogTitle>
-            <AlertDialogDescription>
-              아래 주차별 차이를 확인한 뒤 저장합니다. Actual은 기존 값이 있어도 시트 값을 기준으로 덮어씁니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {stageResult && (
-            <div className="flex min-h-0 flex-1 flex-col gap-3 text-[13px] text-slate-700">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="font-semibold text-slate-950">
-                  저장 대상 {safeStageLineCount.toLocaleString()}건
-                </div>
-                <div className="text-slate-500">Projection {stageResult.projectionLineCount.toLocaleString()}건 · Actual {stageResult.actualLineCount.toLocaleString()}건</div>
-              </div>
-              {stageResult.riskLineCount > 0 && (
-                <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                  확인 필요 {stageResult.riskLineCount.toLocaleString()}건은 저장하지 않고 남깁니다.
-                </div>
-              )}
-              {stageResult.omittedCandidateCount > 0 && (
-                <div className="border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
-                  화면에는 일부만 표시했습니다. 추가 {stageResult.omittedCandidateCount.toLocaleString()}건도 같은 기준으로 저장됩니다.
-                </div>
-              )}
-              <div className="min-h-0 flex-1 overflow-auto border border-slate-200">
-                <table className="w-full min-w-[860px] text-[12px]">
-                  <thead className="sticky top-0 bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">기간</th>
-                      <th className="px-3 py-2 text-left font-medium">구분</th>
-                      <th className="px-3 py-2 text-left font-medium">항목</th>
-                      <th className="px-3 py-2 text-left font-medium">저장 여부</th>
-                      <th className="px-3 py-2 text-right font-medium">MYSCube값</th>
-                      <th className="px-3 py-2 text-right font-medium">시트 값</th>
-                      <th className="px-3 py-2 text-right font-medium">차이</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stageCandidates.map((candidate) => {
-                      const diff = getCandidateDiff(candidate);
-                      const riskFlags = candidate.riskFlags || [];
-                      return (
-                        <tr key={candidate.id || `${candidate.scope || 'weekly'}-${candidate.year || candidate.yearMonth}-${candidate.weekNo || 0}-${candidate.mode}-${candidate.lineId}`} className="border-t border-slate-100">
-                          <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{formatCandidateWeek(candidate)}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                            {candidate.mode === 'projection' ? 'Projection' : 'Actual'} · {candidate.lineDirection === 'in' ? '입금' : '출금'}
-                          </td>
-                          <td className="px-3 py-2 font-medium text-slate-900">{getCandidateLineLabel(candidate)}</td>
-                          <td className="px-3 py-2">
-                            {riskFlags.length ? (
-                              <span className="inline-flex bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900">
-                                확인 필요 · {riskFlags.map(formatRiskFlag).join(', ')}
-                              </span>
-                            ) : (
-                              <span className="inline-flex bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
-                                저장 대상
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                            {formatCandidateAmount(candidate.beforeAmount, candidate.beforeHadValue)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-950">
-                            {formatCandidateAmount(candidate.proposedAmount, candidate.proposedHadValue)}
-                          </td>
-                          <td className={`px-3 py-2 text-right font-semibold tabular-nums ${diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                            {formatDiffAmount(diff)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {stageCandidates.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="px-3 py-10 text-center text-slate-500">
-                          MYSCube값과 다른 값이 없습니다.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={loading}>취소</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!canReflect}
-              onClick={(event) => {
-                event.preventDefault();
-                void handleReflectSheetValues();
-              }}
-            >
-              {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-              전체 MYSCube에 저장
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

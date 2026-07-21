@@ -10,6 +10,8 @@ describe('UserManagementPage permission dashboard', () => {
     expect(source).toContain('전체 멤버 권한 대시보드');
     expect(source).toContain('프로젝트 접근');
     expect(source).toContain('지정 조직장');
+    expect(source).toContain('label="지정 조직장"');
+    expect(source).toContain('>조직장</Badge>');
     expect(source).toContain('결산·재오픈 요청');
     expect(source).toContain('등록 승인');
     expect(source).toContain('재오픈 승인·반려');

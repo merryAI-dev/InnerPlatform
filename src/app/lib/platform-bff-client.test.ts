@@ -37,6 +37,9 @@ import {
   upsertCashflowWeekAmountsViaBff,
   saveCashflowProjectionBatchViaBff,
   fetchCashflowMonthCloseViaBff,
+  fetchCashflowMonthCloseQaDateTimeViaBff,
+  setCashflowMonthCloseQaDateTimeViaBff,
+  completeCashflowWeeklyUpdateViaBff,
   closeCashflowMonthViaBff,
   requestCashflowMonthReopenViaBff,
   decideCashflowMonthReopenViaBff,
@@ -204,6 +207,29 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
+  });
+
+  it('uses project-scoped contracts for the Stage QA clock and explicit weekly settlement completion', async () => {
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: { projectId: 'p001', active: true, qaDateTime: '2026-07-16T23:59' } })),
+      post: vi.fn(async (path: string) => ({ data: path.endsWith('weekly-update-complete')
+        ? { projectId: 'p001', yearMonth: '2026-07', weekNo: 3, completedAt: '2026-07-16T09:00:00.000Z', alreadyCompleted: false }
+        : { projectId: 'p001', active: true, qaDateTime: '2026-07-16T23:59' } })),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'finance-1', role: 'finance' };
+
+    await fetchCashflowMonthCloseQaDateTimeViaBff({ tenantId: 'mysc', actor, projectId: 'p001', client });
+    await setCashflowMonthCloseQaDateTimeViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', qaDateTime: '2026-07-16T23:59', client,
+    });
+    await completeCashflowWeeklyUpdateViaBff({ tenantId: 'mysc', actor, projectId: 'p001', client });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({ retries: 0 }));
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({
+      body: { qaDateTime: '2026-07-16T23:59' },
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({ body: {} }));
   });
 
   it('routes projection through the fenced JVM-owned BFF endpoint', async () => {
