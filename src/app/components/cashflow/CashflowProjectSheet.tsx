@@ -2467,7 +2467,7 @@ export function CashflowProjectSheet({
           if (!monthCloseBusy) setMonthCloseReviewOpen(open);
         }}
       >
-        <AlertDialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1180px] overflow-y-auto">
+        <AlertDialogContent className="max-h-[92vh] w-[96vw] max-w-[1800px] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>{yearMonth} 최종저장 · 월 결산</AlertDialogTitle>
             <AlertDialogDescription>
