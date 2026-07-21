@@ -60,6 +60,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -565,6 +566,16 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("sourceRevision", SOURCE_REVISION)
             .containsEntry("targetRevisionAtFetch", response.resultingTargetRevision())
             .containsEntry("targetRevisionUpdateSource", "JVM_CANONICAL_APPLY");
+        verify(fixture.transaction, never()).get(argThat((DocumentReference ref) ->
+            ref.getPath().startsWith("orgs/tenant-a/cashflow_weeks/")
+        ));
+        verify(fixture.transaction).getAll(
+            argThat(ref -> ref.getPath().endsWith("-w1")),
+            argThat(ref -> ref.getPath().endsWith("-w2")),
+            argThat(ref -> ref.getPath().endsWith("-w3")),
+            argThat(ref -> ref.getPath().endsWith("-w4")),
+            argThat(ref -> ref.getPath().endsWith("-w5"))
+        );
     }
 
     @Test
@@ -1852,6 +1863,28 @@ class FirestoreCashflowLeaseGuardTest {
             when(snapshot.getData()).thenReturn(data);
             when(snapshot.getReference()).thenReturn(document);
             return ApiFutures.immediateFuture(snapshot);
+        });
+        when(transaction.getAll(
+            any(DocumentReference.class),
+            any(DocumentReference.class),
+            any(DocumentReference.class),
+            any(DocumentReference.class),
+            any(DocumentReference.class)
+        )).thenAnswer(invocation -> {
+            DocumentReference[] documents = java.util.Arrays.stream(invocation.getArguments())
+                .map(DocumentReference.class::cast)
+                .toArray(DocumentReference[]::new);
+            List<DocumentSnapshot> snapshots = java.util.Arrays.stream(documents).map(document -> {
+                Map<String, Object> data = docs.get(document.getPath());
+                String documentId = document.getId();
+                DocumentSnapshot snapshot = mock(DocumentSnapshot.class);
+                when(snapshot.exists()).thenReturn(data != null);
+                when(snapshot.getData()).thenReturn(data);
+                when(snapshot.getReference()).thenReturn(document);
+                when(snapshot.getId()).thenReturn(documentId);
+                return snapshot;
+            }).toList();
+            return ApiFutures.immediateFuture(snapshots);
         });
         when(transaction.get(any(Query.class))).thenAnswer(invocation -> {
             QueryScope scope = queryScopes.get(invocation.getArgument(0));

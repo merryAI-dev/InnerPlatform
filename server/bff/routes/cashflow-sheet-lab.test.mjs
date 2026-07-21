@@ -468,9 +468,15 @@ describe('cashflow sheet lab route', () => {
         },
       },
     });
+    let annualCallsStarted = 0;
+    let releaseAnnualCalls;
+    const annualCallsReady = new Promise((resolve) => { releaseAnnualCalls = resolve; });
     const javaWeeklyClient = {
       applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
       applyCashflowSheetAnnualTotal: vi.fn(async (input) => {
+        annualCallsStarted += 1;
+        if (annualCallsStarted === 3) releaseAnnualCalls();
+        await annualCallsReady;
         const response = javaAnnualApplyResponse(input);
         const docId = Buffer.from(`${input.projectId}\n${input.year}`, 'utf8').toString('base64url');
         await db.doc(`orgs/tenant-a/cashflow_sheet_year_totals/${docId}`).set({
@@ -535,6 +541,7 @@ describe('cashflow sheet lab route', () => {
       ]),
     }));
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(3);
+    expect(annualCallsStarted).toBe(3);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/')).toHaveLength(0);
 
     const yearView = await request(app)
@@ -549,6 +556,77 @@ describe('cashflow sheet lab route', () => {
         actual: expect.objectContaining({ source: 'ANNUAL', totalIn: 350, totalOut: 450, net: -100 }),
       }),
     ]));
+  });
+
+  it('resumes a bounded parallel annual apply after one year fails', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2024-01-01',
+        contractEnd: '2028-12-31',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+    });
+    const attemptsByYear = new Map();
+    const javaWeeklyClient = {
+      applyCashflowSheetAnnualTotal: vi.fn(async (input) => {
+        const attempt = (attemptsByYear.get(input.year) || 0) + 1;
+        attemptsByYear.set(input.year, attempt);
+        if (input.year === 2025 && attempt === 1) {
+          throw Object.assign(new Error('temporary annual failure'), {
+            statusCode: 503,
+            code: 'weekly_api_unavailable',
+          });
+        }
+        return javaAnnualApplyResponse(input);
+      }),
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMultiYearMatrix(),
+        })),
+      },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+    });
+
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'annual-resume-refresh' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'annual-resume-stage' })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-resume-first' })
+      .expect(503);
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('APPLYING');
+
+    const replay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-resume-second' })
+      .expect(200);
+    expect(replay.body.appliedYears).toEqual([2024, 2025, 2028]);
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(6);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    const annualCalls = javaWeeklyClient.applyCashflowSheetAnnualTotal.mock.calls.map(([call]) => call);
+    for (const year of [2024, 2025, 2028]) {
+      const calls = annualCalls.filter((call) => call.year === year);
+      expect(calls[0].idempotencyKey).toBe(calls[1].idempotencyKey);
+    }
   });
 
   it('warns but does not block when a complete weekly year conflicts with its annual total', async () => {

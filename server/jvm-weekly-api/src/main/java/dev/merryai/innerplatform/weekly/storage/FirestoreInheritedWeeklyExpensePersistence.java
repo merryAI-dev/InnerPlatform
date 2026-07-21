@@ -804,13 +804,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         cells = CashflowSheetLabApplyRequest.requireCompleteMonth(cells);
         requireCashflowMonthsOpen(tenantId, projectId, List.of(yearMonth));
         Map<String, Map<String, Object>> targetMonthDocs = new TreeMap<>();
-        for (int weekNo = 1; weekNo <= CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT; weekNo += 1) {
-            String docId = cashflowWeekId(projectId, yearMonth, weekNo);
-            DocumentSnapshot snap = get(cashflowWeekRef(tenantId, docId));
+        DocumentReference[] targetWeekRefs = java.util.stream.IntStream
+            .rangeClosed(1, CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
+            .mapToObj(weekNo -> cashflowWeekRef(tenantId, cashflowWeekId(projectId, yearMonth, weekNo)))
+            .toArray(DocumentReference[]::new);
+        for (DocumentSnapshot snap : getAll(targetWeekRefs)) {
             if (!snap.exists()) continue;
             Map<String, Object> document = data(snap);
-            requireCanonicalCashflowMonthDocument(projectId, yearMonth, weekNo, docId, document);
-            targetMonthDocs.put(docId, document);
+            WeekDocParts parts = parseCashflowWeekId(projectId, snap.getId());
+            requireCanonicalCashflowMonthDocument(projectId, yearMonth, parts.weekNo(), snap.getId(), document);
+            targetMonthDocs.put(snap.getId(), document);
         }
         QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
@@ -2643,6 +2646,19 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             return snap;
         } catch (Exception error) {
             throw new IllegalStateException("Could not read Firestore document: " + ref.getPath(), error);
+        }
+    }
+
+    private List<DocumentSnapshot> getAll(DocumentReference... refs) {
+        try {
+            Transaction tx = currentTransaction.get();
+            List<DocumentSnapshot> snapshots = tx == null ? db.getAll(refs).get() : tx.getAll(refs).get();
+            for (DocumentSnapshot snap : snapshots) {
+                cacheDocument(snap.getReference(), snap.exists() ? data(snap) : Map.of());
+            }
+            return snapshots;
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not read Firestore documents.", error);
         }
     }
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   asyncHandler,
+  chunkArray,
   createHttpError,
   ensureDocumentExists,
   readOptionalText,
@@ -1924,30 +1925,45 @@ async function applyStagedCashflowSheetLab({
       ? await resolveEditSession()
       : editSession;
     const operationCount = stagedYears.length + stagedMonths.length;
-    for (const stagedYear of stagedYears) {
-      const isLastOperation = completedOperationCount === operationCount - 1;
-      const yearEditSession = resolvedEditSession
-        ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
-        : null;
-      const javaResult = await javaWeeklyClient.applyCashflowSheetAnnualTotal({
-        context,
-        projectId,
-        idempotencyKey: yearApplyIdempotencyKey({
-          idempotencyKey: effectiveIdempotencyKey,
-          stagedRunId,
+    for (const yearBatch of chunkArray(stagedYears.map((stagedYear, index) => ({ stagedYear, index })), 4)) {
+      const settled = await Promise.allSettled(yearBatch.map(async ({ stagedYear, index }) => {
+        const operationStartedAt = Date.now();
+        const isLastOperation = index === operationCount - 1;
+        const yearEditSession = resolvedEditSession
+          ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
+          : null;
+        const javaResult = await javaWeeklyClient.applyCashflowSheetAnnualTotal({
+          context,
+          projectId,
+          idempotencyKey: yearApplyIdempotencyKey({
+            idempotencyKey: effectiveIdempotencyKey,
+            stagedRunId,
+            year: stagedYear.year,
+          }),
+          editSession: yearEditSession,
+          sourceRevision: stageRun.sourceRevision,
           year: stagedYear.year,
-        }),
-        editSession: yearEditSession,
-        sourceRevision: stageRun.sourceRevision,
-        year: stagedYear.year,
-        expectedRevision: stagedYear.expectedRevision,
-        cells: stagedYear.cells,
-      });
-      verifiedLineCount += verifyJavaAnnualAppliedCells(javaResult, stagedYear, projectId);
-      javaAnnualResults.push(javaResult);
-      completedOperationCount += 1;
+          expectedRevision: stagedYear.expectedRevision,
+          cells: stagedYear.cells,
+        });
+        const result = {
+          javaResult,
+          verifiedLineCount: verifyJavaAnnualAppliedCells(javaResult, stagedYear, projectId),
+        };
+        logger('annual.ok', { projectId, year: stagedYear.year, durationMs: Date.now() - operationStartedAt });
+        return result;
+      }));
+      const rejected = settled.find((result) => result.status === 'rejected');
+      for (const result of settled) {
+        if (result.status !== 'fulfilled') continue;
+        verifiedLineCount += result.value.verifiedLineCount;
+        javaAnnualResults.push(result.value.javaResult);
+        completedOperationCount += 1;
+      }
+      if (rejected) throw rejected.reason;
     }
     for (let index = 0; index < stagedMonths.length; index += 1) {
+      const operationStartedAt = Date.now();
       const month = stagedMonths[index];
       const isLastOperation = completedOperationCount === operationCount - 1;
       const monthEditSession = resolvedEditSession
@@ -1970,6 +1986,7 @@ async function applyStagedCashflowSheetLab({
       });
       targetRevision = assertResultingTargetRevision(javaResult);
       verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, projectId);
+      logger('month.ok', { projectId, yearMonth: month.yearMonth, durationMs: Date.now() - operationStartedAt });
       javaResults.push(javaResult);
       completedOperationCount += 1;
     }
