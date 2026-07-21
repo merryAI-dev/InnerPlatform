@@ -18,6 +18,7 @@ describe('portal canonical edit resource routes', () => {
 
   it('keeps ID-less legacy entry routes available for SPA migration', () => {
     expect(source).toContain("{ path: 'register-project', element: <S C={PortalProjectRegister} /> }");
+    expect(source).toContain("{ path: 'project-approvals', element: <S C={ProjectAssigneeApprovalPage} /> }");
     expect(source).toContain("{ path: 'edit-project', element: <S C={PortalProjectEdit} /> }");
     expect(source).toContain("{ path: 'cashflow', element: <S C={PortalCashflowPage} /> }");
     expect(source).toContain("{ path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> }");

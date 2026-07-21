@@ -90,7 +90,8 @@ export function ProjectDetailPage() {
 
   const project = getProjectById(projectId || '');
   const projectLedgers = getProjectLedgers(projectId || '');
-  const pendingProjectChangeMap = usePendingProjectChangeRequests();
+  const pendingProjectIds = useMemo(() => project?.id ? [project.id] : [], [project?.id]);
+  const pendingProjectChangeMap = usePendingProjectChangeRequests(pendingProjectIds);
   const pendingProjectChangeRequest = project ? pendingProjectChangeMap.get(project.id) || null : null;
 
   const revenueFinancials = project ? normalizeProjectRevenueFields(project, 'totalRevenueAmount') : null;

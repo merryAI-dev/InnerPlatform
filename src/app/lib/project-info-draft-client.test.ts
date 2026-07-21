@@ -34,7 +34,7 @@ function harness() {
         lease: { state: 'RELEASED', canEdit: false }, outbox: { id: 'outbox-a', status: 'PENDING' },
       } }),
     patch: vi.fn(async () => ({ data: { draft: { ...DRAFT, draftRevision: 3 } } })),
-    request: vi.fn(),
+    request: vi.fn(async () => ({ data: { draft: { ...DRAFT, draftRevision: 4 } } })),
   } as unknown as ProjectInfoDraftApiClient;
   const client = createProjectInfoDraftClient({
     tenantId: 'mysc',
@@ -47,7 +47,7 @@ function harness() {
 }
 
 describe('project information draft client', () => {
-  it('gets, opens, saves, uploads and submits only through the project-scoped BFF contract', async () => {
+  it('gets, opens, saves, uploads, removes and submits only through the project-scoped BFF contract', async () => {
     const { api, client } = harness();
     const ownership = { leaseId: 'lease-a', fence: 3 };
     await client.get();
@@ -61,8 +61,12 @@ describe('project information draft client', () => {
         arrayBuffer: async () => new Uint8Array([0x70, 0x64, 0x66]).buffer,
       },
     });
-    const submitted = await client.submit(ownership, {
+    const removed = await client.removeAttachment(ownership, {
       expectedDraftRevision: 3,
+      documentKind: 'contract',
+    });
+    const submitted = await client.submit(ownership, {
+      expectedDraftRevision: 4,
       expectedVersion: 3,
       resubmit: true,
       reviewComment: '보완 완료',
@@ -85,9 +89,13 @@ describe('project information draft client', () => {
     expect(api.post).toHaveBeenNthCalledWith(3, `${path}/submit`, expect.objectContaining({
       headers,
       body: {
-        expectedDraftRevision: 3, expectedVersion: 3, resubmit: true, reviewComment: '보완 완료',
+        expectedDraftRevision: 4, expectedVersion: 3, resubmit: true, reviewComment: '보완 완료',
       },
     }));
+    expect(api.request).toHaveBeenCalledWith(`${path}/attachments/contract`, expect.objectContaining({
+      method: 'DELETE', headers, body: { expectedDraftRevision: 3 },
+    }));
+    expect(removed.draft.draftRevision).toBe(4);
     expect(submitted).toMatchObject({ status: 'SUBMITTED', projectVersion: 4 });
   });
 

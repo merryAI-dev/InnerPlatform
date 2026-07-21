@@ -192,7 +192,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
       teamName: 'AXR',
       teamMembersDetailed: [{
         memberName: 'Actor A',
-        role: '실무책임자',
+        role: '운영매니저',
         participationRate: 100,
         isDocumentOnly: false,
       }],

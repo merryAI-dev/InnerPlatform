@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { NAV_GROUPS } from './nav-config';
 
 const navConfigSource = readFileSync(
   resolve(import.meta.dirname, 'nav-config.ts'),
@@ -30,6 +31,12 @@ describe('admin monitoring foundation shell contract', () => {
     expect(navConfigSource).toContain("label: '조직DB'");
     expect(navConfigSource).not.toContain("label: '캐시플로 추출'");
     expect(navConfigSource).not.toContain("label: '사업이관'");
+  });
+
+  it('keeps each admin navigation destination unique', () => {
+    const destinations = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.to));
+
+    expect(destinations).toEqual([...new Set(destinations)]);
   });
 
   it('registers a dedicated cashflow export route under the admin shell', () => {

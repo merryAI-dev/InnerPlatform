@@ -235,6 +235,22 @@ export function createProjectInfoDraftClient(options: {
       return { draft: parseDraft(body.draft, projectId), attachment: parseAttachment(body.attachment) };
     },
 
+    async removeAttachment(
+      ownership: { leaseId: string; fence: number },
+      input: { expectedDraftRevision: number; documentKind: ProjectInfoDocumentKind },
+    ) {
+      const response = await client.request<unknown>(
+        `${path}/attachments/${encodeURIComponent(input.documentKind)}`,
+        {
+          method: 'DELETE',
+          ...request,
+          headers: ownershipHeaders(sessionId, ownership),
+          body: { expectedDraftRevision: revision(input.expectedDraftRevision) },
+        },
+      );
+      return parseDraftBody(response.data, projectId);
+    },
+
     async submit(
       ownership: { leaseId: string; fence: number },
       input: {

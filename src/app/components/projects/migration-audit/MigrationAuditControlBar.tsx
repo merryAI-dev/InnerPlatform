@@ -27,6 +27,7 @@ interface MigrationAuditControlBarProps {
   onSearchQueryChange: (value: string) => void;
   summary: MigrationAuditConsoleSummary;
   reviewStage?: MigrationAuditReviewStage;
+  assigneeOnly?: boolean;
 }
 
 export function MigrationAuditControlBar({
@@ -42,6 +43,7 @@ export function MigrationAuditControlBar({
   onSearchQueryChange,
   summary,
   reviewStage = 'executive',
+  assigneeOnly = false,
 }: MigrationAuditControlBarProps) {
   const isManagementPlanning = reviewStage === 'managementPlanning';
   const reviewLabel = isManagementPlanning ? '경영기획실 합의' : '조직장 결재';
@@ -86,8 +88,8 @@ export function MigrationAuditControlBar({
           </div>
         </div>
 
-        <div className={`grid gap-4 ${isManagementPlanning ? 'xl:grid-cols-[minmax(180px,230px)_minmax(180px,230px)_minmax(260px,1fr)]' : 'xl:grid-cols-[minmax(180px,230px)_minmax(180px,230px)_minmax(180px,230px)_minmax(260px,1fr)]'}`}>
-          {!isManagementPlanning ? (
+        <div className={`grid gap-4 ${isManagementPlanning || assigneeOnly ? 'xl:grid-cols-[minmax(180px,230px)_minmax(180px,230px)_minmax(260px,1fr)]' : 'xl:grid-cols-[minmax(180px,230px)_minmax(180px,230px)_minmax(180px,230px)_minmax(260px,1fr)]'}`}>
+          {!isManagementPlanning && !assigneeOnly ? (
             <div className="space-y-1.5">
               <p className="text-[12px] font-semibold text-slate-600">검토함</p>
               <Select value={inboxScope} onValueChange={(value) => onInboxScopeChange(value as 'MINE' | 'ALL')}>

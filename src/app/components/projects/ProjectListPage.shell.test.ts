@@ -115,11 +115,14 @@ describe('ProjectListPage shell contract', () => {
     expect(source).not.toContain('onClick={() => navigate(`/projects/${p.id}`)}');
   });
 
-  it('surfaces pending PM change requests from both request collections', () => {
+  it('surfaces pending PM change requests through the permission-checked BFF summary', () => {
     expect(source).toContain('usePendingProjectChangeRequests');
+    expect(source).toContain('usePendingProjectChangeRequests(projectIds)');
     expect(source).toContain('수정 검토 중');
-    expect(pendingHookSource).toContain("const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests']");
+    expect(pendingHookSource).toContain('fetchPendingProjectChangeRequestsViaBff');
+    expect(pendingHookSource).toContain('projectIds,');
     expect(pendingHookSource).toContain("request.requestKind !== 'CHANGE'");
     expect(pendingHookSource).toContain("request.targetProjectId || request.approvedProjectId");
+    expect(pendingHookSource).not.toContain("collection(db, 'tenants'");
   });
 });

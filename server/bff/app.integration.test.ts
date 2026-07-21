@@ -100,6 +100,12 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
   beforeEach(async () => {
     await resetTenantData();
+    await db.doc(`orgs/${tenantId}/members/${actorId}`).set({
+      uid: actorId,
+      email: 'u001@example.com',
+      role: 'admin',
+      status: 'ACTIVE',
+    });
   });
 
   afterAll(async () => {
@@ -2224,6 +2230,9 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
   });
 
   it('blocks demoting the last remaining admin (lockout protection)', async () => {
+    // This scenario predates the shared ACTIVE actor fixture above and must begin
+    // with exactly one persisted admin to exercise the lockout invariant.
+    await db.doc(`orgs/${tenantId}/members/${actorId}`).delete();
     await db.doc(`orgs/${tenantId}/members/u-admin-1`).set({
       uid: 'u-admin-1',
       tenantId,

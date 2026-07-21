@@ -30,6 +30,10 @@ export const projectRegistrationDraftAttachmentSchema = z.object({
   contentBase64: NON_EMPTY_STRING.max(PROJECT_REGISTRATION_ATTACHMENT_BASE64_MAX_LENGTH),
 }).strict();
 
+export const projectDraftAttachmentDeleteSchema = z.object({
+  expectedDraftRevision: z.number().int().nonnegative(),
+}).strict();
+
 export const projectRegistrationDraftSubmitSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
 }).strict();

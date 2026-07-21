@@ -12,6 +12,7 @@ import { createIdempotencyService } from './idempotency.mjs';
 import { createAuditChainService } from './audit-chain.mjs';
 import { createEditLeaseService } from './edit-lease.mjs';
 import {
+  DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE,
   createOutboxEvent,
   enqueueOutboxEventInTransaction,
   processOutboxBatch,
@@ -77,7 +78,10 @@ import {
 } from './google-sheets.mjs';
 import { createGoogleSheetMigrationAiService } from './google-sheet-migration-ai.mjs';
 import { createProjectRequestContractAiService } from './project-request-contract-ai.mjs';
-import { createProjectRequestContractStorageService } from './project-request-contract-storage.mjs';
+import {
+  createDraftAttachmentCleanupOutboxHandler,
+  createProjectRequestContractStorageService,
+} from './project-request-contract-storage.mjs';
 import { createProjectSheetSourceStorageService } from './project-sheet-source-storage.mjs';
 import { createBusinessCardGeminiAiService } from './business-card-gemini-ai.mjs';
 import { createBusinessCardStorageService } from './business-card-storage.mjs';
@@ -566,7 +570,7 @@ export async function resolveApiRequestContext(req, {
 
   let actorRole = identity.actorRole;
   let actorEmail = identity.actorEmail;
-  const actorName = identity.actorName;
+  let actorName = identity.actorName;
 
   if (identity.source === 'firebase' && typeof resolveMemberIdentity === 'function') {
     const memberIdentity = await resolveMemberIdentity({
@@ -575,6 +579,7 @@ export async function resolveApiRequestContext(req, {
     });
     actorRole = normalizeRole(memberIdentity?.role) || actorRole || undefined;
     actorEmail = actorEmail || readOptionalText(memberIdentity?.email).toLowerCase() || undefined;
+    actorName = actorName || readOptionalText(memberIdentity?.name) || undefined;
   }
 
   return {
@@ -791,6 +796,10 @@ export function createBffApp(options = {}) {
       draftStorageService: projectRegistrationDraftStorageService,
       now,
     });
+  const draftAttachmentCleanupOutboxHandler = options.draftAttachmentCleanupOutboxHandler
+    || createDraftAttachmentCleanupOutboxHandler({
+      draftStorageService: projectRegistrationDraftStorageService,
+    });
 
   async function resolveMemberIdentity({ tenantId, actorId }) {
     const normalizedTenantId = readOptionalText(tenantId);
@@ -804,6 +813,7 @@ export function createBffApp(options = {}) {
     return {
       role: normalizeRole(data.role),
       email: readOptionalText(data.email).toLowerCase() || undefined,
+      name: readOptionalText(data.name) || undefined,
     };
   }
 
@@ -925,6 +935,7 @@ export function createBffApp(options = {}) {
       eventHandlers: {
         'project.registration.submitted': projectRegistrationOutboxHandler,
         'project.info.submitted': projectInfoOutboxHandler,
+        [DRAFT_ATTACHMENT_CLEANUP_EVENT_TYPE]: draftAttachmentCleanupOutboxHandler,
       },
     });
 

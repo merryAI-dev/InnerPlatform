@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '../data/types';
 import {
+  ACCOUNT_TYPE_LABELS,
   getProjectTypeSelectableOptions,
+  LABOR_SETTLEMENT_BASIS_LABELS,
+  normalizeAccountType,
   normalizeProjectContractType,
   PROJECT_CONTRACT_TYPE_OPTIONS,
   PROJECT_TYPE_LABELS,
+  SETTLEMENT_SYSTEM_LABELS,
 } from '../data/types';
 import {
   buildProjectEditorDraftFromProject,
@@ -12,7 +16,22 @@ import {
   buildProjectEditorReviewChanges,
   buildProjectRequestPayloadFromDraft,
   createProjectEditorDraft,
+  hasInvalidProjectContractPeriod,
 } from './project-editor';
+
+describe('project registration period validation', () => {
+  it('accepts a real ordered ISO contract period', () => {
+    expect(hasInvalidProjectContractPeriod('2026-01-01', '2026-12-31')).toBe(false);
+  });
+
+  it.each([
+    ['2026-12-31', '2026-01-01'],
+    ['2026-02-30', '2026-12-31'],
+    ['2026-01-01', '2026-13-01'],
+  ])('rejects invalid contract period %s ~ %s', (start, end) => {
+    expect(hasInvalidProjectContractPeriod(start, end)).toBe(true);
+  });
+});
 
 const baseProject: Project = {
   id: 'p-1',
@@ -109,6 +128,85 @@ describe('project editor draft mapping', () => {
     expect(draft.laborTransferPlan).toEqual({
       mode: 'MONTHLY_WEEK_3',
       milestoneAmounts: { contract: 0, interim: 0, final: 0 },
+    });
+  });
+
+  it('derives annual profit rates and clears settlement-only fields when the v2 basis is none', () => {
+    const draft = createProjectEditorDraft({
+      registrationRequirementsVersion: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2026-12-31',
+      contractAmount: 120_000,
+      totalRevenueAmount: 90_000,
+      financialYears: [{
+        year: 2026,
+        contractAmount: 120_000,
+        salesVatAmount: 0,
+        totalRevenueAmount: 90_000,
+        supportAmount: 0,
+        profitRate: 0,
+        confirmed: true,
+      }],
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'DEDICATED',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+    });
+
+    expect(draft.financialYears[0].profitRate).toBe(0.75);
+    expect(draft).toMatchObject({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'NONE',
+      settlementSystem: 'NONE',
+      laborSettlementBasis: 'NONE',
+    });
+  });
+
+  it('preserves the legacy v1 settlement-type NONE clearing behavior', () => {
+    expect(createProjectEditorDraft({
+      registrationRequirementsVersion: 1,
+      settlementType: 'NONE',
+      basis: '공급대가',
+      accountType: 'DEDICATED',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+    })).toMatchObject({
+      settlementType: 'NONE',
+      basis: 'NONE',
+      accountType: 'NONE',
+      settlementSystem: 'NONE',
+      laborSettlementBasis: 'NONE',
+    });
+  });
+
+  it('preserves legacy v1 details when the type enables settlement even if the old basis is NONE', () => {
+    expect(createProjectEditorDraft({
+      registrationRequirementsVersion: 1,
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'DEDICATED',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+    })).toMatchObject({
+      settlementType: 'TYPE1',
+      basis: 'NONE',
+      accountType: 'DEDICATED',
+      settlementSystem: 'BOTAEM_E',
+      laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
+    });
+  });
+
+  it('exposes the exact PPT labels for settlement-none and other account options', () => {
+    expect(ACCOUNT_TYPE_LABELS.OTHER).toBe('기타');
+    expect(normalizeAccountType('OTHER')).toBe('OTHER');
+    expect(SETTLEMENT_SYSTEM_LABELS.NONE).toBe('정산없음');
+    expect(LABOR_SETTLEMENT_BASIS_LABELS).toMatchObject({
+      INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금포함 실급여',
+      EXCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 제외 실급여',
+      FIXED_AMOUNT: '정액정산',
+      NONE: '정산없음',
     });
   });
 
@@ -527,7 +625,7 @@ describe('project editor draft mapping', () => {
     expect(draft.status).toBe('CONTRACT_PENDING');
     expect(draft.phase).toBe('CONFIRMED');
     expect(draft.settlementType).toBe('NONE');
-    expect(draft.basis).toBe('공급가액');
+    expect(draft.basis).toBe('NONE');
     expect(draft.accountType).toBe('NONE');
     expect(draft.fundInputMode).toBe('BANK_UPLOAD');
   });

@@ -1,3 +1,5 @@
+import express from 'express';
+import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createIdempotencyService } from '../idempotency.mjs';
 import { buildActiveEditLeaseDocument, resolveEditLeaseDocumentId } from '../edit-lease.mjs';
@@ -5,6 +7,7 @@ import { loadRbacPolicy } from '../rbac-policy.mjs';
 import {
   createProjectInfoDraftService,
   createProjectInfoSubmittedOutboxHandler,
+  mountProjectInfoDraftRoutes,
 } from './project-info-drafts.mjs';
 
 const VALID_PDF = Buffer.from('%PDF-1.4\n');
@@ -100,8 +103,69 @@ function validPayload(overrides = {}) {
   };
 }
 
-function harness({ storageService } = {}) {
+function validV2Payload(overrides = {}) {
+  return validPayload({
+    registrationRequirementsVersion: 2,
+    financialYears: [{
+      year: 2026,
+      contractAmount: 100000,
+      salesVatAmount: 10000,
+      totalRevenueAmount: 40000,
+      supportAmount: 0,
+      profitRate: 0.4,
+      confirmed: true,
+    }],
+    paymentExpectedMonths: { contract: '2026-07', interim: '', final: '' },
+    advanceInterimBelow70Reason: '',
+    registrationConfirmations: {
+      laborIncludesFourInsurance: true,
+      laborIncludesRetirementPay: true,
+      customerSettlementBasisConfirmed: true,
+      modusignContractUsed: true,
+      originalContractSubmitted: null,
+    },
+    registrationOptionalDocumentNotes: {
+      proposalWordOriginal: '고객사 미제공',
+      proposalPptOriginal: '해당 없음',
+      presentationPptOriginal: '해당 없음',
+    },
+    teamMembersDetailed: [
+      {
+        memberName: 'Head A',
+        memberNickname: 'Head',
+        role: '사업 최종 책임자',
+        participationRate: 100,
+        isDocumentOnly: false,
+      },
+      {
+        memberName: 'Actor A',
+        memberNickname: 'Actor',
+        role: '실무책임자',
+        participationRate: 100,
+        isDocumentOnly: false,
+      },
+      {
+        memberName: 'Operator A',
+        memberNickname: 'Operator',
+        role: '운영매니저',
+        participationRate: 100,
+        isDocumentOnly: false,
+      },
+    ],
+    contractDocument: { path: 'orgs/tenant-a/project-registration-documents/project-a/contract.pdf' },
+    customerBusinessRegistrationDocument: {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/customer-business-registration.pdf',
+    },
+    quoteDocument: { path: 'orgs/tenant-a/project-registration-documents/project-a/quote.pdf' },
+    proposalDocument: { path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf' },
+    rfpRequestEvidenceDocument: null,
+    ...overrides,
+  });
+}
+
+function harness({ storageService, outboxEventFactory, cleanupOutboxEventFactory } = {}) {
   let nowMs = Date.parse('2026-07-12T00:00:00.000Z');
+  let cleanupOutboxSequence = 0;
   const lease = buildActiveEditLeaseDocument({
     tenantId: 'tenant-a', resourceType: 'project-info', resourceId: 'project-a',
     actorId: 'actor-a', actorDisplayName: 'Actor A', sessionId: 'session-a',
@@ -116,7 +180,7 @@ function harness({ storageService } = {}) {
     },
     'orgs/tenant-a/projects/project-a': {
       id: 'project-a', tenantId: 'tenant-a', version: 3, executiveReviewStatus: 'APPROVED',
-      executiveReviewHistory: [], ...validPayload(),
+      executiveReviewHistory: [], ...validV2Payload(),
     },
     [`orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-info', 'project-a')}`]: lease,
   });
@@ -126,10 +190,18 @@ function harness({ storageService } = {}) {
     db,
     now: () => new Date(nowMs).toISOString(),
     createAttachmentId: () => 'attachment-a',
-    createOutboxEvent: (input) => ({
+    createOutboxEvent: outboxEventFactory || ((input) => ({
       id: 'outbox-a', ...input, status: 'PENDING', attempts: 0,
       nextAttemptAt: input.createdAt, updatedAt: input.createdAt,
-    }),
+    })),
+    createAttachmentCleanupOutboxEvent: cleanupOutboxEventFactory || ((input) => ({
+      id: `cleanup-outbox-${++cleanupOutboxSequence}`,
+      ...input,
+      status: 'PENDING',
+      attempts: 0,
+      nextAttemptAt: input.createdAt,
+      updatedAt: input.createdAt,
+    })),
     auditChainService,
     idempotencyService,
     draftStorageService: storageService,
@@ -196,6 +268,219 @@ describe('project information private drafts', () => {
     });
   });
 
+  it('carries unpublished attachments into a newer submission after the older delivery becomes stale', async () => {
+    let outboxSequence = 0;
+    const relocateDraftAttachments = vi.fn(async ({ tenantId, projectId, attachmentRefs }) => (
+      attachmentRefs.map((attachment) => ({
+        ...attachment,
+        path: `orgs/${tenantId}/project-registration-documents/${projectId}/${attachment.path.split('/').at(-1)}`,
+        visibility: 'PRIVATE',
+      }))
+    ));
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+      relocateDraftAttachments,
+    };
+    const h = harness({
+      storageService,
+      outboxEventFactory: (input) => ({
+        id: `outbox-${++outboxSequence}`,
+        ...input,
+        status: 'PENDING',
+        attempts: 0,
+        nextAttemptAt: input.createdAt,
+        updatedAt: input.createdAt,
+      }),
+    });
+    await openedDraft(h, 'open-v1');
+    const uploaded = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-v1',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract-v1.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'submit-v1',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+    const oldEvent = clone(h.db.documents.get('outbox/outbox-1'));
+
+    h.db.documents.set(
+      `orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-info', 'project-a')}`,
+      buildActiveEditLeaseDocument({
+        tenantId: 'tenant-a', resourceType: 'project-info', resourceId: 'project-a',
+        actorId: 'actor-a', actorDisplayName: 'Actor A', sessionId: 'session-a',
+        leaseId: 'lease-a', serverNow: Date.parse('2026-07-12T00:00:00.000Z'),
+      }),
+    );
+    await openedDraft(h, 'open-v2');
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'submit-v2',
+      expectedDraftRevision: 0,
+      expectedVersion: 4,
+    });
+    const newEvent = clone(h.db.documents.get('outbox/outbox-2'));
+
+    expect(newEvent.payload.attachmentRefs).toEqual([
+      expect.objectContaining({ documentKind: 'contract', path: uploaded.body.attachment.path }),
+    ]);
+    const handler = createProjectInfoSubmittedOutboxHandler({
+      db: h.db,
+      draftStorageService: storageService,
+      now: () => '2026-07-12T00:05:00.000Z',
+    });
+    await handler(oldEvent);
+    expect(relocateDraftAttachments).not.toHaveBeenCalled();
+    await handler(newEvent);
+
+    expect(relocateDraftAttachments).toHaveBeenCalledOnce();
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a')).toMatchObject({
+      requestVersion: 2,
+      submittedOutboxId: 'outbox-2',
+      proposedSnapshot: {
+        contractDocument: {
+          path: expect.stringContaining('/project-registration-documents/project-a/'),
+        },
+      },
+      attachmentsPublishedAt: '2026-07-12T00:05:00.000Z',
+    });
+  });
+
+  it('keeps an inherited unpublished attachment immutable when the next draft removes it', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'immutable-open-v1');
+    await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'immutable-upload-v1',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract-v1.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'immutable-submit-v1',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+    h.db.documents.set(
+      `orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-info', 'project-a')}`,
+      buildActiveEditLeaseDocument({
+        tenantId: 'tenant-a', resourceType: 'project-info', resourceId: 'project-a',
+        actorId: 'actor-a', actorDisplayName: 'Actor A', sessionId: 'session-a',
+        leaseId: 'lease-a', serverNow: Date.parse('2026-07-12T00:00:00.000Z'),
+      }),
+    );
+
+    const reopened = await openedDraft(h, 'immutable-open-v2');
+    expect(reopened.body.draft.attachmentRefs[0]).not.toHaveProperty('inheritedFromProjectRequest');
+    const rawDraft = [...h.db.documents.values()].find((value) => value?.resourceType === 'project-info' && value?.status === 'ACTIVE');
+    expect(rawDraft.attachmentRefs[0]).toMatchObject({
+      documentKind: 'contract',
+      inheritedFromProjectRequest: true,
+    });
+
+    const removed = await h.service.removeAttachment({
+      ...h.base,
+      idempotencyKey: 'immutable-remove-v2',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+    });
+
+    expect(removed.body.draft).toMatchObject({
+      draftRevision: 1,
+      attachmentRefs: [],
+      payload: { contractDocument: null },
+    });
+    expect(storageService.deleteDraftAttachment).not.toHaveBeenCalled();
+    expect([...h.db.documents.values()].some((value) => value?.eventType === 'draft.attachments.cleanup'))
+      .toBe(false);
+  });
+
+  it('replaces an inherited proposal without deleting the prior request blob', async () => {
+    const storageService = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService });
+    await openedDraft(h, 'inherited-proposal-open-v1');
+    await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'inherited-proposal-upload-v1',
+      expectedDraftRevision: 0,
+      documentKind: 'proposal',
+      fileName: 'proposal-v1.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'inherited-proposal-submit-v1',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+    h.db.documents.set(
+      `orgs/tenant-a/editLeases/${resolveEditLeaseDocumentId('project-info', 'project-a')}`,
+      buildActiveEditLeaseDocument({
+        tenantId: 'tenant-a', resourceType: 'project-info', resourceId: 'project-a',
+        actorId: 'actor-a', actorDisplayName: 'Actor A', sessionId: 'session-a',
+        leaseId: 'lease-a', serverNow: Date.parse('2026-07-12T00:00:00.000Z'),
+      }),
+    );
+    await openedDraft(h, 'inherited-proposal-open-v2');
+
+    const replacement = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'inherited-rfp-upload-v2',
+      expectedDraftRevision: 0,
+      documentKind: 'rfp_request_evidence',
+      fileName: 'rfp-v2.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+
+    expect(replacement.body.draft.attachmentRefs).toEqual([
+      expect.objectContaining({ documentKind: 'rfp_request_evidence', name: 'rfp-v2.pdf' }),
+    ]);
+    expect(storageService.deleteDraftAttachment).not.toHaveBeenCalled();
+    expect([...h.db.documents.values()].some((value) => value?.eventType === 'draft.attachments.cleanup'))
+      .toBe(false);
+  });
+
   it('opens an owner-only draft from canonical data and hides it from admins', async () => {
     const h = harness();
     h.db.documents.set('orgs/tenant-a/members/actor-a', {
@@ -213,6 +498,146 @@ describe('project information private drafts', () => {
     await expect(h.service.get({
       tenantId: 'tenant-a', actorId: 'actor-admin', projectId: 'project-a',
     })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
+  });
+
+  it('downloads a stored edit-draft attachment only for its owner and exact document kind', async () => {
+    const downloadDraftAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('private-edit-pdf'), contentType: 'application/pdf', size: 16,
+    }));
+    const h = harness({ storageService: { downloadDraftAttachment } });
+    await openedDraft(h);
+    const [draftPath] = [...h.db.documents.keys()].filter((path) => path.includes('/privateEditDrafts/'));
+    const draft = h.db.documents.get(draftPath);
+    const path = `orgs/tenant-a/project-registration-drafts/${draftPath.split('/').at(-1)}/attachment-a-contract.pdf`;
+    h.db.documents.set(draftPath, {
+      ...draft,
+      attachmentRefs: [{
+        attachmentId: 'attachment-a', documentKind: 'contract', path,
+        name: 'contract.pdf', size: 16, contentType: 'application/pdf',
+      }],
+    });
+
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'contract',
+    })).resolves.toMatchObject({
+      buffer: Buffer.from('private-edit-pdf'), name: 'contract.pdf', contentType: 'application/pdf',
+    });
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-admin', projectId: 'project-a', documentKind: 'contract',
+    })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'performance_certificate',
+    })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'browser-controlled',
+    })).rejects.toMatchObject({ statusCode: 400, code: 'draft_attachment_invalid' });
+    expect(downloadDraftAttachment).toHaveBeenCalledOnce();
+    expect(downloadDraftAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a', draftId: draftPath.split('/').at(-1), path,
+    });
+  });
+
+  it('previews only exact canonical or resumable-request documents when no private replacement exists', async () => {
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('stored-project-pdf'), contentType: 'application/pdf', size: 18,
+    }));
+    const h = harness({ storageService: {
+      downloadDraftAttachment: vi.fn(),
+      downloadProjectRegistrationAttachment,
+    } });
+    const canonicalPath = 'orgs/tenant-a/project-registration-documents/project-a/contract.pdf';
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      ...h.db.documents.get('orgs/tenant-a/projects/project-a'),
+      contractDocument: { path: canonicalPath, name: 'canonical-contract.pdf' },
+    });
+    await openedDraft(h);
+
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'contract',
+    })).resolves.toMatchObject({
+      buffer: Buffer.from('stored-project-pdf'), name: 'canonical-contract.pdf',
+    });
+    expect(downloadProjectRegistrationAttachment).toHaveBeenLastCalledWith({
+      tenantId: 'tenant-a', projectId: 'project-a', path: canonicalPath,
+    });
+
+    const [draftPath] = [...h.db.documents.keys()].filter((path) => path.includes('/privateEditDrafts/'));
+    const draft = h.db.documents.get(draftPath);
+    h.db.documents.set(draftPath, {
+      ...draft,
+      payload: {
+        ...draft.payload,
+        quoteDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/browser-forged.pdf',
+          name: 'browser-forged.pdf',
+        },
+      },
+    });
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'quote',
+    })).rejects.toMatchObject({ statusCode: 404, code: 'not_found' });
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledTimes(1);
+  });
+
+  it('previews a server-stored pending change document without trusting browser metadata', async () => {
+    const downloadProjectRegistrationAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('pending-rfp'), contentType: 'application/pdf', size: 11,
+    }));
+    const h = harness({ storageService: {
+      downloadDraftAttachment: vi.fn(),
+      downloadProjectRegistrationAttachment,
+    } });
+    const rfpPath = 'orgs/tenant-a/project-registration-documents/project-a/pending-rfp.pdf';
+    h.db.documents.set('orgs/tenant-a/project_requests/change-project-a', {
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      payload: { rfpRequestEvidenceDocument: { path: rfpPath, name: 'pending-rfp.pdf' } },
+      proposedSnapshot: { rfpRequestEvidenceDocument: { path: rfpPath, name: 'pending-rfp.pdf' } },
+    });
+    await openedDraft(h);
+
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'rfp_request_evidence',
+    })).resolves.toMatchObject({ buffer: Buffer.from('pending-rfp'), name: 'pending-rfp.pdf' });
+    expect(downloadProjectRegistrationAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a', projectId: 'project-a', path: rfpPath,
+    });
+  });
+
+  it('previews a trusted pending-change document from private draft storage before outbox relocation', async () => {
+    const downloadDraftAttachment = vi.fn(async () => ({
+      buffer: Buffer.from('pending-private-rfp'), contentType: 'application/pdf', size: 19,
+    }));
+    const h = harness({ storageService: {
+      downloadDraftAttachment,
+      downloadProjectRegistrationAttachment: vi.fn(),
+    } });
+    await openedDraft(h);
+    const [draftPath] = [...h.db.documents.keys()].filter((path) => path.includes('/privateEditDrafts/'));
+    const draftId = draftPath.split('/').at(-1);
+    const rfpPath = `orgs/tenant-a/project-registration-drafts/${draftId}/pending-rfp.pdf`;
+    const draft = h.db.documents.get(draftPath);
+    h.db.documents.set(draftPath, {
+      ...draft,
+      payload: {
+        ...draft.payload,
+        proposalDocument: null,
+        rfpRequestEvidenceDocument: { path: rfpPath, name: 'pending-rfp.pdf' },
+      },
+    });
+    h.db.documents.set('orgs/tenant-a/project_requests/change-project-a', {
+      requestKind: 'CHANGE',
+      status: 'PENDING',
+      payload: { rfpRequestEvidenceDocument: { path: rfpPath, name: 'pending-rfp.pdf' } },
+      proposedSnapshot: { rfpRequestEvidenceDocument: { path: rfpPath, name: 'pending-rfp.pdf' } },
+    });
+
+    await expect(h.service.readAttachment({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'rfp_request_evidence',
+    })).resolves.toMatchObject({ buffer: Buffer.from('pending-private-rfp'), name: 'pending-rfp.pdf' });
+    expect(downloadDraftAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a', draftId, path: rfpPath,
+    });
   });
 
   it('temporary save changes only the private draft and rejects stale revisions', async () => {
@@ -246,7 +671,7 @@ describe('project information private drafts', () => {
     await openedDraft(h);
     await h.service.update({
       ...h.base, idempotencyKey: 'save-a', expectedDraftRevision: 0,
-      payload: validPayload({ name: 'Submitted name', browserOnlyField: 'must not persist' }), stepIndex: 4,
+      payload: validV2Payload({ name: 'Submitted name', browserOnlyField: 'must not persist' }), stepIndex: 4,
     });
     const submitInput = {
       ...h.base,
@@ -268,7 +693,15 @@ describe('project information private drafts', () => {
       projectVersion: 4, draftRevision: 2, lease: { state: 'RELEASED', canEdit: false },
       outbox: { id: 'outbox-a', status: 'PENDING' },
     });
-    expect(project).toMatchObject({ name: 'Project A', version: 4, executiveReviewStatus: 'PENDING' });
+    expect(project).toMatchObject({
+      name: 'Project A',
+      version: 4,
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+      executiveReviewComment: null,
+    });
     expect(request).toMatchObject({
       requestKind: 'CHANGE', status: 'PENDING', baseProjectVersion: 3,
       targetProjectVersion: 4, requestVersion: 1, submittedOutboxId: 'outbox-a',
@@ -301,7 +734,7 @@ describe('project information private drafts', () => {
       ...h.base,
       idempotencyKey: 'management-pending-save',
       expectedDraftRevision: 0,
-      payload: validPayload({ name: 'Must not reopen review' }),
+      payload: validV2Payload({ name: 'Must not reopen review' }),
     });
 
     await expect(h.service.submit({
@@ -349,7 +782,7 @@ describe('project information private drafts', () => {
       ...h.base,
       idempotencyKey: 'management-reject-save',
       expectedDraftRevision: 0,
-      payload: validPayload({ name: 'Management resubmission' }),
+      payload: validV2Payload({ name: 'Management resubmission' }),
     });
     await h.service.submit({
       ...h.base,
@@ -410,7 +843,7 @@ describe('project information private drafts', () => {
       ...h.base,
       idempotencyKey: 'checkout-save',
       expectedDraftRevision: 3,
-      payload: validPayload({
+      payload: validV2Payload({
         status: 'COMPLETED',
         checkout: {
           finalPaymentReceived: true,
@@ -456,7 +889,7 @@ describe('project information private drafts', () => {
       ...h.base,
       idempotencyKey: 'checkout-invalid-save',
       expectedDraftRevision: 0,
-      payload: validPayload({
+      payload: validV2Payload({
         status: 'COMPLETED',
         checkout: {
           finalPaymentReceived: true,
@@ -473,6 +906,174 @@ describe('project information private drafts', () => {
     await expect(h.service.submit({
       ...h.base,
       idempotencyKey: 'checkout-invalid-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
+  });
+
+  it('rejects a forged completion-evidence path instead of silently deleting the canonical PDF', async () => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    const canonicalPerformanceCertificate = {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/performance-certificate.pdf',
+      name: 'performance-certificate.pdf',
+      contentType: 'application/pdf',
+    };
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      ...validV2Payload({
+        proposalDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+          name: 'proposal.pdf',
+          contentType: 'application/pdf',
+        },
+        rfpRequestEvidenceDocument: null,
+        performanceCertificateDocument: canonicalPerformanceCertificate,
+      }),
+    });
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'forged-checkout-save',
+      expectedDraftRevision: 0,
+      payload: validV2Payload({
+        proposalDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+          name: 'proposal.pdf',
+          contentType: 'application/pdf',
+        },
+        rfpRequestEvidenceDocument: null,
+        status: 'COMPLETED',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: true,
+          taxInvoiceEvidenceConfirmed: false,
+          finalSettlementReportConfirmed: false,
+          usbEvidenceSubmitted: false,
+          evidenceDeletedAfterUsb: false,
+        },
+        performanceCertificateDocument: {
+          path: 'orgs/other-tenant/project-registration-documents/other/forged-performance.pdf',
+          name: 'forged-performance.pdf',
+          contentType: 'application/pdf',
+        },
+      }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'forged-checkout-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.get(projectPath).performanceCertificateDocument)
+      .toEqual(canonicalPerformanceCertificate);
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
+  });
+
+  it('rejects a legacy-v1 project information submission instead of bypassing the seven-document contract', async () => {
+    const h = harness();
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'legacy-v1-save',
+      expectedDraftRevision: 0,
+      payload: validPayload({ registrationRequirementsVersion: 1 }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'legacy-v1-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
+  });
+
+  it('rejects explicit removal of a completion PDF while its confirmation remains checked', async () => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    const canonicalPerformanceCertificate = {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/performance-certificate.pdf',
+      name: 'performance-certificate.pdf',
+      contentType: 'application/pdf',
+    };
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      ...validV2Payload({
+        proposalDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+        },
+        rfpRequestEvidenceDocument: null,
+        performanceCertificateDocument: canonicalPerformanceCertificate,
+      }),
+    });
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'removed-checkout-save',
+      expectedDraftRevision: 0,
+      payload: validV2Payload({
+        proposalDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+        },
+        rfpRequestEvidenceDocument: null,
+        status: 'COMPLETED',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: true,
+          taxInvoiceEvidenceConfirmed: false,
+          finalSettlementReportConfirmed: false,
+          usbEvidenceSubmitted: false,
+          evidenceDeletedAfterUsb: false,
+        },
+        performanceCertificateDocument: null,
+      }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'removed-checkout-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.get(projectPath).performanceCertificateDocument)
+      .toEqual(canonicalPerformanceCertificate);
+  });
+
+  it('requires checkout fields when editing an already-completed project even if status is omitted', async () => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      status: 'COMPLETED',
+      checkout: {
+        finalPaymentReceived: true,
+        bankBalanceZero: true,
+        performanceCertificateReceived: false,
+        taxInvoiceEvidenceConfirmed: false,
+        finalSettlementReportConfirmed: false,
+        usbEvidenceSubmitted: false,
+        evidenceDeletedAfterUsb: false,
+      },
+    });
+    await openedDraft(h);
+    const payload = validV2Payload({ name: 'Completed project rename' });
+    delete payload.status;
+    delete payload.checkout;
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'completed-omitted-checkout-save',
+      expectedDraftRevision: 0,
+      payload,
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'completed-omitted-checkout-submit',
       expectedDraftRevision: 1,
       expectedVersion: 3,
     })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
@@ -541,6 +1142,367 @@ describe('project information private drafts', () => {
     }));
     expect(replaced.body.draft.attachmentRefs).toHaveLength(1);
     expect(replaced.body.draft.attachmentRefs[0].name).toBe('replacement.pdf');
+    expect(h.db.documents.get('outbox/cleanup-outbox-1')).toMatchObject({
+      eventType: 'draft.attachments.cleanup',
+      entityType: 'project_info_draft',
+      payload: {
+        draftId: expect.stringMatching(/^v1_/),
+        paths: [uploaded.body.attachment.path],
+      },
+    });
+  });
+
+  it('clears canonical contract analysis when a private replacement is uploaded and submitted with null analysis', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      contractAnalysis: { summary: 'canonical contract A analysis' },
+    });
+    await openedDraft(h, 'open-contract-analysis');
+    const replacement = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'upload-contract-b',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract-b.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+
+    expect(replacement.body.draft.payload.contractAnalysis).toBeNull();
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'save-contract-b-failed-analysis',
+      expectedDraftRevision: 1,
+      payload: validV2Payload({
+        contractDocument: { path: replacement.body.attachment.path },
+        contractAnalysis: null,
+      }),
+    });
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'submit-contract-b-failed-analysis',
+      expectedDraftRevision: 2,
+      expectedVersion: 3,
+    });
+
+    const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
+    expect(request.proposedSnapshot.contractDocument).toMatchObject({
+      documentKind: 'contract',
+      path: replacement.body.attachment.path,
+    });
+    expect(request.proposedSnapshot.contractAnalysis).toBeNull();
+    expect(request.payload.contractAnalysis).toBeNull();
+  });
+
+  it('removes a private attachment only with the owning lease fence and advances the draft revision', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    await openedDraft(h);
+    const uploaded = await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: 'remove-upload',
+      expectedDraftRevision: 0,
+      documentKind: 'contract',
+      fileName: 'contract.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'remove-save-path',
+      expectedDraftRevision: 1,
+      payload: validPayload({ contractDocument: { path: uploaded.body.attachment.path } }),
+    });
+
+    await expect(h.service.removeAttachment({
+      ...h.base,
+      fence: h.base.fence + 1,
+      idempotencyKey: 'remove-wrong-fence',
+      expectedDraftRevision: 2,
+      documentKind: 'contract',
+    })).rejects.toMatchObject({ statusCode: 423, code: 'edit_lease_held' });
+    expect(storage.deleteDraftAttachment).not.toHaveBeenCalled();
+    expect(h.db.documents.has('outbox/cleanup-outbox-1')).toBe(false);
+
+    const removed = await h.service.removeAttachment({
+      ...h.base,
+      idempotencyKey: 'remove-contract',
+      expectedDraftRevision: 2,
+      documentKind: 'contract',
+    });
+
+    expect(removed.body.draft).toMatchObject({
+      draftRevision: 3,
+      attachmentRefs: [],
+      payload: { contractDocument: null },
+    });
+    expect(storage.deleteDraftAttachment).toHaveBeenCalledOnce();
+    expect(storage.deleteDraftAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a',
+      draftId: expect.stringMatching(/^v1_/),
+      path: uploaded.body.attachment.path,
+    });
+    expect(h.db.documents.get('outbox/cleanup-outbox-1')).toMatchObject({
+      eventType: 'draft.attachments.cleanup',
+      payload: {
+        draftId: expect.stringMatching(/^v1_/),
+        paths: [uploaded.body.attachment.path],
+      },
+    });
+  });
+
+  it('replaces proposal with RFP evidence in the private edit draft and submitted request', async () => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    await openedDraft(h);
+    const common = {
+      ...h.base,
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    };
+    const proposal = await h.service.addAttachment({
+      ...common,
+      idempotencyKey: 'alternative-proposal-upload',
+      expectedDraftRevision: 0,
+      documentKind: 'proposal',
+      fileName: 'proposal.pdf',
+    });
+    const rfp = await h.service.addAttachment({
+      ...common,
+      idempotencyKey: 'alternative-rfp-upload',
+      expectedDraftRevision: 1,
+      documentKind: 'rfp_request_evidence',
+      fileName: 'rfp.pdf',
+    });
+
+    expect(rfp.body.draft.attachmentRefs.map((item) => item.documentKind))
+      .toEqual(['rfp_request_evidence']);
+    expect(storage.deleteDraftAttachment).toHaveBeenCalledWith({
+      tenantId: 'tenant-a',
+      draftId: expect.stringMatching(/^v1_/),
+      path: proposal.body.attachment.path,
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'alternative-submit',
+      expectedDraftRevision: 2,
+      expectedVersion: 3,
+    });
+
+    expect(h.db.documents.get('outbox/outbox-a').payload.attachmentRefs.map((item) => item.documentKind))
+      .toEqual(['rfp_request_evidence']);
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot)
+      .toMatchObject({
+        proposalDocument: null,
+        rfpRequestEvidenceDocument: { documentKind: 'rfp_request_evidence', name: 'rfp.pdf' },
+      });
+  });
+
+  it.each([
+    {
+      label: 'canonical proposal with private RFP evidence',
+      canonicalField: 'proposalDocument',
+      canonicalKind: 'proposal',
+      replacementField: 'rfpRequestEvidenceDocument',
+      replacementKind: 'rfp_request_evidence',
+    },
+    {
+      label: 'canonical RFP evidence with private proposal',
+      canonicalField: 'rfpRequestEvidenceDocument',
+      canonicalKind: 'rfp_request_evidence',
+      replacementField: 'proposalDocument',
+      replacementKind: 'proposal',
+    },
+  ])('submits $label without resurrecting the replaced canonical alternative', async ({
+    canonicalField,
+    canonicalKind,
+    replacementField,
+    replacementKind,
+  }) => {
+    const storage = {
+      uploadDraftAttachment: vi.fn(async (input) => ({
+        path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
+        name: input.fileName,
+        size: input.buffer.byteLength,
+        contentType: input.mimeType,
+        uploadedAt: '2026-07-12T00:01:00.000Z',
+      })),
+      deleteDraftAttachment: vi.fn(async () => undefined),
+    };
+    const h = harness({ storageService: storage });
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      ...h.db.documents.get('orgs/tenant-a/projects/project-a'),
+      ...validV2Payload({
+        proposalDocument: null,
+        rfpRequestEvidenceDocument: null,
+        [canonicalField]: {
+          path: `orgs/tenant-a/project-registration-documents/project-a/${canonicalKind}.pdf`,
+          name: `${canonicalKind}.pdf`,
+          contentType: 'application/pdf',
+        },
+      }),
+    });
+    await openedDraft(h);
+    await h.service.addAttachment({
+      ...h.base,
+      idempotencyKey: `canonical-alternative-${replacementKind}`,
+      expectedDraftRevision: 0,
+      documentKind: replacementKind,
+      fileName: `${replacementKind}.pdf`,
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: `canonical-alternative-submit-${replacementKind}`,
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+
+    const proposed = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot;
+    expect(proposed[canonicalField]).toBeNull();
+    expect(proposed[replacementField]).toMatchObject({ documentKind: replacementKind });
+  });
+
+  it('rejects client-forged document paths when no validated private attachment exists', async () => {
+    const h = harness();
+    h.db.documents.set('orgs/tenant-a/projects/project-a', {
+      ...h.db.documents.get('orgs/tenant-a/projects/project-a'),
+      ...validV2Payload({
+        proposalDocument: {
+          path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+        },
+        rfpRequestEvidenceDocument: null,
+      }),
+    });
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'forged-document-save',
+      expectedDraftRevision: 0,
+      payload: validV2Payload({
+        contractDocument: { path: 'orgs/other-tenant/project-registration-documents/other/contract.pdf' },
+        customerBusinessRegistrationDocument: { path: 'missing-customer.pdf' },
+        quoteDocument: { path: 'missing-quote.pdf' },
+        proposalDocument: null,
+        rfpRequestEvidenceDocument: { path: 'missing-rfp.pdf' },
+      }),
+    });
+
+    await expect(h.service.submit({
+      ...h.base,
+      idempotencyKey: 'forged-document-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'project_registration_invalid' });
+    expect(h.db.documents.has('orgs/tenant-a/project_requests/change-project-a')).toBe(false);
+  });
+
+  it.each([
+    { requestStatus: 'PENDING', projectReviewStatus: 'APPROVED', resubmit: false },
+    { requestStatus: 'REJECTED', projectReviewStatus: 'REVISION_REJECTED', resubmit: true },
+  ])('preserves server-stored replacement documents when reopening a $requestStatus change', async ({
+    requestStatus,
+    projectReviewStatus,
+    resubmit,
+  }) => {
+    const h = harness();
+    const projectPath = 'orgs/tenant-a/projects/project-a';
+    const requestPath = 'orgs/tenant-a/project_requests/change-project-a';
+    const proposedRfp = {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/replacement-rfp.pdf',
+      name: 'replacement-rfp.pdf',
+      contentType: 'application/pdf',
+      visibility: 'PRIVATE',
+    };
+    const canonical = validV2Payload({
+      proposalDocument: {
+        path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf',
+      },
+      rfpRequestEvidenceDocument: null,
+    });
+    const previousPayload = validV2Payload({
+      proposalDocument: null,
+      rfpRequestEvidenceDocument: proposedRfp,
+    });
+    h.db.documents.set(projectPath, {
+      ...h.db.documents.get(projectPath),
+      ...canonical,
+      executiveReviewStatus: projectReviewStatus,
+      managementPlanningReviewStatus: 'AGREED',
+      projectCode: 'AXR-2026-001',
+    });
+    h.db.documents.set(requestPath, {
+      id: 'change-project-a',
+      requestKind: 'CHANGE',
+      status: requestStatus,
+      requestVersion: 1,
+      targetProjectId: 'project-a',
+      targetProjectVersion: 4,
+      payload: previousPayload,
+      proposedSnapshot: previousPayload,
+    });
+
+    const opened = await openedDraft(h);
+    expect(opened.body.draft.payload).toMatchObject({
+      proposalDocument: null,
+      rfpRequestEvidenceDocument: proposedRfp,
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: `stored-replacement-submit-${requestStatus.toLowerCase()}`,
+      expectedDraftRevision: 0,
+      expectedVersion: 3,
+      resubmit,
+      ...(resubmit ? { reviewComment: '문서 보완 완료' } : {}),
+    });
+
+    expect(h.db.documents.get(requestPath).proposedSnapshot).toMatchObject({
+      proposalDocument: null,
+      rfpRequestEvidenceDocument: proposedRfp,
+    });
+    expect(h.db.documents.get(projectPath)).toMatchObject({
+      executiveReviewStatus: 'PENDING',
+      managementPlanningReviewStatus: 'AGREED',
+      projectCode: 'AXR-2026-001',
+    });
   });
 
   it('maps a new original-document kind into the canonical change request field', async () => {
@@ -651,5 +1613,84 @@ describe('project information private drafts', () => {
       buffer: fakePdf,
     })).rejects.toMatchObject({ statusCode: 422, code: 'draft_attachment_invalid' });
     expect(storage.uploadDraftAttachment).not.toHaveBeenCalled();
+  });
+
+  it('serves an owner edit-draft attachment as private no-store bytes', async () => {
+    const service = {
+      readAttachment: vi.fn(async () => ({
+        buffer: Buffer.from('private-edit-pdf'), contentType: 'application/pdf', size: 16,
+        name: 'contract\"\r\nX-Test: injected.pdf',
+      })),
+    };
+    const app = express();
+    app.use((req, _res, next) => {
+      req.context = {
+        tenantId: 'tenant-a', actorId: 'actor-a', actorRole: 'pm', actorName: 'Actor A', requestId: 'request-a',
+      };
+      next();
+    });
+    mountProjectInfoDraftRoutes(app, { enabled: true, projectInfoDraftService: service });
+    app.use((error, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    const response = await request(app)
+      .get('/api/v1/project-info-drafts/project-a/attachments/contract')
+      .expect(200);
+
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['content-disposition']).toContain('%22%0D%0AX-Test%3A%20injected.pdf');
+    expect(response.headers['x-test']).toBeUndefined();
+    expect(response.body).toEqual(Buffer.from('private-edit-pdf'));
+    expect(service.readAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 'tenant-a', actorId: 'actor-a', projectId: 'project-a', documentKind: 'contract',
+    }));
+  });
+
+  it('passes the typed attachment kind, revision, and lease fence to DELETE', async () => {
+    const service = {
+      removeAttachment: vi.fn(async () => ({
+        status: 200,
+        replayed: false,
+        body: { draft: { projectId: 'project-a', draftRevision: 3 } },
+      })),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.context = {
+        tenantId: 'tenant-a', actorId: 'actor-a', actorRole: 'pm', actorName: 'Actor A',
+        requestId: 'request-a', idempotencyKey: req.header('idempotency-key') || undefined,
+      };
+      next();
+    });
+    mountProjectInfoDraftRoutes(app, { enabled: true, projectInfoDraftService: service });
+    app.use((error, _req, res, _next) => {
+      res.status(error.statusCode || 500).json({ error: error.code || 'internal_error' });
+    });
+
+    await request(app)
+      .delete('/api/v1/project-info-drafts/project-a/attachments/tax_invoice')
+      .set({
+        'idempotency-key': 'info-remove-route',
+        'x-edit-session-id': 'session-a',
+        'x-edit-lease-id': 'lease-a',
+        'x-edit-fence': '4',
+      })
+      .send({ expectedDraftRevision: 2 })
+      .expect(200);
+
+    expect(service.removeAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 'tenant-a',
+      actorId: 'actor-a',
+      projectId: 'project-a',
+      sessionId: 'session-a',
+      leaseId: 'lease-a',
+      fence: 4,
+      expectedDraftRevision: 2,
+      documentKind: 'tax_invoice',
+    }));
   });
 });

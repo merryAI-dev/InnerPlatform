@@ -7,6 +7,7 @@ const source = readFileSync(resolve(import.meta.dirname, 'ProjectDetailPage.tsx'
 describe('ProjectDetailPage shell contract', () => {
   it('shows a pending PM change request without replacing the approved project master values', () => {
     expect(source).toContain('usePendingProjectChangeRequests');
+    expect(source).toContain('usePendingProjectChangeRequests(pendingProjectIds)');
     expect(source).toContain('pendingProjectChangeRequest');
     expect(source).toContain('수정 중');
     expect(source).toContain('describeProjectRequestVersion');

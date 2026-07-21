@@ -18,6 +18,7 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain("label: '사업비 입력(주간)'");
     expect(portalLayoutSource).toContain("label: '인건비/공지'");
     expect(portalLayoutSource).toContain("label: '프로젝트 수정'");
+    expect(portalLayoutSource).toContain("label: '프로젝트 등록/승인'");
     expect(portalLayoutSource.indexOf("label: '명함 DB'")).toBeGreaterThan(
       portalLayoutSource.indexOf("label: '프로젝트 등록 요청'"),
     );
@@ -74,6 +75,8 @@ describe('PortalLayout shell actions', () => {
 
   it('keeps portal navigation explicit without onboarding or project-select redirect effects', () => {
     expect(portalLayoutSource).toContain('isPortalStandaloneEntryPath');
+    expect(portalLayoutSource).toContain('isProjectRegistrationPath');
+    expect(portalLayoutSource).toContain('&& !isProjectRegistrationPath');
     expect(portalLayoutSource).toContain('blockedPortalAccess');
     expect(portalLayoutSource).toContain("navigate('/portal/project-select')");
     expect(portalLayoutSource).not.toContain("navigate('/portal/weekly-expenses')");
@@ -81,6 +84,13 @@ describe('PortalLayout shell actions', () => {
     expect(portalLayoutSource).not.toContain("navigate('/', { replace: true })");
     expect(portalLayoutSource).not.toContain('shouldForcePortalOnboarding');
     expect(portalLayoutSource).not.toContain('resolvePortalProjectSelectPath(currentPath)');
+  });
+
+  it('keeps project registration inside the global portal shell even before a project is assigned', () => {
+    expect(portalLayoutSource).toContain("location.pathname === '/portal/register-project'");
+    expect(portalLayoutSource).toContain("location.pathname.startsWith('/portal/register-project/')");
+    expect(portalLayoutSource).toContain('!portalUser && !isProjectRegistrationPath');
+    expect(portalLayoutSource).toContain("if (isProjectRegistrationPath) return '프로젝트 등록';");
   });
 
   it('exposes stable portal navigation test ids for release-gate flows', () => {

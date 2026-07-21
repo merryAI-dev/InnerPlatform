@@ -7,6 +7,10 @@ import {
   changeTransactionStateViaBff,
   deepSyncAuthGovernanceUserViaBff,
   fetchAuthGovernanceUsersViaBff,
+  fetchAssignedProjectRequestsViaBff,
+  fetchLatestProjectRequestViaBff,
+  fetchPendingProjectChangeRequestsViaBff,
+  fetchProjectReviewInboxViaBff,
   fetchProjectsViaBff,
   linkProjectEvidenceDriveRootViaBff,
   notifyProjectRequestRegistrationViaBff,
@@ -484,6 +488,112 @@ describe('platform-bff-client', () => {
       timeoutMs: 10000,
     }));
     expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/projects?limit=200&cursor=page-2', expect.any(Object));
+  });
+
+  it('reads only the authenticated reviewer\'s project requests through the scoped BFF inbox', async () => {
+    const client = asMockClient({
+      post: vi.fn(),
+      get: vi.fn(async () => ({
+        data: {
+          items: [{
+            id: 'request-head-a',
+            approvedProjectId: 'project-a',
+            payload: { executiveApproverId: 'head-a' },
+          }],
+          projects: [{ id: 'project-a', name: 'Project A' }],
+        },
+      })),
+      request: vi.fn(),
+    });
+
+    const result = await fetchAssignedProjectRequestsViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'head-a', role: 'pm', idToken: 'token-abc' },
+      client,
+    });
+
+    expect(result).toEqual({
+      requests: [expect.objectContaining({ id: 'request-head-a', approvedProjectId: 'project-a' })],
+      projects: [expect.objectContaining({ id: 'project-a', name: 'Project A' })],
+    });
+    expect(client.get).toHaveBeenCalledWith('/api/v1/project-requests/assigned-to-me', expect.objectContaining({
+      tenantId: 'mysc',
+      timeoutMs: 10000,
+    }));
+  });
+
+  it('reads latest, pending-summary, and privileged review request views through the BFF', async () => {
+    const client = asMockClient({
+      post: vi.fn(async (path: string) => ({
+        data: { items: [{ id: path.includes('pending-changes') ? 'pending-a' : 'review-a', requestKind: 'CHANGE' }] },
+      })),
+      get: vi.fn()
+        .mockResolvedValueOnce({ data: { item: { id: 'latest-a', approvedProjectId: 'project-a' } } }),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'pm-a', role: 'pm', idToken: 'token-abc' };
+
+    await expect(fetchLatestProjectRequestViaBff({
+      tenantId: 'mysc', actor, projectId: 'project-a', client,
+    })).resolves.toEqual(expect.objectContaining({ id: 'latest-a' }));
+    await expect(fetchPendingProjectChangeRequestsViaBff({
+      tenantId: 'mysc', actor, projectIds: ['project-a'], client,
+    })).resolves.toEqual([expect.objectContaining({ id: 'pending-a' })]);
+    await expect(fetchProjectReviewInboxViaBff({
+      tenantId: 'mysc', actor, projectIds: ['project-a'], client,
+    })).resolves.toEqual([expect.objectContaining({ id: 'review-a' })]);
+
+    expect(client.get).toHaveBeenNthCalledWith(1, '/api/v1/projects/project-a/latest-request', expect.objectContaining({ timeoutMs: 10000 }));
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/project-requests/pending-changes', expect.objectContaining({
+      body: { projectIds: ['project-a'] },
+      timeoutMs: 10000,
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/project-requests/review-inbox', expect.objectContaining({
+      body: { projectIds: ['project-a'] },
+      timeoutMs: 10000,
+    }));
+  });
+
+  it('chunks 201 project ids and returns deduplicated requests in stable requested order', async () => {
+    const projectIds = Array.from({ length: 201 }, (_, index) => `project-${index + 1}`);
+    const client = asMockClient({
+      post: vi.fn(async (_path: string, options: { body?: unknown }) => {
+        const batch = (options.body as { projectIds: string[] }).projectIds;
+        return {
+          data: {
+            items: batch.length === 200
+              ? [
+                { id: 'request-b', requestedAt: '2026-07-20T00:00:00.000Z' },
+                { id: 'request-duplicate', requestedAt: '2026-07-19T00:00:00.000Z' },
+              ]
+              : [
+                { id: 'request-a', requestedAt: '2026-07-20T00:00:00.000Z' },
+                { id: 'request-duplicate', requestedAt: '2026-07-19T00:00:00.000Z' },
+              ],
+          },
+        };
+      }),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'reviewer-a', role: 'admin' };
+
+    await expect(fetchProjectReviewInboxViaBff({
+      tenantId: 'mysc', actor, projectIds: [...projectIds, 'project-1', ' '], client,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: 'request-a' }),
+      expect.objectContaining({ id: 'request-b' }),
+      expect.objectContaining({ id: 'request-duplicate' }),
+    ]);
+    await expect(fetchPendingProjectChangeRequestsViaBff({
+      tenantId: 'mysc', actor, projectIds, client,
+    })).resolves.toHaveLength(3);
+
+    expect(client.post).toHaveBeenCalledTimes(4);
+    expect((client.post.mock.calls[0]?.[1]?.body as { projectIds: string[] }).projectIds).toHaveLength(200);
+    expect((client.post.mock.calls[1]?.[1]?.body as { projectIds: string[] }).projectIds).toHaveLength(1);
+    expect((client.post.mock.calls[2]?.[1]?.body as { projectIds: string[] }).projectIds).toHaveLength(200);
+    expect((client.post.mock.calls[3]?.[1]?.body as { projectIds: string[] }).projectIds).toHaveLength(1);
   });
 
   it('calls project trash and restore endpoints', async () => {

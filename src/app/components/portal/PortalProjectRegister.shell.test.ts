@@ -36,6 +36,25 @@ describe('PortalProjectRegister private draft session', () => {
     expect(source).toContain('attachmentDocument(uploaded.attachment)');
   });
 
+  it('analyzes the validated private contract and returns its extracted fields to the editor', () => {
+    expect(source).toContain('extractTextFromPdf(file)');
+    expect(source).toContain('analyzeProjectRequestContractViaBff({');
+    expect(source).toContain("kind === 'contract'");
+    expect(source).toMatch(/return\s*\{\s*document:\s*attachmentDocument\(uploaded\.attachment\),\s*contractAnalysis\s*\}/);
+    expect(source).not.toContain('contractAnalysis: null }');
+  });
+
+  it('loads private attachment blobs through the owner-authorized BFF for review previews', () => {
+    expect(source).toContain('downloadProjectRegistrationDraftAttachmentViaBff');
+    expect(source).toContain('usePrivateDraftDocumentPreviews');
+    expect(source).toContain('enabled: !submitted');
+    expect(source).toContain('signal,');
+    expect(source).toContain('documentPreviewUrls={documentPreviewUrls}');
+    expect(source).toContain('documentPreviewStates={documentPreviewStates}');
+    expect(source).toContain('onLoadDocumentPreview={loadDocumentPreview}');
+    expect(source).not.toContain('Promise.all(attachments');
+  });
+
   it('does not remount the editor for token-only auth refreshes', () => {
     const effect = source.slice(source.indexOf('useEffect(() => {', source.indexOf('export function PortalProjectRegister')));
     expect(effect).toContain('identityKey');
@@ -49,5 +68,15 @@ describe('PortalProjectRegister private draft session', () => {
     expect(source).toContain('const autosave = useMemo(() => ({');
     expect(source).toContain('initialDraft={editorDraft}');
     expect(source).toContain('autosave={autosave}');
+  });
+
+  it('opens legacy private drafts under the current registration-v2 contract', () => {
+    expect(source).toContain('registrationRequirementsVersion: 2');
+    expect(source.indexOf('registrationRequirementsVersion: 2')).toBeGreaterThan(source.indexOf('...(record.payload as Partial<ProjectEditorDraft>)'));
+  });
+
+  it('names the organization-head review destination explicitly', () => {
+    expect(source).toContain('지정 결재자의 조직장 검토 화면');
+    expect(source).not.toContain('관리자 검토 화면');
   });
 });

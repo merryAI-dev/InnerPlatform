@@ -51,6 +51,24 @@ function objectNameWithinPrefix(path, prefix, errorMessage) {
   return { path: normalized, objectName };
 }
 
+export function createDraftAttachmentCleanupOutboxHandler({ draftStorageService } = {}) {
+  return async (event) => {
+    if (typeof draftStorageService?.deleteDraftAttachment !== 'function') {
+      throw new Error('Draft attachment storage service is required');
+    }
+    const draftId = readOptionalText(event?.payload?.draftId);
+    const paths = event?.payload?.paths;
+    if (!draftId || !Array.isArray(paths) || paths.length < 1 || paths.length > 100) {
+      throw new Error('Draft attachment cleanup payload is invalid');
+    }
+    await Promise.all(paths.map((path) => draftStorageService.deleteDraftAttachment({
+      tenantId: event?.tenantId,
+      draftId,
+      path,
+    })));
+  };
+}
+
 export function createProjectRequestContractStorageService(options = {}) {
   const bucketName = options.bucketName || resolveBucketName(options.env || process.env);
   const adminApp = options.adminApp || getOrInitAdminApp({ projectId: options.projectId });
@@ -140,6 +158,22 @@ export function createProjectRequestContractStorageService(options = {}) {
         'draft attachment path is outside its draft prefix',
       );
       await bucket.file(path).delete({ ignoreNotFound: true });
+    },
+
+    async downloadDraftAttachment(input) {
+      const prefix = draftAttachmentPrefix(input?.tenantId, input?.draftId);
+      const { path } = objectNameWithinPrefix(
+        input?.path,
+        prefix,
+        'draft attachment path is outside its draft prefix',
+      );
+      const file = bucket.file(path);
+      const [[buffer], [metadata]] = await Promise.all([file.download(), file.getMetadata()]);
+      return {
+        buffer,
+        contentType: readOptionalText(metadata?.contentType) || 'application/octet-stream',
+        size: Number.parseInt(String(metadata?.size || buffer.byteLength), 10) || buffer.byteLength,
+      };
     },
 
     async relocateDraftAttachments(input) {

@@ -291,6 +291,7 @@ describe('portal standalone entry paths', () => {
     expect(isPortalStandaloneEntryPath('/portal/project-settings')).toBe(false);
     expect(isPortalStandaloneEntryPath('/portal/weekly-expenses')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal/register-project')).toBe(true);
+    expect(isPortalStandaloneEntryPath('/portal/project-approvals')).toBe(true);
     expect(isPortalStandaloneEntryPath('/portal')).toBe(false);
     expect(isPortalStandaloneEntryPath('/portal/budget')).toBe(false);
   });

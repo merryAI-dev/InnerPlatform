@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Loader2 } from 'lucide-react';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '../../data/auth-store';
+import { usePortalStore } from '../../data/portal-store';
 import { useAppStore } from '../../data/store';
 import type { Project, ProjectExecutiveReviewStatus, ProjectRequest } from '../../data/types';
-import { getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
 import {
+  fetchAssignedProjectRequestsViaBff,
+  fetchProjectReviewInboxViaBff,
   isPlatformApiEnabled,
   reviewProjectExecutiveStatusViaBff,
   reviewProjectManagementPlanningStatusViaBff,
 } from '../../lib/platform-bff-client';
 import { downloadProjectAttachmentViaBff, downloadProjectRequestAttachmentViaBff } from '../../lib/project-request-attachment-client';
+import type { ProjectRequestDocumentKind } from '../../platform/project-contract-upload';
 import {
   type MigrationAuditConsoleRecord,
   type MigrationAuditConsoleStatus,
@@ -24,8 +26,8 @@ import {
 } from '../../platform/project-migration-console';
 import { getManagementPlanningReview } from '../../platform/project-management-planning-review';
 import { resolveProjectRequestKind, resolveProjectRequestPayload } from '../../platform/project-change-request';
-import { resolveMigrationReviewContractDocument } from '../../platform/project-migration-review-dossier';
 import { PageHeader } from '../layout/PageHeader';
+import { usePrivateDraftDocumentPreviews } from '../portal/usePrivateDraftDocumentPreviews';
 import { Card, CardContent } from '../ui/card';
 import { MigrationAuditControlBar } from './migration-audit/MigrationAuditControlBar';
 import { MigrationAuditRecordList } from './migration-audit/MigrationAuditRecordList';
@@ -45,10 +47,23 @@ import { Input } from '../ui/input';
 
 type ReviewActionMode = 'approve' | 'reject' | 'discard';
 export type ProjectRegistrationReviewStage = 'executive' | 'managementPlanning';
-type ProjectRequestCollectionName = 'project_requests' | 'projectRequests';
-type ProjectRequestWithSource = ProjectRequest & { __collectionName?: ProjectRequestCollectionName };
+const REVIEW_DOCUMENT_FIELDS = {
+  contract: 'contractDocument',
+  customer_business_registration: 'customerBusinessRegistrationDocument',
+  quote: 'quoteDocument',
+  proposal: 'proposalDocument',
+  rfp_request_evidence: 'rfpRequestEvidenceDocument',
+  proposal_word_original: 'proposalWordOriginalDocument',
+  proposal_ppt_original: 'proposalPptOriginalDocument',
+  presentation_ppt_original: 'presentationPptOriginalDocument',
+} as const satisfies Partial<Record<ProjectRequestDocumentKind, keyof Project>>;
+type ReviewDocumentField = typeof REVIEW_DOCUMENT_FIELDS[keyof typeof REVIEW_DOCUMENT_FIELDS];
 
-const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests'];
+type ReviewDocumentSource = {
+  source: 'project' | 'request';
+  projectId: string;
+  requestId: string;
+};
 
 function getReviewDialogTitle(mode: ReviewActionMode, reviewStage: ProjectRegistrationReviewStage): string {
   if (reviewStage === 'managementPlanning') return mode === 'approve' ? '프로젝트 코드 부여에 합의할까요?' : '프로젝트 코드를 반려할까요?';
@@ -104,18 +119,28 @@ type ProjectMigrationAuditPageProps = {
   embedded?: boolean;
   reviewScope?: 'all' | 'pending';
   reviewStage?: ProjectRegistrationReviewStage;
+  assigneeOnly?: boolean;
 };
 
-export function ProjectMigrationAuditPage({
+type ProjectMigrationAuditPageContentProps = ProjectMigrationAuditPageProps & {
+  projects: Project[];
+  currentUser?: { name?: string; email?: string } | null;
+};
+
+function ProjectMigrationAuditPageContent({
   embedded = false,
   reviewScope = 'all',
   reviewStage = 'executive',
-}: ProjectMigrationAuditPageProps = {}) {
+  assigneeOnly = false,
+  projects,
+  currentUser,
+}: ProjectMigrationAuditPageContentProps) {
   const { user: authUser } = useAuth();
-  const { projects, currentUser } = useAppStore();
-  const { db, isOnline, orgId } = useFirebase();
+  const { orgId } = useFirebase();
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
+  const [assignedProjects, setAssignedProjects] = useState<Project[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
+  const [requestLoadError, setRequestLoadError] = useState('');
   const [cicFilter, setCicFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | MigrationAuditConsoleStatus>('PENDING');
   const [searchQuery, setSearchQuery] = useState('');
@@ -125,50 +150,67 @@ export function ProjectMigrationAuditPage({
   const [reviewComment, setReviewComment] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [acting, setActing] = useState(false);
-  const [secureContractDocument, setSecureContractDocument] = useState({ key: '', url: '', error: '' });
+  const [requestReloadVersion, setRequestReloadVersion] = useState(0);
   const isManagementPlanning = reviewStage === 'managementPlanning';
+  const reviewProjectIds = useMemo(() => projects.map((project) => project.id).filter(Boolean), [projects]);
 
   useEffect(() => {
-    if (!db || !isOnline) {
+    if (!isPlatformApiEnabled() || !authUser?.uid) {
       setRequests([]);
+      setAssignedProjects([]);
       setLoadingRequests(false);
+      setRequestLoadError('프로젝트 결재 서버 연결을 확인하지 못했습니다. 다시 로그인한 뒤 확인해 주세요.');
       return undefined;
     }
-
-    setLoadingRequests(true);
-    const sourceRows = new Map<ProjectRequestCollectionName, ProjectRequestWithSource[]>();
-    const initializedSources = new Set<ProjectRequestCollectionName>();
     let disposed = false;
-    const publish = () => {
-      if (disposed) return;
-      setRequests(Array.from(sourceRows.values()).flat());
-      if (initializedSources.size === PROJECT_REQUEST_COLLECTIONS.length) setLoadingRequests(false);
-    };
-    const unsubscribers = PROJECT_REQUEST_COLLECTIONS.map((collectionName) => onSnapshot(
-      query(collection(db, `${getOrgRootPath(orgId)}/${collectionName}`), orderBy('requestedAt', 'desc')),
-      (snapshot) => {
-        sourceRows.set(collectionName, snapshot.docs.map((docSnap) => ({
-          ...(docSnap.data() as ProjectRequest),
-          id: String((docSnap.data() as ProjectRequest).id || docSnap.id),
-          __collectionName: collectionName,
-        })));
-        initializedSources.add(collectionName);
-        publish();
-      },
-      (error) => {
-        console.error(`[ProjectMigrationAuditPage] ${collectionName} listen error:`, error);
-        sourceRows.set(collectionName, []);
-        initializedSources.add(collectionName);
-        publish();
-      },
-    ));
-    return () => {
-      disposed = true;
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [db, isOnline, orgId]);
+    setLoadingRequests(true);
+    setRequestLoadError('');
+    void (async () => {
+      try {
+        const actor = {
+          uid: authUser.uid,
+          email: authUser.email,
+          role: authUser.role,
+          idToken: authUser.idToken,
+        };
+        if (assigneeOnly) {
+          const assignedInbox = await fetchAssignedProjectRequestsViaBff({ tenantId: orgId, actor });
+          if (!disposed) {
+            setRequests(assignedInbox.requests);
+            setAssignedProjects(assignedInbox.projects);
+          }
+        } else {
+          const nextRequests = await fetchProjectReviewInboxViaBff({
+            tenantId: orgId,
+            actor,
+            projectIds: reviewProjectIds,
+          });
+          if (!disposed) {
+            setRequests(nextRequests);
+            setAssignedProjects([]);
+          }
+        }
+      } catch (error) {
+        console.error('[ProjectMigrationAuditPage] project request fetch error:', error);
+        if (!disposed) {
+          setRequests([]);
+          setAssignedProjects([]);
+          setRequestLoadError('PM 등록 프로젝트와 접수 이력을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        }
+      } finally {
+        if (!disposed) setLoadingRequests(false);
+      }
+    })();
+    return () => { disposed = true; };
+  }, [assigneeOnly, authUser?.email, authUser?.idToken, authUser?.role, authUser?.uid, orgId, requestReloadVersion, reviewProjectIds]);
 
-  const records = useMemo(() => buildMigrationAuditConsoleRecords(projects, requests), [projects, requests]);
+  const recordProjects = useMemo(() => {
+    if (assignedProjects.length === 0) return projects;
+    const projectsById = new Map(projects.map((project) => [project.id, project]));
+    assignedProjects.forEach((project) => projectsById.set(project.id, project));
+    return Array.from(projectsById.values());
+  }, [assignedProjects, projects]);
+  const records = useMemo(() => buildMigrationAuditConsoleRecords(recordProjects, requests), [recordProjects, requests]);
   const stageRecords = useMemo(() => {
     if (isManagementPlanning) return buildManagementPlanningRecords(records);
     return buildExecutiveRecords(records);
@@ -177,58 +219,85 @@ export function ProjectMigrationAuditPage({
     ? stageRecords.filter((record) => record.status === 'PENDING')
     : stageRecords, [reviewScope, stageRecords]);
   const reviewerDepartment = String(authUser?.department || '').trim();
+  const effectiveInboxScope = assigneeOnly ? 'MINE' : inboxScope;
   const inboxRecords = useMemo(() => {
-    if (isManagementPlanning || inboxScope === 'ALL') return scopedRecords;
+    if (isManagementPlanning || effectiveInboxScope === 'ALL') return scopedRecords;
     return scopedRecords.filter((record) => {
       const approverId = resolveProjectRequestPayload(record.request)?.executiveApproverId || record.project.executiveApproverId;
       return Boolean(authUser?.uid && approverId === authUser.uid);
     });
-  }, [authUser?.uid, inboxScope, isManagementPlanning, scopedRecords]);
+  }, [authUser?.uid, effectiveInboxScope, isManagementPlanning, scopedRecords]);
   const summaryRecords = useMemo(() => filterMigrationAuditConsoleRecords(inboxRecords, { cic: cicFilter, status: 'ALL', searchQuery }), [cicFilter, inboxRecords, searchQuery]);
   const filteredRecords = useMemo(() => filterMigrationAuditConsoleRecords(summaryRecords, { cic: cicFilter, status: statusFilter, searchQuery }), [cicFilter, searchQuery, statusFilter, summaryRecords]);
   const summary = useMemo(() => summarizeMigrationAuditConsole(summaryRecords), [summaryRecords]);
   const cicOptions = useMemo(() => collectMigrationAuditCicOptions(inboxRecords), [inboxRecords]);
   const openRecord = useMemo(() => summaryRecords.find((record) => record.id === openRecordId) || null, [openRecordId, summaryRecords]);
-  const contractDocument = openRecord ? resolveMigrationReviewContractDocument(openRecord.project, openRecord.request) : null;
-  const contractDocumentPath = String(contractDocument?.path || '').trim();
-  const contractDownloadUrl = String(contractDocument?.downloadURL || '').trim();
-  const requestContractPath = String(resolveProjectRequestPayload(openRecord?.request)?.contractDocument?.path || '').trim();
-  const requestId = String(openRecord?.request?.id || '').trim();
-  const projectId = String(openRecord?.project.id || '').trim();
-  const contractAttachmentSource = requestId && contractDocumentPath === requestContractPath ? 'request' : projectId && contractDocumentPath ? 'project' : '';
-  const contractAttachmentId = contractAttachmentSource === 'request' ? requestId : projectId;
-  const secureContractDocumentKey = contractAttachmentSource && contractAttachmentId && contractDocumentPath ? `${contractAttachmentSource}:${contractAttachmentId}:${contractDocumentPath}` : '';
-  const secureContractDocumentUrl = secureContractDocument.key === secureContractDocumentKey ? secureContractDocument.url : '';
-  const privateAttachmentError = secureContractDocument.key === secureContractDocumentKey ? secureContractDocument.error : '';
+  const existingProjectCode = String(openRecord?.project.projectCode || '').trim();
+  const reviewDocumentAccess = useMemo(() => {
+    const sources = new Map<ProjectRequestDocumentKind, ReviewDocumentSource>();
+    const attachments: Array<{ documentKind: ProjectRequestDocumentKind; path: string }> = [];
+    if (!openRecord) return { attachments, sources };
+
+    const payload = resolveProjectRequestPayload(openRecord.request);
+    const requestId = String(openRecord.request?.id || '').trim();
+    const projectId = String(openRecord.project.id || '').trim();
+    (Object.entries(REVIEW_DOCUMENT_FIELDS) as Array<[ProjectRequestDocumentKind, ReviewDocumentField]>).forEach(([documentKind, field]) => {
+      const requestDocument = payload?.[field];
+      const projectDocument = openRecord.project[field];
+      const document = requestDocument !== undefined ? requestDocument : projectDocument;
+      const path = String(document?.path || '').trim();
+      const downloadURL = String(document?.downloadURL || '').trim();
+      if (!path || downloadURL) return;
+
+      const requestPath = String(requestDocument?.path || '').trim();
+      const source = requestId && requestPath === path ? 'request' : 'project';
+      if ((source === 'request' && !requestId) || (source === 'project' && !projectId)) return;
+      attachments.push({ documentKind, path });
+      sources.set(documentKind, { source, projectId, requestId });
+    });
+    return { attachments, sources };
+  }, [openRecord]);
+  const loadReviewDocumentPreview = useCallback(async ({
+    documentKind,
+    signal,
+  }: {
+    documentKind: ProjectRequestDocumentKind;
+    signal: AbortSignal;
+  }) => {
+    const source = reviewDocumentAccess.sources.get(documentKind);
+    if (!source || !authUser?.uid) throw new Error('첨부 파일을 불러올 권한 정보를 확인하지 못했습니다.');
+    const actor = { uid: authUser.uid, email: authUser.email, role: authUser.role, idToken: authUser.idToken };
+    if (source.source === 'request') {
+      return downloadProjectRequestAttachmentViaBff({
+        tenantId: orgId,
+        actor,
+        requestId: source.requestId,
+        documentKind,
+        signal,
+      });
+    }
+    return downloadProjectAttachmentViaBff({
+      tenantId: orgId,
+      actor,
+      projectId: source.projectId,
+      documentKind,
+      signal,
+    });
+  }, [authUser?.email, authUser?.idToken, authUser?.role, authUser?.uid, orgId, reviewDocumentAccess]);
+  const {
+    documentPreviewUrls,
+    documentPreviewStates,
+    loadDocumentPreview,
+  } = usePrivateDraftDocumentPreviews({
+    attachments: reviewDocumentAccess.attachments,
+    enabled: Boolean(openRecord && isPlatformApiEnabled() && authUser?.uid),
+    loadAttachment: loadReviewDocumentPreview,
+  });
   const designatedApproverId = resolveProjectRequestPayload(openRecord?.request)?.executiveApproverId || openRecord?.project.executiveApproverId;
   const canExecutiveFinalize = Boolean(authUser?.uid && designatedApproverId === authUser.uid);
   const role = String(authUser?.role || '').trim().toLowerCase();
   const canManagementPlanningFinalize = role === 'admin' || role === 'finance';
   const canFinalize = isManagementPlanning ? canManagementPlanningFinalize : canExecutiveFinalize;
-
-  useEffect(() => {
-    setSecureContractDocument({ key: secureContractDocumentKey, url: '', error: '' });
-    if (!isPlatformApiEnabled() || !authUser?.uid || !contractAttachmentSource || !contractAttachmentId || !contractDocumentPath || contractDownloadUrl) return undefined;
-    let disposed = false;
-    let objectUrl = '';
-    const actor = { uid: authUser.uid, email: authUser.email, role: authUser.role, idToken: authUser.idToken };
-    const download = contractAttachmentSource === 'request'
-      ? downloadProjectRequestAttachmentViaBff({ tenantId: orgId, actor, requestId, documentKind: 'contract' })
-      : downloadProjectAttachmentViaBff({ tenantId: orgId, actor, projectId, documentKind: 'contract' });
-    void download.then(({ blob }) => {
-      if (disposed) return;
-      objectUrl = URL.createObjectURL(blob);
-      setSecureContractDocument({ key: secureContractDocumentKey, url: objectUrl, error: '' });
-    }).catch((error) => {
-      if (disposed) return;
-      console.error('[ProjectMigrationAuditPage] private attachment download failed:', error);
-      setSecureContractDocument({ key: secureContractDocumentKey, url: '', error: '보안 원문을 불러오지 못했습니다. 권한 또는 파일 처리 상태를 확인해 주세요.' });
-    });
-    return () => {
-      disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [authUser?.email, authUser?.idToken, authUser?.role, authUser?.uid, contractAttachmentId, contractAttachmentSource, contractDocumentPath, contractDownloadUrl, orgId, projectId, requestId, secureContractDocumentKey]);
 
   async function handleConfirmAction() {
     if (!openRecord || !actionMode) return;
@@ -269,6 +338,7 @@ export function ProjectMigrationAuditPage({
           },
         });
         toast.success(actionMode === 'approve' ? '프로젝트 코드를 부여하고 합의했습니다.' : '반려 사유를 PM에게 전달했습니다.', { description: openRecord.title });
+        setRequestReloadVersion((version) => version + 1);
         setActionMode(null);
         setReviewComment('');
         setProjectCode('');
@@ -294,6 +364,7 @@ export function ProjectMigrationAuditPage({
         review: { requestId: openRecord.request?.id, reviewStatus: nextExecutiveStatus, reviewComment: trimmedComment || undefined, reviewerName },
       });
       toast.success(actionMode === 'approve' ? '프로젝트를 승인했습니다.' : actionMode === 'reject' ? '수정 요청 후 반려로 처리했습니다.' : '중복·폐기로 처리했습니다.', { description: openRecord.title });
+      setRequestReloadVersion((version) => version + 1);
       setActionMode(null);
       setReviewComment('');
     } catch (error) {
@@ -310,22 +381,33 @@ export function ProjectMigrationAuditPage({
 
   return (
     <div className="space-y-6">
-      {!embedded ? <PageHeader icon={ClipboardCheck} iconGradient={isManagementPlanning ? 'linear-gradient(135deg, #0f2f57 0%, #174a7c 100%)' : 'linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)'} title={pageTitle} description={pageDescription} badge={isManagementPlanning ? '경영기획실 합의' : '대표 검토'} /> : null}
-      {!db || !isOnline ? <Card><CardContent className="p-4 text-[12px] text-muted-foreground">Firebase 연결이 없어서 PM 등록 프로젝트와 접수 이력을 읽지 못했습니다. Firestore 연결 후 다시 확인해 주세요.</CardContent></Card> : null}
-      <MigrationAuditControlBar cicOptions={cicOptions} cicFilter={cicFilter} onCicFilterChange={setCicFilter} inboxScope={inboxScope} onInboxScopeChange={setInboxScope} reviewerDepartment={reviewerDepartment} statusFilter={statusFilter} onStatusFilterChange={setStatusFilter} searchQuery={searchQuery} onSearchQueryChange={setSearchQuery} summary={summary} reviewStage={reviewStage} />
+      {!embedded ? <PageHeader icon={ClipboardCheck} iconGradient={isManagementPlanning ? 'linear-gradient(135deg, #0f2f57 0%, #174a7c 100%)' : 'linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%)'} title={pageTitle} description={pageDescription} badge={isManagementPlanning ? '경영기획실 합의' : '조직장 결재'} /> : null}
+      {requestLoadError ? <Card><CardContent className="p-4 text-[12px] text-muted-foreground">{requestLoadError}</CardContent></Card> : null}
+      <MigrationAuditControlBar cicOptions={cicOptions} cicFilter={cicFilter} onCicFilterChange={setCicFilter} inboxScope={effectiveInboxScope} onInboxScopeChange={setInboxScope} reviewerDepartment={reviewerDepartment} statusFilter={statusFilter} onStatusFilterChange={setStatusFilter} searchQuery={searchQuery} onSearchQueryChange={setSearchQuery} summary={summary} reviewStage={reviewStage} assigneeOnly={assigneeOnly} />
       {loadingRequests ? <Card><CardContent className="flex items-center justify-center gap-2 py-16 text-[12px] text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />PM 등록 프로젝트와 접수 이력을 불러오는 중입니다…</CardContent></Card> : <MigrationAuditRecordList records={filteredRecords} onOpen={(record) => setOpenRecordId(record.id)} reviewStage={reviewStage} />}
-      <MigrationAuditDocumentDialog open={!!openRecord} record={openRecord} acting={acting} canFinalize={canFinalize} contractDocumentDownloadURL={secureContractDocumentUrl || contractDownloadUrl} contractDocumentError={privateAttachmentError} reviewStage={reviewStage} onOpenChange={(open) => { if (!open) setOpenRecordId(null); }} onApprove={() => { setActionMode('approve'); setReviewComment(''); setProjectCode(''); }} onReject={() => { setActionMode('reject'); setReviewComment(isManagementPlanning ? '' : (openRecord?.project.executiveReviewComment || '')); setProjectCode(''); }} />
+      <MigrationAuditDocumentDialog open={!!openRecord} record={openRecord} acting={acting} canFinalize={canFinalize} documentPreviewUrls={documentPreviewUrls} documentPreviewStates={documentPreviewStates} reviewStage={reviewStage} onLoadDocumentPreview={loadDocumentPreview} onOpenChange={(open) => { if (!open) setOpenRecordId(null); }} onApprove={() => { setActionMode('approve'); setReviewComment(''); setProjectCode(String(openRecord?.project.projectCode || '').trim()); }} onReject={() => { setActionMode('reject'); setReviewComment(isManagementPlanning ? '' : (openRecord?.project.executiveReviewComment || '')); setProjectCode(''); }} />
       <AlertDialog open={!!actionMode} onOpenChange={(open) => { if (!open) { setActionMode(null); setReviewComment(''); setProjectCode(''); } }}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>{getReviewDialogTitle(actionMode || 'approve', reviewStage)}</AlertDialogTitle><AlertDialogDescription>{getProjectRequestReviewDescription(actionMode || 'approve', openRecord?.request, reviewStage)}</AlertDialogDescription></AlertDialogHeader>
           <div className="space-y-2">
-            {isManagementPlanning && actionMode === 'approve' ? <div className="space-y-2"><label htmlFor="management-planning-project-code" className="text-[12px] font-medium text-slate-700">프로젝트 코드</label><Input id="management-planning-project-code" value={projectCode} onChange={(event) => setProjectCode(event.target.value)} placeholder="예: MYSC-2026-001" className="rounded-none border-slate-400" autoComplete="off" /><p className="text-[11px] leading-5 text-slate-500">합의 저장과 함께 프로젝트 원장에 저장되며, 이후 운영 화면의 기준 코드로 사용됩니다.</p></div> : null}
+            {isManagementPlanning && actionMode === 'approve' ? <div className="space-y-2"><label htmlFor="management-planning-project-code" className="text-[12px] font-medium text-slate-700">프로젝트 코드</label><Input id="management-planning-project-code" value={projectCode} onChange={(event) => setProjectCode(event.target.value)} readOnly={Boolean(existingProjectCode)} placeholder="예: MYSC-2026-001" className="rounded-none border-slate-400" autoComplete="off" /><p className="text-[11px] leading-5 text-slate-500">{existingProjectCode ? '이미 부여된 프로젝트 코드는 변경할 수 없습니다.' : '합의 저장과 함께 프로젝트 원장에 저장되며, 이후 운영 화면의 기준 코드로 사용됩니다.'}</p></div> : null}
             <p className="text-[12px] font-medium text-slate-700">{actionMode === 'approve' ? (isManagementPlanning ? '합의 메모' : '승인 메모') : actionMode === 'reject' ? '반려 사유' : '폐기 사유'}</p>
-            <Textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} placeholder={actionMode === 'approve' ? (isManagementPlanning ? '합의 판단 근거를 남길 수 있습니다.' : '승인 판단 근거를 남길 수 있습니다.') : 'PM이 보완 내용을 이해할 수 있도록 반려 사유를 남겨 주세요.'} className="min-h-[120px]" />
+            <Textarea value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} maxLength={2000} placeholder={actionMode === 'approve' ? (isManagementPlanning ? '합의 판단 근거를 남길 수 있습니다.' : '승인 판단 근거를 남길 수 있습니다.') : 'PM이 보완 내용을 이해할 수 있도록 반려 사유를 남겨 주세요.'} className="min-h-[120px]" />
+            <p className="text-right text-[10px] text-slate-500">{reviewComment.length.toLocaleString()}/2,000자</p>
           </div>
           <AlertDialogFooter><AlertDialogCancel disabled={acting}>취소</AlertDialogCancel><AlertDialogAction onClick={(event) => { event.preventDefault(); void handleConfirmAction(); }} disabled={acting || (isManagementPlanning && actionMode === 'approve' && !projectCode.trim()) || (actionMode !== 'approve' && !reviewComment.trim())}>{acting ? '저장 중...' : actionMode === 'approve' ? (isManagementPlanning ? '합의 및 코드 저장' : '승인 저장') : actionMode === 'reject' ? '반려 저장' : '폐기 저장'}</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
   );
+}
+
+export function ProjectMigrationAuditPage(props: ProjectMigrationAuditPageProps = {}) {
+  const { projects, currentUser } = useAppStore();
+  return <ProjectMigrationAuditPageContent {...props} projects={projects} currentUser={currentUser} />;
+}
+
+export function ProjectAssigneeApprovalPage() {
+  const { projects, portalUser } = usePortalStore();
+  return <ProjectMigrationAuditPageContent assigneeOnly projects={projects} currentUser={portalUser} />;
 }

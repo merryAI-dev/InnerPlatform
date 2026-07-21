@@ -107,4 +107,14 @@ describe('project-contract-upload', () => {
     expect(resolveProjectDocumentMimeType('proposal_word_original', { name: 'proposal.docx', type: '' } as File))
       .toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   });
+
+  it.each([
+    ['contract', 'contract.pdf', 'application/pdf'],
+    ['proposal_word_original', 'proposal.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['proposal_ppt_original', 'proposal.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    ['rfp_request_evidence', 'request.eml', 'message/rfc822'],
+    ['rfp_request_evidence', 'request.msg', 'application/vnd.ms-outlook'],
+  ] as const)('canonicalizes generic browser MIME for %s', (kind, name, expected) => {
+    expect(resolveProjectDocumentMimeType(kind, { name, type: 'application/octet-stream' } as File)).toBe(expected);
+  });
 });

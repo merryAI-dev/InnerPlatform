@@ -265,9 +265,16 @@ function buildProjectExecutiveReviewSlackPayload({ project, projectRequest, revi
 }
 
 function assertProjectRequestMatchesProject(request, projectId) {
-  const requestProjectId = readOptionalText(request?.approvedProjectId);
   const normalizedProjectId = readOptionalText(projectId);
-  if (requestProjectId && normalizedProjectId && requestProjectId !== normalizedProjectId) {
+  const requestProjectIds = [request?.approvedProjectId, request?.targetProjectId]
+    .map(readOptionalText)
+    .filter(Boolean);
+  if (
+    !normalizedProjectId
+    || requestProjectIds.length === 0
+    || requestProjectIds.some((requestProjectId) => requestProjectId !== normalizedProjectId)
+  ) {
+    const requestProjectId = requestProjectIds.join(', ') || '(missing)';
     throw createHttpError(
       409,
       `Project request does not belong to project: ${requestProjectId} != ${normalizedProjectId}`,
@@ -466,6 +473,205 @@ async function readProjectAttachmentMember({ db, tenantId, actorId }) {
   return member;
 }
 
+function hasProjectRequestAccess({ actorId, member, projectId, project }) {
+  const profile = member?.portalProfile && typeof member.portalProfile === 'object'
+    ? member.portalProfile
+    : {};
+  const assignedProjectIds = new Set([
+    member?.projectId,
+    ...(Array.isArray(member?.projectIds) ? member.projectIds : []),
+    profile.projectId,
+    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+  ].map(readOptionalText).filter(Boolean));
+  return ['admin', 'finance'].includes(normalizeRole(member?.role))
+    || assignedProjectIds.has(readOptionalText(projectId))
+    || [
+      project?.createdBy,
+      project?.registeredById,
+      project?.managerId,
+      project?.executiveApproverId,
+    ].map(readOptionalText).includes(readOptionalText(actorId));
+}
+
+function sortProjectRequests(requests) {
+  return requests.sort((left, right) => (
+    String(right.requestedAt || '').localeCompare(String(left.requestedAt || ''))
+    || String(left.id).localeCompare(String(right.id))
+  ));
+}
+
+const PROJECT_REQUEST_QUERY_LIMIT = 500;
+
+function getBoundedProjectRequestSnapshot(query) {
+  return query.limit(PROJECT_REQUEST_QUERY_LIMIT).get();
+}
+
+function parseProjectRequestQueryProjectIds(value) {
+  const projectIds = Array.isArray(value)
+    ? Array.from(new Set(value.map(readOptionalText).filter(Boolean)))
+    : [];
+  if (projectIds.length > 200 || projectIds.some((projectId) => projectId.includes('/'))) {
+    throw createHttpError(400, 'Project request query is invalid', 'project_request_query_invalid');
+  }
+  return projectIds;
+}
+
+async function preferCanonicalProjectRequests({ db, tenantId, canonicalRequests, legacyRequests }) {
+  const unprobedLegacyIds = Array.from(legacyRequests.keys()).filter((id) => !canonicalRequests.has(id));
+  const canonicalProbes = await Promise.all(unprobedLegacyIds.map(async (id) => {
+    const snap = await db.doc(`orgs/${tenantId}/project_requests/${id}`).get();
+    return snap.exists ? [id, { ...(snap.data() || {}), id }] : null;
+  }));
+  canonicalProbes.forEach((entry) => {
+    if (entry) canonicalRequests.set(entry[0], entry[1]);
+  });
+  return sortProjectRequests(Array.from(new Set([
+    ...canonicalRequests.keys(),
+    ...legacyRequests.keys(),
+  ])).map((id) => canonicalRequests.get(id) || legacyRequests.get(id)));
+}
+
+async function queryProjectRequestsByProjectIds({ db, tenantId, projectIds }) {
+  const normalizedProjectIds = Array.from(new Set((Array.isArray(projectIds) ? projectIds : [])
+    .map(readOptionalText)
+    .filter((projectId) => projectId && !projectId.includes('/'))));
+  if (!normalizedProjectIds.length) return [];
+  const projectIdChunks = [];
+  for (let index = 0; index < normalizedProjectIds.length; index += 30) {
+    projectIdChunks.push(normalizedProjectIds.slice(index, index + 30));
+  }
+  const queryCollection = async (collectionName) => {
+    const collectionRef = db.collection(`orgs/${tenantId}/${collectionName}`);
+    const snapshots = await Promise.all(projectIdChunks.flatMap((projectIdChunk) => [
+      getBoundedProjectRequestSnapshot(collectionRef.where('approvedProjectId', 'in', projectIdChunk)),
+      getBoundedProjectRequestSnapshot(collectionRef.where('targetProjectId', 'in', projectIdChunk)),
+    ]));
+    const rows = new Map();
+    snapshots.forEach((snapshot) => {
+      snapshot.docs.forEach((doc) => rows.set(doc.id, { ...(doc.data() || {}), id: doc.id }));
+    });
+    return rows;
+  };
+  const [canonicalRequests, legacyRequests] = await Promise.all([
+    queryCollection('project_requests'),
+    queryCollection('projectRequests'),
+  ]);
+  const requests = await preferCanonicalProjectRequests({ db, tenantId, canonicalRequests, legacyRequests });
+  const requestedProjectIds = new Set(normalizedProjectIds);
+  return requests.filter((request) => [request.approvedProjectId, request.targetProjectId]
+    .map(readOptionalText)
+    .some((projectId) => requestedProjectIds.has(projectId)));
+}
+
+async function readPendingProjectChangeRequests({ db, tenantId, actorId, projectIds }) {
+  const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+  if (!['admin', 'finance'].includes(normalizeRole(member?.role))) {
+    const projectSnapshots = await Promise.all(projectIds.map((projectId) => (
+      db.doc(`orgs/${tenantId}/projects/${projectId}`).get()
+    )));
+    if (projectSnapshots.some((snapshot, index) => (
+      !snapshot.exists
+      || !hasProjectRequestAccess({
+        actorId,
+        member,
+        projectId: projectIds[index],
+        project: snapshot.data() || {},
+      })
+    ))) {
+      throw createHttpError(403, 'Project request access denied', 'forbidden');
+    }
+  }
+  const requests = await queryProjectRequestsByProjectIds({ db, tenantId, projectIds });
+  return requests
+    .filter((request) => readOptionalText(request.requestKind) === 'CHANGE'
+      && readOptionalText(request.status) === 'PENDING')
+    .map((request) => ({
+      id: request.id,
+      requestKind: 'CHANGE',
+      targetProjectId: readOptionalText(request.targetProjectId) || null,
+      approvedProjectId: readOptionalText(request.approvedProjectId) || null,
+      status: 'PENDING',
+      requestedAt: readOptionalText(request.requestedAt) || null,
+      baseProjectVersion: Number.isInteger(request.baseProjectVersion) ? request.baseProjectVersion : null,
+      targetProjectVersion: Number.isInteger(request.targetProjectVersion) ? request.targetProjectVersion : null,
+    }));
+}
+
+async function readAssignedProjectRequests({ db, tenantId, actorId }) {
+  await readProjectAttachmentMember({ db, tenantId, actorId });
+  const normalizedActorId = readOptionalText(actorId);
+  const assignedProjects = await db.collection(`orgs/${tenantId}/projects`)
+    .where('executiveApproverId', '==', normalizedActorId)
+    .get();
+  const assignedProjectIds = new Set(assignedProjects.docs.map((doc) => doc.id));
+  const projectIdChunks = [];
+  const projectIds = Array.from(assignedProjectIds);
+  for (let index = 0; index < projectIds.length; index += 30) {
+    projectIdChunks.push(projectIds.slice(index, index + 30));
+  }
+
+  const queryCollection = async (collectionName) => {
+    const collectionRef = db.collection(`orgs/${tenantId}/${collectionName}`);
+    const queries = [
+      collectionRef.where('payload.executiveApproverId', '==', normalizedActorId),
+      collectionRef.where('proposedSnapshot.executiveApproverId', '==', normalizedActorId),
+      ...projectIdChunks.flatMap((projectIdChunk) => [
+        collectionRef.where('approvedProjectId', 'in', projectIdChunk),
+        collectionRef.where('targetProjectId', 'in', projectIdChunk),
+      ]),
+    ];
+    const snapshots = await Promise.all(queries.map(getBoundedProjectRequestSnapshot));
+    const rows = new Map();
+    snapshots.forEach((snapshot) => {
+      snapshot.docs.forEach((doc) => rows.set(doc.id, { ...(doc.data() || {}), id: doc.id }));
+    });
+    return rows;
+  };
+
+  const [canonicalRequests, legacyRequests] = await Promise.all([
+    queryCollection('project_requests'),
+    queryCollection('projectRequests'),
+  ]);
+  const projectRequests = await preferCanonicalProjectRequests({
+    db,
+    tenantId,
+    canonicalRequests,
+    legacyRequests,
+  });
+  const assigned = projectRequests.map((projectRequest) => {
+    const payload = resolveProjectRequestPayloadForReview(projectRequest);
+    const requestApproverId = readOptionalText(payload?.executiveApproverId);
+    if (requestApproverId) return requestApproverId === normalizedActorId ? projectRequest : null;
+    const projectId = readOptionalText(projectRequest.targetProjectId || projectRequest.approvedProjectId);
+    return assignedProjectIds.has(projectId) ? projectRequest : null;
+  });
+
+  const items = sortProjectRequests(assigned
+    .filter(Boolean)
+    .filter((projectRequest) => projectRequestAttachmentsArePublished(projectRequest, tenantId)));
+  const projects = new Map(assignedProjects.docs.map((doc) => [
+    doc.id,
+    { id: doc.id, ...(doc.data() || {}) },
+  ]));
+  const missingProjectIds = Array.from(new Set(items
+    .map((item) => readOptionalText(item.targetProjectId || item.approvedProjectId))
+    .filter((projectId) => projectId && !projects.has(projectId))));
+  const missingProjectSnapshots = await Promise.all(missingProjectIds.map((projectId) => (
+    db.doc(`orgs/${tenantId}/projects/${projectId}`).get()
+  )));
+  missingProjectSnapshots.forEach((snapshot, index) => {
+    if (snapshot.exists) {
+      const projectId = missingProjectIds[index];
+      projects.set(projectId, { id: projectId, ...(snapshot.data() || {}) });
+    }
+  });
+
+  return {
+    items,
+    projects: Array.from(projects.values()).sort((left, right) => String(left.id).localeCompare(String(right.id))),
+  };
+}
+
 function sendPrivateProjectAttachment(res, downloaded, attachment, objectName) {
   const buffer = Buffer.isBuffer(downloaded?.buffer)
     ? downloaded.buffer
@@ -493,6 +699,14 @@ const PRIVATE_DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
 const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
 const REGISTRATION_PAYMENT_FIELDS = ['contract', 'interim', 'final'];
 const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const REGISTRATION_SETTLEMENT_TYPES = new Set(['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5', 'NONE']);
+const REGISTRATION_SETTLEMENT_BASES = new Set([
+  'SUPPLY_AMOUNT', '공급가액', 'SUPPLY_PRICE', '공급대가', 'OTHER', '기타', 'NONE',
+]);
+const REGISTRATION_V2_SETTLEMENT_BASES = new Set([
+  'SUPPLY_AMOUNT', '공급가액', 'SUPPLY_PRICE', '공급대가', 'NONE',
+]);
+const REGISTRATION_ACCOUNT_TYPES = new Set(['DEDICATED', 'OPERATING', 'NONE', 'OTHER']);
 const SETTLEMENT_SYSTEM_CODES = new Set([
   'E_NARA_DOUM', 'IRIS', 'RCMS', 'EZBARO', 'E_HIJO', 'EDUFINE',
   'HAPPYEUM', 'AGRIX', 'BOTAEM_E', 'SMTECH', 'KOCCA_PMS', 'NIPA',
@@ -580,7 +794,6 @@ function assertRegistrationFinancials(payload, type) {
 }
 
 function assertRegistrationTeamMembers(value) {
-  if (value === undefined || value === null) return;
   if (!Array.isArray(value)) invalidRegistration('Project registration teamMembersDetailed is invalid');
   value.forEach((member, index) => {
     if (!member || typeof member !== 'object' || Array.isArray(member)) {
@@ -616,6 +829,31 @@ function assertRegistrationTeamMembers(value) {
       invalidRegistration(`Project registration teamMembersDetailed.${index} labor allocation period is invalid`);
     }
   });
+  if (!value.some((member) => (
+    readOptionalText(member?.role) === '운영매니저' && member?.isDocumentOnly === false
+  ))) {
+    const hasDocumentOnlyOperatingManager = value.some((member) => (
+      readOptionalText(member?.role) === '운영매니저' && member?.isDocumentOnly === true
+    ));
+    invalidRegistration(hasDocumentOnlyOperatingManager
+      ? 'Project registration requires at least one actual operating manager'
+      : 'Project registration requires at least one operating manager');
+  }
+  if (!value.some((member) => (
+    readOptionalText(member?.role) === '사업 최종 책임자' && member?.isDocumentOnly === false
+  ))) {
+    invalidRegistration('Project registration requires an actual project final responsible member');
+  }
+  const invalidSettlementSupport = value.some((member) => {
+    if (readOptionalText(member?.role) !== '정산지원') return false;
+    const memberName = readOptionalText(member?.memberName);
+    const memberNickname = readOptionalText(member?.memberNickname);
+    const allowed = ['송성미', '최지윤'].includes(memberName) || ['도담', '써니'].includes(memberNickname);
+    return member?.isDocumentOnly !== false || !allowed;
+  });
+  if (invalidSettlementSupport) {
+    invalidRegistration('Project registration settlement support must be 도담 or 써니');
+  }
 }
 
 function assertRegistrationV2PaymentPlan(payload) {
@@ -772,14 +1010,15 @@ function normalizeRegistrationFinancialYears(value) {
   return value.flatMap((row) => {
     const year = Number(row?.year);
     if (!Number.isSafeInteger(year) || year < 2000 || year > 2099) return [];
-    const profitRate = Number(row?.profitRate);
+    const contractAmount = registrationAmount(row?.contractAmount);
+    const totalRevenueAmount = registrationAmount(row?.totalRevenueAmount);
     return [{
       year,
-      contractAmount: registrationAmount(row?.contractAmount),
+      contractAmount,
       salesVatAmount: registrationAmount(row?.salesVatAmount),
-      totalRevenueAmount: registrationAmount(row?.totalRevenueAmount),
+      totalRevenueAmount,
       supportAmount: registrationAmount(row?.supportAmount),
-      profitRate: Number.isFinite(profitRate) ? Math.min(1, Math.max(0, profitRate)) : 0,
+      profitRate: contractAmount > 0 ? Math.min(1, totalRevenueAmount / contractAmount) : 0,
       confirmed: row?.confirmed === true,
     }];
   });
@@ -825,8 +1064,11 @@ function normalizeProjectCheckout(value) {
 }
 
 function assertProjectCheckoutPayload(payload, attachmentRefs, currentProject) {
-  const status = normalizeProjectStatus(readOptionalText(payload?.status));
+  const status = normalizeProjectStatus(readOptionalText(currentProject?.status || payload?.status));
   if (!['COMPLETED', 'COMPLETED_PENDING_PAYMENT'].includes(status)) return;
+  if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, 'checkout')) {
+    invalidRegistration('Completed project checkout is required');
+  }
   const checkout = payload?.checkout;
   if (!checkout || typeof checkout !== 'object' || Array.isArray(checkout)) {
     invalidRegistration('Completed project checkout is required');
@@ -868,11 +1110,29 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
       invalidRegistration(`Project registration ${field} is required`);
     }
   }
-  if (normalizeSettlementType(readOptionalText(payload.settlementType)) === 'NONE') {
-    invalidRegistration('Project registration settlementType is required');
+  const settlementType = readOptionalText(payload.settlementType);
+  const basis = readOptionalText(payload.basis);
+  const accountType = readOptionalText(payload.accountType);
+  const settlementSystem = readOptionalText(payload.settlementSystem);
+  const laborSettlementBasis = readOptionalText(payload.laborSettlementBasis);
+  if (!REGISTRATION_SETTLEMENT_TYPES.has(settlementType)) {
+    invalidRegistration('Project registration settlementType is invalid');
   }
-  if (normalizeBasis(readOptionalText(payload.basis)) === 'NONE') {
-    invalidRegistration('Project registration basis is required');
+  if (!REGISTRATION_SETTLEMENT_BASES.has(basis)) {
+    invalidRegistration('Project registration basis is invalid');
+  }
+  if (!REGISTRATION_V2_SETTLEMENT_BASES.has(basis)) {
+    invalidRegistration('Project registration basis is invalid for requirements version 2');
+  }
+  const settlementDetailsEnabled = normalizeBasis(basis) !== 'NONE';
+  if (settlementDetailsEnabled && accountType && !REGISTRATION_ACCOUNT_TYPES.has(accountType)) {
+    invalidRegistration('Project registration accountType is invalid');
+  }
+  if (settlementDetailsEnabled && settlementSystem && !SETTLEMENT_SYSTEM_CODES.has(settlementSystem)) {
+    invalidRegistration('Project registration settlementSystem is invalid');
+  }
+  if (settlementDetailsEnabled && laborSettlementBasis && !LABOR_SETTLEMENT_BASES.has(laborSettlementBasis)) {
+    invalidRegistration('Project registration laborSettlementBasis is invalid');
   }
   assertRegistrationV2PaymentPlan(payload);
 
@@ -882,6 +1142,14 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
   const missingDocumentKind = REGISTRATION_REQUIRED_DOCUMENT_KINDS.find((kind) => !attachedKinds.has(kind));
   if (missingDocumentKind) {
     invalidRegistration(`Project registration required attachment is missing: ${missingDocumentKind}`);
+  }
+  const hasProposal = attachedKinds.has('proposal');
+  const hasRfpRequestEvidence = attachedKinds.has('rfp_request_evidence');
+  if (!hasProposal && !hasRfpRequestEvidence) {
+    invalidRegistration('Project registration requires proposal or RFP evidence');
+  }
+  if (hasProposal && hasRfpRequestEvidence) {
+    invalidRegistration('Project registration requires exactly one of proposal or RFP evidence');
   }
   const optionalNotes = normalizeRegistrationOptionalDocumentNotes(payload.registrationOptionalDocumentNotes);
   for (const [documentKind, noteField] of [
@@ -941,14 +1209,17 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
   if (!confirmations || typeof confirmations !== 'object' || Array.isArray(confirmations)) {
     invalidRegistration('Project registration confirmations are required');
   }
-  if (confirmations.laborIncludesFourInsurance !== true) {
-    invalidRegistration('Project registration 4-insurance confirmation is required');
-  }
-  if (confirmations.laborIncludesRetirementPay !== true) {
-    invalidRegistration('Project registration retirement pay confirmation is required');
-  }
-  if (confirmations.customerSettlementBasisConfirmed !== true) {
-    invalidRegistration('Project registration customer settlement basis confirmation is required');
+  const requiresSettlementConfirmations = settlementDetailsEnabled;
+  if (requiresSettlementConfirmations) {
+    if (confirmations.laborIncludesFourInsurance !== true) {
+      invalidRegistration('Project registration 4-insurance confirmation is required');
+    }
+    if (confirmations.laborIncludesRetirementPay !== true) {
+      invalidRegistration('Project registration retirement pay confirmation is required');
+    }
+    if (confirmations.customerSettlementBasisConfirmed !== true) {
+      invalidRegistration('Project registration customer settlement basis confirmation is required');
+    }
   }
   if (typeof confirmations.modusignContractUsed !== 'boolean') {
     invalidRegistration('Project registration Modusign confirmation is required');
@@ -958,23 +1229,101 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
   }
 }
 
-function trustedRegistrationRequirementAttachments(currentProject, attachmentRefs) {
-  const canonicalFields = {
-    contract: 'contractDocument',
-    customer_business_registration: 'customerBusinessRegistrationDocument',
-    quote: 'quoteDocument',
-    proposal: 'proposalDocument',
-    proposal_word_original: 'proposalWordOriginalDocument',
-    proposal_ppt_original: 'proposalPptOriginalDocument',
-    presentation_ppt_original: 'presentationPptOriginalDocument',
-    rfp_request_evidence: 'rfpRequestEvidenceDocument',
+const REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS = {
+  contract: 'contractDocument',
+  customer_business_registration: 'customerBusinessRegistrationDocument',
+  quote: 'quoteDocument',
+  proposal: 'proposalDocument',
+  proposal_word_original: 'proposalWordOriginalDocument',
+  proposal_ppt_original: 'proposalPptOriginalDocument',
+  presentation_ppt_original: 'presentationPptOriginalDocument',
+  rfp_request_evidence: 'rfpRequestEvidenceDocument',
+};
+
+const PROJECT_INFO_DOCUMENT_FIELDS = [
+  ...new Set([
+    ...Object.values(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS),
+    'performanceCertificateDocument',
+    'taxInvoiceDocument',
+    'finalSettlementReportDocument',
+  ]),
+];
+
+function trustedStoredChangeRequestDocuments(previousRequest) {
+  if (
+    readOptionalText(previousRequest?.requestKind) !== 'CHANGE'
+    || !['PENDING', 'REJECTED'].includes(readOptionalText(previousRequest?.status))
+  ) return {};
+  const source = previousRequest?.proposedSnapshot && typeof previousRequest.proposedSnapshot === 'object'
+    ? previousRequest.proposedSnapshot
+    : previousRequest?.payload;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+  return Object.fromEntries(PROJECT_INFO_DOCUMENT_FIELDS.flatMap((field) => (
+    readOptionalText(source[field]?.path) ? [[field, source[field]]] : []
+  )));
+}
+
+function trustedRegistrationRequirementAttachments(
+  currentProject,
+  payload,
+  attachmentRefs,
+  trustedStoredDocuments = {},
+) {
+  const privateAttachments = new Map((Array.isArray(attachmentRefs) ? attachmentRefs : [])
+    .flatMap((attachment) => {
+      const documentKind = readOptionalText(attachment?.documentKind);
+      const path = readOptionalText(attachment?.path);
+      return documentKind && path ? [[documentKind, { documentKind, path }]] : [];
+    }));
+  const privateAlternativeAttached = privateAttachments.has('proposal')
+    || privateAttachments.has('rfp_request_evidence');
+  const payloadDocument = (field) => {
+    if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, field)) return undefined;
+    const path = readOptionalText(payload[field]?.path);
+    if (!path) return null;
+    const canonicalPath = readOptionalText(currentProject?.[field]?.path);
+    if (canonicalPath && path === canonicalPath) return { path: canonicalPath };
+    const storedPath = readOptionalText(trustedStoredDocuments?.[field]?.path);
+    return storedPath && path === storedPath ? { path: storedPath } : null;
   };
-  return [
-    ...(Array.isArray(attachmentRefs) ? attachmentRefs : []),
-    ...Object.entries(canonicalFields).flatMap(([documentKind, field]) => (
-      readOptionalText(currentProject?.[field]?.path) ? [{ documentKind, path: currentProject[field].path }] : []
-    )),
-  ];
+  const canonicalFields = {
+    ...REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS,
+  };
+  return Object.entries(canonicalFields).flatMap(([documentKind, field]) => {
+    const privateAttachment = privateAttachments.get(documentKind);
+    if (privateAttachment) return [privateAttachment];
+    if (privateAlternativeAttached && ['proposal', 'rfp_request_evidence'].includes(documentKind)) return [];
+    const proposedDocument = payloadDocument(field);
+    if (proposedDocument !== undefined) {
+      return proposedDocument ? [{ documentKind, path: proposedDocument.path }] : [];
+    }
+    const canonicalPath = readOptionalText(currentProject?.[field]?.path);
+    return canonicalPath ? [{ documentKind, path: canonicalPath }] : [];
+  });
+}
+
+function assertTrustedProjectInfoDocumentReferences(
+  currentProject,
+  payload,
+  attachmentRefs,
+  trustedStoredDocuments = {},
+) {
+  const privateDocuments = registrationPrivateDocuments(attachmentRefs);
+  const privateAlternativeAttached = Boolean(
+    privateDocuments.proposalDocument || privateDocuments.rfpRequestEvidenceDocument,
+  );
+  for (const field of PROJECT_INFO_DOCUMENT_FIELDS) {
+    if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, field)) continue;
+    const candidate = payload[field];
+    if (candidate === null || candidate === undefined) continue;
+    if (privateDocuments[field]) continue;
+    if (privateAlternativeAttached && ['proposalDocument', 'rfpRequestEvidenceDocument'].includes(field)) continue;
+    const candidatePath = readOptionalText(candidate?.path);
+    const canonicalPath = readOptionalText(currentProject?.[field]?.path);
+    const storedPath = readOptionalText(trustedStoredDocuments?.[field]?.path);
+    if (candidatePath && (candidatePath === canonicalPath || candidatePath === storedPath)) continue;
+    invalidRegistration(`Project information document path is not trusted: ${field}`);
+  }
 }
 
 function assertRegistrationPayload(payload) {
@@ -1009,6 +1358,19 @@ function assertRegistrationPayload(payload) {
   }
 }
 
+function assertDistinctExecutiveApprover(payload, actorId, ownerId) {
+  const executiveApproverId = readOptionalText(payload?.executiveApproverId);
+  const requesterIds = new Set([
+    readOptionalText(actorId),
+    readOptionalText(ownerId),
+    readOptionalText(payload?.registeredById),
+    readOptionalText(payload?.managerId),
+  ].filter(Boolean));
+  if (executiveApproverId && requesterIds.has(executiveApproverId)) {
+    invalidRegistration('Project designated executive approver must differ from the requester');
+  }
+}
+
 export function buildProjectRegistrationCanonicalDocuments({
   tenantId,
   projectId,
@@ -1026,11 +1388,18 @@ export function buildProjectRegistrationCanonicalDocuments({
   if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) {
     invalidRegistration('New project registration requires requirements version 2');
   }
+  if (readOptionalText(payload.settlementType) === 'NONE') {
+    invalidRegistration('Project registration settlementType NONE is not available in requirements version 2');
+  }
   assertRegistrationV2Requirements(payload, requirementsAttachmentRefs);
   const ownerId = readOptionalText(payload.registeredById) || readOptionalText(payload.managerId) || actorId;
+  assertDistinctExecutiveApprover(payload, actorId, ownerId);
   const ownerName = readOptionalText(payload.registeredByName) || readOptionalText(payload.managerName) || actorName;
   const ownerEmail = readOptionalText(payload.registeredByEmail) || (ownerId === actorId ? readOptionalText(actorEmail) : '');
   const fundInputMode = normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode));
+  const settlementType = normalizeSettlementType(readOptionalText(payload.settlementType));
+  const basis = normalizeBasis(readOptionalText(payload.basis));
+  const settlementDetailsEnabled = basis !== 'NONE';
   const documents = registrationPrivateDocuments(attachmentRefs);
   const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
   const requestPayload = stripUndefinedDeep({
@@ -1059,11 +1428,13 @@ export function buildProjectRegistrationCanonicalDocuments({
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
-    settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
-    basis: normalizeBasis(readOptionalText(payload.basis)),
-    accountType: normalizeAccountType(readOptionalText(payload.accountType)),
-    settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
-    laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
+    settlementType,
+    basis,
+    accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(readOptionalText(payload.accountType)),
+    settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(payload.settlementSystem),
+    laborSettlementBasis: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeLaborSettlementBasis(payload.laborSettlementBasis),
     laborTransferPlan: normalizeLaborTransferPlan(payload.laborTransferPlan),
     fundInputMode,
     settlementSheetPolicy: registrationSettlementSheetPolicy(payload.settlementSheetPolicy, fundInputMode),
@@ -1169,7 +1540,7 @@ function normalizeBasis(value) {
 }
 
 function normalizeAccountType(value) {
-  return value === 'DEDICATED' || value === 'OPERATING' ? value : 'NONE';
+  return value === 'DEDICATED' || value === 'OPERATING' || value === 'OTHER' ? value : 'NONE';
 }
 
 function normalizeProjectFundInputMode(value) {
@@ -1202,6 +1573,11 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     : readOptionalText(existingPayload[key]);
   const pickValue = (key) => hasProjectField(key) ? project?.[key] : existingPayload[key];
   const pickNumber = (key) => Number.isFinite(project?.[key]) ? project[key] : existingPayload[key];
+  const settlementType = normalizeSettlementType(pickText('settlementType'));
+  const basis = normalizeBasis(pickText('basis'));
+  const settlementDetailsEnabled = Number(pickValue('registrationRequirementsVersion')) === 2
+    ? basis !== 'NONE'
+    : settlementType !== 'NONE';
 
   return {
     ...(existingPayload && typeof existingPayload === 'object' ? existingPayload : {}),
@@ -1228,11 +1604,13 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     contractStart: pickText('contractStart'),
     contractEnd: pickText('contractEnd'),
     contractType: normalizeProjectContractType(pickText('contractType')),
-    settlementType: normalizeSettlementType(pickText('settlementType')),
-    basis: normalizeBasis(pickText('basis')),
-    accountType: normalizeAccountType(pickText('accountType')),
-    settlementSystem: normalizeSettlementSystemCode(pickText('settlementSystem')),
-    laborSettlementBasis: normalizeLaborSettlementBasis(pickText('laborSettlementBasis')),
+    settlementType,
+    basis: Number(pickValue('registrationRequirementsVersion')) === 2 || settlementDetailsEnabled ? basis : 'NONE',
+    accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(pickText('accountType')),
+    settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(pickText('settlementSystem')),
+    laborSettlementBasis: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeLaborSettlementBasis(pickText('laborSettlementBasis')),
     laborTransferPlan: normalizeLaborTransferPlan(pickValue('laborTransferPlan')),
     fundInputMode: normalizeProjectFundInputMode(pickText('fundInputMode')),
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
@@ -1313,6 +1691,10 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     || readOptionalText(currentProject.registeredByName)
     || readOptionalText(currentProject.managerName);
   const teamMembersDetailed = normalizeProjectTeamMembersDetailed(payload.teamMembersDetailed);
+  const settlementType = normalizeSettlementType(readOptionalText(payload.settlementType));
+  const registrationVersion = registrationRequirementsVersion(payload.registrationRequirementsVersion);
+  const basis = normalizeBasis(readOptionalText(payload.basis));
+  const settlementDetailsEnabled = registrationVersion === 2 ? basis !== 'NONE' : settlementType !== 'NONE';
   return normalizeProjectRevenueFields(stripUndefinedDeep({
     name: readOptionalText(payload.name) || readOptionalText(currentProject.name),
     officialContractName: readOptionalText(payload.officialContractName),
@@ -1330,7 +1712,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     totalRevenueAmount: Number.isFinite(Number(payload.totalRevenueAmount)) ? Math.max(0, Math.round(Number(payload.totalRevenueAmount))) : 0,
     supportAmount: Number.isFinite(Number(payload.supportAmount)) ? Math.max(0, Math.round(Number(payload.supportAmount))) : 0,
     financialInputFlags: payload.financialInputFlags,
-    registrationRequirementsVersion: registrationRequirementsVersion(payload.registrationRequirementsVersion),
+    registrationRequirementsVersion: registrationVersion,
     financialYears: normalizeRegistrationFinancialYears(payload.financialYears),
     registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
     registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
@@ -1340,11 +1722,13 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
-    settlementType: normalizeSettlementType(readOptionalText(payload.settlementType)),
-    basis: normalizeBasis(readOptionalText(payload.basis)),
-    accountType: normalizeAccountType(readOptionalText(payload.accountType)),
-    settlementSystem: normalizeSettlementSystemCode(payload.settlementSystem),
-    laborSettlementBasis: normalizeLaborSettlementBasis(payload.laborSettlementBasis),
+    settlementType,
+    basis: registrationVersion === 2 || settlementDetailsEnabled ? basis : 'NONE',
+    accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(readOptionalText(payload.accountType)),
+    settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(payload.settlementSystem),
+    laborSettlementBasis: !settlementDetailsEnabled
+      ? 'NONE'
+      : normalizeLaborSettlementBasis(payload.laborSettlementBasis),
     laborTransferPlan: normalizeLaborTransferPlan(payload.laborTransferPlan),
     fundInputMode: normalizeProjectFundInputMode(readOptionalText(payload.fundInputMode)),
     settlementSheetPolicy: payload.settlementSheetPolicy,
@@ -1397,8 +1781,9 @@ const PROJECT_INFO_CHANGE_LABELS = {
   contractEnd: '계약 종료일',
   currency: '통화',
   contractAmount: '계약금액',
+  salesVatAmount: '총매출부가세',
   totalRevenueAmount: '총수익',
-  supportAmount: '지원금',
+  supportAmount: '총지원금',
   settlementType: '정산 유형',
   basis: '정산 기준',
   accountType: '통장 유형',
@@ -1409,7 +1794,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   registeredByName: '사업 담당자',
   executiveApproverName: '지정 결재자',
   teamName: '사내기업팀',
-  teamMembersDetailed: '서류상 참여인력',
+  teamMembersDetailed: '참여인력 (서류상·실제)',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
   advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
@@ -1425,8 +1810,8 @@ const PROJECT_INFO_CHANGE_LABELS = {
   proposalPptOriginalDocument: '제안서 PPT 원본',
   presentationPptOriginalDocument: '발표자료 PPT 원본',
   rfpRequestEvidenceDocument: 'RFP 또는 요청 메일 증빙',
-  registrationOptionalDocumentNotes: '선택 첨부 미첨부 사유',
-  customerBusinessRegistrationDocument: '발주처 사업자등록증 PDF',
+  registrationOptionalDocumentNotes: '원본 파일 미첨부 사유',
+  customerBusinessRegistrationDocument: '고객사 사업자등록증 PDF',
   financialYears: '연도별 재무',
   registrationConfirmations: '등록 확인사항',
   checkout: '종료사업 체크아웃',
@@ -1471,62 +1856,68 @@ function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
   });
 }
 
-function projectInfoPayloadWithDocuments(payload, project, attachmentRefs) {
+function projectInfoPayloadWithDocuments(payload, project, attachmentRefs, trustedStoredDocuments = {}) {
   const privateDocuments = registrationPrivateDocuments(attachmentRefs);
+  const privateAlternativeAttached = Boolean(
+    privateDocuments.proposalDocument || privateDocuments.rfpRequestEvidenceDocument,
+  );
+  const effectiveDocument = (field) => {
+    if (privateDocuments[field]) return privateDocuments[field];
+    if (privateAlternativeAttached && ['proposalDocument', 'rfpRequestEvidenceDocument'].includes(field)) return null;
+    if (Object.hasOwn(payload, field)) {
+      const payloadPath = readOptionalText(payload[field]?.path);
+      const canonicalPath = readOptionalText(project[field]?.path);
+      if (payloadPath && canonicalPath && payloadPath === canonicalPath) return project[field];
+      const storedPath = readOptionalText(trustedStoredDocuments[field]?.path);
+      return payloadPath && storedPath && payloadPath === storedPath ? trustedStoredDocuments[field] : null;
+    }
+    return project[field] || null;
+  };
   const normalizedPatch = buildProjectPatchFromChangeRequestPayload(payload, project);
   const proposedWithLegacyFallback = buildProjectRequestPayloadFromProject({ ...project, ...normalizedPatch }, payload);
   const proposed = Object.fromEntries(PROJECT_INFO_PAYLOAD_FIELDS.flatMap((field) => (
     Object.hasOwn(proposedWithLegacyFallback, field) ? [[field, proposedWithLegacyFallback[field]]] : []
   )));
+  const contractDocument = effectiveDocument('contractDocument');
+  const contractWasReplaced = Boolean(
+    readOptionalText(contractDocument?.path)
+    && readOptionalText(contractDocument?.path) !== readOptionalText(project.contractDocument?.path),
+  );
+  const contractAnalysis = Object.hasOwn(payload, 'contractAnalysis')
+    ? payload.contractAnalysis
+    : (contractWasReplaced ? null : project.contractAnalysis);
   return stripUndefinedDeep({
     ...proposed,
-    contractDocument: privateDocuments.contractDocument || payload.contractDocument || project.contractDocument || null,
-    customerBusinessRegistrationDocument: privateDocuments.customerBusinessRegistrationDocument
-      || payload.customerBusinessRegistrationDocument
-      || project.customerBusinessRegistrationDocument
-      || null,
-    quoteDocument: privateDocuments.quoteDocument || payload.quoteDocument || project.quoteDocument || null,
-    proposalDocument: privateDocuments.proposalDocument || payload.proposalDocument || project.proposalDocument || null,
-    proposalWordOriginalDocument: privateDocuments.proposalWordOriginalDocument
-      || payload.proposalWordOriginalDocument
-      || project.proposalWordOriginalDocument
-      || null,
-    proposalPptOriginalDocument: privateDocuments.proposalPptOriginalDocument
-      || payload.proposalPptOriginalDocument
-      || project.proposalPptOriginalDocument
-      || null,
-    presentationPptOriginalDocument: privateDocuments.presentationPptOriginalDocument
-      || payload.presentationPptOriginalDocument
-      || project.presentationPptOriginalDocument
-      || null,
-    rfpRequestEvidenceDocument: privateDocuments.rfpRequestEvidenceDocument
-      || payload.rfpRequestEvidenceDocument
-      || project.rfpRequestEvidenceDocument
-      || null,
-    performanceCertificateDocument: privateDocuments.performanceCertificateDocument
-      || payload.performanceCertificateDocument
-      || project.performanceCertificateDocument
-      || null,
-    taxInvoiceDocument: privateDocuments.taxInvoiceDocument
-      || payload.taxInvoiceDocument
-      || project.taxInvoiceDocument
-      || null,
-    finalSettlementReportDocument: privateDocuments.finalSettlementReportDocument
-      || payload.finalSettlementReportDocument
-      || project.finalSettlementReportDocument
-      || null,
-    contractAnalysis: payload.contractAnalysis || project.contractAnalysis || null,
+    contractDocument,
+    customerBusinessRegistrationDocument: effectiveDocument('customerBusinessRegistrationDocument'),
+    quoteDocument: effectiveDocument('quoteDocument'),
+    proposalDocument: effectiveDocument('proposalDocument'),
+    proposalWordOriginalDocument: effectiveDocument('proposalWordOriginalDocument'),
+    proposalPptOriginalDocument: effectiveDocument('proposalPptOriginalDocument'),
+    presentationPptOriginalDocument: effectiveDocument('presentationPptOriginalDocument'),
+    rfpRequestEvidenceDocument: effectiveDocument('rfpRequestEvidenceDocument'),
+    performanceCertificateDocument: effectiveDocument('performanceCertificateDocument'),
+    taxInvoiceDocument: effectiveDocument('taxInvoiceDocument'),
+    finalSettlementReportDocument: effectiveDocument('finalSettlementReportDocument'),
+    contractAnalysis: contractAnalysis && typeof contractAnalysis === 'object'
+      ? contractAnalysis
+      : null,
   });
 }
 
 export function buildProjectInfoDraftSeed(project, previousRequest) {
-  const isPendingChange = readOptionalText(previousRequest?.requestKind) === 'CHANGE'
-    && readOptionalText(previousRequest?.status) === 'PENDING';
-  const pendingPayload = isPendingChange
+  const isResumableChange = readOptionalText(previousRequest?.requestKind) === 'CHANGE'
+    && ['PENDING', 'REJECTED'].includes(readOptionalText(previousRequest?.status));
+  const pendingPayload = isResumableChange
     ? (previousRequest.proposedSnapshot || previousRequest.payload)
     : null;
   if (pendingPayload && typeof pendingPayload === 'object' && !Array.isArray(pendingPayload)) {
-    return projectInfoPayloadWithDocuments(pendingPayload, project, []);
+    return projectInfoPayloadWithDocuments(
+      pendingPayload,
+      project,
+      [],
+      trustedStoredChangeRequestDocuments(previousRequest),
+    );
   }
   return projectInfoPayloadWithDocuments(buildProjectRequestPayloadFromProject(project), project, []);
 }
@@ -1545,50 +1936,102 @@ export function buildProjectInfoChangeSubmission({
   resubmit = false,
   reviewComment,
 }) {
+  const trustedStoredDocuments = trustedStoredChangeRequestDocuments(previousRequest);
   assertRegistrationPayload(payload);
+  if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) {
+    invalidRegistration('Project information changes require registration requirements version 2');
+  }
+  const ownerId = readOptionalText(payload.registeredById)
+    || readOptionalText(payload.managerId)
+    || readOptionalText(project.registeredById)
+    || readOptionalText(project.managerId)
+    || actorId;
+  assertDistinctExecutiveApprover(payload, actorId, ownerId);
+  assertTrustedProjectInfoDocumentReferences(
+    project,
+    payload,
+    attachmentRefs,
+    trustedStoredDocuments,
+  );
   assertRegistrationV2Requirements(
     payload,
-    trustedRegistrationRequirementAttachments(project, attachmentRefs),
+    trustedRegistrationRequirementAttachments(project, payload, attachmentRefs, trustedStoredDocuments),
   );
-  assertProjectCheckoutPayload(payload, attachmentRefs, project);
   const beforeSnapshot = projectInfoPayloadWithDocuments(
     buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
     project,
     [],
   );
-  const proposedSnapshot = projectInfoPayloadWithDocuments(payload, project, attachmentRefs);
+  const proposedSnapshot = projectInfoPayloadWithDocuments(
+    payload,
+    project,
+    attachmentRefs,
+    trustedStoredDocuments,
+  );
+  assertProjectCheckoutPayload(payload, attachmentRefs, proposedSnapshot);
   const changedFields = projectInfoChanges(beforeSnapshot, proposedSnapshot);
   const currentVersion = Number.isInteger(project.version) && project.version > 0 ? project.version : 1;
   const requestVersion = Number.isInteger(previousRequest?.requestVersion) && previousRequest.requestVersion > 0
     ? previousRequest.requestVersion + 1
     : 1;
   const managementPlanningResubmission = isManagementPlanningRevisionRejected(project);
-  if (resubmit && !managementPlanningResubmission && !isExecutiveRevisionRejected(project)) {
+  const executiveResubmission = isExecutiveRevisionRejected(project);
+  if (resubmit && !managementPlanningResubmission && !executiveResubmission) {
     throw createHttpError(409, 'Project is not awaiting resubmission', 'invalid_resubmit_state');
   }
-  const projectPatch = resubmit
+  const shouldResubmit = resubmit || managementPlanningResubmission || executiveResubmission;
+  const previousExecutiveReviewStatus = readOptionalText(project.executiveReviewStatus) || 'PENDING';
+  const executiveReviewReopens = !shouldResubmit
+    && ['APPROVED', 'PLANNING_AGREED'].includes(previousExecutiveReviewStatus);
+  const currentExecutiveHistory = Array.isArray(project.executiveReviewHistory)
+    ? project.executiveReviewHistory
+    : [];
+  const previousReviewedAt = readOptionalText(project.executiveReviewedAt);
+  const previousReviewedById = readOptionalText(project.executiveReviewedById);
+  const previousReviewedByName = readOptionalText(project.executiveReviewedByName);
+  const previousReviewComment = readOptionalText(project.executiveReviewComment);
+  const previousDecisionAlreadyRecorded = currentExecutiveHistory.some((entry) => (
+    readOptionalText(entry?.status) === previousExecutiveReviewStatus
+      && readOptionalText(entry?.reviewedAt) === previousReviewedAt
+      && readOptionalText(entry?.reviewedById) === previousReviewedById
+  ));
+  const previousDecisionHistory = executiveReviewReopens
+    && !previousDecisionAlreadyRecorded
+    && (previousReviewedAt || previousReviewedById || previousReviewedByName || previousReviewComment)
+    ? [{
+        status: previousExecutiveReviewStatus,
+        previousStatus: null,
+        reviewedAt: previousReviewedAt || null,
+        reviewedById: previousReviewedById || null,
+        reviewedByName: previousReviewedByName || null,
+        reviewComment: previousReviewComment || null,
+      }]
+    : [];
+  const executivePendingPatch = {
+    executiveReviewStatus: 'PENDING',
+    executiveReviewedAt: null,
+    executiveReviewedById: null,
+    executiveReviewedByName: null,
+    executiveReviewComment: null,
+    executiveReviewHistory: [
+      ...currentExecutiveHistory,
+      ...previousDecisionHistory,
+      {
+        status: 'PENDING',
+        previousStatus: previousExecutiveReviewStatus,
+        reviewedAt: timestamp,
+        reviewedById: actorId,
+        reviewedByName: actorName,
+        reviewComment: readOptionalText(reviewComment) || null,
+        ...(changedFields.length ? { changes: changedFields } : {}),
+      },
+    ],
+  };
+  const projectPatch = shouldResubmit
     ? (managementPlanningResubmission
       ? buildManagementPlanningResubmissionPatch()
-      : {
-        executiveReviewStatus: 'PENDING',
-        executiveReviewedAt: timestamp,
-        executiveReviewedById: actorId,
-        executiveReviewedByName: actorName,
-        executiveReviewComment: readOptionalText(reviewComment) || null,
-        executiveReviewHistory: [
-          ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
-          {
-            status: 'PENDING',
-            previousStatus: readOptionalText(project.executiveReviewStatus) || 'PENDING',
-            reviewedAt: timestamp,
-            reviewedById: actorId,
-            reviewedByName: actorName,
-            reviewComment: readOptionalText(reviewComment) || null,
-            ...(changedFields.length ? { changes: changedFields } : {}),
-          },
-        ],
-      })
-    : {};
+      : executivePendingPatch)
+    : (executiveReviewReopens ? executivePendingPatch : {});
   const projectRequestId = `change-${readOptionalText(project.id)}`;
   const projectRequest = stripUndefinedDeep({
     id: projectRequestId,
@@ -1630,6 +2073,59 @@ function resolveProjectRequestPayloadForReview(request) {
     return request.proposedSnapshot;
   }
   return request?.payload || {};
+}
+
+function projectRequestAttachmentsArePublished(request, tenantId) {
+  const payload = resolveProjectRequestPayloadForReview(request);
+  const privatePrefix = `orgs/${tenantId}/project-registration-drafts/`;
+  const hasUnpublishedAttachment = PROJECT_INFO_DOCUMENT_FIELDS.some((field) => (
+    readOptionalText(payload?.[field]?.path).startsWith(privatePrefix)
+  ));
+  const registrationIsAwaitingPublication = readOptionalText(request?.requestKind) === 'REGISTRATION'
+    && registrationRequirementsVersion(payload?.registrationRequirementsVersion) === 2
+    && !readOptionalText(request?.registrationAttachmentsPublishedAt)
+    && !hasCanonicalRegistrationV2Documents(request, payload, tenantId);
+  return !hasUnpublishedAttachment && !registrationIsAwaitingPublication;
+}
+
+function assertProjectRequestAttachmentsPublished(request, tenantId) {
+  if (!projectRequestAttachmentsArePublished(request, tenantId)) {
+    throw createHttpError(
+      409,
+      'Submitted attachments are still being prepared for review',
+      'project_attachments_processing',
+    );
+  }
+}
+
+function hasCanonicalRegistrationV2Documents(request, payload, tenantId) {
+  const projectId = readOptionalText(request?.approvedProjectId || request?.targetProjectId);
+  if (!projectId || projectId.includes('/')) return false;
+  const canonicalPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+  const isCanonicalDocument = (field) => {
+    const path = readOptionalText(payload?.[field]?.path);
+    const objectName = path.startsWith(canonicalPrefix) ? path.slice(canonicalPrefix.length) : '';
+    return Boolean(objectName && !objectName.includes('/'));
+  };
+  const allExistingDocumentsAreCanonical = PROJECT_INFO_DOCUMENT_FIELDS.every((field) => (
+    !readOptionalText(payload?.[field]?.path) || isCanonicalDocument(field)
+  ));
+  if (!allExistingDocumentsAreCanonical) return false;
+  if (!REGISTRATION_REQUIRED_DOCUMENT_KINDS.every((kind) => (
+    isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[kind])
+  ))) return false;
+  const hasProposal = isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS.proposal);
+  const hasRfpEvidence = isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS.rfp_request_evidence);
+  if (hasProposal === hasRfpEvidence) return false;
+  const optionalNotes = normalizeRegistrationOptionalDocumentNotes(payload.registrationOptionalDocumentNotes);
+  return [
+    ['proposal_word_original', 'proposalWordOriginal'],
+    ['proposal_ppt_original', 'proposalPptOriginal'],
+    ['presentation_ppt_original', 'presentationPptOriginal'],
+  ].every(([documentKind, noteField]) => (
+    isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[documentKind])
+      || Boolean(optionalNotes[noteField])
+  ));
 }
 
 function normalizeParticipationRate(value) {
@@ -1751,6 +2247,10 @@ export async function tryEnsureProjectRootFolder({
 }
 
 function resolveParticipationSettlementSystem(project) {
+  if (
+    Number(project?.registrationRequirementsVersion) === 2
+    && normalizeBasis(project?.basis) === 'NONE'
+  ) return 'NONE';
   const selectedSystem = normalizeSettlementSystemCode(project?.settlementSystem);
   if (selectedSystem !== 'NONE') return selectedSystem;
   if (project?.settlementType === 'TYPE5' || project?.accountType === 'DEDICATED') {
@@ -2120,6 +2620,50 @@ export function mountProjectRoutes(app, {
     res.status(200).json(buildListResponse(items, limit));
   }));
 
+  app.get('/api/v1/project-requests/assigned-to-me', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const { items, projects } = await readAssignedProjectRequests({ db, tenantId, actorId });
+    res.setHeader('cache-control', 'private, no-store');
+    res.status(200).json({ items, projects });
+  }));
+
+  app.post('/api/v1/project-requests/pending-changes', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const projectIds = parseProjectRequestQueryProjectIds(req.body?.projectIds);
+    const items = await readPendingProjectChangeRequests({ db, tenantId, actorId, projectIds });
+    res.setHeader('cache-control', 'private, no-store');
+    res.status(200).json({ items });
+  }));
+
+  app.post('/api/v1/project-requests/review-inbox', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    assertActorRoleAllowed(req, ['admin', 'finance'], 'read the project review inbox');
+    await readProjectAttachmentMember({ db, tenantId, actorId });
+    const projectIds = parseProjectRequestQueryProjectIds(req.body?.projectIds);
+    const items = (await queryProjectRequestsByProjectIds({ db, tenantId, projectIds }))
+      .filter((projectRequest) => projectRequestAttachmentsArePublished(projectRequest, tenantId));
+    res.setHeader('cache-control', 'private, no-store');
+    res.status(200).json({ items });
+  }));
+
+  app.get('/api/v1/projects/:projectId/latest-request', asyncHandler(async (req, res) => {
+    const { tenantId, actorId } = req.context;
+    const projectId = readOptionalText(req.params.projectId);
+    if (!projectId || projectId.includes('/')) {
+      throw createHttpError(400, 'Project request lookup is invalid', 'project_request_query_invalid');
+    }
+    const member = await readProjectAttachmentMember({ db, tenantId, actorId });
+    const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
+    if (!projectSnap.exists) throw createHttpError(404, `Project not found: ${projectId}`, 'not_found');
+    const project = projectSnap.data() || {};
+    if (!hasProjectRequestAccess({ actorId, member, projectId, project })) {
+      throw createHttpError(403, 'Project request access denied', 'forbidden');
+    }
+    const items = await queryProjectRequestsByProjectIds({ db, tenantId, projectIds: [projectId] });
+    res.setHeader('cache-control', 'private, no-store');
+    res.status(200).json({ item: items[0] || null });
+  }));
+
   app.get('/api/v1/projects/:projectId/attachments/:documentKind', asyncHandler(async (req, res) => {
     const { tenantId, actorId } = req.context;
     const projectId = readOptionalText(req.params.projectId);
@@ -2200,13 +2744,23 @@ export function mountProjectRoutes(app, {
       throw createHttpError(400, 'Project request attachment is invalid', 'project_request_attachment_invalid');
     }
     const member = await readProjectAttachmentMember({ db, tenantId, actorId });
-    if (!['admin', 'finance'].includes(normalizeRole(member.role))) {
-      throw createHttpError(403, 'Project attachment access denied', 'forbidden');
-    }
     const projectRequest = await readProjectRequestById(db, tenantId, requestId);
     if (!projectRequest) throw createHttpError(404, `Project request not found: ${requestId}`, 'not_found');
     const projectId = readOptionalText(projectRequest.targetProjectId || projectRequest.approvedProjectId);
     const payload = resolveProjectRequestPayloadForReview(projectRequest);
+    const storedRole = normalizeRole(member.role);
+    const requestApproverId = readOptionalText(payload?.executiveApproverId);
+    if (!['admin', 'finance'].includes(storedRole)) {
+      let isDesignatedApprover = requestApproverId === actorId;
+      if (!requestApproverId && projectId) {
+        const projectSnap = await db.doc(`orgs/${tenantId}/projects/${projectId}`).get();
+        isDesignatedApprover = projectSnap.exists
+          && readOptionalText(projectSnap.data()?.executiveApproverId) === actorId;
+      }
+      if (!isDesignatedApprover) {
+        throw createHttpError(403, 'Project attachment access denied', 'forbidden');
+      }
+    }
     const attachment = payload?.[field];
     const path = readOptionalText(attachment?.path);
     const expectedPrefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
@@ -2698,7 +3252,7 @@ export function mountProjectRoutes(app, {
       );
     }
     const projectPath = `orgs/${tenantId}/projects/${projectId}`;
-    let reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
+    const reviewerName = readOptionalText(actorName) || readOptionalText(actorEmail) || actorId;
     const now = new Date().toISOString();
     await ensureDocumentExists(db, projectPath, `Project not found: ${projectId}`);
     const { request, requestId: resolvedRequestId, refs } = await resolveProjectRequestDocuments({
@@ -2738,7 +3292,9 @@ export function mountProjectRoutes(app, {
         if (designatedApproverId && requesterIds.has(actorId)) {
           throw createHttpError(403, 'Requester cannot approve their own project registration', 'self_approval_forbidden');
         }
-        reviewerName = readOptionalText(currentProject.executiveApproverName) || reviewerName;
+        if (parsed.reviewStatus === 'APPROVED') {
+          assertProjectRequestAttachmentsPublished(reviewRequest, tenantId);
+        }
         const legacyProjectCode = isLegacyPlanningAgreement ? requireProjectCode(currentProject.projectCode) : null;
         const submittedCode = normalizeProjectCode(parsed.projectCode);
         if (isLegacyPlanningAgreement && submittedCode && requireProjectCode(submittedCode) !== legacyProjectCode) {
@@ -2852,6 +3408,7 @@ export function mountProjectRoutes(app, {
   app.post('/api/v1/projects/:projectId/management-planning-review', createMutatingRoute(idempotencyService, async (req) => {
     const { tenantId, actorId, actorEmail, actorName } = req.context;
     assertActorRoleAllowed(req, ['admin', 'finance'], 'review project management planning status');
+    await readProjectAttachmentMember({ db, tenantId, actorId });
     const projectId = readOptionalText(req.params.projectId);
     if (!projectId) {
       throw createHttpError(400, 'project id is required', 'missing_project_id');
@@ -2876,6 +3433,9 @@ export function mountProjectRoutes(app, {
       requestId: parsed.requestId,
       projectId,
     });
+    const appliesResubmittedChange = parsed.reviewStatus === 'AGREED'
+      && isProjectChangeRequest(request)
+      && readOptionalText(request?.status) === 'PENDING';
 
     await mergeProjectAndRequestDocs({
       db,
@@ -2902,6 +3462,18 @@ export function mountProjectRoutes(app, {
           ? currentProject.managementPlanningReviewHistory
           : [];
         const isAgreed = parsed.reviewStatus === 'AGREED';
+        const appliesCurrentChange = isAgreed
+          && isProjectChangeRequest(reviewRequest)
+          && readOptionalText(reviewRequest?.status) === 'PENDING';
+        if (appliesCurrentChange) {
+          assertProjectRequestAttachmentsPublished(reviewRequest, tenantId);
+        }
+        const approvedChangePatch = appliesCurrentChange
+          ? buildProjectPatchFromChangeRequestPayload(
+            resolveProjectRequestPayloadForReview(reviewRequest),
+            currentProject,
+          )
+          : {};
         if (isAgreed && projectCode && projectCodeClaimRef) {
           const existingProjectCode = normalizeProjectCode(currentProject.projectCode);
           if (existingProjectCode && existingProjectCode !== projectCode) {
@@ -2910,6 +3482,17 @@ export function mountProjectRoutes(app, {
           const codeSnap = await tx.get(projectCodeClaimRef);
           const claim = codeSnap.exists ? (codeSnap.data() || {}) : {};
           if (codeSnap.exists && readOptionalText(claim.projectId) !== projectId) {
+            throw createHttpError(409, 'Project code is already assigned to another project', 'project_code_conflict');
+          }
+          const projectsWithCodes = await tx.get(db.collection(`orgs/${tenantId}/projects`));
+          const legacyConflict = projectsWithCodes.docs.find((projectDoc) => {
+            if (projectDoc.id === projectId) return false;
+            const candidate = projectDoc.data() || {};
+            return [candidate.projectCodeKey, candidate.projectCode]
+              .map(normalizeProjectCode)
+              .includes(projectCode);
+          });
+          if (legacyConflict) {
             throw createHttpError(409, 'Project code is already assigned to another project', 'project_code_conflict');
           }
           tx.set(projectCodeClaimRef, {
@@ -2923,6 +3506,7 @@ export function mountProjectRoutes(app, {
         }
 
         return {
+          ...approvedChangePatch,
           managementPlanningReviewStatus: parsed.reviewStatus,
           managementPlanningReviewedAt: now,
           managementPlanningReviewedById: actorId,
@@ -2943,7 +3527,7 @@ export function mountProjectRoutes(app, {
           ],
         };
       },
-      buildRequestPatch: () => {
+      buildRequestPatch: (_currentProject, currentRequest, nextVersion) => {
         if (!resolvedRequestId) return null;
         const isAgreed = parsed.reviewStatus === 'AGREED';
         const reviewComment = readOptionalText(parsed.reviewComment);
@@ -2971,10 +3555,16 @@ export function mountProjectRoutes(app, {
           rejectedReason: null,
           approvedProjectId: projectId,
           targetProjectId: projectId,
+          ...(isProjectChangeRequest(currentRequest || request)
+            && readOptionalText((currentRequest || request)?.status) === 'PENDING' ? {
+              approvedSnapshot: resolveProjectRequestPayloadForReview(currentRequest || request),
+              approvedProjectVersion: nextVersion,
+            } : {}),
           updatedAt: now,
         };
       },
       requestRefs: resolvedRequestId ? refs : [],
+      enforceChangeRequestVersion: appliesResubmittedChange,
       tenantId,
       actorId,
       now,

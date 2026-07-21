@@ -13,15 +13,25 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).not.toContain('setDoc(');
   });
 
-  it('uses the executive review resubmit endpoint only for explicit resubmission', () => {
-    expect(source).toContain("resubmit: actionId === 'resubmit'");
-    expect(source).toContain("actionId === 'resubmit' && resubmitComment.trim()");
+  it('forces every rejected edit through the stage-aware resubmission path', () => {
+    expect(source).toContain("const shouldResubmit = canResubmit || actionId === 'resubmit'");
+    expect(source).toContain('resubmit: shouldResubmit');
+    expect(source).toContain('shouldResubmit && resubmitComment.trim()');
+    expect(source).not.toContain("resubmit: actionId === 'resubmit'");
     expect(source).not.toContain('resubmitProjectExecutiveReviewViaBff');
   });
 
-  it('reads canonical and legacy project request collections so reviewer feedback is retained', () => {
-    expect(source).toContain("['project_requests', 'projectRequests']");
-    expect(source).toContain('const sourceRows = new Map<string, ProjectRequest>()');
+  it('shows a single resubmit action after either approval stage rejects the project', () => {
+    expect(source).toContain("canResubmit\n            ? [{ id: 'resubmit', label: '수정 후 다시 제출'");
+    expect(source).toContain(": [{ id: 'save', label: '최종 저장', icon: Save }]");
+    expect(source).not.toContain("{ id: 'save', label: '최종 저장', icon: Save },\n          ...(canResubmit");
+  });
+
+  it('reads the latest canonical-preferred request through the permission-checked BFF', () => {
+    expect(source).toContain('fetchLatestProjectRequestViaBff');
+    expect(source).toContain('latest project request fetch failed');
+    expect(source).not.toContain("['project_requests', 'projectRequests']");
+    expect(source).not.toContain("collection(db, 'tenants'");
   });
 
   it('keeps the project edit draft key stable across request listener updates', () => {
@@ -44,5 +54,13 @@ describe('PortalProjectEdit persistence shell', () => {
     expect(source).toContain("managementPlanningReview.status === 'REVISION_REJECTED'");
     expect(source).toContain('data-testid="portal-management-planning-review"');
     expect(source).toContain('buildPortalProjectReviewFeedback(project, requestDoc)');
+    expect(source).toContain('기존 조직장 승인 이력은 유지되며, 보완한 요청은 경영기획실 재검토 화면에 표시됩니다.');
+    expect(source).toContain("canManagementPlanningResubmit\n                ?");
+    expect(source).toContain('조직장 승인 전까지 프로젝트 원장은 바뀌지 않으며');
+  });
+
+  it('matches the BFF 2,000-character resubmission memo limit in the editor', () => {
+    expect(source).toContain('maxLength={2000}');
+    expect(source).toContain('{resubmitComment.length.toLocaleString()}/2,000자');
   });
 });

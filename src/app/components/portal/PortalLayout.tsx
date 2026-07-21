@@ -4,6 +4,7 @@ import {
   LogOut,
   FolderKanban, Menu,
   Plus, Pencil,
+  ClipboardCheck,
   CircleDollarSign,
   BarChart3,
   Loader2,
@@ -108,6 +109,7 @@ const NAV_SECTIONS: PortalNavSection[] = [
   {
     title: '프로젝트 배정 및 등록',
     items: [
+      { to: '/portal/project-approvals', icon: ClipboardCheck, label: '프로젝트 등록/승인' },
       { to: '/portal/edit-project', icon: Pencil, label: '프로젝트 수정' },
       { to: '/portal/register-project', icon: Plus, label: '프로젝트 등록 요청', accent: true },
       { to: '/portal/business-cards', icon: UserRoundCheck, label: '명함 DB' },
@@ -188,6 +190,8 @@ function PortalContent() {
   const navigationHandlerRef = useRef<((attempt: PortalNavigationAttempt) => boolean) | null>(null);
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const isCashflowWorkspace = location.pathname.startsWith('/portal/cashflow');
+  const isProjectRegistrationPath = location.pathname === '/portal/register-project'
+    || location.pathname.startsWith('/portal/register-project/');
   const blockedPortalAccess = Boolean(
     !authLoading
     && !portalLoading
@@ -295,9 +299,10 @@ function PortalContent() {
   ), [currentFundInputMode, labEnabled]);
   const topNavItems = useMemo(() => navSections.flatMap((section) => section.items), [navSections]);
   const currentSectionLabel = useMemo(() => {
+    if (isProjectRegistrationPath) return '프로젝트 등록';
     const current = topNavItems.find((item) => isActive(item.to, item.exact));
     return current?.label || '프로젝트 선택';
-  }, [topNavItems, location.pathname]);
+  }, [isProjectRegistrationPath, topNavItems, location.pathname]);
   const shellCommandItems = useMemo(() => buildPortalShellCommandItems({
     role: authUser?.role,
     currentPath,
@@ -397,11 +402,13 @@ function PortalContent() {
     return <Outlet />;
   }
 
-  if (isPortalStandaloneEntryPath(location.pathname) && !isAdminSpaceRole(authUser?.role)) {
+  if (isPortalStandaloneEntryPath(location.pathname)
+    && !isProjectRegistrationPath
+    && !isAdminSpaceRole(authUser?.role)) {
     return <Outlet />;
   }
 
-  if (!portalUser && !isAdminSpaceRole(authUser?.role)) {
+  if (!portalUser && !isProjectRegistrationPath && !isAdminSpaceRole(authUser?.role)) {
     return (
       <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-slate-950">
         <div className="mx-auto w-full max-w-6xl">

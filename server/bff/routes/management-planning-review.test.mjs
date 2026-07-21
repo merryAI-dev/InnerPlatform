@@ -21,14 +21,25 @@ function createDb(seed = {}) {
       documents.set(path, options.merge && current ? { ...current, ...clone(value) } : clone(value));
     },
   });
+  const collection = (path) => ({ path, kind: 'query' });
+  const querySnapshot = (path) => {
+    const prefix = `${path}/`;
+    const docs = [...documents.entries()].flatMap(([documentPath, value]) => {
+      const relativePath = documentPath.startsWith(prefix) ? documentPath.slice(prefix.length) : '';
+      if (!relativePath || relativePath.includes('/')) return [];
+      return [{ id: relativePath, data: () => clone(value) }];
+    });
+    return { docs, empty: docs.length === 0, size: docs.length };
+  };
 
   return {
     documents,
     doc,
+    collection,
     async runTransaction(callback) {
       const writes = [];
       const tx = {
-        get: async (ref) => snapshot(ref.path),
+        get: async (ref) => ref.kind === 'query' ? querySnapshot(ref.path) : snapshot(ref.path),
         set: (ref, value, options = {}) => writes.push({ ref, value: clone(value), options }),
       };
       const result = await callback(tx);
@@ -44,8 +55,13 @@ function createDb(seed = {}) {
   };
 }
 
-function createRouteApp({ actorRole = 'finance', seed = {} } = {}) {
-  const db = createDb(seed);
+function createRouteApp({ actorRole = 'finance', memberStatus = 'ACTIVE', seed = {} } = {}) {
+  const db = createDb({
+    'orgs/tenant-a/members/finance-a': {
+      uid: 'finance-a', role: actorRole, status: memberStatus,
+    },
+    ...seed,
+  });
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -171,14 +187,34 @@ describe('management planning project review route', () => {
   });
 
   it('closes a resubmitted management-planning change request when it agrees', async () => {
+    const executiveHistory = [{
+      status: 'APPROVED',
+      previousStatus: 'PENDING',
+      reviewedAt: '2026-07-10T00:00:00.000Z',
+      reviewedById: 'executive-a',
+      reviewedByName: '조직장A',
+      reviewComment: '조직장 승인',
+    }];
     const { app, db } = createRouteApp({
       seed: reviewSeed(
-        approvedProject({ managementPlanningReviewStatus: 'REVISION_REJECTED' }),
+        approvedProject({
+          name: '보완 전 프로젝트 A',
+          managementPlanningReviewStatus: 'REVISION_REJECTED',
+          executiveReviewHistory: executiveHistory,
+        }),
         approvedRequest({
           requestKind: 'CHANGE',
           status: 'PENDING',
           reviewOutcome: null,
           rejectedReason: null,
+          baseProjectVersion: 3,
+          targetProjectVersion: 4,
+          proposedSnapshot: {
+            name: '보완 후 프로젝트 A',
+            registrationRequirementsVersion: 2,
+            settlementType: 'NONE',
+            financialYears: [],
+          },
         }),
       ),
     });
@@ -195,6 +231,10 @@ describe('management planning project review route', () => {
 
     expect(response.status).toBe(200);
     expect(db.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
+      name: '보완 후 프로젝트 A',
+      version: 5,
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewHistory: executiveHistory,
       managementPlanningReviewStatus: 'AGREED',
       projectCode: 'AXR-2026-002',
     });
@@ -205,7 +245,49 @@ describe('management planning project review route', () => {
       reviewedByName: 'finance-a@example.com',
       reviewComment: '보완 확인',
       rejectedReason: null,
+      approvedProjectVersion: 5,
+      approvedSnapshot: expect.objectContaining({ name: '보완 후 프로젝트 A' }),
     });
+  });
+
+  it('does not agree to a resubmitted change while its attachments are still private draft files', async () => {
+    const { app, db } = createRouteApp({
+      seed: reviewSeed(
+        approvedProject({ managementPlanningReviewStatus: 'REVISION_REJECTED' }),
+        approvedRequest({
+          requestKind: 'CHANGE',
+          status: 'PENDING',
+          reviewOutcome: null,
+          baseProjectVersion: 3,
+          targetProjectVersion: 4,
+          proposedSnapshot: {
+            name: '보완 후 프로젝트 A',
+            registrationRequirementsVersion: 2,
+            settlementType: 'NONE',
+            financialYears: [],
+            contractDocument: {
+              name: 'private-contract.pdf',
+              path: 'orgs/tenant-a/project-registration-drafts/draft-a/private-contract.pdf',
+            },
+          },
+        }),
+      ),
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/management-planning-review')
+      .set('idempotency-key', 'planning-private-attachment')
+      .send({
+        requestId: 'request-a',
+        reviewStatus: 'AGREED',
+        projectCode: 'AXR-2026-PRIVATE',
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('project_attachments_processing');
+    expect(db.documents.get('orgs/tenant-a/projects/project-a')?.managementPlanningReviewStatus)
+      .toBe('REVISION_REJECTED');
+    expect(db.documents.get('orgs/tenant-a/projectCodeClaims/AXR-2026-PRIVATE')).toBeUndefined();
   });
 
   it('accepts a legacy approved request as organization-head approval for code issuance', async () => {
@@ -305,12 +387,49 @@ describe('management planning project review route', () => {
     expect(db.documents.get('orgs/tenant-a/projects/project-a')?.managementPlanningReviewStatus).toBe('PENDING');
   });
 
+  it('rejects a code already stored on a legacy project even when no claim document exists', async () => {
+    const { app, db } = createRouteApp({
+      seed: {
+        ...reviewSeed(),
+        'orgs/tenant-a/projects/project-legacy': approvedProject({
+          id: 'project-legacy',
+          projectCode: ' axr-2026-legacy ',
+          projectCodeKey: undefined,
+          managementPlanningReviewStatus: 'AGREED',
+        }),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/management-planning-review')
+      .set('idempotency-key', 'planning-legacy-duplicate-code')
+      .send({ requestId: 'request-a', reviewStatus: 'AGREED', projectCode: 'AXR-2026-LEGACY' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('project_code_conflict');
+    expect(db.documents.get('orgs/tenant-a/projectCodeClaims/AXR-2026-LEGACY')).toBeUndefined();
+    expect(db.documents.get('orgs/tenant-a/projects/project-a')?.managementPlanningReviewStatus).toBe('PENDING');
+  });
+
   it('allows only admin or finance to decide management-planning review', async () => {
     const { app, db } = createRouteApp({ actorRole: 'pm', seed: reviewSeed() });
 
     const response = await request(app)
       .post('/api/v1/projects/project-a/management-planning-review')
       .set('idempotency-key', 'planning-pm-denied')
+      .send({ requestId: 'request-a', reviewStatus: 'AGREED', projectCode: 'AXR-2026-001' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('forbidden');
+    expect(db.documents.get('orgs/tenant-a/projects/project-a')?.managementPlanningReviewStatus).toBe('PENDING');
+  });
+
+  it('rejects management-planning review from an inactive member', async () => {
+    const { app, db } = createRouteApp({ memberStatus: 'INACTIVE', seed: reviewSeed() });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/management-planning-review')
+      .set('idempotency-key', 'planning-inactive-denied')
       .send({ requestId: 'request-a', reviewStatus: 'AGREED', projectCode: 'AXR-2026-001' });
 
     expect(response.status).toBe(403);

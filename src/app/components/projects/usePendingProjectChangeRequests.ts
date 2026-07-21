@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { useAuth } from '../../data/auth-store';
 import type { ProjectRequest } from '../../data/types';
-import { getOrgRootPath } from '../../lib/firebase';
 import { useFirebase } from '../../lib/firebase-context';
-
-type ProjectRequestCollectionName = 'project_requests' | 'projectRequests';
-
-const PROJECT_REQUEST_COLLECTIONS: ProjectRequestCollectionName[] = ['project_requests', 'projectRequests'];
+import {
+  fetchPendingProjectChangeRequestsViaBff,
+  isPlatformApiEnabled,
+} from '../../lib/platform-bff-client';
 
 function buildPendingChangeMap(requests: ProjectRequest[]): Map<string, ProjectRequest> {
   const next = new Map<string, ProjectRequest>();
@@ -22,43 +21,42 @@ function buildPendingChangeMap(requests: ProjectRequest[]): Map<string, ProjectR
   return next;
 }
 
-export function usePendingProjectChangeRequests(): Map<string, ProjectRequest> {
-  const { db, isOnline, orgId } = useFirebase();
+export function usePendingProjectChangeRequests(projectIds: string[]): Map<string, ProjectRequest> {
+  const { orgId } = useFirebase();
+  const { user } = useAuth();
   const [pendingProjectChangeMap, setPendingProjectChangeMap] = useState<Map<string, ProjectRequest>>(new Map());
 
   useEffect(() => {
-    if (!db || !isOnline) {
+    if (!user?.uid || !isPlatformApiEnabled()) {
       setPendingProjectChangeMap(new Map());
       return undefined;
     }
-
-    const collectionRows = new Map<ProjectRequestCollectionName, ProjectRequest[]>();
-    const publish = () => {
-      setPendingProjectChangeMap(buildPendingChangeMap(Array.from(collectionRows.values()).flat()));
+    let disposed = false;
+    const load = async () => {
+      try {
+        const requests = await fetchPendingProjectChangeRequestsViaBff({
+          tenantId: orgId,
+          projectIds,
+          actor: {
+            uid: user.uid,
+            email: user.email,
+            role: user.role,
+            idToken: user.idToken,
+          },
+        });
+        if (!disposed) setPendingProjectChangeMap(buildPendingChangeMap(requests));
+      } catch (error) {
+        console.error('[usePendingProjectChangeRequests] BFF fetch failed:', error);
+        if (!disposed) setPendingProjectChangeMap(new Map());
+      }
     };
-
-    const unsubscribes = PROJECT_REQUEST_COLLECTIONS.map((collectionName) => {
-      const q = query(
-        collection(db, `${getOrgRootPath(orgId)}/${collectionName}`),
-        where('status', '==', 'PENDING'),
-      );
-      return onSnapshot(q, (snapshot) => {
-        collectionRows.set(collectionName, snapshot.docs.map((docSnap) => ({
-          ...(docSnap.data() as ProjectRequest),
-          id: docSnap.id,
-        })));
-        publish();
-      }, (error) => {
-        console.error(`[usePendingProjectChangeRequests] ${collectionName} listen failed:`, error);
-        collectionRows.set(collectionName, []);
-        publish();
-      });
-    });
-
+    void load();
+    window.addEventListener('focus', load);
     return () => {
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
+      disposed = true;
+      window.removeEventListener('focus', load);
     };
-  }, [db, isOnline, orgId]);
+  }, [orgId, projectIds, user?.email, user?.idToken, user?.role, user?.uid]);
 
   return pendingProjectChangeMap;
 }

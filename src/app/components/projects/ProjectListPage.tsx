@@ -63,7 +63,8 @@ export function ProjectListPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [activeTab, setActiveTab] = useState<string>('contract-pending');
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
-  const pendingProjectChangeMap = usePendingProjectChangeRequests();
+  const projectIds = useMemo(() => allProjects.map((project) => project.id).filter(Boolean), [allProjects]);
+  const pendingProjectChangeMap = usePendingProjectChangeRequests(projectIds);
 
   const {
     active: activeProjects,

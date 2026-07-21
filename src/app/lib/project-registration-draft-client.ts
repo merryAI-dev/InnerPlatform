@@ -244,6 +244,23 @@ export function createProjectRegistrationDraftClient(options: {
       return { draft: parseDraft(body.draft), attachment: parseAttachment(body.attachment) };
     },
 
+    async removeAttachment(
+      draftId: string,
+      ownership: { leaseId: string; fence: number },
+      input: { expectedDraftRevision: number; documentKind: ProjectRegistrationDocumentKind },
+    ) {
+      const response = await client.request<unknown>(
+        `${pathFor(draftId)}/attachments/${encodeURIComponent(input.documentKind)}`,
+        {
+          method: 'DELETE',
+          ...request,
+          headers: ownershipHeaders(sessionId, ownership),
+          body: { expectedDraftRevision: revision(input.expectedDraftRevision) },
+        },
+      );
+      return parseDraftBody(response.data);
+    },
+
     async submit(
       draftId: string,
       ownership: { leaseId: string; fence: number },
