@@ -1279,7 +1279,7 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ idempotencyKey: 'apply-001' })
       .expect(503)
-      .expect((response) => expect(response.body.code).toBe('cashflow_edit_leases_disabled'));
+      .expect((response) => expect(response.body.code).toBe('unsafe_bff_runtime'));
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
@@ -1325,7 +1325,7 @@ describe('cashflow sheet lab route', () => {
   });
 
   it.each(['0', '-1', '01', '1e2', '1.0', '9007199254740992'])(
-    'rejects non-canonical final-apply edit fence %s before the JVM',
+    'ignores obsolete final-apply edit fence %s and still requires a pinned stage run',
     async (fence) => {
       const javaWeeklyClient = { applyCashflowSheetLab: vi.fn() };
       await request(createApp({
@@ -1340,7 +1340,7 @@ describe('cashflow sheet lab route', () => {
         .send({ idempotencyKey: `bad-fence-${fence}` })
         .expect(400)
         .expect((response) => {
-          expect(response.body.code).toBe('cashflow_edit_lease_request_invalid');
+          expect(response.body.code).toBe('cashflow_sheet_stage_run_required');
         });
       expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     },
@@ -1947,14 +1947,10 @@ describe('cashflow sheet lab route', () => {
           amount: 999,
         }),
       ]),
-      editSession: expect.objectContaining({
-        leaseId: 'sheet-lab-lease',
-        fence: 8,
-        finalize: true,
-      }),
+      editSession: null,
     }));
-    expect(editLeaseService.acquire).toHaveBeenCalledTimes(1);
-    expect(editLeaseService.release).toHaveBeenCalledTimes(1);
+    expect(editLeaseService.acquire).not.toHaveBeenCalled();
+    expect(editLeaseService.release).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells).toHaveLength(160);
     expect(db.__getQueries()).toContainEqual({
       path: 'orgs/tenant-a/cashflow_change_candidates',
@@ -2042,7 +2038,7 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls.map(([input]) => input.yearMonth))
       .toEqual(['2026-01', '2026-02']);
-    expect(editLeaseService.release).toHaveBeenCalledTimes(1);
+    expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
   it('imports the sanitized 260701 workbook shape across the full year and verifies exact ledger totals', async () => {
@@ -2125,7 +2121,7 @@ describe('cashflow sheet lab route', () => {
       resultingTargetRevision: `sha256:${'3'.repeat(64)}`,
     });
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(3);
-    expect(editLeaseService.release).toHaveBeenCalledTimes(1);
+    expect(editLeaseService.release).not.toHaveBeenCalled();
     expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({
       appliedSourceRevision: mirror.body.sourceRevision,
       appliedTargetRevision: `sha256:${'3'.repeat(64)}`,
@@ -2184,7 +2180,7 @@ describe('cashflow sheet lab route', () => {
         expect(response.body.code).toBe('cashflow_jvm_apply_verification_failed');
       });
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('APPLYING');
-    expect(editLeaseService.release).toHaveBeenCalledTimes(1);
+    expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
   it('resumes an uncertain single-month apply with the server-pinned idempotency key', async () => {

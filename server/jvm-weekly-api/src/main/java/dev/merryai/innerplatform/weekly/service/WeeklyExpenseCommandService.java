@@ -266,7 +266,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         SaveDraftRequest request
     ) {
-        actor = requireCashflowWriteLease(SAVE_DRAFT_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(SAVE_DRAFT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<SaveDraftResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -369,7 +369,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         ImportBankStatementBatchRequest request
     ) {
-        actor = requireCashflowWriteLease(BANK_IMPORT_BATCH_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(BANK_IMPORT_BATCH_COMMAND, actor, projectId, editSession);
         assertAtomicWriteBudget(request.lines().size(), 3 + finalizeWriteCount(editSession), "Bank statement import");
         String requestHash = hashJson(request);
         Optional<ImportBankStatementBatchResponse> replay = readIdempotentResponse(
@@ -494,7 +494,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         ApplyBankStatementItemsRequest request
     ) {
-        actor = requireCashflowWriteLease(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(BANK_IMPORT_APPLY_ITEMS_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<ApplyBankStatementItemsResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -634,11 +634,11 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         UpsertProjectionRequest request
     ) {
-        if (request.lines().isEmpty() && (editSession == null || !editSession.finalizeLease())) {
-            throw new IllegalArgumentException("Empty projection lines are allowed only for a final save.");
+        if (request.lines().isEmpty()) {
+            throw new IllegalArgumentException("At least one projection line is required.");
         }
-        assertAtomicWriteBudget(request.lines().size(), 2 + finalizeWriteCount(editSession), "Projection command");
-        TrustedActorContext writer = requireCashflowWriteLease(UPSERT_PROJECTION_COMMAND, actor, projectId, editSession);
+        assertAtomicWriteBudget(request.lines().size(), 2, "Projection command");
+        TrustedActorContext writer = requireCashflowWritePermission(UPSERT_PROJECTION_COMMAND, actor, projectId);
         String requestHash = hashJson(request);
         Optional<UpsertProjectionResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -728,12 +728,6 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        writer = requireCashflowWriteLease(
-            CASHFLOW_VARIANCE_COMMAND,
-            writer,
-            projectId,
-            nonFinalSession(editSession)
-        );
         WeeklyExpensePersistence.CashflowVarianceRecord saved = persistence.updateCashflowVariance(
             writer,
             projectId,
@@ -805,13 +799,11 @@ public class WeeklyExpenseCommandService {
         CloseCashflowMonthRequest.requireCompleteConfirmations(request.confirmations());
         CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
         CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
-        CashflowEditSession finalSession = finalizedSession(editSession);
         assertAtomicWriteBudget(
             CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT,
-            5 + finalizeWriteCount(finalSession),
+            5,
             "Cashflow month close"
         );
-        writer = requireCashflowWriteLease(CLOSE_CASHFLOW_MONTH_COMMAND, writer, projectId, finalSession);
         WeeklyExpensePersistence.CashflowMonthCloseRecord saved = persistence.closeCashflowMonth(
             writer,
             projectId,
@@ -972,8 +964,7 @@ public class WeeklyExpenseCommandService {
         if (replay.isPresent()) return replay.get();
 
         List<CashflowSheetLabApplyRequest.Cell> cells = requireCompleteCashflowSheetMonth(request);
-        assertAtomicWriteBudget(cells.size(), 3 + finalizeWriteCount(editSession), "Cashflow sheet apply");
-        writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
+        assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
             writer.tenantId(),
@@ -1073,8 +1064,7 @@ public class WeeklyExpenseCommandService {
         if (replay.isPresent()) return replay.get();
 
         CashflowSheetAnnualApplyRequest.requireCompleteYear(request.cells());
-        assertAtomicWriteBudget(1, 2 + finalizeWriteCount(editSession), "Cashflow annual total apply");
-        writer = requireCashflowWriteLease(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId, editSession);
+        assertAtomicWriteBudget(1, 2, "Cashflow annual total apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetAnnualReplacement replacement = persistence
             .replaceCashflowSheetYearTotal(writer.tenantId(), projectId, sourceSheetKey, request);
@@ -1130,7 +1120,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         SubmitWeekRequest request
     ) {
-        actor = requireCashflowWriteLease(SUBMIT_WEEK_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(SUBMIT_WEEK_COMMAND, actor, projectId, editSession);
         String tenantId = actor.tenantId();
         String requestHash = hashJson(request);
         Optional<SubmitWeekResponse> replay = readIdempotentResponse(
@@ -1252,7 +1242,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CloseWeekRequest request
     ) {
-        actor = requireCashflowWriteLease(CLOSE_WEEK_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(CLOSE_WEEK_COMMAND, actor, projectId, editSession);
         requireProjectionLinesMatchWeek(request);
         assertAtomicWriteBudget(
             request.projectionLines().size(),
@@ -1425,7 +1415,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CellPatchCommandRequest request
     ) {
-        actor = requireCashflowWriteLease(CELL_PATCH_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(CELL_PATCH_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1470,7 +1460,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CopyCellsRequest request
     ) {
-        actor = requireCashflowWriteLease(CELLS_COPY_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(CELLS_COPY_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1516,7 +1506,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         PasteCellsRequest request
     ) {
-        actor = requireCashflowWriteLease(CELLS_PASTE_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(CELLS_PASTE_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1572,7 +1562,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         CutCellsRequest request
     ) {
-        actor = requireCashflowWriteLease(CELLS_CUT_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(CELLS_CUT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<CellCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1620,7 +1610,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         RowInsertRequest request
     ) {
-        actor = requireCashflowWriteLease(ROW_INSERT_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(ROW_INSERT_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<RowCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -1667,7 +1657,7 @@ public class WeeklyExpenseCommandService {
         CashflowEditSession editSession,
         RowDeleteRequest request
     ) {
-        actor = requireCashflowWriteLease(ROW_DELETE_COMMAND, actor, projectId, editSession);
+        actor = requireWeeklyExpenseWriteLease(ROW_DELETE_COMMAND, actor, projectId, editSession);
         String requestHash = hashJson(request);
         Optional<RowCommandResponse> replay = readIdempotentResponse(
             actor.tenantId(),
@@ -2753,7 +2743,7 @@ public class WeeklyExpenseCommandService {
         return value == null ? "" : value;
     }
 
-    private TrustedActorContext requireCashflowWriteLease(
+    private TrustedActorContext requireWeeklyExpenseWriteLease(
         String commandName,
         TrustedActorContext actor,
         String projectId,
@@ -2762,8 +2752,8 @@ public class WeeklyExpenseCommandService {
         if (!cashflowEditLeasesEnabled) {
             throw new WeeklyExpenseEditLeaseException(
                 503,
-                "cashflow_edit_leases_disabled",
-                "Cashflow writes require the Stage edit-lease runtime."
+                "weekly_expense_edit_leases_disabled",
+                "Weekly expense writes require the Stage edit-lease runtime."
             );
         }
         String storedRole = persistence.requireCashflowWriteLease(actor, projectId, editSession);
@@ -2783,13 +2773,6 @@ public class WeeklyExpenseCommandService {
         TrustedActorContext actor,
         String projectId
     ) {
-        if (!cashflowEditLeasesEnabled) {
-            throw new WeeklyExpenseEditLeaseException(
-                503,
-                "cashflow_edit_leases_disabled",
-                "Cashflow writes require the Stage edit-lease runtime."
-            );
-        }
         return requireCashflowWritePermissionWithoutLeaseRuntime(commandName, actor, projectId);
     }
 

@@ -44,6 +44,8 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
     void allowLegacyJpaFixtureWritesWithoutFirestoreLeaseBackend() {
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowWriteLease(any(), any(), any());
+        doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
+            .when(weeklyExpensePersistence).requireCashflowWritePermission(any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
     }
 

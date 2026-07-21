@@ -238,12 +238,23 @@ function commandBody(req) {
   return body;
 }
 
-function privateCashflowDraftId(projectId, actorId) {
-  return `v1_${Buffer.from(JSON.stringify(['cashflow', projectId, actorId]), 'utf8').toString('base64url')}`;
-}
-
 function objectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function readWeeklyExpenseEditSession(req) {
+  const sessionId = readOptionalText(req.header('x-edit-session-id'));
+  const leaseId = readOptionalText(req.header('x-edit-lease-id'));
+  const fenceText = readOptionalText(req.header('x-edit-fence'));
+  const fence = /^[1-9]\d*$/.test(fenceText) ? Number(fenceText) : Number.NaN;
+  if (!sessionId || !leaseId || !Number.isSafeInteger(fence)) {
+    throw createHttpError(400, 'Weekly expense edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
+  }
+  const finalizeText = readOptionalText(req.header('x-edit-finalize'));
+  if (finalizeText && finalizeText !== 'true') {
+    throw createHttpError(400, 'x-edit-finalize must be true when present.', 'cashflow_edit_lease_request_invalid');
+  }
+  return { sessionId, leaseId, fence, ...(finalizeText === 'true' ? { finalize: true } : {}) };
 }
 
 function parseAuditMetadata(value) {
@@ -734,8 +745,48 @@ function actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary) {
   const targetWeekCount = yearMonth < asOfYearMonth ? 5 : yearMonth === asOfYearMonth ? Math.max(0, Math.min(5, asOfWeekNo)) : 0;
   if (targetWeekCount === 0) return 0;
   const target = cells.filter((cell) => cell.mode === 'actual' && cell.weekNo <= targetWeekCount);
-  if (target.length === 0) return 0;
-  return Math.round((target.filter((cell) => cell.cellState === 'VALUE').length / target.length) * 10_000) / 100;
+  const expected = targetWeekCount * CASHFLOW_ALL_LINES.length;
+  if (expected === 0) return 0;
+  return Math.round((Math.min(expected, target.length) / expected) * 10_000) / 100;
+}
+
+function settlementProgress(comparison, confirmations, yearMonth, comparisonBoundary) {
+  const asOfYearMonth = readOptionalText(comparisonBoundary?.asOfWeek?.yearMonth);
+  const asOfWeekNo = Number(comparisonBoundary?.asOfWeek?.weekNo);
+  const targetWeekCount = yearMonth < asOfYearMonth ? 5 : yearMonth === asOfYearMonth ? Math.max(0, Math.min(5, asOfWeekNo)) : 0;
+  if (targetWeekCount === 0) return { percent: 0, completed: 0, total: 0, incompleteWeeks: [] };
+
+  const confirmationKeys = validConfirmationKeys(confirmations);
+  const weeks = new Map((Array.isArray(comparison?.weeks) ? comparison.weeks : []).map((week) => [Number(week?.weekNo), week]));
+  const incompleteWeeks = [];
+  let completed = 0;
+  for (let weekNo = 1; weekNo <= targetWeekCount; weekNo += 1) {
+    const week = weeks.get(weekNo);
+    const lines = Array.isArray(week?.lines) ? week.lines : [];
+    const matches = lines.length === CASHFLOW_ALL_LINES.length
+      && lines.every((line) => safeAmount(line?.difference) === 0);
+    const humanConfirmed = ['projection', 'actual'].every((mode) => (
+      CASHFLOW_ALL_LINES.every((cashflowLine) => confirmationKeys.has(`${mode}:${weekNo}:${cashflowLine}`))
+    ));
+    if (matches || humanConfirmed) {
+      completed += 1;
+      continue;
+    }
+    incompleteWeeks.push({
+      yearMonth,
+      weekNo,
+      totalIn: safeAmount(week?.totalIn),
+      totalOut: safeAmount(week?.totalOut),
+      balance: safeAmount(week?.net),
+      reason: lines.length === CASHFLOW_ALL_LINES.length ? 'DIFFERENCE_REVIEW_REQUIRED' : 'SOURCE_INCOMPLETE',
+    });
+  }
+  return {
+    percent: Math.round((completed / targetWeekCount) * 10_000) / 100,
+    completed,
+    total: targetWeekCount,
+    incompleteWeeks,
+  };
 }
 
 function postCloseAdjustment(close, currentSnapshot) {
@@ -1130,33 +1181,16 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     ? objectValue(close?.snapshot) || {}
     : null;
   const tenantId = readOptionalText(req.context?.tenantId);
-  const actorId = readOptionalText(req.context?.actorId);
-  const draftId = privateCashflowDraftId(projectId, actorId);
-  const [projectDocument, mirror, draft] = closedSnapshot ? [null, null, null] : await Promise.all([
+  const [projectDocument, mirror] = closedSnapshot ? [null, null] : await Promise.all([
     readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
     readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
-    readDocument(db, `orgs/${tenantId}/privateEditDrafts/${draftId}`),
   ]);
   const project = closedSnapshot?.project || projectDocument || {};
   const sheetFacts = closedSnapshot?.sheetFacts || mirror?.sheetFacts || null;
-  const draftInput = objectValue(draft?.payload)?.monthClose;
-  const draftMatches = Boolean(
-    draftInput
-    && draft?.tenantId === tenantId
-    && draft?.ownerUid === actorId
-    && draft?.resourceType === 'cashflow'
-    && draft?.resourceId === projectId
-    && draft?.status === 'ACTIVE'
-    && draftInput.yearMonth === yearMonth
-  );
-  const draftSourceMatches = draftMatches
-    && draftInput.sourceRevision === mirror?.sourceRevision
-    && draftInput.targetRevision === mirror?.targetRevisionAtFetch;
   const mirrorCells = normalizeMonthCloseCells(mirror?.cells, yearMonth);
-  const draftCells = normalizeMonthCloseCells(draftInput?.cells, yearMonth);
   const cells = closedSnapshot
     ? closeSnapshotCells(closedSnapshot, yearMonth)
-    : (draftSourceMatches && completeMonthCloseCells(draftCells) ? draftCells : mirrorCells);
+    : mirrorCells;
   const projectionMode = buildMonthModeReadModel(cells, 'projection');
   const actualMode = buildMonthModeReadModel(cells, 'actual');
   const projection = dashboardTotals(projectionMode);
@@ -1168,13 +1202,11 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       readModel: { months: [{ yearMonth, projection: projectionMode, actual: actualMode }] },
     }, comparisonBoundary).months[0] || null
     : null;
-  const confirmations = closedSnapshot?.confirmations || (draftMatches ? draftInput?.confirmations : []) || [];
-  const managementConfirmations = closedSnapshot?.managementConfirmations
-    || (draftMatches ? draftInput?.managementConfirmations : [])
-    || [];
+  const confirmations = closedSnapshot?.confirmations || [];
+  const managementConfirmations = closedSnapshot?.managementConfirmations || [];
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
   const depositScheduleRows = closedSnapshot?.depositScheduleRows
-    || (draftSourceMatches ? draftInput?.depositScheduleRows : sourceRows)
+    || sourceRows
     || [];
   const managementChecks = Array.isArray(closedSnapshot?.managementChecks)
     ? closedSnapshot.managementChecks
@@ -1211,17 +1243,6 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     blockers.push(...sheetControlBlockers(sheetFacts));
     if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
-    if (!draftMatches) blockers.push({ code: 'DRAFT_REQUIRED', message: '월 결산 임시저장을 먼저 완료해 주세요.' });
-    else if (!draftSourceMatches) blockers.push({ code: 'DRAFT_SOURCE_STALE', message: '임시저장과 현재 시트값이 다릅니다.' });
-    if (!matchingDepositSchedule(sourceRows, draftInput?.depositScheduleRows)) {
-      blockers.push({ code: 'DEPOSIT_SCHEDULE_INCOMPLETE', message: '시트 입금 일정 5주를 확인해 주세요.' });
-    }
-    if (!completeMonthCloseConfirmations(confirmations)) {
-      blockers.push({ code: 'CONFIRMATIONS_INCOMPLETE', message: '모든 캐시플로우 항목을 확인 또는 해당 없음으로 판정해 주세요.' });
-    }
-    if (!completeManagementConfirmations(managementConfirmations)) {
-      blockers.push({ code: 'MANAGEMENT_CONFIRMATIONS_INCOMPLETE', message: '주요 관리 항목 4개를 모두 확인 또는 해당 없음으로 판정해 주세요.' });
-    }
   }
   const contractAmount = safeAmount(project?.contractAmount);
   const projectionTotalIn = canonicalProjectionTotalIn(cashflow, projection.totalIn);
@@ -1238,6 +1259,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
         / (requiredCellConfirmationCount + requiredManagementConfirmationCount),
     ) * 10_000,
   ) / 100;
+  const settlement = settlementProgress(comparison, confirmations, yearMonth, comparisonBoundary);
   const source = closedSnapshot ? {
     kind: 'MONTH_CLOSE_SNAPSHOT',
     status: readOptionalText(close?.status),
@@ -1270,14 +1292,18 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     managementConfirmations,
     deadlineSummary,
     postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
-    draftRevision: draftMatches && Number.isSafeInteger(Number(draft?.draftRevision)) ? Number(draft.draftRevision) : null,
+    draftRevision: null,
     totals: { projection, actual, difference },
     comparison,
     summary: {
       projectionProgressPercent,
       actualProgressPercent: actualWrittenProgressPercent(cells, yearMonth, comparisonBoundary),
       confirmationProgressPercent,
-      comparisonMatches: Boolean(comparison) && comparison.weeks.every((week) => week.net === 0 && week.totalIn === 0 && week.totalOut === 0),
+      settlementProgressPercent: settlement.percent,
+      settlementCompletedWeekCount: settlement.completed,
+      settlementTargetWeekCount: settlement.total,
+      settlementIncompleteWeeks: settlement.incompleteWeeks,
+      comparisonMatches: settlement.total > 0 && settlement.incompleteWeeks.length === 0,
       comparisonAsOfDate: comparisonBoundary.asOfDate,
       comparisonAsOfWeek: comparisonBoundary.asOfWeek,
       evaluatedBusinessDate: readOptionalText(close?.evaluatedBusinessDate) || null,
@@ -1298,73 +1324,21 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, com
     throw createHttpError(503, 'Cashflow month close source storage is unavailable.', 'cashflow_month_close_source_unavailable');
   }
   const tenantId = readOptionalText(req.context?.tenantId);
-  const actorId = readOptionalText(req.context?.actorId);
   const requested = commandBody(req);
   const yearMonth = readOptionalText(requested.yearMonth);
   const expectedRevision = Number(requested.expectedRevision);
+  const closeInput = objectValue(requested.closeInput);
   if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     throw createHttpError(400, 'Cashflow month close scope is invalid.', 'cashflow_month_close_request_invalid');
   }
+  if (!closeInput || readOptionalText(closeInput.yearMonth) !== yearMonth) {
+    throw createHttpError(400, 'Cashflow month close review input is required.', 'cashflow_month_close_request_invalid');
+  }
 
-  const [draftSnap, mirrorSnap, projectSnap] = await Promise.all([
-    db.doc(`orgs/${tenantId}/privateEditDrafts/${privateCashflowDraftId(projectId, actorId)}`).get(),
+  const [mirrorSnap, projectSnap] = await Promise.all([
     db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`).get(),
     db.doc(`orgs/${tenantId}/projects/${projectId}`).get(),
   ]);
-  if (!draftSnap.exists) {
-    throw createHttpError(409, 'Save a private cashflow draft before closing the month.', 'cashflow_month_close_draft_required');
-  }
-  const draft = draftSnap.data() || {};
-  const draftRevision = Number(draft.draftRevision);
-  const closeInput = objectValue(objectValue(draft.payload)?.monthClose);
-  const submittedRequest = objectValue(draft.monthCloseSubmission);
-  if (
-    draft.tenantId === tenantId
-    && draft.ownerUid === actorId
-    && draft.resourceType === 'cashflow'
-    && draft.resourceId === projectId
-    && draft.status === 'SUBMITTED'
-    && readOptionalText(submittedRequest?.idempotencyKey) === requested.idempotencyKey
-    && readOptionalText(submittedRequest?.yearMonth) === yearMonth
-    && Number(submittedRequest?.expectedRevision) === expectedRevision
-    && Number.isSafeInteger(Number(submittedRequest?.expectedDraftRevision))
-    && Number(submittedRequest.expectedDraftRevision) >= 0
-    && /^sha256:[a-f0-9]{64}$/.test(readOptionalText(submittedRequest?.sourceRevision))
-    && /^sha256:[a-f0-9]{64}$/.test(readOptionalText(submittedRequest?.targetRevision))
-    && Array.isArray(submittedRequest?.depositScheduleRows)
-    && Array.isArray(submittedRequest?.cells)
-    && Array.isArray(submittedRequest?.confirmations)
-    && Array.isArray(submittedRequest?.managementChecks)
-    && Array.isArray(submittedRequest?.managementConfirmations)
-  ) {
-    return {
-      idempotencyKey: requested.idempotencyKey,
-      yearMonth,
-      expectedRevision,
-      expectedDraftRevision: Number(submittedRequest.expectedDraftRevision),
-      sourceRevision: submittedRequest.sourceRevision,
-      targetRevision: submittedRequest.targetRevision,
-      depositScheduleRows: submittedRequest.depositScheduleRows,
-      cells: submittedRequest.cells,
-      confirmations: submittedRequest.confirmations,
-      managementChecks: submittedRequest.managementChecks,
-      managementConfirmations: submittedRequest.managementConfirmations,
-      deadlineSummary: submittedRequest.deadlineSummary || null,
-    };
-  }
-  if (
-    draft.tenantId !== tenantId
-    || draft.ownerUid !== actorId
-    || draft.resourceType !== 'cashflow'
-    || draft.resourceId !== projectId
-    || draft.status !== 'ACTIVE'
-    || !Number.isSafeInteger(draftRevision)
-    || draftRevision < 0
-    || !closeInput
-    || closeInput.yearMonth !== yearMonth
-  ) {
-    throw createHttpError(409, 'The latest private draft cannot be used for this month close.', 'cashflow_month_close_draft_conflict');
-  }
   if (!mirrorSnap.exists) {
     throw createHttpError(409, 'Refresh and pin the cashflow sheet before closing the month.', 'cashflow_month_close_source_required');
   }
@@ -1404,7 +1378,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, com
     idempotencyKey: requested.idempotencyKey,
     yearMonth,
     expectedRevision,
-    expectedDraftRevision: draftRevision,
+    expectedDraftRevision: 0,
     sourceRevision: closeInput.sourceRevision,
     targetRevision: closeInput.targetRevision,
     depositScheduleRows: closeInput.depositScheduleRows,
@@ -1414,21 +1388,6 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, com
     managementConfirmations: [...validManagementConfirmations(closeInput.managementConfirmations).values()],
     deadlineSummary,
   };
-}
-
-function readCashflowEditSession(req) {
-  const sessionId = readOptionalText(req.header('x-edit-session-id'));
-  const leaseId = readOptionalText(req.header('x-edit-lease-id'));
-  const fenceText = readOptionalText(req.header('x-edit-fence'));
-  const fence = /^[1-9]\d*$/.test(fenceText) ? Number(fenceText) : Number.NaN;
-  if (!sessionId || !leaseId || !Number.isSafeInteger(fence)) {
-    throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
-  }
-  const finalizeText = readOptionalText(req.header('x-edit-finalize'));
-  if (finalizeText && finalizeText !== 'true') {
-    throw createHttpError(400, 'x-edit-finalize must be true when present.', 'cashflow_edit_lease_request_invalid');
-  }
-  return { sessionId, leaseId, fence, ...(finalizeText === 'true' ? { finalize: true } : {}) };
 }
 
 function createJavaMutatingProxyRoute(routeHandler) {
@@ -1473,7 +1432,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
   const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
   const bffDataProjectId = resolveBffDataProjectId(env);
-  const editLeasesEnabled = readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  const weeklyExpenseEditLeasesEnabled = readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
 
   function proxyJavaWeeklyRequest(options) {
     return proxyJavaWeeklyJson({
@@ -1491,8 +1450,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   async function proxyMutation(req, path, body, {
     cashflowWrite = false,
-    requireEditLease = cashflowWrite,
-    requireFinalize = false,
+    requireWeeklyExpenseLease = false,
   } = {}) {
     let editSession;
     let dataProjectId;
@@ -1507,14 +1465,11 @@ export function mountJvmWeeklyApiRoutes(app, {
       if (bffDataProjectId === liveProjectId) {
         throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
       }
-      if (requireEditLease) {
-        if (!editLeasesEnabled) {
-          throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+      if (requireWeeklyExpenseLease) {
+        if (!weeklyExpenseEditLeasesEnabled) {
+          throw createHttpError(503, 'Weekly expense writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
         }
-        editSession = readCashflowEditSession(req);
-        if (requireFinalize && editSession.finalize !== true) {
-          throw createHttpError(400, 'Cashflow month close requires x-edit-finalize: true.', 'cashflow_edit_finalize_required');
-        }
+        editSession = readWeeklyExpenseEditSession(req);
       }
       dataProjectId = bffDataProjectId;
     }
@@ -1559,7 +1514,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       req,
       `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}/save-draft`,
       commandBody(req),
-      { cashflowWrite: true },
+      { cashflowWrite: true, requireWeeklyExpenseLease: true },
     );
     return { status: 200, body: result };
   }));
@@ -1571,7 +1526,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       req,
       `/api/v1/weekly-expenses/${projectId}/bank-statements/import-batch`,
       commandBody(req),
-      { cashflowWrite: true },
+      { cashflowWrite: true, requireWeeklyExpenseLease: true },
     );
     return { status: 200, body: result };
   }));
@@ -1596,7 +1551,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       req,
       `/api/v1/weekly-expenses/${projectId}/bank-statements/apply-items`,
       commandBody(req),
-      { cashflowWrite: true },
+      { cashflowWrite: true, requireWeeklyExpenseLease: true },
     );
     return { status: 200, body: result };
   }));
@@ -1610,7 +1565,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         req,
         `/api/v1/weekly-expenses/${projectId}/sheets/${sheetKey}/commands/${command}`,
         commandBody(req),
-        { cashflowWrite: true },
+        { cashflowWrite: true, requireWeeklyExpenseLease: true },
       );
       return { status: 200, body: result };
     }));
@@ -1659,7 +1614,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.post('/api/v1/cashflow-metadata/:projectId/variance', createJavaMutatingProxyRoute(async (req) => {
     assertWeeklyWorkspaceOrRoleAllowed(
       req,
-      ['admin', 'finance', 'pm', 'tenant_admin'],
+      ['admin', 'finance', 'pm'],
       'update cashflow variance metadata',
       authMode,
       workspaceEmailDomain,
@@ -1721,12 +1676,19 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close', createJavaMutatingProxyRoute(async (req) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['pm'], 'close cashflow month', authMode, workspaceEmailDomain);
-    if (readCashflowEditSession(req).finalize !== true) {
-      throw createHttpError(400, 'Cashflow month close requires x-edit-finalize: true.', 'cashflow_edit_finalize_required');
-    }
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm'], 'close cashflow month', authMode, workspaceEmailDomain);
     const rawProjectId = readOptionalText(req.params.projectId);
     const projectId = encodeURIComponent(rawProjectId);
+    const requested = commandBody(req);
+    if (
+      !/^20\d{2}-(0[1-9]|1[0-2])$/.test(readOptionalText(requested.yearMonth))
+      || !Number.isSafeInteger(Number(requested.expectedRevision))
+      || Number(requested.expectedRevision) < 0
+      || !objectValue(requested.closeInput)
+      || readOptionalText(requested.closeInput.yearMonth) !== readOptionalText(requested.yearMonth)
+    ) {
+      throw createHttpError(400, 'Cashflow month close review input is required.', 'cashflow_month_close_request_invalid');
+    }
     const comparisonBoundary = resolveCashflowComparisonAsOf('', now());
     const cashflow = await proxyJavaWeeklyRequest({
       context: req.context,
@@ -1744,19 +1706,19 @@ export function mountJvmWeeklyApiRoutes(app, {
       req,
       `/api/v1/cashflow/${projectId}/month-close`,
       closeBody,
-      { cashflowWrite: true, requireFinalize: true },
+      { cashflowWrite: true },
     );
     return { status: 200, body: result };
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close/reopen-request', createJavaMutatingProxyRoute(async (req) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['pm'], 'request cashflow month reopen', authMode, workspaceEmailDomain);
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm'], 'request cashflow month reopen', authMode, workspaceEmailDomain);
     const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${projectId}/month-close/reopen-request`,
       commandBody(req),
-      { cashflowWrite: true, requireEditLease: false },
+      { cashflowWrite: true },
     );
     return { status: 200, body: result };
   }));
@@ -1768,7 +1730,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       req,
       `/api/v1/cashflow/${projectId}/month-close/reopen-decision`,
       commandBody(req),
-      { cashflowWrite: true, requireEditLease: false },
+      { cashflowWrite: true },
     );
     return { status: 200, body: result };
   }));

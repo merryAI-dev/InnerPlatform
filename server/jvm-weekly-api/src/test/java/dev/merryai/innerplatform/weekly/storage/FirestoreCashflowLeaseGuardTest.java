@@ -131,7 +131,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void noChangeFinalCommitsAuditIdempotencyAndExactLeaseReleaseWithoutCanonicalWrite() {
+    void projectionWritePersistsCanonicalDataWithoutChangingAnExistingLease() {
         Fixture fixture = fixture(activeMember(), activeLease());
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
 
@@ -139,21 +139,25 @@ class FirestoreCashflowLeaseGuardTest {
             ACTOR,
             "project-a",
             FINAL_SESSION,
-            new UpsertProjectionRequest("finalize-no-change", List.of())
+            new UpsertProjectionRequest("projection-without-lease", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 1, "SALES_IN", BigDecimal.ONE
+                )
+            ))
         ));
 
-        assertThat(response.savedLineCount()).isZero();
+        assertThat(response.savedLineCount()).isEqualTo(1);
         assertThat(fixture.documents.keySet())
             .anyMatch(path -> path.startsWith("orgs/tenant-a/weekly_api_audit_events/"))
             .anyMatch(path -> path.startsWith("orgs/tenant-a/weekly_api_idempotency/"));
         assertThat(fixture.documents.keySet())
-            .noneMatch(path -> path.startsWith("orgs/tenant-a/cashflow_weeks/"));
+            .anyMatch(path -> path.startsWith("orgs/tenant-a/cashflow_weeks/"));
         assertThat(fixture.documents.get(leasePath("project-a")))
-            .containsEntry("state", "RELEASED")
-            .containsEntry("releaseReason", "FINAL_SAVE")
+            .containsEntry("state", "ACTIVE")
             .containsEntry("sessionId", "session-a")
             .containsEntry("leaseId", "lease-a")
-            .containsEntry("fence", 7L);
+            .containsEntry("fence", 7L)
+            .doesNotContainKeys("releasedAt", "releaseReason");
     }
 
     @Test
@@ -374,7 +378,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void everyCashflowWeekWriterFailsClosedWithoutAnExactValidatedLeaseScope() {
+    void everyCashflowWeekWriterFailsClosedWithoutValidatedWritePermission() {
         Fixture fixture = fixture(activeMember(), activeLease());
 
         assertMissingScope(fixture, () -> fixture.persistence.saveProjection(projection("project-a")));
@@ -402,12 +406,12 @@ class FirestoreCashflowLeaseGuardTest {
             .satisfies(error -> {
                 WeeklyExpenseEditLeaseException lease = (WeeklyExpenseEditLeaseException) error;
                 org.assertj.core.api.Assertions.assertThat(lease.statusCode()).isEqualTo(423);
-                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_edit_lease_scope_mismatch");
+                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_write_scope_mismatch");
             });
     }
 
     @Test
-    void validatedLeaseScopeDoesNotLeakIntoTheNextTransaction() {
+    void validatedLegacyLeaseScopeDoesNotCreateWritePermissionInTheNextTransaction() {
         Fixture fixture = fixture(activeMember(), activeLease());
 
         fixture.persistence.runCommandTransaction(() -> {
@@ -778,7 +782,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void exactReplayReturnsAfterFinalApplyReleasedTheLease() {
+    void exactReplayReturnsWithoutChangingAnExistingLease() {
         Fixture fixture = fixture(activeMember(), activeLease());
         CashflowSheetLabApplyRequest request = monthlyRequest(
             "monthly-final-replay",
@@ -795,7 +799,9 @@ class FirestoreCashflowLeaseGuardTest {
         ));
 
         assertThat(replay).isEqualTo(first);
-        assertThat(fixture.documents.get(leasePath("project-a"))).containsEntry("state", "RELEASED");
+        assertThat(fixture.documents.get(leasePath("project-a")))
+            .containsEntry("state", "ACTIVE")
+            .doesNotContainKeys("releasedAt", "releaseReason");
     }
 
     @Test
@@ -827,10 +833,9 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void monthCloseAtomicallyPersistsCanonicalValuesSnapshotAndLeaseRelease() {
+    void monthCloseAtomicallyPersistsCanonicalValuesAndSnapshotWithoutLease() {
         CloseCashflowMonthRequest request = monthCloseRequest("month-close-1", 0, 3);
         Fixture fixture = fixture(activeMember(), activeLease());
-        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
         fixture.documents.put(
             "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
             pinnedMirror(request)
@@ -843,16 +848,11 @@ class FirestoreCashflowLeaseGuardTest {
             SESSION,
             request
         ));
-        Map<String, Object> submittedDraft = fixture.documents.get(draftPath("project-a", "pm-1"));
-        CloseCashflowMonthRequest reconstructedRequest = new ObjectMapper().convertValue(
-            submittedDraft.get("monthCloseSubmission"),
-            CloseCashflowMonthRequest.class
-        );
         CashflowMonthCloseResponse replay = fixture.persistence.runCommandTransaction(() -> service.closeCashflowMonth(
             ACTOR,
             "project-a",
             SESSION,
-            reconstructedRequest
+            request
         ));
 
         Map<String, Object> close = fixture.documents.get(monthClosePath("project-a", "2026-06"));
@@ -894,21 +894,8 @@ class FirestoreCashflowLeaseGuardTest {
             .containsKeys("projection", "actual")
             .containsEntry("yearMonth", "2026-06");
         assertThat(fixture.documents.get(leasePath("project-a")))
-            .containsEntry("state", "RELEASED")
-            .containsEntry("releaseReason", "FINAL_SAVE");
-        assertThat(reconstructedRequest).isEqualTo(request);
-        assertThat(submittedDraft)
-            .containsEntry("status", "SUBMITTED")
-            .containsEntry("draftRevision", 4L)
-            .containsEntry("submittedAt", NOW.toString())
-            .hasEntrySatisfying("monthCloseSubmission", value -> assertThat((Map<String, Object>) value)
-                .containsEntry("idempotencyKey", request.idempotencyKey())
-                .containsEntry("yearMonth", request.yearMonth())
-                .containsEntry("expectedRevision", request.expectedRevision())
-                .containsEntry("expectedDraftRevision", request.expectedDraftRevision())
-                .hasEntrySatisfying("cells", cells -> assertThat((List<?>) cells).hasSize(160))
-                .hasEntrySatisfying("confirmations", confirmations -> assertThat((List<?>) confirmations).hasSize(160)))
-            .doesNotContainKey("payload");
+            .containsEntry("state", "ACTIVE")
+            .doesNotContainKeys("releasedAt", "releaseReason");
         assertThat(fixture.documents.keySet())
             .anyMatch(path -> path.startsWith("orgs/tenant-a/weekly_api_audit_events/"))
             .anyMatch(path -> path.startsWith("orgs/tenant-a/weekly_api_idempotency/"));
@@ -963,7 +950,8 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("evaluatedBusinessDate", "2026-08-01")
             .containsEntry("qaDateOverride", true);
         assertThat(fixture.documents.get(leasePath("project-a")))
-            .containsEntry("releasedAt", NOW.toString());
+            .containsEntry("state", "ACTIVE")
+            .doesNotContainKeys("releasedAt", "releaseReason");
     }
 
     @Test
@@ -1483,7 +1471,7 @@ class FirestoreCashflowLeaseGuardTest {
             .satisfies(error -> {
                 WeeklyExpenseEditLeaseException lease = (WeeklyExpenseEditLeaseException) error;
                 org.assertj.core.api.Assertions.assertThat(lease.statusCode()).isEqualTo(503);
-                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_edit_lease_required");
+                org.assertj.core.api.Assertions.assertThat(lease.code()).isEqualTo("cashflow_write_permission_required");
             });
     }
 

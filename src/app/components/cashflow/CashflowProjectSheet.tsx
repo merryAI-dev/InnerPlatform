@@ -60,10 +60,6 @@ import {
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabYearViewResult,
 } from '../../lib/sheets-cashflow-readonly-client';
-import { EditLeaseDialogs } from '../editing/EditLeaseDialogs';
-import { useCashflowEditLease } from './useCashflowEditLease';
-import { createCashflowPrivateDraftClient } from '../../lib/cashflow-private-draft-client';
-import type { CashflowMutationLease } from '../../lib/cashflow-edit-lease';
 import {
   applyCashflowMonthCloseProjectionDrafts,
   buildCashflowMonthCloseDraftInput,
@@ -71,7 +67,6 @@ import {
   cashflowMonthCloseReviewProgress,
   createEmptyCashflowMonthCloseDepositRows,
   normalizeCashflowMonthCloseCells,
-  readCashflowMonthCloseReview,
   requiredCashflowMonthCloseDecision,
   type CashflowMonthCloseDecisionMap,
   type CashflowMonthCloseDepositReviewRow,
@@ -205,9 +200,8 @@ export function CashflowProjectSheet({
   const { orgId } = useFirebase();
   const navigate = useNavigate();
   const role = (roleOverride || user?.role || '').toString().toLowerCase() as UserRole | '';
-  const isPm = role === 'pm';
   const canReviewReopen = role === 'finance' || role === 'admin';
-  const canUseCashflowActions = isPm;
+  const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin';
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
@@ -224,17 +218,6 @@ export function CashflowProjectSheet({
     user?.role,
     user?.uid,
   ]);
-  const cashflowLease = useCashflowEditLease({ tenantId: orgId, projectId, actor: bffActor });
-  const cashflowPrivateDraftClient = useMemo(() => (
-    cashflowLease.sessionId
-      ? createCashflowPrivateDraftClient({
-          tenantId: orgId,
-          projectId,
-          actor: bffActor,
-          sessionId: cashflowLease.sessionId,
-        })
-      : null
-  ), [bffActor, cashflowLease.sessionId, orgId, projectId]);
   const latestBffActorRef = useRef(bffActor);
   useEffect(() => {
     latestBffActorRef.current = bffActor;
@@ -342,198 +325,42 @@ export function CashflowProjectSheet({
 
   type WeekSaveState = 'dirty' | 'saving' | 'error' | 'saved';
   const [weekSaveState, setWeekSaveState] = useState<Record<string, WeekSaveState>>({});
-  const [privateDraftRevision, setPrivateDraftRevision] = useState<number | null>(null);
-  const [privateDraftPayload, setPrivateDraftPayload] = useState<Record<string, unknown>>({});
-  const loadedPrivateDraftKeyRef = useRef('');
-  const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const [exitBusy, setExitBusy] = useState(false);
   const canEdit = canUseCashflowActions
-    && cashflowLease.canEdit
     && monthCloseResult?.status === 'OPEN';
 
   const hasDirty = useMemo(
     () => hasUnsavedChanges(weekSaveState) || Object.keys(drafts).length > 0 || monthCloseReviewDirty,
     [drafts, monthCloseReviewDirty, weekSaveState],
   );
-  const hasActiveEditSession = cashflowLease.canEdit && Boolean(cashflowLease.ownership);
-  const blocker = useBlocker(hasDirty || hasActiveEditSession);
+  const blocker = useBlocker(hasDirty);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (!hasDirty && !hasActiveEditSession) return;
+      if (!hasDirty) return;
       e.preventDefault();
       e.returnValue = '';
     };
 
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [hasActiveEditSession, hasDirty]);
+  }, [hasDirty]);
 
   useEffect(() => {
     setDrafts({});
     setEditingWeekModes({});
     setWeekSaveState({});
-    setPrivateDraftRevision(null);
-    setPrivateDraftPayload({});
     setMonthCloseResult(null);
     setMonthCloseDecisions({});
     setManagementDecisions({});
     setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
     setMonthCloseReviewDirty(false);
-    loadedPrivateDraftKeyRef.current = '';
-    privateDraftLoadRef.current = null;
   }, [projectId]);
-
-  const hydrateCashflowPrivateDraft = useCallback(async (ownership: { leaseId: string; fence: number }): Promise<void> => {
-    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
-    const key = `${projectId}:${ownership.leaseId}:${ownership.fence}`;
-    if (loadedPrivateDraftKeyRef.current === key) return;
-    if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
-    const promise = (async () => {
-      const { draft } = await cashflowPrivateDraftClient.open(ownership);
-      setPrivateDraftRevision(draft.draftRevision);
-      const payload = draft.payload || {};
-      setPrivateDraftPayload(payload);
-      const board = payload.board && typeof payload.board === 'object' && !Array.isArray(payload.board)
-        ? payload.board as Record<string, unknown>
-        : payload;
-      if (draft.status === 'ACTIVE') {
-        if (board.drafts && typeof board.drafts === 'object' && !Array.isArray(board.drafts)) {
-          setDrafts(board.drafts as Record<string, string>);
-        }
-        if (board.weekSaveState && typeof board.weekSaveState === 'object' && !Array.isArray(board.weekSaveState)) {
-          setWeekSaveState(board.weekSaveState as Record<string, WeekSaveState>);
-        }
-      }
-      loadedPrivateDraftKeyRef.current = key;
-    })();
-    privateDraftLoadRef.current = { key, promise };
-    try {
-      await promise;
-    } finally {
-      if (privateDraftLoadRef.current?.key === key) privateDraftLoadRef.current = null;
-    }
-  }, [cashflowPrivateDraftClient, projectId]);
-
-  useEffect(() => {
-    if (!cashflowLease.canEdit || !cashflowLease.ownership) return;
-    void hydrateCashflowPrivateDraft(cashflowLease.ownership).catch((error) => {
-      toast.error(resolveApiErrorMessage(error, '임시저장본을 복구하지 못했습니다.'));
-    });
-  }, [cashflowLease.canEdit, cashflowLease.ownership, hydrateCashflowPrivateDraft]);
-
-  useEffect(() => {
-    const restored = readCashflowMonthCloseReview(
-      privateDraftPayload.monthCloseReview || privateDraftPayload.monthClose,
-      yearMonth,
-    );
-    if (restored) {
-      setMonthCloseDecisions(restored.decisions);
-      setMonthCloseDepositRows(restored.depositScheduleRows);
-      setManagementDecisions(restored.managementDecisions);
-    } else {
-      setMonthCloseDecisions({});
-      setManagementDecisions({});
-      setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
-    }
-    setMonthCloseReviewDirty(false);
-  }, [privateDraftPayload, yearMonth]);
-
-  const beginCashflowEditing = useCallback(async (resumePrevious = false): Promise<boolean> => {
-    if (!isPm || monthCloseResult?.status !== 'OPEN') {
-      toast.info(monthCloseResult?.status === 'CLOSED'
-        ? '월 결산 완료 후에는 수정할 수 없습니다. 재오픈을 요청해 주세요.'
-        : 'PM만 결산 전 캐시플로를 수정할 수 있습니다.');
-      return false;
-    }
-    if (!cashflowPrivateDraftClient) return false;
-    const ownership = await (resumePrevious ? cashflowLease.takeover() : cashflowLease.acquire());
-    if (!ownership) return false;
-    try {
-      await hydrateCashflowPrivateDraft(ownership);
-      return true;
-    } catch (error) {
-      await cashflowLease.release();
-      toast.error(resolveApiErrorMessage(error, '임시저장본을 열지 못했습니다.'));
-      return false;
-    }
-  }, [cashflowLease.acquire, cashflowLease.release, cashflowLease.takeover, cashflowPrivateDraftClient, hydrateCashflowPrivateDraft, isPm, monthCloseResult?.status]);
-
-  const savePrivateCashflowDraft = useCallback(async (
-    monthCloseInput?: CashflowMonthCloseDraftInput,
-    providedLease?: CashflowMutationLease,
-  ): Promise<number> => {
-    if (!cashflowPrivateDraftClient) throw new Error('임시저장 API가 준비되지 않았습니다.');
-    const mutationLease = providedLease || await cashflowLease.checkBeforeMutation();
-    let revision = privateDraftRevision;
-    let payload = privateDraftPayload;
-    if (revision === null) {
-      const opened = await cashflowPrivateDraftClient.open(mutationLease);
-      revision = opened.draft.draftRevision;
-      payload = opened.draft.payload;
-    }
-    const reviewConfirmations = Object.entries(monthCloseDecisions).flatMap(([key, decision]) => {
-      if (!decision) return [];
-      const [mode, weekNo, ...lineParts] = key.split(':');
-      if ((mode !== 'projection' && mode !== 'actual') || !Number.isInteger(Number(weekNo)) || lineParts.length === 0) return [];
-      return [{ mode, weekNo: Number(weekNo), cashflowLine: lineParts.join(':'), decision }];
-    });
-    const managementConfirmations = Object.entries(managementDecisions).flatMap(([checkId, decision]) => (
-      decision ? [{ checkId, decision }] : []
-    ));
-    const nextPayload = {
-      ...payload,
-      board: { drafts, weekSaveState, yearMonth },
-      monthCloseReview: {
-        yearMonth,
-        confirmations: reviewConfirmations,
-        managementConfirmations,
-        depositScheduleRows: monthCloseDepositRows,
-      },
-      ...(monthCloseInput ? { monthClose: monthCloseInput } : {}),
-    };
-    const { draft } = await cashflowPrivateDraftClient.save(mutationLease, {
-      expectedDraftRevision: revision,
-      payload: nextPayload,
-    });
-    setPrivateDraftRevision(draft.draftRevision);
-    setPrivateDraftPayload(draft.payload);
-    setMonthCloseReviewDirty(false);
-    return draft.draftRevision;
-  }, [
-    cashflowLease.checkBeforeMutation,
-    cashflowPrivateDraftClient,
-    drafts,
-    monthCloseDecisions,
-    monthCloseDepositRows,
-    managementDecisions,
-    privateDraftRevision,
-    privateDraftPayload,
-    weekSaveState,
-    yearMonth,
-  ]);
-
-  const savePrivateDraftAndLeave = useCallback(async (): Promise<void> => {
-    if (blocker.state !== 'blocked') return;
-    setExitBusy(true);
-    try {
-      await savePrivateCashflowDraft();
-      const released = await cashflowLease.release();
-      if (!released) throw new Error('수정 세션을 종료하지 못했습니다. 임시저장본은 유지됩니다.');
-      blocker.proceed?.();
-    } catch (error) {
-      toast.error(resolveApiErrorMessage(error, '임시저장 후 이동하지 못했습니다. 현재 화면에서 다시 시도해 주세요.'));
-    } finally {
-      setExitBusy(false);
-    }
-  }, [blocker, cashflowLease.release, savePrivateCashflowDraft]);
 
   const discardChangesAndLeave = useCallback(async (): Promise<void> => {
     if (blocker.state !== 'blocked') return;
     setExitBusy(true);
     try {
-      const released = await cashflowLease.release();
-      if (!released) throw new Error('수정 세션을 종료하지 못했습니다.');
       setDrafts({});
       setEditingWeekModes({});
       setWeekSaveState({});
@@ -544,7 +371,7 @@ export function CashflowProjectSheet({
     } finally {
       setExitBusy(false);
     }
-  }, [blocker, cashflowLease.release]);
+  }, [blocker]);
 
   useEffect(() => {
     let cancelled = false;
@@ -824,7 +651,6 @@ export function CashflowProjectSheet({
   useEffect(() => {
     const sourceRows = monthCloseResult?.dashboard?.sheetDepositScheduleRows || [];
     if (sourceRows.length !== 5 || monthCloseReviewDirty) return;
-    if (readCashflowMonthCloseReview(privateDraftPayload.monthCloseReview || privateDraftPayload.monthClose, yearMonth)) return;
     setMonthCloseDepositRows(sourceRows
       .slice()
       .sort((left, right) => left.weekNo - right.weekNo)
@@ -838,7 +664,7 @@ export function CashflowProjectSheet({
         actualSource: 'NOT_APPLICABLE',
         decision: null,
       })));
-  }, [monthCloseResult?.dashboard?.sheetDepositScheduleRows, monthCloseReviewDirty, privateDraftPayload, yearMonth]);
+  }, [monthCloseResult?.dashboard?.sheetDepositScheduleRows, monthCloseReviewDirty]);
 
   const monthCloseCellsState = useMemo(() => {
     try {
@@ -867,8 +693,8 @@ export function CashflowProjectSheet({
   }), [managementDecisions, monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows, monthCloseResult?.dashboard?.managementChecks]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
-    if (!isPm || monthCloseResult?.status !== 'OPEN') {
-      toast.error('결산 전 상태의 PM만 최종저장할 수 있습니다.');
+    if (!canUseCashflowActions || monthCloseResult?.status !== 'OPEN') {
+      toast.error('결산 권한이 있는 프로젝트 담당자만 최종저장할 수 있습니다.');
       return;
     }
     let monthCloseInput: CashflowMonthCloseDraftInput;
@@ -895,8 +721,6 @@ export function CashflowProjectSheet({
 
     setMonthCloseBusy(true);
     try {
-      const mutationLease = await cashflowLease.checkBeforeMutation();
-      await savePrivateCashflowDraft(monthCloseInput, mutationLease);
       const actor = await resolveBffActor();
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
       const prepared = await fetchCashflowMonthCloseViaBff({
@@ -916,37 +740,32 @@ export function CashflowProjectSheet({
         payload: {
           yearMonth,
           expectedRevision: prepared.revision,
+          closeInput: monthCloseInput,
         },
         idempotencyKey: `cashflow-month-close:${projectId}:${yearMonth}:${prepared.revision}`,
-        lease: mutationLease,
       });
       setMonthCloseResult(result);
       setMonthCloseReviewOpen(false);
       setDrafts({});
       setEditingWeekModes({});
       setWeekSaveState({});
-      setPrivateDraftRevision(null);
-      setPrivateDraftPayload({});
       setManagementDecisions({});
       setMonthCloseReviewDirty(false);
-      await cashflowLease.checkStatus();
       await Promise.all([
         loadCashflowComparison(),
         loadCashflowEvents(),
       ]);
       toast.success(`${yearMonth} 월 결산을 완료했습니다. 이제 수정할 수 없습니다.`);
     } catch (error) {
-      toast.error(resolveApiErrorMessage(error, '월 결산에 실패했습니다. 임시저장본은 유지됩니다.'));
+      toast.error(resolveApiErrorMessage(error, '월 결산에 실패했습니다. 입력 내용을 확인하고 다시 시도해 주세요.'));
       await loadCashflowMonthClose();
     } finally {
       setMonthCloseBusy(false);
     }
   }, [
-    cashflowLease.checkBeforeMutation,
-    cashflowLease.checkStatus,
+    canUseCashflowActions,
     drafts,
     monthClosePinnedSource,
-    isPm,
     loadCashflowComparison,
     loadCashflowEvents,
     loadCashflowMonthClose,
@@ -957,7 +776,6 @@ export function CashflowProjectSheet({
     orgId,
     projectId,
     resolveBffActor,
-    savePrivateCashflowDraft,
     yearMonth,
   ]);
 
@@ -967,8 +785,8 @@ export function CashflowProjectSheet({
       toast.error('사유를 입력해 주세요.');
       return;
     }
-    if (reopenAction === 'request' && !isPm) {
-      toast.error('PM만 재오픈을 요청할 수 있습니다.');
+    if (reopenAction === 'request' && !canUseCashflowActions) {
+      toast.error('결산 권한이 있는 프로젝트 담당자만 재오픈을 요청할 수 있습니다.');
       return;
     }
     if (reopenAction !== 'request' && !canReviewReopen) {
@@ -1015,7 +833,7 @@ export function CashflowProjectSheet({
     } finally {
       setMonthCloseBusy(false);
     }
-  }, [canReviewReopen, isPm, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
+  }, [canReviewReopen, canUseCashflowActions, loadCashflowMonthClose, monthCloseResult, orgId, projectId, reopenAction, reopenReason, resolveBffActor, yearMonth]);
 
   const handleRefreshSheetMirror = useCallback(async (): Promise<void> => {
     if (!cashflowSheetConfig?.value) {
@@ -1271,16 +1089,18 @@ export function CashflowProjectSheet({
   }
 
   const openProjectionWeekEditing = useCallback(async (targetYearMonth: string, weekNo: number) => {
-    if (!cashflowLease.canEdit) {
-      const started = await beginCashflowEditing();
-      if (!started) return;
+    if (!canEdit) {
+      toast.info(monthCloseResult?.status === 'CLOSED'
+        ? '월 결산 완료 후에는 수정할 수 없습니다. 재오픈을 요청해 주세요.'
+        : '프로젝트 현금흐름 수정 권한을 확인해 주세요.');
+      return;
     }
     setShowEmptyCashflowRows(true);
     setEditingWeekModes((current) => ({
       ...current,
       [resolveWeekKey({ yearMonth: targetYearMonth, mode: 'projection', weekNo })]: true,
     }));
-  }, [beginCashflowEditing, cashflowLease.canEdit]);
+  }, [canEdit, monthCloseResult?.status]);
 
   function getWeekLabel(weekNo: number, targetYearMonth = yearMonth): string {
     return annualWeeks.find((week) => week.yearMonth === targetYearMonth && week.weekNo === weekNo)?.label
@@ -1363,8 +1183,16 @@ export function CashflowProjectSheet({
     const inbox = [
       ...blockers.map((item) => ({ id: `blocker-${item.code}`, tone: 'danger' as CashflowOpsTone, title: item.message, detail: item.code })),
       ...warnings.map((item) => ({ id: `warning-${item.code}`, tone: 'warning' as CashflowOpsTone, title: item.message, detail: item.code })),
-      ...(dashboard && !dashboard.summary?.comparisonMatches
-        ? [{ id: 'projection-actual-diff', tone: 'warning' as CashflowOpsTone, title: 'Projection/Actual 차이를 확인해 주세요.', detail: '서버 비교 결과에 차이가 있습니다.' }]
+      ...(dashboard && (dashboard.summary?.settlementIncompleteWeeks?.length || 0) > 0
+        ? [{
+            id: 'projection-actual-diff',
+            tone: 'warning' as CashflowOpsTone,
+            title: `Projection/Actual 확인이 필요한 주차 ${dashboard.summary.settlementIncompleteWeeks.length}건`,
+            detail: dashboard.summary.settlementIncompleteWeeks
+              .slice(0, 5)
+              .map((week) => `${week.yearMonth} ${week.weekNo}주차`)
+              .join(', '),
+          }]
         : []),
     ];
     if (!dashboard && !monthCloseLoading && !canonicalAnnualTotal && !selectedYearUsesAnnualStructure) {
@@ -1373,7 +1201,7 @@ export function CashflowProjectSheet({
     const issueCount = inbox.length;
     const kind = blockers.length > 0 || (!dashboard && !monthCloseLoading && !canonicalAnnualTotal && !selectedYearUsesAnnualStructure)
       ? 'blocked' as const
-      : warnings.length > 0 || !dashboard?.summary?.comparisonMatches
+      : warnings.length > 0 || (dashboard?.summary?.settlementIncompleteWeeks?.length || 0) > 0
         ? 'review' as const
         : 'ready' as const;
     const tone: CashflowOpsTone = kind === 'blocked' ? 'danger' : kind === 'review' ? 'warning' : 'success';
@@ -1397,7 +1225,7 @@ export function CashflowProjectSheet({
       rates: {
         projection: rate(dashboard?.summary?.projectionProgressPercent || 0),
         actual: rate(dashboard?.summary?.actualProgressPercent || 0),
-        confirmation: rate(dashboard?.summary?.confirmationProgressPercent || 0),
+        confirmation: rate(dashboard?.summary?.settlementProgressPercent || 0),
       },
       inbox,
     };
@@ -1488,7 +1316,7 @@ export function CashflowProjectSheet({
             type="button"
             className="w-full py-0.5 text-center text-[9px] text-slate-300"
             onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
-            disabled={!canUseCashflowActions || cashflowLease.busy || monthCloseResult?.status !== 'OPEN'}
+            disabled={!canUseCashflowActions || monthCloseResult?.status !== 'OPEN'}
             aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
           >
             -
@@ -1511,7 +1339,7 @@ export function CashflowProjectSheet({
             type="button"
             className={`h-5 w-full rounded-md px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}
             onClick={() => void openProjectionWeekEditing(input.targetYearMonth, input.weekNo)}
-            disabled={!canUseCashflowActions || cashflowLease.busy || monthCloseResult?.status !== 'OPEN'}
+            disabled={!canUseCashflowActions || monthCloseResult?.status !== 'OPEN'}
             aria-label={`${input.targetYearMonth} ${input.weekNo}주차 Projection 입력`}
           >
             {fmt(projection)}
@@ -1788,13 +1616,13 @@ export function CashflowProjectSheet({
               <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
-              {isPm && monthCloseResult?.status === 'OPEN' ? (
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || cashflowLease.busy || monthCloseBusy}>
+              {canUseCashflowActions && monthCloseResult?.status === 'OPEN' ? (
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={!canEdit || monthCloseBusy}>
                   <CheckCircle2 className="mr-1 h-3 w-3" />
                   월 결산
                 </Button>
               ) : null}
-              {isPm && monthCloseResult?.status === 'CLOSED' ? (
+              {canUseCashflowActions && monthCloseResult?.status === 'CLOSED' ? (
                 <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                   재오픈 요청
                 </Button>
@@ -1804,11 +1632,6 @@ export function CashflowProjectSheet({
                   <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
                   <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
                 </>
-              ) : null}
-              {cashflowLease.canEdit ? (
-                <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-[10px]" onClick={() => void cashflowLease.extend()} disabled={cashflowLease.busy}>
-                  {cashflowLease.remainingLabel} · 30분 연장
-                </Button>
               ) : null}
               </div>
             )}
@@ -1963,7 +1786,7 @@ export function CashflowProjectSheet({
       ? '총 계약금액 기준'
       : label === 'Actual'
         ? '이번 주차까지 입력 기준'
-        : '사람 확인 완료 기준';
+        : '차이 0 또는 사람 확인 기준';
     return (
       <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
@@ -2729,17 +2552,6 @@ export function CashflowProjectSheet({
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canEdit || monthCloseBusy}
-              onClick={() => void savePrivateCashflowDraft()
-                .then(() => toast.success('월 결산 검토 내용을 임시저장했습니다.'))
-                .catch((error) => toast.error(resolveApiErrorMessage(error, '임시저장에 실패했습니다.')))}
-            >
-              <Save className="mr-1 h-3.5 w-3.5" />
-              임시저장
-            </Button>
             <AlertDialogAction
               disabled={!canEdit || monthCloseBusy || !monthCloseProgress.complete || Boolean(monthCloseCellsState.error)}
               onClick={(event) => {
@@ -2977,11 +2789,9 @@ export function CashflowProjectSheet({
       >
          <AlertDialogContent>
            <AlertDialogHeader>
-             <AlertDialogTitle>{hasDirty ? '저장되지 않은 변경사항이 있습니다' : '수정 세션을 종료할까요?'}</AlertDialogTitle>
+             <AlertDialogTitle>저장되지 않은 변경사항이 있습니다</AlertDialogTitle>
              <AlertDialogDescription>
-               {hasDirty
-                 ? '페이지를 이동하면 아직 저장되지 않은 캐시플로 입력값이 유실될 수 있습니다.'
-                 : '페이지를 이동하면 현재 프로젝트의 수정 선점이 종료됩니다.'}
+               페이지를 이동하면 아직 최종저장하지 않은 현금흐름 입력값이 사라집니다.
              </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2992,38 +2802,11 @@ export function CashflowProjectSheet({
               disabled={exitBusy}
               onClick={() => void discardChangesAndLeave()}
             >
-               {hasDirty ? '저장하지 않고 종료' : '수정 세션 종료'}
+               저장하지 않고 이동
              </Button>
-             {hasDirty ? (
-               <AlertDialogAction
-                 disabled={exitBusy}
-                 onClick={(event) => {
-                   event.preventDefault();
-                   void savePrivateDraftAndLeave();
-                 }}
-               >
-                 임시저장 후 종료
-               </AlertDialogAction>
-             ) : null}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-
-      <EditLeaseDialogs
-        warningOpen={cashflowLease.warningOpen}
-        expiredOpen={cashflowLease.expiredOpen}
-        conflictOpen={cashflowLease.conflictOpen}
-        holder={cashflowLease.holder}
-        expiresAt={cashflowLease.expiresAt}
-        remainingMs={cashflowLease.remainingMs}
-        busy={cashflowLease.busy}
-        onDismissWarning={cashflowLease.dismissWarning}
-        onExtend={() => { void cashflowLease.extend(); }}
-        onContinueReadOnly={cashflowLease.continueReadOnly}
-        onReacquire={() => { void beginCashflowEditing(); }}
-        onTakeover={() => { void beginCashflowEditing(true); }}
-      />
     </div>
   );
 }

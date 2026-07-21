@@ -138,10 +138,10 @@ describe('platform-bff-client', () => {
     });
     await closeCashflowMonthViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'month-close-1',
-      lease: cashflowLease,
       payload: {
         yearMonth: '2026-06',
         expectedRevision: 2,
+        closeInput: { yearMonth: '2026-06' } as never,
       },
       client,
     });
@@ -163,14 +163,17 @@ describe('platform-bff-client', () => {
     );
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close', expect.objectContaining({
       idempotencyKey: 'month-close-1',
-      headers: {
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-        'x-edit-finalize': 'true',
-      },
-      body: expect.objectContaining({ yearMonth: '2026-06', expectedRevision: 2 }),
+      body: expect.objectContaining({
+        yearMonth: '2026-06',
+        expectedRevision: 2,
+        closeInput: { yearMonth: '2026-06' },
+      }),
     }));
+    expect(client.post).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/cashflow/p001/month-close',
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
     expect(client.post).toHaveBeenNthCalledWith(
       2,
       '/api/v1/cashflow/p001/month-close/reopen-request',

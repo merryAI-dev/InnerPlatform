@@ -25,11 +25,8 @@ import static org.mockito.Mockito.when;
 
 class WeeklyExpenseCommandLeaseConfigurationTest {
     @Test
-    void emptyProjectionIsAFinalizationCommandOnlyAndStillPersistsAuditAndIdempotency() {
+    void emptyProjectionIsRejectedEvenForALegacyFinalizationSession() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
-        when(persistence.requireCashflowWriteLease(any(), any(), any())).thenReturn("pm");
-        when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
         WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
             persistence,
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
@@ -41,18 +38,15 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             "stage-data-project", "session-a", "lease-a", 1, true
         );
 
-        var response = service.upsertProjection(
+        assertThatThrownBy(() -> service.upsertProjection(
             new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm"),
             "project-a",
             finalSession,
             new UpsertProjectionRequest("projection-final-no-change", List.of())
-        );
-
-        assertThat(response.savedLineCount()).isZero();
-        verify(persistence).requireCashflowWriteLease(any(), org.mockito.ArgumentMatchers.eq("project-a"), org.mockito.ArgumentMatchers.eq(finalSession));
-        verify(persistence, never()).saveProjection(any());
-        verify(persistence).saveAuditEvent(any());
-        verify(persistence).saveIdempotency(any());
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("At least one projection line");
+        verifyNoInteractions(persistence);
     }
 
     @Test
@@ -73,13 +67,17 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             new UpsertProjectionRequest("projection-empty-non-final", List.of())
         ))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("final");
+            .hasMessageContaining("At least one projection line");
         verifyNoInteractions(persistence);
     }
 
     @Test
-    void disabledLeaseFlagFailsClosedBeforePersistence() {
+    void projectionWriteDoesNotDependOnTheLegacyLeaseFlag() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(any(), any())).thenReturn("finance");
+        when(persistence.saveProjection(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
         WeeklyExpenseAuthorizationService authorization = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> true,
             canonicalProjectsExist(),
@@ -102,16 +100,15 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             ))
         );
 
-        assertThatThrownBy(() -> service.upsertProjection(
+        var response = service.upsertProjection(
             new TrustedActorContext("tenant-a", "finance-1", "finance@example.com", "finance"),
             "project-a",
             new CashflowEditSession("stage-data-project", "session-a", "lease-a", 1),
             request
-        ))
-            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
-            .extracting(error -> ((WeeklyExpenseEditLeaseException) error).statusCode())
-            .isEqualTo(503);
-        verifyNoInteractions(persistence);
+        );
+
+        assertThat(response.savedLineCount()).isEqualTo(1);
+        verify(persistence, never()).requireCashflowWriteLease(any(), any(), any());
     }
 
     @Test

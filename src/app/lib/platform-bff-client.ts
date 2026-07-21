@@ -910,6 +910,17 @@ export interface CashflowMonthCloseDashboard {
     projectionProgressPercent: number;
     actualProgressPercent: number;
     confirmationProgressPercent: number;
+    settlementProgressPercent: number;
+    settlementCompletedWeekCount: number;
+    settlementTargetWeekCount: number;
+    settlementIncompleteWeeks: Array<{
+      yearMonth: string;
+      weekNo: number;
+      totalIn: number;
+      totalOut: number;
+      balance: number;
+      reason: 'DIFFERENCE_REVIEW_REQUIRED' | 'SOURCE_INCOMPLETE';
+    }>;
     comparisonMatches: boolean;
     comparisonAsOfDate: string;
     comparisonAsOfWeek: { yearMonth: string; weekNo: number };
@@ -928,6 +939,7 @@ export interface CashflowMonthCloseDashboard {
 export interface CloseCashflowMonthPayload {
   yearMonth: string;
   expectedRevision: number;
+  closeInput: CashflowMonthCloseDraftInput;
 }
 
 export interface RequestCashflowMonthReopenPayload {
@@ -2317,7 +2329,6 @@ export async function closeCashflowMonthViaBff(params: {
   projectId: string;
   payload: CloseCashflowMonthPayload;
   idempotencyKey: string;
-  lease: CashflowMutationLease;
   client?: PlatformApiClientLike;
 }): Promise<CashflowMonthCloseResult> {
   const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
@@ -2326,10 +2337,6 @@ export async function closeCashflowMonthViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       body: params.payload,
-      headers: {
-        ...cashflowMutationHeaders(params.lease),
-        'x-edit-finalize': 'true',
-      },
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 20000,

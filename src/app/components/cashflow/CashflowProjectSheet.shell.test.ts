@@ -17,10 +17,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('settleWeek');
   });
 
-  it('makes final save mean atomic month close after private draft and server validation', () => {
+  it('makes final save mean direct atomic month close after server validation', () => {
     expect(source).toContain('최종저장 · 월 결산');
-    expect(source).toMatch(/await savePrivateCashflowDraft\(monthCloseInput, mutationLease\);[\s\S]*fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*closeCashflowMonthViaBff/);
+    expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*closeCashflowMonthViaBff/);
     expect(source).toContain('expectedRevision: prepared.revision');
+    expect(source).toContain('closeInput: monthCloseInput');
+    expect(source).not.toContain('savePrivateCashflowDraft');
+    expect(source).not.toContain('cashflowLease');
     expect(source).not.toContain('saveCashflowProjectionBatchViaBff');
     expect(source).toContain('projectionDrafts: drafts');
     expect(source).toContain('applyCashflowMonthCloseProjectionDrafts');
@@ -218,23 +221,22 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toMatch(/loadCashflowComparison\(\)[\s\S]*loadCashflowMonthClose\(\)/);
   });
 
-  it('offers the exact three in-app exit choices and releases only on exit', () => {
-    expect(source).toContain('임시저장 후 종료');
-    expect(source).toContain('저장하지 않고 종료');
+  it('warns once for unsaved local changes without a cashflow edit session', () => {
+    expect(source).not.toContain('임시저장 후 종료');
+    expect(source).toContain('저장하지 않고 이동');
     expect(source).toContain('계속 작성');
     expect(source).toContain('discardChangesAndLeave');
-    expect(source).toContain('await cashflowLease.release();');
-    expect(source).toMatch(/savePrivateCashflowDraft\(\);[\s\S]*const released = await cashflowLease\.release\(\);[\s\S]*if \(!released\) throw new Error/);
+    expect(source).not.toContain('cashflowLease.release');
     expect(source).toContain('blocker.proceed?.();');
-    expect(source).toContain('hasDirty || hasActiveEditSession');
-    expect(source).toContain('수정 세션을 종료할까요?');
+    expect(source).not.toContain('hasActiveEditSession');
+    expect(source).toContain('저장되지 않은 변경사항이 있습니다');
   });
 
-  it('gates PM close and Finance/Admin reopen decisions while viewer stays read-only', () => {
-    expect(source).toContain("const isPm = role === 'pm'");
+  it('allows PM, Finance, and Admin to close or request reopen while decisions stay Finance/Admin only', () => {
+    expect(source).toContain("const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin'");
     expect(source).toContain("role === 'finance' || role === 'admin'");
     expect(source).toContain("monthCloseResult?.status === 'OPEN'");
-    expect(source).toContain('PM만 재오픈을 요청할 수 있습니다.');
+    expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
     expect(source).toContain('Finance 또는 Admin만 재오픈 요청을 처리할 수 있습니다.');
   });
 });

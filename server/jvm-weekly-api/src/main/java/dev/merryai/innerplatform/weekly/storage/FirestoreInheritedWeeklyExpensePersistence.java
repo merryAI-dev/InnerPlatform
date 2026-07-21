@@ -95,6 +95,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
     private final ThreadLocal<CashflowLeaseScope> currentCashflowLeaseScope = new ThreadLocal<>();
+    private final ThreadLocal<CashflowWriteScope> currentCashflowWriteScope = new ThreadLocal<>();
     private final ThreadLocal<Map<String, String>> currentCashflowMonthStates = new ThreadLocal<>();
 
     @Autowired
@@ -166,6 +167,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 currentTransaction.set(transaction);
                 transactionDocumentCache.set(new LinkedHashMap<>());
                 currentCashflowLeaseScope.remove();
+                currentCashflowWriteScope.remove();
                 currentCashflowMonthStates.set(new LinkedHashMap<>());
                 try {
                     T result = call(action);
@@ -173,6 +175,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     return result;
                 } finally {
                     currentCashflowLeaseScope.remove();
+                    currentCashflowWriteScope.remove();
                     currentCashflowMonthStates.remove();
                     currentTransaction.remove();
                     transactionDocumentCache.remove();
@@ -270,7 +273,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
         DocumentSnapshot memberSnap = get(db.document("orgs/" + actor.tenantId() + "/members/" + actor.id()));
         Map<String, Object> member = memberSnap.exists() ? data(memberSnap) : Map.of();
-        return requireStoredCashflowWriter(member, actor, projectId);
+        String storedRole = requireStoredCashflowWriter(member, actor, projectId);
+        currentCashflowWriteScope.set(new CashflowWriteScope(actor.tenantId(), projectId, actor.id()));
+        return storedRole;
     }
 
     @Override
@@ -462,7 +467,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
         CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
         requireConfirmationStatesMatchCells(cells, confirmations);
-        ValidatedCloseSource source = requireActiveDraftAndPinnedSource(actor, projectId, request);
+        ValidatedCloseSource source = requirePinnedCloseSource(actor, projectId, request);
 
         DocumentReference closeRef = db.document(monthlyClosePath(actor.tenantId(), projectId, request.yearMonth()));
         DocumentSnapshot closeSnapshot = get(closeRef);
@@ -553,7 +558,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         version.put("closedByUid", actor.id());
         version.put("closedByName", actor.name());
         set(db.document(monthlyCloseVersionPath(actor.tenantId(), versionId)), version);
-        submitValidatedPrivateDraft(actor, projectId, request, source, now);
         currentCashflowMonthStates.get().put(
             monthStateKey(actor.tenantId(), projectId, request.yearMonth()),
             "CLOSED"
@@ -1274,37 +1278,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
     }
 
-    private ValidatedCloseSource requireActiveDraftAndPinnedSource(
+    private ValidatedCloseSource requirePinnedCloseSource(
         TrustedActorContext actor,
         String projectId,
         CloseCashflowMonthRequest request
     ) {
-        String draftPath = privateDraftPath(actor.tenantId(), projectId, actor.id());
-        DocumentSnapshot snapshot = get(db.document(draftPath));
-        if (!snapshot.exists()) {
-            throw new WeeklyExpenseConflictException("An active private draft is required before cashflow month close.");
-        }
-        Map<String, Object> draft = data(snapshot);
-        if (!actor.tenantId().equals(text(draft.get("tenantId"), ""))
-            || !actor.id().equals(text(draft.get("ownerUid"), ""))
-            || !"cashflow".equals(text(draft.get("resourceType"), ""))
-            || !projectId.equals(text(draft.get("resourceId"), ""))
-            || !"ACTIVE".equals(text(draft.get("status"), ""))) {
-            throw new WeeklyExpenseConflictException("The private cashflow draft is not active for this editor.");
-        }
-        if (longValue(draft.get("draftRevision"), -1) != request.expectedDraftRevision()) {
-            throw new WeeklyExpenseConflictException("Cashflow draft revision changed. Save the latest draft before closing.");
-        }
-        Map<String, Object> payload = nestedMap(draft.get("payload"));
-        Map<String, Object> storedCloseInput = nestedMap(payload.get("monthClose"));
-        if (storedCloseInput.isEmpty()
-            || !hashCanonicalJson(canonicalCloseInput(storedCloseInput))
-                .equals(hashCanonicalJson(canonicalCloseInput(closeInputMap(request))))) {
-            throw new WeeklyExpenseConflictException(
-                "Cashflow month close input does not match the latest private draft. Save and reload before closing."
-            );
-        }
-
         DocumentSnapshot mirrorSnapshot = get(db.document(
             "orgs/" + actor.tenantId() + "/cashflow_sheet_mirrors/" + projectId
         ));
@@ -1328,36 +1306,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, Object> sheetFacts = nestedMap(mirror.get("sheetFacts"));
         requireCloseablePinnedSheetFacts(sheetFacts, request);
-        return new ValidatedCloseSource(capturedAt, sheetFacts, draftPath, text(draft.get("createdAt"), ""));
-    }
-
-    private void submitValidatedPrivateDraft(
-        TrustedActorContext actor,
-        String projectId,
-        CloseCashflowMonthRequest request,
-        ValidatedCloseSource source,
-        Instant now
-    ) {
-        Map<String, Object> submitted = new LinkedHashMap<>();
-        submitted.put("ownerUid", actor.id());
-        submitted.put("tenantId", actor.tenantId());
-        submitted.put("resourceType", "cashflow");
-        submitted.put("resourceId", projectId);
-        submitted.put("draftRevision", Math.addExact(request.expectedDraftRevision(), 1));
-        submitted.put("status", "SUBMITTED");
-        submitted.put("createdAt", source.draftCreatedAt().isBlank() ? now.toString() : source.draftCreatedAt());
-        submitted.put("updatedAt", now.toString());
-        submitted.put("submittedAt", now.toString());
-        submitted.put("monthCloseSubmission", submittedCloseRequest(request));
-        replacePrivateDraftDocument(db.document(source.draftPath()), submitted);
-    }
-
-    private Map<String, Object> submittedCloseRequest(CloseCashflowMonthRequest request) {
-        Map<String, Object> submitted = new LinkedHashMap<>(closeInputMap(request));
-        submitted.put("idempotencyKey", request.idempotencyKey());
-        submitted.put("expectedRevision", request.expectedRevision());
-        submitted.put("expectedDraftRevision", request.expectedDraftRevision());
-        return (Map<String, Object>) canonicalValue(submitted);
+        return new ValidatedCloseSource(capturedAt, sheetFacts);
     }
 
     private void requireCloseablePinnedSheetFacts(
@@ -2821,19 +2770,19 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private void requireValidatedCashflowWriteScope(String tenantId, String projectId) {
-        CashflowLeaseScope scope = currentCashflowLeaseScope.get();
+        CashflowWriteScope scope = currentCashflowWriteScope.get();
         if (currentTransaction.get() == null || scope == null) {
             throw leaseError(
                 503,
-                "cashflow_edit_lease_required",
-                "A validated cashflow edit lease is required for canonical cashflow writes."
+                "cashflow_write_permission_required",
+                "Validated project write permission is required for canonical cashflow writes."
             );
         }
         if (!scope.tenantId().equals(tenantId) || !scope.projectId().equals(projectId)) {
             throw leaseError(
                 423,
-                "cashflow_edit_lease_scope_mismatch",
-                "The validated cashflow edit lease does not match this project."
+                "cashflow_write_scope_mismatch",
+                "The validated cashflow write permission does not match this project."
             );
         }
     }
@@ -2852,16 +2801,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     ) {
     }
 
+    private record CashflowWriteScope(String tenantId, String projectId, String actorId) {
+    }
+
     private record ValidatedCloseSource(
         String sourceReadAt,
-        Map<String, Object> sheetFacts,
-        String draftPath,
-        String draftCreatedAt
+        Map<String, Object> sheetFacts
     ) {
         private ValidatedCloseSource {
             sheetFacts = sheetFacts == null ? Map.of() : Map.copyOf(sheetFacts);
-            draftPath = draftPath == null ? "" : draftPath;
-            draftCreatedAt = draftCreatedAt == null ? "" : draftCreatedAt;
         }
     }
 

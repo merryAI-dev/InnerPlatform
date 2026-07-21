@@ -15,7 +15,6 @@ import dev.merryai.innerplatform.weekly.storage.JpaWeeklyExpensePersistence;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -718,7 +717,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void emptyProjectionFinalizesWithoutCanonicalProjectionRows() throws Exception {
+    void emptyProjectionIsRejectedEvenWhenLegacyFinalizationHeaderIsPresent() throws Exception {
         String body = """
             {
               "idempotencyKey": "projection-final-no-change-controller",
@@ -735,10 +734,8 @@ class WeeklyExpenseControllerTest {
                 .header("x-edit-finalize", "true")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.commandName").value("weeklyExpense.projection.upsert"))
-            .andExpect(jsonPath("$.savedLineCount").value(0))
-            .andExpect(jsonPath("$.projection").isEmpty());
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("weekly_expense_bad_request"));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId(
             "tenant-final-no-change",
@@ -747,13 +744,13 @@ class WeeklyExpenseControllerTest {
         assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc(
             "tenant-final-no-change",
             "project-final-no-change"
-        )).hasSize(1);
+        )).isEmpty();
         assertThat(idempotencyRepository.findByTenantIdAndProjectIdAndCommandNameAndIdempotencyKey(
             "tenant-final-no-change",
             "project-final-no-change",
             "weeklyExpense.projection.upsert",
             "projection-final-no-change-controller"
-        )).isPresent();
+        )).isEmpty();
     }
 
     @Test
@@ -1557,10 +1554,10 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void cashflowMonthCloseRejectsEveryRoleExceptPm() throws Exception {
+    void cashflowMonthCloseAllowsAdminFinanceAndPmButRejectsViewer() throws Exception {
         String body = validCashflowMonthCloseBody("month-close-role-001");
 
-        for (String role : List.of("admin", "finance", "viewer")) {
+        for (String role : List.of("admin", "finance", "pm")) {
             mockMvc.perform(asActor(
                     post("/api/v1/cashflow/project-month-close-role/month-close"),
                     "tenant-month-close-role",
@@ -1570,9 +1567,20 @@ class WeeklyExpenseControllerTest {
                     .header("x-edit-finalize", "true")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("cashflow_month_close_backend_unavailable"));
         }
+
+        mockMvc.perform(asActor(
+                post("/api/v1/cashflow/project-month-close-role/month-close"),
+                "tenant-month-close-role",
+                "viewer-month-close",
+                "viewer"
+            )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("weekly_expense_forbidden"));
     }
 
     @Test
@@ -1717,7 +1725,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void projectionWriteParsesOnlyCanonicalFinalizationHeader() throws Exception {
+    void projectionWriteIgnoresCanonicalLegacyFinalizationHeaderAndRejectsInvalidValue() throws Exception {
         String body = """
             {
               "idempotencyKey": "projection-finalize-header",
@@ -1734,9 +1742,7 @@ class WeeklyExpenseControllerTest {
                 .content(body))
             .andExpect(status().isOk());
 
-        ArgumentCaptor<CashflowEditSession> session = ArgumentCaptor.forClass(CashflowEditSession.class);
-        verify(weeklyExpensePersistence).requireCashflowWriteLease(any(), eq("project-finalize-header"), session.capture());
-        assertThat(session.getValue().finalizeLease()).isTrue();
+        verify(weeklyExpensePersistence).requireCashflowWritePermission(any(), eq("project-finalize-header"));
 
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-finalize-header-invalid/projection"), "tenant-finalize-header", "finance-1", "finance")
                 .header("x-edit-finalize", "yes")
@@ -1747,7 +1753,7 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
-    void finalProjectionCountsTheAtomicLeaseReleaseWrite() throws Exception {
+    void legacyFinalizationHeaderDoesNotConsumeAnExtraAtomicWrite() throws Exception {
         List<Map<String, Object>> lines = new ArrayList<>();
         for (int index = 0; index < 498; index += 1) {
             lines.add(Map.of(
@@ -1766,9 +1772,8 @@ class WeeklyExpenseControllerTest {
                 .header("x-edit-finalize", "true")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-            .andExpect(status().isUnprocessableEntity())
-            .andExpect(jsonPath("$.code").value("atomic_write_limit_exceeded"))
-            .andExpect(jsonPath("$.expectedWriteCount").value(501));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.savedLineCount").value(1));
     }
 
     @Test

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   asyncHandler,
   createHttpError,
@@ -268,72 +268,6 @@ async function readCashflowSheetYearView({ db, tenantId, projectId, project, sel
     fallbackYears,
     mismatchYears,
   };
-}
-
-function readEditSession(req) {
-  const sessionId = readOptionalText(req.header('x-edit-session-id'));
-  const leaseId = readOptionalText(req.header('x-edit-lease-id'));
-  const fenceText = readOptionalText(req.header('x-edit-fence'));
-  const fence = /^[1-9]\d*$/.test(fenceText) ? Number(fenceText) : Number.NaN;
-  if (!sessionId || !leaseId || !Number.isSafeInteger(fence)) {
-    throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
-  }
-  const finalizeText = readOptionalText(req.header('x-edit-finalize'));
-  if (finalizeText && finalizeText !== 'true') {
-    throw createHttpError(400, 'x-edit-finalize must be true when present.', 'cashflow_edit_lease_request_invalid');
-  }
-  return { sessionId, leaseId, fence, ...(finalizeText === 'true' ? { finalize: true } : {}) };
-}
-
-function hasEditLeaseHeaders(req) {
-  return [
-    'x-edit-session-id',
-    'x-edit-lease-id',
-    'x-edit-fence',
-    'x-edit-finalize',
-  ].some((header) => Boolean(readOptionalText(req.header(header))));
-}
-
-async function acquireSheetLabApplyLease({ editLeaseService, req, tenantId, projectId }) {
-  if (!editLeaseService) {
-    throw createHttpError(503, 'Cashflow final apply requires the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
-  }
-  const sessionId = `cashflow-sheet-lab:${randomUUID()}`;
-  const acquired = await editLeaseService.acquire({
-    tenantId,
-    actorId: req.context?.actorId,
-    actorDisplayName: readOptionalText(req.context?.actorName) || readOptionalText(req.context?.actorEmail) || '사용자',
-    sessionId,
-    resourceType: 'cashflow',
-    resourceId: projectId,
-    requestId: req.context?.requestId,
-  });
-  const lease = acquired?.body || acquired;
-  return {
-    sessionId,
-    leaseId: readOptionalText(lease?.leaseId),
-    fence: Number(lease?.fence),
-    finalize: true,
-  };
-}
-
-async function releaseSheetLabApplyLease({ editLeaseService, req, tenantId, projectId, editSession }) {
-  if (!editLeaseService || !editSession?.sessionId || !editSession?.leaseId || !Number.isSafeInteger(editSession?.fence)) return;
-  try {
-    await editLeaseService.release({
-      tenantId,
-      actorId: req.context?.actorId,
-      actorDisplayName: readOptionalText(req.context?.actorName) || readOptionalText(req.context?.actorEmail) || '사용자',
-      sessionId: editSession.sessionId,
-      resourceType: 'cashflow',
-      resourceId: projectId,
-      leaseId: editSession.leaseId,
-      fence: editSession.fence,
-      requestId: req.context?.requestId,
-    });
-  } catch (error) {
-    logCashflowSheetLab('apply.temporary_lease.release_failed', req, routeErrorDetails(error), 'warn');
-  }
 }
 
 function normalizeRole(value) {
@@ -2208,8 +2142,6 @@ export function mountCashflowSheetLabRoutes(app, {
   googleSheetsService,
   enabled = true,
   env = process.env,
-  editLeasesEnabled,
-  editLeaseService,
   javaWeeklyClient,
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
@@ -2228,9 +2160,8 @@ export function mountCashflowSheetLabRoutes(app, {
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
   });
-  const authoritativeWritesEnabled = typeof editLeasesEnabled === 'boolean'
-    ? editLeasesEnabled
-    : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
+  const authoritativeWritesEnabled = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() === 'stage'
+    || Boolean(javaWeeklyClient);
   const authoritativeJavaClient = authoritativeWritesEnabled
     ? (javaWeeklyClient || createJavaWeeklyClient({ env }))
     : null;
@@ -2518,21 +2449,18 @@ export function mountCashflowSheetLabRoutes(app, {
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/apply', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
     if (!authoritativeWritesEnabled) {
-      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+      throw createHttpError(503, 'Cashflow writes are available only in the Stage write runtime.', 'unsafe_bff_runtime');
     }
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab apply payload');
     const project = await readProjectDocument(db, tenantId, projectId);
     const deprecatedGoogleAccessTokenIgnored = Boolean(readOptionalText(req.header('x-google-access-token')));
-    const clientEditSession = hasEditLeaseHeaders(req) ? readEditSession(req) : null;
     const idempotencyKey = readOptionalText(parsed.idempotencyKey) || readOptionalText(req.context?.idempotencyKey);
     if (authoritativeWritesEnabled && !idempotencyKey) {
       throw createHttpError(400, 'idempotencyKey is required for cashflow apply.', 'idempotency_key_required');
     }
 
-    let editSession = clientEditSession;
-    let temporaryLeaseAcquired = false;
     try {
       const stagedRunId = readOptionalText(parsed.stageRunId);
       if (!stagedRunId) {
@@ -2549,19 +2477,8 @@ export function mountCashflowSheetLabRoutes(app, {
         parsed,
         context: req.context,
         javaWeeklyClient: authoritativeJavaClient,
-        editSession,
-        resolveEditSession: clientEditSession
-          ? null
-          : async () => {
-            editSession = await acquireSheetLabApplyLease({
-              editLeaseService,
-              req,
-              tenantId,
-              projectId,
-            });
-            temporaryLeaseAcquired = true;
-            return editSession;
-          },
+        editSession: null,
+        resolveEditSession: null,
         idempotencyKey,
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`apply.${event}`, req, details, level);
@@ -2576,16 +2493,6 @@ export function mountCashflowSheetLabRoutes(app, {
         ...routeErrorDetails(normalizeRouteError(error)),
       }, 'warn');
       throw normalizeRouteError(error);
-    } finally {
-      if (temporaryLeaseAcquired) {
-        await releaseSheetLabApplyLease({
-          editLeaseService,
-          req,
-          tenantId,
-          projectId,
-          editSession,
-        });
-      }
     }
   }));
 

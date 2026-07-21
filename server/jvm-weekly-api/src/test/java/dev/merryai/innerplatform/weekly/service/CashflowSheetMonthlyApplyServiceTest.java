@@ -41,11 +41,10 @@ class CashflowSheetMonthlyApplyServiceTest {
     );
 
     @Test
-    void checksStoredPermissionThenReplayBeforeLeaseAndAppliesACompleteMonth() {
+    void checksStoredPermissionThenReplayAndAppliesACompleteMonthWithoutLease() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
         when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION)).thenReturn("pm");
         when(persistence.replaceCashflowSheetMonth(
             eq("tenant-a"),
             eq("project-a"),
@@ -81,7 +80,6 @@ class CashflowSheetMonthlyApplyServiceTest {
         order.verify(persistence).findIdempotency(
             "tenant-a", "project-a", WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND, "apply-month-1"
         );
-        order.verify(persistence).requireCashflowWriteLease(ACTOR, "project-a", SESSION);
         order.verify(persistence).replaceCashflowSheetMonth(
             eq("tenant-a"),
             eq("project-a"),
@@ -98,7 +96,6 @@ class CashflowSheetMonthlyApplyServiceTest {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
         when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(persistence.requireCashflowWriteLease(ACTOR, "project-a", SESSION)).thenReturn("pm");
         when(persistence.replaceCashflowSheetMonth(
             eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION), any(), eq(true)
         )).thenReturn(new WeeklyExpensePersistence.CashflowSheetMonthReplacement(List.of(), List.of(), List.of(), TARGET_REVISION));
