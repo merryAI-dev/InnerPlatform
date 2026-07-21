@@ -2692,11 +2692,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 text(data.get("tenantId"), ""),
                 text(data.get("projectId"), "")
             );
-            requireCachedCashflowMonthOpen(
-                text(data.get("tenantId"), ""),
-                text(data.get("projectId"), ""),
-                text(data.get("yearMonth"), "")
-            );
+            if (ref.getPath().contains("/cashflow_weeks/")) {
+                requireCachedCashflowMonthOpen(
+                    text(data.get("tenantId"), ""),
+                    text(data.get("projectId"), ""),
+                    text(data.get("yearMonth"), "")
+                );
+            }
             Transaction tx = currentTransaction.get();
             if (tx == null) {
                 ref.set(data).get();

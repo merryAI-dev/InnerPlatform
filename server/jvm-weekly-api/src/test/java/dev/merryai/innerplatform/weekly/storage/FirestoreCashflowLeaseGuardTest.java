@@ -12,6 +12,7 @@ import com.google.cloud.firestore.Transaction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
@@ -564,6 +565,34 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("sourceRevision", SOURCE_REVISION)
             .containsEntry("targetRevisionAtFetch", response.resultingTargetRevision())
             .containsEntry("targetRevisionUpdateSource", "JVM_CANONICAL_APPLY");
+    }
+
+    @Test
+    void annualTotalWriteDoesNotRequireAMonthKey() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        CashflowSheetAnnualApplyRequest request = new CashflowSheetAnnualApplyRequest(
+            "annual-2025",
+            SOURCE_REVISION,
+            2025,
+            0,
+            annualCells()
+        );
+
+        fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a",
+                "project-a",
+                "cashflow-sheet-lab",
+                request
+            );
+            return null;
+        });
+
+        assertThat(fixture.documents.values()).anySatisfy(document -> assertThat(document)
+            .containsEntry("projectId", "project-a")
+            .containsEntry("year", 2025)
+            .doesNotContainKey("yearMonth"));
     }
 
     @Test
@@ -1713,6 +1742,23 @@ class FirestoreCashflowLeaseGuardTest {
             ),
             new CloseCashflowMonthRequest.DeadlineSummary("", 0, 0, null)
         );
+    }
+
+    private static List<CashflowSheetAnnualApplyRequest.Cell> annualCells() {
+        List<CashflowSheetAnnualApplyRequest.Cell> cells = new ArrayList<>();
+        for (String mode : List.of("projection", "actual")) {
+            for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                cells.add(new CashflowSheetAnnualApplyRequest.Cell(
+                    mode,
+                    lineId,
+                    "EMPTY",
+                    null,
+                    null,
+                    lineId
+                ));
+            }
+        }
+        return cells;
     }
 
     private static CashflowSheetLabApplyRequest monthlyRequest(
