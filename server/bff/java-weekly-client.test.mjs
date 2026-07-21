@@ -44,7 +44,6 @@ describe('Java weekly cashflow client', () => {
       sourceRevision: monthlyContract.sourceRevision,
       year: 2025,
       expectedRevision: 3,
-      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
       cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 2300000 }],
     });
 
@@ -59,7 +58,7 @@ describe('Java weekly cashflow client', () => {
     });
   });
 
-  it('forwards the pinned monthly contract and never sends caller sourceSheetKey', async () => {
+  it('forwards the pinned monthly contract without a cashflow edit lease', async () => {
     const fetchImpl = vi.fn(async (_url, init) => ({
       ok: true,
       status: 200,
@@ -76,18 +75,14 @@ describe('Java weekly cashflow client', () => {
       targetRevision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       yearMonth: '2026-07',
       sourceSheetKey: 'caller-controlled',
-      editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7, finalize: true },
       cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
     });
 
     const [, init] = fetchImpl.mock.calls[0];
-    expect(init.headers).toMatchObject({
-      'x-data-project-id': 'stage-data-project',
-      'x-edit-session-id': 'session-a',
-      'x-edit-lease-id': 'lease-a',
-      'x-edit-fence': '7',
-      'x-edit-finalize': 'true',
-    });
+    expect(init.headers).toMatchObject({ 'x-data-project-id': 'stage-data-project' });
+    expect(init.headers['x-edit-session-id']).toBeUndefined();
+    expect(init.headers['x-edit-lease-id']).toBeUndefined();
+    expect(init.headers['x-edit-fence']).toBeUndefined();
     expect(JSON.parse(init.body)).toEqual({
       idempotencyKey: 'apply-1',
       sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -176,22 +171,23 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl.mock.calls[0][1].headers['x-data-project-id']).toBe('stage-data-project');
   });
 
-  it.each(['0', '-1', '01', '1e2', '1.0', '9007199254740992'])(
-    'rejects non-canonical edit fence %s before network',
-    async (fence) => {
-      const fetchImpl = vi.fn();
-      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+  it('allows a sheet overwrite without a cashflow edit lease', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
-      await expect(client.applyCashflowSheetLab({
-        context,
-        projectId: 'project-a',
-        idempotencyKey: `apply-bad-fence-${fence}`,
-        ...monthlyContract,
-        editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence },
-      })).rejects.toMatchObject({ statusCode: 400, code: 'cashflow_edit_lease_request_invalid' });
-      expect(fetchImpl).not.toHaveBeenCalled();
-    },
-  );
+    await client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-without-lease',
+      ...monthlyContract,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
 
   it('preserves the JVM atomic write count on client errors', async () => {
     const fetchImpl = vi.fn(async () => ({

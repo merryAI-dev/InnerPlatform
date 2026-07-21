@@ -47,13 +47,6 @@ export function resolveBffDataProjectId(options = {}, env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
-function parsePositiveSafeInteger(value) {
-  const text = readOptionalText(String(value ?? ''));
-  if (!/^[1-9]\d*$/.test(text)) return null;
-  const parsed = Number(text);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
 export function isWorkspaceAuthMode(authMode) {
   const normalized = readOptionalText(authMode).toLowerCase();
   return normalized === 'internal_saas_workspace' || normalized === 'workspace';
@@ -200,7 +193,6 @@ export function createJavaWeeklyClient({
     context,
     projectId,
     idempotencyKey,
-    editSession,
     sourceRevision,
     targetRevision,
     yearMonth,
@@ -210,9 +202,6 @@ export function createJavaWeeklyClient({
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
-    }
-    if (readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() !== 'true') {
-      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
     }
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
       throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
@@ -224,17 +213,10 @@ export function createJavaWeeklyClient({
     if (bffDataProjectId === liveProjectId) {
       throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
     }
-    const sessionId = readOptionalText(editSession?.sessionId);
-    const leaseId = readOptionalText(editSession?.leaseId);
-    const fence = parsePositiveSafeInteger(editSession?.fence);
-    if (!sessionId || !leaseId || fence === null) {
-      throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
-    }
     const result = await requestJson({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/apply`,
-      editSession: { sessionId, leaseId, fence, finalize: editSession?.finalize === true },
       dataProjectId: bffDataProjectId,
       body: {
         idempotencyKey,
@@ -255,7 +237,6 @@ export function createJavaWeeklyClient({
     context,
     projectId,
     idempotencyKey,
-    editSession,
     sourceRevision,
     year,
     expectedRevision,
@@ -263,9 +244,6 @@ export function createJavaWeeklyClient({
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
-    if (readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() !== 'true') {
-      throw createHttpError(503, 'Cashflow writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
-    }
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
       throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
     }
@@ -276,17 +254,10 @@ export function createJavaWeeklyClient({
     if (bffDataProjectId === liveProjectId) {
       throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
     }
-    const sessionId = readOptionalText(editSession?.sessionId);
-    const leaseId = readOptionalText(editSession?.leaseId);
-    const fence = parsePositiveSafeInteger(editSession?.fence);
-    if (!sessionId || !leaseId || fence === null) {
-      throw createHttpError(400, 'Cashflow edit lease headers are required.', 'cashflow_edit_lease_request_invalid');
-    }
     const result = await requestJson({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/annual/apply`,
-      editSession: { sessionId, leaseId, fence, finalize: editSession?.finalize === true },
       dataProjectId: bffDataProjectId,
       body: { idempotencyKey, sourceRevision, year, expectedRevision, cells },
     });
