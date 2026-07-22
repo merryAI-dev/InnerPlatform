@@ -83,9 +83,23 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('차이 항목만');
     expect(source).not.toContain('setDifferenceViewMode');
     expect(source).toContain("'bg-[#EAF0F5] text-[#17324D]'");
-    expect(source).toContain('bg-[#FFF7DE]');
+    expect(source).toContain("rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'");
+    expect(source).toContain("input.isAltRow ? 'bg-slate-50' : 'bg-white'");
+    expect(source).toContain('isAltRow: rowIndex % 2 === 1');
+    expect(source).toContain("'text-emerald-700' : 'text-red-700'");
+    expect(source).toContain("'bg-[#EAF0F5] text-sky-700'");
+    expect(source).toContain('data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border');
+    expect(source).toContain("surface: 'border-border bg-accent'");
+    expect(source).toContain('text-card-foreground">주간 정산');
+    expect(source).toContain('text-card-foreground">월 결산');
+    expect(source).toContain('text-secondary-foreground">{check.title}');
+    expect(source).toContain('text-muted-foreground">프로젝트 전체 기간 · BFF/JVM 서버 판정');
+    expect(source).toContain('divide-y divide-border');
+    expect(source).toContain('bg-accent px-2.5 py-1 font-semibold text-accent-foreground');
+    expect(source).toContain('space-y-5 bg-background p-4');
+    expect(source).not.toMatch(/FFF7DE|E4C974|D6A92C|FCE8A8/);
     expect(source).toContain('text-red-700');
-    expect(source).not.toMatch(/(?:emerald|rose|amber|blue|indigo|violet)-\d+/);
+    expect(source).not.toMatch(/(?:rose|amber|blue|indigo|violet)-\d+/);
   });
 
   it('shows week codes without redundant date ranges in both cashflow tables', () => {

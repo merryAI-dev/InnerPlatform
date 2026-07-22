@@ -1643,12 +1643,13 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
+    isAltRow: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'projection' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const shouldHighlightMismatch = persisted.mismatch;
-    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : 'bg-white';
+    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1669,11 +1670,12 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
+    isAltRow: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'actual' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : 'bg-slate-50';
+    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1694,15 +1696,18 @@ export function CashflowProjectSheet({
     value: number;
     mode: 'projection' | 'actual';
     isThisWeek?: boolean;
+    isAltRow?: boolean;
     emphasis?: 'income' | 'expense' | 'balance';
     stickyRight?: boolean;
     rowTone?: 'income' | 'expense';
   }) {
     const bgClass = input.emphasis
-      ? 'bg-[#FFF7DE]'
-      : input.mode === 'actual'
-        ? (input.isThisWeek ? 'bg-[#EAF0F5]' : 'bg-slate-50')
-        : (input.isThisWeek ? 'bg-[#EAF0F5]' : 'bg-white');
+      ? 'bg-[#EAF0F5]'
+      : input.isThisWeek
+        ? 'bg-[#EAF0F5]'
+        : input.isAltRow
+          ? 'bg-slate-50'
+          : 'bg-white';
     const valueClass = input.emphasis ? 'text-slate-950' : 'text-slate-800';
     return (
       <td key={input.keyName} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${input.stickyRight ? 'sticky right-0 z-20 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]' : ''} ${bgClass}`}>
@@ -1779,12 +1784,12 @@ export function CashflowProjectSheet({
         behavior: 'smooth',
       });
     };
-    const renderAnnualLineCell = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId, year: number, rowTone: 'income' | 'expense') => {
+    const renderAnnualLineCell = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId, year: number, isAltRow: boolean) => {
       const total = annualTotalFor(year, mode);
       const state = total?.lineStates?.[lineId] || (Object.prototype.hasOwnProperty.call(total?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
       const value = total?.lineAmounts?.[lineId] || 0;
       return (
-        <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-50 px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700">
+        <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
           {state === 'VALUE' ? fmt(value) : <span className="text-slate-300">-</span>}
         </td>
       );
@@ -1803,26 +1808,27 @@ export function CashflowProjectSheet({
     const renderModeLineRows = (
       mode: 'projection' | 'actual',
       lineIds: CashflowSheetLineId[],
-      rowTone: 'income' | 'expense',
-    ) => lineIds.map((lineId) => {
+      tone: 'income' | 'expense',
+    ) => lineIds.map((lineId, rowIndex) => {
       const emphasized = lineId === 'MYSC_PREPAY_IN' || lineId.startsWith('MYSC_PREPAY_');
       return (
         <tr key={`${mode}-${lineId}`} data-cashflow-row="line" className="border-t border-white transition-colors hover:brightness-[0.98]">
-          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white border-l-[4px] px-3 py-2 text-[12px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-slate-700 bg-white' : 'border-l-slate-400 bg-slate-50'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
+          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[12px] leading-4 ${tone === 'income' ? 'text-emerald-700' : 'text-red-700'} ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
             {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
-          {previousAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowTone))}
+          {previousAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
             return mode === 'projection'
-              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek })
-              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek });
+              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 })
+              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 });
           })}
-          {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowTone))}
+          {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
             value: derived[mode].rowTotals[lineId] || 0,
             mode,
+            isAltRow: rowIndex % 2 === 1,
             stickyRight: true,
           })}
         </tr>
@@ -1838,8 +1844,8 @@ export function CashflowProjectSheet({
       const rowTone = isIncome ? 'income' : isExpense ? 'expense' : undefined;
       const emphasis = isIncome ? 'income' : isExpense ? 'expense' : 'balance';
       return (
-        <tr key={`${mode}-${kind}`} data-cashflow-row={kind} className="border-t-[6px] border-white bg-[#FFF7DE]">
-          <td className="sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-[#FFF7DE] px-3 py-2 text-[12px] font-bold text-slate-950">
+        <tr key={`${mode}-${kind}`} data-cashflow-row={kind} className="border-t-[6px] border-white bg-[#EAF0F5]">
+          <td className="sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-[#EAF0F5] px-3 py-2 text-[12px] font-bold text-[#17324D]">
             {label}
           </td>
           {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
@@ -1909,14 +1915,14 @@ export function CashflowProjectSheet({
     const renderAnnualModeTable = (mode: 'projection' | 'actual') => {
       if (!canonicalAnnualTotal) return null;
       const total = canonicalAnnualTotal[mode];
-      const renderAnnualRows = (lineIds: CashflowSheetLineId[], tone: 'income' | 'expense') => lineIds.map((lineId) => {
+      const renderAnnualRows = (lineIds: CashflowSheetLineId[], tone: 'income' | 'expense') => lineIds.map((lineId, rowIndex) => {
         const state = total.lineStates?.[lineId] || (Object.prototype.hasOwnProperty.call(total.lineAmounts, lineId) ? 'VALUE' : 'EMPTY');
         return (
           <tr key={`annual-${mode}-${lineId}`} className="border-t border-white">
-            <td className={`border-r-[6px] border-r-white border-l-[3px] px-4 py-2 text-[12px] text-slate-900 ${tone === 'income' ? 'border-l-slate-700 bg-white' : 'border-l-slate-400 bg-slate-50'}`}>
+            <td className={`border-r-[6px] border-r-white px-4 py-2 text-[12px] ${tone === 'income' ? 'text-emerald-700' : 'text-red-700'} ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
               {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
             </td>
-            <td className="bg-slate-50 px-4 py-2 text-right text-[12px] tabular-nums text-slate-700">
+            <td className={`px-4 py-2 text-right text-[12px] tabular-nums text-slate-700 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
               {state === 'VALUE' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-300">-</span>}
             </td>
           </tr>
@@ -1924,8 +1930,8 @@ export function CashflowProjectSheet({
       });
       const summaryRow = (label: string, value: number, tone: 'income' | 'expense' | 'balance') => (
         <tr key={`annual-${mode}-${label}`} className="border-t-[6px] border-white">
-          <td className="bg-[#FFF7DE] px-4 py-2 text-[12px] font-bold text-slate-950">{label}</td>
-          <td className="bg-[#FFF7DE] px-4 py-2 text-right text-[12px] font-bold tabular-nums text-slate-950">{fmt(value)}</td>
+          <td className="bg-[#EAF0F5] px-4 py-2 text-[12px] font-bold text-[#17324D]">{label}</td>
+          <td className="bg-[#EAF0F5] px-4 py-2 text-right text-[12px] font-bold tabular-nums text-[#17324D]">{fmt(value)}</td>
         </tr>
       );
       return (
@@ -2006,7 +2012,7 @@ export function CashflowProjectSheet({
                 {canonicalAnnualTotal ? renderAnnualModeTable('projection') : renderModeTable('projection')}
               </section>
               <section data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
-                <h3 className="sticky left-0 z-30 w-fit border-l-4 border-slate-500 bg-slate-700 px-3 py-2 text-[14px] font-bold text-white">ACTUAL</h3>
+                <h3 className="sticky left-0 z-30 w-fit border-l-4 border-[#17324D] bg-[#17324D] px-3 py-2 text-[14px] font-bold text-white">ACTUAL</h3>
                 {canonicalAnnualTotal ? renderAnnualModeTable('actual') : renderModeTable('actual')}
               </section>
             </div>
@@ -2065,15 +2071,16 @@ export function CashflowProjectSheet({
                       Projection과 Actual 차이가 없습니다.
                     </td>
                   </tr>
-                ) : rows.map((row) => (
+                ) : rows.map((row, rowIndex) => (
                   <tr key={row.lineId} className="border-t-[6px] border-white">
-                    <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white border-l-[3px] px-3 py-2 ${row.section === '입금' ? 'border-l-slate-700 bg-white' : 'border-l-slate-400 bg-slate-50'}`}>
-                      <div className="truncate text-slate-900">{row.label}</div>
+                    <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                      <div className={`truncate ${row.section === '입금' ? 'text-emerald-700' : 'text-red-700'}`}>{row.label}</div>
                     </td>
                     {row.cells.map((cell) => {
+                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
-                        ? 'text-slate-300'
-                        : 'bg-[#EAF0F5] text-[#17324D]';
+                        ? `${rowSurface} text-slate-300`
+                        : 'bg-[#EAF0F5] text-sky-700';
                       return (
                         <td
                           key={`${row.lineId}-${cell.yearMonth}-${cell.weekNo}`}
@@ -2096,15 +2103,15 @@ export function CashflowProjectSheet({
 
   function opsToneClass(tone: CashflowOpsTone): string {
     if (tone === 'danger') return 'border-red-200 bg-red-50 text-red-800';
-    if (tone === 'warning') return 'border-[#E4C974] bg-[#FFF7DE] text-slate-800';
-    if (tone === 'success') return 'border-slate-200 bg-slate-50 text-slate-700';
-    if (tone === 'info') return 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]';
-    return 'border-slate-200 bg-slate-50 text-slate-700';
+    if (tone === 'warning') return 'border-border bg-accent text-accent-foreground';
+    if (tone === 'success') return 'border-border bg-secondary text-secondary-foreground';
+    if (tone === 'info') return 'border-border bg-accent text-accent-foreground';
+    return 'border-border bg-secondary text-secondary-foreground';
   }
 
   function opsDotClass(tone: CashflowOpsTone): string {
     if (tone === 'danger') return 'bg-red-500';
-    if (tone === 'warning') return 'bg-[#D6A92C]';
+    if (tone === 'warning') return 'bg-sky-600';
     if (tone === 'success') return 'bg-slate-500';
     if (tone === 'info') return 'bg-[#17324D]';
     return 'bg-slate-400';
@@ -2112,26 +2119,26 @@ export function CashflowProjectSheet({
 
   function opsSubtleBgClass(tone: CashflowOpsTone): string {
     if (tone === 'danger') return 'bg-red-50';
-    if (tone === 'warning') return 'bg-[#FFF7DE]';
-    if (tone === 'success') return 'bg-slate-50';
-    if (tone === 'info') return 'bg-[#EAF0F5]';
-    return 'bg-slate-50';
+    if (tone === 'warning') return 'bg-accent';
+    if (tone === 'success') return 'bg-secondary';
+    if (tone === 'info') return 'bg-accent';
+    return 'bg-secondary';
   }
 
   function opsTextClass(tone: CashflowOpsTone): string {
     if (tone === 'danger') return 'text-red-700';
-    if (tone === 'warning') return 'text-slate-800';
-    if (tone === 'success') return 'text-slate-700';
-    if (tone === 'info') return 'text-[#17324D]';
-    return 'text-slate-700';
+    if (tone === 'warning') return 'text-accent-foreground';
+    if (tone === 'success') return 'text-secondary-foreground';
+    if (tone === 'info') return 'text-primary';
+    return 'text-secondary-foreground';
   }
 
   function renderRateTile(label: string, rate: { percent: number }) {
     const tone = label === 'Projection'
-      ? { surface: 'border-[#C7D3DF] bg-[#EAF0F5]', value: 'text-[#17324D]', bar: 'bg-[#17324D]' }
+      ? { surface: 'border-border bg-accent', value: 'text-primary', bar: 'bg-primary' }
       : label === 'Actual'
-        ? { surface: 'border-slate-200 bg-white', value: 'text-slate-800', bar: 'bg-slate-600' }
-        : { surface: 'border-[#E4C974] bg-[#FFF7DE]', value: 'text-slate-900', bar: 'bg-[#D6A92C]' };
+        ? { surface: 'border-border bg-card', value: 'text-foreground', bar: 'bg-sky-600' }
+        : { surface: 'border-border bg-accent', value: 'text-primary', bar: 'bg-sky-600' };
     const projectionSummary = monthCloseResult?.dashboard?.summary;
     const summaryDescription = label === 'Projection'
       ? projectionSummary
@@ -2143,8 +2150,8 @@ export function CashflowProjectSheet({
     return (
       <div className={`min-w-[158px] rounded-md border px-3.5 py-3 shadow-none ${tone.surface}`} title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[12px] font-semibold leading-4 text-slate-600">{label}</div>
-          <div className="text-[12px] tabular-nums text-slate-500">서버 기준</div>
+          <div className="text-[12px] font-semibold leading-4 text-muted-foreground">{label}</div>
+          <div className="text-[12px] tabular-nums text-muted-foreground">서버 기준</div>
         </div>
         <div className="mt-1 flex items-end justify-between gap-2">
           <span className={`text-[22px] font-bold leading-6 tabular-nums ${tone.value}`}>
@@ -2152,10 +2159,10 @@ export function CashflowProjectSheet({
           </span>
           <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{rate.percent === 100 ? 'OK' : '확인 중'}</span>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
           <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
         </div>
-        <div className="mt-1.5 text-[12px] leading-4 text-slate-500">{summaryDescription}</div>
+        <div className="mt-1.5 text-[12px] leading-4 text-muted-foreground">{summaryDescription}</div>
       </div>
     );
   }
@@ -2172,16 +2179,16 @@ export function CashflowProjectSheet({
           {renderRateTile('결산', opsSummary.rates.confirmation)}
         </div>
 
-        <div className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white shadow-none xl:max-h-[126px]">
+        <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card shadow-none xl:max-h-[126px]">
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <div className="min-w-0">
-              <div className="text-[12px] font-semibold text-slate-500">확인할 항목</div>
+              <div className="text-[12px] font-semibold text-muted-foreground">확인할 항목</div>
               <div className={`mt-0.5 text-[12px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
                 {opsSummary.status.count}건
               </div>
             </div>
           </div>
-          <div className="divide-y divide-slate-50">
+          <div className="divide-y divide-border">
             {input.visibleInbox.length === 0 ? (
               <div className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
                 <div className="flex h-4 items-center justify-center">
@@ -2189,7 +2196,7 @@ export function CashflowProjectSheet({
                 </div>
                 <div className="min-w-0">
                   <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
-                  <div className="mt-0.5 truncate text-[12px] leading-4 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
+                  <div className="mt-0.5 truncate text-[12px] leading-4 text-muted-foreground">서버 검증 기준으로 준비되었습니다.</div>
                 </div>
               </div>
             ) : input.visibleInbox.map((item) => (
@@ -2199,12 +2206,12 @@ export function CashflowProjectSheet({
                 </div>
                 <div className="min-w-0">
                   <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass(item.tone)}`}>{item.title}</div>
-                  <div className="mt-0.5 truncate text-[12px] leading-4 text-slate-500">{item.detail}</div>
+                  <div className="mt-0.5 truncate text-[12px] leading-4 text-muted-foreground">{item.detail}</div>
                 </div>
               </div>
             ))}
             {input.hiddenInboxCount > 0 && (
-              <div className="px-2 py-1 text-[12px] font-semibold text-slate-500">
+              <div className="px-2 py-1 text-[12px] font-semibold text-muted-foreground">
                 외 {input.hiddenInboxCount}건
               </div>
             )}
@@ -2225,12 +2232,12 @@ export function CashflowProjectSheet({
       visibleInbox,
     });
     return (
-      <Card className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <Card className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <CardContent className="space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <ClipboardList className="h-4 w-4 shrink-0 text-[#17324D]" />
-              <div className="truncate text-[16px] font-bold tracking-[-0.01em] text-slate-950">{dashboardTitle}</div>
+              <ClipboardList className="h-4 w-4 shrink-0 text-primary" />
+              <div className="truncate text-[16px] font-bold tracking-[-0.01em] text-card-foreground">{dashboardTitle}</div>
               <Button
                 type="button"
                 size="sm"
@@ -2257,7 +2264,7 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="hidden text-[12px] text-slate-400 sm:inline">기준일 {todayIso}</span>
+              <span className="hidden text-[12px] text-muted-foreground sm:inline">기준일 {todayIso}</span>
               <Badge className={`rounded-md px-2.5 py-1 text-[12px] shadow-none ${opsToneClass(opsSummary.status.tone)}`}>
                 {statusBadgeLabel}
               </Badge>
@@ -2271,23 +2278,23 @@ export function CashflowProjectSheet({
                 ['전용 계좌사업', sheetDashboardMetadata.accountType?.value],
                 ['정산 여부', sheetDashboardMetadata.settlementStatus?.value],
               ].filter(([, value]) => Boolean(value)).map(([label, value]) => (
-                <span key={label} className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 font-semibold text-slate-800">
-                  <span className="mr-1 text-[#17324D]">{label}</span>{value}
+                <span key={label} className="rounded-md border border-border bg-accent px-2.5 py-1 font-semibold text-accent-foreground">
+                  <span className="mr-1 text-primary">{label}</span>{value}
                 </span>
               ))}
-              <span className="ml-1 border-l border-slate-200 pl-3 text-slate-500">
+              <span className="ml-1 border-l border-border pl-3 text-muted-foreground">
                 세금계산서 발행일 · 입금일 · 입금액 주별 확인됨
               </span>
             </div>
           ) : null}
 
           {!canonicalAnnualTotal && !selectedYearUsesAnnualStructure ? (
-            <section data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-slate-300 bg-slate-300 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <div className="bg-white px-4 py-3">
+            <section data-cashflow-settlement-actions className="grid gap-px overflow-hidden rounded-md border border-border bg-border md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <div className="bg-card px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-[13px] font-bold text-slate-950">주간 정산</div>
-                    <div className="mt-1 text-[12px] leading-4 text-slate-500">
+                    <div className="text-[13px] font-bold text-card-foreground">주간 정산</div>
+                    <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
                       {monthCloseResult?.dashboard?.deadlineSummary?.current
                         ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${weeklyCompletionStatusLabel(monthCloseResult.dashboard.deadlineSummary.current.status)}`
                         : '서버에서 주간 마감 상태를 확인하고 있습니다.'}
@@ -2307,19 +2314,19 @@ export function CashflowProjectSheet({
                     </Button>
                   ) : null}
                 </div>
-                <div className="mt-3 flex items-center gap-4 text-[12px] text-slate-500">
+                <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</strong></span>
-                  <span>기한 내 완료 <strong className="ml-1 text-[#17324D]">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</strong></span>
+                  <span>기한 내 완료 <strong className="ml-1 text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</strong></span>
                 </div>
               </div>
-              <div className="bg-white px-4 py-3">
+              <div className="bg-card px-4 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <div className="text-[13px] font-bold text-slate-950">월 결산</div>
+                      <div className="text-[13px] font-bold text-card-foreground">월 결산</div>
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
-                    <div className="mt-1 text-[12px] leading-4 text-slate-500">
+                    <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
                       {monthClosePreparation.status === 'READY'
                         ? `${yearMonth}을 확정하면 재오픈 승인 전까지 수정할 수 없습니다.`
                         : monthClosePreparation.title}
@@ -2351,7 +2358,7 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
                   <span>{monthCloseResult?.dashboard?.summary?.closeDeadline ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
                   {isStageHost && canReviewReopen ? (
                     <Button
@@ -2390,29 +2397,29 @@ export function CashflowProjectSheet({
           {dashboardSummary}
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-            <div className="rounded-md border border-slate-200 bg-white px-3.5 py-3 shadow-none">
+            <div className="rounded-md border border-border bg-card px-3.5 py-3 shadow-none">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-[12px] font-bold text-slate-900">주요 관리 항목</div>
-                <span className="text-[12px] text-slate-400">프로젝트 전체 기간 · BFF/JVM 서버 판정</span>
+                <div className="text-[12px] font-bold text-card-foreground">주요 관리 항목</div>
+                <span className="text-[12px] text-muted-foreground">프로젝트 전체 기간 · BFF/JVM 서버 판정</span>
               </div>
               <div className="space-y-2">
                 {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {
                   const decision = managementDecisions[check.id];
                   const tone: CashflowOpsTone = check.status === 'OK' ? 'success' : check.status === 'WARNING' ? 'warning' : 'neutral';
                   return (
-                    <div key={check.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div key={check.id} className="rounded-md border border-border bg-secondary px-3 py-2">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
-                            <span className="text-[12px] font-bold text-slate-900">{check.title}</span>
+                            <span className="text-[12px] font-bold text-secondary-foreground">{check.title}</span>
                           </div>
                           {check.findings?.length ? (
-                            <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-slate-500">
+                            <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
                               {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
                             </ul>
                           ) : (
-                            <div className="mt-1 text-[12px] leading-4 text-slate-500">{check.detail}</div>
+                            <div className="mt-1 text-[12px] leading-4 text-muted-foreground">{check.detail}</div>
                           )}
                         </div>
                         <div className="flex shrink-0 gap-1">
@@ -2447,24 +2454,24 @@ export function CashflowProjectSheet({
             </div>
 
             <div className="space-y-3">
-              <div className="rounded-md border border-slate-200 bg-white px-3.5 py-3 shadow-none">
+              <div className="rounded-md border border-border bg-card px-3.5 py-3 shadow-none">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[12px] font-bold text-slate-900">목요일 자정 업데이트</div>
-                  <Badge className="h-6 rounded-md border border-slate-300 bg-slate-100 px-2 text-[12px] text-slate-700 shadow-none">
+                  <div className="text-[12px] font-bold text-card-foreground">목요일 자정 업데이트</div>
+                  <Badge className="h-6 rounded-md border border-slate-200 bg-slate-100 px-2 text-[12px] text-slate-700 shadow-none">
                     {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? '정산 완료' : '완료 대기'}
                   </Badge>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
-                  <div className="rounded-md bg-slate-50 px-3 py-2"><div className="text-slate-400">누적 미준수</div><div className="mt-1 font-bold text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
-                  <div className="rounded-md bg-slate-50 px-3 py-2"><div className="text-slate-400">기한 내 완료</div><div className="mt-1 font-bold text-[#17324D]">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
+                  <div className="rounded-md bg-secondary px-3 py-2"><div className="text-muted-foreground">누적 미준수</div><div className="mt-1 font-bold text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
+                  <div className="rounded-md bg-secondary px-3 py-2"><div className="text-muted-foreground">기한 내 완료</div><div className="mt-1 font-bold text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
                 </div>
-                <div className="mt-2 text-[12px] leading-4 text-slate-500">
+                <div className="mt-2 text-[12px] leading-4 text-muted-foreground">
                   {monthCloseResult?.dashboard?.deadlineSummary?.current
                     ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${weeklyCompletionStatusLabel(monthCloseResult.dashboard.deadlineSummary.current.status)}`
                     : '첫 시트 검토 완료 시점부터 집계합니다.'}
                 </div>
                 {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? (
-                  <div className="mt-1 truncate text-[12px] text-slate-400">
+                  <div className="mt-1 truncate text-[12px] text-muted-foreground">
                     {monthCloseResult.dashboard.deadlineSummary.current.completedBy || '사용자'} · {formatSheetAppliedAt(monthCloseResult.dashboard.deadlineSummary.current.completedAt)}
                   </div>
                 ) : null}
@@ -2473,10 +2480,10 @@ export function CashflowProjectSheet({
           </div>
 
           {monthCloseResult?.dashboard?.postCloseAdjustment ? (
-            <div className="rounded-md border border-[#E4C974] bg-[#FFF7DE] px-3 py-2 text-[12px] text-slate-900">
+            <div className="rounded-md border border-border bg-accent px-3 py-2 text-[12px] text-accent-foreground">
               <div className="font-bold">결산 후 조정 특이사항</div>
               <div className="mt-1">{monthCloseResult.dashboard.postCloseAdjustment.reason} · 변경 {monthCloseResult.dashboard.postCloseAdjustment.changedCount}건</div>
-              <div className="mt-1.5 space-y-1 text-[12px] leading-4 text-slate-700">
+              <div className="mt-1.5 space-y-1 text-[12px] leading-4 text-secondary-foreground">
                 {monthCloseResult.dashboard.postCloseAdjustment.changes.slice(0, 5).map((change) => (
                   <div key={`${change.mode}:${change.weekNo}:${change.cashflowLine}`}>
                     {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[change.cashflowLine as CashflowSheetLineId] || change.cashflowLine}
@@ -2549,7 +2556,7 @@ export function CashflowProjectSheet({
     if (source === 'google_sheet_refresh') return 'bg-slate-100 text-slate-700';
     if (source === 'google_sheet_apply') return 'bg-[#EAF0F5] text-[#17324D]';
     if (source === 'month_close') return 'bg-[#EAF0F5] text-[#17324D]';
-    if (source === 'revert') return 'bg-[#FFF7DE] text-slate-800';
+    if (source === 'revert') return 'bg-[#EAF0F5] text-[#17324D]';
     return 'bg-slate-100 text-slate-700';
   }
 
@@ -2577,12 +2584,12 @@ export function CashflowProjectSheet({
     }
     const hasRisk = Boolean(candidate.riskFlags?.length);
     return (
-      <td key={key} className={`min-w-[108px] border-l-[6px] border-l-white px-1.5 py-1 text-right align-top ${hasRisk ? 'bg-[#FFF7DE]' : 'bg-slate-50'}`}>
+      <td key={key} className={`min-w-[108px] border-l-[6px] border-l-white px-1.5 py-1 text-right align-top ${hasRisk ? 'bg-[#EAF0F5]' : 'bg-slate-50'}`}>
         <div className="text-[12px] leading-4 text-slate-400">{cashflowCandidateBeforeLabel(candidate)}</div>
         <div className={`text-[12px] font-bold leading-4 ${hasRisk ? 'text-slate-900' : 'text-slate-950'}`}>{cashflowCandidateProposedLabel(candidate)}</div>
         <div className="mt-0.5 flex justify-end">
           {hasRisk ? (
-            <span className="rounded-full bg-[#FCE8A8] px-1.5 py-0.5 text-[12px] font-semibold text-slate-800">
+            <span className="rounded-full bg-[#EAF0F5] px-1.5 py-0.5 text-[12px] font-semibold text-[#17324D]">
               {candidate.riskFlags?.map(cashflowCandidateRiskLabel).join(', ')}
             </span>
           ) : (
@@ -2613,9 +2620,7 @@ export function CashflowProjectSheet({
       candidate,
     ]));
     const renderRows = (lineIds: CashflowSheetLineId[], tone: 'income' | 'expense') => lineIds.flatMap((lineId) => {
-      const labelClass = tone === 'income'
-        ? 'bg-white border-l-[3px] border-l-slate-700'
-        : 'bg-slate-50 border-l-[3px] border-l-slate-400';
+      const labelClass = tone === 'income' ? 'bg-white' : 'bg-slate-50';
       const projectionRow = (
         <tr key={`${lineId}-projection`} className="border-t border-white">
           <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[12px] font-semibold leading-4 text-slate-900 ${labelClass}`}>
@@ -2769,17 +2774,17 @@ export function CashflowProjectSheet({
   const monthCloseStatusClass = monthCloseError
     ? 'border border-red-200 bg-red-50 text-red-700'
     : monthCloseResult?.status === 'CLOSED'
-    ? 'border border-slate-300 bg-slate-100 text-slate-700'
+    ? 'border border-border bg-secondary text-secondary-foreground'
     : monthCloseResult?.status === 'REOPEN_REQUESTED'
-      ? 'border border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'
-      : 'border border-[#E4C974] bg-[#FFF7DE] text-slate-800';
+      ? 'border border-border bg-accent text-accent-foreground'
+      : 'border border-border bg-accent text-accent-foreground';
   const sheetDashboardMetadata = cashflowSheetMirror?.status === 'FRESH'
     ? cashflowSheetMirror.sheetFacts?.metadata
     : undefined;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
 
   return (
-    <div className="space-y-5 bg-slate-100 p-4">
+    <div className="space-y-5 bg-background p-4">
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
         {renderOpsTimeline()}
@@ -2817,7 +2822,7 @@ export function CashflowProjectSheet({
               onChange={(event) => setQaClockInput(event.target.value)}
             />
           </label>
-          <div className="rounded-md bg-[#FFF7DE] px-3 py-2 text-[12px] leading-4 text-slate-800">
+          <div className="rounded-md bg-[#EAF0F5] px-3 py-2 text-[12px] leading-4 text-[#17324D]">
             Stage 전용이며 이 프로젝트에만 적용됩니다. 운영 데이터와 실제 서버 시각은 바뀌지 않습니다.
           </div>
           <AlertDialogFooter>
@@ -2864,12 +2869,12 @@ export function CashflowProjectSheet({
             </div>
           </div>
 
-          <div className={`rounded-md border px-3 py-3 text-[13px] leading-5 ${monthClosePreparation.status === 'READY' ? 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]' : monthClosePreparation.status === 'STATUS_RETRY_REQUIRED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#E4C974] bg-[#FFF7DE] text-slate-800'}`}>
+          <div className={`rounded-md border px-3 py-3 text-[13px] leading-5 ${monthClosePreparation.status === 'READY' ? 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]' : monthClosePreparation.status === 'STATUS_RETRY_REQUIRED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
             <div className="font-bold">{monthClosePreparation.title}</div>
             <div className="mt-1">{monthClosePreparation.detail}</div>
           </div>
 
-          <div className="rounded-md border border-[#E4C974] bg-[#FFF7DE] px-3 py-3 text-[13px] leading-5 text-slate-900">
+          <div className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-3 py-3 text-[13px] leading-5 text-[#17324D]">
             결산 후에는 재오픈 승인을 받기 전까지 이 월을 수정할 수 없습니다.
           </div>
 
@@ -2970,7 +2975,7 @@ export function CashflowProjectSheet({
                   : '설정 후에도 자동으로 값을 가져오지 않습니다. 시트 설정에서 직접 시트값을 가져올 때만 고정합니다.'}
                 </div>
               </div>
-              <Badge className={`w-fit rounded-md border px-2.5 py-1 text-[12px] ${sheetMirrorStatus === 'FRESH' ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-[#E4C974] bg-[#FFF7DE] text-slate-800'}`}>
+              <Badge className={`w-fit rounded-md border px-2.5 py-1 text-[12px] ${sheetMirrorStatus === 'FRESH' ? 'border-slate-300 bg-slate-100 text-slate-700' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
                 {cashflowSheetConfig ? sheetMirrorStatus : '선택 설정'}
               </Badge>
             </div>
@@ -3001,7 +3006,7 @@ export function CashflowProjectSheet({
                 </div>
               ))}
             </div>
-            <div className={`rounded-md border px-3 py-2 text-[12px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-[#E4C974] bg-[#FFF7DE] text-slate-800'}`}>
+            <div className={`rounded-md border px-3 py-2 text-[12px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
               {cashflowSheetConfig
                 ? `${sheetIdentityLabel} · ${sheetRangeLabel}`
                 : '먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.'}
@@ -3072,8 +3077,8 @@ export function CashflowProjectSheet({
                   </div>
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.actualLineCount.toLocaleString()}건</div>
                 </div>
-                <div className="rounded-md bg-[#FFF7DE] px-3 py-2">
-                  <div className="text-[12px] font-semibold text-slate-800">
+                <div className="rounded-md bg-[#EAF0F5] px-3 py-2">
+                  <div className="text-[12px] font-semibold text-[#17324D]">
                     <HoverExplain message="닫힌 주차처럼 바로 저장하지 않고 별도 검토가 필요한 항목입니다. 저장 버튼은 검토 완료 항목만 반영합니다.">
                       확인 필요
                     </HoverExplain>
@@ -3088,7 +3093,7 @@ export function CashflowProjectSheet({
               </div>
               {!sheetStageDialog.replaceAllActualSources ? renderSheetStageReviewGrid(sheetStageDialog) : null}
               {sheetStageDialog.omittedCandidateCount > 0 ? (
-                <div className="rounded-md border border-[#E4C974] bg-[#FFF7DE] px-3 py-2 text-[12px] text-slate-800">
+                <div className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-3 py-2 text-[12px] text-[#17324D]">
                   표시되지 않은 변경 값 {sheetStageDialog.omittedCandidateCount.toLocaleString()}건
                 </div>
               ) : null}

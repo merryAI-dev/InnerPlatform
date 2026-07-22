@@ -71,3 +71,15 @@
   `body.error='sk_live_supersecret'` and a raw amount; the serialized browser
   Devtools log contained neither value.
 - Docker was not used. Live deployment remains excluded.
+
+## Visual follow-up
+
+- Cashflow tables use white/slate zebra rows throughout each item row. Item
+  rails were removed; income labels use muted green, expense labels muted red,
+  and non-zero Projection–Actual differences use sky blue.
+- Dashboard surfaces use existing Tailwind semantic tokens: `background`,
+  `card`, `secondary`, `accent`, and `border`. This keeps the weekly/monthly
+  settlement divider, rate cards, and management checks on one 1px rule in
+  both light and dark modes.
+- Focused cashflow shell tests: 34/34 passed. Final production build passed
+  in 2m 13s. Independent visual audit: 100/100.

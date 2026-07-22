@@ -39,8 +39,9 @@ describe('cashflow action chrome', () => {
     expect(importEditorSource).not.toContain('캐시플로 Actual 불러오기가 이어져 실제 입금/지출 값으로 캐시플로 화면에 반영됩니다.');
   });
 
-  it('uses neutral row grouping instead of income or expense color badges in cashflow item cells', () => {
-    expect(cashflowProjectSheetSource).toContain("? 'border-l-slate-700 bg-white' : 'border-l-slate-400 bg-slate-50'");
+  it('uses zebra rows without decorative item-side color rails', () => {
+    expect(cashflowProjectSheetSource).toContain("rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'");
+    expect(cashflowProjectSheetSource).not.toContain("? 'border-l-slate-700 bg-white' : 'border-l-slate-400 bg-slate-50'");
     expect(cashflowProjectSheetSource).not.toContain('{sectionLabel}');
     expect(cashflowProjectSheetSource).not.toContain('<Badge variant="outline" className={row.section');
   });
