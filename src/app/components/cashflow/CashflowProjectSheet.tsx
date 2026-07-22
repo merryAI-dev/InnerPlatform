@@ -135,11 +135,6 @@ function formatSheetWeekLabel(yearMonth: string, weekNo: number): string {
   return `${year}-${month}-${weekNo}`;
 }
 
-function formatShortWeekRange(week: Pick<MonthMondayWeek, 'weekStart' | 'weekEnd'>): string {
-  if (!week.weekStart || !week.weekEnd) return '';
-  return `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}`;
-}
-
 function hydrateWeekDates(week: MonthMondayWeek): MonthMondayWeek {
   if (week.weekStart && week.weekEnd) return week;
   const canonical = getMonthMondayWeeks(week.yearMonth).find((candidate) => candidate.weekNo === week.weekNo);
@@ -1576,7 +1571,6 @@ export function CashflowProjectSheet({
                   <div className="min-h-5">
                     <span className="block truncate text-[12px] font-bold leading-5 text-slate-800">{week.label}</span>
                   </div>
-                  <div className="truncate text-[12px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
                 </th>
               );
             })}
@@ -1779,7 +1773,6 @@ export function CashflowProjectSheet({
                   {annualWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
-                      {formatShortWeekRange(week) ? <div className="text-[12px] font-normal text-slate-400">{formatShortWeekRange(week)}</div> : null}
                     </th>
                   ))}
                 </tr>

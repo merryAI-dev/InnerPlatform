@@ -85,6 +85,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("'bg-blue-50 text-blue-700'");
   });
 
+  it('shows week codes without redundant date ranges in both cashflow tables', () => {
+    expect(source).toContain('{week.label}');
+    expect(source).not.toContain('formatShortWeekRange');
+    expect(source).not.toContain('week.weekStart.slice(5)');
+  });
+
   it('places the operations dashboard before comparison and the monthly board', () => {
     const operations = source.indexOf('{renderOperationsPanel()}');
     const comparison = source.indexOf('data-cashflow-block="comparison"');
