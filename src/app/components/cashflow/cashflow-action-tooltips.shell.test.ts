@@ -46,11 +46,11 @@ describe('cashflow action chrome', () => {
     expect(cashflowProjectSheetSource).not.toContain('<Badge variant="outline" className={row.section');
   });
 
-  it('blocks final month close until the server and human-confirmation contract pass', () => {
+  it('keeps final month close compact while preserving server validation', () => {
     expect(cashflowProjectSheetSource).toContain('buildCashflowMonthCloseDraftInput');
-    expect(cashflowProjectSheetSource).toContain('monthCloseProgress.complete');
+    expect(cashflowProjectSheetSource).toContain('월 결산 확정');
     expect(cashflowProjectSheetSource).toContain('dashboard?.validation?.blockers');
-    expect(cashflowProjectSheetSource).toContain('캐시플로 항목 사람 확인');
+    expect(cashflowProjectSheetSource).not.toContain('캐시플로 항목 사람 확인');
     expect(cashflowProjectSheetSource).not.toContain('prepareAuditedWeekAmounts');
     expect(cashflowProjectSheetSource).not.toContain('showAuditBlock');
   });

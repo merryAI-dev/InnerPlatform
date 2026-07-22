@@ -66,11 +66,9 @@ import {
 import {
   buildCashflowMonthCloseDraftInput,
   cashflowMonthCloseConfirmationKey,
-  cashflowMonthCloseReviewProgress,
   createEmptyCashflowMonthCloseDepositRows,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
-  type CashflowMonthCloseDecisionMap,
   type CashflowMonthCloseDepositReviewRow,
   type CashflowManagementDecisionMap,
 } from './cashflow-month-close';
@@ -123,27 +121,11 @@ function HoverExplain({
       <TooltipTrigger asChild>
         <span className="cursor-pointer underline decoration-dotted underline-offset-2">{children}</span>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-[280px] text-[11px] leading-relaxed">
+      <TooltipContent side="top" className="max-w-[280px] text-[12px] leading-relaxed">
         {message}
       </TooltipContent>
     </Tooltip>
   );
-}
-
-function parseAmount(raw: string): number {
-  const cleaned = String(raw || '').trim().replaceAll(',', '');
-  if (!cleaned) return 0;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
-}
-
-function formatAmountInput(raw: string): string {
-  const cleaned = String(raw || '').replace(/[^\d-]/g, '');
-  if (!cleaned) return '';
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return '';
-  return Math.trunc(n).toLocaleString('ko-KR');
 }
 
 function formatSheetWeekLabel(yearMonth: string, weekNo: number): string {
@@ -172,7 +154,7 @@ function renderCashflowLineLabel(label: string): ReactNode {
   return (
     <>
       <span className="block">{main}</span>
-      <span className="block text-[8px] font-normal leading-3 text-slate-500">{detail}</span>
+      <span className="block text-[12px] font-normal leading-4 text-slate-500">{detail}</span>
     </>
   );
 }
@@ -284,7 +266,6 @@ export function CashflowProjectSheet({
   const [qaClockSetting, setQaClockSetting] = useState<CashflowMonthCloseQaDateTimeSetting | null>(null);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
-  const [monthCloseDecisions, setMonthCloseDecisions] = useState<CashflowMonthCloseDecisionMap>({});
   const [managementDecisions, setManagementDecisions] = useState<CashflowManagementDecisionMap>({});
   const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
     () => createEmptyCashflowMonthCloseDepositRows(),
@@ -356,7 +337,6 @@ export function CashflowProjectSheet({
 
   useEffect(() => {
     setMonthCloseResult(null);
-    setMonthCloseDecisions({});
     setManagementDecisions({});
     setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
     setMonthCloseReviewDirty(false);
@@ -771,14 +751,6 @@ export function CashflowProjectSheet({
     }
   }, [monthClosePinnedSource, yearMonth]);
 
-  const monthCloseProgress = useMemo(() => cashflowMonthCloseReviewProgress({
-    cells: monthCloseCellsState.cells,
-    decisions: monthCloseDecisions,
-    depositScheduleRows: monthCloseDepositRows,
-    managementChecks: monthCloseResult?.dashboard?.managementChecks,
-    managementDecisions,
-  }), [managementDecisions, monthCloseCellsState.cells, monthCloseDecisions, monthCloseDepositRows, monthCloseResult?.dashboard?.managementChecks]);
-
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
     if (!canFinalizeMonth || monthCloseResult?.status !== 'OPEN') {
       toast.error('프로젝트 접근 권한이 있는 활성 사용자만 월 결산할 수 있습니다.');
@@ -786,13 +758,35 @@ export function CashflowProjectSheet({
     }
     let monthCloseInput: CashflowMonthCloseDraftInput;
     try {
+      if (monthCloseCellsState.error) throw new Error(monthCloseCellsState.error);
+      const decisions = Object.fromEntries(monthCloseCellsState.cells.map((cell) => [
+        cashflowMonthCloseConfirmationKey(cell),
+        requiredCashflowMonthCloseDecision(cell),
+      ]));
+      const depositScheduleRows = monthCloseDepositRows.map((row) => {
+        const hasDepositValue = Boolean(
+          row.taxInvoiceIssuedDate
+          || row.expectedDepositDate
+          || row.expectedDepositAmount != null
+          || row.actualDepositDate
+          || row.actualDepositAmount != null,
+        );
+        return {
+          ...row,
+          decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE',
+        } satisfies CashflowMonthCloseDepositReviewRow;
+      });
+      const managementChecks = monthCloseResult?.dashboard?.managementChecks || [];
       monthCloseInput = buildCashflowMonthCloseDraftInput({
         mirror: monthClosePinnedSource,
         yearMonth,
-        decisions: monthCloseDecisions,
-        depositScheduleRows: monthCloseDepositRows,
-        managementChecks: monthCloseResult?.dashboard?.managementChecks || [],
-        managementDecisions,
+        decisions,
+        depositScheduleRows,
+        managementChecks,
+        managementDecisions: Object.fromEntries(managementChecks.map((check) => [
+          check.id,
+          managementDecisions[check.id] || 'CONFIRMED',
+        ])),
         deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
           trackingStartedAt: null,
           missedCount: 0,
@@ -801,7 +795,7 @@ export function CashflowProjectSheet({
         } satisfies CashflowDeadlineSummary,
       });
     } catch (error) {
-      toast.error(resolveApiErrorMessage(error, '사람 확인이 필요한 항목을 모두 처리해 주세요.'));
+      toast.error(resolveApiErrorMessage(error, '월 결산할 데이터를 준비하지 못했습니다. 시트 값을 다시 확인해 주세요.'));
       return;
     }
 
@@ -851,7 +845,7 @@ export function CashflowProjectSheet({
     loadCashflowComparison,
     loadCashflowEvents,
     loadCashflowMonthClose,
-    monthCloseDecisions,
+    monthCloseCellsState,
     monthCloseDepositRows,
     managementDecisions,
     monthCloseResult,
@@ -1347,9 +1341,9 @@ export function CashflowProjectSheet({
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
+          <div className="py-0.5 text-center text-[12px] text-slate-300">-</div>
         ) : (
-          <div className={`h-5 px-1 text-right text-[8px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
+          <div className={`h-5 px-1 text-right text-[12px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-rose-700' : 'text-slate-900'}`}>
             {fmt(projection)}
           </div>
         )}
@@ -1372,9 +1366,9 @@ export function CashflowProjectSheet({
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <div className="py-0.5 text-center text-[9px] text-slate-300">-</div>
+          <div className="py-0.5 text-center text-[12px] text-slate-300">-</div>
         ) : (
-          <div className="h-5 px-1 text-right text-[8px] leading-5 tabular-nums text-slate-700">
+          <div className="h-5 px-1 text-right text-[12px] leading-5 tabular-nums text-slate-700">
             {fmt(actual)}
           </div>
         )}
@@ -1405,7 +1399,7 @@ export function CashflowProjectSheet({
         : 'text-slate-950';
     return (
       <td key={input.keyName} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${input.stickyRight ? 'sticky right-0 z-20 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]' : ''} ${bgClass}`}>
-        <div className="flex items-center justify-end gap-1 text-[8px] leading-4">
+        <div className="flex items-center justify-end gap-1 text-[12px] leading-4">
           <span className={`font-semibold tabular-nums ${input.mode === 'actual' ? 'text-slate-700' : valueClass}`}>
             {fmt(input.value)}
           </span>
@@ -1483,7 +1477,7 @@ export function CashflowProjectSheet({
       const state = total?.lineStates?.[lineId] || (Object.prototype.hasOwnProperty.call(total?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
       const value = total?.lineAmounts?.[lineId] || 0;
       return (
-        <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[8px] tabular-nums ${rowTone === 'income' ? 'bg-emerald-50/60 text-emerald-800' : 'bg-rose-50/60 text-rose-800'}`}>
+        <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums ${rowTone === 'income' ? 'bg-emerald-50/60 text-emerald-800' : 'bg-rose-50/60 text-rose-800'}`}>
           {state === 'VALUE' ? fmt(value) : <span className="text-slate-300">-</span>}
         </td>
       );
@@ -1506,8 +1500,8 @@ export function CashflowProjectSheet({
     ) => lineIds.map((lineId) => {
       const emphasized = lineId === 'MYSC_PREPAY_IN' || lineId.startsWith('MYSC_PREPAY_');
       return (
-        <tr key={`${mode}-${lineId}`} data-cashflow-row="line" className="border-t border-white">
-          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-1.5 text-[9px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
+        <tr key={`${mode}-${lineId}`} data-cashflow-row="line" className="border-t border-white transition-colors hover:brightness-[0.98]">
+          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[12px] leading-4 text-slate-900 ${rowTone === 'income' ? 'border-l-[4px] border-l-emerald-500 bg-emerald-50/80' : 'border-l-[4px] border-l-rose-500 bg-rose-50/80'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
             {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
           {previousAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowTone))}
@@ -1538,7 +1532,7 @@ export function CashflowProjectSheet({
       const emphasis = isIncome ? 'income' : isExpense ? 'expense' : 'balance';
       return (
         <tr key={`${mode}-${kind}`} data-cashflow-row={kind} className={`border-t-[6px] border-white ${isIncome ? 'bg-emerald-50/80' : isExpense ? 'bg-rose-50/80' : 'bg-slate-100/90'}`}>
-          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[9px] font-bold ${isIncome ? 'bg-emerald-50 text-emerald-950' : isExpense ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>
+          <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[12px] font-bold ${isIncome ? 'bg-emerald-50 text-emerald-950' : isExpense ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>
             {label}
           </td>
           {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
@@ -1563,16 +1557,16 @@ export function CashflowProjectSheet({
       );
     };
     const renderModeTable = (mode: 'projection' | 'actual') => (
-      <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${192 + (boardColumnCount - 1) * 84}px` }}>
+      <table className="w-full border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${192 + (boardColumnCount - 1) * 84}px` }}>
         <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
           <tr>
-            <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[11px] font-bold text-slate-800">
+            <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[12px] font-bold text-slate-800">
               항목
             </th>
             {previousAnnualYears.map((year) => (
               <th key={`${mode}-${year}-before`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
-                <div className="text-[10px] font-bold text-slate-800">{year}년</div>
-                <div className="text-[8px] font-normal text-slate-400">누적</div>
+                <div className="text-[12px] font-bold text-slate-800">{year}년</div>
+                <div className="text-[12px] font-normal text-slate-400">누적</div>
               </th>
             ))}
             {visibleWeeks.map((week) => {
@@ -1580,19 +1574,19 @@ export function CashflowProjectSheet({
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-blue-50/90' : 'bg-slate-50/80'}`}>
                   <div className="min-h-5">
-                    <span className="block truncate text-[10px] font-bold leading-5 text-slate-800">{week.label}</span>
+                    <span className="block truncate text-[12px] font-bold leading-5 text-slate-800">{week.label}</span>
                   </div>
-                  <div className="truncate text-[8px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
+                  <div className="truncate text-[12px] font-normal text-slate-400">{week.weekStart && week.weekEnd ? `${week.weekStart.slice(5)}~${week.weekEnd.slice(5)}` : '-'}</div>
                 </th>
               );
             })}
             {followingAnnualYears.map((year) => (
               <th key={`${mode}-${year}-after`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
-                <div className="text-[10px] font-bold text-slate-800">{year}년</div>
-                <div className="text-[8px] font-normal text-slate-400">합계</div>
+                <div className="text-[12px] font-bold text-slate-800">{year}년</div>
+                <div className="text-[12px] font-normal text-slate-400">합계</div>
               </th>
             ))}
-            <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
+            <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[12px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
               {selectedYear}년 합계
             </th>
           </tr>
@@ -1613,10 +1607,10 @@ export function CashflowProjectSheet({
         const state = total.lineStates?.[lineId] || (Object.prototype.hasOwnProperty.call(total.lineAmounts, lineId) ? 'VALUE' : 'EMPTY');
         return (
           <tr key={`annual-${mode}-${lineId}`} className="border-t border-white">
-            <td className={`border-r-[6px] border-r-white px-4 py-2 text-[10px] text-slate-900 ${tone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'}`}>
+            <td className={`border-r-[6px] border-r-white px-4 py-2 text-[12px] text-slate-900 ${tone === 'income' ? 'border-l-[3px] border-l-emerald-400 bg-emerald-50/80' : 'border-l-[3px] border-l-rose-400 bg-rose-50/80'}`}>
               {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
             </td>
-            <td className={`px-4 py-2 text-right text-[10px] tabular-nums ${tone === 'income' ? 'bg-emerald-50/50' : 'bg-rose-50/50'}`}>
+            <td className={`px-4 py-2 text-right text-[12px] tabular-nums ${tone === 'income' ? 'bg-emerald-50/50' : 'bg-rose-50/50'}`}>
               {state === 'VALUE' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-300">-</span>}
             </td>
           </tr>
@@ -1624,16 +1618,16 @@ export function CashflowProjectSheet({
       });
       const summaryRow = (label: string, value: number, tone: 'income' | 'expense' | 'balance') => (
         <tr key={`annual-${mode}-${label}`} className="border-t-[6px] border-white">
-          <td className={`px-4 py-2 text-[10px] font-bold ${tone === 'income' ? 'bg-emerald-50 text-emerald-950' : tone === 'expense' ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>{label}</td>
-          <td className={`px-4 py-2 text-right text-[10px] font-bold tabular-nums ${tone === 'income' ? 'bg-emerald-50 text-emerald-800' : tone === 'expense' ? 'bg-rose-50 text-rose-800' : 'bg-slate-100 text-slate-950'}`}>{fmt(value)}</td>
+          <td className={`px-4 py-2 text-[12px] font-bold ${tone === 'income' ? 'bg-emerald-50 text-emerald-950' : tone === 'expense' ? 'bg-rose-50 text-rose-950' : 'bg-slate-100 text-slate-950'}`}>{label}</td>
+          <td className={`px-4 py-2 text-right text-[12px] font-bold tabular-nums ${tone === 'income' ? 'bg-emerald-50 text-emerald-800' : tone === 'expense' ? 'bg-rose-50 text-rose-800' : 'bg-slate-100 text-slate-950'}`}>{fmt(value)}</td>
         </tr>
       );
       return (
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr>
-              <th className="bg-white px-4 py-3 text-left text-[11px] font-bold text-slate-800">항목</th>
-              <th className="w-[180px] bg-slate-50 px-4 py-3 text-right text-[11px] font-bold text-slate-800">{selectedYear}년 합계</th>
+              <th className="bg-white px-4 py-3 text-left text-[12px] font-bold text-slate-800">항목</th>
+              <th className="w-[180px] bg-slate-50 px-4 py-3 text-right text-[12px] font-bold text-slate-800">{selectedYear}년 합계</th>
             </tr>
           </thead>
           <tbody>
@@ -1653,29 +1647,29 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">현금흐름 관리시트</div>
-              <div className="mt-1 text-[10px] text-slate-500">조회 전용 · 값은 시트 값 불러오기로만 반영됩니다.</div>
+              <div className="mt-1 text-[12px] text-slate-500">조회 전용 · 값은 시트 값 불러오기로만 반영됩니다.</div>
             </div>
             {canonicalAnnualTotal ? (
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <Badge className="h-8 rounded-full border-0 bg-indigo-100 px-3 text-[10px] text-indigo-800">연간 합계 원장</Badge>
-                <span className="text-[10px] text-slate-500">주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.</span>
+                <Badge className="h-8 rounded-full border-0 bg-indigo-100 px-3 text-[12px] text-indigo-800">연간 합계 원장</Badge>
+                <span className="text-[12px] text-slate-500">주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.</span>
               </div>
             ) : (
               <div className="flex flex-wrap items-center justify-end gap-2">
-              <label className="flex items-center gap-1 text-[10px] font-semibold text-slate-600">
+              <label className="flex items-center gap-1 text-[12px] font-semibold text-slate-600">
                 <span className="sr-only">결산 대상 월</span>
                 <Input
                   type="month"
                   value={yearMonth}
-                  className="h-8 w-[138px] rounded-full border-0 bg-white px-3 text-[11px] shadow-sm"
+                  className="h-8 w-[138px] rounded-full border-0 bg-white px-3 text-[12px] shadow-sm"
                   onChange={(event) => setYearMonth(event.target.value)}
                 />
               </label>
-              <Badge className={`h-8 rounded-full border-0 px-3 text-[10px] ${monthCloseStatusClass}`}>
+              <Badge className={`h-8 rounded-full border-0 px-3 text-[12px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
               {monthCloseResult?.dashboard?.summary?.closeDeadline ? (
-                <span className="text-[10px] text-slate-500">
+                <span className="text-[12px] text-slate-500">
                   {monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산
                 </span>
               ) : null}
@@ -1684,7 +1678,7 @@ export function CashflowProjectSheet({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-8 max-w-[150px] rounded-full border-amber-200 bg-amber-50 px-3 text-[10px] text-amber-900 shadow-sm"
+                  className="h-8 max-w-[150px] rounded-full border-amber-200 bg-amber-50 px-3 text-[12px] text-amber-900 shadow-sm"
                   onClick={() => {
                     setQaClockInput(qaClockSetting?.qaDateTime || `${todayIso}T10:00`);
                     setQaClockOpen(true);
@@ -1694,20 +1688,20 @@ export function CashflowProjectSheet({
                 </Button>
               ) : null}
               {canFinalizeMonth && monthCloseResult?.status === 'OPEN' ? (
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => setMonthCloseReviewOpen(true)} disabled={monthCloseBusy || !monthCloseResult.closeEligible} title={monthCloseResult.closeEligible ? '확인한 월 데이터를 최종 확정합니다.' : '대상 월이 끝난 뒤 월 결산할 수 있습니다.'}>
+                <Button type="button" size="sm" className="h-9 rounded-full bg-slate-900 px-4 text-[13px] text-white shadow-sm hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500" onClick={() => setMonthCloseReviewOpen(true)} disabled={monthCloseBusy || !monthCloseResult.closeEligible} title={monthCloseResult.closeEligible ? '확인한 월 데이터를 최종 확정합니다.' : '대상 월이 끝난 뒤 월 결산할 수 있습니다.'}>
                   <CheckCircle2 className="mr-1 h-3 w-3" />
                   월 결산
                 </Button>
               ) : null}
               {canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[11px] shadow-sm" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
+                <Button type="button" size="sm" variant="outline" className="h-8 rounded-full border-0 bg-white px-3 text-[12px] shadow-sm" onClick={() => { setReopenReason(''); setReopenAction('request'); }}>
                   재오픈 요청
                 </Button>
               ) : null}
               {canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED' ? (
                 <>
-                  <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
-                  <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[11px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
+                  <Button type="button" size="sm" className="h-8 rounded-full px-3 text-[12px]" onClick={() => { setReopenReason(''); setReopenAction('approve'); }}>재오픈 승인</Button>
+                  <Button type="button" size="sm" variant="outline" className="h-8 rounded-full px-3 text-[12px]" onClick={() => { setReopenReason(''); setReopenAction('reject'); }}>재오픈 반려</Button>
                 </>
               ) : null}
               </div>
@@ -1715,7 +1709,7 @@ export function CashflowProjectSheet({
           </div>
           <div data-cashflow-block="multi-year-view" className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3">
             {navigationYears.map((year) => (
-              <button type="button" key={year} data-cashflow-year-view={year} aria-current={year === selectedYear ? 'page' : undefined} aria-label={`${year}년 현금흐름 보기`} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-full px-4 py-2 text-[11px] font-bold transition-colors ${year === selectedYear ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 shadow-sm hover:bg-blue-50'}`}>
+              <button type="button" key={year} data-cashflow-year-view={year} aria-current={year === selectedYear ? 'page' : undefined} aria-label={`${year}년 현금흐름 보기`} onClick={() => setYearMonth(`${year}-01`)} className={`rounded-full px-4 py-2 text-[12px] font-bold transition-colors ${year === selectedYear ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 shadow-sm hover:bg-blue-50'}`}>
                 {String(year).slice(-2)}년
               </button>
             ))}
@@ -1731,18 +1725,18 @@ export function CashflowProjectSheet({
                 </Button>
               </>
             ) : null}
-            <div ref={cashflowBoardScrollRef} className="space-y-4 overflow-x-auto scroll-smooth rounded-[20px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
+            <div ref={cashflowBoardScrollRef} className="space-y-5 overflow-x-auto scroll-smooth rounded-[20px] bg-white p-3 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.8)]">
               <section data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
-                <h3 className="sticky left-0 z-30 w-fit px-3 py-2 text-[14px] font-bold text-slate-950">Projection</h3>
+                <h3 className="sticky left-0 z-30 w-fit rounded-lg bg-blue-700 px-3 py-2 text-[14px] font-bold text-white shadow-sm">Projection</h3>
                 {canonicalAnnualTotal ? renderAnnualModeTable('projection') : renderModeTable('projection')}
               </section>
               <section data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
-                <h3 className="sticky left-0 z-30 w-fit px-3 py-2 text-[14px] font-bold text-slate-950">ACTUAL</h3>
+                <h3 className="sticky left-0 z-30 w-fit rounded-lg bg-slate-800 px-3 py-2 text-[14px] font-bold text-white shadow-sm">ACTUAL</h3>
                 {canonicalAnnualTotal ? renderAnnualModeTable('actual') : renderModeTable('actual')}
               </section>
             </div>
           </div>
-          {cashflowComparisonLoading || cashflowYearViewLoading ? <div className="px-3 py-2 text-[11px] text-slate-500">불러오는 중...</div> : null}
+          {cashflowComparisonLoading || cashflowYearViewLoading ? <div className="px-3 py-2 text-[12px] text-slate-500">불러오는 중...</div> : null}
         </CardContent>
       </Card>
     );
@@ -1771,21 +1765,21 @@ export function CashflowProjectSheet({
                   Projection - Actual 차이
                 </HoverExplain>
               </div>
-              <div className="text-[10px] text-slate-500">
+              <div className="text-[12px] text-slate-500">
                 BFF 기준일 {monthCloseResult?.dashboard?.summary?.comparisonAsOfDate || cashflowSnapshot?.comparison?.asOfDate || '-'} · 차이 = Projection - Actual
               </div>
             </div>
-            <Badge className="rounded-full border-0 bg-blue-50 px-2.5 py-1 text-[10px] text-blue-700">차이 항목만</Badge>
+            <Badge className="rounded-full border-0 bg-blue-50 px-2.5 py-1 text-[12px] text-blue-700">차이 항목만</Badge>
           </div>
           <div className="overflow-x-auto rounded-[18px] bg-white p-2 shadow-[inset_0_0_0_1px_rgba(226,232,240,0.55)]">
-            <table className="border-separate border-spacing-0 text-[11px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
+            <table className="border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
               <thead className="bg-white text-slate-500">
                 <tr>
                   <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
                   {annualWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
-                      {formatShortWeekRange(week) ? <div className="text-[9px] font-normal text-slate-400">{formatShortWeekRange(week)}</div> : null}
+                      {formatShortWeekRange(week) ? <div className="text-[12px] font-normal text-slate-400">{formatShortWeekRange(week)}</div> : null}
                     </th>
                   ))}
                 </tr>
@@ -1859,27 +1853,32 @@ export function CashflowProjectSheet({
   }
 
   function renderRateTile(label: string, rate: { percent: number }) {
+    const tone = label === 'Projection'
+      ? { surface: 'border-blue-100 bg-blue-50/70', value: 'text-blue-700', bar: 'bg-blue-500' }
+      : label === 'Actual'
+        ? { surface: 'border-emerald-100 bg-emerald-50/70', value: 'text-emerald-700', bar: 'bg-emerald-500' }
+        : { surface: 'border-amber-100 bg-amber-50/70', value: 'text-amber-800', bar: 'bg-amber-500' };
     const summaryDescription = label === 'Projection'
       ? '총 계약금액 기준'
       : label === 'Actual'
         ? '이번 주차까지 입력 기준'
         : '차이 0 또는 사람 확인 기준';
     return (
-      <div className="min-w-[158px] rounded-[18px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]" title="BFF/JVM 서버 요약값">
+      <div className={`min-w-[158px] rounded-[18px] border px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)] ${tone.surface}`} title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-semibold leading-4 text-slate-600">{label}</div>
-          <div className="text-[10px] tabular-nums text-slate-500">서버 기준</div>
+          <div className="text-[12px] font-semibold leading-4 text-slate-600">{label}</div>
+          <div className="text-[12px] tabular-nums text-slate-500">서버 기준</div>
         </div>
         <div className="mt-1 flex items-end justify-between gap-2">
-          <span className="text-[22px] font-bold leading-6 tabular-nums text-blue-700">
+          <span className={`text-[22px] font-bold leading-6 tabular-nums ${tone.value}`}>
             {rate.percent}%
           </span>
-          <span className="truncate text-right text-[9px] font-semibold leading-3 text-blue-700">{rate.percent === 100 ? 'OK' : '확인 중'}</span>
+          <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{rate.percent === 100 ? 'OK' : '확인 중'}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
+          <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
         </div>
-        <div className="mt-1.5 truncate text-[9px] leading-3 text-slate-500">{summaryDescription}</div>
+        <div className="mt-1.5 truncate text-[12px] leading-4 text-slate-500">{summaryDescription}</div>
       </div>
     );
   }
@@ -1899,8 +1898,8 @@ export function CashflowProjectSheet({
         <div className="min-w-0 overflow-hidden rounded-[20px] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] xl:max-h-[126px]">
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <div className="min-w-0">
-              <div className="text-[10px] font-semibold text-slate-500">확인할 항목</div>
-              <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
+              <div className="text-[12px] font-semibold text-slate-500">확인할 항목</div>
+              <div className={`mt-0.5 text-[12px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
                 {opsSummary.status.count}건
               </div>
             </div>
@@ -1912,8 +1911,8 @@ export function CashflowProjectSheet({
                   <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass('success')}`} />
                 </div>
                 <div className="min-w-0">
-                  <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
-                  <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
+                  <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
+                  <div className="mt-0.5 truncate text-[12px] leading-4 text-slate-500">서버 검증 기준으로 준비되었습니다.</div>
                 </div>
               </div>
             ) : input.visibleInbox.map((item) => (
@@ -1922,13 +1921,13 @@ export function CashflowProjectSheet({
                   <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
                 </div>
                 <div className="min-w-0">
-                  <div className={`truncate text-[10px] font-bold leading-3 ${opsTextClass(item.tone)}`}>{item.title}</div>
-                  <div className="mt-0.5 truncate text-[9px] leading-3 text-slate-500">{item.detail}</div>
+                  <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass(item.tone)}`}>{item.title}</div>
+                  <div className="mt-0.5 truncate text-[12px] leading-4 text-slate-500">{item.detail}</div>
                 </div>
               </div>
             ))}
             {input.hiddenInboxCount > 0 && (
-              <div className="px-2 py-1 text-[9px] font-semibold text-slate-500">
+              <div className="px-2 py-1 text-[12px] font-semibold text-slate-500">
                 외 {input.hiddenInboxCount}건
               </div>
             )}
@@ -1954,12 +1953,12 @@ export function CashflowProjectSheet({
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <ClipboardList className="h-4 w-4 shrink-0 text-blue-600" />
-              <div className="truncate text-[15px] font-bold tracking-[-0.01em] text-slate-950">{dashboardTitle}</div>
+              <div className="truncate text-[16px] font-bold tracking-[-0.01em] text-slate-950">{dashboardTitle}</div>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 shrink-0 rounded-full border-blue-200 bg-white px-2.5 text-[10px] font-semibold text-blue-700"
+                className="h-7 shrink-0 rounded-full border-blue-200 bg-white px-2.5 text-[12px] font-semibold text-blue-700"
                 onClick={() => cashflowSheetConfig
                   ? navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)
                   : handleOpenSheetOnboarding()}
@@ -1971,7 +1970,7 @@ export function CashflowProjectSheet({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-7 shrink-0 rounded-full border-emerald-200 bg-white px-2.5 text-[10px] font-semibold text-emerald-700"
+                  className="h-7 shrink-0 rounded-full border-emerald-200 bg-white px-2.5 text-[12px] font-semibold text-emerald-700"
                   disabled={sheetRefreshLoading}
                   onClick={() => void handleRefreshSheetMirror()}
                 >
@@ -1981,15 +1980,15 @@ export function CashflowProjectSheet({
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="hidden text-[10px] text-slate-400 sm:inline">기준일 {todayIso}</span>
-              <Badge className={`rounded-full border-0 px-2.5 py-1 text-[10px] shadow-sm ${opsToneClass(opsSummary.status.tone)}`}>
+              <span className="hidden text-[12px] text-slate-400 sm:inline">기준일 {todayIso}</span>
+              <Badge className={`rounded-full border-0 px-2.5 py-1 text-[12px] shadow-sm ${opsToneClass(opsSummary.status.tone)}`}>
                 {statusBadgeLabel}
               </Badge>
             </div>
           </div>
 
           {sheetDashboardMetadata ? (
-            <div className="flex flex-wrap items-center gap-2 text-[10px]">
+            <div className="flex flex-wrap items-center gap-2 text-[12px]">
               {[
                 ['사업 타입', sheetDashboardMetadata.businessType?.value],
                 ['전용 계좌사업', sheetDashboardMetadata.accountType?.value],
@@ -2006,13 +2005,13 @@ export function CashflowProjectSheet({
           ) : null}
 
           {cashflowSheetMirror?.lastRefreshError?.message ? (
-            <div className="flex items-center justify-between gap-3 rounded-[14px] border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800">
+            <div className="flex items-center justify-between gap-3 rounded-[14px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800">
               <span className="min-w-0 truncate">시트 연동 오류: {cashflowSheetMirror.lastRefreshError.message}</span>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 shrink-0 rounded-full border-rose-200 bg-white px-2.5 text-[10px] text-rose-700"
+                className="h-7 shrink-0 rounded-full border-rose-200 bg-white px-2.5 text-[12px] text-rose-700"
                 onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
               >
                 시트 설정
@@ -2025,8 +2024,8 @@ export function CashflowProjectSheet({
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
             <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-[11px] font-bold text-slate-900">주요 관리 항목</div>
-                <span className="text-[9px] text-slate-400">프로젝트 전체 기간 · BFF/JVM 서버 판정</span>
+                <div className="text-[12px] font-bold text-slate-900">주요 관리 항목</div>
+                <span className="text-[12px] text-slate-400">프로젝트 전체 기간 · BFF/JVM 서버 판정</span>
               </div>
               <div className="space-y-2">
                 {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {
@@ -2038,14 +2037,14 @@ export function CashflowProjectSheet({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
-                            <span className="text-[10px] font-bold text-slate-900">{check.title}</span>
+                            <span className="text-[12px] font-bold text-slate-900">{check.title}</span>
                           </div>
                           {check.findings?.length ? (
-                            <ul className="mt-1 space-y-0.5 text-[9px] leading-4 text-slate-500">
+                            <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-slate-500">
                               {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
                             </ul>
                           ) : (
-                            <div className="mt-1 text-[9px] leading-4 text-slate-500">{check.detail}</div>
+                            <div className="mt-1 text-[12px] leading-4 text-slate-500">{check.detail}</div>
                           )}
                         </div>
                         <div className="flex shrink-0 gap-1">
@@ -2053,7 +2052,7 @@ export function CashflowProjectSheet({
                             type="button"
                             size="sm"
                             variant={decision === 'CONFIRMED' ? 'default' : 'outline'}
-                            className="h-6 rounded-full px-2 text-[9px]"
+                            className="h-6 rounded-full px-2 text-[12px]"
                             disabled={!canFinalizeMonth}
                             onClick={() => {
                               setManagementDecisions((current) => ({ ...current, [check.id]: 'CONFIRMED' }));
@@ -2064,7 +2063,7 @@ export function CashflowProjectSheet({
                             type="button"
                             size="sm"
                             variant={decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
-                            className="h-6 rounded-full px-2 text-[9px]"
+                            className="h-6 rounded-full px-2 text-[12px]"
                             disabled={!canFinalizeMonth}
                             onClick={() => {
                               setManagementDecisions((current) => ({ ...current, [check.id]: 'NOT_APPLICABLE' }));
@@ -2082,12 +2081,12 @@ export function CashflowProjectSheet({
             <div className="space-y-3">
               <div className="rounded-[20px] bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-bold text-slate-900">목요일 자정 업데이트</div>
+                  <div className="text-[12px] font-bold text-slate-900">목요일 자정 업데이트</div>
                   {canFinalizeMonth ? (
                     <Button
                       type="button"
                       size="sm"
-                      className="h-7 shrink-0 rounded-full px-2.5 text-[9px]"
+                      className="h-7 shrink-0 rounded-full px-2.5 text-[12px]"
                       disabled={weeklyCompletionBusy || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
                       onClick={() => void handleCompleteWeeklyUpdate()}
                     >
@@ -2096,17 +2095,17 @@ export function CashflowProjectSheet({
                     </Button>
                   ) : null}
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
                   <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">누적 미준수</div><div className="mt-1 font-bold text-rose-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
                   <div className="rounded-xl bg-slate-50 px-3 py-2"><div className="text-slate-400">기한 내 완료</div><div className="mt-1 font-bold text-emerald-700">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
                 </div>
-                <div className="mt-2 text-[9px] leading-4 text-slate-500">
+                <div className="mt-2 text-[12px] leading-4 text-slate-500">
                   {monthCloseResult?.dashboard?.deadlineSummary?.current
                     ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${weeklyCompletionStatusLabel(monthCloseResult.dashboard.deadlineSummary.current.status)}`
                     : '첫 시트 검토 완료 시점부터 집계합니다.'}
                 </div>
                 {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? (
-                  <div className="mt-1 truncate text-[9px] text-slate-400">
+                  <div className="mt-1 truncate text-[12px] text-slate-400">
                     {monthCloseResult.dashboard.deadlineSummary.current.completedBy || '사용자'} · {formatSheetAppliedAt(monthCloseResult.dashboard.deadlineSummary.current.completedAt)}
                   </div>
                 ) : null}
@@ -2115,10 +2114,10 @@ export function CashflowProjectSheet({
           </div>
 
           {monthCloseResult?.dashboard?.postCloseAdjustment ? (
-            <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] text-amber-950">
+            <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-950">
               <div className="font-bold">결산 후 조정 특이사항</div>
               <div className="mt-1">{monthCloseResult.dashboard.postCloseAdjustment.reason} · 변경 {monthCloseResult.dashboard.postCloseAdjustment.changedCount}건</div>
-              <div className="mt-1.5 space-y-1 text-[9px] leading-4 text-amber-900">
+              <div className="mt-1.5 space-y-1 text-[12px] leading-4 text-amber-900">
                 {monthCloseResult.dashboard.postCloseAdjustment.changes.slice(0, 5).map((change) => (
                   <div key={`${change.mode}:${change.weekNo}:${change.cashflowLine}`}>
                     {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[change.cashflowLine as CashflowSheetLineId] || change.cashflowLine}
@@ -2201,7 +2200,7 @@ export function CashflowProjectSheet({
   function renderSheetStageCandidateCell(key: string, candidate?: CashflowSheetLabChangeCandidate) {
     if (!candidate) {
       return (
-        <td key={key} className="min-w-[108px] border-l-[6px] border-l-white bg-white px-1.5 py-1 text-right text-[9px] text-slate-300">
+        <td key={key} className="min-w-[108px] border-l-[6px] border-l-white bg-white px-1.5 py-1 text-right text-[12px] text-slate-300">
           -
         </td>
       );
@@ -2209,8 +2208,8 @@ export function CashflowProjectSheet({
     const hasRisk = Boolean(candidate.riskFlags?.length);
     return (
       <td key={key} className={`min-w-[108px] border-l-[6px] border-l-white px-1.5 py-1 text-right align-top ${hasRisk ? 'bg-amber-50' : 'bg-emerald-50/70'}`}>
-        <div className="text-[8px] leading-3 text-slate-400">{cashflowCandidateBeforeLabel(candidate)}</div>
-        <div className={`text-[10px] font-bold leading-4 ${hasRisk ? 'text-amber-900' : 'text-slate-950'}`}>{cashflowCandidateProposedLabel(candidate)}</div>
+        <div className="text-[12px] leading-4 text-slate-400">{cashflowCandidateBeforeLabel(candidate)}</div>
+        <div className={`text-[12px] font-bold leading-4 ${hasRisk ? 'text-amber-900' : 'text-slate-950'}`}>{cashflowCandidateProposedLabel(candidate)}</div>
         <div className="mt-0.5 flex justify-end">
           {hasRisk ? (
             <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[7px] font-semibold text-amber-800">
@@ -2249,10 +2248,10 @@ export function CashflowProjectSheet({
         : 'bg-rose-50/80 border-l-[3px] border-l-rose-400';
       const projectionRow = (
         <tr key={`${lineId}-projection`} className="border-t border-white">
-          <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[8px] font-semibold leading-4 text-slate-900 ${labelClass}`}>
+          <td rowSpan={2} className={`sticky left-0 z-20 w-[132px] min-w-[132px] border-r-[6px] border-r-white px-2.5 py-1.5 text-[12px] font-semibold leading-4 text-slate-900 ${labelClass}`}>
             {renderCashflowLineLabel(CASHFLOW_SHEET_LINE_LABELS[lineId])}
           </td>
-          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[8px] font-semibold text-slate-700">Projection</td>
+          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-1 text-[12px] font-semibold text-slate-700">Projection</td>
           {periods.map((period) => renderSheetStageCandidateCell(
             `projection:${period.key}:${lineId}`,
             byCell.get(`projection:${period.key}:${lineId}`),
@@ -2261,7 +2260,7 @@ export function CashflowProjectSheet({
       );
       const actualRow = (
         <tr key={`${lineId}-actual`} className="border-t border-white">
-          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-slate-100/80 px-1 py-1 text-[8px] font-semibold text-slate-500">Actual</td>
+          <td className="sticky left-[132px] z-10 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-slate-100/80 px-1 py-1 text-[12px] font-semibold text-slate-500">Actual</td>
           {periods.map((period) => renderSheetStageCandidateCell(
             `actual:${period.key}:${lineId}`,
             byCell.get(`actual:${period.key}:${lineId}`),
@@ -2277,13 +2276,13 @@ export function CashflowProjectSheet({
 
     return (
       <div className="max-h-[520px] overflow-auto rounded-lg border border-slate-200 bg-white">
-        <table className="w-full border-separate border-spacing-0 text-[8px]" style={{ minWidth: `${202 + periods.length * 108}px` }}>
+        <table className="w-full border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${202 + periods.length * 108}px` }}>
           <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_8px_18px_rgba(15,23,42,0.06)]">
             <tr>
-              <th className="sticky left-0 z-50 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-white px-2 py-2 text-left text-[11px] font-bold text-slate-800">항목</th>
-              <th className="sticky left-[132px] z-50 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-2 text-left text-[11px] font-bold text-slate-800">구분</th>
+              <th className="sticky left-0 z-50 w-[132px] min-w-[132px] border-r-[6px] border-r-white bg-white px-2 py-2 text-left text-[12px] font-bold text-slate-800">항목</th>
+              <th className="sticky left-[132px] z-50 w-[70px] min-w-[70px] border-r-[6px] border-r-white bg-white px-1 py-2 text-left text-[12px] font-bold text-slate-800">구분</th>
               {periods.map((period) => (
-                <th key={period.key} className="min-w-[108px] border-l-[6px] border-l-white bg-slate-50/80 px-1.5 py-2 text-center text-[10px] font-bold text-slate-800">
+                <th key={period.key} className="min-w-[108px] border-l-[6px] border-l-white bg-slate-50/80 px-1.5 py-2 text-center text-[12px] font-bold text-slate-800">
                   {period.label}
                 </th>
               ))}
@@ -2311,13 +2310,13 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
-              <div className="text-[10px] text-slate-500">누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.</div>
+              <div className="text-[12px] text-slate-500">누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (
                 <span
                   key={badge.key}
-                  className="rounded-full border-0 bg-slate-100 px-2 py-1 text-[9px] font-semibold leading-3 text-slate-700"
+                  className="rounded-full border-0 bg-slate-100 px-2 py-1 text-[12px] font-semibold leading-4 text-slate-700"
                 >
                   {badge.label} {badge.value}
                 </span>
@@ -2326,13 +2325,13 @@ export function CashflowProjectSheet({
           </div>
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-[18px] bg-slate-50/70 px-2 py-2 pr-1">
             {cashflowEventsError ? (
-              <div className="px-2 py-8 text-center text-[10px] leading-4 text-rose-600">
+              <div className="px-2 py-8 text-center text-[12px] leading-4 text-rose-600">
                 변경 이력을 불러오지 못했습니다.
                 <br />
                 {cashflowEventsError}
               </div>
             ) : cashflowEvents.length === 0 ? (
-              <div className="px-2 py-8 text-center text-[10px] leading-4 text-slate-500">
+              <div className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
                 시트 값을 불러오거나 월 결산하면 담당자와 시간이 여기에 남습니다.
@@ -2356,21 +2355,21 @@ export function CashflowProjectSheet({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[9px] font-semibold leading-3 ${cashflowEventSourceClass(event.source)}`}>
+                        <span className={`shrink-0 rounded-full border-0 px-1.5 py-0.5 text-[12px] font-semibold leading-4 ${cashflowEventSourceClass(event.source)}`}>
                           {event.source === 'google_sheet_refresh' ? '불러오기' : event.source === 'google_sheet_apply' ? '시트' : event.source === 'month_close' ? '결산' : event.source === 'revert' ? '되돌림' : '기록'}
                         </span>
-                        <span className="truncate text-[11px] font-bold text-slate-900">{cashflowEventLabel(event)}</span>
+                        <span className="truncate text-[12px] font-bold text-slate-900">{cashflowEventLabel(event)}</span>
                       </div>
                     </div>
-                    <div className="shrink-0 text-[9px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
+                    <div className="shrink-0 text-[12px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
                   </div>
-                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
+                  <div className="mt-1 text-[12px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
                   {canRevert && (
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="mt-1 h-6 rounded-full px-2 text-[9px]"
+                      className="mt-1 h-6 rounded-full px-2 text-[12px]"
                       onClick={() => void handleRevertCashflowRun(event.runId)}
                       disabled={revertingRunId === event.runId}
                     >
@@ -2378,7 +2377,7 @@ export function CashflowProjectSheet({
                       이 반영 되돌리기
                     </Button>
                   )}
-                  {event.revertedAt && <div className="mt-1 text-[9px] font-semibold text-amber-700">되돌림 완료</div>}
+                  {event.revertedAt && <div className="mt-1 text-[12px] font-semibold text-amber-700">되돌림 완료</div>}
                 </div>
               </div>
               );
@@ -2418,7 +2417,7 @@ export function CashflowProjectSheet({
           </span>
           <div>
             <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">Projection - Actual 차이</div>
-            <div className="text-[10px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
+            <div className="text-[12px] text-slate-500">기준 범위 {cashflowTotalPeriodLabel}</div>
           </div>
         </div>
         {renderProjectionActualDiffTable()}
@@ -2434,7 +2433,7 @@ export function CashflowProjectSheet({
               이 프로젝트의 월 결산 가능일과 목요일 자정 주간 마감을 선택한 시각 기준으로 확인합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <label className="grid gap-1.5 text-[11px] font-semibold text-slate-700">
+          <label className="grid gap-1.5 text-[12px] font-semibold text-slate-700">
             테스트 날짜와 시간
             <Input
               type="datetime-local"
@@ -2443,7 +2442,7 @@ export function CashflowProjectSheet({
               onChange={(event) => setQaClockInput(event.target.value)}
             />
           </label>
-          <div className="rounded-xl bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-900">
+          <div className="rounded-xl bg-amber-50 px-3 py-2 text-[12px] leading-4 text-amber-900">
             Stage 전용이며 이 프로젝트에만 적용됩니다. 운영 데이터와 실제 서버 시각은 바뀌지 않습니다.
           </div>
           <AlertDialogFooter>
@@ -2467,231 +2466,48 @@ export function CashflowProjectSheet({
           if (!monthCloseBusy) setMonthCloseReviewOpen(open);
         }}
       >
-        <AlertDialogContent className="max-h-[92vh] w-[96vw] max-w-[1800px] overflow-y-auto">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[520px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{yearMonth} 최종저장 · 월 결산</AlertDialogTitle>
             <AlertDialogDescription>
-              시트값과 입금 일정을 사람이 모두 확인하면 서버가 스냅샷을 확정합니다. 확정 후에는 재오픈 승인 전까지 수정할 수 없습니다.
+              이번 달 현금흐름을 확정하고 수정을 잠급니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <div className="grid gap-2 sm:grid-cols-4">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="text-[10px] text-slate-500">시트 고정본</div>
-              <div className="mt-1 truncate text-[11px] font-semibold text-slate-900">{monthCloseResult?.dashboard?.source?.sourceRevision || cashflowSheetMirror?.sourceRevision || '준비되지 않음'}</div>
+          <div className="space-y-2 rounded-2xl bg-slate-50 p-4 text-[13px] text-slate-700">
+            <div className="flex items-center justify-between gap-4">
+              <span>결산 대상</span>
+              <strong className="text-slate-950">{yearMonth}</strong>
             </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2">
-              <div className="text-[10px] text-blue-600">캐시플로 항목 확인</div>
-              <div className="mt-1 text-[13px] font-bold text-blue-900">{monthCloseProgress.confirmedCells} / {monthCloseProgress.totalCells}</div>
+            <div className="flex items-center justify-between gap-4">
+              <span>시트 데이터</span>
+              <strong className="text-emerald-700">{monthCloseCellsState.error ? '확인 필요' : '준비됨'}</strong>
             </div>
-            <div className="rounded-xl bg-emerald-50 px-3 py-2">
-              <div className="text-[10px] text-emerald-600">입금 일정 확인</div>
-              <div className="mt-1 text-[13px] font-bold text-emerald-900">{monthCloseProgress.confirmedDepositRows} / 5</div>
-            </div>
-            <div className="rounded-xl bg-amber-50 px-3 py-2">
-              <div className="text-[10px] text-amber-700">주요 관리 항목 확인</div>
-              <div className="mt-1 text-[13px] font-bold text-amber-900">{monthCloseProgress.confirmedManagementChecks} / 4</div>
+            <div className="flex items-center justify-between gap-4">
+              <span>주요 관리 항목</span>
+              <strong className="text-slate-950">{monthCloseResult?.dashboard?.managementChecks?.length || 0}건</strong>
             </div>
           </div>
 
           {monthCloseCellsState.error ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{monthCloseCellsState.error}</div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">{monthCloseCellsState.error}</div>
           ) : null}
 
-          <section className="space-y-2 rounded-[18px] border border-slate-200 p-3">
-            <div>
-              <h3 className="text-[13px] font-bold text-slate-950">세금계산서·입금 일정</h3>
-              <p className="mt-1 text-[10px] text-slate-500">시트에서 불러온 발행일·입금예정일·입금액을 확인하고, 실제 입금 정보가 있으면 출처까지 선택해 주세요.</p>
-            </div>
-            <div className="space-y-2">
-              {monthCloseDepositRows.map((row) => {
-                const hasSheetSource = Boolean(row.taxInvoiceIssuedDate || row.expectedDepositDate || row.expectedDepositAmount != null);
-                return (
-                <div key={row.weekNo} className="grid gap-2 rounded-xl bg-slate-50 p-3 xl:grid-cols-[52px_repeat(5,minmax(120px,1fr))_150px_auto] xl:items-end">
-                  <div className="pb-2 text-[11px] font-bold text-slate-800">{row.weekNo}주차</div>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    세금계산서 발행일
-                    <Input
-                      type="date"
-                      value={row.taxInvoiceIssuedDate}
-                      className="h-8 bg-slate-100 text-[10px]"
-                      readOnly
-                      disabled={!canFinalizeMonth}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    입금예정일
-                    <Input
-                      type="date"
-                      value={row.expectedDepositDate}
-                      className="h-8 bg-slate-100 text-[10px]"
-                      readOnly
-                      disabled={!canFinalizeMonth}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    입금예정액
-                    <Input
-                      inputMode="numeric"
-                      value={row.expectedDepositAmount == null ? '' : formatAmountInput(String(row.expectedDepositAmount))}
-                      className="h-8 bg-slate-100 text-right text-[10px]"
-                      readOnly
-                      disabled={!canFinalizeMonth}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    실제 입금일
-                    <Input
-                      type="date"
-                      value={row.actualDepositDate}
-                      className="h-8 bg-white text-[10px]"
-                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
-                      onChange={(event) => {
-                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
-                          ? { ...candidate, actualDepositDate: event.target.value, decision: null }
-                          : candidate));
-                        setMonthCloseReviewDirty(true);
-                      }}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    실제 입금액
-                    <Input
-                      inputMode="numeric"
-                      value={row.actualDepositAmount == null ? '' : formatAmountInput(String(row.actualDepositAmount))}
-                      className="h-8 bg-white text-right text-[10px]"
-                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
-                      onChange={(event) => {
-                        const value = event.target.value.trim() ? parseAmount(event.target.value) : null;
-                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
-                          ? { ...candidate, actualDepositAmount: value, decision: null }
-                          : candidate));
-                        setMonthCloseReviewDirty(true);
-                      }}
-                    />
-                  </label>
-                  <label className="grid gap-1 text-[9px] font-semibold text-slate-500">
-                    실제 입금 출처
-                    <select
-                      value={row.actualSource}
-                      className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[10px]"
-                      disabled={!canFinalizeMonth || row.decision === 'NOT_APPLICABLE'}
-                      onChange={(event) => {
-                        const actualSource = event.target.value as CashflowMonthCloseDepositReviewRow['actualSource'];
-                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
-                          ? { ...candidate, actualSource, decision: null }
-                          : candidate));
-                        setMonthCloseReviewDirty(true);
-                      }}
-                    >
-                      <option value="NOT_APPLICABLE">입금 전/해당 없음</option>
-                      <option value="SHEET">시트</option>
-                      <option value="BANK_TRANSACTION">계좌 거래</option>
-                      <option value="DIRECT_ENTRY">직접 입력</option>
-                    </select>
-                  </label>
-                  <div className="flex gap-1 pb-0.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={row.decision === 'CONFIRMED' ? 'default' : 'outline'}
-                      className="h-8 px-2 text-[10px]"
-                      disabled={!canFinalizeMonth}
-                      onClick={() => {
-                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
-                          ? { ...candidate, decision: 'CONFIRMED' }
-                          : candidate));
-                        setMonthCloseReviewDirty(true);
-                      }}
-                    >확인</Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={row.decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
-                      className="h-8 px-2 text-[10px]"
-                      disabled={!canFinalizeMonth || hasSheetSource}
-                      onClick={() => {
-                        setMonthCloseDepositRows((current) => current.map((candidate) => candidate.weekNo === row.weekNo
-                          ? {
-                              ...candidate,
-                              actualDepositDate: '',
-                              actualDepositAmount: null,
-                              actualSource: 'NOT_APPLICABLE',
-                              decision: 'NOT_APPLICABLE',
-                            }
-                          : candidate));
-                        setMonthCloseReviewDirty(true);
-                      }}
-                    >해당 없음</Button>
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="space-y-3 rounded-[18px] border border-slate-200 p-3">
-            <div>
-              <h3 className="text-[13px] font-bold text-slate-950">캐시플로 항목 사람 확인</h3>
-              <p className="mt-1 text-[10px] text-slate-500">금액이 있는 셀은 확인, 빈 셀은 해당 없음을 직접 선택해 주세요.</p>
-            </div>
-            <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
-              {(['projection', 'actual'] as const).map((mode) => (
-                <div key={mode} className="space-y-2">
-                  <h4 className="sticky top-0 z-10 rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white">
-                    {mode === 'projection' ? 'Projection' : 'ACTUAL'}
-                  </h4>
-                  {[1, 2, 3, 4, 5].map((weekNo) => (
-                    <div key={`${mode}-${weekNo}`} className="rounded-xl bg-slate-50 p-2">
-                      <div className="mb-1 text-[10px] font-bold text-slate-700">{weekNo}주차</div>
-                      <div className="grid gap-1 md:grid-cols-2">
-                        {monthCloseCellsState.cells.filter((cell) => cell.mode === mode && cell.weekNo === weekNo).map((cell) => {
-                          const key = cashflowMonthCloseConfirmationKey(cell);
-                          const requiredDecision = requiredCashflowMonthCloseDecision(cell);
-                          const selected = monthCloseDecisions[key] === requiredDecision;
-                          return (
-                            <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2 py-1.5">
-                              <div className="min-w-0">
-                                <div className="truncate text-[9px] font-semibold text-slate-800">{getCashflowModeLineLabel(cell.cashflowLine as CashflowSheetLineId, mode)}</div>
-                                <div className="text-[9px] tabular-nums text-slate-500">
-                                  {cell.cellState === 'VALUE' ? `${fmt(Number(cell.amount || 0))}원` : '빈 셀'} · {cell.sourceLabel || cell.sourceCell || '-'}
-                                </div>
-                              </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant={selected ? 'default' : 'outline'}
-                                className="h-7 shrink-0 px-2 text-[9px]"
-                                disabled={!canFinalizeMonth}
-                                onClick={() => {
-                                  setMonthCloseDecisions((current) => ({ ...current, [key]: requiredDecision }));
-                                  setMonthCloseReviewDirty(true);
-                                }}
-                              >
-                                {requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'}
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </section>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-[13px] leading-5 text-amber-950">
+            결산 후에는 재오픈 승인을 받기 전까지 이 월을 수정할 수 없습니다.
+          </div>
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
             <AlertDialogAction
-              disabled={!canFinalizeMonth || monthCloseBusy || !monthCloseProgress.complete || Boolean(monthCloseCellsState.error)}
+              disabled={!canFinalizeMonth || monthCloseBusy || Boolean(monthCloseCellsState.error)}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();
               }}
             >
               {monthCloseBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-              최종저장 · 월 결산
+              월 결산 확정
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2715,7 +2531,7 @@ export function CashflowProjectSheet({
               결산 이후 변경은 감사 이력과 경고 카운트에 남습니다. 처리 사유를 구체적으로 작성해 주세요.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <label className="grid gap-2 text-[11px] font-semibold text-slate-700">
+          <label className="grid gap-2 text-[12px] font-semibold text-slate-700">
             사유
             <textarea
               value={reopenReason}
@@ -2761,17 +2577,17 @@ export function CashflowProjectSheet({
                   <ArrowDownToLine className="h-4 w-4 text-blue-600" />
                   {cashflowSheetConfig ? '시트에서 가져오기' : '연동 전 확인사항'}
                 </div>
-                <div className="mt-1 text-[11px] leading-5 text-slate-600">
+                <div className="mt-1 text-[12px] leading-5 text-slate-600">
                   {cashflowSheetConfig
                     ? '마지막으로 고정한 Projection/Actual 값을 원장과 비교합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
                   : '설정 후에도 자동으로 값을 가져오지 않습니다. 시트 설정에서 직접 시트값을 가져올 때만 고정합니다.'}
                 </div>
               </div>
-              <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[10px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+              <Badge className={`w-fit rounded-full border-0 px-2.5 py-1 text-[12px] ${sheetMirrorStatus === 'FRESH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
                 {cashflowSheetConfig ? sheetMirrorStatus : '선택 설정'}
               </Badge>
             </div>
-            <div className="flex items-start gap-2 rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] leading-5 text-blue-900">
+            <div className="flex items-start gap-2 rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-[12px] leading-5 text-blue-900">
               <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
               <div>
                 {cashflowSheetConfig
@@ -2791,14 +2607,14 @@ export function CashflowProjectSheet({
               ]).map(([step, title, detail]) => (
                 <div key={step} className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{step}</span>
-                    <span className="text-[11px] font-bold text-slate-900">{title}</span>
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[12px] font-bold text-white">{step}</span>
+                    <span className="text-[12px] font-bold text-slate-900">{title}</span>
                   </div>
-                  <div className="mt-1 text-[10px] leading-4 text-slate-500">{detail}</div>
+                  <div className="mt-1 text-[12px] leading-4 text-slate-500">{detail}</div>
                 </div>
               ))}
             </div>
-            <div className={`rounded-[12px] border px-3 py-2 text-[11px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            <div className={`rounded-[12px] border px-3 py-2 text-[12px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
               {cashflowSheetConfig
                 ? `${sheetIdentityLabel} · ${sheetRangeLabel}`
                 : '먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.'}
@@ -2846,7 +2662,7 @@ export function CashflowProjectSheet({
             <div className="space-y-3">
               <div className="grid gap-2 sm:grid-cols-4">
                 <div className="rounded-lg bg-emerald-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
-                  <div className="text-[10px] font-semibold text-emerald-700">
+                  <div className="text-[12px] font-semibold text-emerald-700">
                     <HoverExplain message="확인 필요 표시가 없어 바로 저장 가능한 변경입니다. 저장 버튼은 이 항목만 반영합니다.">
                       바로 저장 가능
                     </HoverExplain>
@@ -2854,7 +2670,7 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-[16px] font-bold text-emerald-900">{Math.max(0, sheetStageDialog.stagedLineCount - sheetStageDialog.riskLineCount).toLocaleString()}건</div>
                 </div>
                 <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
-                  <div className="text-[10px] font-semibold text-slate-500">
+                  <div className="text-[12px] font-semibold text-slate-500">
                     <HoverExplain message="시트의 Projection 셀과 현재 캐시플로우 원장이 다른 항목입니다.">
                       Projection
                     </HoverExplain>
@@ -2862,7 +2678,7 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.projectionLineCount.toLocaleString()}건</div>
                 </div>
                 <div className="rounded-lg bg-slate-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
-                  <div className="text-[10px] font-semibold text-slate-500">
+                  <div className="text-[12px] font-semibold text-slate-500">
                     <HoverExplain message="시트의 Actual 셀과 현재 캐시플로우 원장이 다른 항목입니다. Actual은 시트에서만 입력한다고 보고 반영합니다.">
                       Actual
                     </HoverExplain>
@@ -2870,7 +2686,7 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-[16px] font-bold text-slate-950">{sheetStageDialog.actualLineCount.toLocaleString()}건</div>
                 </div>
                 <div className="rounded-lg bg-amber-50 px-3 py-2 transition-transform hover:-translate-y-0.5">
-                  <div className="text-[10px] font-semibold text-amber-700">
+                  <div className="text-[12px] font-semibold text-amber-700">
                     <HoverExplain message="닫힌 주차처럼 바로 저장하지 않고 별도 검토가 필요한 항목입니다. 저장 버튼은 검토 완료 항목만 반영합니다.">
                       확인 필요
                     </HoverExplain>
@@ -2878,14 +2694,14 @@ export function CashflowProjectSheet({
                   <div className="mt-1 text-[16px] font-bold text-amber-900">{sheetStageDialog.riskLineCount.toLocaleString()}건</div>
                 </div>
               </div>
-              <div className={`rounded-lg border px-3 py-2 text-[11px] leading-5 ${sheetStageDialog.replaceAllActualSources ? 'border-rose-200 bg-rose-50 text-rose-900' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+              <div className={`rounded-lg border px-3 py-2 text-[12px] leading-5 ${sheetStageDialog.replaceAllActualSources ? 'border-rose-200 bg-rose-50 text-rose-900' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
                 {sheetStageDialog.replaceAllActualSources
                   ? '기존 은행·수기 등 Actual 출처도 이 월에서는 삭제됩니다. 시트값이 이 월의 단일 기준인지 확인한 뒤 저장하세요.'
                   : 'Actual은 시트 출처 값만 갱신하고 다른 출처 값은 유지합니다. 확인 필요 표시가 있는 행은 저장되지 않습니다.'}
               </div>
               {!sheetStageDialog.replaceAllActualSources ? renderSheetStageReviewGrid(sheetStageDialog) : null}
               {sheetStageDialog.omittedCandidateCount > 0 ? (
-                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
                   표시되지 않은 변경 값 {sheetStageDialog.omittedCandidateCount.toLocaleString()}건
                 </div>
               ) : null}

@@ -30,28 +30,26 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
-  it('requires explicit human decisions for 160 cells, five deposit rows, and four management checks', () => {
-    expect(source).toContain('monthCloseProgress.confirmedCells');
-    expect(source).toContain('monthCloseProgress.confirmedDepositRows');
-    expect(source).toContain('monthCloseProgress.confirmedManagementChecks');
+  it('closes the month from one compact confirmation while preserving the server snapshot contract', () => {
+    expect(source).toContain('이번 달 현금흐름을 확정하고 수정을 잠급니다.');
+    expect(source).toContain('월 결산 확정');
     expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
-    expect(source).toContain('캐시플로 항목 사람 확인');
-    expect(source).toContain("requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'");
-    expect(source).toContain("decision: 'CONFIRMED'");
-    expect(source).toContain("decision: 'NOT_APPLICABLE'");
-    expect(source).toContain('!monthCloseProgress.complete');
+    expect(source).not.toContain('캐시플로 항목 사람 확인');
+    expect(source).not.toContain('세금계산서·입금 일정</h3>');
+    expect(source).toContain("decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE'");
+    expect(source).not.toContain('!monthCloseProgress.complete');
   });
 
-  it('prefills immutable sheet-authored deposit facts and edits only actual facts', () => {
+  it('prefills immutable sheet-authored deposit facts for the compact month close', () => {
     expect(source).toContain('dashboard?.sheetDepositScheduleRows');
     expect(source).toContain('taxInvoiceIssuedDate: row.taxInvoiceIssuedDate');
     expect(source).toContain('expectedDepositDate: row.expectedDepositDate');
     expect(source).toContain('expectedDepositAmount: row.expectedDepositAmount');
-    expect(source).toContain('readOnly');
-    expect(source).toContain('hasSheetSource');
-    expect(source).toContain('disabled={!canFinalizeMonth || hasSheetSource}');
-    expect(source).toContain('actualDepositDate: event.target.value');
-    expect(source).toContain('actualDepositAmount: value');
+    expect(source).toContain("decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE'");
+  });
+
+  it('keeps all cashflow labels at a readable 12px minimum', () => {
+    expect(source).not.toMatch(/text-\[(?:8|9|10|11)px\]/);
   });
 
   it('consumes composed dashboard totals, comparison, summary, sheet metadata, and validation', () => {
@@ -112,7 +110,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('keeps the dashboard deposit schedule as a compact sheet-confirmed note', () => {
     expect(source).toContain('세금계산서 발행일 · 입금일 · 입금액 주별 확인됨');
-    expect(source.match(/<h3 className="text-\[13px\] font-bold text-slate-950">세금계산서·입금 일정<\/h3>/g)).toHaveLength(1);
+    expect(source).not.toContain('세금계산서·입금 일정</h3>');
   });
 
   it('keeps the PPT summary as Projection, Actual, and monthly close only', () => {
