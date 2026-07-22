@@ -4,7 +4,7 @@ import {
   type RequestActor,
 } from './request-context';
 import { captureException } from './observability';
-import { recordDevtoolsLog, toDevtoolsError } from './devtools-transaction-log';
+import { recordDevtoolsLog, toDevtoolsError, toSafeDiagnosticCode } from './devtools-transaction-log';
 
 const DEFAULT_RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -80,8 +80,7 @@ function parseJwtClaims(token: string): JwtClaimsSummary | undefined {
 
 function readErrorCode(body: unknown): string | undefined {
   if (!body || typeof body !== 'object') return undefined;
-  const value = (body as { code?: unknown; error?: unknown }).code || (body as { error?: unknown }).error;
-  return typeof value === 'string' ? value : undefined;
+  return toSafeDiagnosticCode((body as { code?: unknown }).code);
 }
 
 function readErrorMessage(body: unknown): string | undefined {
@@ -325,14 +324,19 @@ export class PlatformApiClient {
     const clientRequestId = headers.get('x-request-id') || '';
 
     if (!hasAuthorizationHeader) {
-      console.warn('[PlatformApiClient] Missing Authorization header for BFF request', {
+      recordDevtoolsLog({
+        kind: 'bff_request',
+        phase: 'info',
+        operation: 'bff.authorization.missing',
         method,
         path,
-        requestUrl,
-        actorId: options.actor.id,
-        actorEmail: options.actor.email,
+        requestId: clientRequestId,
         tenantId: options.tenantId,
-        hasBody: options.body !== undefined && options.body !== null,
+        actorId: options.actor.id,
+        summary: {
+          hasBody: options.body !== undefined && options.body !== null,
+          hasAuthorizationHeader: false,
+        },
       });
     }
 
@@ -392,18 +396,22 @@ export class PlatformApiClient {
 
         if (!response.ok) {
           if (response.status === 401 || response.status === 403) {
-            console.warn('[PlatformApiClient] BFF auth rejected', {
+            recordDevtoolsLog({
+              kind: 'bff_request',
+              phase: 'info',
+              operation: 'bff.authorization.rejected',
               method,
               path,
-              requestUrl,
+              requestId: clientRequestId,
+              responseRequestId: requestId,
               status: response.status,
-              code: responseCode,
-              message: responseMessage,
-              requestId,
+              tenantId: options.tenantId,
               actorId: options.actor.id,
-              actorHasIdToken: Boolean(actorIdToken && actorIdToken.trim()),
-              hasAuthorizationHeader,
-              tokenAudience: tokenClaims?.aud,
+              summary: {
+                hasAuthorizationHeader,
+                actorHasIdToken: Boolean(actorIdToken && actorIdToken.trim()),
+                hasResponseCode: Boolean(responseCode),
+              },
             });
           }
           throw new PlatformApiError(

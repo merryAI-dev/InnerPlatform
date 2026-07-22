@@ -92,7 +92,9 @@ expectNotContains('src/app/components/projects/ProjectListPage.tsx', '모니터�
 expectNotContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'copyMonthValues');
 expectNotContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'Projection → Actual');
 expectNotContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'Actual → Projection');
-expectContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'formatAmountInput(String(persisted.amount))');
+expectContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'data-cashflow-settlement-actions');
+expectContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'handleOpenMonthCloseReview');
+expectContains('src/app/components/cashflow/CashflowProjectSheet.tsx', 'monthClosePreparation');
 expectNotContains('src/app/components/cashflow/ImportEditor.tsx', '행 정보');
 expectNotContains('src/app/components/cashflow/ImportEditorRow.tsx', '행 정보');
 expectNotContains('src/app/components/portal/PortalWeeklyExpensePage.tsx', '저장되지 않은 사업비 입력이 있습니다');

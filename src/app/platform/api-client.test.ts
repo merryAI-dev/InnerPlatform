@@ -225,4 +225,53 @@ describe('PlatformApiClient', () => {
     ]);
     expect(JSON.stringify(logs)).not.toContain('id-token-1');
   });
+
+  it('does not write raw authorization diagnostics to console or transaction logs', async () => {
+    clearDevtoolsLogs();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      code: 'missing_bearer_token',
+      message: 'person@mysc.co.kr expectedDepositAmount=9999 raw cell=B12:C12',
+    }), {
+      status: 401,
+      headers: { 'content-type': 'application/json', 'x-request-id': 'req-denied' },
+    }));
+    const client = new PlatformApiClient({ fetchImpl });
+
+    try {
+      await expect(client.get('/api/v1/secure', {
+        tenantId: 'mysc',
+        actor: { id: 'u001', email: 'person@mysc.co.kr' },
+      })).rejects.toBeInstanceOf(PlatformApiError);
+
+      const serialized = JSON.stringify(getDevtoolsLogs());
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(serialized).not.toContain('person@mysc.co.kr');
+      expect(serialized).not.toContain('expectedDepositAmount=9999');
+      expect(serialized).not.toContain('B12:C12');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('never copies body.error into the response-code transaction summary', async () => {
+    clearDevtoolsLogs();
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      error: 'sk_live_supersecret',
+      message: 'raw financial payload 2300000',
+    }), {
+      status: 400,
+      headers: { 'content-type': 'application/json', 'x-request-id': 'req-secret' },
+    }));
+    const client = new PlatformApiClient({ fetchImpl });
+
+    await expect(client.get('/api/v1/secure', {
+      tenantId: 'mysc',
+      actor: { id: 'u001' },
+    })).rejects.toBeInstanceOf(PlatformApiError);
+
+    const serialized = JSON.stringify(getDevtoolsLogs());
+    expect(serialized).not.toContain('sk_live_supersecret');
+    expect(serialized).not.toContain('2300000');
+  });
 });

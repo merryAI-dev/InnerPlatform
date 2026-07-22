@@ -7,6 +7,7 @@ import {
   recordDevtoolsLog,
   sanitizeDevtoolsValue,
   summarizeAmountMap,
+  toDevtoolsError,
 } from './devtools-transaction-log';
 
 describe('devtools transaction log', () => {
@@ -65,6 +66,54 @@ describe('devtools transaction log', () => {
         safe: 'visible',
       },
     });
+  });
+
+  it('drops sensitive text embedded inside an error message and keeps only safe diagnostics', () => {
+    const error = Object.assign(new Error('owner=person@mysc.co.kr token eyJhbGciOiJIUzI1NiJ9 amount=2300000 expectedDepositAmount: 9999 raw cell value=협력사A/8500'), {
+      status: 503,
+      requestId: 'req_123',
+      body: { code: 'jvm_weekly_api_unreachable' },
+    });
+    const sanitized = toDevtoolsError(error);
+
+    expect(sanitized.message).not.toContain('person@mysc.co.kr');
+    expect(sanitized.message).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+    expect(sanitized.message).not.toContain('2300000');
+    expect(sanitized.message).not.toContain('9999');
+    expect(sanitized.message).not.toContain('협력사A');
+    expect(sanitized).toMatchObject({
+      name: 'Error',
+      message: '[jvm_weekly_api_unreachable] Request failed',
+      status: 503,
+      requestId: 'req_123',
+    });
+  });
+
+  it('redacts response messages and financial fields in a transaction summary', () => {
+    const sanitized = sanitizeDevtoolsValue({
+      responseMessage: 'expectedDepositAmount: 9999, raw cell value=협력사A/8500',
+      expectedDepositAmount: 9999,
+      sourceCell: 'B12:C12',
+      status: 503,
+    });
+
+    expect(sanitized).toEqual({
+      responseMessage: '[redacted]',
+      expectedDepositAmount: '[redacted]',
+      sourceCell: '[redacted]',
+      status: 503,
+    });
+  });
+
+  it('does not treat a token-shaped body.error as a safe diagnostic code', () => {
+    const sanitized = toDevtoolsError({
+      name: 'PlatformApiError',
+      status: 403,
+      body: { error: 'sk_live_1234567890' },
+    });
+
+    expect(sanitized.message).toBe('Request failed');
+    expect(sanitized.message).not.toContain('sk_live_1234567890');
   });
 
   it('shows elapsed time in the collapsed console label', () => {

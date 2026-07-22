@@ -57,11 +57,35 @@ function makeLogId(): string {
 }
 
 function isSensitiveKey(key: string): boolean {
-  return /(token|authorization|password|secret|credential|privatekey|contentbase64|rawtext|googleaccesstoken|idtoken|email)/i.test(key);
+  return /(token|authorization|password|secret|credential|privatekey|contentbase64|rawtext|googleaccesstoken|idtoken|email|message|detail|amount|cell|value|payload|body)/i.test(key);
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED)
+    .replace(/\b(authorization|bearer|access[_-]?token|id[_-]?token|googleaccess[_-]?token|password|secret|credential)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/\b[A-Z]{1,3}\d{1,4}(?::[A-Z]{1,3}\d{1,4})?\b/g, '[cell]')
+    .replace(/\b\d{1,3}(?:,\d{3})+(?:\s*(?:원|KRW))?/gi, '[amount]')
+    .replace(/\b\d{4,}\s*(?:원|KRW)?\b/gi, '[number]');
 }
 
 function truncateString(value: string): string {
-  return value.length > 500 ? `${value.slice(0, 500)}...` : value;
+  const redacted = redactSensitiveText(value);
+  return redacted.length > 500 ? `${redacted.slice(0, 500)}...` : redacted;
+}
+
+export function toSafeDiagnosticCode(value: unknown): string | undefined {
+  if (!(typeof value === 'string'
+    && /^(?:[a-z]+_){1,7}[a-z]+$/.test(value)
+    && !/(token|secret|credential|password|bearer|authorization|private|key)/.test(value))) {
+    return undefined;
+  }
+  return value;
+}
+
+function isSafeDiagnosticCode(value: unknown): value is string {
+  return Boolean(toSafeDiagnosticCode(value));
 }
 
 export function sanitizeDevtoolsValue(value: unknown, depth = 0): unknown {
@@ -100,18 +124,26 @@ export function sanitizeDevtoolsValue(value: unknown, depth = 0): unknown {
 }
 
 export function toDevtoolsError(error: unknown): DevtoolsLogEntry['error'] {
-  if (error instanceof Error) {
-    const maybe = error as Error & { status?: number; requestId?: string };
-    return {
-      name: error.name || 'Error',
-      message: error.message,
-      status: typeof maybe.status === 'number' ? maybe.status : undefined,
-      requestId: typeof maybe.requestId === 'string' ? maybe.requestId : undefined,
-    };
-  }
+  const maybe = error as {
+    name?: unknown;
+    status?: unknown;
+    requestId?: unknown;
+    code?: unknown;
+    body?: { code?: unknown; error?: unknown };
+  };
+  const code = [maybe?.code, maybe?.body?.code].find(isSafeDiagnosticCode);
+  const name = typeof maybe?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(maybe.name)
+    ? maybe.name
+    : 'RequestError';
   return {
-    name: 'UnknownError',
-    message: String(error),
+    name,
+    message: code ? `[${code}] Request failed` : 'Request failed',
+    status: typeof maybe?.status === 'number' && Number.isInteger(maybe.status) && maybe.status >= 100 && maybe.status <= 599
+      ? maybe.status
+      : undefined,
+    requestId: typeof maybe?.requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(maybe.requestId)
+      ? maybe.requestId
+      : undefined,
   };
 }
 

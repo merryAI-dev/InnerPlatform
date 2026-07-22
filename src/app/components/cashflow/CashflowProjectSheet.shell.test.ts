@@ -31,7 +31,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('closes the month from one compact confirmation while preserving the server snapshot contract', () => {
-    expect(source).toContain('이번 달 현금흐름을 확정하고 수정을 잠급니다.');
+    expect(source).toContain('결산 기준을 먼저 점검한 뒤, 준비된 경우에만 이 달의 수정을 잠급니다.');
     expect(source).toContain('월 결산 확정');
     expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
@@ -49,7 +49,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps all cashflow labels at a readable 12px minimum', () => {
-    expect(source).not.toMatch(/text-\[(?:8|9|10|11)px\]/);
+    expect(source).not.toMatch(/text-\[(?:[0-9]|1[01])px\]/);
   });
 
   it('consumes composed dashboard totals, comparison, summary, sheet metadata, and validation', () => {
@@ -76,13 +76,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('visibleInbox.length === 0');
   });
 
-  it('keeps Projection then ACTUAL row order and shows only blue difference rows', () => {
+  it('keeps Projection then ACTUAL row order and uses navy for difference rows', () => {
     expect(source.indexOf('data-cashflow-block="projection"')).toBeLessThan(source.indexOf('data-cashflow-block="actual"'));
     expect(source).toMatch(/renderModeLineRows\(mode, CASHFLOW_IN_LINES[\s\S]*renderSummaryRow\(mode, 'totalIn'\)[\s\S]*renderModeLineRows\(mode, CASHFLOW_OUT_LINES[\s\S]*renderSummaryRow\(mode, 'totalOut'\)[\s\S]*renderSummaryRow\(mode, 'net'\)/);
     expect(source).toContain('Projection - Actual 차이');
     expect(source).toContain('차이 항목만');
     expect(source).not.toContain('setDifferenceViewMode');
-    expect(source).toContain("'bg-blue-50 text-blue-700'");
+    expect(source).toContain("'bg-[#EAF0F5] text-[#17324D]'");
+    expect(source).toContain('bg-[#FFF7DE]');
+    expect(source).toContain('text-red-700');
+    expect(source).not.toMatch(/(?:emerald|rose|amber|blue|indigo|violet)-\d+/);
   });
 
   it('shows week codes without redundant date ranges in both cashflow tables', () => {
@@ -188,12 +191,35 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('기한 후 완료');
   });
 
-  it('keeps the board action next to the settlement status without a manual temporary-save button', () => {
-    const boardHeader = source.slice(source.indexOf('현금흐름 관리시트'), source.indexOf('data-cashflow-block="multi-year-view"'));
-    expect(boardHeader).toContain('월 결산');
-    expect(boardHeader).toContain('closeDeadline');
-    expect(boardHeader).toContain('!monthCloseResult.closeEligible');
-    expect(boardHeader).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
+  it('makes weekly and monthly settlement primary dashboard actions without a manual temporary-save button', () => {
+    const operations = source.slice(source.indexOf('function renderOperationsPanel()'), source.indexOf('function renderOpsTimeline()'));
+    expect(operations).toContain('data-cashflow-settlement-actions');
+    expect(operations).toContain('주간 정산 완료');
+    expect(operations).toContain('월 결산');
+    expect(operations).toContain('handleOpenMonthCloseReview');
+    expect(operations).toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
+    expect(operations).toContain('closeDeadline');
+    expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');
+  });
+
+  it('guides a blocked month close to the specific next action and records safe developer diagnostics', () => {
+    expect(source).toContain('cashflow.month_close.review.open');
+    expect(source).toContain('cashflow.month_close.preflight.blocked');
+    expect(source).toContain('cashflow.month_close.preflight.sheet_refresh');
+    expect(source).toContain('cashflow.month_close.status.load');
+    expect(source).toContain('cashflow.weekly_settlement.complete');
+    expect(source).toContain('시트 설정으로 이동');
+    expect(source).toContain('시트 값 불러오기');
+    expect(source).toContain('결산 상태 다시 확인');
+    expect(source).toContain('recordDevtoolsLog');
+    expect(source).toContain('toDevtoolsError');
+  });
+
+  it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {
+    const preparation = source.slice(source.indexOf('const monthClosePreparation'), source.indexOf('const handleOpenMonthCloseReview'));
+    expect(preparation.indexOf('if (monthCloseCellsState.error)')).toBeLessThan(preparation.indexOf('if (monthCloseError)'));
+    expect(source).toContain("!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED'");
+    expect(source).toContain("!monthCloseError && canReviewReopen && monthCloseResult?.status === 'REOPEN_REQUESTED'");
   });
 
   it('keeps Projection read-only and accepts values only through sheet import', () => {
@@ -270,9 +296,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('allows every active project-access role to close or request reopen while decisions stay Finance/Admin only', () => {
     expect(source).toContain("const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin'");
     expect(source).toContain("const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin'");
+    expect(source).toContain("const canCompleteWeekly = canFinalizeMonth || role === 'tenant_admin'");
     expect(source).toContain('const canRequestMonthReopen = canFinalizeMonth');
     expect(source).toContain("role === 'finance' || role === 'admin'");
-    expect(source).toContain("monthCloseResult?.status === 'OPEN'");
+    expect(source).toContain("monthCloseResult?.status !== 'OPEN'");
     expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
     expect(source).toContain('Finance 또는 Admin만 재오픈 요청을 처리할 수 있습니다.');
   });
