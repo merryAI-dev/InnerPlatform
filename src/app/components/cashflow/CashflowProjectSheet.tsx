@@ -92,6 +92,16 @@ function formatSheetAppliedAt(value?: string): string {
   }).format(date);
 }
 
+function decodeActivityActor(value?: string): string {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 function weeklyCompletionStatusLabel(status?: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING'): string {
   if (status === 'COMPLETED') return '기한 내 완료';
   if (status === 'COMPLETED_LATE') return '기한 후 완료';
@@ -1851,8 +1861,11 @@ export function CashflowProjectSheet({
       : label === 'Actual'
         ? { surface: 'border-emerald-100 bg-emerald-50/70', value: 'text-emerald-700', bar: 'bg-emerald-500' }
         : { surface: 'border-amber-100 bg-amber-50/70', value: 'text-amber-800', bar: 'bg-amber-500' };
+    const projectionSummary = monthCloseResult?.dashboard?.summary;
     const summaryDescription = label === 'Projection'
-      ? '총 계약금액 기준'
+      ? projectionSummary
+        ? `프로젝트 등록 시 전체 계약 금액: ${fmt(Number(projectionSummary.projectionContractAmount || 0))}원 · 현재 Projection 작성 전체 금액: ${fmt(Number(projectionSummary.projectionTotalIn || 0))}원`
+        : '프로젝트 등록 시 전체 계약 금액과 현재 Projection 작성 전체 금액을 불러오는 중입니다.'
       : label === 'Actual'
         ? '이번 주차까지 입력 기준'
         : '차이 0 또는 사람 확인 기준';
@@ -1871,7 +1884,7 @@ export function CashflowProjectSheet({
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
           <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
         </div>
-        <div className="mt-1.5 truncate text-[12px] leading-4 text-slate-500">{summaryDescription}</div>
+        <div className="mt-1.5 text-[12px] leading-4 text-slate-500">{summaryDescription}</div>
       </div>
     );
   }
@@ -2143,19 +2156,21 @@ export function CashflowProjectSheet({
   }
 
   function cashflowEventDetail(event: CashflowEvent): string {
+    const actorName = decodeActivityActor(event.actorName);
+    const actorEmail = decodeActivityActor(event.actorEmail);
     if (event.type === 'sheet_refresh') {
-      const actor = event.actorName
-        ? `${event.actorName}님이`
-        : event.actorEmail ? `${event.actorEmail} 계정으로` : '담당자가';
+      const actor = actorName
+        ? `${actorName}님이`
+        : actorEmail ? `${actorEmail} 계정으로` : '담당자가';
       const action = `${actor} 시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.`;
       return [event.sheetName, action].filter(Boolean).join(' · ');
     }
     if (event.type === 'sheet_apply') {
-      const actor = event.actorName || event.actorEmail || '담당자';
+      const actor = actorName || actorEmail || '담당자';
       const period = event.scope === 'annual' && event.year ? `${event.year}년 합계` : event.yearMonth || '';
       return `${actor} · ${period} 원장 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
     }
-    if (event.type === 'month_close') return [`${event.yearMonth || ''} 월`, event.status || '결산 완료', event.actorName || event.actorEmail || '사용자'].filter(Boolean).join(' · ');
+    if (event.type === 'month_close') return [`${event.yearMonth || ''} 월`, event.status || '결산 완료', actorName || actorEmail || '사용자'].filter(Boolean).join(' · ');
     if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
       const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
       const lineLabel = event.lineId ? CASHFLOW_SHEET_LINE_LABELS[event.lineId as CashflowSheetLineId] || event.lineId : '';
@@ -2165,7 +2180,16 @@ export function CashflowProjectSheet({
     }
     if (event.type === 'sheet_apply_reverted') return '선택한 시트 반영 run의 금액 변경을 이전 값으로 되돌렸습니다.';
     const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
-    return [weekLabel, event.actorName || event.actorEmail || '사용자'].filter(Boolean).join(' · ');
+    return [weekLabel, actorName || actorEmail || '사용자'].filter(Boolean).join(' · ');
+  }
+
+  function latestCashflowEventSummary(event?: CashflowEvent): string {
+    if (!event) return '시트 반영과 월 결산 기록이 여기에 남습니다.';
+    const actor = decodeActivityActor(event.actorName) || decodeActivityActor(event.actorEmail) || '최근 사용자';
+    if (event.type === 'sheet_refresh') return `${actor}님이 시트의 최신 값을 불러왔습니다.`;
+    if (event.type === 'sheet_apply') return `${actor}님이 시트 값을 원장에 반영했습니다.`;
+    if (event.type === 'month_close') return `${actor}님이 ${event.yearMonth || ''} 월 결산을 확정했습니다.`;
+    return `${actor}님의 최근 변경 기록입니다.`;
   }
 
   function cashflowEventSourceClass(source: CashflowEvent['source']): string {
@@ -2296,6 +2320,7 @@ export function CashflowProjectSheet({
       { key: 'amount', label: '금액 변경', value: cashflowEvents.filter((event) => event.type === 'projection_amount_change' || event.type === 'actual_amount_change').length },
       { key: 'status', label: '월 결산', value: cashflowEvents.filter((event) => event.type === 'month_close').length },
     ].filter((item) => item.value > 0);
+    const latestEvent = cashflowEvents[0];
 
     return (
       <Card className="h-full overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
@@ -2303,7 +2328,7 @@ export function CashflowProjectSheet({
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
               <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
-              <div className="text-[12px] text-slate-500">누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.</div>
+              <div className="mt-0.5 text-[12px] leading-4 text-slate-600">{latestCashflowEventSummary(latestEvent)}</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {countBadges.map((badge) => (

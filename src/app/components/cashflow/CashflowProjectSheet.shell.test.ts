@@ -127,6 +127,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('renderOpsStatusDonut');
   });
 
+  it('shows the registered contract amount and full Projection amount together', () => {
+    expect(source).toContain('프로젝트 등록 시 전체 계약 금액');
+    expect(source).toContain('현재 Projection 작성 전체 금액');
+    expect(source).toContain('projectionContractAmount');
+    expect(source).toContain('projectionTotalIn');
+    expect(source).not.toContain("? '총 계약금액 기준'");
+  });
+
   it('keeps sheet sync explicit and uses the approved action label', () => {
     expect(source).toContain('handleRefreshSheetMirror');
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
@@ -216,10 +224,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('shows who explicitly loaded the sheet values in the activity timeline', () => {
-    expect(source).toContain('`${event.actorName}님이`');
-    expect(source).toContain('`${event.actorEmail} 계정으로`');
+    expect(source).toContain('decodeActivityActor');
+    expect(source).toContain('decodeURIComponent(text)');
+    expect(source).toContain('`${actorName}님이`');
+    expect(source).toContain('`${actorEmail} 계정으로`');
     expect(source).toContain('시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.');
-    expect(source).toContain('누가 언제 시트 값을 불러오고 월 결산했는지 확인할 수 있습니다.');
+    expect(source).toContain('latestCashflowEventSummary');
+    expect(source).toContain('시트의 최신 값을 불러왔습니다.');
   });
 
   it('places prior annual totals before and later annual totals after the selected year weeks', () => {
