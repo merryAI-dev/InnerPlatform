@@ -21,6 +21,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('최종저장 · 월 결산');
     expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*closeCashflowMonthViaBff/);
     expect(source).toContain('expectedRevision: prepared.revision');
+    expect(source).toContain('expectedOpeningBalances: reviewedOpeningBalances');
     expect(source).toContain('closeInput: monthCloseInput');
     expect(source).not.toContain('savePrivateCashflowDraft');
     expect(source).not.toContain('cashflowLease');
@@ -54,9 +55,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('consumes composed dashboard totals, comparison, summary, sheet metadata, and validation', () => {
     expect(source).toContain('monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find');
-    expect(source).toContain('cashflowSnapshot?.readModel?.range?.[mode]');
-    expect(source).toContain('rangeStart: cashflowSnapshotRange.start');
-    expect(source).toContain('rangeEnd: cashflowSnapshotRange.end');
+    expect(source).toContain('const canonicalReadModel = monthCloseResult?.dashboard?.canonical');
+    expect(source).toContain('canonicalReadModel?.range?.[mode]');
+    expect(source).not.toContain('fetchCashflowSnapshotViaBff');
+    expect(source).not.toContain('loadCashflowComparison');
+    expect(source).not.toContain('cashflowSnapshot');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
     expect(source).toContain('dashboard?.summary?.projectionProgressPercent');
     expect(source).toContain('cashflowSheetMirror.sheetFacts?.metadata');
@@ -68,6 +71,22 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('computeCashflowDerivedTotals');
     expect(source).not.toContain('computeOpeningCashflowTotals');
     expect(source).not.toContain('monthSummaries.reduce');
+  });
+
+  it('applies the server opening balance without recreating month-close reads during hydration', () => {
+    expect(source).toContain('monthCloseRequestGenerationRef');
+    expect(source).toContain('requestGeneration === monthCloseRequestGenerationRef.current');
+    expect(source).toContain('monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear');
+    expect(source).toContain('const canonicalReadModel = monthCloseResult?.dashboard?.canonical');
+    expect(source).toContain('openingBalances[mode]?.sources?.find((source) => source.year === year)');
+    expect(source).toContain('lineStates: jvmOpeningSource.lineStates');
+    expect(source).toContain('const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances');
+    expect(source).toContain('carryForwardCashflowRunningBalances({');
+    expect(source).toContain('priorWeeklyNet: Number(priorServerWeek?.net || 0)');
+    expect(source).toContain('annualOpeningBalance: openingBalance');
+    expect(source).toContain('serverRunningNets: serverWeeks.map');
+    expect(source).toContain('weekTotals.at(-1)?.net ?? openingBalance');
+    expect(source).toMatch(/\}, \[orgId, projectId, resolveBffActor, selectedYear, user\?\.uid, yearMonth\]\);/);
   });
 
   it('keeps the ready placeholder out of the issue count', () => {
@@ -188,8 +207,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('캐시플로우 시트 연동 시작하기');
     expect(source).toContain('나중에 하기');
     expect(source).toContain('설정 후에도 자동으로 값을 가져오지 않습니다.');
-    expect(source).toContain('cashflowSnapshot?.comparison?.months || []');
+    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months || []');
     expect(source).toContain('comparisonWeek?.lines?.find');
+  });
+
+  it('shows legacy closed snapshots as evidence-only without a live-ledger fallback', () => {
+    expect(source).toContain("snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY'");
+    expect(source).toContain('이전 형식의 월 결산입니다.');
+    expect(source).toContain('재오픈 승인 후 시트값을 다시 반영하고 재결산');
+    expect(source).not.toContain('fetchCashflowSnapshotViaBff');
+    expect(source).toContain('resolveCashflowEvidenceScope({');
+    expect(source).toContain('const canonicalAnnualTotal = !allowLiveAnnualYearView || hasWeeklyYearData');
+    expect(source).toContain('(allowLiveAnnualYearView && cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear))');
+    expect(source).toContain('if (!allowLiveAnnualYearView) return null;');
+    expect(source).toContain('const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata');
   });
 
   it('keeps the operations dashboard as the first visible cashflow block', () => {
@@ -264,15 +295,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-annual-summary="true"');
-    expect(source).toContain('cashflowYearView.navigationYears');
+    expect(source).toContain('cashflowEvidenceScope.yearView.navigationYears');
     expect(source).toContain(': [selectedYear]');
     expect(source).toContain('canonicalAnnualTotal');
     expect(source).toContain('주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.');
     expect(source).toContain('data-cashflow-block="multi-year-view"');
     expect(source).toContain('data-cashflow-year-view={year}');
     expect(source).toContain('{String(year).slice(-2)}년');
-    expect(source).toContain("start: { yearMonth: `${selectedYear}-01`, weekNo: 1 }");
-    expect(source).toContain("end: { yearMonth: `${selectedYear}-12`, weekNo: 5 }");
+    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months');
+    expect(source).not.toContain('cashflowSnapshotRange');
   });
 
   it('shows who explicitly loaded the sheet values in the activity timeline', () => {
@@ -304,8 +335,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('check.findings.map((finding)');
   });
 
-  it('reloads both the canonical ledger and management checks after sheet apply', () => {
-    expect(source).toMatch(/loadCashflowComparison\(\)[\s\S]*loadCashflowMonthClose\(\)/);
+  it('reloads the canonical ledger and management checks together after sheet apply', () => {
+    expect(source).toContain('loadCashflowMonthClose()');
+    expect(source).not.toContain('loadCashflowComparison');
   });
 
   it('warns once for unsaved local changes without a cashflow edit session', () => {

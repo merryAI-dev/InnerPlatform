@@ -164,7 +164,7 @@ reopen.
   the JVM fetch, and response parsing.  It is limited to 12 seconds
   (`JVM_WEEKLY_API_TIMEOUT_MS` can only lower that ceiling), and both attempts
   share a 24-second total budget so the BFF resolves before the browser's
-  30-second timeout.  Metadata fetch receives the same abort signal; GoogleAuth
+  27-second timeout.  Metadata fetch receives the same abort signal; GoogleAuth
   and injected resolvers are bounded by the outer timeout race.
 - Transport failure returns `jvm_weekly_api_unreachable`; generic upstream 5xx
   returns `jvm_weekly_api_internal_error`.  Domain 4xx codes such as

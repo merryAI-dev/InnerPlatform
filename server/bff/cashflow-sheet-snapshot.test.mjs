@@ -17,6 +17,31 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(classifyCashflowSheetCell('(1,234)')).toEqual({ state: 'VALUE', amount: -1234 });
   });
 
+  it('pins an annual explicit zero as ZERO with its amount intact', () => {
+    const annualMapping = {
+      mode: 'projection', year: 2025, lineId: 'SALES_IN', direction: 'IN',
+      rowIndex: 0, columnIndex: 0, a1: 'A1', label: '매출액(입금)',
+    };
+    const zero = createCashflowPinnedSnapshot({
+      projectId: 'project-a',
+      spreadsheetId: 'sheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      template: { sections: [{ mode: 'projection', annualMappings: [annualMapping] }] },
+      matrix: [[0]],
+    });
+    const empty = createCashflowPinnedSnapshot({
+      projectId: 'project-a',
+      spreadsheetId: 'sheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      template: { sections: [{ mode: 'projection', annualMappings: [annualMapping] }] },
+      matrix: [['']],
+    });
+
+    expect(zero.annualCells).toEqual([expect.objectContaining({ state: 'ZERO', amount: 0 })]);
+    expect(empty.annualCells).toEqual([expect.objectContaining({ state: 'EMPTY' })]);
+    expect(zero.sourceRevision).not.toBe(empty.sourceRevision);
+  });
+
   it('marks non-numeric sheet contents invalid instead of silently converting them to zero', () => {
     expect(classifyCashflowSheetCell('확인 필요')).toEqual({
       state: 'INVALID',

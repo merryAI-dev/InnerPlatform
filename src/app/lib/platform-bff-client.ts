@@ -826,6 +826,24 @@ export interface CashflowMonthCloseDepositScheduleRow {
   decision: 'CONFIRMED' | 'NOT_APPLICABLE';
 }
 
+export interface CashflowOpeningBalances {
+  selectedYear: number;
+  projection: {
+    amount: number;
+    lineAmounts: Record<string, number>;
+    sources: Array<{ year: number; lineAmounts: Record<string, number>; lineStates: Record<string, 'EMPTY' | 'ZERO' | 'VALUE'> }>;
+    includedYears: number[];
+    excludedWeeklyYears: number[];
+  };
+  actual: {
+    amount: number;
+    lineAmounts: Record<string, number>;
+    sources: Array<{ year: number; lineAmounts: Record<string, number>; lineStates: Record<string, 'EMPTY' | 'ZERO' | 'VALUE'> }>;
+    includedYears: number[];
+    excludedWeeklyYears: number[];
+  };
+}
+
 export interface CashflowMonthCloseDraftInput {
   sourceRevision: string;
   targetRevision: string;
@@ -888,6 +906,11 @@ export interface CashflowMonthCloseDashboard {
   confirmations: CashflowMonthCloseConfirmation[];
   managementChecks: CashflowManagementCheck[];
   managementConfirmations: CashflowManagementConfirmation[];
+  openingBalances?: CashflowOpeningBalances;
+  snapshotCompatibility: {
+    status: 'LIVE_CURRENT' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY';
+    missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
+  };
   deadlineSummary: CashflowDeadlineSummary;
   postCloseAdjustment: {
     reason: string;
@@ -956,6 +979,7 @@ export interface CashflowMonthCloseDashboard {
 export interface CloseCashflowMonthPayload {
   yearMonth: string;
   expectedRevision: number;
+  expectedOpeningBalances: CashflowOpeningBalances;
   closeInput: CashflowMonthCloseDraftInput;
 }
 
@@ -2443,6 +2467,11 @@ export async function fetchCashflowSnapshotViaBff(params: {
   return response.data;
 }
 
+const cashflowMonthCloseRequests = new WeakMap<
+  PlatformApiClientLike,
+  Map<string, Promise<CashflowMonthCloseResult>>
+>();
+
 export async function fetchCashflowMonthCloseViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -2450,16 +2479,34 @@ export async function fetchCashflowMonthCloseViaBff(params: {
   yearMonth: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).get<CashflowMonthCloseResult>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close?yearMonth=${encodeURIComponent(params.yearMonth)}`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data;
+  const client = resolveClient(params.client);
+  let clientRequests = cashflowMonthCloseRequests.get(client);
+  if (!clientRequests) {
+    clientRequests = new Map();
+    cashflowMonthCloseRequests.set(client, clientRequests);
+  }
+  const requestKey = [params.tenantId, params.actor.uid, params.projectId, params.yearMonth].join(':');
+  const existing = clientRequests.get(requestKey);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const response = await client.get<CashflowMonthCloseResult>(
+      `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close?yearMonth=${encodeURIComponent(params.yearMonth)}`,
+      {
+        tenantId: params.tenantId,
+        actor: toRequestActor(params.actor),
+        retries: 0,
+        timeoutMs: 27_000,
+      },
+    );
+    return response.data;
+  })();
+  clientRequests.set(requestKey, request);
+  try {
+    return await request;
+  } finally {
+    if (clientRequests.get(requestKey) === request) clientRequests.delete(requestKey);
+  }
 }
 
 export async function fetchCashflowMonthCloseQaDateTimeViaBff(params: {
@@ -2610,7 +2657,7 @@ export async function closeCashflowMonthViaBff(params: {
       body: params.payload,
       idempotencyKey: params.idempotencyKey,
       retries: 0,
-      timeoutMs: 20000,
+      timeoutMs: 27_000,
     },
   );
   return response.data;

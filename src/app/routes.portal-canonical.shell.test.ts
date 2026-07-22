@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'routes.tsx'), 'utf8');
 const cashflowSource = readFileSync(resolve(import.meta.dirname, 'components/portal/PortalCashflowPage.tsx'), 'utf8');
+const adminCashflowSource = readFileSync(resolve(import.meta.dirname, 'components/cashflow/ProjectCashflowSheetPage.tsx'), 'utf8');
 const projectEditSource = readFileSync(resolve(import.meta.dirname, 'components/portal/PortalProjectEdit.tsx'), 'utf8');
 const legacyProjectEditSource = readFileSync(resolve(import.meta.dirname, 'components/projects/ProjectWizardPage.tsx'), 'utf8');
 const sheetLabSource = readFileSync(resolve(import.meta.dirname, 'features/cashflow-sheet-compare/CashflowSheetLabPage.tsx'), 'utf8');
@@ -31,6 +32,11 @@ describe('portal canonical edit resource routes', () => {
     expect(sheetLabSource).toContain('useParams');
     expect(sheetLabSource).toContain('routeProjectId');
     expect(sheetLabSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true })");
+  });
+
+  it('remounts the finance screen when the project resource changes', () => {
+    expect(cashflowSource).toContain('key={projectId}');
+    expect(adminCashflowSource).toContain('key={projectId}');
   });
 
   it('resolves project edit from the exact route resource without stale session fallback', () => {

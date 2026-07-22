@@ -1,5 +1,6 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
@@ -37,6 +38,7 @@ import java.util.TreeMap;
 @RestController
 @RequestMapping("/api/v1")
 public class WeeklyExpenseController {
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private final WeeklyExpenseCommandService commandService;
     private final WeeklyExpensePersistence persistence;
@@ -281,7 +283,19 @@ public class WeeklyExpenseController {
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
         commandService.requireProjectAllowed(WeeklyExpenseCommandService.CASHFLOW_READ_COMMAND, actorContext(tenantId, actorId, actorRole, actorEmail), projectId);
-        List<CashflowSnapshotResponse.ProjectionLine> projection = persistence.findProjectionLines(tenantId, projectId).stream()
+        WeeklyExpensePersistence.CashflowLedgerSource source = readCashflowSource(tenantId, projectId);
+        return buildCashflowSnapshot(projectId, source);
+    }
+
+    private WeeklyExpensePersistence.CashflowLedgerSource readCashflowSource(String tenantId, String projectId) {
+        return persistence.findCashflowLedgerSource(tenantId, projectId);
+    }
+
+    private CashflowSnapshotResponse buildCashflowSnapshot(
+        String projectId,
+        WeeklyExpensePersistence.CashflowLedgerSource source
+    ) {
+        List<CashflowSnapshotResponse.ProjectionLine> projection = source.projection().stream()
             .map(line -> new CashflowSnapshotResponse.ProjectionLine(
                 line.getYearMonth(),
                 line.getWeekNo(),
@@ -289,7 +303,7 @@ public class WeeklyExpenseController {
                 line.getAmount()
             ))
             .toList();
-        List<CashflowSnapshotResponse.ActualLine> actual = persistence.findActualLines(tenantId, projectId).stream()
+        List<CashflowSnapshotResponse.ActualLine> actual = source.actual().stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
                 line.getSheetKey(),
                 line.getYearMonth(),
@@ -372,10 +386,72 @@ public class WeeklyExpenseController {
             projectId,
             yearMonth
         );
-        CashflowSnapshotResponse cashflow = "OPEN".equals(monthClose.status())
-            ? cashflowSnapshot(projectId, tenantId, actorId, actorRole, actorEmail)
+        boolean open = "OPEN".equals(monthClose.status());
+        CashflowMonthDashboardSourceResponse.SnapshotCompatibility snapshotCompatibility = open
+            ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
+            : frozenSnapshotCompatibility(monthClose);
+        WeeklyExpensePersistence.CashflowLedgerSource source = open
+            ? readCashflowSource(tenantId, projectId)
             : null;
-        return new CashflowMonthDashboardSourceResponse(monthClose, cashflow);
+        CashflowSnapshotResponse cashflow = open ? buildCashflowSnapshot(projectId, source) : null;
+        CashflowOpeningBalancesResponse openingBalances = open
+            ? toOpeningBalancesResponse(persistence.findCashflowOpeningBalance(
+                tenantId,
+                projectId,
+                Integer.parseInt(yearMonth.substring(0, 4)),
+                source.weeklyYears()
+            ))
+            : snapshotCompatibility.missingEvidence().contains("OPENING_BALANCES")
+                ? null
+                : frozenOpeningBalances(monthClose, yearMonth);
+        if (openingBalances != null) {
+            CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, yearMonth);
+        }
+        return new CashflowMonthDashboardSourceResponse(
+            monthClose,
+            cashflow,
+            openingBalances,
+            snapshotCompatibility
+        );
+    }
+
+    private CashflowMonthDashboardSourceResponse.SnapshotCompatibility frozenSnapshotCompatibility(
+        CashflowMonthCloseResponse monthClose
+    ) {
+        List<String> missingEvidence = new ArrayList<>();
+        Map<String, Object> snapshot = monthClose.snapshot();
+        if (snapshot == null || !snapshot.containsKey("openingBalances")) {
+            missingEvidence.add("OPENING_BALANCES");
+        }
+        if (snapshot == null || !snapshot.containsKey("ledgerWeeks")) {
+            missingEvidence.add("LEDGER_WEEKS");
+        }
+        return new CashflowMonthDashboardSourceResponse.SnapshotCompatibility(
+            missingEvidence.isEmpty() ? "FROZEN_COMPLETE" : "LEGACY_EVIDENCE_ONLY",
+            missingEvidence
+        );
+    }
+
+    private CashflowOpeningBalancesResponse frozenOpeningBalances(
+        CashflowMonthCloseResponse monthClose,
+        String yearMonth
+    ) {
+        Object raw = monthClose.snapshot().get("openingBalances");
+        if (raw == null) {
+            throw new WeeklyExpenseConflictException(
+                "Closed cashflow snapshot is missing its row-level opening-balance contract."
+            );
+        }
+        try {
+            return CloseCashflowMonthRequest.requireOpeningBalances(
+                JSON.convertValue(raw, CashflowOpeningBalancesResponse.class),
+                yearMonth
+            );
+        } catch (RuntimeException error) {
+            throw new WeeklyExpenseConflictException(
+                "Closed cashflow snapshot has an invalid row-level opening-balance contract."
+            );
+        }
     }
 
     @PostMapping("/cashflow/{projectId}/month-close")
@@ -647,6 +723,34 @@ public class WeeklyExpenseController {
                     actualByMonth.getOrDefault(yearMonth, emptyModeReadModel())
                 ))
                 .toList()
+        );
+    }
+
+    private CashflowOpeningBalancesResponse toOpeningBalancesResponse(
+        WeeklyExpensePersistence.CashflowOpeningBalance opening
+    ) {
+        return new CashflowOpeningBalancesResponse(
+            opening.selectedYear(),
+            toOpeningBalanceMode(opening.projection()),
+            toOpeningBalanceMode(opening.actual())
+        );
+    }
+
+    private CashflowOpeningBalancesResponse.Mode toOpeningBalanceMode(
+        WeeklyExpensePersistence.CashflowOpeningBalance.Mode mode
+    ) {
+        return new CashflowOpeningBalancesResponse.Mode(
+            mode.amount(),
+            mode.lineAmounts(),
+            mode.sources().stream()
+                .map(source -> new CashflowOpeningBalancesResponse.YearSource(
+                    source.year(),
+                    source.lineAmounts(),
+                    source.lineStates()
+                ))
+                .toList(),
+            mode.includedYears(),
+            mode.excludedWeeklyYears()
         );
     }
 

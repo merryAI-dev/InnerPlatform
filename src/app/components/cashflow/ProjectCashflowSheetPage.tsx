@@ -34,6 +34,7 @@ export function ProjectCashflowSheetPage() {
 
   return (
     <CashflowProjectSheet
+      key={projectId}
       projectId={projectId}
       projectName={project.name}
       initialViewMode={initialViewMode}

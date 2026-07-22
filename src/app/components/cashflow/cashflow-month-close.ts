@@ -8,7 +8,10 @@ import type {
   CashflowManagementConfirmation,
   CashflowDeadlineSummary,
 } from '../../lib/platform-bff-client';
-import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
+import type {
+  CashflowSheetLabMirrorResult,
+  CashflowSheetLabYearViewResult,
+} from '../../lib/sheets-cashflow-readonly-client';
 
 export type CashflowMonthCloseDecision = CashflowMonthCloseConfirmation['decision'];
 export type CashflowMonthCloseDecisionMap = Record<string, CashflowMonthCloseDecision | undefined>;
@@ -18,6 +21,61 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 };
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
+
+export type CashflowSheetDashboardMetadata = NonNullable<
+  NonNullable<CashflowSheetLabMirrorResult['sheetFacts']>['metadata']
+>;
+
+export function resolveCashflowEvidenceScope(input: {
+  projectId: string;
+  yearMonth: string;
+  monthClose: {
+    projectId: string;
+    yearMonth: string;
+    status: string;
+    dashboard?: {
+      snapshotCompatibility?: { status?: string };
+      sheetMetadata?: Record<string, unknown>;
+    };
+  } | null;
+  liveYearView: CashflowSheetLabYearViewResult | null;
+  liveSheetMetadata?: CashflowSheetDashboardMetadata;
+}): {
+  allowLiveAnnualYearView: boolean;
+  yearView: CashflowSheetLabYearViewResult | null;
+  sheetMetadata?: CashflowSheetDashboardMetadata;
+} {
+  const sameScope = input.monthClose?.projectId === input.projectId
+    && input.monthClose.yearMonth === input.yearMonth;
+  const allowLiveAnnualYearView = sameScope
+    && input.monthClose?.status === 'OPEN'
+    && input.monthClose.dashboard?.snapshotCompatibility?.status !== 'LEGACY_EVIDENCE_ONLY';
+  const frozenMetadata = input.monthClose?.dashboard?.sheetMetadata;
+  const hasFrozenMetadata = sameScope
+    && frozenMetadata != null
+    && Object.keys(frozenMetadata).length > 0;
+  return {
+    allowLiveAnnualYearView,
+    yearView: allowLiveAnnualYearView ? input.liveYearView : null,
+    sheetMetadata: hasFrozenMetadata
+      ? frozenMetadata as CashflowSheetDashboardMetadata
+      : allowLiveAnnualYearView
+        ? input.liveSheetMetadata
+        : undefined,
+  };
+}
+
+export function carryForwardCashflowRunningBalances(input: {
+  priorWeeklyNet: number;
+  annualOpeningBalance: number;
+  serverRunningNets: Array<number | null>;
+}): number[] {
+  let carriedWeeklyNet = input.priorWeeklyNet;
+  return input.serverRunningNets.map((serverNet) => {
+    if (serverNet != null) carriedWeeklyNet = serverNet;
+    return carriedWeeklyNet + input.annualOpeningBalance;
+  });
+}
 
 export function cashflowMonthCloseConfirmationKey(input: {
   mode: CashflowMonthCloseCell['mode'];

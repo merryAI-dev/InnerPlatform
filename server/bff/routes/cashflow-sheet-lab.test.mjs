@@ -108,7 +108,7 @@ function javaBatchApplyResponse(request, resultingTargetRevision) {
 
 function javaAnnualApplyResponse(request) {
   const values = (mode) => Object.fromEntries((request.cells || [])
-    .filter((cell) => cell.mode === mode && cell.cellState === 'VALUE')
+    .filter((cell) => cell.mode === mode && ['VALUE', 'ZERO'].includes(cell.cellState))
     .map((cell) => [cell.cashflowLine, cell.amount]));
   const states = (mode) => Object.fromEntries((request.cells || [])
     .filter((cell) => cell.mode === mode)
@@ -186,12 +186,14 @@ async function loadSanitized260701FullYearFixture() {
 }
 
 function buildMultiYearMatrix() {
-  return [
+  const matrix = [
     ['title'],
     ...buildSection(false, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027, 2028], '100'),
     [],
     ...buildSection(true, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027, 2028], '50'),
   ];
+  matrix[3][3] = '0';
+  return matrix;
 }
 
 function buildConflictingAnnualWeeklyMatrix() {
@@ -540,12 +542,16 @@ describe('cashflow sheet lab route', () => {
       year: 2025,
       expectedRevision: 0,
       cells: expect.arrayContaining([
-        expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'VALUE', amount: 100 }),
+        expect.objectContaining({ mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
         expect.objectContaining({ mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
       ]),
     }));
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(3);
     expect(annualCallsStarted).toBe(3);
+    const annual2025Id = Buffer.from('project-a\n2025', 'utf8').toString('base64url');
+    const annual2025 = db.__getDocument(`orgs/tenant-a/cashflow_sheet_year_totals/${annual2025Id}`);
+    expect(annual2025.projection).toHaveProperty('MYSC_PREPAY_IN', 0);
+    expect(annual2025.projectionStates).toHaveProperty('MYSC_PREPAY_IN', 'ZERO');
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/')).toHaveLength(0);
 
     const yearView = await request(app)
@@ -556,10 +562,11 @@ describe('cashflow sheet lab route', () => {
         year: 2025,
         source: 'ANNUAL',
         revision: 1,
-        projection: expect.objectContaining({ source: 'ANNUAL', totalIn: 700, totalOut: 900, net: -200 }),
+        projection: expect.objectContaining({ source: 'ANNUAL', totalIn: 600, totalOut: 900, net: -300 }),
         actual: expect.objectContaining({ source: 'ANNUAL', totalIn: 350, totalOut: 450, net: -100 }),
       }),
     ]));
+
   });
 
   it('fails closed when an annual JVM response does not match the fixed command contract', async () => {

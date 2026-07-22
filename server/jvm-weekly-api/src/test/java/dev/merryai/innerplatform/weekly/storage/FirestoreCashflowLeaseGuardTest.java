@@ -12,6 +12,7 @@ import com.google.cloud.firestore.Transaction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
@@ -900,6 +901,49 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("projectId", "project-a")
             .containsEntry("year", 2025)
             .doesNotContainKey("yearMonth"));
+        assertThat(fixture.persistence.findCashflowSheetYearTotals("tenant-a", "project-a"))
+            .singleElement()
+            .satisfies(total -> {
+                assertThat(total.year()).isEqualTo(2025);
+                assertThat(total.projection()).isEmpty();
+                assertThat(total.actual()).isEmpty();
+                assertThat(total.projectionStates()).containsEntry("MYSC_PREPAY_IN", "EMPTY");
+                assertThat(total.actualStates()).containsEntry("MYSC_PREPAY_IN", "EMPTY");
+            });
+    }
+
+    @Test
+    void annualTotalWritePreservesExplicitZeroAsARowValueAndState() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        List<CashflowSheetAnnualApplyRequest.Cell> cells = annualCells().stream()
+            .map(cell -> "projection".equals(cell.mode()) && "SALES_IN".equals(cell.cashflowLine())
+                ? new CashflowSheetAnnualApplyRequest.Cell(
+                    cell.mode(), cell.cashflowLine(), "ZERO", BigDecimal.ZERO, "A1", cell.sourceLabel()
+                )
+                : cell)
+            .toList();
+        CashflowSheetAnnualApplyRequest request = new CashflowSheetAnnualApplyRequest(
+            "annual-zero-2025",
+            SOURCE_REVISION,
+            2025,
+            0,
+            cells
+        );
+
+        fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a", "project-a", "cashflow-sheet-lab", request
+            );
+            return null;
+        });
+
+        assertThat(fixture.persistence.findCashflowSheetYearTotals("tenant-a", "project-a"))
+            .singleElement()
+            .satisfies(total -> {
+                assertThat(total.projection()).containsEntry("SALES_IN", BigDecimal.ZERO);
+                assertThat(total.projectionStates()).containsEntry("SALES_IN", "ZERO");
+            });
     }
 
     @Test
@@ -1265,6 +1309,40 @@ class FirestoreCashflowLeaseGuardTest {
                 "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w1",
                 "orgs/tenant-a/cashflow_weeks/project-a-2026-08-w1"
             );
+        assertThat(fixture.persistence.findCashflowWeeklyYears("tenant-a", "project-a"))
+            .containsExactly(2026);
+    }
+
+    @Test
+    void dashboardLedgerSourceDerivesProjectionActualAndYearsFromOneFirestoreQuery() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2025-12-w5",
+            new LinkedHashMap<>(Map.of(
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2025-12",
+                "weekNo", 5,
+                "projection", Map.of("SALES_IN", 2_000_000L),
+                "weeklyExpenseActualBySheet", Map.of(
+                    "cashflow-sheet-lab",
+                    Map.of("SALES_IN", 1_800_000L)
+                )
+            ))
+        );
+
+        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+            .findCashflowLedgerSource("tenant-a", "project-a");
+
+        assertThat(source.weeklyYears()).containsExactly(2025);
+        assertThat(source.projection()).singleElement().satisfies(line ->
+            assertThat(line.getAmount()).isEqualByComparingTo("2000000")
+        );
+        assertThat(source.actual()).singleElement().satisfies(line ->
+            assertThat(line.getAmount()).isEqualByComparingTo("1800000")
+        );
+        verify(fixture.collections.get("orgs/tenant-a/cashflow_weeks"), times(1))
+            .whereEqualTo("projectId", "project-a");
     }
 
     @Test
@@ -1318,7 +1396,7 @@ class FirestoreCashflowLeaseGuardTest {
             .containsKeys(
                 "project", "sheetFacts", "depositScheduleRows", "confirmations",
                 "managementChecks", "managementConfirmations", "deadlineSummary",
-                "weeklyTotals", "projectionTotal", "actualTotal"
+                "openingBalances", "weeklyTotals", "projectionTotal", "actualTotal"
             );
         assertThat(closeVersion)
             .containsEntry("projectId", "project-a")
@@ -2002,6 +2080,7 @@ class FirestoreCashflowLeaseGuardTest {
             pinned.confirmations(),
             pinned.managementChecks(),
             pinned.managementConfirmations(),
+            pinned.openingBalances(),
             pinned.deadlineSummary()
         );
         Fixture fixture = fixture(activeMember(), activeLease());
@@ -2015,6 +2094,60 @@ class FirestoreCashflowLeaseGuardTest {
 
         assertThat(fixture.documents).doesNotContainKey(monthClosePath("project-a", pinned.yearMonth()));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
+    }
+
+    @Test
+    void monthCloseRejectsChangedOpeningRowsEvenWhenTheNetTotalIsUnchanged() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        CashflowSheetAnnualApplyRequest annual = new CashflowSheetAnnualApplyRequest(
+            "annual-opening-rows",
+            SOURCE_REVISION,
+            2025,
+            0,
+            annualCellsWithProjection("SALES_IN", new BigDecimal("2000000"))
+        );
+        fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceCashflowSheetYearTotal(
+                "tenant-a",
+                "project-a",
+                "cashflow-sheet-lab",
+                annual
+            );
+            return null;
+        });
+
+        CloseCashflowMonthRequest base = monthCloseRequest("month-close-opening-row-drift", 0, 3);
+        CashflowOpeningBalancesResponse staleOpening = openingBalanceForProjection(
+            2026,
+            2025,
+            "TEAM_SUPPORT_IN",
+            new BigDecimal("2000000")
+        );
+        CloseCashflowMonthRequest request = new CloseCashflowMonthRequest(
+            base.idempotencyKey(),
+            base.sourceRevision(),
+            base.targetRevision(),
+            base.yearMonth(),
+            base.expectedRevision(),
+            base.expectedDraftRevision(),
+            base.depositScheduleRows(),
+            base.cells(),
+            base.confirmations(),
+            base.managementChecks(),
+            base.managementConfirmations(),
+            staleOpening,
+            base.deadlineSummary()
+        );
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", pinnedMirror(request));
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request)))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("opening balance changed");
+
+        assertThat(fixture.documents).doesNotContainKey(monthClosePath("project-a", request.yearMonth()));
     }
 
     @Test
@@ -2747,6 +2880,11 @@ class FirestoreCashflowLeaseGuardTest {
                 new CloseCashflowMonthRequest.ManagementConfirmation("negative-projection-balance", "CONFIRMED"),
                 new CloseCashflowMonthRequest.ManagementConfirmation("future-prepay-over-million", "CONFIRMED")
             ),
+            new CashflowOpeningBalancesResponse(
+                Integer.parseInt(month.yearMonth().substring(0, 4)),
+                new CashflowOpeningBalancesResponse.Mode(BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()),
+                new CashflowOpeningBalancesResponse.Mode(BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
+            ),
             new CloseCashflowMonthRequest.DeadlineSummary("", 0, 0, null)
         );
     }
@@ -2766,6 +2904,48 @@ class FirestoreCashflowLeaseGuardTest {
             }
         }
         return cells;
+    }
+
+    private static List<CashflowSheetAnnualApplyRequest.Cell> annualCellsWithProjection(
+        String lineId,
+        BigDecimal amount
+    ) {
+        return annualCells().stream()
+            .map(cell -> "projection".equals(cell.mode()) && lineId.equals(cell.cashflowLine())
+                ? new CashflowSheetAnnualApplyRequest.Cell(
+                    cell.mode(), cell.cashflowLine(), "VALUE", amount, "A1", cell.sourceLabel()
+                )
+                : cell)
+            .toList();
+    }
+
+    private static CashflowOpeningBalancesResponse openingBalanceForProjection(
+        int selectedYear,
+        int sourceYear,
+        String lineId,
+        BigDecimal amount
+    ) {
+        Map<String, BigDecimal> rows = Map.of(lineId, amount);
+        Map<String, String> states = new LinkedHashMap<>();
+        for (String canonicalLine : CashflowLineCatalog.ALL_LINES) {
+            states.put(canonicalLine, canonicalLine.equals(lineId) ? "VALUE" : "EMPTY");
+        }
+        CashflowOpeningBalancesResponse.YearSource source = new CashflowOpeningBalancesResponse.YearSource(
+            sourceYear,
+            rows,
+            states
+        );
+        return new CashflowOpeningBalancesResponse(
+            selectedYear,
+            new CashflowOpeningBalancesResponse.Mode(
+                amount,
+                rows,
+                List.of(source),
+                List.of(sourceYear),
+                List.of()
+            ),
+            new CashflowOpeningBalancesResponse.Mode(BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
+        );
     }
 
     private static CashflowSheetLabApplyRequest monthlyRequest(

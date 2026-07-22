@@ -5,11 +5,13 @@ import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib
 import {
   applyCashflowMonthCloseProjectionDrafts,
   buildCashflowMonthCloseDraftInput,
+  carryForwardCashflowRunningBalances,
   cashflowMonthCloseConfirmationKey,
   createEmptyCashflowMonthCloseDepositRows,
   cashflowMonthCloseReviewProgress,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
+  resolveCashflowEvidenceScope,
 } from './cashflow-month-close';
 
 function mirror(): CashflowSheetLabMirrorResult {
@@ -50,6 +52,71 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
+  it('does not expose live annual rows or mirror metadata to a legacy closed view', () => {
+    const scope = resolveCashflowEvidenceScope({
+      projectId: 'project-1',
+      yearMonth: '2026-07',
+      monthClose: {
+        projectId: 'project-1',
+        yearMonth: '2026-07',
+        status: 'CLOSED',
+        dashboard: {
+          snapshotCompatibility: { status: 'LEGACY_EVIDENCE_ONLY' },
+          sheetMetadata: {},
+        },
+      },
+      liveYearView: { projectId: 'project-1', status: 'FRESH', selectedYear: 2026, years: [], canonicalAnnualYears: [], navigationYears: [2026], availableYears: [2026], readModelStatus: 'CURRENT', fallbackYears: [], mismatchYears: [] },
+      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
+    });
+
+    expect(scope.allowLiveAnnualYearView).toBe(false);
+    expect(scope.yearView).toBeNull();
+    expect(scope.sheetMetadata).toBeUndefined();
+    expect(JSON.stringify(scope)).not.toContain('LIVE-SENTINEL');
+  });
+
+  it('uses frozen metadata for a closed view instead of current mirror metadata', () => {
+    const scope = resolveCashflowEvidenceScope({
+      projectId: 'project-1',
+      yearMonth: '2026-07',
+      monthClose: {
+        projectId: 'project-1',
+        yearMonth: '2026-07',
+        status: 'CLOSED',
+        dashboard: {
+          snapshotCompatibility: { status: 'FROZEN_COMPLETE' },
+          sheetMetadata: { businessType: { sourceCell: 'B2', value: 'FROZEN' } },
+        },
+      },
+      liveYearView: null,
+      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
+    });
+
+    expect(scope.sheetMetadata?.businessType?.value).toBe('FROZEN');
+    expect(JSON.stringify(scope)).not.toContain('LIVE-SENTINEL');
+  });
+
+  it('rejects an OPEN result from another project before resolving live evidence', () => {
+    const scope = resolveCashflowEvidenceScope({
+      projectId: 'project-2',
+      yearMonth: '2026-07',
+      monthClose: { projectId: 'project-1', yearMonth: '2026-07', status: 'OPEN' },
+      liveYearView: { projectId: 'project-2', status: 'FRESH', selectedYear: 2026, years: [], canonicalAnnualYears: [], navigationYears: [2026], availableYears: [2026], readModelStatus: 'CURRENT', fallbackYears: [], mismatchYears: [] },
+      liveSheetMetadata: { businessType: { sourceCell: 'B2', value: 'LIVE-SENTINEL' } },
+    });
+
+    expect(scope.allowLiveAnnualYearView).toBe(false);
+    expect(scope.yearView).toBeNull();
+    expect(scope.sheetMetadata).toBeUndefined();
+  });
+  it('carries prior weekly net and annual-only opening through empty weeks', () => {
+    expect(carryForwardCashflowRunningBalances({
+      priorWeeklyNet: 3_000_000,
+      annualOpeningBalance: 2_000_000,
+      serverRunningNets: [null, 3_500_000, null, 2_750_000],
+    })).toEqual([5_000_000, 5_500_000, 5_500_000, 4_750_000]);
+  });
+
   it('normalizes exactly 160 pinned cells in Projection then Actual order', () => {
     const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
     expect(cells).toHaveLength(160);

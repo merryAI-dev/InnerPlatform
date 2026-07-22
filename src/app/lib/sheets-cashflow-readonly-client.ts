@@ -216,6 +216,7 @@ export interface CashflowSheetLabChangeCandidate {
   lineDirection: 'in' | 'out';
   beforeAmount: number | null;
   beforeHadValue: boolean;
+  beforeCellState?: 'VALUE' | 'ZERO' | 'EMPTY';
   proposedAmount: number | null;
   proposedHadValue: boolean;
   sourceCell?: string;
@@ -248,7 +249,7 @@ export interface CashflowSheetLabAnnualCell {
   direction: 'IN' | 'OUT';
   sourceCell: string;
   sourceLabel: string;
-  state: 'VALUE' | 'EMPTY' | 'INVALID';
+  state: 'VALUE' | 'ZERO' | 'EMPTY' | 'INVALID';
   amount?: number;
   rawValue?: string;
 }
@@ -353,7 +354,7 @@ export interface CashflowSheetLabAnnualModeTotal {
   emptyCellCount: number;
   invalidCellCount: number;
   lineAmounts: Record<string, number>;
-  lineStates?: Record<string, 'VALUE' | 'EMPTY'>;
+  lineStates?: Record<string, 'VALUE' | 'ZERO' | 'EMPTY'>;
   totalIn: number;
   totalOut: number;
   net: number;

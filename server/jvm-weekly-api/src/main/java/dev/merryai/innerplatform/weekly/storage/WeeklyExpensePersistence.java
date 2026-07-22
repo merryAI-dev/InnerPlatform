@@ -23,6 +23,7 @@ import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseProjectionEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseSheetEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -41,12 +42,33 @@ public interface WeeklyExpensePersistence {
         }
     }
 
+    record CashflowLedgerWeekSnapshot(
+        String yearMonth,
+        int weekNo,
+        Map<String, Object> projection,
+        Map<String, Object> actual
+    ) {
+        public CashflowLedgerWeekSnapshot {
+            projection = projection == null ? Map.of() : Map.copyOf(projection);
+            actual = actual == null ? Map.of() : Map.copyOf(actual);
+        }
+    }
+
     record CashflowSheetMonthReplacement(
         List<WeeklyExpenseProjectionEntity> projection,
         List<WeeklyExpenseActualEntity> actual,
         List<CashflowMonthWeekSnapshot> weeks,
+        List<CashflowLedgerWeekSnapshot> ledgerWeeks,
         String resultingTargetRevision
     ) {
+        public CashflowSheetMonthReplacement(
+            List<WeeklyExpenseProjectionEntity> projection,
+            List<WeeklyExpenseActualEntity> actual,
+            List<CashflowMonthWeekSnapshot> weeks,
+            String resultingTargetRevision
+        ) {
+            this(projection, actual, weeks, List.of(), resultingTargetRevision);
+        }
     }
 
     record CashflowSheetBatchMonthReplacement(
@@ -59,6 +81,7 @@ public interface WeeklyExpensePersistence {
 
     record CashflowSheetBatchReplacement(
         List<CashflowSheetBatchMonthReplacement> months,
+        List<CashflowLedgerWeekSnapshot> ledgerWeeks,
         String resultingTargetRevision
     ) {
     }
@@ -80,6 +103,65 @@ public interface WeeklyExpensePersistence {
         Map<String, String> projectionStates,
         Map<String, String> actualStates
     ) {
+    }
+
+    record CashflowSheetAnnualTotal(
+        int year,
+        Map<String, java.math.BigDecimal> projection,
+        Map<String, java.math.BigDecimal> actual,
+        Map<String, String> projectionStates,
+        Map<String, String> actualStates
+    ) {
+    }
+
+    /**
+     * One authoritative read of the weekly cashflow ledger. Projection, Actual,
+     * and the years used to suppress annual fallbacks must come from the same
+     * storage snapshot so carry-forward cannot observe three different versions.
+     */
+    record CashflowLedgerSource(
+        List<WeeklyExpenseProjectionEntity> projection,
+        List<WeeklyExpenseActualEntity> actual,
+        List<Integer> weeklyYears
+    ) {
+        public CashflowLedgerSource {
+            projection = projection == null ? List.of() : List.copyOf(projection);
+            actual = actual == null ? List.of() : List.copyOf(actual);
+            weeklyYears = weeklyYears == null ? List.of() : weeklyYears.stream().distinct().sorted().toList();
+        }
+    }
+
+    record CashflowOpeningBalance(
+        int selectedYear,
+        Mode projection,
+        Mode actual
+    ) {
+        public record Mode(
+            BigDecimal amount,
+            Map<String, BigDecimal> lineAmounts,
+            List<YearSource> sources,
+            List<Integer> includedYears,
+            List<Integer> excludedWeeklyYears
+        ) {
+            public Mode {
+                amount = amount == null ? BigDecimal.ZERO : amount;
+                lineAmounts = lineAmounts == null ? Map.of() : Map.copyOf(lineAmounts);
+                sources = sources == null ? List.of() : List.copyOf(sources);
+                includedYears = includedYears == null ? List.of() : List.copyOf(includedYears);
+                excludedWeeklyYears = excludedWeeklyYears == null ? List.of() : List.copyOf(excludedWeeklyYears);
+            }
+        }
+
+        public record YearSource(
+            int year,
+            Map<String, BigDecimal> lineAmounts,
+            Map<String, String> lineStates
+        ) {
+            public YearSource {
+                lineAmounts = lineAmounts == null ? Map.of() : Map.copyOf(lineAmounts);
+                lineStates = lineStates == null ? Map.of() : Map.copyOf(lineStates);
+            }
+        }
     }
 
     record CashflowMonthCloseRecord(
@@ -427,6 +509,127 @@ public interface WeeklyExpensePersistence {
             "cashflow_annual_replace_backend_unavailable",
             "Authoritative annual cashflow replacement requires the Firestore transaction backend."
         );
+    }
+
+    default List<CashflowSheetAnnualTotal> findCashflowSheetYearTotals(String tenantId, String projectId) {
+        return List.of();
+    }
+
+    default List<Integer> findCashflowWeeklyYears(String tenantId, String projectId) {
+        return findCashflowLedgerSource(tenantId, projectId).weeklyYears();
+    }
+
+    default CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
+        List<WeeklyExpenseProjectionEntity> projection = findProjectionLines(tenantId, projectId);
+        List<WeeklyExpenseActualEntity> actual = findActualLines(tenantId, projectId);
+        List<Integer> weeklyYears = java.util.stream.Stream.concat(
+                projection.stream().map(WeeklyExpenseProjectionEntity::getYearMonth),
+                actual.stream().map(WeeklyExpenseActualEntity::getYearMonth)
+            )
+            .filter(value -> value != null && value.matches("20\\d{2}-(0[1-9]|1[0-2])"))
+            .map(value -> Integer.parseInt(value.substring(0, 4)))
+            .distinct()
+            .sorted()
+            .toList();
+        return new CashflowLedgerSource(projection, actual, weeklyYears);
+    }
+
+    /**
+     * Canonical carry-forward policy for cashflow reads and month-close snapshots.
+     * A prior year uses weekly ledger lines when that year exists in the weekly ledger;
+     * the annual-total document is only a fallback, so a year can never be counted twice.
+     */
+    default CashflowOpeningBalance findCashflowOpeningBalance(
+        String tenantId,
+        String projectId,
+        int selectedYear
+    ) {
+        return findCashflowOpeningBalance(
+            tenantId,
+            projectId,
+            selectedYear,
+            findCashflowWeeklyYears(tenantId, projectId)
+        );
+    }
+
+    default CashflowOpeningBalance findCashflowOpeningBalance(
+        String tenantId,
+        String projectId,
+        int selectedYear,
+        Collection<Integer> sourceWeeklyYears
+    ) {
+        if (selectedYear < 2000 || selectedYear > 2099) {
+            throw new IllegalArgumentException("Cashflow opening-balance year must be between 2000 and 2099.");
+        }
+        List<Integer> weeklyYears = (sourceWeeklyYears == null ? List.<Integer>of() : sourceWeeklyYears).stream()
+            .filter(year -> year < selectedYear)
+            .distinct()
+            .sorted()
+            .toList();
+        List<CashflowSheetAnnualTotal> annualTotals = findCashflowSheetYearTotals(tenantId, projectId).stream()
+            .filter(total -> total.year() < selectedYear && !weeklyYears.contains(total.year()))
+            .sorted(java.util.Comparator.comparingInt(CashflowSheetAnnualTotal::year))
+            .toList();
+        List<Integer> includedYears = annualTotals.stream().map(CashflowSheetAnnualTotal::year).toList();
+        List<CashflowOpeningBalance.YearSource> projectionSources = annualTotals.stream()
+            .map(total -> new CashflowOpeningBalance.YearSource(
+                total.year(),
+                total.projection(),
+                total.projectionStates()
+            ))
+            .toList();
+        List<CashflowOpeningBalance.YearSource> actualSources = annualTotals.stream()
+            .map(total -> new CashflowOpeningBalance.YearSource(
+                total.year(),
+                total.actual(),
+                total.actualStates()
+            ))
+            .toList();
+        Map<String, BigDecimal> projectionLines = cashflowAggregateLines(projectionSources);
+        Map<String, BigDecimal> actualLines = cashflowAggregateLines(actualSources);
+
+        return new CashflowOpeningBalance(
+            selectedYear,
+            new CashflowOpeningBalance.Mode(
+                cashflowMapNet(projectionLines),
+                projectionLines,
+                projectionSources,
+                includedYears,
+                weeklyYears
+            ),
+            new CashflowOpeningBalance.Mode(
+                cashflowMapNet(actualLines),
+                actualLines,
+                actualSources,
+                includedYears,
+                weeklyYears
+            )
+        );
+    }
+
+    private static Map<String, BigDecimal> cashflowAggregateLines(
+        List<CashflowOpeningBalance.YearSource> sources
+    ) {
+        Map<String, BigDecimal> totals = new java.util.TreeMap<>();
+        for (CashflowOpeningBalance.YearSource source : sources) {
+            source.lineAmounts().forEach((rawLine, value) -> {
+                String line = dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog.canonicalize(rawLine);
+                if (!dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog.ALL_LINES.contains(line)) return;
+                totals.merge(line, value == null ? BigDecimal.ZERO : value, BigDecimal::add);
+            });
+        }
+        return Map.copyOf(totals);
+    }
+
+    private static BigDecimal cashflowMapNet(Map<String, BigDecimal> amounts) {
+        if (amounts == null) return BigDecimal.ZERO;
+        BigDecimal totalIn = dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog.IN_LINES.stream()
+            .map(line -> amounts.getOrDefault(line, BigDecimal.ZERO))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalOut = dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog.OUT_LINES.stream()
+            .map(line -> amounts.getOrDefault(line, BigDecimal.ZERO))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return totalIn.subtract(totalOut);
     }
 
     Optional<WeeklyExpenseIdempotencyEntity> findIdempotency(

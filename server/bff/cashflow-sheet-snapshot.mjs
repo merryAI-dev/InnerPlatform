@@ -97,6 +97,9 @@ function snapshotCell(mapping, matrix) {
 
 function snapshotAnnualCell(mapping, matrix) {
   const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+  const annualClassified = classified.state === 'VALUE' && classified.amount === 0
+    ? { state: 'ZERO', amount: 0 }
+    : classified;
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
@@ -104,7 +107,7 @@ function snapshotAnnualCell(mapping, matrix) {
     direction: mapping.direction,
     sourceCell: mapping.a1,
     sourceLabel: mapping.label || mapping.canonicalLabel || mapping.lineId,
-    ...classified,
+    ...annualClassified,
   };
 }
 

@@ -150,6 +150,11 @@ describe('platform-bff-client', () => {
       payload: {
         yearMonth: '2026-06',
         expectedRevision: 2,
+        expectedOpeningBalances: {
+          selectedYear: 2026,
+          projection: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+          actual: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+        },
         closeInput: { yearMonth: '2026-06' } as never,
       },
       client,
@@ -172,6 +177,7 @@ describe('platform-bff-client', () => {
     );
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close', expect.objectContaining({
       idempotencyKey: 'month-close-1',
+      timeoutMs: 27_000,
       body: expect.objectContaining({
         yearMonth: '2026-06',
         expectedRevision: 2,
@@ -208,6 +214,41 @@ describe('platform-bff-client', () => {
       3,
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.not.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
+  it('coalesces concurrent month-close reads per actor and releases the key after completion', async () => {
+    let finishFirstRequest: ((value: { data: { ok: true; projectId: string; yearMonth: string; status: 'OPEN' } }) => void) | undefined;
+    const firstResponse = new Promise<{ data: { ok: true; projectId: string; yearMonth: string; status: 'OPEN' } }>((resolve) => {
+      finishFirstRequest = resolve;
+    });
+    const client = asMockClient({
+      get: vi.fn()
+        .mockImplementationOnce(() => firstResponse)
+        .mockResolvedValue({ data: { ok: true, projectId: 'p001', yearMonth: '2026-07', status: 'OPEN' } }),
+      post: vi.fn(),
+      request: vi.fn(),
+    });
+    const input = {
+      tenantId: 'mysc',
+      actor: { uid: 'u001', role: 'pm' },
+      projectId: 'p001',
+      yearMonth: '2026-07',
+      client,
+    };
+
+    const first = fetchCashflowMonthCloseViaBff(input);
+    const duplicate = fetchCashflowMonthCloseViaBff(input);
+    const otherMonth = fetchCashflowMonthCloseViaBff({ ...input, yearMonth: '2026-08' });
+    expect(client.get).toHaveBeenCalledTimes(2);
+    finishFirstRequest?.({ data: { ok: true, projectId: 'p001', yearMonth: '2026-07', status: 'OPEN' } });
+    await expect(Promise.all([first, duplicate, otherMonth])).resolves.toHaveLength(3);
+
+    await fetchCashflowMonthCloseViaBff(input);
+    expect(client.get).toHaveBeenCalledTimes(3);
+    expect(client.get).toHaveBeenLastCalledWith(
+      '/api/v1/cashflow/p001/month-close?yearMonth=2026-07',
+      expect.objectContaining({ retries: 0, timeoutMs: 27_000 }),
     );
   });
 

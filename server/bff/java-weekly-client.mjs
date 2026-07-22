@@ -126,14 +126,25 @@ export function createJavaWeeklyClient({
     : 12_000;
   const totalRequestTimeoutMs = Math.min(requestTimeoutMs * 2, 24_000);
 
-  async function requestJson({ context, method = 'GET', path, body, editSession, dataProjectId }) {
+  async function requestJson({ context, method = 'GET', path, body, editSession, dataProjectId, deadlineAtMs }) {
     if (!baseUrl) {
       throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
     }
     const requestStartedAt = Date.now();
+    const callerDeadlineAtMs = Number.isFinite(Number(deadlineAtMs))
+      ? Number(deadlineAtMs)
+      : Number.POSITIVE_INFINITY;
+    const requestDeadlineAtMs = Math.min(requestStartedAt + totalRequestTimeoutMs, callerDeadlineAtMs);
+    const callerDeadlineReached = () => Number.isFinite(callerDeadlineAtMs) && Date.now() >= callerDeadlineAtMs;
+    const callerDeadlineError = () => createHttpError(
+      504,
+      '월 결산 서버 처리 시간이 초과되었습니다. 서버 결과를 다시 조회해 주세요.',
+      'cashflow_month_close_route_timeout',
+    );
     const send = async () => {
-      const remainingMs = totalRequestTimeoutMs - (Date.now() - requestStartedAt);
+      const remainingMs = requestDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
+        if (callerDeadlineReached()) throw callerDeadlineError();
         const error = new Error('JVM weekly API total timeout exceeded');
         error.name = 'AbortError';
         throw error;
@@ -185,10 +196,12 @@ export function createJavaWeeklyClient({
       return await send();
     } catch (error) {
       if (Number.isInteger(error?.statusCode)) throw error;
+      if (callerDeadlineReached()) throw callerDeadlineError();
       try {
         return await send();
       } catch (retryError) {
         if (Number.isInteger(retryError?.statusCode)) throw retryError;
+        if (callerDeadlineReached()) throw callerDeadlineError();
         throw createHttpError(
           503,
           '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',

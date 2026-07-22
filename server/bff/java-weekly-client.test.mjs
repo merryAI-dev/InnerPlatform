@@ -412,6 +412,37 @@ describe('Java weekly cashflow client', () => {
     }
   });
 
+  it('honors an absolute caller deadline without retrying a timed-out mutation', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      }));
+      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 12_000 });
+      const requestPromise = client.requestJson({
+        context,
+        method: 'POST',
+        path: '/api/v1/cashflow/project-a/month-close',
+        body: { idempotencyKey: 'close-deadline-1' },
+        deadlineAtMs: Date.now() + 20,
+      });
+      const assertion = expect(requestPromise).rejects.toMatchObject({
+        statusCode: 504,
+        code: 'cashflow_month_close_route_timeout',
+      });
+
+      await vi.advanceTimersByTimeAsync(21);
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves the JVM atomic write count on client errors', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: false,

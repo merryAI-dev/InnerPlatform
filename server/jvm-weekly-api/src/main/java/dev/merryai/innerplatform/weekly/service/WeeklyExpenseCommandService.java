@@ -792,6 +792,7 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
+        CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
         String requestHash = hashJson(request);
         Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
             writer.tenantId(),

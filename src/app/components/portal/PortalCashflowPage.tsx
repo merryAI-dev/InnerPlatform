@@ -33,6 +33,7 @@ export function PortalCashflowPage() {
 
   return (
     <CashflowProjectSheet
+      key={projectId}
       projectId={projectId}
       projectName={myProject?.name}
       roleOverride={portalUser?.role}

@@ -44,7 +44,7 @@ class CashflowSheetAnnualApplyServiceTest {
             4,
             Map.of("MYSC_PREPAY_IN", BigDecimal.ZERO),
             Map.of("MYSC_PREPAY_IN", BigDecimal.valueOf(50)),
-            states("VALUE"),
+            states("ZERO"),
             states("VALUE")
         ));
         when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -59,6 +59,7 @@ class CashflowSheetAnnualApplyServiceTest {
         assertThat(response.year()).isEqualTo(2025);
         assertThat(response.revision()).isEqualTo(4);
         assertThat(response.projection()).containsEntry("MYSC_PREPAY_IN", BigDecimal.ZERO);
+        assertThat(response.projectionStates()).containsEntry("MYSC_PREPAY_IN", "ZERO");
         verify(persistence).replaceCashflowSheetYearTotal(
             "tenant-a", "project-a", "cashflow-sheet-lab", request
         );
@@ -72,7 +73,7 @@ class CashflowSheetAnnualApplyServiceTest {
                 cells.add(new CashflowSheetAnnualApplyRequest.Cell(
                     mode,
                     lineId,
-                    explicitValue ? "VALUE" : "EMPTY",
+                    explicitValue ? ("projection".equals(mode) ? "ZERO" : "VALUE") : "EMPTY",
                     explicitValue ? ("projection".equals(mode) ? BigDecimal.ZERO : BigDecimal.valueOf(50)) : null,
                     null,
                     lineId

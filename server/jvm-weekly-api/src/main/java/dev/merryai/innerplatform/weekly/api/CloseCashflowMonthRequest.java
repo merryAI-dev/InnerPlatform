@@ -36,6 +36,7 @@ public record CloseCashflowMonthRequest(
     List<Confirmation> confirmations,
     @Valid @NotNull @Size(min = 4, max = 4) List<ManagementCheck> managementChecks,
     @Valid @NotNull @Size(min = 4, max = 4) List<ManagementConfirmation> managementConfirmations,
+    @Valid @NotNull CashflowOpeningBalancesResponse openingBalances,
     @Valid @NotNull DeadlineSummary deadlineSummary
 ) {
     private static final List<String> MANAGEMENT_CHECK_IDS = List.of(
@@ -126,6 +127,105 @@ public record CloseCashflowMonthRequest(
         managementChecks = managementChecks == null ? List.of() : List.copyOf(managementChecks);
         managementConfirmations = managementConfirmations == null ? List.of() : List.copyOf(managementConfirmations);
         deadlineSummary = deadlineSummary == null ? new DeadlineSummary("", 0, 0, null) : deadlineSummary;
+    }
+
+    public static CashflowOpeningBalancesResponse requireOpeningBalances(
+        CashflowOpeningBalancesResponse value,
+        String yearMonth
+    ) {
+        if (value == null || yearMonth == null || yearMonth.length() < 4) {
+            throw new IllegalArgumentException("Cashflow month close requires the JVM opening balance.");
+        }
+        int selectedYear = Integer.parseInt(yearMonth.substring(0, 4));
+        if (value.selectedYear() != selectedYear || value.projection() == null || value.actual() == null) {
+            throw new IllegalArgumentException("Cashflow opening balance does not match the close year.");
+        }
+        requireOpeningBalanceMode(value.projection(), selectedYear, "projection");
+        requireOpeningBalanceMode(value.actual(), selectedYear, "actual");
+        return value;
+    }
+
+    private static void requireOpeningBalanceMode(
+        CashflowOpeningBalancesResponse.Mode mode,
+        int selectedYear,
+        String label
+    ) {
+        requireWholeWon(mode.amount(), label + " opening balance");
+        List<Integer> included = mode.includedYears();
+        List<Integer> excludedWeekly = mode.excludedWeeklyYears();
+        Map<String, BigDecimal> aggregate = mode.lineAmounts();
+        List<CashflowOpeningBalancesResponse.YearSource> sources = mode.sources();
+        if (included == null || excludedWeekly == null || aggregate == null || sources == null) {
+            throw new IllegalArgumentException("Cashflow opening-balance source years are required.");
+        }
+        List<Integer> sourceYears = sources.stream().map(CashflowOpeningBalancesResponse.YearSource::year).toList();
+        List<Integer> canonicalIncluded = included.stream().distinct().sorted().toList();
+        List<Integer> canonicalExcluded = excludedWeekly.stream().distinct().sorted().toList();
+        boolean invalidYear = java.util.stream.Stream.concat(canonicalIncluded.stream(), canonicalExcluded.stream())
+            .anyMatch(year -> year == null || year < 2000 || year >= selectedYear);
+        boolean overlaps = canonicalIncluded.stream().anyMatch(canonicalExcluded::contains);
+        if (invalidYear || overlaps || !canonicalIncluded.equals(included) || !canonicalExcluded.equals(excludedWeekly)
+            || !canonicalIncluded.equals(sourceYears)) {
+            throw new IllegalArgumentException("Cashflow opening-balance source years are not canonical.");
+        }
+        Map<String, BigDecimal> recomputed = new java.util.TreeMap<>();
+        for (CashflowOpeningBalancesResponse.YearSource source : sources) {
+            if (source == null || source.lineAmounts() == null || source.lineStates() == null) {
+                throw new IllegalArgumentException("Cashflow opening-balance row sources are required.");
+            }
+            if (!source.lineStates().keySet().equals(new java.util.HashSet<>(CashflowLineCatalog.ALL_LINES))) {
+                throw new IllegalArgumentException("Cashflow opening-balance source must preserve every cashflow row state.");
+            }
+            for (Map.Entry<String, BigDecimal> entry : source.lineAmounts().entrySet()) {
+                requireCanonicalOpeningLine(entry.getKey());
+                requireWholeWon(entry.getValue(), label + " opening-balance row");
+                recomputed.merge(entry.getKey(), entry.getValue(), BigDecimal::add);
+            }
+            java.util.Set<String> amountLines = new java.util.HashSet<>();
+            for (Map.Entry<String, String> entry : source.lineStates().entrySet()) {
+                requireCanonicalOpeningLine(entry.getKey());
+                if (!List.of("EMPTY", "ZERO", "VALUE").contains(entry.getValue())) {
+                    throw new IllegalArgumentException("Cashflow opening-balance row state is invalid.");
+                }
+                if ("VALUE".equals(entry.getValue())) amountLines.add(entry.getKey());
+                if ("ZERO".equals(entry.getValue())) {
+                    amountLines.add(entry.getKey());
+                    BigDecimal zero = source.lineAmounts().get(entry.getKey());
+                    if (zero == null || zero.compareTo(BigDecimal.ZERO) != 0) {
+                        throw new IllegalArgumentException("Cashflow opening-balance ZERO row must preserve an explicit zero amount.");
+                    }
+                }
+            }
+            if (!source.lineAmounts().keySet().equals(amountLines)) {
+                throw new IllegalArgumentException("Cashflow opening-balance row amounts must match their source states.");
+            }
+        }
+        if (!sameAmountMap(aggregate, recomputed)) {
+            throw new IllegalArgumentException("Cashflow opening-balance rows do not match their annual sources.");
+        }
+        BigDecimal recomputedNet = CashflowLineCatalog.IN_LINES.stream()
+            .map(line -> aggregate.getOrDefault(line, BigDecimal.ZERO))
+            .reduce(BigDecimal.ZERO, BigDecimal::add)
+            .subtract(CashflowLineCatalog.OUT_LINES.stream()
+                .map(line -> aggregate.getOrDefault(line, BigDecimal.ZERO))
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+        if (mode.amount().compareTo(recomputedNet) != 0) {
+            throw new IllegalArgumentException("Cashflow opening-balance total does not match its rows.");
+        }
+    }
+
+    private static void requireCanonicalOpeningLine(String line) {
+        if (line == null || !CashflowLineCatalog.ALL_LINES.contains(line)) {
+            throw new IllegalArgumentException("Cashflow opening-balance row is invalid.");
+        }
+    }
+
+    private static boolean sameAmountMap(Map<String, BigDecimal> left, Map<String, BigDecimal> right) {
+        if (left.size() != right.size() || !left.keySet().equals(right.keySet())) return false;
+        return left.entrySet().stream().allMatch(entry -> {
+            BigDecimal other = right.get(entry.getKey());
+            return entry.getValue() != null && other != null && entry.getValue().compareTo(other) == 0;
+        });
     }
 
     public static List<DepositScheduleRow> requireCompleteDepositSchedule(List<DepositScheduleRow> rows) {

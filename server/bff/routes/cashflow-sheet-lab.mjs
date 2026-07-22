@@ -15,6 +15,10 @@ import {
   createCashflowPinnedSnapshot,
 } from '../cashflow-sheet-snapshot.mjs';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
+import {
+  cashflowAnnualTotalDocPath,
+  summarizeCashflowAnnualMode,
+} from '../cashflow-annual-total.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import {
@@ -39,7 +43,6 @@ const CASHFLOW_SHEET_REFRESH_RUNS_COLLECTION_ID = 'cashflow_sheet_refresh_runs';
 const CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID = 'cashflow_sheet_stage_runs';
 const CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID = 'cashflow_sheet_stage_months';
 const CASHFLOW_SHEET_STAGE_YEARS_COLLECTION_ID = 'cashflow_sheet_stage_years';
-const CASHFLOW_YEAR_TOTALS_COLLECTION_ID = 'cashflow_sheet_year_totals';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
 const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
@@ -166,41 +169,8 @@ function cashflowNavigationYears(availableYears, selectedYear) {
   return availableYears.slice(start, start + 3);
 }
 
-function summarizeCanonicalAnnualMode(document, mode) {
-  const values = document?.[mode] && typeof document[mode] === 'object' ? document[mode] : {};
-  const states = document?.[`${mode}States`] && typeof document[`${mode}States`] === 'object'
-    ? document[`${mode}States`]
-    : {};
-  const lineAmounts = Object.fromEntries(CASHFLOW_ALL_LINES.flatMap((lineId) => (
-    readOptionalText(states[lineId]) === 'VALUE' && Number.isSafeInteger(Number(values[lineId]))
-      ? [[lineId, Number(values[lineId])]]
-      : []
-  )));
-  const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + (lineAmounts[lineId] || 0), 0);
-  const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + (lineAmounts[lineId] || 0), 0);
-  return {
-    source: 'ANNUAL',
-    coverage: {
-      status: 'ANNUAL_ONLY',
-      weekCount: 0,
-      expectedWeekCount: 60,
-      monthCount: 0,
-      expectedMonthCount: 12,
-    },
-    valueCellCount: CASHFLOW_ALL_LINES.filter((lineId) => readOptionalText(states[lineId]) === 'VALUE').length,
-    emptyCellCount: CASHFLOW_ALL_LINES.filter((lineId) => readOptionalText(states[lineId]) === 'EMPTY').length,
-    invalidCellCount: 0,
-    lineAmounts,
-    lineStates: Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [lineId, readOptionalText(states[lineId]) || 'EMPTY'])),
-    totalIn,
-    totalOut,
-    net: totalIn - totalOut,
-    reconciliation: { status: 'NOT_APPLICABLE', mismatchedLineIds: [] },
-  };
-}
-
 async function readCanonicalAnnualTotal(db, tenantId, projectId, year) {
-  const snap = await db.doc(cashflowYearTotalDocPath(tenantId, projectId, year)).get();
+  const snap = await db.doc(cashflowAnnualTotalDocPath(tenantId, projectId, year)).get();
   if (!snap.exists) return null;
   const value = snap.data() || {};
   if (readOptionalText(value.projectId) !== projectId || Number(value.year) !== year) return null;
@@ -210,8 +180,8 @@ async function readCanonicalAnnualTotal(db, tenantId, projectId, year) {
     revision: Math.max(0, Number(value.revision) || 0),
     sourceRevision: readOptionalText(value.sourceRevision),
     updatedAt: readOptionalText(value.updatedAt),
-    projection: summarizeCanonicalAnnualMode(value, 'projection'),
-    actual: summarizeCanonicalAnnualMode(value, 'actual'),
+    projection: summarizeCashflowAnnualMode(value, 'projection'),
+    actual: summarizeCashflowAnnualMode(value, 'actual'),
   };
 }
 
@@ -424,14 +394,6 @@ function cashflowSheetRefreshRunDocPath(tenantId, projectId, idempotencyKey) {
 function cashflowSheetStageMonthDocPath(tenantId, runId, yearMonth) {
   const monthKey = readOptionalText(yearMonth).replace('-', '_');
   return `orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_MONTHS_COLLECTION_ID}/${runId}_${monthKey}`;
-}
-
-function javaSafeDocId(value) {
-  return Buffer.from(String(value), 'utf8').toString('base64url');
-}
-
-function cashflowYearTotalDocPath(tenantId, projectId, year) {
-  return `orgs/${tenantId}/${CASHFLOW_YEAR_TOTALS_COLLECTION_ID}/${javaSafeDocId(`${projectId}\n${Number(year)}`)}`;
 }
 
 function cashflowSheetStageYearDocPath(tenantId, runId, year) {
@@ -1264,8 +1226,9 @@ function validateCompletePinnedYear(year, cells = []) {
       Number(cell?.year) !== year
       || !CASHFLOW_MODES.includes(mode)
       || !CASHFLOW_LINE_ORDER.has(lineId)
-      || !['VALUE', 'EMPTY'].includes(state)
-      || (state === 'VALUE' && !Number.isSafeInteger(cell?.amount))
+      || !['VALUE', 'ZERO', 'EMPTY'].includes(state)
+      || (['VALUE', 'ZERO'].includes(state) && !Number.isSafeInteger(cell?.amount))
+      || (state === 'ZERO' && cell?.amount !== 0)
       || (state === 'EMPTY' && cell?.amount !== undefined)
     ) return { ok: false, reason: 'invalid_cell' };
     const key = `${mode}:${lineId}`;
@@ -1291,7 +1254,7 @@ function validateCompletePinnedYear(year, cells = []) {
         mode: cell.mode,
         cashflowLine: cell.lineId,
         cellState: cell.state,
-        amount: cell.state === 'VALUE' ? cell.amount : undefined,
+        amount: ['VALUE', 'ZERO'].includes(cell.state) ? cell.amount : undefined,
         sourceCell: readOptionalText(cell.sourceCell) || undefined,
         sourceLabel: readOptionalText(cell.sourceLabel) || cell.lineId,
       })),
@@ -1520,13 +1483,13 @@ async function buildPinnedAnnualChangeCandidates({
     const expectedRevision = Math.max(0, Number(current?.revision) || 0);
     const yearCandidates = validated.cells.map((cell) => {
       const beforeState = readOptionalText(current?.[cell.mode]?.lineStates?.[cell.cashflowLine]) || 'EMPTY';
-      const beforeHadValue = beforeState === 'VALUE';
+      const beforeHadValue = ['VALUE', 'ZERO'].includes(beforeState);
       const beforeAmount = beforeHadValue
         ? normalizeAppliedAmount(current?.[cell.mode]?.lineAmounts?.[cell.cashflowLine])
         : null;
-      const proposedHadValue = cell.cellState === 'VALUE';
+      const proposedHadValue = ['VALUE', 'ZERO'].includes(cell.cellState);
       const proposedAmount = proposedHadValue ? normalizeAppliedAmount(cell.amount) : null;
-      if (!forceFullReplacement && beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) {
+      if (!forceFullReplacement && beforeState === cell.cellState && (!proposedHadValue || beforeAmount === proposedAmount)) {
         return null;
       }
       return {
@@ -1544,6 +1507,7 @@ async function buildPinnedAnnualChangeCandidates({
         lineDirection: CASHFLOW_IN_LINES.includes(cell.cashflowLine) ? 'in' : 'out',
         beforeAmount,
         beforeHadValue,
+        beforeCellState: beforeState,
         proposedAmount,
         proposedHadValue,
         cellState: cell.cellState,
@@ -1785,7 +1749,7 @@ function verifyJavaAnnualAppliedCells(result, stagedYear, { projectId, sourceRev
       if (readOptionalText(states[cell.cashflowLine]) !== cell.cellState) {
         throw createHttpError(502, 'JVM 연간 합계의 공란·값 상태가 시트 고정본과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
       }
-      if (cell.cellState === 'VALUE' && Number(values[cell.cashflowLine]) !== Number(cell.amount)) {
+      if (['VALUE', 'ZERO'].includes(cell.cellState) && Number(values[cell.cashflowLine]) !== Number(cell.amount)) {
         throw createHttpError(502, 'JVM 연간 합계 금액이 시트 고정본과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
       }
       verifiedLineCount += 1;
@@ -1872,7 +1836,7 @@ async function applyStagedCashflowSheetLab({
       weekNo: cell.weekNo,
       lineId: cell.cashflowLine,
       state: cell.cellState,
-      amount: cell.cellState === 'VALUE' ? cell.amount : undefined,
+      amount: ['VALUE', 'ZERO'].includes(cell.cellState) ? cell.amount : undefined,
       sourceCell: cell.sourceCell,
       sourceLabel: cell.sourceLabel,
     })));
@@ -1895,7 +1859,7 @@ async function applyStagedCashflowSheetLab({
       mode: cell.mode,
       lineId: cell.cashflowLine,
       state: cell.cellState,
-      amount: cell.cellState === 'VALUE' ? cell.amount : undefined,
+      amount: ['VALUE', 'ZERO'].includes(cell.cellState) ? cell.amount : undefined,
       sourceCell: cell.sourceCell,
       sourceLabel: cell.sourceLabel,
     })));

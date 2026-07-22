@@ -32,7 +32,6 @@ import { getAuthInstance } from '../../lib/firebase';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
 import {
-  fetchCashflowSnapshotViaBff,
   fetchCashflowActivityViaBff,
   closeCashflowMonthViaBff,
   completeCashflowWeeklyUpdateViaBff,
@@ -46,7 +45,6 @@ import {
   type CashflowMonthCloseResult,
   type CashflowMonthCloseQaDateTimeSetting,
   type CashflowDeadlineSummary,
-  type CashflowSnapshotResult,
   type CashflowActivityEvent,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
@@ -66,9 +64,11 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
+  carryForwardCashflowRunningBalances,
   cashflowMonthCloseConfirmationKey,
   createEmptyCashflowMonthCloseDepositRows,
   normalizeCashflowMonthCloseCells,
+  resolveCashflowEvidenceScope,
   requiredCashflowMonthCloseDecision,
   type CashflowMonthCloseDepositReviewRow,
   type CashflowManagementDecisionMap,
@@ -285,9 +285,6 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
-  const [cashflowSnapshot, setCashflowSnapshot] = useState<CashflowSnapshotResult | null>(null);
-  const [cashflowComparisonLoading, setCashflowComparisonLoading] = useState(false);
-  const [cashflowComparisonError, setCashflowComparisonError] = useState<string | null>(null);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [cashflowYearView, setCashflowYearView] = useState<CashflowSheetLabYearViewResult | null>(null);
   const [cashflowYearViewLoading, setCashflowYearViewLoading] = useState(false);
@@ -318,18 +315,23 @@ export function CashflowProjectSheet({
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
+  const monthCloseRequestGenerationRef = useRef(0);
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
   const selectedYear = useMemo(() => {
     const parsed = Number.parseInt(yearMonth.slice(0, 4), 10);
     return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
   }, [yearMonth]);
-  const cashflowSnapshotRange = useMemo(() => {
-    return {
-      start: { yearMonth: `${selectedYear}-01`, weekNo: 1 },
-      end: { yearMonth: `${selectedYear}-12`, weekNo: 5 },
-    };
-  }, [selectedYear]);
+  const cashflowEvidenceScope = resolveCashflowEvidenceScope({
+    projectId,
+    yearMonth,
+    monthClose: monthCloseResult,
+    liveYearView: cashflowYearView,
+    liveSheetMetadata: cashflowSheetMirror?.status === 'FRESH'
+      ? cashflowSheetMirror.sheetFacts?.metadata
+      : undefined,
+  });
+  const { allowLiveAnnualYearView } = cashflowEvidenceScope;
   const yearWeeks = useMemo(() => getYearMondayWeeks(selectedYear), [selectedYear]);
   const annualWeeks = useMemo<MonthMondayWeek[]>(
     () => yearWeeks.map(hydrateWeekDates),
@@ -451,12 +453,12 @@ export function CashflowProjectSheet({
 
   useEffect(() => {
     let cancelled = false;
-    setCashflowYearViewLoading(true);
-    if (!projectId || !orgId || !user?.uid) {
+    if (!projectId || !orgId || !user?.uid || !allowLiveAnnualYearView) {
       setCashflowYearView(null);
       setCashflowYearViewLoading(false);
       return () => { cancelled = true; };
     }
+    setCashflowYearViewLoading(true);
     const readYearView = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
       getCashflowSheetLabYearViewViaBff({ tenantId: orgId, actor, projectId, selectedYear })
     );
@@ -482,68 +484,11 @@ export function CashflowProjectSheet({
     };
     void loadYearView();
     return () => { cancelled = true; };
-  }, [cashflowYearViewRevision, orgId, projectId, resolveBffActor, selectedYear, user?.uid]);
-
-  const loadCashflowComparison = useCallback(async (): Promise<void> => {
-    if (!projectId || !orgId || !user?.uid) {
-      setCashflowSnapshot(null);
-      setCashflowComparisonError('로그인 세션이 만료되었습니다.');
-      return;
-    }
-    const readSnapshot = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
-      fetchCashflowSnapshotViaBff({
-        tenantId: orgId,
-        actor,
-        projectId,
-        asOf: todayIso,
-        rangeStart: cashflowSnapshotRange.start,
-        rangeEnd: cashflowSnapshotRange.end,
-      })
-    );
-    setCashflowComparisonLoading(true);
-    setCashflowComparisonError(null);
-    try {
-      const actor = await resolveBffActor();
-      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      try {
-        setCashflowSnapshot(await readSnapshot(actor));
-      } catch (error) {
-        if (!isBffAuthRejection(error)) throw error;
-        const refreshedActor = await resolveBffActor({ forceRefresh: true });
-        if (!refreshedActor?.idToken) throw error;
-        setCashflowSnapshot(await readSnapshot(refreshedActor));
-      }
-    } catch (error) {
-      setCashflowSnapshot(null);
-      setCashflowComparisonError(resolveApiErrorMessage(error, 'Projection - Actual 차이를 불러오지 못했습니다.'));
-    } finally {
-      setCashflowComparisonLoading(false);
-    }
-  }, [cashflowSnapshotRange.end, cashflowSnapshotRange.start, orgId, projectId, resolveBffActor, todayIso, user?.uid]);
-
-  useEffect(() => {
-    void loadCashflowComparison();
-  }, [loadCashflowComparison]);
+  }, [allowLiveAnnualYearView, cashflowYearViewRevision, orgId, projectId, resolveBffActor, selectedYear, user?.uid]);
 
   const loadCashflowMonthClose = useCallback(async (): Promise<void> => {
-    const selectedYearHasWeeklyData = Boolean(
-      cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear)
-      ||
-      cashflowSnapshot?.projection?.some((line) => line.yearMonth.startsWith(`${selectedYear}-`))
-      || cashflowSnapshot?.actual?.some((line) => line.yearMonth.startsWith(`${selectedYear}-`)),
-    );
-    const importedYearTotal = cashflowSheetMirror?.sheetFacts?.annualCashflowTotals?.find((row) => row.year === selectedYear);
-    const importedAnnualOnly = Boolean(importedYearTotal)
-      && importedYearTotal?.projection.source !== 'WEEKLY'
-      && importedYearTotal?.actual.source !== 'WEEKLY';
-    const selectedYearUsesAnnualTotal = !selectedYearHasWeeklyData
-      && (importedAnnualOnly || Boolean(cashflowYearView?.canonicalAnnualYears?.some((row) => row.year === selectedYear)));
-    if (selectedYearUsesAnnualTotal) {
-      setMonthCloseResult(null);
-      setMonthCloseError(null);
-      setMonthCloseLoading(false);
-      return;
-    }
+    const requestGeneration = ++monthCloseRequestGenerationRef.current;
+    const isCurrentRequest = () => requestGeneration === monthCloseRequestGenerationRef.current;
     if (!projectId || !orgId || !user?.uid) {
       setMonthCloseResult(null);
       setMonthCloseError('로그인 세션이 만료되었습니다.');
@@ -558,7 +503,7 @@ export function CashflowProjectSheet({
       operation: 'cashflow.month_close.status.load',
       projectId,
       yearMonth,
-      summary: { selectedYear, hasPinnedSheet: cashflowSheetMirror?.status === 'FRESH' },
+      summary: { selectedYear },
     });
     try {
       const actor = await resolveBffActor();
@@ -570,6 +515,7 @@ export function CashflowProjectSheet({
         projectId,
         yearMonth,
       });
+      if (!isCurrentRequest()) return;
       setMonthCloseResult(result);
       logCashflowSettlement({
         phase: 'success',
@@ -589,6 +535,7 @@ export function CashflowProjectSheet({
           projectId,
           yearMonth,
         });
+        if (!isCurrentRequest()) return;
         setMonthCloseResult(result);
         logCashflowSettlement({
           phase: 'success',
@@ -600,6 +547,7 @@ export function CashflowProjectSheet({
         });
       }
     } catch (error) {
+      if (!isCurrentRequest()) return;
       setMonthCloseError(resolveApiErrorMessage(error, '월 결산 상태를 불러오지 못했습니다.'));
       logCashflowSettlement({
         phase: 'error',
@@ -610,9 +558,9 @@ export function CashflowProjectSheet({
         error,
       });
     } finally {
-      setMonthCloseLoading(false);
+      if (isCurrentRequest()) setMonthCloseLoading(false);
     }
-  }, [cashflowSheetMirror?.appliedWeeklyYears, cashflowSheetMirror?.sheetFacts?.annualCashflowTotals, cashflowSnapshot?.actual, cashflowSnapshot?.projection, cashflowYearView?.canonicalAnnualYears, orgId, projectId, resolveBffActor, selectedYear, user?.uid, yearMonth]);
+  }, [orgId, projectId, resolveBffActor, selectedYear, user?.uid, yearMonth]);
 
   useEffect(() => {
     void loadCashflowMonthClose();
@@ -667,14 +615,14 @@ export function CashflowProjectSheet({
       setQaClockSetting(setting);
       setQaClockInput(setting.qaDateTime || '');
       setQaClockOpen(false);
-      await Promise.all([loadCashflowMonthClose(), loadCashflowComparison()]);
+      await loadCashflowMonthClose();
       toast.success(setting.active ? 'QA 기준시각을 적용했습니다.' : '실제 서버 시각으로 복구했습니다.');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, 'QA 기준시각을 저장하지 못했습니다.'));
     } finally {
       setQaClockBusy(false);
     }
-  }, [canReviewReopen, isStageHost, loadCashflowComparison, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
+  }, [canReviewReopen, isStageHost, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
 
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
     if (!canCompleteWeekly) return;
@@ -980,6 +928,11 @@ export function CashflowProjectSheet({
       toast.error(resolveApiErrorMessage(error, '월 결산할 데이터를 준비하지 못했습니다. 시트 값을 다시 확인해 주세요.'));
       return;
     }
+    const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances;
+    if (!reviewedOpeningBalances) {
+      toast.error('전년도 이월 항목을 불러오지 못했습니다. 월 결산 화면을 다시 열어 주세요.');
+      return;
+    }
 
     setMonthCloseBusy(true);
     const startedAt = Date.now();
@@ -1010,6 +963,7 @@ export function CashflowProjectSheet({
         payload: {
           yearMonth,
           expectedRevision: prepared.revision,
+          expectedOpeningBalances: reviewedOpeningBalances,
           closeInput: monthCloseInput,
         },
         idempotencyKey: `cashflow-month-close:${projectId}:${yearMonth}:${prepared.revision}`,
@@ -1019,7 +973,7 @@ export function CashflowProjectSheet({
       setManagementDecisions({});
       setMonthCloseReviewDirty(false);
       await Promise.all([
-        loadCashflowComparison(),
+        loadCashflowMonthClose(),
         loadCashflowEvents(),
       ]);
       logCashflowSettlement({
@@ -1049,7 +1003,6 @@ export function CashflowProjectSheet({
     canFinalizeMonth,
     cashflowSheetConfig?.value,
     monthClosePinnedSource,
-    loadCashflowComparison,
     loadCashflowEvents,
     loadCashflowMonthClose,
     monthCloseCellsState,
@@ -1298,7 +1251,6 @@ export function CashflowProjectSheet({
     const rememberApplyResult = async (result: Awaited<ReturnType<typeof apply>>) => {
       await Promise.all([
         loadCashflowEvents(),
-        loadCashflowComparison(),
         loadCashflowMonthClose(),
       ]);
       setCashflowSheetConfig((current) => current ? {
@@ -1355,7 +1307,7 @@ export function CashflowProjectSheet({
     } finally {
       setSheetStageApplyLoading(false);
     }
-  }, [loadCashflowComparison, loadCashflowEvents, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
+  }, [loadCashflowEvents, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
 
   const handleStagePinnedSheetValues = useCallback(async (
     replaceAllActualSources = false,
@@ -1446,8 +1398,10 @@ export function CashflowProjectSheet({
   }
 
   const projectionActualComparison = useMemo(() => {
-    if (!cashflowSnapshot && !monthCloseResult?.dashboard?.comparison) return { rows: [], changedRows: [] };
-    const comparisonMonths = cashflowSnapshot?.comparison?.months || [];
+    const comparisonMonths = (monthCloseResult?.dashboard?.canonical?.months || [])
+      .map((month) => month.comparison)
+      .filter((month): month is NonNullable<typeof month> => Boolean(month));
+    if (comparisonMonths.length === 0 && !monthCloseResult?.dashboard?.comparison) return { rows: [], changedRows: [] };
     const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month]));
     if (monthCloseResult?.dashboard?.comparison) {
       comparisonByMonth.set(yearMonth, monthCloseResult.dashboard.comparison);
@@ -1482,22 +1436,22 @@ export function CashflowProjectSheet({
       rows,
       changedRows: rows.filter((row) => row.changed),
     };
-  }, [annualWeeks, cashflowSnapshot, monthCloseResult?.dashboard?.comparison, yearMonth]);
+  }, [annualWeeks, monthCloseResult?.dashboard?.canonical?.months, monthCloseResult?.dashboard?.comparison, yearMonth]);
 
   const cashflowTotalPeriodLabel = `${selectedYear}년`;
-  const navigationYears = cashflowYearView?.navigationYears?.length
-    ? cashflowYearView.navigationYears
+  const navigationYears = cashflowEvidenceScope.yearView?.navigationYears?.length
+    ? cashflowEvidenceScope.yearView.navigationYears
     : [selectedYear];
   const hasWeeklyYearData = Boolean(
-    cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear)
-    ||
-    cashflowSnapshot?.projection?.some((line) => line.yearMonth.startsWith(`${selectedYear}-`))
-    || cashflowSnapshot?.actual?.some((line) => line.yearMonth.startsWith(`${selectedYear}-`)),
+    (allowLiveAnnualYearView && cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear))
+    || monthCloseResult?.dashboard?.canonical?.months?.some((month) => month.yearMonth.startsWith(`${selectedYear}-`)),
   );
-  const canonicalAnnualTotal = hasWeeklyYearData
+  const canonicalAnnualTotal = !allowLiveAnnualYearView || hasWeeklyYearData
     ? null
-    : cashflowYearView?.canonicalAnnualYears?.find((row) => row.year === selectedYear) || null;
-  const selectedImportedAnnualTotal = cashflowSheetMirror?.sheetFacts?.annualCashflowTotals?.find((row) => row.year === selectedYear);
+    : cashflowEvidenceScope.yearView?.canonicalAnnualYears?.find((row) => row.year === selectedYear) || null;
+  const selectedImportedAnnualTotal = allowLiveAnnualYearView
+    ? cashflowSheetMirror?.sheetFacts?.annualCashflowTotals?.find((row) => row.year === selectedYear)
+    : null;
   const selectedYearUsesAnnualStructure = !hasWeeklyYearData
     && Boolean(selectedImportedAnnualTotal)
     && selectedImportedAnnualTotal?.projection.source !== 'WEEKLY'
@@ -1593,7 +1547,7 @@ export function CashflowProjectSheet({
         mismatch: comparisonLine?.mismatch === true,
       };
     }
-    const month = cashflowSnapshot?.readModel?.months?.find((candidate) => candidate.yearMonth === params.targetYearMonth);
+    const month = monthCloseResult?.dashboard?.canonical?.months?.find((candidate) => candidate.yearMonth === params.targetYearMonth);
     const week = month?.[params.mode]?.weeks?.find((candidate) => candidate.weekNo === params.weekNo);
     const comparisonLine = month?.comparison?.weeks
       ?.find((candidate) => candidate.weekNo === params.weekNo)
@@ -1699,7 +1653,7 @@ export function CashflowProjectSheet({
   }
 
   function renderUnifiedMonthlyBoard() {
-    if (cashflowComparisonLoading && !cashflowSnapshot) {
+    if (monthCloseLoading && !monthCloseResult?.dashboard?.canonical) {
       return (
         <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">
           서버 확정 원장과 기간 합계를 불러오는 중입니다.
@@ -1707,29 +1661,71 @@ export function CashflowProjectSheet({
       );
     }
     const visibleWeeks = annualWeeks;
-    const ledgerYears = (cashflowYearView?.availableYears?.length ? cashflowYearView.availableYears : navigationYears)
+    const ledgerYears = (cashflowEvidenceScope.yearView?.availableYears?.length ? cashflowEvidenceScope.yearView.availableYears : navigationYears)
       .filter((year, index, years) => years.indexOf(year) === index)
       .sort((left, right) => left - right);
     const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
-      const canonical = cashflowYearView?.canonicalAnnualYears?.find((row) => row.year === year);
-      const mirrored = cashflowYearView?.years?.find((row) => row.year === year);
+      const jvmOpeningSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
+        ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
+        : null;
+      if (jvmOpeningSource) {
+        const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmOpeningSource.lineAmounts?.[lineId] || 0), 0);
+        const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmOpeningSource.lineAmounts?.[lineId] || 0), 0);
+        return {
+          year,
+          lineAmounts: jvmOpeningSource.lineAmounts,
+          lineStates: jvmOpeningSource.lineStates,
+          totalIn,
+          totalOut,
+          net: totalIn - totalOut,
+        };
+      }
+      if (!allowLiveAnnualYearView) return null;
+      const canonical = cashflowEvidenceScope.yearView?.canonicalAnnualYears?.find((row) => row.year === year);
+      const mirrored = cashflowEvidenceScope.yearView?.years?.find((row) => row.year === year);
       return canonical?.[mode] || mirrored?.[mode] || null;
     };
     const previousAnnualYears = ledgerYears.filter((year) => year < selectedYear);
     const followingAnnualYears = ledgerYears.filter((year) => year > selectedYear);
     const selectedAnnualOnly = Boolean(canonicalAnnualTotal);
     const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
+    const canonicalReadModel = monthCloseResult?.dashboard?.canonical;
     const readServerSummary = (mode: 'projection' | 'actual') => {
-      const weekTotals = visibleWeeks.map((week) => {
+      const openingBalance = selectedAnnualOnly
+        ? 0
+        : monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
+            ? Number(monthCloseResult.dashboard.openingBalances[mode]?.amount || 0)
+            : 0;
+      const priorServerWeek = (canonicalReadModel?.months || [])
+        .filter((month) => month.yearMonth < `${selectedYear}-01`)
+        .flatMap((month) => (month[mode]?.weeks || []).map((week) => ({ ...week, yearMonth: month.yearMonth })))
+        .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo)
+        .at(-1);
+      const serverWeeks = visibleWeeks.map((week) => {
         const dashboardWeek = week.yearMonth === yearMonth
           ? monthCloseResult?.dashboard?.totals?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo)
           : null;
-        const serverWeek = dashboardWeek || cashflowSnapshot?.readModel?.months
+        const canonicalWeek = canonicalReadModel?.months
           ?.find((month) => month.yearMonth === week.yearMonth)
           ?.[mode]?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
-        return serverWeek || { weekNo: week.weekNo, amounts: {}, totalIn: 0, totalOut: 0, net: 0, weekIn: 0, weekOut: 0 };
+        return canonicalWeek || dashboardWeek || null;
       });
-      const rangeTotals = selectedAnnualOnly ? annualTotalFor(selectedYear, mode) : cashflowSnapshot?.readModel?.range?.[mode];
+      const displayedRunningBalances = carryForwardCashflowRunningBalances({
+        priorWeeklyNet: Number(priorServerWeek?.net || 0),
+        annualOpeningBalance: openingBalance,
+        serverRunningNets: serverWeeks.map((week) => week == null ? null : Number(week.net || 0)),
+      });
+      const weekTotals = serverWeeks.map((serverWeek, index) => {
+        const visibleWeek = visibleWeeks[index];
+        return {
+          ...(serverWeek || { weekNo: visibleWeek.weekNo, amounts: {}, totalIn: 0, totalOut: 0, weekIn: 0, weekOut: 0 }),
+          net: displayedRunningBalances[index],
+        };
+      });
+      const rangeTotals = selectedAnnualOnly ? annualTotalFor(selectedYear, mode) : canonicalReadModel?.range?.[mode];
+      const endingBalance = selectedAnnualOnly
+        ? Number(rangeTotals?.net || 0)
+        : Number(weekTotals.at(-1)?.net ?? openingBalance);
       return {
         rowTotals: ((rangeTotals as { rowTotals?: Record<CashflowSheetLineId, number>; lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.rowTotals
           || (rangeTotals as { lineAmounts?: Record<CashflowSheetLineId, number> } | null)?.lineAmounts
@@ -1738,7 +1734,7 @@ export function CashflowProjectSheet({
         monthTotals: {
           totalIn: rangeTotals?.totalIn || 0,
           totalOut: rangeTotals?.totalOut || 0,
-          net: rangeTotals?.net || 0,
+          net: endingBalance,
         },
       };
     };
@@ -1768,7 +1764,7 @@ export function CashflowProjectSheet({
       const value = total?.lineAmounts?.[lineId] || 0;
       return (
         <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
-          {state === 'VALUE' ? fmt(value) : <span className="text-slate-300">-</span>}
+          {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-300">-</span>}
         </td>
       );
     };
@@ -1901,7 +1897,7 @@ export function CashflowProjectSheet({
               {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
             </td>
             <td className={`px-4 py-2 text-right text-[12px] tabular-nums text-slate-700 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
-              {state === 'VALUE' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-300">-</span>}
+              {state === 'VALUE' || state === 'ZERO' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-300">-</span>}
             </td>
           </tr>
         );
@@ -1995,7 +1991,7 @@ export function CashflowProjectSheet({
               </section>
             </div>
           </div>
-          {cashflowComparisonLoading || cashflowYearViewLoading ? <div className="px-3 py-2 text-[12px] text-slate-500">불러오는 중...</div> : null}
+          {monthCloseLoading || cashflowYearViewLoading ? <div className="px-3 py-2 text-[12px] text-slate-500">불러오는 중...</div> : null}
         </CardContent>
       </Card>
     );
@@ -2004,13 +2000,20 @@ export function CashflowProjectSheet({
 
   function renderProjectionActualDiffTable() {
     const rows = projectionActualComparison.changedRows;
-    if (cashflowComparisonLoading) {
+    if (monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY') {
+      return (
+        <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-5 text-[12px] leading-5 text-[#17324D]">
+          이전 형식으로 결산된 월이라 전체 기간의 항목별 차이 근거는 표시하지 않습니다. 결산 당시 보관된 월 값만 읽을 수 있습니다.
+        </div>
+      );
+    }
+    if (monthCloseLoading) {
       return <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">BFF 차이값을 불러오는 중...</div>;
     }
-    if (cashflowComparisonError || !cashflowSnapshot?.readModel?.range) {
+    if (monthCloseError || !monthCloseResult?.dashboard?.canonical?.range) {
       return (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-6 text-center text-[12px] text-red-700">
-          {cashflowComparisonError || '서버 확정 원장과 기간 합계를 불러오지 못했습니다.'}
+          {monthCloseError || '서버 확정 원장과 기간 합계를 불러오지 못했습니다.'}
         </div>
       );
     }
@@ -2025,7 +2028,7 @@ export function CashflowProjectSheet({
                 </HoverExplain>
               </div>
               <div className="text-[12px] text-slate-500">
-                BFF 기준일 {monthCloseResult?.dashboard?.summary?.comparisonAsOfDate || cashflowSnapshot?.comparison?.asOfDate || '-'} · 차이 = Projection - Actual
+                BFF 기준일 {monthCloseResult?.dashboard?.summary?.comparisonAsOfDate || '-'} · 차이 = Projection - Actual
               </div>
             </div>
             <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">차이 항목만</Badge>
@@ -2644,13 +2647,17 @@ export function CashflowProjectSheet({
     : monthCloseResult?.status === 'REOPEN_REQUESTED'
       ? 'border border-border bg-accent text-accent-foreground'
       : 'border border-border bg-accent text-accent-foreground';
-  const sheetDashboardMetadata = cashflowSheetMirror?.status === 'FRESH'
-    ? cashflowSheetMirror.sheetFacts?.metadata
-    : undefined;
+  const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
+  const legacyCloseEvidence = monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY';
 
   return (
     <div className="space-y-5 bg-background p-4">
+      {legacyCloseEvidence ? (
+        <div role="status" className="rounded-md border border-slate-300 bg-slate-50 px-4 py-3 text-[12px] leading-5 text-[#17324D]">
+          <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 원장은 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
+        </div>
+      ) : null}
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
         {renderOpsTimeline()}

@@ -25,7 +25,7 @@ public record CashflowSheetAnnualApplyRequest(
     public record Cell(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,
         @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_CASHFLOW_LINE_LENGTH) String cashflowLine,
-        @NotBlank @Pattern(regexp = "VALUE|EMPTY") String cellState,
+        @NotBlank @Pattern(regexp = "VALUE|ZERO|EMPTY") String cellState,
         BigDecimal amount,
         @Size(max = 20) String sourceCell,
         @Size(max = 200) String sourceLabel
@@ -47,12 +47,15 @@ public record CashflowSheetAnnualApplyRequest(
             if (!List.of("projection", "actual").contains(mode)) {
                 throw new IllegalArgumentException("Cashflow annual mode must be projection or actual.");
             }
-            if ("VALUE".equals(state)) {
+            if (List.of("VALUE", "ZERO").contains(state)) {
                 if (cell.amount() == null) throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
                 try {
                     cell.amount().longValueExact();
                 } catch (ArithmeticException error) {
                     throw new IllegalArgumentException("Cashflow amounts must be whole won values in the supported range.");
+                }
+                if ("ZERO".equals(state) && cell.amount().compareTo(BigDecimal.ZERO) != 0) {
+                    throw new IllegalArgumentException("ZERO cashflow cells require an explicit zero amount.");
                 }
             } else if (!"EMPTY".equals(state) || cell.amount() != null) {
                 throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");

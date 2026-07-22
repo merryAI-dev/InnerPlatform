@@ -649,8 +649,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             .requireCompleteConfirmations(request.confirmations());
         CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
         CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
+        CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
         requireConfirmationStatesMatchCells(cells, confirmations);
         ValidatedCloseSource source = requirePinnedCloseSource(actor, projectId, request);
+        CashflowOpeningBalance openingBalance = findCashflowOpeningBalance(
+            actor.tenantId(),
+            projectId,
+            targetMonth.getYear()
+        );
+        requireMatchingOpeningBalance(request.openingBalances(), openingBalance);
 
         DocumentReference closeRef = db.document(monthlyClosePath(actor.tenantId(), projectId, request.yearMonth()));
         DocumentSnapshot closeSnapshot = get(closeRef);
@@ -685,6 +692,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             confirmations,
             replacement,
             source,
+            openingBalance,
             now,
             today,
             businessDate.qaOverrideActive()
@@ -1165,6 +1173,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             month.projection(),
             month.actual(),
             month.weeks(),
+            replacement.ledgerWeeks(),
             replacement.resultingTargetRevision()
         );
     }
@@ -1212,6 +1221,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             month.projection(),
             month.actual(),
             month.weeks(),
+            replacement.ledgerWeeks(),
             replacement.resultingTargetRevision()
         );
     }
@@ -1416,6 +1426,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
         Map<String, Map<String, Object>> resultingWeeks = new LinkedHashMap<>(allProjectWeeks);
         resultingWeeks.putAll(replacements);
+        for (Map.Entry<String, Map<String, Object>> entry : resultingWeeks.entrySet()) {
+            WeekDocParts parts = parseCashflowWeekId(projectId, entry.getKey());
+            requireCanonicalCashflowMonthDocument(
+                projectId,
+                parts.yearMonth(),
+                parts.weekNo(),
+                entry.getKey(),
+                entry.getValue()
+            );
+        }
         String resultingTargetRevision = computeCashflowTargetRevision(resultingWeeks.values());
         if (mirrorTracksTargetRevision) {
             set(mirrorRef, Map.of(
@@ -1424,8 +1444,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "targetRevisionUpdateSource", "JVM_CANONICAL_APPLY"
             ));
         }
+        List<CashflowLedgerWeekSnapshot> ledgerWeeks = resultingWeeks.values().stream()
+            .sorted(Comparator
+                .comparing((Map<String, Object> document) -> text(document.get("yearMonth"), ""))
+                .thenComparingInt(document -> intValue(document.get("weekNo"), 0)))
+            .map(document -> new CashflowLedgerWeekSnapshot(
+                text(document.get("yearMonth"), ""),
+                intValue(document.get("weekNo"), 0),
+                nestedMap(document.get("projection")),
+                nestedMap(document.get("actual"))
+            ))
+            .toList();
         return new CashflowSheetBatchReplacement(
             List.copyOf(monthResults),
+            ledgerWeeks,
             resultingTargetRevision
         );
     }
@@ -1467,7 +1499,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Map<String, BigDecimal> amounts = "projection".equals(cell.mode()) ? projection : actual;
             Map<String, String> states = "projection".equals(cell.mode()) ? projectionStates : actualStates;
             states.put(cell.cashflowLine(), cell.cellState());
-            if ("VALUE".equals(cell.cellState())) amounts.put(cell.cashflowLine(), cell.amount());
+            if (List.of("VALUE", "ZERO").contains(cell.cellState())) amounts.put(cell.cashflowLine(), cell.amount());
             Map<String, Object> sourceCell = new LinkedHashMap<>();
             sourceCell.put("mode", cell.mode());
             sourceCell.put("cashflowLine", cell.cashflowLine());
@@ -1503,6 +1535,68 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Map.copyOf(projectionStates),
             Map.copyOf(actualStates)
         );
+    }
+
+    @Override
+    public List<CashflowSheetAnnualTotal> findCashflowSheetYearTotals(String tenantId, String projectId) {
+        QuerySnapshot snapshot = query(cashflowYearTotals(tenantId).whereEqualTo("projectId", projectId));
+        return snapshot.getDocuments().stream()
+            .map(this::data)
+            .filter(document -> projectId.equals(text(document.get("projectId"), "")))
+            .map(document -> new CashflowSheetAnnualTotal(
+                intValue(document.get("year"), 0),
+                Map.copyOf(decimalMap(nestedMap(document.get("projection")))),
+                Map.copyOf(decimalMap(nestedMap(document.get("actual")))),
+                Map.copyOf(stringMap(document.get("projectionStates"))),
+                Map.copyOf(stringMap(document.get("actualStates")))
+            ))
+            .filter(total -> total.year() >= 2000 && total.year() <= 2100)
+            .sorted(Comparator.comparingInt(CashflowSheetAnnualTotal::year))
+            .toList();
+    }
+
+    @Override
+    public List<Integer> findCashflowWeeklyYears(String tenantId, String projectId) {
+        return findCashflowLedgerSource(tenantId, projectId).weeklyYears();
+    }
+
+    @Override
+    public CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
+        QuerySnapshot snapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
+        List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
+        List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
+        Set<Integer> weeklyYears = new java.util.TreeSet<>();
+        for (DocumentSnapshot doc : snapshot.getDocuments()) {
+            Map<String, Object> document = data(doc);
+            String yearMonth = text(document.get("yearMonth"), "");
+            int weekNo = intValue(document.get("weekNo"), 0);
+            if (yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])")) {
+                weeklyYears.add(Integer.parseInt(yearMonth.substring(0, 4)));
+            }
+            for (Map.Entry<String, Object> entry : nestedMap(document.get("projection")).entrySet()) {
+                WeeklyExpenseProjectionEntity line = new WeeklyExpenseProjectionEntity(
+                    tenantId, projectId, yearMonth, weekNo, entry.getKey()
+                );
+                line.setAmount(decimal(entry.getValue()));
+                projection.add(line);
+            }
+            Map<String, Object> bySheet = nestedMap(document.get("weeklyExpenseActualBySheet"));
+            for (Map.Entry<String, Object> sheetEntry : bySheet.entrySet()) {
+                for (Map.Entry<String, Object> lineEntry : nestedMap(sheetEntry.getValue()).entrySet()) {
+                    WeeklyExpenseActualEntity line = new WeeklyExpenseActualEntity(
+                        tenantId,
+                        projectId,
+                        sheetEntry.getKey(),
+                        yearMonth,
+                        weekNo,
+                        lineEntry.getKey()
+                    );
+                    line.setAmount(decimal(lineEntry.getValue()));
+                    actual.add(line);
+                }
+            }
+        }
+        return new CashflowLedgerSource(projection, actual, List.copyOf(weeklyYears));
     }
 
     static String computeCashflowTargetRevision(Collection<Map<String, Object>> documents) {
@@ -2006,6 +2100,58 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
     }
 
+    private void requireMatchingOpeningBalance(
+        dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse expected,
+        CashflowOpeningBalance actual
+    ) {
+        if (expected == null
+            || expected.selectedYear() != actual.selectedYear()
+            || !sameOpeningBalanceMode(expected.projection(), actual.projection())
+            || !sameOpeningBalanceMode(expected.actual(), actual.actual())) {
+            throw new WeeklyExpenseConflictException(
+                "Cashflow opening balance changed. Reload the month-close review before closing."
+            );
+        }
+    }
+
+    private boolean sameOpeningBalanceMode(
+        dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse.Mode expected,
+        CashflowOpeningBalance.Mode actual
+    ) {
+        return expected != null
+            && expected.amount() != null
+            && expected.amount().compareTo(actual.amount()) == 0
+            && sameOpeningAmountMap(expected.lineAmounts(), actual.lineAmounts())
+            && sameOpeningSources(expected.sources(), actual.sources())
+            && expected.includedYears().equals(actual.includedYears())
+            && expected.excludedWeeklyYears().equals(actual.excludedWeeklyYears());
+    }
+
+    private boolean sameOpeningAmountMap(Map<String, BigDecimal> expected, Map<String, BigDecimal> actual) {
+        if (expected == null || actual == null || expected.size() != actual.size()
+            || !expected.keySet().equals(actual.keySet())) return false;
+        return expected.entrySet().stream().allMatch(entry -> {
+            BigDecimal value = actual.get(entry.getKey());
+            return entry.getValue() != null && value != null && entry.getValue().compareTo(value) == 0;
+        });
+    }
+
+    private boolean sameOpeningSources(
+        List<dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse.YearSource> expected,
+        List<CashflowOpeningBalance.YearSource> actual
+    ) {
+        if (expected == null || actual == null || expected.size() != actual.size()) return false;
+        for (int index = 0; index < expected.size(); index += 1) {
+            dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse.YearSource expectedSource = expected.get(index);
+            CashflowOpeningBalance.YearSource actualSource = actual.get(index);
+            if (expectedSource == null
+                || expectedSource.year() != actualSource.year()
+                || !sameOpeningAmountMap(expectedSource.lineAmounts(), actualSource.lineAmounts())
+                || !expectedSource.lineStates().equals(actualSource.lineStates())) return false;
+        }
+        return true;
+    }
+
     private Map<String, Object> closeInputMap(CloseCashflowMonthRequest request) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("yearMonth", request.yearMonth());
@@ -2016,6 +2162,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         input.put("confirmations", request.confirmations());
         input.put("managementChecks", request.managementChecks());
         input.put("managementConfirmations", request.managementConfirmations());
+        input.put("openingBalances", request.openingBalances());
         input.put("deadlineSummary", request.deadlineSummary());
         return JSON.convertValue(input, Map.class);
     }
@@ -2032,6 +2179,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "confirmations",
                 "managementChecks",
                 "managementConfirmations",
+                "openingBalances",
                 "deadlineSummary"
             )) {
                 selected.put(field, raw.get(field));
@@ -2052,6 +2200,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 .requireCompleteManagementChecks(input.managementChecks());
             List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations = CloseCashflowMonthRequest
                 .requireCompleteManagementConfirmations(input.managementConfirmations());
+            dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse openingBalances = CloseCashflowMonthRequest
+                .requireOpeningBalances(input.openingBalances(), input.yearMonth());
             requireConfirmationStatesMatchCells(cells, confirmations);
 
             Map<String, Object> canonical = new LinkedHashMap<>();
@@ -2063,6 +2213,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             canonical.put("confirmations", confirmations);
             canonical.put("managementChecks", managementChecks);
             canonical.put("managementConfirmations", managementConfirmations);
+            canonical.put("openingBalances", openingBalances);
             canonical.put("deadlineSummary", input.deadlineSummary());
             return JSON.convertValue(canonical, Map.class);
         } catch (WeeklyExpenseConflictException error) {
@@ -2180,6 +2331,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CloseCashflowMonthRequest.Confirmation> confirmations,
         CashflowSheetMonthReplacement replacement,
         ValidatedCloseSource source,
+        CashflowOpeningBalance openingBalance,
         Instant now,
         LocalDate evaluatedBusinessDate,
         boolean qaDateOverride
@@ -2279,8 +2431,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         snapshot.put("confirmations", confirmationSnapshot);
         snapshot.put("managementChecks", JSON.convertValue(request.managementChecks(), List.class));
         snapshot.put("managementConfirmations", managementConfirmationSnapshot);
+        snapshot.put("openingBalances", JSON.convertValue(openingBalance, Map.class));
         snapshot.put("deadlineSummary", JSON.convertValue(request.deadlineSummary(), Map.class));
         snapshot.put("weeklyTotals", weeklyTotals);
+        snapshot.put("ledgerWeeks", JSON.convertValue(replacement.ledgerWeeks(), List.class));
         snapshot.put("projectionTotal", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionTotal));
         snapshot.put("actualTotal", FirestoreCashflowWeekActualMerge.cashflowTotals(actualTotal));
         snapshot.put("sourceFingerprint", request.sourceRevision());
@@ -3226,9 +3380,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private DocumentReference cashflowYearTotalRef(String tenantId, String projectId, int year) {
-        return db.document(
-            "orgs/" + tenantId + "/cashflow_sheet_year_totals/" + safeDocId(projectId + "\n" + year)
-        );
+        return cashflowYearTotals(tenantId).document(safeDocId(projectId + "\n" + year));
+    }
+
+    private CollectionReference cashflowYearTotals(String tenantId) {
+        return db.collection("orgs/" + tenantId + "/cashflow_sheet_year_totals");
     }
 
     private CollectionReference expenseIntake(String tenantId, String projectId) {
@@ -3419,6 +3575,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return result;
     }
 
+    private Map<String, String> stringMap(Object value) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (!(value instanceof Map<?, ?> map)) return result;
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            result.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+        }
+        return result;
+    }
+
     private Map<String, BigDecimal> decimalMap(Map<String, Object> values) {
         Map<String, BigDecimal> result = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : values.entrySet()) {
@@ -3604,6 +3769,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CloseCashflowMonthRequest.Confirmation> confirmations,
         List<CloseCashflowMonthRequest.ManagementCheck> managementChecks,
         List<CloseCashflowMonthRequest.ManagementConfirmation> managementConfirmations,
+        dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse openingBalances,
         CloseCashflowMonthRequest.DeadlineSummary deadlineSummary
     ) {
     }

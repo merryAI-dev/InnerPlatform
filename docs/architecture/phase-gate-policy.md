@@ -50,6 +50,7 @@
 | Cashflow multi-year visibility hotfix | `docs/architecture/contracts/2026-07-22-cashflow-multi-year-visibility-hotfix.md` | COMPLETE | 100/100 |
 | Cashflow ERP settlement UX | `docs/architecture/contracts/2026-07-22-cashflow-erp-settlement-ux.md` | COMPLETE | 100/100 |
 | Cashflow closed-month sheet amendment | `docs/architecture/contracts/2026-07-22-cashflow-close-amendment-contract.md` | COMPLETE | 100/100 |
+| Cashflow opening balance and month-close read path | `docs/architecture/contracts/2026-07-22-cashflow-opening-balance-and-read-path.md` | IN_PROGRESS | - |
 
 이전 Phase는 현재 Phase를 100점으로 마감한 뒤 같은 기준으로 역검증한다. 점수가 부족하면 완료 상태를 취소하고 보완 작업으로 되돌린다. 향후 Phase는 구현을 시작하기 전에 이 등록부에 계약과 감시자를 먼저 등록하고, 100점 증거가 없으면 다음 Phase 또는 Stage로 넘어가지 않는다.
 

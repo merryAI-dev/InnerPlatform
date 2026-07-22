@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -45,6 +47,64 @@ class CloseCashflowMonthRequestTest {
         assertThatThrownBy(() -> CloseCashflowMonthRequest.requireCompleteDepositSchedule(rows))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("whole won value");
+    }
+
+    @Test
+    void openingBalanceRejectsAChangedRowCompositionEvenWhenTheTotalIsUnchanged() {
+        CashflowOpeningBalancesResponse.YearSource source = new CashflowOpeningBalancesResponse.YearSource(
+            2025,
+            Map.of("SALES_IN", new BigDecimal("2000000")),
+            completeStates("SALES_IN")
+        );
+        CashflowOpeningBalancesResponse.Mode projection = new CashflowOpeningBalancesResponse.Mode(
+            new BigDecimal("2000000"),
+            Map.of("TEAM_SUPPORT_IN", new BigDecimal("2000000")),
+            List.of(source),
+            List.of(2025),
+            List.of()
+        );
+        CashflowOpeningBalancesResponse openingBalances = new CashflowOpeningBalancesResponse(
+            2026,
+            projection,
+            new CashflowOpeningBalancesResponse.Mode(BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
+        );
+
+        assertThatThrownBy(() -> CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, "2026-01"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("rows do not match their annual sources");
+    }
+
+    @Test
+    void openingBalanceRejectsAnAnnualSourceThatOmitsCanonicalRowStates() {
+        CashflowOpeningBalancesResponse.YearSource source = new CashflowOpeningBalancesResponse.YearSource(
+            2025,
+            Map.of("SALES_IN", new BigDecimal("2000000")),
+            Map.of("SALES_IN", "VALUE")
+        );
+        CashflowOpeningBalancesResponse.Mode projection = new CashflowOpeningBalancesResponse.Mode(
+            new BigDecimal("2000000"),
+            Map.of("SALES_IN", new BigDecimal("2000000")),
+            List.of(source),
+            List.of(2025),
+            List.of()
+        );
+        CashflowOpeningBalancesResponse openingBalances = new CashflowOpeningBalancesResponse(
+            2026,
+            projection,
+            new CashflowOpeningBalancesResponse.Mode(BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of())
+        );
+
+        assertThatThrownBy(() -> CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, "2026-01"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("preserve every cashflow row state");
+    }
+
+    private static Map<String, String> completeStates(String valueLine) {
+        Map<String, String> states = new LinkedHashMap<>();
+        for (String line : dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog.ALL_LINES) {
+            states.put(line, line.equals(valueLine) ? "VALUE" : "EMPTY");
+        }
+        return states;
     }
 
     private static List<CloseCashflowMonthRequest.DepositScheduleRow> validNotApplicableRows() {
