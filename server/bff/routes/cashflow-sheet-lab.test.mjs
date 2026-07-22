@@ -704,6 +704,60 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
+  it('keeps imported annual years visible when registration still has a single-year period', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+      },
+      initialDocuments: {
+        'orgs/tenant-a/cashflow_sheet_mirrors/project-a': {
+          projectId: 'project-a',
+          status: 'FRESH',
+          sourceRevision: 'sha256:multi-year-source',
+          years: [2024, 2025, 2026, 2027, 2028],
+          sheetFacts: {
+            annualCashflowTotals: [2024, 2025, 2026, 2027, 2028].map((year) => ({
+              year,
+              projection: { source: year === 2026 ? 'WEEKLY' : 'ANNUAL', totalIn: year, totalOut: 0, net: year, lineAmounts: {} },
+              actual: { source: year === 2026 ? 'WEEKLY' : 'ANNUAL', totalIn: year, totalOut: 0, net: year, lineAmounts: {} },
+            })),
+          },
+        },
+      },
+    });
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
+      .expect(200);
+
+    expect(response.body.availableYears).toEqual([2024, 2025, 2026, 2027, 2028]);
+    expect(response.body.navigationYears).toEqual([2025, 2026, 2027]);
+    expect(response.body.years.map((row) => row.year)).toEqual([2024, 2025, 2026, 2027, 2028]);
+  });
+
+  it('does not invent adjacent years for an unlinked single-year project', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+      },
+    });
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2026')
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      availableYears: [2026],
+      navigationYears: [2026],
+      years: [],
+      canonicalAnnualYears: [],
+    });
+  });
+
   it('compares a pinned multi-year sheet total with registered financial years', async () => {
     const db = createDb({
       project: {

@@ -148,11 +148,8 @@ function readSelectedYear(value) {
 
 function cashflowAvailableYears(mirror, project, selectedYear) {
   const registeredYears = projectCashflowYears(project);
-  if (registeredYears.length > 0) return registeredYears;
   return [...new Set([
-    selectedYear - 1,
-    selectedYear,
-    selectedYear + 1,
+    ...(registeredYears.length > 0 ? registeredYears : [selectedYear - 1, selectedYear, selectedYear + 1]),
     ...(Array.isArray(project?.financialYears) ? project.financialYears.map((row) => Number(row?.year)) : []),
     ...(Array.isArray(mirror?.years) ? mirror.years.map(Number) : []),
     ...(Array.isArray(mirror?.appliedAnnualYears) ? mirror.appliedAnnualYears.map(Number) : []),
