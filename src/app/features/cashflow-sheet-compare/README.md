@@ -192,6 +192,22 @@ network/query work if it:
   record browser `overwrite.sheet_values.ok durationMs`, BFF `months.ok
   durationMs`, and JVM `jvmDurationMs` before/after values here.
 
+**2026-07-22 retrospective hardening**
+
+- Replaced the hand-built `260701` matrix claim with a committed, privacy-safe
+  XLSX fixture that reproduces the actual 66-column cashflow sheet shape. The
+  regression now parses 1,920 cells, preserves one explicit zero and 1,871
+  blanks, stages all 12 months, and makes exactly one JVM batch call.
+- The storage regression now submits all 12 months in reverse order and
+  directly asserts one 60-reference `getAll`, one project-wide
+  `whereEqualTo("projectId", "project-a")` query, and one transaction query
+  read before committing the full year.
+- The service regression now reconstructs a stored batch response from the
+  same request hash and proves that an exact idempotency retry performs no
+  replacement, audit append, or second idempotency write.
+- Focused evidence: BFF route 54/54 in 8.29 seconds; JVM storage/service 79/79
+  in 23.202 seconds. These are correctness measurements, not Stage latency.
+
 **Stage deployment evidence**
 
 - Cloud Build `231f133f-2cc4-42d1-9ac9-c3003d2adb04` reran the complete JVM

@@ -67,6 +67,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -691,20 +692,28 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void multiMonthApplySortsMonthsAndCommitsEveryMonthInOneCommandTransaction() {
+    void fullYearApplySortsMonthsAndReadsAllSixtyWeeksInOneCommandTransaction() {
         Fixture fixture = fixture(activeMember(), activeLease());
         String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
-        CashflowSheetLabApplyRequest july = monthlyRequest("july-source", targetRevision, "2026-07", "");
-        CashflowSheetLabApplyRequest august = monthlyRequest("august-source", targetRevision, "2026-08", "");
+        List<CashflowSheetBatchApplyRequest.Month> requestedMonths = new ArrayList<>();
+        List<String> expectedMonths = new ArrayList<>();
+        for (int month = 12; month >= 1; month -= 1) {
+            String yearMonth = "2026-" + String.format("%02d", month);
+            CashflowSheetLabApplyRequest monthly = monthlyRequest(
+                "month-" + month,
+                targetRevision,
+                yearMonth,
+                ""
+            );
+            requestedMonths.add(new CashflowSheetBatchApplyRequest.Month(yearMonth, monthly.cells()));
+            expectedMonths.addFirst(yearMonth);
+        }
         CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
-            "batch-july-august",
+            "batch-full-year",
             SOURCE_REVISION,
             targetRevision,
             false,
-            List.of(
-                new CashflowSheetBatchApplyRequest.Month("2026-08", august.cells()),
-                new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells())
-            )
+            requestedMonths
         );
 
         CashflowSheetBatchApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
@@ -712,21 +721,16 @@ class FirestoreCashflowLeaseGuardTest {
         ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request));
 
         assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
-            .containsExactly("2026-07", "2026-08");
-        assertThat(response.savedProjectionLineCount()).isEqualTo(160);
-        assertThat(response.savedActualLineCount()).isEqualTo(160);
+            .containsExactlyElementsOf(expectedMonths);
+        assertThat(response.savedProjectionLineCount()).isEqualTo(960);
+        assertThat(response.savedActualLineCount()).isEqualTo(960);
         assertThat(fixture.documents.keySet().stream()
-            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-07-w")))
-            .hasSize(5);
-        assertThat(fixture.documents.keySet().stream()
-            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-08-w")))
-            .hasSize(5);
-        verify(fixture.transaction).getAll(
-            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
-            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
-            any(DocumentReference.class), any(DocumentReference.class), any(DocumentReference.class),
-            any(DocumentReference.class)
-        );
+            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-")))
+            .hasSize(60);
+        assertThat(fixture.getAllSizes).containsExactly(60);
+        verify(fixture.collections.get("orgs/tenant-a/cashflow_weeks"), times(1))
+            .whereEqualTo("projectId", "project-a");
+        verify(fixture.transaction, times(1)).get(any(Query.class));
     }
 
     @Test
@@ -2660,6 +2664,7 @@ class FirestoreCashflowLeaseGuardTest {
         Map<Query, QueryScope> queryScopes = new HashMap<>();
         Map<String, Map<String, Object>> docs = new HashMap<>();
         List<PendingWrite> pendingWrites = new ArrayList<>();
+        List<Integer> getAllSizes = new ArrayList<>();
         docs.put("orgs/tenant-a/members/pm-1", member);
         docs.put(leasePath("project-a"), lease);
         if (projectExists) {
@@ -2704,6 +2709,7 @@ class FirestoreCashflowLeaseGuardTest {
                 : java.util.Arrays.stream(arguments)
                 .map(DocumentReference.class::cast)
                 .toArray(DocumentReference[]::new);
+            getAllSizes.add(documents.length);
             List<DocumentSnapshot> snapshots = java.util.Arrays.stream(documents).map(document -> {
                 Map<String, Object> data = docs.get(document.getPath());
                 String documentId = document.getId();
@@ -2769,7 +2775,7 @@ class FirestoreCashflowLeaseGuardTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             cashflowMonthCloseQaDate
         );
-        return new Fixture(persistence, transaction, refs, docs);
+        return new Fixture(persistence, transaction, refs, collections, docs, getAllSizes);
     }
 
     private static DocumentReference ref(Map<String, DocumentReference> refs, String path) {
@@ -3116,7 +3122,9 @@ class FirestoreCashflowLeaseGuardTest {
         FirestoreInheritedWeeklyExpensePersistence persistence,
         Transaction transaction,
         Map<String, DocumentReference> refs,
-        Map<String, Map<String, Object>> documents
+        Map<String, CollectionReference> collections,
+        Map<String, Map<String, Object>> documents,
+        List<Integer> getAllSizes
     ) {
     }
 

@@ -2,6 +2,8 @@ package dev.merryai.innerplatform.weekly.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
@@ -154,6 +156,62 @@ class CashflowSheetMonthlyApplyServiceTest {
         assertThat(replay).isEqualTo(savedResponse);
         verify(persistence, never()).requireCashflowWriteLease(any(), any(), any());
         verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void replaysTheExactBatchResponseForTheSameIdempotencyKeyAndRequest() throws Exception {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "apply-batch-replay",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            false,
+            List.of(
+                new CashflowSheetBatchApplyRequest.Month("2026-07", completeCells(5)),
+                new CashflowSheetBatchApplyRequest.Month("2026-08", completeCells(5))
+            )
+        );
+        CashflowSheetBatchApplyResponse savedResponse = new CashflowSheetBatchApplyResponse(
+            true,
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            "project-a",
+            "cashflow-sheet-lab",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            TARGET_REVISION,
+            160,
+            160,
+            List.of(),
+            17,
+            "audit-batch-1"
+        );
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(
+            "tenant-a",
+            "project-a",
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            "apply-batch-replay"
+        )).thenReturn(Optional.of(new WeeklyExpenseIdempotencyEntity(
+            "tenant-a",
+            "project-a",
+            "apply-batch-replay",
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            sha256(objectMapper.writeValueAsString(request)),
+            objectMapper.writeValueAsString(savedResponse)
+        )));
+
+        CashflowSheetBatchApplyResponse replay = service(persistence).applyCashflowSheetBatch(
+            ACTOR,
+            "project-a",
+            SESSION,
+            request
+        );
+
+        assertThat(replay).isEqualTo(savedResponse);
+        verify(persistence, never()).replaceCashflowSheetMonths(any(), any(), any(), any(), any());
+        verify(persistence, never()).saveAuditEvent(any());
+        verify(persistence, never()).saveIdempotency(any());
     }
 
     @Test

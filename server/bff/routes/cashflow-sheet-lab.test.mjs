@@ -1,4 +1,6 @@
 import express from 'express';
+import ExcelJS from 'exceljs';
+import { fileURLToPath } from 'node:url';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { mountCashflowSheetLabRoutes } from './cashflow-sheet-lab.mjs';
@@ -166,44 +168,21 @@ function buildMatrixWithWeekLabels(weekLabels) {
   ];
 }
 
-function buildWorkbook260701MockMatrix() {
-  const weekLabels = Array.from({ length: 12 }, (_, monthIndex) => (
-    Array.from({ length: 5 }, (_unused, weekIndex) => `26-${monthIndex + 1}-${weekIndex + 1}`)
-  )).flat();
-  const valueMap = new Map([
-    ['IN:0:26-1-3', '2300000'],
-    ['IN:1:26-1-3', '2000000'],
-    ['IN:2:26-2-1', '300000'],
-    ['IN:3:26-2-1', '5000000'],
-    ['IN:4:26-2-1', '500000'],
-    ['IN:5:26-2-1', '1000000'],
-    ['IN:6:26-3-1', '0'],
-    ['OUT:0:26-2-2', '2300000'],
-    ['OUT:1:26-1-4', '2000000'],
-    ['OUT:2:26-1-3', '1000000'],
-    ['OUT:2:26-1-4', '2000000'],
-    ['OUT:3:26-1-3', '100000'],
-    ['OUT:3:26-1-4', '200000'],
-    ['OUT:4:26-2-3', '2000000'],
-    ['OUT:5:26-2-2', '2000000'],
-    ['OUT:6:26-2-2', '500000'],
-    ['OUT:7:26-1-5', '1000000'],
-  ]);
-  const section = (actual) => {
-    const inLabels = actual ? ACTUAL_IN_LABELS : PROJECTION_IN_LABELS;
-    const outLabels = actual ? ACTUAL_OUT_LABELS : PROJECTION_OUT_LABELS;
-    const values = (direction, lineIndex) => weekLabels.map((week) => valueMap.get(`${direction}:${lineIndex}:${week}`) || '');
-    return [
-      [actual ? 'ACTUAL' : 'Projection'],
-      ['', '', '', ...weekLabels],
-      ...inLabels.map((label, index) => [label, '', '', ...values('IN', index)]),
-      ['입금 합계'],
-      ...outLabels.map((label, index) => [label, '', '', ...values('OUT', index)]),
-      ['출금 합계'],
-      [actual ? '잔액' : '잔액 (※ 중요)'],
-    ];
-  };
-  return [['260701 cashflow mock'], ...section(false), [], ...section(true)];
+async function loadSanitized260701FullYearFixture() {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(fileURLToPath(new URL(
+    '../fixtures/cashflow-260701-sanitized-full-year.xlsx',
+    import.meta.url,
+  )));
+  const sheet = workbook.getWorksheet('cashflow(사용내역 연동)');
+  if (!sheet) throw new Error('Sanitized cashflow fixture sheet is missing');
+  return Array.from({ length: sheet.rowCount }, (_row, rowIndex) => (
+    Array.from({ length: sheet.columnCount }, (_column, columnIndex) => {
+      const value = sheet.getCell(rowIndex + 1, columnIndex + 1).value;
+      if (value && typeof value === 'object' && 'result' in value) return value.result ?? '';
+      return value ?? '';
+    })
+  ));
 }
 
 function buildMultiYearMatrix() {
@@ -2273,7 +2252,7 @@ describe('cashflow sheet lab route', () => {
     expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
-  it('imports the sanitized 260701 workbook shape across the full year and verifies exact ledger totals', async () => {
+  it('imports the sanitized 260701 XLSX across all 12 months and verifies exact ledger totals', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2288,10 +2267,10 @@ describe('cashflow sheet lab route', () => {
     const googleSheetsService = {
       previewSpreadsheet: vi.fn(async () => ({
         spreadsheetId: 'spreadsheet-a',
-        spreadsheetTitle: '260701 cashflow mock',
+        spreadsheetTitle: '260701 sanitized cashflow fixture',
         selectedSheetName: 'cashflow(사용내역 연동)',
         availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-        matrix: buildWorkbook260701MockMatrix(),
+        matrix: await loadSanitized260701FullYearFixture(),
       })),
     };
     const resultingTargetRevision = `sha256:${'3'.repeat(64)}`;
@@ -2323,17 +2302,20 @@ describe('cashflow sheet lab route', () => {
       actualIn: sum('actual', 'IN'),
       actualOut: sum('actual', 'OUT'),
     }).toEqual({
-      projectionIn: 11_100_000,
-      projectionOut: 13_100_000,
-      actualIn: 11_100_000,
-      actualOut: 13_100_000,
+      projectionIn: 7_800_000,
+      projectionOut: 3_900_000,
+      actualIn: 7_020_000,
+      actualOut: 3_120_000,
     });
 
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-260701-mock' })
       .expect(200);
-    expect(stage.body.stagedMonths).toEqual(['2026-01', '2026-02', '2026-03']);
+    expect(stage.body.stagedMonths).toEqual(Array.from(
+      { length: 12 },
+      (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`,
+    ));
 
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
@@ -2341,10 +2323,10 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(apply.body).toMatchObject({
-      appliedLineCount: 480,
-      projectionLineCount: 240,
-      actualLineCount: 240,
-      verifiedLineCount: 34,
+      appliedLineCount: 1920,
+      projectionLineCount: 960,
+      actualLineCount: 960,
+      verifiedLineCount: 49,
       resultingTargetRevision: `sha256:${'3'.repeat(64)}`,
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);

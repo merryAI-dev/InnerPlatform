@@ -28,6 +28,7 @@ scripts/etl/output/
 
 # Large binary files
 *.xlsx
+!server/bff/fixtures/cashflow-260701-sanitized-full-year.xlsx
 .env.vercel.production
 .gitnexus
 .worktrees/

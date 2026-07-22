@@ -42,10 +42,10 @@
 
 | Phase | 기준 문서 | 상태 | 최종 점수 |
 |---|---|---:|---:|
-| Cashflow sheet fidelity | `.gstack/sprint-contract-2026-07-13-cashflow-sheet-fidelity.md` | RETROSPECTIVE_PENDING | - |
+| Cashflow sheet fidelity | `docs/architecture/contracts/2026-07-13-cashflow-sheet-fidelity.md` | COMPLETE | 100/100 |
 | Main home / project selection | `.gstack/sprint-contract-2026-07-20-main-home-project-selection.md` | RETROSPECTIVE_PENDING | - |
 | Cashflow sheet tutorial | `.gstack/sprint-contract-2026-07-20-cashflow-sheet-tutorial.md` | RETROSPECTIVE_PENDING | - |
-| Cashflow multi-month apply | `.gstack/sprint-contract-2026-07-21-cashflow-multi-month-apply.md` | RETROSPECTIVE_PENDING | - |
+| Cashflow multi-month apply | `docs/architecture/contracts/2026-07-21-cashflow-multi-month-apply.md` | COMPLETE | 100/100 |
 | Cashflow weekly lock | `docs/architecture/contracts/2026-07-22-cashflow-weekly-lock.md` | COMPLETE | 100/100 |
 
 이전 Phase는 현재 Phase를 100점으로 마감한 뒤 같은 기준으로 역검증한다. 점수가 부족하면 완료 상태를 취소하고 보완 작업으로 되돌린다. 향후 Phase는 구현을 시작하기 전에 이 등록부에 계약과 감시자를 먼저 등록하고, 100점 증거가 없으면 다음 Phase 또는 Stage로 넘어가지 않는다.
