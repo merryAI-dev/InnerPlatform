@@ -126,6 +126,29 @@ describe('Java weekly cashflow client', () => {
     });
   });
 
+  it('forwards a late closed-month change reason to the JVM batch authority', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', months: [] }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await client.applyCashflowSheetBatch({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-batch-reason-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      targetRevision: monthlyContract.targetRevision,
+      months: [{ yearMonth: '2026-07', cells: monthlyContract.cells }],
+      closedMonthChangeReason: '결산 후 실제 입금액 정정',
+    });
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toMatchObject({
+      closedMonthChangeReason: '결산 후 실제 입금액 정정',
+    });
+  });
+
   it('fails before network when BFF and JVM data projects differ', async () => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({
@@ -271,6 +294,7 @@ describe('Java weekly cashflow client', () => {
     expect(resolveIdentityToken).toHaveBeenCalledWith({
       audience: 'https://stage-jvm.example',
       serviceAccountJson,
+      signal: expect.any(AbortSignal),
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer stage-id-token');
@@ -289,6 +313,103 @@ describe('Java weekly cashflow client', () => {
       ...monthlyContract,
     })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts a hanging JVM request before the frontend timeout and returns the stable unreachable code', async () => {
+    const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-timeout-1',
+      ...monthlyContract,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([, init]) => init.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  it('times out a hanging identity-token resolver before the JVM fetch starts', async () => {
+    const fetchImpl = vi.fn();
+    const resolveIdentityToken = vi.fn(() => new Promise(() => {}));
+    const client = createJavaWeeklyClient({
+      env: stageEnv({
+        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example',
+        JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' }),
+      }),
+      fetchImpl,
+      jvmWeeklyApiIdentityTokenResolver: resolveIdentityToken,
+      jvmWeeklyApiTimeoutMs: 5,
+    });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-token-timeout-1',
+      ...monthlyContract,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    expect(resolveIdentityToken.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(resolveIdentityToken.mock.calls.every(([input]) => input.signal instanceof AbortSignal)).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('passes the attempt AbortSignal to a hanging metadata identity-token fetch', async () => {
+    const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }));
+    const client = createJavaWeeklyClient({
+      env: stageEnv({ JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example' }),
+      fetchImpl,
+      jvmWeeklyApiTimeoutMs: 5,
+    });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-metadata-timeout-1',
+      ...monthlyContract,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(fetchImpl.mock.calls.every(([, init]) => init.signal instanceof AbortSignal)).toBe(true);
+    expect(fetchImpl.mock.calls.every(([url]) => String(url).includes('metadata.google.internal'))).toBe(true);
+  });
+
+  it('caps the configured timeout so two attempts stay within the 24-second total budget', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      }));
+      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 30_000 });
+      const requestPromise = client.applyCashflowSheetLab({
+        context,
+        projectId: 'project-a',
+        idempotencyKey: 'apply-total-timeout-budget',
+        ...monthlyContract,
+      });
+      const assertion = expect(requestPromise)
+        .rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+
+      await vi.advanceTimersByTimeAsync(24_001);
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('preserves the JVM atomic write count on client errors', async () => {
@@ -313,6 +434,26 @@ describe('Java weekly cashflow client', () => {
       statusCode: 422,
       code: 'atomic_write_limit_exceeded',
       details: { expectedWriteCount: 501 },
+    });
+  });
+
+  it('normalizes an unstructured Spring 500 response into a stable retryable BFF error', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => JSON.stringify({ code: 'internal_error', error: 'Internal Server Error', message: 'unexpected failure' }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-internal-error',
+      ...monthlyContract,
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_internal_error',
+      upstreamStatus: 500,
     });
   });
 });

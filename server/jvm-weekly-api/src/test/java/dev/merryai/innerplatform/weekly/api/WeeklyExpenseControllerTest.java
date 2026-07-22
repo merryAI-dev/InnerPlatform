@@ -847,7 +847,7 @@ class WeeklyExpenseControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
             .andExpect(status().isServiceUnavailable())
-            .andExpect(jsonPath("$.code").value("cashflow_month_replace_backend_unavailable"));
+            .andExpect(jsonPath("$.code").value("cashflow_month_amendment_backend_unavailable"));
 
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
@@ -1445,7 +1445,9 @@ class WeeklyExpenseControllerTest {
         when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-month-dashboard"), eq("2026-06")))
             .thenReturn(new CashflowMonthCloseResponse(
             true, "cashflowMonth.read", "project-month-dashboard", "2026-06", "OPEN",
-            0, 0, 0, null, null, Map.of(), Map.of(), false,
+            0, 0, 0,
+            0, 0, null, null, null, null, null, false,
+            null, null, Map.of(), Map.of(), false,
             "2026-07-20", "2026-07-10", true,
             null, null, null, null, null, null, null, null, null, null, null
         ));

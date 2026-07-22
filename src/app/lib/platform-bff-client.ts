@@ -981,6 +981,14 @@ export interface CashflowMonthCloseResult {
   revision: number;
   reopenCount: number;
   projectWarningCount: number;
+  amendmentCount: number;
+  postDeadlineAmendmentWarningCount: number;
+  lastAmendmentAt: string | null;
+  lastAmendmentByUid: string | null;
+  lastAmendmentByName: string | null;
+  lastAmendmentReason: string | null;
+  lastAmendmentDeadline: string | null;
+  lastAmendmentPostDeadline: boolean;
   snapshotHash: string | null;
   previousSnapshotHash: string | null;
   snapshot: Record<string, unknown>;

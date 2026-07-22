@@ -42,6 +42,7 @@ const CASHFLOW_SHEET_STAGE_YEARS_COLLECTION_ID = 'cashflow_sheet_stage_years';
 const CASHFLOW_YEAR_TOTALS_COLLECTION_ID = 'cashflow_sheet_year_totals';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
+const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const FINANCIAL_YEAR_FIELDS = [
   'contractAmount',
@@ -1358,7 +1359,31 @@ async function readCashflowSheetStageYear({ db, tenantId, projectId, runId, year
   return value;
 }
 
-function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, context, now, forceFullReplacement = false }) {
+async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, yearMonths }) {
+  const closedMonths = new Set();
+  await Promise.all((yearMonths || []).map(async (yearMonth) => {
+    const snap = await db.doc(`orgs/${tenantId}/monthly_closes/${projectId}-${yearMonth}`).get();
+    if (!snap.exists) return;
+    const close = snap.data() || {};
+    if (
+      readOptionalText(close.contractVersion) !== 'cashflow-month-close-v1'
+      || readOptionalText(close.tenantId) !== tenantId
+      || readOptionalText(close.projectId) !== projectId
+      || readOptionalText(close.yearMonth) !== yearMonth
+      || !['OPEN', 'CLOSED', 'REOPEN_REQUESTED'].includes(readOptionalText(close.status))
+    ) {
+      throw createHttpError(
+        409,
+        `${yearMonth} 월 결산 상태가 표준 계약과 다릅니다. 관리자에게 확인해 주세요.`,
+        'cashflow_month_close_contract_invalid',
+      );
+    }
+    if (close.status === 'CLOSED') closedMonths.add(yearMonth);
+  }));
+  return closedMonths;
+}
+
+function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, closedMonths = new Set(), context, now, forceFullReplacement = false }) {
   const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
   const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
   const blockedMonths = new Set((mirror?.cells || [])
@@ -1368,13 +1393,6 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
   for (const [yearMonth, cells] of groupPinnedCellsByMonth(mirror?.cells || [])) {
     if (!validateCompletePinnedMonth(yearMonth, cells).ok) blockedMonths.add(yearMonth);
   }
-  const closedMonths = new Set((cashflowSnapshot?.weeks || [])
-    .filter((week) => (
-      Boolean(week?.adminClosed)
-      || readOptionalText(week?.weeklyStatusState).toLowerCase() === 'closed'
-    ))
-    .map((week) => readOptionalText(week?.yearMonth))
-    .filter(Boolean));
   const closedDifferences = (mirror?.cells || []).filter((cell) => {
     if (!closedMonths.has(readOptionalText(cell?.yearMonth))) return false;
     if (cell?.state !== 'VALUE' && cell?.state !== 'EMPTY') return false;
@@ -1402,7 +1420,6 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
     summary.differenceCount += 1;
     summary.weeks.add(Number(cell.weekNo));
     closedMonthDifferenceMap.set(yearMonth, summary);
-    blockedMonths.add(yearMonth);
   }
   const closedMonthDifferences = [...closedMonthDifferenceMap.values()]
     .map((summary) => ({
@@ -1412,7 +1429,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
     }))
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
   const riskLineCount = closedDifferences.length;
-  const nonWritableMonths = new Set([...blockedMonths, ...closedMonths]);
+  const nonWritableMonths = blockedMonths;
 
   const candidates = (mirror?.cells || [])
     .filter((cell) => !nonWritableMonths.has(readOptionalText(cell.yearMonth)))
@@ -1431,7 +1448,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       if (!forceFullReplacement && beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
 
       const week = weekIndex.get(`${cell.yearMonth}:${cell.weekNo}`);
-      const riskFlags = week?.adminClosed ? ['closed_week_change'] : [];
+      const riskFlags = closedMonths.has(readOptionalText(cell.yearMonth)) ? ['closed_month_change'] : [];
       return {
         tenantId,
         projectId,
@@ -1712,11 +1729,20 @@ function javaAppliedLineIndex(lines, { mode, yearMonth }) {
   return index;
 }
 
-function verifyJavaMonthAppliedCells(result, month, projectId) {
+function verifyJavaMonthAppliedCells(result, month, {
+  projectId,
+  sourceRevision,
+  targetRevision,
+  commandName,
+}) {
   if (
-    readOptionalText(result?.projectId) !== projectId
+    result?.ok !== true
+    || readOptionalText(result?.commandName) !== commandName
+    || readOptionalText(result?.projectId) !== projectId
     || readOptionalText(result?.yearMonth) !== month.yearMonth
     || readOptionalText(result?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+    || readOptionalText(result?.sourceRevision) !== sourceRevision
+    || readOptionalText(result?.targetRevision) !== targetRevision
   ) {
     throw createHttpError(502, 'JVM 캐시플로 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
   }
@@ -1737,11 +1763,14 @@ function verifyJavaMonthAppliedCells(result, month, projectId) {
   return verifiedLineCount;
 }
 
-function verifyJavaAnnualAppliedCells(result, stagedYear, projectId) {
+function verifyJavaAnnualAppliedCells(result, stagedYear, { projectId, sourceRevision }) {
   if (
-    readOptionalText(result?.projectId) !== projectId
+    result?.ok !== true
+    || readOptionalText(result?.commandName) !== CASHFLOW_SHEET_APPLY_COMMAND
+    || readOptionalText(result?.projectId) !== projectId
     || Number(result?.year) !== stagedYear.year
     || readOptionalText(result?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+    || readOptionalText(result?.sourceRevision) !== sourceRevision
     || Number(result?.revision) !== Number(stagedYear.expectedRevision) + 1
   ) {
     throw createHttpError(502, 'JVM 연간 합계 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
@@ -1793,6 +1822,7 @@ async function applyStagedCashflowSheetLab({
   const applyRequestHash = stableHash({
     stagedRunId,
     applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
+    ...(readOptionalText(parsed.closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason) } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
   });
   if (readOptionalText(stageRun.status) === 'APPLIED') {
@@ -1810,15 +1840,11 @@ async function applyStagedCashflowSheetLab({
     throw createHttpError(400, '저장할 검토 후보가 없습니다.', 'cashflow_sheet_stage_candidates_empty');
   }
 
-  const riskCandidates = candidates.filter((candidate) => Array.isArray(candidate.riskFlags) && candidate.riskFlags.length > 0);
   const candidateMonths = [...new Set(candidates.map((candidate) => readOptionalText(candidate.yearMonth)).filter(Boolean))].sort();
   const candidateYears = [...new Set(candidates
     .filter((candidate) => readOptionalText(candidate.scope) === 'annual')
     .map((candidate) => Number(candidate.year))
     .filter(Number.isSafeInteger))].sort((left, right) => left - right);
-  if (riskCandidates.length > 0) {
-    throw createHttpError(409, '결산된 월은 다시 열기 전까지 수정할 수 없습니다.', 'cashflow_sheet_stage_closed_month');
-  }
   const selectedMonths = candidateMonths;
   const selectedMonthSet = new Set(selectedMonths);
   const selectedYearSet = new Set(candidateYears);
@@ -1926,46 +1952,10 @@ async function applyStagedCashflowSheetLab({
       ? await resolveEditSession()
       : editSession;
     const operationCount = stagedYears.length + (stagedMonths.length > 0 ? 1 : 0);
-    for (const yearBatch of chunkArray(stagedYears.map((stagedYear, index) => ({ stagedYear, index })), 4)) {
-      const settled = await Promise.allSettled(yearBatch.map(async ({ stagedYear, index }) => {
-        const operationStartedAt = Date.now();
-        const isLastOperation = index === operationCount - 1;
-        const yearEditSession = resolvedEditSession
-          ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
-          : null;
-        const javaResult = await javaWeeklyClient.applyCashflowSheetAnnualTotal({
-          context,
-          projectId,
-          idempotencyKey: yearApplyIdempotencyKey({
-            idempotencyKey: effectiveIdempotencyKey,
-            stagedRunId,
-            year: stagedYear.year,
-          }),
-          editSession: yearEditSession,
-          sourceRevision: stageRun.sourceRevision,
-          year: stagedYear.year,
-          expectedRevision: stagedYear.expectedRevision,
-          cells: stagedYear.cells,
-        });
-        const result = {
-          javaResult,
-          verifiedLineCount: verifyJavaAnnualAppliedCells(javaResult, stagedYear, projectId),
-        };
-        logger('annual.ok', { projectId, year: stagedYear.year, durationMs: Date.now() - operationStartedAt });
-        return result;
-      }));
-      const rejected = settled.find((result) => result.status === 'rejected');
-      for (const result of settled) {
-        if (result.status !== 'fulfilled') continue;
-        verifiedLineCount += result.value.verifiedLineCount;
-        javaAnnualResults.push(result.value.javaResult);
-        completedOperationCount += 1;
-      }
-      if (rejected) throw rejected.reason;
-    }
     if (stagedMonths.length === 1) {
       const operationStartedAt = Date.now();
       const month = stagedMonths[0];
+      const monthTargetRevision = targetRevision;
       const isLastOperation = completedOperationCount === operationCount - 1;
       const monthEditSession = resolvedEditSession
         ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
@@ -1984,9 +1974,15 @@ async function applyStagedCashflowSheetLab({
         yearMonth: month.yearMonth,
         cells: month.cells,
         replaceAllActualSources,
+        closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
       });
       targetRevision = assertResultingTargetRevision(javaResult);
-      verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, projectId);
+      verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, {
+        projectId,
+        sourceRevision: readOptionalText(stageRun.sourceRevision),
+        targetRevision: monthTargetRevision,
+        commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+      });
       logger('month.ok', { projectId, yearMonth: month.yearMonth, durationMs: Date.now() - operationStartedAt });
       javaResults.push(javaResult);
       completedOperationCount += 1;
@@ -2010,9 +2006,13 @@ async function applyStagedCashflowSheetLab({
         targetRevision,
         months: stagedMonths.map((month) => ({ yearMonth: month.yearMonth, cells: month.cells })),
         replaceAllActualSources,
+        closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
       });
       if (
-        readOptionalText(batchResult?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+        batchResult?.ok !== true
+        || readOptionalText(batchResult?.commandName) !== CASHFLOW_SHEET_APPLY_COMMAND
+        || readOptionalText(batchResult?.projectId) !== projectId
+        || readOptionalText(batchResult?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
         || readOptionalText(batchResult?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
         || readOptionalText(batchResult?.targetRevision) !== batchTargetRevision
       ) {
@@ -2031,6 +2031,7 @@ async function applyStagedCashflowSheetLab({
         }
         const compatibleResult = {
           ...monthResult,
+          ok: batchResult.ok,
           commandName: batchResult.commandName,
           projectId: batchResult.projectId,
           sourceSheetKey: batchResult.sourceSheetKey,
@@ -2039,7 +2040,12 @@ async function applyStagedCashflowSheetLab({
           resultingTargetRevision: batchResult.resultingTargetRevision,
           auditId: batchResult.auditId,
         };
-        verifiedLineCount += verifyJavaMonthAppliedCells(compatibleResult, month, projectId);
+        verifiedLineCount += verifyJavaMonthAppliedCells(compatibleResult, month, {
+          projectId,
+          sourceRevision: readOptionalText(stageRun.sourceRevision),
+          targetRevision: batchTargetRevision,
+          commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+        });
         javaResults.push(compatibleResult);
       }
       logger('months.ok', {
@@ -2049,6 +2055,49 @@ async function applyStagedCashflowSheetLab({
         jvmDurationMs: Number(batchResult?.durationMs) || 0,
       });
       completedOperationCount += 1;
+    }
+    // Closed-month authorization is validated by the JVM monthly command. Run it before
+    // independent annual totals so a missing late-amendment reason cannot leave a partial apply.
+    for (const yearBatch of chunkArray(stagedYears.map((stagedYear, index) => ({ stagedYear, index })), 4)) {
+      const settled = await Promise.allSettled(yearBatch.map(async ({ stagedYear, index }) => {
+        const operationStartedAt = Date.now();
+        const operationIndex = (stagedMonths.length > 0 ? 1 : 0) + index;
+        const isLastOperation = operationIndex === operationCount - 1;
+        const yearEditSession = resolvedEditSession
+          ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
+          : null;
+        const javaResult = await javaWeeklyClient.applyCashflowSheetAnnualTotal({
+          context,
+          projectId,
+          idempotencyKey: yearApplyIdempotencyKey({
+            idempotencyKey: effectiveIdempotencyKey,
+            stagedRunId,
+            year: stagedYear.year,
+          }),
+          editSession: yearEditSession,
+          sourceRevision: stageRun.sourceRevision,
+          year: stagedYear.year,
+          expectedRevision: stagedYear.expectedRevision,
+          cells: stagedYear.cells,
+        });
+        const result = {
+          javaResult,
+          verifiedLineCount: verifyJavaAnnualAppliedCells(javaResult, stagedYear, {
+            projectId,
+            sourceRevision: readOptionalText(stageRun.sourceRevision),
+          }),
+        };
+        logger('annual.ok', { projectId, year: stagedYear.year, durationMs: Date.now() - operationStartedAt });
+        return result;
+      }));
+      const rejected = settled.find((result) => result.status === 'rejected');
+      for (const result of settled) {
+        if (result.status !== 'fulfilled') continue;
+        verifiedLineCount += result.value.verifiedLineCount;
+        javaAnnualResults.push(result.value.javaResult);
+        completedOperationCount += 1;
+      }
+      if (rejected) throw rejected.reason;
     }
   } catch (error) {
     const statusCode = Number(error?.statusCode || error?.status);
@@ -2072,7 +2121,7 @@ async function applyStagedCashflowSheetLab({
   const actualLineCount = appliedCells.filter((cell) => cell.mode === 'actual').length;
   const response = {
     ok: true,
-    commandName: 'weeklyExpense.cashflowSheetLab.apply',
+    commandName: CASHFLOW_SHEET_APPLY_COMMAND,
     projectId,
     sourceSheetKey: CASHFLOW_SHEET_SOURCE_KEY,
     sourceRevision: stageRun.sourceRevision,
@@ -2085,7 +2134,7 @@ async function applyStagedCashflowSheetLab({
     appliedLineCount: appliedCells.length,
     projectionLineCount,
     actualLineCount,
-    skippedRiskLineCount: parsed.applyRiskCandidates ? 0 : riskCandidates.length,
+    skippedRiskLineCount: 0,
     lastAppliedAt: now,
     runId: `cashflow-sheet-apply:${projectId}:${now}`,
     stagedRunId,
@@ -2097,7 +2146,7 @@ async function applyStagedCashflowSheetLab({
     verifiedLineCount,
     firebaseResult: {
       ok: true,
-      commandName: 'weeklyExpense.cashflowSheetLab.apply',
+      commandName: CASHFLOW_SHEET_APPLY_COMMAND,
       projectId,
       sourceRevision: stageRun.sourceRevision,
       targetRevisionAtStart: stageRun.targetRevisionAtFetch,
@@ -2115,18 +2164,19 @@ async function applyStagedCashflowSheetLab({
       verifiedLineCount,
     },
   };
-  await reservation.runRef.set({
+  const runCompletionPatch = {
     status: 'APPLIED',
     appliedAt: now,
     appliedIdempotencyKey: effectiveIdempotencyKey,
     applyRequestHash,
     applyResponse: response,
     appliedBy: response.lastAppliedBy,
-  }, { merge: true });
+  };
   const appliedWeeklyYears = [...new Set(selectedMonths
     .map((yearMonth) => Number(yearMonth.slice(0, 4)))
     .filter(Number.isSafeInteger))];
-  await db.doc(cashflowSheetMirrorDocPath(tenantId, projectId)).set(stripUndefinedDeep({
+  const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+  const mirrorCompletionPatch = stripUndefinedDeep({
     appliedSourceRevision: stageRun.sourceRevision,
     appliedTargetRevision: targetRevision,
     lastAppliedAt: now,
@@ -2143,7 +2193,20 @@ async function applyStagedCashflowSheetLab({
     ].filter(Number.isSafeInteger))]
       .filter((year) => !candidateYears.includes(year))
       .sort((left, right) => left - right),
-  }), { merge: true });
+  });
+  await db.runTransaction(async (transaction) => {
+    const currentRunSnap = await transaction.get(reservation.runRef);
+    const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+    if (
+      readOptionalText(currentRun.status) !== 'APPLYING'
+      || readOptionalText(currentRun.appliedIdempotencyKey) !== effectiveIdempotencyKey
+      || readOptionalText(currentRun.applyRequestHash) !== applyRequestHash
+    ) {
+      throw createHttpError(409, '시트 반영 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_apply_completion_conflict');
+    }
+    transaction.set(reservation.runRef, runCompletionPatch, { merge: true });
+    transaction.set(mirrorRef, mirrorCompletionPatch, { merge: true });
+  });
   try {
     await markCashflowChangeCandidatesStatus({
       db,
@@ -2221,6 +2284,12 @@ async function stagePinnedCashflowSheetLab({
   if (currentTargetRevision !== readOptionalText(mirror.targetRevisionAtFetch)) {
     throw createHttpError(409, '시트 연동 후 캐시플로우 값이 변경되었습니다. 다시 연동해 주세요.', 'cashflow_sheet_target_revision_conflict');
   }
+  const closedMonths = await readCanonicalClosedCashflowMonths({
+    db,
+    tenantId,
+    projectId,
+    yearMonths: pinnedMonths,
+  });
   const now = new Date().toISOString();
   const weekly = buildPinnedSheetChangeCandidates({
     tenantId,
@@ -2228,6 +2297,7 @@ async function stagePinnedCashflowSheetLab({
     runId,
     mirror: { ...mirror, cells: pinnedCells },
     cashflowSnapshot,
+    closedMonths,
     context,
     now,
     forceFullReplacement: Boolean(parsed.replaceAllActualSources),

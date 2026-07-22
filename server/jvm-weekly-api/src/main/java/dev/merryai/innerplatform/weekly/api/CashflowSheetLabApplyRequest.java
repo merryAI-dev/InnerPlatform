@@ -24,10 +24,22 @@ public record CashflowSheetLabApplyRequest(
     @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])")
     String yearMonth,
     boolean replaceAllActualSources,
+    @Size(max = 1000) String closedMonthChangeReason,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
     public static final int EXPECTED_CELL_COUNT = 160;
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        List<Cell> cells
+    ) {
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, cells);
+    }
 
     public record Cell(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,

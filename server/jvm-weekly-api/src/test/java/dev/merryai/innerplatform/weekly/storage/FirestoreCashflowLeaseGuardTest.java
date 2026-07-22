@@ -734,7 +734,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void multiMonthApplyWritesNothingWhenAnyRequestedMonthIsClosed() {
+    void multiMonthApplyAmendsAClosedMonthBeforeItsDeadlineWithoutAWarning() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-08", Map.of(
             "contractVersion", "cashflow-month-close-v1",
@@ -759,13 +759,119 @@ class FirestoreCashflowLeaseGuardTest {
             )
         );
 
+        CashflowSheetBatchApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
+            .containsExactly("2026-07", "2026-08");
+        assertThat(fixture.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-08"))
+            .containsEntry("amendmentCount", 1L)
+            .containsEntry("postDeadlineAmendmentWarningCount", 0L)
+            .containsEntry("lastAmendmentPostDeadline", false);
+        assertThat(fixture.documents.keySet()).anyMatch(path -> path.contains("/cashflow_month_amendments/"));
+    }
+
+    @Test
+    void multiMonthApplyRequiresOneLateReasonAndRecordsTheClosedMonthOnce() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-11"));
+        fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "CLOSED",
+            "revision", 1L,
+            "reopenCount", 0L
+        ));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest july = monthlyRequest("batch-late-july", targetRevision, "2026-07", "");
+        CashflowSheetLabApplyRequest august = monthlyRequest("batch-late-august", targetRevision, "2026-08", "");
+        List<CashflowSheetBatchApplyRequest.Month> months = List.of(
+            new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells()),
+            new CashflowSheetBatchApplyRequest.Month("2026-08", august.cells())
+        );
+        CashflowSheetBatchApplyRequest withoutReason = new CashflowSheetBatchApplyRequest(
+            "batch-late-no-reason", SOURCE_REVISION, targetRevision, false, null, months
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, withoutReason)))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
+                assertThat(error.statusCode()).isEqualTo(409);
+                assertThat(error.code()).isEqualTo("cashflow_closed_month_reason_required");
+            });
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_month_amendments/"));
+
+        CashflowSheetBatchApplyRequest corrected = new CashflowSheetBatchApplyRequest(
+            "batch-late-with-reason",
+            SOURCE_REVISION,
+            targetRevision,
+            false,
+            "결산 후 다중 월 입금액 정정",
+            months
+        );
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        CashflowSheetBatchApplyResponse first = fixture.persistence.runCommandTransaction(() ->
+            service.applyCashflowSheetBatch(ACTOR, "project-a", SESSION, corrected)
+        );
+        CashflowSheetBatchApplyResponse replay = fixture.persistence.runCommandTransaction(() ->
+            service.applyCashflowSheetBatch(ACTOR, "project-a", SESSION, corrected)
+        );
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(fixture.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-07"))
+            .containsEntry("amendmentCount", 1L)
+            .containsEntry("postDeadlineAmendmentWarningCount", 1L)
+            .containsEntry("lastAmendmentReason", "결산 후 다중 월 입금액 정정");
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_month_amendments/")))
+            .hasSize(1);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/weekly_api_audit_events/")))
+            .hasSize(1);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weeks/project-a-2026-")))
+            .hasSize(10);
+    }
+
+    @Test
+    void sheetBatchDoesNotTreatAReopenRequestAsAClosedMonthAmendment() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-11"));
+        fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "REOPEN_REQUESTED",
+            "revision", 2L,
+            "reopenCount", 0L
+        ));
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest july = monthlyRequest("batch-reopen-requested", targetRevision, "2026-07", "");
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "batch-reopen-requested",
+            SOURCE_REVISION,
+            targetRevision,
+            false,
+            "승인 전 변경 시도",
+            List.of(new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells()))
+        );
+
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request)))
             .isInstanceOf(WeeklyExpenseConflictException.class)
             .hasMessageContaining("closed");
-
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_month_amendments/"));
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/weekly_api_audit_events/"));
     }
 
     @Test
@@ -797,7 +903,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void monthlyApplyRejectsTargetDriftAndAClosedMonthWithoutCanonicalWrites() {
+    void monthlyApplyRejectsTargetDriftAndAmendsAClosedMonthBeforeItsDeadline() {
         Fixture drifted = fixture(activeMember(), activeLease());
         assertThatThrownBy(() -> drifted.persistence.runCommandTransaction(() -> commandService(
             drifted.persistence
@@ -823,7 +929,7 @@ class FirestoreCashflowLeaseGuardTest {
             "revision", 1L,
             "reopenCount", 0L
         ));
-        assertThatThrownBy(() -> closed.persistence.runCommandTransaction(() -> commandService(
+        CashflowSheetLabApplyResponse closedResponse = closed.persistence.runCommandTransaction(() -> commandService(
             closed.persistence
         ).applyCashflowSheetLab(
             ACTOR,
@@ -834,8 +940,61 @@ class FirestoreCashflowLeaseGuardTest {
                 "sha256:298012959db83e193536ff7f60735889252ceaa4325de6944465e2dd197fcb44",
                 ""
             )
-        ))).isInstanceOf(WeeklyExpenseConflictException.class).hasMessageContaining("closed");
-        assertThat(closed.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
+        ));
+        assertThat(closedResponse.yearMonth()).isEqualTo("2026-07");
+        assertThat(closed.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-07"))
+            .containsEntry("amendmentCount", 1L)
+            .containsEntry("postDeadlineAmendmentWarningCount", 0L);
+    }
+
+    @Test
+    void postDeadlineClosedMonthSheetChangeRequiresReasonAndRecordsOneWarning() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-11"));
+        fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "CLOSED",
+            "revision", 1L,
+            "reopenCount", 0L
+        ));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest base = monthlyRequest("late-no-reason", targetRevision, "");
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, base)))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
+                assertThat(error.statusCode()).isEqualTo(409);
+                assertThat(error.code()).isEqualTo("cashflow_closed_month_reason_required");
+            });
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+
+        CashflowSheetLabApplyRequest corrected = new CashflowSheetLabApplyRequest(
+            "late-with-reason", base.sourceRevision(), base.targetRevision(), base.yearMonth(),
+            base.replaceAllActualSources(), "결산 후 실제 입금액 정정", base.cells()
+        );
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .applyCashflowSheetLab(ACTOR, "project-a", SESSION, corrected));
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .applyCashflowSheetLab(ACTOR, "project-a", SESSION, corrected));
+
+        assertThat(fixture.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-07"))
+            .containsEntry("amendmentCount", 1L)
+            .containsEntry("postDeadlineAmendmentWarningCount", 1L)
+            .containsEntry("lastAmendmentReason", "결산 후 실제 입금액 정정");
+        assertThat(fixture.documents.keySet()).anyMatch(path -> path.contains("/cashflow_month_amendments/"));
+        CashflowMonthCloseResponse close = commandService(fixture.persistence)
+            .readCashflowMonthClose(READ_ACTOR, "project-a", "2026-07");
+        assertThat(close.amendmentCount()).isEqualTo(1L);
+        assertThat(close.postDeadlineAmendmentWarningCount()).isEqualTo(1L);
+        assertThat(close.projectWarningCount()).isEqualTo(1L);
+        assertThat(close.lastAmendmentReason()).isEqualTo("결산 후 실제 입금액 정정");
     }
 
     @Test

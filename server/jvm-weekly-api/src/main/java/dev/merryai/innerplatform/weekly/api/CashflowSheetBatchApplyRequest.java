@@ -15,9 +15,20 @@ public record CashflowSheetBatchApplyRequest(
     @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String sourceRevision,
     @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String targetRevision,
     boolean replaceAllActualSources,
+    @Size(max = 1000) String closedMonthChangeReason,
     @Valid @NotNull @Size(min = 1, max = 12) List<Month> months
 ) {
     public static final int MAX_MONTH_COUNT = 12;
+
+    public CashflowSheetBatchApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        boolean replaceAllActualSources,
+        List<Month> months
+    ) {
+        this(idempotencyKey, sourceRevision, targetRevision, replaceAllActualSources, null, months);
+    }
 
     public record Month(
         @NotBlank

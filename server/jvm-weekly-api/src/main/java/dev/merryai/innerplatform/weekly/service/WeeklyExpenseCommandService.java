@@ -1115,6 +1115,15 @@ public class WeeklyExpenseCommandService {
         if (replay.isPresent()) return replay.get();
 
         List<CashflowSheetLabApplyRequest.Cell> cells = requireCompleteCashflowSheetMonth(request);
+        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
+            .authorizeCashflowSheetMonthAmendments(
+                writer,
+                projectId,
+                List.of(request.yearMonth()),
+                request.sourceRevision(),
+                request.closedMonthChangeReason(),
+                request.idempotencyKey()
+            );
         assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
@@ -1125,6 +1134,14 @@ public class WeeklyExpenseCommandService {
             request.targetRevision(),
             cells,
             request.replaceAllActualSources()
+        );
+        persistence.recordCashflowSheetMonthAmendments(
+            writer,
+            projectId,
+            amendments,
+            request.sourceRevision(),
+            request.closedMonthChangeReason(),
+            request.idempotencyKey()
         );
         List<CashflowSnapshotResponse.ActualLine> actual = replacement.actual().stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
@@ -1161,7 +1178,8 @@ public class WeeklyExpenseCommandService {
                 replacement.resultingTargetRevision(),
                 projection.size(),
                 actual.size(),
-                request.replaceAllActualSources()
+                request.replaceAllActualSources(),
+                amendments
             )
         ));
 
@@ -1217,6 +1235,15 @@ public class WeeklyExpenseCommandService {
 
         Map<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = CashflowSheetBatchApplyRequest
             .requireCompleteMonths(request.months());
+        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
+            .authorizeCashflowSheetMonthAmendments(
+                writer,
+                projectId,
+                cellsByMonth.keySet(),
+                request.sourceRevision(),
+                request.closedMonthChangeReason(),
+                request.idempotencyKey()
+            );
         assertAtomicWriteBudget(
             Math.multiplyExact(cellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
             3,
@@ -1229,6 +1256,14 @@ public class WeeklyExpenseCommandService {
             sourceSheetKey,
             request.targetRevision(),
             request
+        );
+        persistence.recordCashflowSheetMonthAmendments(
+            writer,
+            projectId,
+            amendments,
+            request.sourceRevision(),
+            request.closedMonthChangeReason(),
+            request.idempotencyKey()
         );
         List<String> requestedMonths = List.copyOf(cellsByMonth.keySet());
         List<String> replacedMonths = replacement.months().stream()
@@ -1271,6 +1306,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("projectionLineCount", projectionLineCount);
         metadata.put("actualLineCount", actualLineCount);
         metadata.put("durationMs", durationMs);
+        metadata.put("closedMonthAmendments", amendments);
         putActorMetadata(metadata, writer);
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -2743,7 +2779,8 @@ public class WeeklyExpenseCommandService {
         String resultingTargetRevision,
         int projectionLineCount,
         int actualLineCount,
-        boolean replaceAllActualSources
+        boolean replaceAllActualSources,
+        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSheetKey", sourceSheetKey);
@@ -2754,6 +2791,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("projectionLineCount", projectionLineCount);
         metadata.put("actualLineCount", actualLineCount);
         metadata.put("replaceAllActualSources", replaceAllActualSources);
+        metadata.put("closedMonthAmendments", amendments);
         putActorMetadata(metadata, actor);
         return writeJson(metadata);
     }
@@ -3009,6 +3047,14 @@ public class WeeklyExpenseCommandService {
             close.revision(),
             close.reopenCount(),
             close.projectWarningCount(),
+            close.amendmentCount(),
+            close.postDeadlineAmendmentWarningCount(),
+            close.lastAmendmentAt(),
+            close.lastAmendmentByUid(),
+            close.lastAmendmentByName(),
+            close.lastAmendmentReason(),
+            close.lastAmendmentDeadline(),
+            close.lastAmendmentPostDeadline(),
             close.snapshotHash(),
             close.previousSnapshotHash(),
             close.snapshot(),

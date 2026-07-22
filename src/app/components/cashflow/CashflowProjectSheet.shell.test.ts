@@ -167,6 +167,18 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('setInterval');
   });
 
+  it('applies the pinned sheet directly and asks for a reason only when the JVM reports a late closed-month change', () => {
+    expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
+    expect(source).toContain('handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())');
+    expect(source).toContain('closedMonthChangeReason');
+    expect(source).toContain('마감 후 시트값 변경');
+    expect(source).toContain('max-w-[440px]');
+    expect(source).toContain('사유와 함께 반영');
+    expect(source).not.toContain('renderSheetStageReviewGrid');
+    expect(source).not.toContain('sheetStageDialog');
+    expect(source).not.toContain('캐시플로 항목 사람 확인');
+  });
+
   it('keeps an unlinked project usable and guides the user to sheet setup', () => {
     expect(source).toContain("cashflowSheetConfig ? '시트 설정' : '시트 연결'");
     expect(source).toContain('시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다.');
@@ -309,7 +321,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('allows every active project-access role to close or request reopen while decisions stay Finance/Admin only', () => {
     expect(source).toContain("const canUseCashflowActions = role === 'pm' || role === 'finance' || role === 'admin'");
-    expect(source).toContain("const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin'");
+    expect(source).toContain("const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin' || role === 'tenant_admin'");
     expect(source).toContain("const canCompleteWeekly = canFinalizeMonth || role === 'tenant_admin'");
     expect(source).toContain('const canRequestMonthReopen = canFinalizeMonth');
     expect(source).toContain("role === 'finance' || role === 'admin'");

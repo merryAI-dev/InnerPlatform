@@ -247,7 +247,7 @@ class WeeklyExpenseAuthorizationServiceTest {
     void weeklySettlementAllowsProjectParticipantsAndTenantManagersButKeepsReadOnlyRolesReadOnly() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
             (actor, projectId) -> "project-allowed".equals(projectId),
-            (tenantId, projectId) -> true,
+            new SplitProjectExistenceRepository(true, true),
             "strict"
         );
         TrustedActorContext viewer = new TrustedActorContext("tenant-a", "viewer-1", "viewer@example.com", "viewer");
@@ -271,6 +271,17 @@ class WeeklyExpenseAuthorizationServiceTest {
                 .doesNotThrowAnyException();
             assertThatThrownBy(() -> service.requireProjectAllowed(command, viewer, "project-denied"))
                 .isInstanceOf(WeeklyExpenseForbiddenException.class);
+            assertThatThrownBy(() -> service.requireProjectAllowed(command, auditor, "project-allowed"))
+                .isInstanceOf(WeeklyExpenseForbiddenException.class);
+        }
+
+        for (String command : java.util.List.of(
+            WeeklyExpenseCommandService.CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            WeeklyExpenseCommandService.CLOSE_CASHFLOW_MONTH_COMMAND,
+            WeeklyExpenseCommandService.REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND
+        )) {
+            assertThatCode(() -> service.requireProjectAllowed(command, tenantAdmin, "project-allowed"))
+                .doesNotThrowAnyException();
             assertThatThrownBy(() -> service.requireProjectAllowed(command, auditor, "project-allowed"))
                 .isInstanceOf(WeeklyExpenseForbiddenException.class);
         }

@@ -63,6 +63,16 @@ public interface WeeklyExpensePersistence {
     ) {
     }
 
+    record CashflowClosedMonthAmendment(
+        String yearMonth,
+        long closeRevision,
+        String deadline,
+        boolean postDeadline,
+        long amendmentCount,
+        long warningCount
+    ) {
+    }
+
     record CashflowSheetAnnualReplacement(
         long revision,
         Map<String, java.math.BigDecimal> projection,
@@ -79,6 +89,14 @@ public interface WeeklyExpensePersistence {
         long revision,
         long reopenCount,
         long projectWarningCount,
+        long amendmentCount,
+        long postDeadlineAmendmentWarningCount,
+        String lastAmendmentAt,
+        String lastAmendmentByUid,
+        String lastAmendmentByName,
+        String lastAmendmentReason,
+        String lastAmendmentDeadline,
+        boolean lastAmendmentPostDeadline,
         String snapshotHash,
         String previousSnapshotHash,
         Map<String, Object> snapshot,
@@ -340,6 +358,36 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_month_batch_replace_backend_unavailable",
             "Authoritative multi-month cashflow replacement requires the Firestore transaction backend."
+        );
+    }
+
+    default List<CashflowClosedMonthAmendment> authorizeCashflowSheetMonthAmendments(
+        TrustedActorContext actor,
+        String projectId,
+        Collection<String> yearMonths,
+        String sourceRevision,
+        String reason,
+        String idempotencyKey
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_amendment_backend_unavailable",
+            "Cashflow closed-month amendments require the Firestore transaction backend."
+        );
+    }
+
+    default void recordCashflowSheetMonthAmendments(
+        TrustedActorContext actor,
+        String projectId,
+        List<CashflowClosedMonthAmendment> amendments,
+        String sourceRevision,
+        String reason,
+        String idempotencyKey
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_amendment_backend_unavailable",
+            "Cashflow closed-month amendment records require the Firestore transaction backend."
         );
     }
 

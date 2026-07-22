@@ -102,6 +102,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final ThreadLocal<CashflowLeaseScope> currentCashflowLeaseScope = new ThreadLocal<>();
     private final ThreadLocal<CashflowWriteScope> currentCashflowWriteScope = new ThreadLocal<>();
     private final ThreadLocal<Map<String, String>> currentCashflowMonthStates = new ThreadLocal<>();
+    private final ThreadLocal<Map<String, CashflowClosedMonthAmendment>> currentCashflowMonthAmendments = new ThreadLocal<>();
 
     @Autowired
     public FirestoreInheritedWeeklyExpensePersistence(
@@ -174,6 +175,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 currentCashflowLeaseScope.remove();
                 currentCashflowWriteScope.remove();
                 currentCashflowMonthStates.set(new LinkedHashMap<>());
+                currentCashflowMonthAmendments.set(new LinkedHashMap<>());
                 try {
                     T result = call(action);
                     releaseCashflowLeaseAfterSuccessfulFinalCommand();
@@ -182,6 +184,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     currentCashflowLeaseScope.remove();
                     currentCashflowWriteScope.remove();
                     currentCashflowMonthStates.remove();
+                    currentCashflowMonthAmendments.remove();
                     currentTransaction.remove();
                     transactionDocumentCache.remove();
                 }
@@ -329,8 +332,122 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     : "OPEN";
                 if (states != null) states.put(key, status);
             }
+            if ("CLOSED".equals(status) && isAuthorizedCashflowMonthAmendment(key)) {
+                continue;
+            }
             requireMutableMonthStatus(status);
         }
+    }
+
+    @Override
+    public List<CashflowClosedMonthAmendment> authorizeCashflowSheetMonthAmendments(
+        TrustedActorContext actor,
+        String projectId,
+        Collection<String> yearMonths,
+        String sourceRevision,
+        String reason,
+        String idempotencyKey
+    ) {
+        requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
+        List<String> months = (yearMonths == null ? List.<String>of() : yearMonths.stream()
+            .filter(value -> value != null && !value.isBlank())
+            .map(String::trim)
+            .distinct()
+            .sorted()
+            .toList());
+        if (months.isEmpty()) return List.of();
+
+        CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
+        String requestedReason = text(reason, "").trim();
+        List<CashflowClosedMonthAmendment> amendments = new ArrayList<>();
+        Map<String, CashflowClosedMonthAmendment> authorized = currentCashflowMonthAmendments.get();
+        for (String yearMonth : months) {
+            requireYearMonth(yearMonth);
+            String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
+            Map<String, String> states = currentCashflowMonthStates.get();
+            String status = states == null ? null : states.get(key);
+            DocumentReference closeRef = db.document(monthlyClosePath(actor.tenantId(), projectId, yearMonth));
+            DocumentSnapshot closeSnapshot = get(closeRef);
+            Map<String, Object> close = closeSnapshot.exists() ? data(closeSnapshot) : Map.of();
+            if (status == null) {
+                status = close.isEmpty() ? "OPEN" : canonicalMonthStatus(close, actor.tenantId(), projectId, yearMonth);
+                if (states != null) states.put(key, status);
+            }
+            if (!"CLOSED".equals(status)) continue;
+            LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
+            boolean postDeadline = businessDate.date().isAfter(deadline);
+            if (postDeadline && requestedReason.isBlank()) {
+                throw new WeeklyExpenseEditLeaseException(
+                    409,
+                    "cashflow_closed_month_reason_required",
+                    yearMonth + " 마감 후 변경 사유를 입력해 주세요."
+                );
+            }
+            long closeRevision = canonicalMonthCounter(close, "revision");
+            long amendmentCount = addMonthCounters(optionalMonthCounter(close, "amendmentCount"), 1);
+            long warningCount = addMonthCounters(optionalMonthCounter(close, "postDeadlineAmendmentWarningCount"), postDeadline ? 1 : 0);
+            CashflowClosedMonthAmendment amendment = new CashflowClosedMonthAmendment(
+                yearMonth,
+                closeRevision,
+                deadline.toString(),
+                postDeadline,
+                amendmentCount,
+                warningCount
+            );
+            if (authorized != null) authorized.put(key, amendment);
+            amendments.add(amendment);
+        }
+        return List.copyOf(amendments);
+    }
+
+    @Override
+    public void recordCashflowSheetMonthAmendments(
+        TrustedActorContext actor,
+        String projectId,
+        List<CashflowClosedMonthAmendment> amendments,
+        String sourceRevision,
+        String reason,
+        String idempotencyKey
+    ) {
+        String requestedReason = text(reason, "").trim();
+        String normalizedReason = requestedReason.isBlank()
+            ? "시트 고정본 " + text(sourceRevision, "unknown")
+            : requestedReason;
+        String actorName = text(actor.name(), text(actor.email(), actor.id()));
+        Instant now = clock.instant();
+        for (CashflowClosedMonthAmendment amendment : amendments == null ? List.<CashflowClosedMonthAmendment>of() : amendments) {
+            set(db.document(monthlyClosePath(actor.tenantId(), projectId, amendment.yearMonth())), Map.of(
+                "amendmentCount", amendment.amendmentCount(),
+                "postDeadlineAmendmentWarningCount", amendment.warningCount(),
+                "lastAmendmentAt", now.toString(),
+                "lastAmendmentByUid", actor.id(),
+                "lastAmendmentByName", actorName,
+                "lastAmendmentReason", normalizedReason,
+                "lastAmendmentDeadline", amendment.deadline(),
+                "lastAmendmentPostDeadline", amendment.postDeadline()
+            ));
+            String amendmentId = safeDocId(projectId + "\n" + amendment.yearMonth() + "\n" + idempotencyKey);
+            Map<String, Object> amendmentDocument = new LinkedHashMap<>();
+            amendmentDocument.put("id", amendmentId);
+            amendmentDocument.put("tenantId", actor.tenantId());
+            amendmentDocument.put("projectId", projectId);
+            amendmentDocument.put("yearMonth", amendment.yearMonth());
+            amendmentDocument.put("closeRevision", amendment.closeRevision());
+            amendmentDocument.put("deadline", amendment.deadline());
+            amendmentDocument.put("postDeadline", amendment.postDeadline());
+            amendmentDocument.put("sourceRevision", sourceRevision);
+            amendmentDocument.put("reason", normalizedReason);
+            amendmentDocument.put("warningCount", amendment.warningCount());
+            amendmentDocument.put("actorUid", actor.id());
+            amendmentDocument.put("actorName", actorName);
+            amendmentDocument.put("idempotencyKey", idempotencyKey);
+            amendmentDocument.put("createdAt", now.toString());
+            set(db.document("orgs/" + actor.tenantId() + "/cashflow_month_amendments/" + amendmentId), amendmentDocument);
+        }
+    }
+
+    private long optionalMonthCounter(Map<String, Object> close, String field) {
+        return close.containsKey(field) ? canonicalMonthCounter(close, field) : 0;
     }
 
     @Override
@@ -357,6 +474,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             requireYearMonth(scope.yearMonth());
             if (scope.weekNo() < 1 || scope.weekNo() > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
                 throw new IllegalArgumentException("Cashflow weekNo must be between 1 and 5.");
+            }
+            if (isAuthorizedCashflowMonthAmendment(monthStateKey(tenantId, projectId, scope.yearMonth()))) {
+                continue;
             }
             String documentId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
             DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(tenantId, documentId));
@@ -1598,7 +1718,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private void requireCachedCashflowMonthOpen(String tenantId, String projectId, String yearMonth) {
         requireYearMonth(yearMonth);
         Map<String, String> states = currentCashflowMonthStates.get();
-        String status = states == null ? null : states.get(monthStateKey(tenantId, projectId, yearMonth));
+        String key = monthStateKey(tenantId, projectId, yearMonth);
+        String status = states == null ? null : states.get(key);
         if (status == null) {
             throw leaseError(
                 503,
@@ -1606,7 +1727,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "Cashflow month state must be validated before canonical writes."
             );
         }
+        if ("CLOSED".equals(status) && isAuthorizedCashflowMonthAmendment(key)) return;
         requireMutableMonthStatus(status);
+    }
+
+    private boolean isAuthorizedCashflowMonthAmendment(String monthStateKey) {
+        Map<String, CashflowClosedMonthAmendment> amendments = currentCashflowMonthAmendments.get();
+        return amendments != null && amendments.containsKey(monthStateKey);
     }
 
     private String canonicalMonthStatus(
@@ -2005,6 +2132,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         long count = 0;
         for (Map<String, Object> close : projectCloses == null ? List.<Map<String, Object>>of() : projectCloses) {
             count = addMonthCounters(count, canonicalMonthCounter(close, "reopenCount"));
+            count = addMonthCounters(count, optionalMonthCounter(close, "postDeadlineAmendmentWarningCount"));
         }
         return count;
     }
@@ -2245,6 +2373,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             document.isEmpty() ? 0 : canonicalMonthCounter(document, "revision"),
             document.isEmpty() ? 0 : canonicalMonthCounter(document, "reopenCount"),
             warningCount,
+            document.isEmpty() ? 0 : optionalMonthCounter(document, "amendmentCount"),
+            document.isEmpty() ? 0 : optionalMonthCounter(document, "postDeadlineAmendmentWarningCount"),
+            text(document.get("lastAmendmentAt"), ""),
+            text(document.get("lastAmendmentByUid"), ""),
+            text(document.get("lastAmendmentByName"), ""),
+            text(document.get("lastAmendmentReason"), ""),
+            text(document.get("lastAmendmentDeadline"), ""),
+            bool(document.get("lastAmendmentPostDeadline")),
             text(document.get("snapshotHash"), ""),
             text(document.get("previousSnapshotHash"), ""),
             nestedMap(document.get("snapshot")),

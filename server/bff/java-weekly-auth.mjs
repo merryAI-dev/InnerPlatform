@@ -37,11 +37,11 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   }
 }
 
-export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccountJson, resolveIdentityToken) {
+export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccountJson, resolveIdentityToken, signal) {
   if (!audience) return '';
   if (serviceAccountJson) {
     if (typeof resolveIdentityToken === 'function') {
-      const token = await resolveIdentityToken({ audience, serviceAccountJson });
+      const token = await resolveIdentityToken({ audience, serviceAccountJson, signal });
       if (!readOptionalText(token)) {
         throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
       }
@@ -53,6 +53,7 @@ export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccou
   const response = await fetchImpl(tokenUrl, {
     method: 'GET',
     headers: { 'Metadata-Flavor': 'Google' },
+    ...(signal ? { signal } : {}),
   });
   const token = await response.text();
   if (!response.ok || !readOptionalText(token)) {
@@ -72,6 +73,7 @@ export async function buildJavaWeeklyTrustedHeaders({
   workspaceEmailDomain,
   editSession,
   dataProjectId,
+  signal,
 }) {
   if (!serviceToken) {
     throw createHttpError(503, 'JVM weekly API service token is not configured.', 'jvm_weekly_api_token_unconfigured');
@@ -100,6 +102,7 @@ export async function buildJavaWeeklyTrustedHeaders({
     idTokenAudience,
     serviceAccountJson,
     resolveIdentityToken,
+    signal,
   );
   if (identityToken) headers.authorization = `Bearer ${identityToken}`;
   return headers;

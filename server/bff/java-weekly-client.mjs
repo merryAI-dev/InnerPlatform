@@ -58,10 +58,27 @@ export function resolveBffDataProjectId(options = {}, env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
+const GENERIC_UPSTREAM_ERROR_CODES = new Set([
+  'error',
+  'internal_error',
+  'internal_server_error',
+  'unexpected_error',
+]);
+
 function readJavaError(status, payload) {
-  const message = readOptionalText(payload?.message) || readOptionalText(payload?.error) || `Java weekly API request failed with ${status}`;
-  const code = readOptionalText(payload?.code) || readOptionalText(payload?.error) || 'java_weekly_api_error';
-  const error = createHttpError(status, message, code);
+  const upstreamCode = readOptionalText(payload?.code);
+  const hasStableCode = /^[a-z][a-z0-9_]{2,100}$/.test(upstreamCode)
+    && !GENERIC_UPSTREAM_ERROR_CODES.has(upstreamCode);
+  const upstreamFailure = status >= 500;
+  const normalizedStatus = upstreamFailure ? 503 : status;
+  const message = upstreamFailure
+    ? '현금흐름 저장 서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+    : (readOptionalText(payload?.message) || readOptionalText(payload?.error) || `Java weekly API request failed with ${status}`);
+  const code = hasStableCode
+    ? upstreamCode
+    : (upstreamFailure ? 'jvm_weekly_api_internal_error' : 'java_weekly_api_error');
+  const error = createHttpError(normalizedStatus, message, code);
+  error.upstreamStatus = status;
   if (Number.isSafeInteger(payload?.expectedWriteCount)) {
     error.details = { expectedWriteCount: payload.expectedWriteCount };
   }
@@ -89,6 +106,7 @@ export function createJavaWeeklyClient({
   jvmWeeklyAuthMode,
   jvmWeeklyWorkspaceEmailDomain,
   jvmWeeklyFirestoreProjectId,
+  jvmWeeklyApiTimeoutMs,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
@@ -98,15 +116,42 @@ export function createJavaWeeklyClient({
   const workspaceEmailDomain = resolveJavaWeeklyWorkspaceEmailDomain({ jvmWeeklyWorkspaceEmailDomain }, env);
   const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId({ jvmWeeklyFirestoreProjectId }, env);
   const bffDataProjectId = resolveBffDataProjectId({}, env);
+  const configuredTimeoutMs = Number.parseInt(
+    (Number.isFinite(jvmWeeklyApiTimeoutMs) ? String(jvmWeeklyApiTimeoutMs) : readOptionalText(jvmWeeklyApiTimeoutMs))
+      || readOptionalText(env.JVM_WEEKLY_API_TIMEOUT_MS),
+    10,
+  );
+  const requestTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0
+    ? Math.min(configuredTimeoutMs, 12_000)
+    : 12_000;
+  const totalRequestTimeoutMs = Math.min(requestTimeoutMs * 2, 24_000);
 
   async function requestJson({ context, method = 'GET', path, body, editSession, dataProjectId }) {
     if (!baseUrl) {
       throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
     }
+    const requestStartedAt = Date.now();
     const send = async () => {
-      const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
-        method,
-        headers: await buildJavaWeeklyTrustedHeaders({
+      const remainingMs = totalRequestTimeoutMs - (Date.now() - requestStartedAt);
+      if (remainingMs <= 0) {
+        const error = new Error('JVM weekly API total timeout exceeded');
+        error.name = 'AbortError';
+        throw error;
+      }
+      const controller = new AbortController();
+      const attemptTimeoutMs = Math.min(requestTimeoutMs, remainingMs);
+      let timeout;
+      const timeoutPromise = new Promise((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          const error = new Error('JVM weekly API attempt timeout exceeded');
+          error.name = 'AbortError';
+          reject(error);
+        }, attemptTimeoutMs);
+      });
+      timeout.unref?.();
+      const attemptPromise = (async () => {
+        const headers = await buildJavaWeeklyTrustedHeaders({
           fetchImpl,
           context,
           serviceToken,
@@ -117,12 +162,23 @@ export function createJavaWeeklyClient({
           workspaceEmailDomain,
           editSession,
           dataProjectId,
-        }),
-        body: method === 'GET' ? undefined : JSON.stringify(body || {}),
-      });
-      const payload = await readJsonResponse(response);
-      if (!response.ok) throw readJavaError(response.status, payload);
-      return payload;
+          signal: controller.signal,
+        });
+        const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
+          method,
+          headers,
+          body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+          signal: controller.signal,
+        });
+        const payload = await readJsonResponse(response);
+        if (!response.ok) throw readJavaError(response.status, payload);
+        return payload;
+      })();
+      try {
+        return await Promise.race([attemptPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeout);
+      }
     };
 
     try {
@@ -163,6 +219,7 @@ export function createJavaWeeklyClient({
     yearMonth,
     cells,
     replaceAllActualSources = false,
+    closedMonthChangeReason = '',
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -190,6 +247,7 @@ export function createJavaWeeklyClient({
         yearMonth,
         cells,
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
+        ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
@@ -206,6 +264,7 @@ export function createJavaWeeklyClient({
     targetRevision,
     months,
     replaceAllActualSources = false,
+    closedMonthChangeReason = '',
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -232,6 +291,7 @@ export function createJavaWeeklyClient({
         targetRevision,
         months,
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
+        ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
