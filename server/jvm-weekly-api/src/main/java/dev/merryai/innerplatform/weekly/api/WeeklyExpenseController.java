@@ -396,6 +396,25 @@ public class WeeklyExpenseController {
         );
     }
 
+    @GetMapping("/cashflow/{projectId}/weekly-update-complete")
+    public CashflowWeeklyUpdateCompletionResponse readCashflowWeeklyUpdate(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestParam String yearMonth,
+        @RequestParam int weekNo
+    ) {
+        requireCashflowWeeklyUpdateScope(yearMonth, weekNo);
+        return commandService.readCashflowWeeklyUpdate(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            yearMonth,
+            weekNo
+        );
+    }
+
     @PostMapping("/cashflow/{projectId}/weekly-update-complete")
     public CashflowWeeklyUpdateCompletionResponse completeCashflowWeeklyUpdate(
         @PathVariable String projectId,
@@ -406,6 +425,22 @@ public class WeeklyExpenseController {
         @Valid @RequestBody CompleteCashflowWeeklyUpdateRequest request
     ) {
         return commandService.completeCashflowWeeklyUpdate(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            request
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/weekly-update-complete/reopen")
+    public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody ReopenCashflowWeeklyUpdateRequest request
+    ) {
+        return commandService.reopenCashflowWeeklyUpdate(
             actorContext(tenantId, actorId, actorRole, actorEmail),
             projectId,
             request
@@ -699,6 +734,17 @@ public class WeeklyExpenseController {
 
     private BigDecimal safeAmount(BigDecimal amount) {
         return amount == null ? BigDecimal.ZERO : amount;
+    }
+
+    private void requireCashflowWeeklyUpdateScope(String yearMonth, int weekNo) {
+        if (
+            yearMonth == null
+            || !yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])")
+            || weekNo < 1
+            || weekNo > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
+        ) {
+            throw new IllegalArgumentException("yearMonth must be YYYY-MM and weekNo must be between 1 and 5.");
+        }
     }
 
     private TrustedActorContext actorContext(String tenantId, String actorId, String actorRole, String actorEmail) {

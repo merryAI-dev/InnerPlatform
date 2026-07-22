@@ -201,3 +201,108 @@ network/query work if it:
   the guarded GitHub Actions Stage workflow. Until that workflow deploys this
   BFF change, the Stage browser cannot call the new multi-month endpoint and no
   full-year before/after latency claim should be made.
+
+### 2026-07-22: weekly settlement lock contract
+
+**Planning**
+
+Weekly settlement previously recorded only an actor and timestamp. It did not
+prevent a later sheet import, Projection command, or weekly-expense Actual sync
+from changing the same week. The phase contract therefore treats a weekly
+settlement as an immutable server snapshot until an explicit, reasoned reopen.
+Monthly close remains the stronger contract and is the only path that may
+finalize a month containing weekly locks.
+
+The project-wide phase gate is 100/100. A read-only evaluator checks main-path
+wiring, transaction boundaries, authorization, idempotency, legacy documents,
+BFF contracts, real-format sheet regression, build evidence, and this record.
+UI work and Stage deployment remain blocked until every item has evidence.
+
+**Hypothesis**
+
+The existing Firestore transaction is sufficient when the lock participates in
+the canonical JVM write boundary:
+
+1. one completion document stores the current state and optimistic revision;
+2. immutable version documents retain each locked snapshot;
+3. a `CashflowWeekScope(yearMonth, weekNo)` set guards only changed weeks;
+4. sheet apply uses canonical week-ID maps to compare current and replacement
+   financial content before scheduling any writes;
+5. Projection and Actual commands collect all affected scopes before their
+   first write; and
+6. monthly close calls one explicit internal apply variant that bypasses only
+   the weekly guard while retaining the month guard and pinned-source checks.
+
+Redis, a queue, and a second lock service are not used. They would introduce a
+second consistency authority without removing the Firestore compare-and-set
+transaction that already owns these values.
+
+**Execution**
+
+- `cashflow_weekly_update_completions` now stores `LOCKED` or `OPEN`, revision,
+  reopen count, server scope, actor/time, source/target revisions, canonical
+  week snapshot, and SHA-256.
+- Each lock writes one immutable
+  `cashflow_weekly_update_completion_versions/{project-yearMonth-week-revision}`
+  document in the same command transaction. An idempotent replay does not write
+  another version or audit event.
+- Legacy completion rows without `status` remain dashboard-compatible but do
+  not block writes. Their next explicit completion upgrades them to revision 1.
+- Sheet apply rejects the whole transaction when any changed week is locked;
+  unchanged weeks and other unlocked weeks remain writable. Projection no-op
+  values do not create a canonical write. Both Actual replacement paths guard
+  their changed patch scopes.
+- Reopen requires project access, `LOCKED` state, the current revision, and a
+  non-empty reason. It preserves the prior snapshot/hash and advances the state
+  to `OPEN`. A closed month rejects a standalone weekly reopen.
+- Finance/Admin month-reopen approval atomically advances every `LOCKED` weekly
+  completion in that month to `OPEN`. Each transition records the approver,
+  reason, incremented revision/reopen count, and
+  `reopenSource=MONTH_REOPEN_APPROVAL`; a rejected request changes no weekly
+  lock.
+- Weekly status submit/close guards the target week before the first possible
+  transaction write. Repeating an identical status is a no-op, while a changed
+  status for a locked week is rejected. This keeps Firestore's required
+  read-before-write ordering intact.
+- A complete retry hashes the semantic scope (`yearMonth`, `weekNo`) rather than
+  the client timestamp. The same idempotency key therefore returns the original
+  lock even when a client regenerates `completedAt`; reuse for another scope is
+  rejected.
+- JVM and BFF expose explicit read, complete, and reopen contracts. Complete
+  accepts an explicit year/month and week, while an omitted scope retains the
+  Stage QA-clock behavior for compatibility. Reopened documents are no longer
+  counted as completed in the deadline dashboard.
+
+**Local evaluation**
+
+- JVM cashflow storage regression: 71/71 passed. Coverage includes exact changed
+  week detection for sheet, Projection, both Actual paths, and weekly status;
+  explicit zero versus missing values; same-week multi-line merges; unchanged
+  locked-week skips; all-empty week materialization; no partial writes; legacy
+  upgrades; retry-safe idempotency; read-before-write ordering; weekly reopen;
+  month-close bypass; Finance/Admin month-reopen approval reopening its weekly
+  locks; and snapshot-drift detection.
+- Spring MVC contract tests exercise read, complete, reopen, malformed explicit
+  scope, and JVM `409` propagation through real controller mappings. The full
+  JVM module passed 190/190 in 26.909 seconds.
+- BFF route plus TypeScript client contracts passed 120/120. Coverage includes
+  lease-free read/complete/reopen, exact field-presence validation, explicit
+  zero rejection, JVM `409`/`503` propagation, status-aware deadline summary,
+  and the intentionally limited no-scope Stage QA-clock fallback.
+- The BFF/client contracts plus the sanitized 260701 full-year workbook parser
+  and exact-ledger apply regression passed 174/174 in 7.77 seconds. The fixture
+  read 1,920 cells, preserved 34 values and 1,886 explicit empty cells, and
+  applied its three populated months through the multi-month contract.
+- The production Vite build transformed 2,910 modules and completed in 24.58
+  seconds. All runs used local Maven/Node processes; Docker was not started.
+- Independent read-only re-audit scored this phase 100/100: contract/main path
+  20/20; atomicity/concurrency 15/15; snapshot/hash/version 15/15;
+  authorization/reopen/month precedence 15/15; idempotency/audit/legacy 10/10;
+  BFF/TypeScript/error contract 10/10; regression/real input 10/10; and
+  documentation/build/gate 5/5. The auditor independently rebuilt 2,910 Vite
+  modules in 21.87 seconds. One earlier parallel test run had a transient local
+  socket failure under concurrent load; isolated 77/77 and the subsequent
+  single-worker 174/174 run did not reproduce it.
+- This closes only the weekly settlement lock phase. UI work and Stage
+  deployment require their own tracked contract and the relevant retrospective
+  phase audits; Live deployment remains prohibited without explicit approval.

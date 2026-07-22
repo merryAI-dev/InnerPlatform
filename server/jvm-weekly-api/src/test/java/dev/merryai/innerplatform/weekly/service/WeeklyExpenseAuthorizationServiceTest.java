@@ -243,6 +243,45 @@ class WeeklyExpenseAuthorizationServiceTest {
         )).doesNotThrowAnyException();
     }
 
+    @Test
+    void weeklySettlementAllowsProjectParticipantsAndTenantManagersButKeepsReadOnlyRolesReadOnly() {
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> "project-allowed".equals(projectId),
+            (tenantId, projectId) -> true,
+            "strict"
+        );
+        TrustedActorContext viewer = new TrustedActorContext("tenant-a", "viewer-1", "viewer@example.com", "viewer");
+        TrustedActorContext pm = new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm");
+        TrustedActorContext tenantAdmin = new TrustedActorContext(
+            "tenant-a", "tenant-admin-1", "tenant-admin@example.com", "tenant_admin"
+        );
+        TrustedActorContext auditor = new TrustedActorContext(
+            "tenant-a", "auditor-1", "auditor@example.com", "auditor"
+        );
+
+        for (String command : java.util.List.of(
+            WeeklyExpenseCommandService.COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            WeeklyExpenseCommandService.REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND
+        )) {
+            assertThatCode(() -> service.requireProjectAllowed(command, viewer, "project-allowed"))
+                .doesNotThrowAnyException();
+            assertThatCode(() -> service.requireProjectAllowed(command, pm, "project-allowed"))
+                .doesNotThrowAnyException();
+            assertThatCode(() -> service.requireProjectAllowed(command, tenantAdmin, "project-any"))
+                .doesNotThrowAnyException();
+            assertThatThrownBy(() -> service.requireProjectAllowed(command, viewer, "project-denied"))
+                .isInstanceOf(WeeklyExpenseForbiddenException.class);
+            assertThatThrownBy(() -> service.requireProjectAllowed(command, auditor, "project-allowed"))
+                .isInstanceOf(WeeklyExpenseForbiddenException.class);
+        }
+
+        assertThatCode(() -> service.requireProjectAllowed(
+            WeeklyExpenseCommandService.READ_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            auditor,
+            "project-allowed"
+        )).doesNotThrowAnyException();
+    }
+
     private static final class SplitProjectExistenceRepository implements WeeklyProjectExistenceRepository {
         private final boolean existingProjectScopedData;
         private final boolean canonicalProject;

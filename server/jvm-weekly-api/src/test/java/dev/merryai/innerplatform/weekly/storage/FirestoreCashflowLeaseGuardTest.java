@@ -25,6 +25,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionRespon
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
+import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -65,6 +66,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,6 +78,12 @@ class FirestoreCashflowLeaseGuardTest {
         "pm-1",
         "pm@example.com",
         "spoofed-client-role"
+    );
+    private static final TrustedActorContext READ_ACTOR = new TrustedActorContext(
+        "tenant-a",
+        "pm-1",
+        "pm@example.com",
+        "viewer"
     );
     private static final CashflowEditSession SESSION = new CashflowEditSession(
         "stage-data-project",
@@ -164,6 +172,108 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("leaseId", "lease-a")
             .containsEntry("fence", 7L)
             .doesNotContainKeys("releasedAt", "releaseReason");
+    }
+
+    @Test
+    void projectionCommandPreservesExistingAndMultipleSameWeekLines() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String path = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w1";
+        fixture.documents.put(path, new LinkedHashMap<>(Map.of(
+            "id", "project-a-2026-07-w1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "weekNo", 1,
+            "projection", new LinkedHashMap<>(Map.of("BANK_INTEREST_IN", 7L))
+        )));
+
+        UpsertProjectionResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("projection-same-week-merge", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 1, "SALES_IN", BigDecimal.valueOf(2_300_000)
+                ),
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 1, "MYSC_LABOR_OUT", BigDecimal.valueOf(300_000)
+                )
+            ))
+        ));
+
+        assertThat(response.savedLineCount()).isEqualTo(2);
+        assertThat((Map<String, Object>) fixture.documents.get(path).get("projection"))
+            .containsEntry("BANK_INTEREST_IN", 7L)
+            .containsEntry("SALES_IN", 2_300_000L)
+            .containsEntry("MYSC_LABOR_OUT", 300_000L);
+    }
+
+    @Test
+    void projectionCommandPersistsAnExplicitZeroForAPreviouslyMissingLine() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+
+        UpsertProjectionResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("projection-explicit-zero", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 3, "MYSC_LABOR_OUT", BigDecimal.ZERO
+                )
+            ))
+        ));
+
+        assertThat(response.savedLineCount()).isEqualTo(1);
+        assertThat((Map<String, Object>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3"
+        ).get("projection"))
+            .containsEntry("MYSC_LABOR_OUT", 0L);
+    }
+
+    @Test
+    void lockedNoOpProjectionDoesNotBlockAChangedOpenWeekInTheSameCommand() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3",
+            new LinkedHashMap<>(Map.of(
+                "id", "project-a-2026-07-w3",
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "weekNo", 3,
+                "projection", Map.of("SALES_IN", 100L)
+            ))
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+
+        UpsertProjectionResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("locked-noop-open-change", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 3, "SALES_IN", BigDecimal.valueOf(100)
+                ),
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 4, "SALES_IN", BigDecimal.valueOf(200)
+                )
+            ))
+        ));
+
+        assertThat(response.savedLineCount()).isEqualTo(1);
+        assertThat((Map<String, Object>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w4"
+        ).get("projection"))
+            .containsEntry("SALES_IN", 200L);
     }
 
     @Test
@@ -1002,6 +1112,10 @@ class FirestoreCashflowLeaseGuardTest {
             "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
             pinnedMirror(request)
         );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3",
+            lockedWeeklyCompletion("2026-06", 3, 1)
+        );
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
 
         CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> service.closeCashflowMonth(
@@ -1064,8 +1178,24 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void weeklyCashflowCompletionPersistsOnceWithoutAnEditLeaseAndKeepsItsFirstActor() {
+    void weeklyCashflowCompletionLocksTheCurrentLedgerSnapshotAndKeepsItsFirstActor() {
         Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3",
+            new LinkedHashMap<>(Map.of(
+                "id", "project-a-2026-07-w3",
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "weekNo", 3,
+                "projection", Map.of("SALES_IN", 100L),
+                "actual", Map.of("SALES_IN", 90L)
+            ))
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            Map.of("projectId", "project-a", "sourceRevision", SOURCE_REVISION)
+        );
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
         CompleteCashflowWeeklyUpdateRequest firstRequest = new CompleteCashflowWeeklyUpdateRequest(
             "weekly-complete-1", "2026-07", 3, "2026-07-16T09:00:00Z"
@@ -1080,18 +1210,607 @@ class FirestoreCashflowLeaseGuardTest {
         CashflowWeeklyUpdateCompletionResponse second = fixture.persistence.runCommandTransaction(() ->
             service.completeCashflowWeeklyUpdate(ACTOR, "project-a", secondRequest)
         );
+        CashflowWeeklyUpdateCompletionResponse read = fixture.persistence.runCommandTransaction(() ->
+            service.readCashflowWeeklyUpdate(READ_ACTOR, "project-a", "2026-07", 3)
+        );
 
         assertThat(first.alreadyCompleted()).isFalse();
         assertThat(second.alreadyCompleted()).isTrue();
         assertThat(second.completedAt()).isEqualTo(first.completedAt());
+        assertThat(read.status()).isEqualTo("LOCKED");
+        assertThat(read.snapshotHash()).isEqualTo(first.snapshotHash());
         assertThat(fixture.documents.get(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
         ))
             .containsEntry("projectId", "project-a")
             .containsEntry("yearMonth", "2026-07")
             .containsEntry("weekNo", 3)
+            .containsEntry("status", "LOCKED")
+            .containsEntry("revision", 1L)
+            .containsEntry("sourceRevision", SOURCE_REVISION)
             .containsEntry("completedAt", "2026-07-16T09:00:00Z")
-            .containsEntry("completedByUid", "pm-1");
+            .containsEntry("completedByUid", "pm-1")
+            .satisfies(value -> assertThat(value.get("snapshotHash")).asString().startsWith("sha256:"))
+            .satisfies(value -> assertThat(value.get("targetRevision")).asString().startsWith("sha256:"))
+            .containsKey("snapshot");
+        assertThat(fixture.documents.keySet())
+            .anyMatch(path -> path.startsWith(
+                "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1"
+            ));
+    }
+
+    @Test
+    void weeklyCompletionRetryIgnoresRegeneratedTimestampButRejectsADifferentScope() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        CompleteCashflowWeeklyUpdateRequest firstRequest = new CompleteCashflowWeeklyUpdateRequest(
+            "weekly-retry-stable", "2026-07", 3, "2026-07-16T09:00:00Z"
+        );
+        CompleteCashflowWeeklyUpdateRequest retriedRequest = new CompleteCashflowWeeklyUpdateRequest(
+            "weekly-retry-stable", "2026-07", 3, "2026-07-16T09:00:15Z"
+        );
+
+        CashflowWeeklyUpdateCompletionResponse first = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(ACTOR, "project-a", firstRequest)
+        );
+        CashflowWeeklyUpdateCompletionResponse replay = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(ACTOR, "project-a", retriedRequest)
+        );
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
+            .hasSize(1);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/weekly_api_audit_events/")))
+            .hasSize(1);
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-retry-stable", "2026-07", 4, "2026-07-16T09:00:30Z"
+                )
+            )
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("Idempotency key");
+    }
+
+    @Test
+    void weeklyLockReadRejectsCanonicalLedgerDrift() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        String path = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3";
+        fixture.documents.put(path, new LinkedHashMap<>(Map.of(
+            "id", "project-a-2026-07-w3",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "weekNo", 3,
+            "projection", Map.of("SALES_IN", 100L),
+            "actual", Map.of()
+        )));
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        fixture.persistence.runCommandTransaction(() -> service.completeCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new CompleteCashflowWeeklyUpdateRequest(
+                "weekly-drift-lock", "2026-07", 3, "2026-07-16T09:00:00Z"
+            )
+        ));
+        Map<String, Object> drifted = new LinkedHashMap<>(fixture.documents.get(path));
+        drifted.put("projection", Map.of("SALES_IN", 999L));
+        fixture.documents.put(path, drifted);
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            service.readCashflowWeeklyUpdate(READ_ACTOR, "project-a", "2026-07", 3)
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("canonical ledger");
+    }
+
+    @Test
+    void lockedCashflowWeekRejectsProjectionUntilAReasonedReopen() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3",
+            new LinkedHashMap<>(Map.of(
+                "id", "project-a-2026-07-w3",
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "weekNo", 3,
+                "projection", Map.of("SALES_IN", 100L),
+                "actual", Map.of()
+            ))
+        );
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        CompleteCashflowWeeklyUpdateRequest lock = new CompleteCashflowWeeklyUpdateRequest(
+            "weekly-lock-1", "2026-07", 3, "2026-07-16T09:00:00Z"
+        );
+
+        fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(ACTOR, "project-a", lock)
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
+            ACTOR,
+            "project-a",
+            FINAL_SESSION,
+            new UpsertProjectionRequest("projection-while-locked", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 3, "SALES_IN", BigDecimal.valueOf(200))
+            ))
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            service.reopenCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("weekly-reopen-empty", "2026-07", 3, 1, "")
+            )
+        )).isInstanceOf(IllegalArgumentException.class);
+
+        CashflowWeeklyUpdateCompletionResponse reopened = fixture.persistence.runCommandTransaction(() ->
+            service.reopenCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new ReopenCashflowWeeklyUpdateRequest("weekly-reopen-1", "2026-07", 3, 1, "긴급 정정")
+            )
+        );
+        assertThat(reopened.status()).isEqualTo("OPEN");
+        assertThat(reopened.revision()).isEqualTo(2L);
+
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
+            ACTOR,
+            "project-a",
+            FINAL_SESSION,
+            new UpsertProjectionRequest("projection-after-reopen", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 3, "SALES_IN", BigDecimal.valueOf(200))
+            ))
+        ))).doesNotThrowAnyException();
+
+        CashflowWeeklyUpdateCompletionResponse relocked = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-lock-2", "2026-07", 3, "2026-07-16T11:00:00Z"
+                )
+            )
+        );
+        assertThat(relocked.status()).isEqualTo("LOCKED");
+        assertThat(relocked.revision()).isEqualTo(3L);
+        assertThat(fixture.documents).containsKey(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r3"
+        );
+    }
+
+    @Test
+    void aLockedWeekDoesNotBlockProjectionInAnotherWeek() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("different-week", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-07", 4, "SALES_IN", BigDecimal.valueOf(200)
+                )
+            ))
+        ))).doesNotThrowAnyException();
+
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_weeks/project-a-2026-07-w4"))
+            .hasEntrySatisfying("projection", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("SALES_IN", 200L));
+    }
+
+    @Test
+    void sheetApplyRejectsALockedChangedWeekWithoutPartialCanonicalWrites() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest("locked-sheet-apply", targetRevision, "")
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+
+        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+    }
+
+    @Test
+    void sheetApplySkipsAnUnchangedLockedWeekAndUpdatesOnlyTheChangedOpenWeek() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String emptyRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest initialRequest = monthlyRequest(
+            "sheet-initial-before-week-lock",
+            emptyRevision,
+            ""
+        );
+        CashflowSheetLabApplyResponse initial = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, initialRequest));
+        String lockedPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3";
+        Map<String, Object> lockedBefore = new LinkedHashMap<>(fixture.documents.get(lockedPath));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        List<CashflowSheetLabApplyRequest.Cell> changedCells = initialRequest.cells().stream()
+            .map(cell -> "projection".equals(cell.mode())
+                && cell.weekNo() == 4
+                && "SALES_IN".equals(cell.cashflowLine())
+                    ? new CashflowSheetLabApplyRequest.Cell(
+                        cell.mode(), cell.weekNo(), cell.cashflowLine(), "VALUE", BigDecimal.valueOf(101),
+                        cell.sourceCell(), cell.sourceLabel()
+                    )
+                    : cell)
+            .toList();
+        CashflowSheetLabApplyRequest changedRequest = new CashflowSheetLabApplyRequest(
+            "sheet-open-week-change",
+            SOURCE_REVISION,
+            initial.resultingTargetRevision(),
+            "2026-07",
+            false,
+            changedCells
+        );
+
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, changedRequest)))
+            .doesNotThrowAnyException();
+
+        assertThat(fixture.documents.get(lockedPath)).isEqualTo(lockedBefore);
+        assertThat((Map<String, Object>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w4"
+        ).get("projection"))
+            .containsEntry("SALES_IN", 101L);
+    }
+
+    @Test
+    void sheetApplyMaterializesAnAbsentAllEmptyWeekAndKeepsTargetRevisionStable() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String emptyRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest base = monthlyRequest("sheet-empty-week", emptyRevision, "");
+        List<CashflowSheetLabApplyRequest.Cell> cells = base.cells().stream()
+            .map(cell -> cell.weekNo() == 5
+                ? new CashflowSheetLabApplyRequest.Cell(
+                    cell.mode(), cell.weekNo(), cell.cashflowLine(), "EMPTY", null,
+                    cell.sourceCell(), cell.sourceLabel()
+                )
+                : cell)
+            .toList();
+        CashflowSheetLabApplyRequest request = new CashflowSheetLabApplyRequest(
+            base.idempotencyKey(),
+            base.sourceRevision(),
+            base.targetRevision(),
+            base.yearMonth(),
+            base.replaceAllActualSources(),
+            cells
+        );
+
+        CashflowSheetLabApplyResponse first = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request));
+        String emptyWeekPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w5";
+        assertThat(fixture.documents).containsKey(emptyWeekPath);
+        List<Map<String, Object>> persistedWeeks = fixture.documents.entrySet().stream()
+            .filter(entry -> entry.getKey().startsWith("orgs/tenant-a/cashflow_weeks/project-a-2026-07-w"))
+            .map(Map.Entry::getValue)
+            .toList();
+        assertThat(first.resultingTargetRevision()).isEqualTo(
+            FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(persistedWeeks)
+        );
+
+        CashflowSheetLabApplyRequest replay = new CashflowSheetLabApplyRequest(
+            "sheet-empty-week-replay",
+            SOURCE_REVISION,
+            first.resultingTargetRevision(),
+            "2026-07",
+            false,
+            cells
+        );
+        CashflowSheetLabApplyResponse second = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, replay));
+        assertThat(second.resultingTargetRevision()).isEqualTo(first.resultingTargetRevision());
+    }
+
+    @Test
+    void weeklyExpenseActualReplacementRejectsALockedChangedWeek() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(weekPath(), draftWeek());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1",
+            lockedWeeklyCompletion("2026-07", 1, 1)
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceActualLines(
+                "tenant-a",
+                "project-a",
+                "cashflow-sheet-lab",
+                List.of(new SaveDraftResponse.ActualDelta(
+                    "2026-07", 1, "SALES_IN", BigDecimal.valueOf(50)
+                ))
+            );
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+    }
+
+    @Test
+    void weeklySheetActualReplacementRejectsALockedChangedWeek() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(weekPath(), draftWeek());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1",
+            lockedWeeklyCompletion("2026-07", 1, 1)
+        );
+        WeeklyExpenseSheetEntity sheet = new WeeklyExpenseSheetEntity(
+            "tenant-a", "project-a", "default", "Default"
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
+            fixture.persistence.replaceActuals(
+                sheet,
+                List.of(new SaveDraftResponse.ActualDelta(
+                    "2026-07", 1, "SALES_IN", BigDecimal.valueOf(50)
+                ))
+            );
+            return null;
+        }))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+    }
+
+    @Test
+    void submitAndCloseCommandsCannotChangeStatusInsideALockedWeek() {
+        Fixture submitFixture = fixture(activeMember(), activeLease());
+        submitFixture.documents.put(weekPath(), draftWeek());
+        submitFixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1",
+            lockedWeeklyCompletion("2026-07", 1, 1)
+        );
+
+        assertThatThrownBy(() -> submitFixture.persistence.runCommandTransaction(() -> commandService(
+            submitFixture.persistence
+        ).submitWeek(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new SubmitWeekRequest("locked-submit", "2026-07", 1)
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+
+        Fixture closeFixture = fixture(
+            member(Map.of("role", "finance", "projectIds", List.of())),
+            activeLease()
+        );
+        closeFixture.documents.put(weekPath(), submittedWeek());
+        closeFixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1",
+            lockedWeeklyCompletion("2026-07", 1, 1)
+        );
+
+        assertThatThrownBy(() -> closeFixture.persistence.runCommandTransaction(() -> commandService(
+            closeFixture.persistence
+        ).closeWeek(
+            ACTOR,
+            "project-a",
+            SESSION,
+            closeRequest("locked-close", BigDecimal.valueOf(100))
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("locked");
+    }
+
+    @Test
+    void submitWithASheetPreReadsTheWeekLockBeforeItsFirstWrite() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(weekPath(), draftWeek());
+        SubmitWeekRequest request = new SubmitWeekRequest(
+            "submit-read-before-write",
+            "2026-07",
+            1,
+            new SubmitWeekRequest.WeeklySheetSnapshot("default", null, "Default", List.of())
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence).submitWeek(
+            ACTOR,
+            "project-a",
+            SESSION,
+            request
+        ));
+
+        org.mockito.InOrder order = inOrder(fixture.transaction);
+        order.verify(fixture.transaction).get(argThat((DocumentReference ref) -> ref.getPath().equals(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1"
+        )));
+        order.verify(fixture.transaction).set(
+            argThat((DocumentReference ref) -> ref.getPath().equals(sheetPath())),
+            any(),
+            any()
+        );
+    }
+
+    @Test
+    void unchangedWeeklyStatusIsANoOpInsideALockedWeek() {
+        Fixture fixture = fixture(
+            member(Map.of("role", "finance", "projectIds", List.of())),
+            activeLease()
+        );
+        Map<String, Object> closed = closedWeek();
+        fixture.documents.put(weekPath(), new LinkedHashMap<>(closed));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1",
+            lockedWeeklyCompletion("2026-07", 1, 1)
+        );
+        WeeklyExpenseWeeklyStatusEntity status = new WeeklyExpenseWeeklyStatusEntity(
+            "tenant-a", "project-a", "2026-07", 1
+        );
+        status.restorePersistenceState(
+            "status-1",
+            "closed",
+            "pm-1",
+            Instant.parse(String.valueOf(closed.get("pmSubmittedAt"))),
+            "finance-1",
+            Instant.parse(String.valueOf(closed.get("adminClosedAt"))),
+            NOW
+        );
+
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
+            fixture.persistence.requireCashflowMonthClosePermission(ACTOR, "project-a");
+            fixture.persistence.saveWeeklyStatus(status);
+            return null;
+        })).doesNotThrowAnyException();
+        assertThat(fixture.documents.get(weekPath())).isEqualTo(closed);
+    }
+
+    @Test
+    void tenantAdminCanCompleteAWeeklySettlementWithoutProjectAssignment() {
+        Fixture fixture = fixture(
+            member(Map.of("role", "tenant_admin", "projectIds", List.of())),
+            Map.of()
+        );
+
+        CashflowWeeklyUpdateCompletionResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).completeCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new CompleteCashflowWeeklyUpdateRequest(
+                "tenant-admin-weekly-complete", "2026-07", 3, "2026-07-16T09:00:00Z"
+            )
+        ));
+
+        assertThat(response.status()).isEqualTo("LOCKED");
+        assertThat(response.completedBy()).isEqualTo("pm@example.com");
+    }
+
+    @Test
+    void legacyWeeklyCompletionIsUpgradedInsteadOfBeingTreatedAsALock() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            new LinkedHashMap<>(Map.of(
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "weekNo", 3,
+                "completedAt", "2026-07-10T09:00:00Z",
+                "completedByUid", "legacy-user"
+            ))
+        );
+
+        CashflowWeeklyUpdateCompletionResponse upgraded = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).completeCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new CompleteCashflowWeeklyUpdateRequest(
+                "upgrade-legacy-week", "2026-07", 3, "2026-07-16T09:00:00Z"
+            )
+        ));
+
+        assertThat(upgraded.alreadyCompleted()).isFalse();
+        assertThat(upgraded.status()).isEqualTo("LOCKED");
+        assertThat(upgraded.revision()).isEqualTo(1L);
+        assertThat(fixture.documents).containsKey(
+            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1"
+        );
+    }
+
+    @Test
+    void weeklyLockIdempotencyCreatesOneVersionAndOneAuditEvent() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        CompleteCashflowWeeklyUpdateRequest request = new CompleteCashflowWeeklyUpdateRequest(
+            "same-weekly-lock", "2026-07", 3, "2026-07-16T09:00:00Z"
+        );
+
+        CashflowWeeklyUpdateCompletionResponse first = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(ACTOR, "project-a", request)
+        );
+        CashflowWeeklyUpdateCompletionResponse replay = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(ACTOR, "project-a", request)
+        );
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
+            .hasSize(1);
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/weekly_api_audit_events/")))
+            .hasSize(1);
+    }
+
+    @Test
+    void weeklyReopenRejectsRevisionDriftAndClosedMonth() {
+        Fixture revisionFixture = fixture(activeMember(), Map.of());
+        revisionFixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 2)
+        );
+        assertThatThrownBy(() -> revisionFixture.persistence.runCommandTransaction(() -> commandService(
+            revisionFixture.persistence
+        ).reopenCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new ReopenCashflowWeeklyUpdateRequest(
+                "reopen-stale", "2026-07", 3, 1, "긴급 정정"
+            )
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("revision");
+
+        Fixture closedFixture = fixture(activeMember(), Map.of());
+        closedFixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
+            lockedWeeklyCompletion("2026-07", 3, 1)
+        );
+        closedFixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "CLOSED",
+            "revision", 1L,
+            "reopenCount", 0L
+        ));
+        assertThatThrownBy(() -> closedFixture.persistence.runCommandTransaction(() -> commandService(
+            closedFixture.persistence
+        ).reopenCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new ReopenCashflowWeeklyUpdateRequest(
+                "reopen-closed-month", "2026-07", 3, 1, "긴급 정정"
+            )
+        )))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("closed");
     }
 
     @Test
@@ -1587,6 +2306,22 @@ class FirestoreCashflowLeaseGuardTest {
             "reopenCount", 2L
         ));
         fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-06-w3",
+            new LinkedHashMap<>(Map.of(
+                "id", "project-a-2026-06-w3",
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-06",
+                "weekNo", 3,
+                "projection", Map.of("SALES_IN", 200L),
+                "actual", Map.of()
+            ))
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3",
+            lockedWeeklyCompletion("2026-06", 3, 1)
+        );
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
 
         CashflowMonthCloseResponse requested = fixture.persistence.runCommandTransaction(() -> service.requestCashflowMonthReopen(
@@ -1632,7 +2367,29 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(fixture.documents.get(monthClosePath("project-a", "2026-06")))
             .containsEntry("status", "OPEN")
             .containsEntry("reopenCount", 1L)
-            .containsEntry("revision", 3L);
+            .containsEntry("revision", 3L)
+            .hasEntrySatisfying("reopenDecision", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("autoReopenedWeeklyCount", 1));
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3"
+        ))
+            .containsEntry("status", "OPEN")
+            .containsEntry("revision", 2L)
+            .containsEntry("reopenSource", "MONTH_REOPEN_APPROVAL")
+            .hasEntrySatisfying("reopenReason", value -> assertThat(value).asString().contains("증빙 확인 완료"));
+        assertThat(fixture.persistence.runCommandTransaction(() -> service.readCashflowWeeklyUpdate(
+            READ_ACTOR, "project-a", "2026-06", 3
+        )).status()).isEqualTo("OPEN");
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
+            ACTOR,
+            "project-a",
+            SESSION,
+            new UpsertProjectionRequest("projection-after-month-reopen", List.of(
+                new UpsertProjectionRequest.ProjectionLinePatch(
+                    "2026-06", 3, "SALES_IN", BigDecimal.valueOf(300)
+                )
+            ))
+        ))).doesNotThrowAnyException();
     }
 
     @Test
@@ -2318,6 +3075,22 @@ class FirestoreCashflowLeaseGuardTest {
             "pmSubmitted", false,
             "adminClosed", false,
             "projection", Map.of("SALES_IN", 100L)
+        ));
+    }
+
+    private static Map<String, Object> lockedWeeklyCompletion(String yearMonth, int weekNo, long revision) {
+        return new LinkedHashMap<>(Map.ofEntries(
+            Map.entry("id", "project-a-" + yearMonth + "-w" + weekNo),
+            Map.entry("tenantId", "tenant-a"),
+            Map.entry("projectId", "project-a"),
+            Map.entry("yearMonth", yearMonth),
+            Map.entry("weekNo", weekNo),
+            Map.entry("status", "LOCKED"),
+            Map.entry("revision", revision),
+            Map.entry("reopenCount", 0L),
+            Map.entry("snapshotHash", "sha256:" + "a".repeat(64)),
+            Map.entry("completedAt", NOW.toString()),
+            Map.entry("completedByUid", "pm-1")
         ));
     }
 

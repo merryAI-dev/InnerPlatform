@@ -49,6 +49,7 @@ class WeeklyExpenseWorkspaceAuthorizationControllerTest {
         doAnswer(invocation -> ((TrustedActorContext) invocation.getArgument(0)).role())
             .when(weeklyExpensePersistence).requireCashflowMonthClosePermission(any(), any());
         doNothing().when(weeklyExpensePersistence).requireCashflowMonthsOpen(any(), any(), any());
+        doNothing().when(weeklyExpensePersistence).requireCashflowWeeksOpen(any(), any(), any());
     }
 
     @Test

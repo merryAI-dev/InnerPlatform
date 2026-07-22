@@ -8,6 +8,15 @@ public record CashflowWeeklyUpdateCompletionResponse(
     int weekNo,
     String completedAt,
     String completedBy,
-    boolean alreadyCompleted
+    boolean alreadyCompleted,
+    String status,
+    long revision,
+    long reopenCount,
+    String snapshotHash,
+    String sourceRevision,
+    String targetRevision,
+    String reopenedAt,
+    String reopenedBy,
+    String reopenReason
 ) {
 }

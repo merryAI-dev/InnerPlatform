@@ -36,6 +36,7 @@ import dev.merryai.innerplatform.weekly.api.RowCommandResponse;
 import dev.merryai.innerplatform.weekly.api.RowDeleteRequest;
 import dev.merryai.innerplatform.weekly.api.RowInsertRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
+import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftRequest;
 import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
@@ -118,7 +119,9 @@ public class WeeklyExpenseCommandService {
     public static final String CASHFLOW_VARIANCE_COMMAND = "cashflowVariance.update";
     public static final String CASHFLOW_MONTH_CLOSE_READ_COMMAND = "cashflowMonth.read";
     public static final String CLOSE_CASHFLOW_MONTH_COMMAND = "cashflowMonth.close";
+    public static final String READ_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.read";
     public static final String COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.complete";
+    public static final String REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND = "cashflowWeeklyUpdate.reopen";
     public static final String REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.requestReopen";
     public static final String DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND = "cashflowMonth.decideReopen";
     public static final String AUDIT_EXPORT_CREATE_COMMAND = "weeklyExpense.auditExport.create";
@@ -846,7 +849,10 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
-        String requestHash = hashJson(request);
+        String requestHash = hashJson(Map.of(
+            "yearMonth", request.yearMonth(),
+            "weekNo", request.weekNo()
+        ));
         Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
             writer.tenantId(),
             projectId,
@@ -875,25 +881,99 @@ public class WeeklyExpenseCommandService {
                     "yearMonth", saved.yearMonth(),
                     "weekNo", saved.weekNo(),
                     "completedAt", saved.completedAt(),
-                    "completedBy", saved.completedBy()
+                    "completedBy", saved.completedBy(),
+                    "snapshotHash", saved.snapshotHash(),
+                    "sourceRevision", saved.sourceRevision(),
+                    "targetRevision", saved.targetRevision(),
+                    "revision", saved.revision()
                 ))
             ));
         }
-        CashflowWeeklyUpdateCompletionResponse response = new CashflowWeeklyUpdateCompletionResponse(
-            true,
+        CashflowWeeklyUpdateCompletionResponse response = weeklyCompletionResponse(
             COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
-            saved.projectId(),
-            saved.yearMonth(),
-            saved.weekNo(),
-            saved.completedAt(),
-            saved.completedBy(),
-            saved.alreadyCompleted()
+            saved
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
             writer.tenantId(),
             projectId,
             request.idempotencyKey(),
             COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            requestHash,
+            writeJson(response)
+        ));
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowWeeklyUpdateCompletionResponse readCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth,
+        int weekNo
+    ) {
+        authorizationService.requireProjectAllowed(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId);
+        WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord record = persistence
+            .findCashflowWeeklyUpdateCompletion(actor.tenantId(), projectId, yearMonth, weekNo);
+        return weeklyCompletionResponse(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, record);
+    }
+
+    @Transactional
+    public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        ReopenCashflowWeeklyUpdateRequest request
+    ) {
+        if (request.reason().isBlank()) {
+            throw new IllegalArgumentException("A reason is required to reopen a cashflow week.");
+        }
+        TrustedActorContext writer = requireCashflowMonthClosePermission(
+            REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            actor,
+            projectId
+        );
+        String requestHash = hashJson(request);
+        Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
+            writer.tenantId(),
+            projectId,
+            REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            request.idempotencyKey(),
+            requestHash,
+            CashflowWeeklyUpdateCompletionResponse.class
+        );
+        if (replay.isPresent()) return replay.get();
+
+        WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord saved = persistence.reopenCashflowWeeklyUpdate(
+            writer,
+            projectId,
+            request
+        );
+        persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            writer.tenantId(),
+            projectId,
+            projectId + "-" + saved.yearMonth() + "-w" + saved.weekNo(),
+            REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            writer.id(),
+            normalizeRole(writer.role()),
+            request.idempotencyKey(),
+            writeJson(Map.of(
+                "yearMonth", saved.yearMonth(),
+                "weekNo", saved.weekNo(),
+                "revision", saved.revision(),
+                "reopenedAt", saved.reopenedAt(),
+                "reopenedBy", saved.reopenedBy(),
+                "reason", saved.reopenReason(),
+                "previousSnapshotHash", saved.snapshotHash()
+            ))
+        ));
+        CashflowWeeklyUpdateCompletionResponse response = weeklyCompletionResponse(
+            REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
+            saved
+        );
+        persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
+            writer.tenantId(),
+            projectId,
+            request.idempotencyKey(),
+            REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND,
             requestHash,
             writeJson(response)
         ));
@@ -1344,6 +1424,11 @@ public class WeeklyExpenseCommandService {
                 request.yearMonth(),
                 request.weekNo()
             ));
+        persistence.requireCashflowWeeksOpen(
+            tenantId,
+            projectId,
+            List.of(new WeeklyExpensePersistence.CashflowWeekScope(request.yearMonth(), request.weekNo()))
+        );
         List<CellValidationIssue> issues = List.of();
         List<SaveDraftResponse.ActualDelta> actualDelta = List.of();
         int actualWriteCount = 0;
@@ -1461,6 +1546,11 @@ public class WeeklyExpenseCommandService {
                 request.weekNo()
             )
             .orElseThrow(() -> new WeeklyExpenseConflictException("Week must be submitted before close."));
+        persistence.requireCashflowWeeksOpen(
+            actor.tenantId(),
+            projectId,
+            List.of(new WeeklyExpensePersistence.CashflowWeekScope(request.yearMonth(), request.weekNo()))
+        );
         saveProjectionEntities(projectionEntities);
         try {
             status.close(actor.id());
@@ -1926,13 +2016,17 @@ public class WeeklyExpenseCommandService {
 
         List<WeeklyExpenseProjectionEntity> entities = new ArrayList<>();
         for (ProjectionLineAccumulator line : projectionPatches.values()) {
-            WeeklyExpenseProjectionEntity entity = persistence.findProjectionLine(
+            Optional<WeeklyExpenseProjectionEntity> existing = persistence.findProjectionLine(
                 actor.tenantId(),
                 projectId,
                 line.yearMonth,
                 line.weekNo,
                 line.cashflowLine
-            ).orElseGet(() -> new WeeklyExpenseProjectionEntity(
+            );
+            if (existing.isPresent() && line.amount.compareTo(existing.get().getAmount()) == 0) {
+                continue;
+            }
+            WeeklyExpenseProjectionEntity entity = existing.orElseGet(() -> new WeeklyExpenseProjectionEntity(
                 actor.tenantId(),
                 projectId,
                 line.yearMonth,
@@ -1954,6 +2048,17 @@ public class WeeklyExpenseCommandService {
                 first.getTenantId(),
                 first.getProjectId(),
                 entities.stream().map(WeeklyExpenseProjectionEntity::getYearMonth).distinct().toList()
+            );
+            persistence.requireCashflowWeeksOpen(
+                first.getTenantId(),
+                first.getProjectId(),
+                entities.stream()
+                    .map(entity -> new WeeklyExpensePersistence.CashflowWeekScope(
+                        entity.getYearMonth(),
+                        entity.getWeekNo()
+                    ))
+                    .distinct()
+                    .toList()
             );
         }
         List<CashflowSnapshotResponse.ProjectionLine> savedLines = new ArrayList<>();
@@ -2923,6 +3028,31 @@ public class WeeklyExpenseCommandService {
             close.reopenDecidedAt(),
             close.reopenDecidedByUid(),
             auditId
+        );
+    }
+
+    private CashflowWeeklyUpdateCompletionResponse weeklyCompletionResponse(
+        String commandName,
+        WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord saved
+    ) {
+        return new CashflowWeeklyUpdateCompletionResponse(
+            true,
+            commandName,
+            saved.projectId(),
+            saved.yearMonth(),
+            saved.weekNo(),
+            saved.completedAt(),
+            saved.completedBy(),
+            saved.alreadyCompleted(),
+            saved.status(),
+            saved.revision(),
+            saved.reopenCount(),
+            saved.snapshotHash(),
+            saved.sourceRevision(),
+            saved.targetRevision(),
+            saved.reopenedAt(),
+            saved.reopenedBy(),
+            saved.reopenReason()
         );
     }
 

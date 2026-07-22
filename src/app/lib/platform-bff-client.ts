@@ -1009,12 +1009,23 @@ export interface CashflowMonthCloseQaDateTimeSetting {
 }
 
 export interface CashflowWeeklyUpdateCompletionResult {
+  ok?: boolean;
+  commandName?: string;
   projectId: string;
   yearMonth: string;
   weekNo: number;
   completedAt: string;
   completedBy: string | null;
   alreadyCompleted: boolean;
+  status: 'LOCKED' | 'OPEN';
+  revision: number;
+  reopenCount: number;
+  snapshotHash: string;
+  sourceRevision: string;
+  targetRevision: string;
+  reopenedAt: string | null;
+  reopenedBy: string | null;
+  reopenReason: string | null;
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -2485,14 +2496,71 @@ export async function completeCashflowWeeklyUpdateViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  yearMonth?: string;
+  weekNo?: number;
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeeklyUpdateCompletionResult> {
+  const hasExplicitScope = params.yearMonth !== undefined || params.weekNo !== undefined;
   const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-complete`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: {},
+      body: hasExplicitScope
+        ? { yearMonth: params.yearMonth, weekNo: params.weekNo }
+        : {},
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowWeeklyUpdateViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyUpdateCompletionResult> {
+  const query = new URLSearchParams({
+    yearMonth: params.yearMonth,
+    weekNo: String(params.weekNo),
+  });
+  const response = await resolveClient(params.client).get<CashflowWeeklyUpdateCompletionResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-complete?${query.toString()}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function reopenCashflowWeeklyUpdateViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  expectedRevision: number;
+  reason: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyUpdateCompletionResult> {
+  const response = await resolveClient(params.client).post<CashflowWeeklyUpdateCompletionResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-complete/reopen`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: {
+        yearMonth: params.yearMonth,
+        weekNo: params.weekNo,
+        expectedRevision: params.expectedRevision,
+        reason: params.reason,
+      },
       retries: 0,
       timeoutMs: 12000,
     },

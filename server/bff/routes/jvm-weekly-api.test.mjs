@@ -597,7 +597,7 @@ describe('JVM weekly API BFF proxy', () => {
         const body = JSON.parse(init.body);
         source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3', {
           projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
-          completedAt: body.completedAt, completedByEmail: 'pm@example.com',
+          status: 'LOCKED', completedAt: body.completedAt, completedByEmail: 'pm@example.com',
         });
         return {
           ok: true,
@@ -638,6 +638,172 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({
         yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED',
+      }));
+  });
+
+  it('forwards an explicit weekly scope and a reasoned reopen without an edit lease', async () => {
+    const source = fullMonthCloseSource();
+    const fetchImpl = vi.fn(async (url, init) => {
+      const body = init.body ? JSON.parse(init.body) : {};
+      if (init.method === 'GET' && url.includes('/weekly-update-complete?')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true, projectId: 'project-a', yearMonth: '2026-06', weekNo: 2,
+            status: 'LOCKED', revision: 1,
+          }),
+        };
+      }
+      if (url.endsWith('/api/v1/cashflow/project-a/weekly-update-complete/reopen')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            ok: true, projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
+            status: 'OPEN', revision: 2, reopenReason: body.reason,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          ok: true, projectId: 'project-a', yearMonth: body.yearMonth, weekNo: body.weekNo,
+          status: 'LOCKED', revision: 1,
+        }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/weekly-update-complete?yearMonth=2026-06&weekNo=2')
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        yearMonth: '2026-06', weekNo: 2, status: 'LOCKED', revision: 1,
+      }));
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({ yearMonth: '2026-06', weekNo: 2 })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        yearMonth: '2026-06', weekNo: 2, status: 'LOCKED', revision: 1,
+      }));
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
+      .send({ yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정' })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        yearMonth: '2026-06', weekNo: 2, status: 'OPEN', revision: 2, reopenReason: '긴급 정정',
+      }));
+
+    const completeCall = fetchImpl.mock.calls.find(([url]) => url.endsWith('/weekly-update-complete'));
+    expect(JSON.parse(completeCall[1].body)).toMatchObject({ yearMonth: '2026-06', weekNo: 2 });
+    const reopenCall = fetchImpl.mock.calls.find(([url]) => url.endsWith('/weekly-update-complete/reopen'));
+    expect(reopenCall[1].headers).not.toHaveProperty('x-edit-session-id');
+    expect(JSON.parse(reopenCall[1].body)).toMatchObject({
+      yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정',
+    });
+  });
+
+  it('does not count a reopened weekly completion as settled', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
+      projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
+    });
+    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
+      active: true, qaDateTime: '2026-07-16T18:00:00+09:00',
+    });
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3', {
+      projectId: 'project-a', yearMonth: '2026-07', weekNo: 3, status: 'OPEN',
+      completedAt: '2026-07-16T09:00:00+09:00', reopenedAt: '2026-07-16T10:00:00+09:00',
+    });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({
+        yearMonth: '2026-07', weekNo: 3, status: 'PENDING', completedAt: null,
+      }));
+  });
+
+  it('rejects incomplete weekly scopes before the JVM and preserves a JVM lock conflict', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify({
+        code: 'weekly_expense_conflict',
+        message: 'Cashflow week is locked: 2026-06 2주차.',
+      }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
+      env: stageEnv,
+      db: fullMonthCloseSource().db,
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/weekly-update-complete?yearMonth=2026-06&weekNo=6')
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_update_scope_invalid'));
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({ yearMonth: '2026-06' })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_update_scope_invalid'));
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({ yearMonth: '' })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_update_scope_invalid'));
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete/reopen')
+      .send({ yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '' })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_weekly_reopen_request_invalid'));
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({ yearMonth: '2026-06', weekNo: 2 })
+      .expect(409)
+      .expect((response) => expect(response.body).toMatchObject({
+        code: 'weekly_expense_conflict',
+        message: expect.stringContaining('locked'),
+      }));
+  });
+
+  it('preserves a JVM weekly settlement outage code and 503 status', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({
+        code: 'cashflow_weekly_completion_backend_unavailable',
+        message: 'Cashflow weekly completion backend is unavailable.',
+      }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
+      env: stageEnv,
+      db: fullMonthCloseSource().db,
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({ yearMonth: '2026-06', weekNo: 2 })
+      .expect(503)
+      .expect((response) => expect(response.body).toMatchObject({
+        code: 'cashflow_weekly_completion_backend_unavailable',
+        message: expect.stringContaining('unavailable'),
       }));
   });
 

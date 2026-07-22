@@ -1052,7 +1052,12 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     .map((run) => readOptionalText(run.appliedAt) || readOptionalText(run.createdAt))
     .filter((value) => Number.isFinite(Date.parse(value)))
     .sort();
-  const completionRows = completionSnap.docs.map((doc) => doc.data() || {});
+  const completionRows = completionSnap.docs
+    .map((doc) => doc.data() || {})
+    .filter((value) => {
+      const status = readOptionalText(value.status).toUpperCase();
+      return status ? status === 'LOCKED' : Boolean(readOptionalText(value.completedAt));
+    });
   const completions = new Map(completionRows.map((value) => {
     return [`${readOptionalText(value.yearMonth)}:${Number(value.weekNo)}`, value];
   }));
@@ -1732,8 +1737,33 @@ export function mountJvmWeeklyApiRoutes(app, {
     });
   }));
 
+  app.get('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'auditor', 'viewer', 'tenant_admin', 'support', 'security'], 'read weekly cashflow update', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    const yearMonth = readOptionalText(req.query.yearMonth);
+    const weekNo = Number(req.query.weekNo);
+    if (
+      !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+      || !Number.isSafeInteger(weekNo)
+      || weekNo < 1
+      || weekNo > 5
+    ) {
+      throw createHttpError(
+        400,
+        '조회할 주간 정산 연월과 주차를 정확히 입력해 주세요.',
+        'cashflow_weekly_update_scope_invalid',
+      );
+    }
+    const result = await proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete?yearMonth=${encodeURIComponent(yearMonth)}&weekNo=${weekNo}`,
+    });
+    res.status(200).json(result);
+  }));
+
   app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
       throw createHttpError(503, '현금흐름 쓰기는 Stage에서만 사용할 수 있습니다.', 'unsafe_bff_runtime');
     }
@@ -1745,6 +1775,23 @@ export function mountJvmWeeklyApiRoutes(app, {
       fallbackNow: now(),
     });
     const boundary = resolveCashflowComparisonAsOf('', qaClock.now);
+    const requested = commandBody(req);
+    const requestedYearMonth = readOptionalText(requested.yearMonth);
+    const requestedWeekNo = Number(requested.weekNo);
+    const hasExplicitScope = Object.prototype.hasOwnProperty.call(requested, 'yearMonth')
+      || Object.prototype.hasOwnProperty.call(requested, 'weekNo');
+    if (hasExplicitScope && (
+      !/^20\d{2}-(0[1-9]|1[0-2])$/.test(requestedYearMonth)
+      || !Number.isSafeInteger(requestedWeekNo)
+      || requestedWeekNo < 1
+      || requestedWeekNo > 5
+    )) {
+      throw createHttpError(
+        400,
+        '주간 정산 대상 연월과 주차를 함께 정확히 입력해 주세요.',
+        'cashflow_weekly_update_scope_invalid',
+      );
+    }
     const requestKey = (
       readOptionalText(req.context.idempotencyKey)
       || readOptionalText(req.context.requestId)
@@ -1755,10 +1802,43 @@ export function mountJvmWeeklyApiRoutes(app, {
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete`,
       {
         idempotencyKey: `cashflow-weekly:${requestKey}`,
-        yearMonth: boundary.asOfWeek.yearMonth,
-        weekNo: boundary.asOfWeek.weekNo,
+        yearMonth: hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth,
+        weekNo: hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo,
         completedAt: qaClock.now.toISOString(),
       },
+      { cashflowWrite: true },
+    );
+    res.status(200).json(result);
+  }));
+
+  app.post('/api/v1/cashflow/:projectId/weekly-update-complete/reopen', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'reopen weekly cashflow update', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    const requested = commandBody(req);
+    const yearMonth = readOptionalText(requested.yearMonth);
+    const weekNo = Number(requested.weekNo);
+    const expectedRevision = Number(requested.expectedRevision);
+    const reason = readOptionalText(requested.reason);
+    if (
+      !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+      || !Number.isSafeInteger(weekNo)
+      || weekNo < 1
+      || weekNo > 5
+      || !Number.isSafeInteger(expectedRevision)
+      || expectedRevision < 1
+      || !reason
+      || reason.length > 1_000
+    ) {
+      throw createHttpError(
+        400,
+        '주간 정산 재오픈에는 대상 연월·주차·현재 revision·사유가 필요합니다.',
+        'cashflow_weekly_reopen_request_invalid',
+      );
+    }
+    const result = await proxyMutation(
+      req,
+      `/api/v1/cashflow/${encodeURIComponent(projectId)}/weekly-update-complete/reopen`,
+      { ...requested, yearMonth, weekNo, expectedRevision, reason },
       { cashflowWrite: true },
     );
     res.status(200).json(result);

@@ -40,6 +40,8 @@ import {
   fetchCashflowMonthCloseQaDateTimeViaBff,
   setCashflowMonthCloseQaDateTimeViaBff,
   completeCashflowWeeklyUpdateViaBff,
+  fetchCashflowWeeklyUpdateViaBff,
+  reopenCashflowWeeklyUpdateViaBff,
   closeCashflowMonthViaBff,
   requestCashflowMonthReopenViaBff,
   decideCashflowMonthReopenViaBff,
@@ -223,13 +225,59 @@ describe('platform-bff-client', () => {
     await setCashflowMonthCloseQaDateTimeViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', qaDateTime: '2026-07-16T23:59', client,
     });
-    await completeCashflowWeeklyUpdateViaBff({ tenantId: 'mysc', actor, projectId: 'p001', client });
+    await completeCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
+    });
+    await fetchCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
+    });
+    await reopenCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2,
+      expectedRevision: 1, reason: '긴급 정정', client,
+    });
 
     expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({ retries: 0 }));
     expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({
       body: { qaDateTime: '2026-07-16T23:59' },
     }));
-    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({ body: {} }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
+      body: { yearMonth: '2026-06', weekNo: 2 },
+    }));
+    expect(client.get).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/cashflow/p001/weekly-update-complete?yearMonth=2026-06&weekNo=2',
+      expect.objectContaining({ retries: 0 }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/cashflow/p001/weekly-update-complete/reopen', expect.objectContaining({
+      body: { yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정' },
+    }));
+  });
+
+  it('does not turn partial or zero weekly settlement scopes into the QA-clock fallback', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { ok: true } })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+    const actor = { uid: 'finance-1', role: 'finance' };
+
+    await completeCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
+    });
+    await completeCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', weekNo: 0, client,
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/cashflow/p001/weekly-update-complete',
+      expect.objectContaining({ body: { yearMonth: '2026-06', weekNo: undefined } }),
+    );
+    expect(client.post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/cashflow/p001/weekly-update-complete',
+      expect.objectContaining({ body: { yearMonth: undefined, weekNo: 0 } }),
+    );
   });
 
   it('routes projection through the fenced JVM-owned BFF endpoint', async () => {

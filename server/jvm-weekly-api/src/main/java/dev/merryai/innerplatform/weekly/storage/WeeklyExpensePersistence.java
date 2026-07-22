@@ -7,6 +7,7 @@ import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
+import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
@@ -129,8 +130,20 @@ public interface WeeklyExpensePersistence {
         int weekNo,
         String completedAt,
         String completedBy,
-        boolean alreadyCompleted
+        boolean alreadyCompleted,
+        String status,
+        long revision,
+        long reopenCount,
+        String snapshotHash,
+        String sourceRevision,
+        String targetRevision,
+        String reopenedAt,
+        String reopenedBy,
+        String reopenReason
     ) {
+    }
+
+    record CashflowWeekScope(String yearMonth, int weekNo) {
     }
 
     default <T> T runCommandTransaction(Callable<T> action) {
@@ -191,6 +204,18 @@ public interface WeeklyExpensePersistence {
         );
     }
 
+    default void requireCashflowWeeksOpen(
+        String tenantId,
+        String projectId,
+        Collection<CashflowWeekScope> weeks
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_week_guard_backend_unavailable",
+            "Cashflow week validation requires the Firestore transaction backend."
+        );
+    }
+
     default CashflowMonthCloseRecord findCashflowMonthClose(
         String tenantId,
         String projectId,
@@ -237,6 +262,31 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_weekly_completion_backend_unavailable",
             "Cashflow weekly completion requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowWeeklyUpdateCompletionRecord findCashflowWeeklyUpdateCompletion(
+        String tenantId,
+        String projectId,
+        String yearMonth,
+        int weekNo
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_weekly_update_backend_unavailable",
+            "Cashflow weekly update reads require the Firestore transaction backend."
+        );
+    }
+
+    default CashflowWeeklyUpdateCompletionRecord reopenCashflowWeeklyUpdate(
+        TrustedActorContext actor,
+        String projectId,
+        ReopenCashflowWeeklyUpdateRequest request
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_weekly_reopen_backend_unavailable",
+            "Cashflow weekly reopen requires the Firestore transaction backend."
         );
     }
 
