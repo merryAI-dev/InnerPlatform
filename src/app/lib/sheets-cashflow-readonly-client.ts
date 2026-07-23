@@ -338,7 +338,33 @@ export interface CashflowSheetLabMirrorResult {
   }>;
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
+  lastRefreshIdempotencyKey?: string;
   lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
+}
+
+function isCashflowSheetLabMirrorResult(
+  value: unknown,
+  expected: { projectId: string; idempotencyKey?: string },
+): value is CashflowSheetLabMirrorResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<CashflowSheetLabMirrorResult>;
+  if (candidate.projectId !== expected.projectId) return false;
+  if (!['EMPTY', 'FRESH', 'STALE', 'ERROR'].includes(String(candidate.status || ''))) return false;
+  if (expected.idempotencyKey && candidate.lastRefreshIdempotencyKey !== expected.idempotencyKey) return false;
+  if (candidate.status === 'FRESH' || candidate.status === 'STALE') {
+    return typeof candidate.sourceRevision === 'string'
+      && candidate.sourceRevision.length > 0
+      && Array.isArray(candidate.cells)
+      && Array.isArray(candidate.annualCells)
+      && Boolean(candidate.summary && typeof candidate.summary === 'object');
+  }
+  return true;
+}
+
+function invalidCashflowSheetMirrorResponse(): Error & { code: string } {
+  return Object.assign(new Error('Cashflow sheet refresh returned an invalid response.'), {
+    code: 'cashflow_sheet_refresh_response_invalid',
+  });
 }
 
 export interface CashflowSheetLabAnnualModeTotal {
@@ -654,7 +680,23 @@ export async function refreshCashflowSheetLabMirrorViaBff(params: {
       retries: 0,
     },
   );
-  return response.data;
+  const expectedMirror = { projectId: params.projectId, idempotencyKey: params.idempotencyKey };
+  if (isCashflowSheetLabMirrorResult(response.data, expectedMirror)) return response.data;
+
+  // The refresh command is idempotent and may already be committed even if an
+  // intermediary returns an empty body. Recover the persisted server snapshot
+  // instead of treating a successful refresh as a UI failure.
+  const recovered = await apiClient.get<CashflowSheetLabMirrorResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/mirror`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  if (isCashflowSheetLabMirrorResult(recovered.data, expectedMirror)) return recovered.data;
+  throw invalidCashflowSheetMirrorResponse();
 }
 
 export async function getCashflowSheetLabShareAccountViaBff(params: {
