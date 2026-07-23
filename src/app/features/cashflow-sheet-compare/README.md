@@ -314,46 +314,29 @@ transaction that already owns these values.
 - Independent read-only re-audit scored this phase 100/100: contract/main path
   20/20; atomicity/concurrency 15/15; snapshot/hash/version 15/15;
 
-### 2026-07-23: settled-week sheet amendment warning
+### 2026-07-23: month-close-only sheet amendment contract
 
 **Planning and hypothesis**
 
-A sheet import is an authoritative value copy, but it must not silently bypass
-a weekly settlement. The first apply therefore remains a non-writing
-precondition check. If a changed week is `LOCKED`, the JVM returns a structured
-confirmation challenge containing the exact week, weekly-completion revision,
-and canonical target revision. The UI asks whether the user wants to apply
-values that differ from the settled snapshot. A confirmed retry is allowed;
-monthly close and its post-deadline reason requirement remain the stronger
-rule.
+A sheet import is an authoritative value copy. Weekly settlement is an
+operational completion record, not a financial write lock. Only a `CLOSED`
+month is amendment-controlled: changes through the tenth of the following
+month apply normally; later changes require a reason and increment the
+closed-month warning/audit counter.
 
 **Execution**
 
-- Single-month and multi-month sheet writes use the same changed-week
-  comparison in the JVM persistence transaction.
-- An unconfirmed request writes neither the canonical ledger nor warning data.
-- The public BFF does not accept a naked `allow=true` override. It stores the
-  JVM-issued challenge on the pinned stage run and accepts only that challenge
-  ID on retry. The ID is a JVM-signed, ten-minute token bound to tenant,
-  project, target revision, exact settled-week revisions, and a one-time nonce.
-  The JVM then re-reads every completion document and requires the target
-  revision and exact set of `(yearMonth, weekNo, completionRevision)` to match.
-  A newly locked week or changed revision produces a new `409` without writes;
-  an unlocked or expired confirmation returns an explicit retry response rather
-  than a server error.
-- The signer uses the required `JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY`
-  (32+ characters), separate from the BFF/JVM authentication token. Stage and
-  production fail JVM startup if the key is absent or weak.
-- The BFF includes the confirmation hash in its semantic apply hash and
-  fail-closes if the JVM response omits, duplicates, or changes any confirmed
-  scope or warning counter.
-- A confirmed request keeps the weekly completion `LOCKED`, overwrites only
-  financially changed weeks, increments `postSettlementChangeWarningCount`,
-  and stores actor UID, source revision, idempotency key, and timestamp.
-- Each changed settled week also writes one idempotent
-  `cashflow_weekly_settlement_change_warnings` audit document in the same
-  transaction. The JVM response returns the exact affected weeks and counters
-  to the BFF and UI.
+- Single-month and multi-month sheet writes skip weekly `LOCKED` checks in the
+  JVM; the completion record remains available to operations and admin views.
+- The BFF forwards only `closedMonthChangeReason`. A legacy weekly confirmation
+  field is accepted but ignored so an already-open browser tab cannot fail
+  during Stage rollout.
+- The JVM is authoritative for a post-deadline closed-month amendment. It
+  requires the reason, records actor/source/idempotency data, and increments
+  the amendment and warning counters in the same transaction as the ledger
+  write.
+- Both cashflow entry UIs show the reason dialog only after this JVM response;
+  a completed weekly update never produces a write-blocking dialog.
 - The sheet settings screen now loads the saved year-specific link on entry;
   checking the share account no longer performs an unrelated mirror read.
   Project/year hydration uses a request generation guard, validates the
@@ -362,21 +345,18 @@ rule.
 
 **Evaluation**
 
-The storage regression covers no partial writes before confirmation, a
-confirmed changed-week write, retained `LOCKED` status, one warning increment,
-actor/source audit fields, stale completion-revision rejection, and an audit
-document. BFF and both cashflow entry UIs cover the server-issued confirmation
-challenge, compact warning dialog, direct-boolean bypass rejection, retry, and
-saved-link hydration.
+The regression covers a settled-week sheet write without confirmation, plus
+the existing closed-month retry with a reason. BFF and both cashflow entry UIs
+cover the JVM reason response and saved-link hydration.
   authorization/reopen/month precedence 15/15; idempotency/audit/legacy 10/10;
   BFF/TypeScript/error contract 10/10; regression/real input 10/10; and
   documentation/build/gate 5/5. The auditor independently rebuilt 2,910 Vite
   modules in 21.87 seconds. One earlier parallel test run had a transient local
   socket failure under concurrent load; isolated 77/77 and the subsequent
   single-worker 174/174 run did not reproduce it.
-- This closes only the weekly settlement lock phase. UI work and Stage
-  deployment require their own tracked contract and the relevant retrospective
-  phase audits; Live deployment remains prohibited without explicit approval.
+- This closes the weekly-lock removal phase. Stage deployment requires its own
+  tracked verification; Live deployment remains prohibited without explicit
+  approval.
 
 ## 2026-07-23 duplicate-read and JVM error propagation fix
 

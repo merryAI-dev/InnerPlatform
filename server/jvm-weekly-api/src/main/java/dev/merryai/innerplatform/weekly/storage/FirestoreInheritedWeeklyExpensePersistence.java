@@ -494,30 +494,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             .distinct()
             .sorted(Comparator.comparing(CashflowWeekScope::yearMonth).thenComparingInt(CashflowWeekScope::weekNo))
             .toList());
-        List<String> locked = new ArrayList<>();
         for (CashflowWeekScope scope : scopes) {
             requireYearMonth(scope.yearMonth());
             if (scope.weekNo() < 1 || scope.weekNo() > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
                 throw new IllegalArgumentException("Cashflow weekNo must be between 1 and 5.");
             }
-            if (isAuthorizedCashflowMonthAmendment(monthStateKey(tenantId, projectId, scope.yearMonth()))) {
-                continue;
-            }
-            String documentId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
-            DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(tenantId, documentId));
-            Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
-                DocumentSnapshot snapshot = get(ref);
-                return snapshot.exists() ? data(snapshot) : Map.of();
-            });
-            if ("LOCKED".equals(text(document.get("status"), ""))) {
-                locked.add(scope.yearMonth() + " " + scope.weekNo() + "주차");
-            }
-        }
-        if (!locked.isEmpty()) {
-            throw new WeeklyExpenseConflictException(
-                "Cashflow week is locked: " + String.join(", ", locked)
-                    + ". Reopen it with a reason before changing values."
-            );
         }
     }
 
@@ -1718,48 +1699,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ));
         }
 
-        List<String> replacementKeysToWrite = replacements.keySet().stream().toList();
+        List<String> replacementKeysToWrite = replacements.entrySet().stream()
+            .filter(entry -> !allProjectWeeks.containsKey(entry.getKey())
+                || cashflowWeekFinancialContentChanged(
+                    allProjectWeeks.get(entry.getKey()),
+                    entry.getValue()
+                ))
+            .map(Map.Entry::getKey)
+            .toList();
+        // Weekly settlement is operational status only. Closed-month authorization above is the sole write guard.
         List<CashflowSettledWeekChange> settledWeekChanges = List.of();
-        if (!allowLockedWeeks) {
-            replacementKeysToWrite = replacements.entrySet().stream()
-                .filter(entry -> !allProjectWeeks.containsKey(entry.getKey())
-                    || cashflowWeekFinancialContentChanged(
-                        allProjectWeeks.get(entry.getKey()),
-                        entry.getValue()
-                    ))
-                .map(Map.Entry::getKey)
-                .toList();
-            List<CashflowWeekScope> changedWeeks = replacementKeysToWrite.stream()
-                .map(key -> {
-                    WeekDocParts parts = parseCashflowWeekId(projectId, key);
-                    return new CashflowWeekScope(parts.yearMonth(), parts.weekNo());
-                })
-                .toList();
-            if (settledWeekChangeConfirmation != null) {
-                requireExactSettledWeekConfirmation(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    targetRevision,
-                    settledWeekChangeConfirmation
-                );
-                settledWeekChanges = recordCashflowSettledWeekChanges(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    sourceRevision,
-                    targetRevision,
-                    idempotencyKey
-                );
-            } else {
-                requireCashflowWeeksOpenForSheetApply(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    targetRevision
-                );
-            }
-        }
         for (String replacementKey : replacementKeysToWrite) {
             replaceDocument(cashflowWeekRef(tenantId, replacementKey), replacements.get(replacementKey));
         }

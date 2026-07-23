@@ -2800,7 +2800,7 @@ describe('cashflow sheet lab route', () => {
     expect(calls[1].closedMonthChangeReason).toBe('결산 후 실제 입금액 정정');
   });
 
-  it('requires explicit confirmation before forwarding a settled-week sheet change', async () => {
+  it('applies a settled-week sheet change without a weekly confirmation', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2819,36 +2819,8 @@ describe('cashflow sheet lab route', () => {
       matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
     }));
     const resultingTargetRevision = `sha256:${'5'.repeat(64)}`;
-    let expireConfirmation = false;
     const javaWeeklyClient = {
-      applyCashflowSheetLab: vi.fn(async (input) => {
-        if (!input.settledWeekChangeConfirmation) {
-          throw Object.assign(new Error('주간 정산 값과 시트 값이 다릅니다.'), {
-            statusCode: 409,
-            code: 'cashflow_settled_week_change_confirmation_required',
-            details: {
-              confirmationId: 'confirmation-a',
-              targetRevision: input.targetRevision,
-              weeks: [{ yearMonth: '2026-01', weekNo: 2, completionRevision: 1 }],
-            },
-          });
-        }
-        if (expireConfirmation) {
-          throw Object.assign(new Error('주간 정산 상태가 바뀌었습니다. 시트 값을 다시 확인해 주세요.'), {
-            statusCode: 409,
-            code: 'cashflow_settled_week_change_confirmation_expired',
-          });
-        }
-        return {
-          ...javaApplyResponse(input, resultingTargetRevision),
-          settledWeekChanges: [{
-            yearMonth: '2026-01',
-            weekNo: 2,
-            completionRevision: 1,
-            warningCount: 1,
-          }],
-        };
-      }),
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, resultingTargetRevision)),
     };
     const app = createApp({
       db,
@@ -2864,79 +2836,13 @@ describe('cashflow sheet lab route', () => {
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-settled-change' })
       .expect(200);
 
-    const unconfirmed = await request(app)
+    const applied = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-settled-unconfirmed' })
-      .expect(409);
-    expect(unconfirmed.body.details.confirmationId).toBe('confirmation-a');
-    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
-
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({
-        stageRunId: stage.body.runId,
-        idempotencyKey: 'apply-settled-boolean-bypass',
-        allowLockedWeekChanges: true,
-      })
-      .expect(400);
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({
-        stageRunId: stage.body.runId,
-        idempotencyKey: 'apply-settled-wrong-confirmation',
-        settledWeekChangeConfirmationId: 'confirmation-other',
-      })
-      .expect(409);
-
-    expireConfirmation = true;
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({
-        stageRunId: stage.body.runId,
-        idempotencyKey: 'apply-settled-expired',
-        settledWeekChangeConfirmationId: unconfirmed.body.details.confirmationId,
-      })
-      .expect(409);
-    const afterExpiredConfirmation = db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`);
-    expect(afterExpiredConfirmation.status).toBe('READY');
-    expect(afterExpiredConfirmation.pendingSettledWeekChangeConfirmation).toBeNull();
-
-    expireConfirmation = false;
-    const refreshedConfirmation = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-settled-unconfirmed-refreshed' })
-      .expect(409);
-
-    const confirmed = await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({
-        stageRunId: stage.body.runId,
-        idempotencyKey: 'apply-settled-confirmed',
-        settledWeekChangeConfirmationId: refreshedConfirmation.body.details.confirmationId,
-      })
       .expect(200);
-
-    expect(confirmed.body.settledWeekChanges).toEqual([{
-      yearMonth: '2026-01',
-      weekNo: 2,
-      completionRevision: 1,
-      warningCount: 1,
-    }]);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(4);
-    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[3][0].settledWeekChangeConfirmation).toEqual({
-      confirmationId: 'confirmation-a',
-      targetRevision: stage.body.targetRevisionAtFetch,
-      weeks: [{ yearMonth: '2026-01', weekNo: 2, completionRevision: 1 }],
-    });
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({
-        stageRunId: stage.body.runId,
-        idempotencyKey: 'apply-settled-confirmed-replay',
-        settledWeekChangeConfirmationId: refreshedConfirmation.body.details.confirmationId,
-      })
-      .expect(200);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(4);
+    expect(applied.body.settledWeekChanges).toEqual([]);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].settledWeekChangeConfirmation).toBeUndefined();
   });
 
   it('blocks a partial month instead of authoritatively replacing only weeks 4 and 5', async () => {

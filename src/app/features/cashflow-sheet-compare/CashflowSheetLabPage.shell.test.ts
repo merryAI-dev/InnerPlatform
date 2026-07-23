@@ -50,8 +50,9 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
-    expect(pageSource).toContain('settledWeekChangeConfirmationId: pending.confirmationId');
-    expect(pageSource).toContain('주간 정산 값과 다릅니다');
+    expect(pageSource).not.toContain('settledWeekChangeConfirmationId: pending.confirmationId');
+    expect(pageSource).not.toContain('주간 정산 값과 다릅니다');
+    expect(pageSource).toContain('cashflow_closed_month_reason_required');
     expect(pageSource).toContain('stageRunId: stagedRunId');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');

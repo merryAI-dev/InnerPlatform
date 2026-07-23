@@ -1575,70 +1575,6 @@ function stableHash(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function normalizeSettledWeekConfirmation(value, { requireId = true } = {}) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const confirmationId = readOptionalText(value.confirmationId);
-  const targetRevision = readOptionalText(value.targetRevision);
-  const rawWeeks = Array.isArray(value.weeks) ? value.weeks : [];
-  if (
-    (requireId && !confirmationId)
-    || confirmationId.length > 100
-    || !/^sha256:[a-f0-9]{64}$/.test(targetRevision)
-    || rawWeeks.length < 1
-    || rawWeeks.length > 60
-  ) return null;
-  const weeks = rawWeeks.map((week) => ({
-    yearMonth: readOptionalText(week?.yearMonth),
-    weekNo: Number(week?.weekNo),
-    completionRevision: Number(week?.completionRevision),
-  }));
-  const keys = new Set();
-  for (const week of weeks) {
-    const key = `${week.yearMonth}:${week.weekNo}`;
-    if (
-      !/^20\d{2}-(0[1-9]|1[0-2])$/.test(week.yearMonth)
-      || !Number.isSafeInteger(week.weekNo)
-      || week.weekNo < 1
-      || week.weekNo > 5
-      || !Number.isSafeInteger(week.completionRevision)
-      || week.completionRevision < 0
-      || keys.has(key)
-    ) return null;
-    keys.add(key);
-  }
-  weeks.sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
-  return { confirmationId, targetRevision, weeks };
-}
-
-function assertSettledWeekChangeResponse(result, confirmation) {
-  const rawChanges = result?.settledWeekChanges;
-  if (!Array.isArray(rawChanges)) {
-    throw createHttpError(502, 'JVM 정산 변경 응답을 확인할 수 없습니다.', 'cashflow_jvm_settled_week_change_verification_failed');
-  }
-  if (!confirmation) {
-    if (rawChanges.length === 0) return [];
-    throw createHttpError(502, '확인하지 않은 정산 변경이 반환되었습니다.', 'cashflow_jvm_settled_week_change_verification_failed');
-  }
-  const changes = rawChanges.map((change) => ({
-    yearMonth: readOptionalText(change?.yearMonth),
-    weekNo: Number(change?.weekNo),
-    completionRevision: Number(change?.completionRevision),
-    warningCount: Number(change?.warningCount),
-  })).sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
-  const valid = changes.length === confirmation.weeks.length && changes.every((change, index) => {
-    const expected = confirmation.weeks[index];
-    return change.yearMonth === expected.yearMonth
-      && change.weekNo === expected.weekNo
-      && change.completionRevision === expected.completionRevision
-      && Number.isSafeInteger(change.warningCount)
-      && change.warningCount >= 1;
-  });
-  if (!valid) {
-    throw createHttpError(502, 'JVM 정산 변경 범위가 확인한 값과 다릅니다.', 'cashflow_jvm_settled_week_change_verification_failed');
-  }
-  return changes;
-}
-
 function assertApplyRequestMatches(stageRun, applyRequestHash) {
   if (readOptionalText(stageRun.applyRequestHash) !== readOptionalText(applyRequestHash)) {
     throw createHttpError(409, '다른 최종 반영 요청이 이미 이 검토본을 사용 중입니다.', 'cashflow_sheet_apply_in_progress');
@@ -1726,11 +1662,6 @@ async function restoreCashflowSheetApplyReady({
       applyRequestHash: null,
       applyFailedAt: new Date().toISOString(),
       applyFailure: routeErrorDetails(error),
-      ...(error?.code === 'cashflow_settled_week_change_confirmation_required'
-        ? { pendingSettledWeekChangeConfirmation: normalizeSettledWeekConfirmation(error?.details) }
-        : error?.code === 'cashflow_settled_week_change_confirmation_expired'
-          ? { pendingSettledWeekChangeConfirmation: null }
-        : {}),
     }), { merge: true });
   });
 }
@@ -1874,7 +1805,6 @@ async function applyStagedCashflowSheetLab({
     projectId,
     stagedRunId,
     applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
-    settledWeekChangeConfirmationId: readOptionalText(parsed.settledWeekChangeConfirmationId) || null,
   });
   if (!stagedRunId) {
     throw createHttpError(400, '검토 후보 runId가 필요합니다.', 'cashflow_sheet_stage_run_required');
@@ -1882,28 +1812,11 @@ async function applyStagedCashflowSheetLab({
 
   let stageRun = await readCashflowSheetStageRun(db, tenantId, projectId, stagedRunId);
   const replaceAllActualSources = stageRun.replaceAllActualSources === true;
-  const requestedConfirmationId = readOptionalText(parsed.settledWeekChangeConfirmationId);
-  const pendingConfirmation = normalizeSettledWeekConfirmation(stageRun.pendingSettledWeekChangeConfirmation);
-  if (requestedConfirmationId && (
-    !pendingConfirmation
-    || pendingConfirmation.confirmationId !== requestedConfirmationId
-    || pendingConfirmation.targetRevision !== readOptionalText(stageRun.targetRevisionAtFetch)
-  )) {
-    throw createHttpError(
-      409,
-      '주간 정산 변경 확인 정보가 만료되었습니다. 시트 값을 다시 확인해 주세요.',
-      'cashflow_settled_week_change_confirmation_expired',
-    );
-  }
-  const settledWeekChangeConfirmation = requestedConfirmationId ? pendingConfirmation : null;
   const applyRequestHash = stableHash({
     stagedRunId,
     applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
     ...(readOptionalText(parsed.closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason) } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
-    ...(settledWeekChangeConfirmation
-      ? { settledWeekChangeConfirmationHash: stableHash(settledWeekChangeConfirmation) }
-      : {}),
   });
   if (readOptionalText(stageRun.status) === 'APPLIED') {
     assertApplyRequestMatches(stageRun, applyRequestHash);
@@ -2024,17 +1937,9 @@ async function applyStagedCashflowSheetLab({
 
   const javaResults = [];
   const javaAnnualResults = [];
-  const settledWeekChanges = [];
   let verifiedLineCount = 0;
   let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
   let completedOperationCount = 0;
-  if (settledWeekChangeConfirmation && stagedMonths.length === 0) {
-    throw createHttpError(
-      409,
-      '주간 정산 변경 확인 대상 월이 없습니다.',
-      'cashflow_settled_week_change_confirmation_expired',
-    );
-  }
   try {
     const resolvedEditSession = typeof resolveEditSession === 'function'
       ? await resolveEditSession()
@@ -2062,11 +1967,9 @@ async function applyStagedCashflowSheetLab({
         yearMonth: month.yearMonth,
         cells: month.cells,
         replaceAllActualSources,
-        settledWeekChangeConfirmation,
         closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
       });
       targetRevision = assertResultingTargetRevision(javaResult);
-      settledWeekChanges.push(...assertSettledWeekChangeResponse(javaResult, settledWeekChangeConfirmation));
       verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, {
         projectId,
         sourceRevision: readOptionalText(stageRun.sourceRevision),
@@ -2096,7 +1999,6 @@ async function applyStagedCashflowSheetLab({
         targetRevision,
         months: stagedMonths.map((month) => ({ yearMonth: month.yearMonth, cells: month.cells })),
         replaceAllActualSources,
-        settledWeekChangeConfirmation,
         closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
       });
       if (
@@ -2110,7 +2012,6 @@ async function applyStagedCashflowSheetLab({
         throw createHttpError(502, 'JVM 월 배치 저장 계약이 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
       }
       targetRevision = assertResultingTargetRevision(batchResult);
-      settledWeekChanges.push(...assertSettledWeekChangeResponse(batchResult, settledWeekChangeConfirmation));
       const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
         .map((month) => [readOptionalText(month?.yearMonth), month]));
       if (returnedMonths.size !== stagedMonths.length) {
@@ -2192,25 +2093,17 @@ async function applyStagedCashflowSheetLab({
       if (rejected) throw rejected.reason;
     }
   } catch (error) {
-    const handledError = error?.code === 'cashflow_settled_week_change_confirmation_required'
-      && !normalizeSettledWeekConfirmation(error?.details)
-      ? createHttpError(
-        502,
-        'JVM 주간 정산 변경 확인 계약이 올바르지 않습니다.',
-        'cashflow_jvm_settled_week_change_verification_failed',
-      )
-      : error;
-    const statusCode = Number(handledError?.statusCode || handledError?.status);
+    const statusCode = Number(error?.statusCode || error?.status);
     if (completedOperationCount === 0 && statusCode >= 400 && statusCode < 500) {
       await restoreCashflowSheetApplyReady({
         db,
         runRef: reservation.runRef,
         idempotencyKey: effectiveIdempotencyKey,
         applyRequestHash,
-        error: handledError,
+        error,
       });
     }
-    throw handledError;
+    throw error;
   }
 
   const appliedCells = [
@@ -2235,7 +2128,6 @@ async function applyStagedCashflowSheetLab({
     projectionLineCount,
     actualLineCount,
     skippedRiskLineCount: 0,
-    settledWeekChanges,
     lastAppliedAt: now,
     runId: `cashflow-sheet-apply:${projectId}:${now}`,
     stagedRunId,
@@ -2262,7 +2154,6 @@ async function applyStagedCashflowSheetLab({
         revision: Number(result.revision) || 0,
         auditId: readOptionalText(result.auditId) || undefined,
       })),
-      settledWeekChanges,
       verifiedLineCount,
     },
   };
