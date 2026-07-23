@@ -2,11 +2,35 @@ import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' wit
 
 const WEEK_LABEL_RE = /^(\d{2})-(\d{1,2})-(\d{1,2})$/;
 const ANNUAL_YEAR_LABEL_RE = /^(\d{4})년$/;
-const SUPPORTED_MODES = ['projection', 'actual'];
-const MIN_WEEK_LABELS_PER_SECTION = 2;
+const MODES = ['projection', 'actual'];
 const LINE_ENTRIES = Array.isArray(cashflowPolicyData.lineEntries) ? cashflowPolicyData.lineEntries : [];
-const EXPECTED_LINE_IDS = LINE_ENTRIES.map((entry) => entry.lineId);
-const EXPECTED_DERIVED_KINDS = ['deposit_total', 'withdrawal_total', 'balance'];
+const WEEK_COLUMN_INDEXES = Array.from({ length: 60 }, (_, index) => index + 4); // E:BL
+const ANNUAL_COLUMN_INDEXES = [2, 3, 64, 65, 66, 67, 68, 69]; // C:D, BM:BR
+const SOURCE_YEAR_TOTAL_COLUMN_INDEX = 70; // BS
+const SECTION_LAYOUTS = [
+  {
+    mode: 'projection',
+    headerRowIndex: 11,
+    weekRowIndex: 12,
+    lineRowIndexes: [14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30],
+    derivedRows: [
+      { rowIndex: 21, kind: 'deposit_total', label: '입금 합계' },
+      { rowIndex: 31, kind: 'withdrawal_total', label: '출금 합계' },
+      { rowIndex: 32, kind: 'balance', label: '잔액 (※ 중요)' },
+    ],
+  },
+  {
+    mode: 'actual',
+    headerRowIndex: 34,
+    weekRowIndex: 35,
+    lineRowIndexes: [37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53],
+    derivedRows: [
+      { rowIndex: 44, kind: 'deposit_total', label: '입금 합계' },
+      { rowIndex: 54, kind: 'withdrawal_total', label: '출금 합계' },
+      { rowIndex: 55, kind: 'balance', label: '잔액' },
+    ],
+  },
+];
 
 function normalizeText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -21,7 +45,7 @@ export function buildCashflowLineLookup(lineEntries) {
   const ambiguousKeys = new Set();
 
   for (const entry of lineEntries) {
-    for (const mode of SUPPORTED_MODES) {
+    for (const mode of MODES) {
       const modeLabel = mode === 'projection' ? entry.projectionLabel : entry.actualLabel;
       for (const label of [entry.lineId, entry.label, ...(entry.aliases || []), modeLabel]) {
         for (const normalized of new Set([normalizeText(label), normalizeLabelKey(label)].filter(Boolean))) {
@@ -39,12 +63,9 @@ export function buildCashflowLineLookup(lineEntries) {
   }
 
   return (label, mode, direction) => {
-    const prefix = `${mode}|${direction}|`;
-    const keys = new Set([normalizeText(label), normalizeLabelKey(label)]
-      .filter(Boolean)
-      .map((normalized) => `${prefix}${normalized}`));
-    if ([...keys].some((key) => ambiguousKeys.has(key))) return null;
-    for (const key of keys) {
+    for (const normalized of [normalizeText(label), normalizeLabelKey(label)].filter(Boolean)) {
+      const key = `${mode}|${direction}|${normalized}`;
+      if (ambiguousKeys.has(key)) return null;
       const entry = entriesByKey.get(key);
       if (entry) return entry;
     }
@@ -55,12 +76,12 @@ export function buildCashflowLineLookup(lineEntries) {
 const resolveLineEntry = buildCashflowLineLookup(LINE_ENTRIES);
 
 function columnName(columnIndex) {
-  let n = columnIndex + 1;
+  let number = columnIndex + 1;
   let name = '';
-  while (n > 0) {
-    const mod = (n - 1) % 26;
-    name = String.fromCharCode(65 + mod) + name;
-    n = Math.floor((n - 1) / 26);
+  while (number > 0) {
+    const remainder = (number - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    number = Math.floor((number - 1) / 26);
   }
   return name;
 }
@@ -76,347 +97,186 @@ export function cashflowMappingKey({ mode, lineId, yearMonth, weekNo }) {
 export function parseCashflowWeekLabel(value) {
   const match = WEEK_LABEL_RE.exec(normalizeText(value));
   if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
+  const year = 2000 + Number.parseInt(match[1], 10);
   const month = Number.parseInt(match[2], 10);
   const weekNo = Number.parseInt(match[3], 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(weekNo)) return null;
   if (month < 1 || month > 12 || weekNo < 1 || weekNo > 5) return null;
   return {
     raw: normalizeText(value),
-    year: 2000 + year,
+    year,
     month,
-    yearMonth: `${2000 + year}-${String(month).padStart(2, '0')}`,
+    yearMonth: `${year}-${String(month).padStart(2, '0')}`,
     weekNo,
   };
 }
 
-function detectWeekColumns(row) {
-  return (row || [])
-    .map((cell, columnIndex) => {
-      const parsed = parseCashflowWeekLabel(cell);
-      if (!parsed) return null;
-      return {
-        ...parsed,
-        columnIndex,
-        a1: toA1(0, columnIndex).replace(/\d+$/, ''),
-      };
-    })
+function annualColumn(matrix, rowIndex, columnIndex) {
+  const match = ANNUAL_YEAR_LABEL_RE.exec(normalizeText(matrix?.[rowIndex]?.[columnIndex]));
+  if (!match) return null;
+  return {
+    year: Number.parseInt(match[1], 10),
+    columnIndex,
+    a1: toA1(rowIndex, columnIndex),
+  };
+}
+
+function fixedSection(matrix, layout, reasons) {
+  const weekColumns = WEEK_COLUMN_INDEXES.map((columnIndex) => {
+    const parsed = parseCashflowWeekLabel(matrix?.[layout.weekRowIndex]?.[columnIndex]);
+    if (!parsed) {
+      reasons.push({
+        code: 'cashflow_week_header_invalid',
+        mode: layout.mode,
+        sourceCell: toA1(layout.weekRowIndex, columnIndex),
+        message: `${layout.mode} 주차 헤더가 공식 양식과 다릅니다.`,
+      });
+      return null;
+    }
+    return {
+      ...parsed,
+      rowIndex: layout.weekRowIndex,
+      columnIndex,
+      a1: toA1(layout.weekRowIndex, columnIndex),
+    };
+  }).filter(Boolean);
+
+  const annualColumns = ANNUAL_COLUMN_INDEXES
+    .map((columnIndex) => annualColumn(matrix, layout.headerRowIndex, columnIndex))
     .filter(Boolean);
-}
-
-function detectAnnualYearColumns(row) {
-  return (row || [])
-    .map((cell, columnIndex) => {
-      const match = ANNUAL_YEAR_LABEL_RE.exec(normalizeText(cell));
-      if (!match) return null;
-      return {
-        year: Number.parseInt(match[1], 10),
-        columnIndex,
-        a1: toA1(0, columnIndex).replace(/\d+$/, ''),
-      };
-    })
-    .filter((column) => Number.isSafeInteger(column?.year));
-}
-
-function readRowLabel(row) {
-  const searchLimit = Math.min(4, row?.length || 0);
-  for (let index = 0; index < searchLimit; index += 1) {
-    const label = normalizeText(row[index]);
-    if (label) return { label, columnIndex: index };
+  const sourceYear = weekColumns[0]?.year;
+  const sourceTotalHeader = normalizeText(matrix?.[layout.headerRowIndex]?.[SOURCE_YEAR_TOTAL_COLUMN_INDEX]);
+  if (Number.isSafeInteger(sourceYear) && ['Total', `${sourceYear}년 합계`].includes(sourceTotalHeader)) {
+    annualColumns.push({
+      year: sourceYear,
+      columnIndex: SOURCE_YEAR_TOTAL_COLUMN_INDEX,
+      a1: toA1(layout.headerRowIndex, SOURCE_YEAR_TOTAL_COLUMN_INDEX),
+    });
   }
-  return { label: '', columnIndex: -1 };
-}
-
-function resolveDerivedKind(label) {
-  const normalized = normalizeLabelKey(label);
-  if (!normalized) return null;
-  if (normalized === '입금합계') return 'deposit_total';
-  if (normalized === '출금합계') return 'withdrawal_total';
-  if (normalized === '잔액' || normalized === '잔액(※중요)') return 'balance';
-  return null;
-}
-
-function normalizeMatrix(matrix) {
-  return Array.isArray(matrix)
-    ? matrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
-    : [];
-}
-
-function detectSectionCandidates(rows) {
-  return rows
-    .map((row, rowIndex) => {
-      const weekColumns = detectWeekColumns(row).map((week) => ({
-        ...week,
-        rowIndex,
-        a1: toA1(rowIndex, week.columnIndex),
-      }));
-      if (weekColumns.length < MIN_WEEK_LABELS_PER_SECTION) return null;
-      return { rowIndex, weekColumns };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.rowIndex - b.rowIndex);
-}
-
-function resolveModeFromRow(row) {
-  const searchLimit = Math.min(6, row?.length || 0);
-  let hasProjection = false;
-  let hasActual = false;
-  for (let index = 0; index < searchLimit; index += 1) {
-    const normalized = normalizeLabelKey(row[index]).toLowerCase();
-    if (!normalized) continue;
-    hasProjection ||= normalized.includes('projection');
-    hasActual ||= normalized.includes('actual');
-  }
-  if (hasProjection === hasActual) return null;
-  return hasProjection ? 'projection' : 'actual';
-}
-
-function detectCashflowSectionCandidates(rows) {
-  const sections = [];
-  const seenModes = new Set();
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const mode = resolveModeFromRow(rows[rowIndex]);
-    if (!SUPPORTED_MODES.includes(mode) || seenModes.has(mode)) continue;
-
-    for (let weekRowIndex = rowIndex + 1; weekRowIndex < Math.min(rows.length, rowIndex + 6); weekRowIndex += 1) {
-      const weekColumns = detectWeekColumns(rows[weekRowIndex]).map((week) => ({
-        ...week,
-        rowIndex: weekRowIndex,
-        a1: toA1(weekRowIndex, week.columnIndex),
-      }));
-      if (weekColumns.length < MIN_WEEK_LABELS_PER_SECTION) continue;
-      sections.push({
-        mode,
-        headerRowIndex: rowIndex,
-        rowIndex: weekRowIndex,
-        weekColumns,
-      });
-      seenModes.add(mode);
-      break;
-    }
-  }
-
-  return sections.sort((a, b) => a.rowIndex - b.rowIndex);
-}
-
-function analyzeSection({ rows, candidate, nextCandidate, mode }) {
-  const lineRows = [];
-  const derivedRows = [];
-  const ignoredRows = [];
-  const duplicateLineIds = new Set();
-  const seenLineIds = new Set();
-  const endRowIndex = nextCandidate?.headerRowIndex ?? rows.length;
-  const annualColumns = detectAnnualYearColumns(rows[candidate.headerRowIndex]).map((column) => ({
-    ...column,
-    a1: toA1(candidate.headerRowIndex, column.columnIndex),
-  }));
-  let direction = 'IN';
-
-  for (let rowIndex = candidate.rowIndex + 1; rowIndex < endRowIndex; rowIndex += 1) {
-    const row = rows[rowIndex] || [];
-    const { label, columnIndex } = readRowLabel(row);
-    if (!label) continue;
-
-    const derivedKind = resolveDerivedKind(label);
-    if (derivedKind) {
-      derivedRows.push({
-        rowIndex,
-        label,
-        labelColumnIndex: columnIndex,
-        a1: toA1(rowIndex, columnIndex),
-        kind: derivedKind,
-      });
-      if (derivedKind === 'deposit_total') direction = 'OUT';
-      continue;
-    }
-
-    const lineEntry = resolveLineEntry(label, mode, direction);
-    if (lineEntry) {
-      if (seenLineIds.has(lineEntry.lineId)) duplicateLineIds.add(lineEntry.lineId);
-      seenLineIds.add(lineEntry.lineId);
-      lineRows.push({
-        rowIndex,
-        label,
-        labelColumnIndex: columnIndex,
-        a1: toA1(rowIndex, columnIndex),
-        lineId: lineEntry.lineId,
-        canonicalLabel: lineEntry.label,
-        direction: lineEntry.direction,
-      });
-      continue;
-    }
-
-    ignoredRows.push({
-      rowIndex,
-      label,
-      labelColumnIndex: columnIndex,
-      a1: toA1(rowIndex, columnIndex),
-      reason: 'unmapped_row_label',
+  if (annualColumns.length !== ANNUAL_COLUMN_INDEXES.length + 1) {
+    reasons.push({
+      code: 'cashflow_annual_header_invalid',
+      mode: layout.mode,
+      message: `${layout.mode} 연간 합계 헤더가 공식 양식과 다릅니다.`,
     });
   }
 
-  const mappings = [];
-  const annualMappings = [];
-  for (const lineRow of lineRows) {
-    for (const week of candidate.weekColumns) {
-      mappings.push({
-        mode,
-        lineId: lineRow.lineId,
-        label: lineRow.label,
-        canonicalLabel: lineRow.canonicalLabel,
-        direction: lineRow.direction,
-        yearMonth: week.yearMonth,
-        weekNo: week.weekNo,
-        rowIndex: lineRow.rowIndex,
-        columnIndex: week.columnIndex,
-        a1: toA1(lineRow.rowIndex, week.columnIndex),
-        source: 'sheet_layout',
+  const lineRows = layout.lineRowIndexes.map((rowIndex, index) => {
+    const expected = LINE_ENTRIES[index];
+    const label = normalizeText(matrix?.[rowIndex]?.[0]);
+    const resolved = expected ? resolveLineEntry(label, layout.mode, expected.direction) : null;
+    if (!expected || resolved?.lineId !== expected.lineId) {
+      reasons.push({
+        code: 'cashflow_line_invalid',
+        mode: layout.mode,
+        sourceCell: toA1(rowIndex, 0),
+        lineIds: expected ? [expected.lineId] : [],
+        message: `${layout.mode} 항목 행이 공식 양식과 다릅니다.`,
       });
     }
-    for (const column of annualColumns) {
-      annualMappings.push({
-        mode,
-        lineId: lineRow.lineId,
-        label: lineRow.label,
-        canonicalLabel: lineRow.canonicalLabel,
-        direction: lineRow.direction,
-        year: column.year,
-        rowIndex: lineRow.rowIndex,
-        columnIndex: column.columnIndex,
-        a1: toA1(lineRow.rowIndex, column.columnIndex),
-        source: 'sheet_annual_total',
-      });
-    }
-  }
+    return {
+      rowIndex,
+      label,
+      canonicalLabel: expected?.label,
+      labelColumnIndex: 0,
+      a1: toA1(rowIndex, 0),
+      lineId: expected?.lineId,
+      direction: expected?.direction,
+    };
+  }).filter((row) => row.lineId && row.direction);
 
-  const missingLineIds = EXPECTED_LINE_IDS.filter((lineId) => !seenLineIds.has(lineId));
+  const derivedRows = layout.derivedRows.map((row) => {
+    const label = normalizeText(matrix?.[row.rowIndex]?.[0]);
+    if (normalizeLabelKey(label) !== normalizeLabelKey(row.label)) {
+      reasons.push({
+        code: 'cashflow_derived_row_invalid',
+        mode: layout.mode,
+        sourceCell: toA1(row.rowIndex, 0),
+        message: `${layout.mode} 합계/잔액 행이 공식 양식과 다릅니다.`,
+      });
+    }
+    return {
+      ...row,
+      label,
+      labelColumnIndex: 0,
+      a1: toA1(row.rowIndex, 0),
+    };
+  });
+
+  const mappings = lineRows.flatMap((lineRow) => weekColumns.map((week) => ({
+    mode: layout.mode,
+    lineId: lineRow.lineId,
+    label: lineRow.label,
+    canonicalLabel: lineRow.canonicalLabel,
+    direction: lineRow.direction,
+    yearMonth: week.yearMonth,
+    weekNo: week.weekNo,
+    rowIndex: lineRow.rowIndex,
+    columnIndex: week.columnIndex,
+    a1: toA1(lineRow.rowIndex, week.columnIndex),
+    source: 'sheet_layout',
+  })));
+  const annualMappings = lineRows.flatMap((lineRow) => annualColumns.map((column) => ({
+    mode: layout.mode,
+    lineId: lineRow.lineId,
+    label: lineRow.label,
+    canonicalLabel: lineRow.canonicalLabel,
+    direction: lineRow.direction,
+    year: column.year,
+    rowIndex: lineRow.rowIndex,
+    columnIndex: column.columnIndex,
+    a1: toA1(lineRow.rowIndex, column.columnIndex),
+    source: 'sheet_annual_total',
+  })));
 
   return {
-    mode,
-    headerRowIndex: Math.max(0, candidate.rowIndex - 1),
-    weekRowIndex: candidate.rowIndex,
-    weekColumns: candidate.weekColumns,
+    mode: layout.mode,
+    headerRowIndex: layout.headerRowIndex,
+    weekRowIndex: layout.weekRowIndex,
+    weekColumns,
     annualColumns,
     lineRows,
     derivedRows,
-    ignoredRows,
+    ignoredRows: [],
     mappings,
     annualMappings,
-    missingLineIds,
-    duplicateLineIds: Array.from(duplicateLineIds),
+    missingLineIds: [],
+    duplicateLineIds: [],
   };
 }
 
 export function analyzeCashflowSheetTemplate(matrix) {
-  const rows = normalizeMatrix(matrix);
-  const cashflowCandidates = detectCashflowSectionCandidates(rows);
-  const candidates = cashflowCandidates.length >= 2 ? cashflowCandidates : detectSectionCandidates(rows).slice(0, 2)
-    .map((candidate, index) => ({ ...candidate, mode: SUPPORTED_MODES[index], headerRowIndex: Math.max(0, candidate.rowIndex - 1) }));
+  const rows = Array.isArray(matrix)
+    ? matrix.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? '')) : []))
+    : [];
   const reasons = [];
-
-  if (candidates.length < 2) {
+  const sections = SECTION_LAYOUTS.map((layout) => fixedSection(rows, layout, reasons));
+  const projectionWeeks = sections[0].weekColumns.map((week) => week.raw);
+  const actualWeeks = sections[1].weekColumns.map((week) => week.raw);
+  if (projectionWeeks.length !== 60 || JSON.stringify(projectionWeeks) !== JSON.stringify(actualWeeks)) {
     reasons.push({
-      code: 'cashflow_sections_missing',
-      message: 'Projection/Actual 섹션의 주차 라벨 행을 찾지 못했습니다.',
+      code: 'cashflow_week_headers_mismatch',
+      message: 'Projection과 Actual 주차 헤더가 일치하지 않습니다.',
     });
   }
 
-  const selectedCandidates = SUPPORTED_MODES
-    .map((mode) => candidates.find((candidate) => candidate.mode === mode))
-    .filter(Boolean);
-  const sections = selectedCandidates.map((candidate, index) => analyzeSection({
-    rows,
-    candidate,
-    nextCandidate: selectedCandidates[index + 1],
-    mode: candidate.mode || SUPPORTED_MODES[index],
-  }));
-
-  for (const section of sections) {
-    if (section.missingLineIds.length > 0) {
-      reasons.push({
-        code: 'cashflow_line_missing',
-        mode: section.mode,
-        lineIds: section.missingLineIds,
-        message: `${section.mode} 섹션에서 cashflow 라벨을 찾지 못했습니다.`,
-      });
-    }
-    if (section.duplicateLineIds.length > 0) {
-      reasons.push({
-        code: 'cashflow_line_duplicate',
-        mode: section.mode,
-        lineIds: section.duplicateLineIds,
-        message: `${section.mode} 섹션에 중복 cashflow 라벨이 있습니다.`,
-      });
-    }
-
-    const lineIds = section.lineRows.map((row) => row.lineId);
-    if (lineIds.length !== EXPECTED_LINE_IDS.length
-      || lineIds.some((lineId, index) => lineId !== EXPECTED_LINE_IDS[index])) {
-      reasons.push({
-        code: 'cashflow_line_order_invalid',
-        mode: section.mode,
-        expectedLineIds: EXPECTED_LINE_IDS,
-        actualLineIds: lineIds,
-        message: `${section.mode} 섹션 cashflow 라벨 순서가 정책과 다릅니다.`,
-      });
-    }
-
-    const derivedKinds = section.derivedRows.map((row) => row.kind);
-    const missingDerivedKinds = EXPECTED_DERIVED_KINDS.filter((kind) => !derivedKinds.includes(kind));
-    const duplicateDerivedKinds = EXPECTED_DERIVED_KINDS.filter(
-      (kind) => derivedKinds.filter((candidate) => candidate === kind).length > 1,
-    );
-    if (missingDerivedKinds.length > 0) {
-      reasons.push({
-        code: 'cashflow_derived_row_missing',
-        mode: section.mode,
-        kinds: missingDerivedKinds,
-        message: `${section.mode} 섹션 합계/잔액 행이 부족합니다.`,
-      });
-    }
-    if (duplicateDerivedKinds.length > 0) {
-      reasons.push({
-        code: 'cashflow_derived_row_duplicate',
-        mode: section.mode,
-        kinds: duplicateDerivedKinds,
-        message: `${section.mode} 섹션 합계/잔액 행이 중복되었습니다.`,
-      });
-    }
-    if (missingDerivedKinds.length === 0
-      && duplicateDerivedKinds.length === 0
-      && derivedKinds.some((kind, index) => kind !== EXPECTED_DERIVED_KINDS[index])) {
-      reasons.push({
-        code: 'cashflow_derived_row_order_invalid',
-        mode: section.mode,
-        expectedKinds: EXPECTED_DERIVED_KINDS,
-        actualKinds: derivedKinds,
-        message: `${section.mode} 섹션 합계/잔액 행 순서가 다릅니다.`,
-      });
-    }
-  }
-
-  if (cashflowCandidates.length > 2) {
+  const projectionYears = sections[0].annualColumns.map((column) => column.year);
+  const actualYears = sections[1].annualColumns.map((column) => column.year);
+  if (JSON.stringify(projectionYears) !== JSON.stringify(actualYears)) {
     reasons.push({
-      code: 'cashflow_extra_week_sections',
-      count: cashflowCandidates.length,
-      message: '지원 템플릿보다 많은 주차 라벨 섹션이 감지되었습니다.',
+      code: 'cashflow_annual_headers_mismatch',
+      message: 'Projection과 Actual 연간 합계 헤더가 일치하지 않습니다.',
     });
   }
 
   const mappingCandidates = sections.flatMap((section) => section.mappings);
-  const ignoredRows = sections.flatMap((section) => section.ignoredRows.map((row) => ({ ...row, mode: section.mode })));
-  const derivedRows = sections.flatMap((section) => section.derivedRows.map((row) => ({ ...row, mode: section.mode })));
-  const supported = sections.length === 2 && reasons.length === 0;
-
   return {
-    supported,
+    supported: reasons.length === 0,
     policyVersion: cashflowPolicyData.version || 'cashflow-policy-v1',
     sectionOrder: ['projection', 'actual'],
     sections,
     mappingCandidates,
-    derivedRows,
-    ignoredRows,
+    derivedRows: sections.flatMap((section) => section.derivedRows.map((row) => ({ ...row, mode: section.mode }))),
+    ignoredRows: [],
     reasons,
     stats: {
       rowCount: rows.length,

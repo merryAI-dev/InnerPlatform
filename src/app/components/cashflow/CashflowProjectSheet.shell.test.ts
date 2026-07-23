@@ -327,6 +327,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('합계');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
+    expect(source).toContain('>미입력</');
+    expect(source).toContain("cell.difference === null ? '미입력'");
   });
 
   it('keeps the last good month result during a same-month retry and lists every management finding', () => {

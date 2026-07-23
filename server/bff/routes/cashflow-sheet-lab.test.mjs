@@ -42,6 +42,22 @@ const ACTUAL_OUT_LABELS = [
 ];
 
 const JANUARY_FINANCE_WEEKS = ['26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5'];
+const FULL_YEAR_FINANCE_WEEKS = Array.from({ length: 12 }, (_, monthIndex) => (
+  Array.from({ length: 5 }, (_unused, weekIndex) => `26-${monthIndex + 1}-${weekIndex + 1}`)
+)).flat();
+function officialAnnualColumns(sourceYear) {
+  return new Map([
+    [sourceYear - 2, 2],
+    [sourceYear - 1, 3],
+    [sourceYear + 1, 64],
+    [sourceYear + 2, 65],
+    [sourceYear + 3, 66],
+    [sourceYear + 4, 67],
+    [sourceYear + 5, 68],
+    [sourceYear + 6, 69],
+    [sourceYear, 70],
+  ]);
+}
 const CASHFLOW_LINE_IDS = [
   'MYSC_PREPAY_IN', 'MYSC_PREPAY_LABOR_IN', 'MYSC_PREPAY_INPUT_VAT_IN',
   'SALES_IN', 'SALES_VAT_IN', 'TEAM_SUPPORT_IN', 'BANK_INTEREST_IN',
@@ -128,44 +144,67 @@ function javaAnnualApplyResponse(request) {
   };
 }
 
-function buildSection(actual = false, weekLabels = ['26-1-1', '26-1-2', '26-1-3'], annualYears = [], annualValue = '') {
-  const firstWeekColumn = annualYears.length > 0 ? 2 + annualYears.length : 3;
-  const header = [actual ? 'ACTUAL' : 'Projection'];
-  annualYears.forEach((year, index) => {
-    header[2 + index] = `${year}년`;
-  });
-  const weekRow = [...Array(firstWeekColumn).fill(''), ...weekLabels];
-  const valueCells = weekLabels.map(() => '999');
-  const annualValueCells = annualYears.map((year) => (year === 2027 ? '' : annualValue));
-  const inLabels = actual ? ACTUAL_IN_LABELS : PROJECTION_IN_LABELS;
-  const outLabels = actual ? ACTUAL_OUT_LABELS : PROJECTION_OUT_LABELS;
-  return [
-    header,
-    weekRow,
-    ...inLabels.map((label) => [label, '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells]),
-    ['입금 합계', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
-    ...outLabels.map((label) => [label, '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells]),
-    ['출금 합계', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
-    [actual ? '잔액' : '잔액 (※ 중요)', '', ...(annualYears.length > 0 ? annualValueCells : ['']), ...valueCells],
-  ];
+function buildOfficialMatrix({
+  weekLabels = FULL_YEAR_FINANCE_WEEKS,
+  annualYears = [],
+  projectionAnnualValue = '',
+  actualAnnualValue = '',
+} = {}) {
+  const matrix = Array.from({ length: 60 }, () => Array(72).fill(''));
+  const sourceYear = 2000 + Number.parseInt(String(weekLabels[0] || '26').split('-')[0], 10);
+  const annualColumns = officialAnnualColumns(sourceYear);
+  const writeSection = (actual, annualValue) => {
+    const headerRowIndex = actual ? 34 : 11;
+    const weekRowIndex = actual ? 35 : 12;
+    const lineRowIndexes = actual
+      ? [37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53]
+      : [14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30];
+    const derivedRows = actual
+      ? [[44, '입금 합계'], [54, '출금 합계'], [55, '잔액']]
+      : [[21, '입금 합계'], [31, '출금 합계'], [32, '잔액 (※ 중요)']];
+    matrix[headerRowIndex][0] = actual ? 'ACTUAL' : 'Projection';
+    for (const [year, columnIndex] of annualColumns) {
+      matrix[headerRowIndex][columnIndex] = columnIndex === 70 ? 'Total' : `${year}년`;
+    }
+    weekLabels.forEach((label, index) => {
+      matrix[weekRowIndex][4 + index] = label;
+    });
+    const inLabels = actual ? ACTUAL_IN_LABELS : PROJECTION_IN_LABELS;
+    const outLabels = actual ? ACTUAL_OUT_LABELS : PROJECTION_OUT_LABELS;
+    const labels = [...inLabels, ...outLabels];
+    lineRowIndexes.forEach((rowIndex, index) => {
+      matrix[rowIndex][0] = labels[index];
+      weekLabels.forEach((_label, weekIndex) => {
+        matrix[rowIndex][4 + weekIndex] = '999';
+      });
+      for (const year of annualYears) {
+        const columnIndex = annualColumns.get(year);
+        if (columnIndex !== undefined) matrix[rowIndex][columnIndex] = year === 2027 ? '' : annualValue;
+      }
+    });
+    derivedRows.forEach(([rowIndex, label]) => {
+      matrix[rowIndex][0] = label;
+      weekLabels.forEach((_week, weekIndex) => {
+        matrix[rowIndex][4 + weekIndex] = '999';
+      });
+    });
+  };
+  matrix[0][0] = 'title';
+  writeSection(false, projectionAnnualValue);
+  writeSection(true, actualAnnualValue);
+  return matrix;
 }
 
 function buildMatrix() {
-  return [
-    ['title'],
-    ...buildSection(false),
-    [],
-    ...buildSection(true),
-  ];
+  return buildOfficialMatrix();
 }
 
-function buildMatrixWithWeekLabels(weekLabels) {
-  return [
-    ['title'],
-    ...buildSection(false, weekLabels),
-    [],
-    ...buildSection(true, weekLabels),
-  ];
+function buildMatrixWithWeekLabels(requestedLabels) {
+  const sourceYear = Number.parseInt(String(requestedLabels?.[0] || '26').split('-')[0], 10);
+  const fullYearLabels = Array.from({ length: 12 }, (_, monthIndex) => (
+    Array.from({ length: 5 }, (_unused, weekIndex) => `${sourceYear}-${monthIndex + 1}-${weekIndex + 1}`)
+  )).flat();
+  return buildOfficialMatrix({ weekLabels: fullYearLabels });
 }
 
 async function loadSanitized260701FullYearFixture() {
@@ -176,36 +215,42 @@ async function loadSanitized260701FullYearFixture() {
   )));
   const sheet = workbook.getWorksheet('cashflow(사용내역 연동)');
   if (!sheet) throw new Error('Sanitized cashflow fixture sheet is missing');
-  return Array.from({ length: sheet.rowCount }, (_row, rowIndex) => (
+  const matrix = Array.from({ length: Math.max(sheet.rowCount, 60) }, (_row, rowIndex) => (
     Array.from({ length: sheet.columnCount }, (_column, columnIndex) => {
       const value = sheet.getCell(rowIndex + 1, columnIndex + 1).value;
       if (value && typeof value === 'object' && 'result' in value) return value.result ?? '';
       return value ?? '';
     })
   ));
+  matrix.forEach((row) => {
+    while (row.length < 72) row.push('');
+  });
+  for (const headerRowIndex of [11, 34]) {
+    for (const [year, columnIndex] of officialAnnualColumns(2026)) {
+      matrix[headerRowIndex][columnIndex] = columnIndex === 70 ? 'Total' : `${year}년`;
+    }
+  }
+  matrix[32][0] = '잔액 (※ 중요)';
+  matrix[55][0] = '잔액';
+  return matrix;
 }
 
 function buildMultiYearMatrix() {
-  const matrix = [
-    ['title'],
-    ...buildSection(false, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027, 2028], '100'),
-    [],
-    ...buildSection(true, JANUARY_FINANCE_WEEKS, [2024, 2025, 2027, 2028], '50'),
-  ];
-  matrix[3][3] = '0';
+  const matrix = buildOfficialMatrix({
+    annualYears: [2024, 2025, 2027, 2028],
+    projectionAnnualValue: '100',
+    actualAnnualValue: '50',
+  });
+  matrix[14][3] = '0';
   return matrix;
 }
 
 function buildConflictingAnnualWeeklyMatrix() {
-  const weekLabels = Array.from({ length: 12 }, (_, monthIndex) => (
-    Array.from({ length: 5 }, (_unused, weekIndex) => `26-${monthIndex + 1}-${weekIndex + 1}`)
-  )).flat();
-  return [
-    ['title'],
-    ...buildSection(false, weekLabels, [2026], '100'),
-    [],
-    ...buildSection(true, weekLabels, [2026], '50'),
-  ];
+  return buildOfficialMatrix({
+    annualYears: [2026],
+    projectionAnnualValue: '100',
+    actualAnnualValue: '50',
+  });
 }
 
 function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments = {}, onGet, onQuery } = {}) {
@@ -437,7 +482,7 @@ describe('cashflow sheet lab route', () => {
     expect(snapshots).toHaveLength(1);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(1);
     const yearSnapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_years/');
-    expect(yearSnapshots).toHaveLength(5);
+    expect(yearSnapshots).toHaveLength(9);
     const reordered = yearSnapshots.find(({ data }) => data.year === 2025);
     reordered.data.projection.lineAmounts = Object.fromEntries(
       Object.entries(reordered.data.projection.lineAmounts).reverse(),
@@ -450,13 +495,15 @@ describe('cashflow sheet lab route', () => {
 
     expect(yearView.body).toMatchObject({
       selectedYear: 2026,
-      availableYears: [2024, 2025, 2026, 2027, 2028],
+      availableYears: [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032],
       navigationYears: [2025, 2026, 2027],
       readModelStatus: 'CURRENT',
       fallbackYears: [],
       mismatchYears: [],
     });
-    expect(yearView.body.years.map((row) => row.year)).toEqual([2024, 2025, 2026, 2027, 2028]);
+    expect(yearView.body.years.map((row) => row.year)).toEqual([
+      2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032,
+    ]);
     expect(yearView.body.years.every((row) => row.storage === 'SNAPSHOT')).toBe(true);
   });
 
@@ -522,7 +569,7 @@ describe('cashflow sheet lab route', () => {
       .send({ idempotencyKey: 'annual-refresh-001' })
       .expect(200);
     expect(mirror.body.cells).toHaveLength(160);
-    expect(mirror.body.annualCells).toHaveLength(128);
+    expect(mirror.body.annualCells).toHaveLength(288);
 
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
@@ -969,7 +1016,7 @@ describe('cashflow sheet lab route', () => {
     });
     const previewSpreadsheet = vi.fn(async () => {
       const matrix = buildMatrix();
-      matrix[3][3] = previewSpreadsheet.mock.calls.length === 1 ? '111' : '222';
+      matrix[14][4] = previewSpreadsheet.mock.calls.length === 1 ? '111' : '222';
       return {
         spreadsheetId: 'spreadsheet-a',
         selectedSheetName: 'cashflow(사용내역 연동)',
@@ -1025,7 +1072,7 @@ describe('cashflow sheet lab route', () => {
     const previewSpreadsheet = vi.fn(async () => {
       const callNumber = previewSpreadsheet.mock.calls.length;
       const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-      matrix[3][3] = callNumber === 1 ? '111' : '222';
+      matrix[14][4] = callNumber === 1 ? '111' : '222';
       if (callNumber === 1) {
         markFirstPreviewStarted();
         await firstPreviewGate;
@@ -1066,7 +1113,7 @@ describe('cashflow sheet lab route', () => {
     expect(olderResponse.status).toBe(200);
     expect(olderResponse.body.sourceRevision).toBe(newerResponse.body.sourceRevision);
     expect(pinned.body.sourceRevision).toBe(newerResponse.body.sourceRevision);
-    expect(pinned.body.cells.find((cell) => cell.sourceCell === 'D4')?.amount).toBe(222);
+    expect(pinned.body.cells.find((cell) => cell.sourceCell === 'E15')?.amount).toBe(222);
   });
 
   it('does not install the first in-flight refresh after the saved config changes', async () => {
@@ -1821,7 +1868,7 @@ describe('cashflow sheet lab route', () => {
 
   it('blocks only a month containing an invalid pinned cell', async () => {
     const matrix = buildMatrix();
-    matrix[3][3] = '확인 필요';
+    matrix[14][4] = '확인 필요';
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1864,7 +1911,7 @@ describe('cashflow sheet lab route', () => {
 
   it('preserves an EMPTY pinned cell as an authoritative removal candidate', async () => {
     const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-    matrix[3][3] = '-';
+    matrix[14][4] = '-';
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1916,7 +1963,7 @@ describe('cashflow sheet lab route', () => {
 
   it('compares Actual against the cashflow-sheet-lab source contribution instead of the aggregate', async () => {
     const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-    matrix[28][3] = '600';
+    matrix[40][4] = '600';
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1973,7 +2020,7 @@ describe('cashflow sheet lab route', () => {
 
   it('shows legacy aggregate Actual removals for human review before the one-time sheet overwrite', async () => {
     const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-    matrix[28][3] = '-';
+    matrix[40][4] = '-';
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2209,7 +2256,7 @@ describe('cashflow sheet lab route', () => {
         previewCalls += 1;
         if (previewCalls > 1) throw new Error('apply must use staged candidates');
         const matrix = buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS);
-        matrix[4][3] = '';
+        matrix[15][4] = '';
         return {
           spreadsheetId: 'spreadsheet-a',
           spreadsheetTitle: 'Cashflow workbook',
