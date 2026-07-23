@@ -124,9 +124,17 @@ export function createJavaWeeklyClient({
   const requestTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0
     ? Math.min(configuredTimeoutMs, 12_000)
     : 12_000;
-  const totalRequestTimeoutMs = Math.min(requestTimeoutMs * 2, 24_000);
-
-  async function requestJson({ context, method = 'GET', path, body, editSession, dataProjectId, deadlineAtMs }) {
+  async function requestJson({
+    context,
+    method = 'GET',
+    path,
+    body,
+    editSession,
+    dataProjectId,
+    deadlineAtMs,
+    attemptTimeoutMs = requestTimeoutMs,
+    retry = true,
+  }) {
     if (!baseUrl) {
       throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
     }
@@ -134,7 +142,8 @@ export function createJavaWeeklyClient({
     const callerDeadlineAtMs = Number.isFinite(Number(deadlineAtMs))
       ? Number(deadlineAtMs)
       : Number.POSITIVE_INFINITY;
-    const requestDeadlineAtMs = Math.min(requestStartedAt + totalRequestTimeoutMs, callerDeadlineAtMs);
+    const boundedAttemptTimeoutMs = Math.min(Math.max(1, attemptTimeoutMs), 24_000);
+    const requestDeadlineAtMs = callerDeadlineAtMs;
     const callerDeadlineReached = () => Number.isFinite(callerDeadlineAtMs) && Date.now() >= callerDeadlineAtMs;
     const callerDeadlineError = () => createHttpError(
       504,
@@ -150,7 +159,7 @@ export function createJavaWeeklyClient({
         throw error;
       }
       const controller = new AbortController();
-      const attemptTimeoutMs = Math.min(requestTimeoutMs, remainingMs);
+      const timeoutMs = Math.min(boundedAttemptTimeoutMs, remainingMs);
       let timeout;
       const timeoutPromise = new Promise((_resolve, reject) => {
         timeout = setTimeout(() => {
@@ -158,7 +167,7 @@ export function createJavaWeeklyClient({
           const error = new Error('JVM weekly API attempt timeout exceeded');
           error.name = 'AbortError';
           reject(error);
-        }, attemptTimeoutMs);
+        }, timeoutMs);
       });
       timeout.unref?.();
       const attemptPromise = (async () => {
@@ -197,6 +206,13 @@ export function createJavaWeeklyClient({
     } catch (error) {
       if (Number.isInteger(error?.statusCode)) throw error;
       if (callerDeadlineReached()) throw callerDeadlineError();
+      if (!retry) {
+        throw createHttpError(
+          503,
+          '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+          'jvm_weekly_api_unreachable',
+        );
+      }
       try {
         return await send();
       } catch (retryError) {
@@ -298,6 +314,8 @@ export function createJavaWeeklyClient({
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/batch/apply`,
       dataProjectId: bffDataProjectId,
+      attemptTimeoutMs: 24_000,
+      retry: false,
       body: {
         idempotencyKey,
         sourceRevision,

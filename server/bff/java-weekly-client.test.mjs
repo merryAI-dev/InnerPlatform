@@ -149,6 +149,38 @@ describe('Java weekly cashflow client', () => {
     });
   });
 
+  it('waits once for a slow batch conflict instead of retrying and masking it as unreachable', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(() => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          ok: false,
+          status: 409,
+          text: async () => JSON.stringify({ code: 'cashflow_revision_conflict', message: '원장 revision이 변경되었습니다.' }),
+        }), 10);
+      }));
+      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
+      const request = client.applyCashflowSheetBatch({
+        context,
+        projectId: 'project-a',
+        idempotencyKey: 'apply-batch-slow-conflict',
+        sourceRevision: monthlyContract.sourceRevision,
+        targetRevision: monthlyContract.targetRevision,
+        months: [{ yearMonth: '2026-07', cells: monthlyContract.cells }],
+      });
+      const assertion = expect(request).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'cashflow_revision_conflict',
+      });
+
+      await vi.advanceTimersByTimeAsync(11);
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails before network when BFF and JVM data projects differ', async () => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({

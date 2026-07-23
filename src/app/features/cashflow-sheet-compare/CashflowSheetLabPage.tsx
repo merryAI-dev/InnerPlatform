@@ -993,15 +993,6 @@ export function CashflowSheetLabPage({
                   <span className="font-bold">시트 연동 오류</span> · {mirror.lastRefreshError.message}
                 </div>
               ) : null}
-              {(mirror?.reconciliationWarnings?.length || 0) > 0 ? (
-                <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                  {mirror?.reconciliationWarnings?.map((warning) => (
-                    <div key={`${warning.year}-${warning.mode}`}>
-                      {warning.year}년 {warning.mode === 'projection' ? 'Projection' : 'Actual'} 주차 합계와 연간 합계가 다릅니다. 저장은 가능하며 해당 연도 주차 원장을 기준으로 사용합니다.
-                    </div>
-                  ))}
-                </div>
-              ) : null}
             </div>
           </li>
 
@@ -1029,9 +1020,6 @@ export function CashflowSheetLabPage({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-900">
-                    버튼을 누르면 별도 검토 없이 시트 값으로 덮어씁니다. 월 결산된 기간은 변경되지 않습니다.
-                  </div>
                   <Button
                     ref={stageButtonRef}
                     type="button"

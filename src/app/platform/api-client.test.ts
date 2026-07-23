@@ -58,6 +58,30 @@ describe('PlatformApiClient', () => {
     expect(response.data).toBe('ok');
   });
 
+  it('coalesces identical concurrent GET requests and fetches again after completion', async () => {
+    let resolveFirst: ((response: Response) => void) | undefined;
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+    const client = new PlatformApiClient({ fetchImpl });
+    const options = { tenantId: 'mysc', actor: { id: 'u001' } };
+
+    const first = client.get<{ ok: boolean }>('/api/v1/cashflow/p001/activity', options);
+    const duplicate = client.get<{ ok: boolean }>('/api/v1/cashflow/p001/activity', options);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    resolveFirst?.(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    await expect(Promise.all([first, duplicate])).resolves.toHaveLength(2);
+
+    await client.get('/api/v1/cashflow/p001/activity', options);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('throws PlatformApiError on non-2xx responses', async () => {
     const fetchImpl = vi.fn(async () => {
       return new Response(JSON.stringify({ error: 'nope' }), {
