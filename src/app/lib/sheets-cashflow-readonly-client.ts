@@ -260,6 +260,18 @@ export interface CashflowSheetLabAnnualCell {
   rawValue?: string;
 }
 
+export interface CashflowSheetLabTotalCell {
+  mode: 'projection' | 'actual';
+  kind: 'line' | 'derived';
+  lineId?: string;
+  direction?: 'IN' | 'OUT';
+  derivedKind?: 'deposit_total' | 'withdrawal_total' | 'balance';
+  sourceCell: string;
+  state: 'VALUE' | 'ZERO' | 'EMPTY' | 'INVALID';
+  amount?: number;
+  rawValue?: string;
+}
+
 export interface CashflowSheetLabMirrorResult {
   schemaVersion?: number;
   projectId: string;
@@ -289,6 +301,7 @@ export interface CashflowSheetLabMirrorResult {
   summary?: { cellCount: number; valueCount: number; emptyCount: number; invalidCount: number };
   cells?: CashflowSheetLabMirrorCell[];
   annualCells?: CashflowSheetLabAnnualCell[];
+  totalCells?: CashflowSheetLabTotalCell[];
   sheetFacts?: {
     metadata?: {
       lastUpdateText?: { sourceCell: string; value: string };
@@ -319,6 +332,11 @@ export interface CashflowSheetLabMirrorResult {
       year: number;
       projection: CashflowSheetLabAnnualModeTotal;
       actual: CashflowSheetLabAnnualModeTotal;
+    }>;
+    cashflowGrandTotalsBySourceYear?: Array<{
+      sourceYear: number;
+      projection: CashflowSheetLabGrandTotal;
+      actual: CashflowSheetLabGrandTotal;
     }>;
   };
   financialYearChecks?: {
@@ -394,6 +412,14 @@ export interface CashflowSheetLabAnnualModeTotal {
     status: 'NOT_APPLICABLE' | 'PARTIAL_WEEKLY' | 'MATCH' | 'MISMATCH';
     mismatchedLineIds: string[];
   };
+}
+
+export interface CashflowSheetLabGrandTotal {
+  lineAmounts: Record<string, number>;
+  lineStates: Record<string, 'VALUE' | 'ZERO' | 'EMPTY'>;
+  totalIn: number;
+  totalOut: number;
+  net: number;
 }
 
 export interface CashflowSheetLabYearViewResult {

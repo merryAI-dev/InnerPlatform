@@ -1637,7 +1637,39 @@ export function CashflowProjectSheet({
       );
     }
     const visibleWeeks = annualWeeks;
-    const boardColumnCount = visibleWeeks.length + 1;
+    const mirroredAnnualTotals = new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
+      .filter((row) => Number.isSafeInteger(row.year))
+      .map((row) => [row.year, row]));
+    const openingBalanceYears = [
+      ...(monthCloseResult?.dashboard?.openingBalances?.projection?.sources || []).map((source) => source.year),
+      ...(monthCloseResult?.dashboard?.openingBalances?.actual?.sources || []).map((source) => source.year),
+    ];
+    const annualYears = [...new Set([
+      ...openingBalanceYears,
+      ...mirroredAnnualTotals.keys(),
+    ])]
+      .filter((year) => year !== selectedYear)
+      .sort((left, right) => left - right);
+    const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
+    const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
+    const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
+      const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
+        ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
+        : null;
+      if (jvmSource) {
+        const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
+        const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
+        return {
+          lineAmounts: jvmSource.lineAmounts,
+          lineStates: jvmSource.lineStates,
+          totalIn,
+          totalOut,
+          net: totalIn - totalOut,
+        };
+      }
+      return mirroredAnnualTotals.get(year)?.[mode] || null;
+    };
+    const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
     const canonicalReadModel = monthCloseResult?.dashboard?.canonical;
     const readServerSummary = (mode: 'projection' | 'actual') => {
       const openingBalance = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
@@ -1687,6 +1719,31 @@ export function CashflowProjectSheet({
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
     };
+    const sheetGrandTotalFor = (mode: 'projection' | 'actual') => cashflowSheetMirror?.sheetFacts?.cashflowGrandTotalsBySourceYear
+      ?.find((total) => total.sourceYear === selectedYear)?.[mode] || null;
+    const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
+      const sheetGrandTotal = sheetGrandTotalFor(mode);
+      if (Object.prototype.hasOwnProperty.call(sheetGrandTotal?.lineAmounts || {}, lineId)) {
+        return Number(sheetGrandTotal?.lineAmounts[lineId] || 0);
+      }
+      return annualYears.reduce(
+        (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
+        Number(derived[mode].rowTotals[lineId] || 0),
+      );
+    };
+    const projectTotalsFor = (mode: 'projection' | 'actual') => {
+      const sheetGrandTotal = sheetGrandTotalFor(mode);
+      if (sheetGrandTotal) {
+        return {
+          totalIn: Number(sheetGrandTotal.totalIn || 0),
+          totalOut: Number(sheetGrandTotal.totalOut || 0),
+          net: Number(sheetGrandTotal.net || 0),
+        };
+      }
+      const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn || 0), Number(derived[mode].monthTotals.totalIn || 0));
+      const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut || 0), Number(derived[mode].monthTotals.totalOut || 0));
+      return { totalIn, totalOut, net: totalIn - totalOut };
+    };
     const scrollBoard = (direction: -1 | 1) => {
       const container = cashflowBoardScrollRef.current;
       if (!container) return;
@@ -1703,6 +1760,30 @@ export function CashflowProjectSheet({
         behavior: 'smooth',
       });
     };
+    const renderAnnualLineCell = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId, year: number, isAltRow: boolean) => {
+      const total = annualTotalFor(year, mode);
+      const state = total?.lineStates?.[lineId]
+        || (Object.prototype.hasOwnProperty.call(total?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
+      const value = Number(total?.lineAmounts?.[lineId] || 0);
+      return (
+        <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
+          {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-400">미입력</span>}
+        </td>
+      );
+    };
+    const renderAnnualSummaryCell = (
+      mode: 'projection' | 'actual',
+      kind: 'totalIn' | 'totalOut' | 'net',
+      year: number,
+      emphasis: 'income' | 'expense' | 'balance',
+      rowTone?: 'income' | 'expense',
+    ) => renderSummaryCell({
+      keyName: `${mode}-${kind}-${year}-annual`,
+      value: Number(annualTotalFor(year, mode)?.[kind] || 0),
+      mode,
+      emphasis,
+      rowTone,
+    });
     const renderModeLineRows = (
       mode: 'projection' | 'actual',
       lineIds: CashflowSheetLineId[],
@@ -1714,15 +1795,17 @@ export function CashflowProjectSheet({
           <td className={`sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white px-3 py-2 text-[12px] leading-4 ${tone === 'income' ? 'text-emerald-700' : 'text-red-700'} ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'} ${emphasized ? 'font-bold' : 'font-medium'}`}>
             {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
           </td>
+          {previousAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
             return mode === 'projection'
               ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 })
               : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 });
           })}
+          {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {renderSummaryCell({
             keyName: `${mode}-${lineId}-range`,
-            value: derived[mode].rowTotals[lineId] || 0,
+            value: projectLineTotalFor(mode, lineId),
             mode,
             isAltRow: rowIndex % 2 === 1,
             stickyRight: true,
@@ -1744,6 +1827,7 @@ export function CashflowProjectSheet({
           <td className="sticky left-0 z-20 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-[#EAF0F5] px-3 py-2 text-[12px] font-bold text-[#17324D]">
             {label}
           </td>
+          {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
           {visibleWeeks.map((week, index) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
             value: derived[mode].weekTotals[index]?.[kind] || 0,
@@ -1752,9 +1836,10 @@ export function CashflowProjectSheet({
             emphasis,
             rowTone,
           }))}
+          {followingAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
           {renderSummaryCell({
             keyName: `${mode}-${kind}-range`,
-            value: derived[mode].monthTotals[kind],
+            value: projectTotalsFor(mode)[kind],
             mode,
             emphasis,
             stickyRight: true,
@@ -1770,6 +1855,12 @@ export function CashflowProjectSheet({
             <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[12px] font-bold text-slate-800">
               항목
             </th>
+            {previousAnnualYears.map((year) => (
+              <th key={`${mode}-${year}-before`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
+                <div className="text-[12px] font-bold text-slate-800">{year}년</div>
+                <div className="text-[12px] font-normal text-slate-400">누적</div>
+              </th>
+            ))}
             {visibleWeeks.map((week) => {
               const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
               return (
@@ -1780,8 +1871,14 @@ export function CashflowProjectSheet({
                 </th>
               );
             })}
+            {followingAnnualYears.map((year) => (
+              <th key={`${mode}-${year}-after`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
+                <div className="text-[12px] font-bold text-slate-800">{year}년</div>
+                <div className="text-[12px] font-normal text-slate-400">합계</div>
+              </th>
+            ))}
             <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[12px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
-              {selectedYear}년 합계
+              Total
             </th>
           </tr>
         </thead>
@@ -2525,19 +2622,19 @@ export function CashflowProjectSheet({
 
       {renderUnifiedMonthlyBoard()}
 
-      <AlertDialog open={sheetRefreshLoading}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[360px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
+      {sheetRefreshLoading ? (
+        <div className="fixed inset-0 z-[100] grid place-items-start bg-transparent px-4 pt-24" aria-live="polite" aria-busy="true">
+          <div role="status" className="w-full max-w-[420px] rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-xl">
+            <div className="flex items-center gap-2 text-[14px] font-bold text-slate-950">
               <Loader2 className="h-4 w-4 animate-spin text-[#17324D]" />
               시트 값을 불러오는 중입니다
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              시트의 값을 고정해 MYSCube 원장에 반영할 준비를 하고 있습니다. 완료될 때까지 이 창을 닫지 말고 잠시 기다려 주세요.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-        </AlertDialogContent>
-      </AlertDialog>
+            </div>
+            <div className="mt-1 text-[12px] leading-5 text-slate-600">
+              시트의 최신 값을 고정하고 변경된 항목을 확인하고 있습니다. 완료될 때까지 잠시 기다려 주세요.
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">

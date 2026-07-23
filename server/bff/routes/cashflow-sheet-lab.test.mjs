@@ -585,6 +585,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(mirror.body.cells).toHaveLength(160);
     expect(mirror.body.annualCells).toHaveLength(288);
+    expect(mirror.body.totalCells).toHaveLength(38);
 
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')

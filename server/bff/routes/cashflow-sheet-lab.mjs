@@ -659,6 +659,18 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
   ].sort((left, right) => Number(left.year) - Number(right.year)
     || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
     || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
+  const previousTotalCells = readOptionalText(previous?.sourceRevision)
+    ? (previous.totalCells || [])
+      .map((cell) => ({ ...cell, sourceYear: Number(cell?.sourceYear) || previousSourceYear }))
+      .filter((cell) => cell.sourceYear !== sourceYear)
+    : [];
+  const totalCells = [
+    ...previousTotalCells,
+    ...(next.totalCells || []).map((cell) => ({ ...cell, sourceYear })),
+  ].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear)
+    || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
+    || readOptionalText(left.kind).localeCompare(readOptionalText(right.kind))
+    || readOptionalText(left.lineId || left.derivedKind).localeCompare(readOptionalText(right.lineId || right.derivedKind)));
   const replaceYearRows = (previousRows, nextRows, yearOf) => [
     ...(previousRows || []).filter((row) => yearOf(row) !== sourceYear),
     ...(nextRows || []).filter((row) => yearOf(row) === sourceYear),
@@ -676,7 +688,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
       activeWeekRange: next.activeWeekRange,
     },
   };
-  const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells })}`;
+  const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells, totalCells })}`;
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (cell.state === 'VALUE') counts.valueCount += 1;
@@ -695,6 +707,15 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     (row) => Number(row?.year),
   );
   const annualCashflowTotals = buildAnnualCashflowTotals({ cells, annualCells });
+  const cashflowGrandTotalsBySourceYear = [
+    ...(previous?.sheetFacts?.cashflowGrandTotalsBySourceYear || [])
+      .filter((row) => Number(row?.sourceYear) !== sourceYear),
+    {
+      sourceYear,
+      ...(next?.sheetFacts?.cashflowGrandTotals || {}),
+    },
+  ].filter((row) => Number.isSafeInteger(Number(row?.sourceYear)))
+    .sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear));
   const reconciliationWarnings = annualCashflowTotals.flatMap((row) => ['projection', 'actual'].flatMap((mode) => (
     ['MISMATCH', 'PARTIAL_WEEKLY'].includes(readOptionalText(row?.[mode]?.reconciliation?.status))
       ? [{ year: row.year, mode, ...row[mode].reconciliation }]
@@ -709,6 +730,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     sourceRevision,
     cells,
     annualCells,
+    totalCells,
     yearMonths: [...new Set(cells.map((cell) => readOptionalText(cell.yearMonth)).filter(Boolean))].sort(),
     years: [...new Set([
       ...cells.map((cell) => Number(readOptionalText(cell.yearMonth).slice(0, 4))),
@@ -720,6 +742,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
       depositScheduleRows,
       annualFinancialTotals,
       annualCashflowTotals,
+      cashflowGrandTotalsBySourceYear,
     },
     reconciliationWarnings,
     appliedSourceRevision: previous?.appliedSourceRevision,

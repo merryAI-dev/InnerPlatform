@@ -145,14 +145,22 @@ function fixedSection(matrix, layout, reasons) {
     .filter(Boolean);
   const sourceYear = weekColumns[0]?.year;
   const sourceTotalHeader = normalizeText(matrix?.[layout.headerRowIndex]?.[SOURCE_YEAR_TOTAL_COLUMN_INDEX]);
-  if (Number.isSafeInteger(sourceYear) && ['Total', `${sourceYear}년 합계`].includes(sourceTotalHeader)) {
-    annualColumns.push({
-      year: sourceYear,
+  const totalColumn = Number.isSafeInteger(sourceYear) && ['Total', `${sourceYear}년 합계`].includes(sourceTotalHeader)
+    ? {
       columnIndex: SOURCE_YEAR_TOTAL_COLUMN_INDEX,
       a1: toA1(layout.headerRowIndex, SOURCE_YEAR_TOTAL_COLUMN_INDEX),
+    }
+    : null;
+  // The source-year Total is retained as an annual reconciliation input as well as
+  // a display-only grand total. It must never replace the weekly source of truth.
+  if (totalColumn) {
+    annualColumns.push({
+      year: sourceYear,
+      columnIndex: totalColumn.columnIndex,
+      a1: totalColumn.a1,
     });
   }
-  if (annualColumns.length !== ANNUAL_COLUMN_INDEXES.length + 1) {
+  if (annualColumns.length !== ANNUAL_COLUMN_INDEXES.length + 1 || !totalColumn) {
     reasons.push({
       code: 'cashflow_annual_header_invalid',
       mode: layout.mode,
@@ -227,6 +235,27 @@ function fixedSection(matrix, layout, reasons) {
     a1: toA1(lineRow.rowIndex, column.columnIndex),
     source: 'sheet_annual_total',
   })));
+  const totalMappings = [
+    ...lineRows.map((lineRow) => ({
+      mode: layout.mode,
+      lineId: lineRow.lineId,
+      direction: lineRow.direction,
+      rowIndex: lineRow.rowIndex,
+      columnIndex: totalColumn?.columnIndex,
+      a1: totalColumn ? toA1(lineRow.rowIndex, totalColumn.columnIndex) : '',
+      source: 'sheet_grand_total',
+      kind: 'line',
+    })),
+    ...derivedRows.map((row) => ({
+      mode: layout.mode,
+      rowIndex: row.rowIndex,
+      columnIndex: totalColumn?.columnIndex,
+      a1: totalColumn ? toA1(row.rowIndex, totalColumn.columnIndex) : '',
+      source: 'sheet_grand_total',
+      kind: 'derived',
+      derivedKind: row.kind,
+    })),
+  ];
 
   return {
     mode: layout.mode,
@@ -234,11 +263,13 @@ function fixedSection(matrix, layout, reasons) {
     weekRowIndex: layout.weekRowIndex,
     weekColumns,
     annualColumns,
+    totalColumn,
     lineRows,
     derivedRows,
     ignoredRows: [],
     mappings,
     annualMappings,
+    totalMappings,
     missingLineIds: [],
     duplicateLineIds: [],
   };

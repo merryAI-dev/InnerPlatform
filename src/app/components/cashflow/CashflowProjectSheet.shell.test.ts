@@ -185,7 +185,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps the sheet refresh loading state open until the successful response is processed', () => {
-    expect(source).toContain('open={sheetRefreshLoading}');
+    expect(source).toContain('{sheetRefreshLoading ? (');
+    expect(source).toContain('aria-busy="true"');
     expect(source).toContain('시트 값을 불러오는 중입니다');
     expect(source).not.toContain('setSheetRefreshResult');
     expect(source).not.toContain('setSheetStageDialog');
@@ -297,10 +298,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
-  it('keeps multi-year import data out of the cashflow view', () => {
+  it('removes multi-year navigation while keeping the selected-year board self-contained', () => {
     expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).not.toContain('cashflowYearView');
-    expect(source).not.toContain('data-cashflow-annual-summary="true"');
     expect(source).not.toContain('data-cashflow-block="multi-year-view"');
     expect(source).not.toContain('data-cashflow-year-view');
     expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months');
@@ -317,10 +317,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트의 최신 값을 불러왔습니다.');
   });
 
-  it('renders only the selected year weekly ledger while retaining the server opening balance', () => {
-    expect(source).not.toContain('previousAnnualYears');
-    expect(source).not.toContain('followingAnnualYears');
-    expect(source).not.toContain('renderAnnualSummaryCell');
+  it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
+    expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
+    expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
+    expect(source).toContain('const renderAnnualSummaryCell');
+    expect(source).toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
+    expect(source).toContain('Total');
     expect(source).toContain('const visibleWeeks = annualWeeks');
     expect(source).toContain('openingBalances?.selectedYear === selectedYear');
     expect(source).toContain('annualOpeningBalance: openingBalance');
