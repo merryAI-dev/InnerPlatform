@@ -91,6 +91,7 @@ describe('cashflow official fixed template', () => {
     expect(result.mappingCandidates).toHaveLength(1_920);
     expect(result.sections.map((section) => section.weekColumns.length)).toEqual([60, 60]);
     expect(result.sections.map((section) => section.annualMappings.length)).toEqual([144, 144]);
+    expect(result.sections.map((section) => section.totalMappings.length)).toEqual([19, 19]);
     expect(result.sections[0].mappings[0]).toMatchObject({
       mode: 'projection',
       lineId: 'MYSC_PREPAY_IN',
@@ -107,9 +108,9 @@ describe('cashflow official fixed template', () => {
     });
     expect(result.sections[0].annualColumns.map(({ year, a1 }) => [year, a1])).toEqual([
       [2024, 'C12'], [2025, 'D12'], [2027, 'BM12'], [2028, 'BN12'],
-      [2029, 'BO12'], [2030, 'BP12'], [2031, 'BQ12'], [2032, 'BR12'],
-      [2026, 'BS12'],
+      [2029, 'BO12'], [2030, 'BP12'], [2031, 'BQ12'], [2032, 'BR12'], [2026, 'BS12'],
     ]);
+    expect(result.sections[0].totalColumn).toMatchObject({ a1: 'BS12' });
   });
 
   it('fails closed instead of guessing when an official coordinate changes', () => {

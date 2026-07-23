@@ -154,6 +154,10 @@ describe('cashflow sheet pinned snapshot', () => {
         supportAmount: 0,
       }],
       annualCashflowTotals: [],
+      cashflowGrandTotals: {
+        projection: { lineAmounts: {}, lineStates: {}, totalIn: 0, totalOut: 0, net: 0 },
+        actual: { lineAmounts: {}, lineStates: {}, totalIn: 0, totalOut: 0, net: 0 },
+      },
       controlTotals: {
         deposit: { sourceCell: 'BS9', value: 15000, computed: 15000, matches: true },
         unpaid: { sourceCell: 'BT9', value: 85000 },

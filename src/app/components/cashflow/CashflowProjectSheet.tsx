@@ -1637,7 +1637,6 @@ export function CashflowProjectSheet({
       );
     }
     const visibleWeeks = annualWeeks;
-    const appliedAnnualYears = new Set((cashflowSheetMirror?.appliedAnnualYears || []).map(Number));
     const mirroredAnnualTotals = new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
       .filter((row) => Number.isSafeInteger(row.year))
       .map((row) => [row.year, row]));
@@ -1647,7 +1646,7 @@ export function CashflowProjectSheet({
     ];
     const annualYears = [...new Set([
       ...openingBalanceYears,
-      ...[...mirroredAnnualTotals.keys()].filter((year) => appliedAnnualYears.has(year)),
+      ...mirroredAnnualTotals.keys(),
     ])]
       .filter((year) => year !== selectedYear)
       .sort((left, right) => left - right);
@@ -1720,11 +1719,27 @@ export function CashflowProjectSheet({
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
     };
-    const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => annualYears.reduce(
-      (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
-      Number(derived[mode].rowTotals[lineId] || 0),
-    );
+    const sheetGrandTotalFor = (mode: 'projection' | 'actual') => cashflowSheetMirror?.sheetFacts?.cashflowGrandTotalsBySourceYear
+      ?.find((total) => total.sourceYear === selectedYear)?.[mode] || null;
+    const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
+      const sheetGrandTotal = sheetGrandTotalFor(mode);
+      if (Object.prototype.hasOwnProperty.call(sheetGrandTotal?.lineAmounts || {}, lineId)) {
+        return Number(sheetGrandTotal?.lineAmounts[lineId] || 0);
+      }
+      return annualYears.reduce(
+        (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
+        Number(derived[mode].rowTotals[lineId] || 0),
+      );
+    };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
+      const sheetGrandTotal = sheetGrandTotalFor(mode);
+      if (sheetGrandTotal) {
+        return {
+          totalIn: Number(sheetGrandTotal.totalIn || 0),
+          totalOut: Number(sheetGrandTotal.totalOut || 0),
+          net: Number(sheetGrandTotal.net || 0),
+        };
+      }
       const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn || 0), Number(derived[mode].monthTotals.totalIn || 0));
       const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut || 0), Number(derived[mode].monthTotals.totalOut || 0));
       return { totalIn, totalOut, net: totalIn - totalOut };

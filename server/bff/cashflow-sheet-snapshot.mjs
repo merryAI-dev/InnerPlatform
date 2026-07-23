@@ -111,6 +111,22 @@ function snapshotAnnualCell(mapping, matrix) {
   };
 }
 
+function snapshotTotalCell(mapping, matrix) {
+  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+  const totalClassified = classified.state === 'VALUE' && classified.amount === 0
+    ? { state: 'ZERO', amount: 0 }
+    : classified;
+  return {
+    mode: mapping.mode,
+    kind: mapping.kind,
+    lineId: mapping.lineId,
+    direction: mapping.direction,
+    derivedKind: mapping.derivedKind,
+    sourceCell: mapping.a1,
+    ...totalClassified,
+  };
+}
+
 function compareCells(left, right) {
   return String(left.mode).localeCompare(String(right.mode))
     || String(left.yearMonth).localeCompare(String(right.yearMonth))
@@ -227,6 +243,34 @@ export function buildAnnualCashflowTotals({ cells, annualCells }) {
     });
 }
 
+function buildCashflowSheetTotal(totalCells, mode) {
+  const lineAmounts = {};
+  const lineStates = {};
+  for (const cell of totalCells.filter((candidate) => candidate.mode === mode && candidate.kind === 'line' && candidate.lineId)) {
+    lineStates[cell.lineId] = cell.state;
+    if (cell.state === 'VALUE' || cell.state === 'ZERO') lineAmounts[cell.lineId] = Number(cell.amount || 0);
+  }
+  const derivedAmount = (kind, fallback) => {
+    const cell = totalCells.find((candidate) => candidate.mode === mode && candidate.kind === 'derived' && candidate.derivedKind === kind);
+    return cell?.state === 'VALUE' || cell?.state === 'ZERO' ? Number(cell.amount || 0) : fallback;
+  };
+  const computedIn = Object.entries(lineAmounts)
+    .filter(([lineId]) => /^.+_IN$/.test(lineId))
+    .reduce((sum, [, amount]) => sum + Number(amount || 0), 0);
+  const computedOut = Object.entries(lineAmounts)
+    .filter(([lineId]) => /^.+_OUT$/.test(lineId))
+    .reduce((sum, [, amount]) => sum + Number(amount || 0), 0);
+  const totalIn = derivedAmount('deposit_total', computedIn);
+  const totalOut = derivedAmount('withdrawal_total', computedOut);
+  return {
+    lineAmounts,
+    lineStates,
+    totalIn,
+    totalOut,
+    net: derivedAmount('balance', totalIn - totalOut),
+  };
+}
+
 function matrixValue(matrix, rowIndex, columnIndex) {
   return normalizedText(matrix?.[rowIndex]?.[columnIndex]);
 }
@@ -327,7 +371,7 @@ function annualSheetFinancialTotals({ depositScheduleRows, projectionControls })
     }));
 }
 
-export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = [], annualCells = [] } = {}) {
+export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = [], annualCells = [], totalCells = [] } = {}) {
   const issues = [];
   const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
   const weekColumns = (projectionSection?.weekColumns || [])
@@ -407,6 +451,10 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = 
     depositScheduleRows,
     annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
     annualCashflowTotals: buildAnnualCashflowTotals({ cells, annualCells }),
+    cashflowGrandTotals: {
+      projection: buildCashflowSheetTotal(totalCells, 'projection'),
+      actual: buildCashflowSheetTotal(totalCells, 'actual'),
+    },
     controlTotals: {
       deposit: {
         sourceCell: depositControlColumnIndex === null ? '' : toA1(8, depositControlColumnIndex),
@@ -442,8 +490,14 @@ export function createCashflowPinnedSnapshot({
     .flatMap((section) => section.annualMappings || [])
     .map((mapping) => snapshotAnnualCell(mapping, matrix))
     .sort(compareAnnualCells);
-  const sheetFacts = extractCashflowSheetFacts({ template, matrix, cells, annualCells });
-  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, sheetFacts });
+  const totalCells = (template?.sections || [])
+    .flatMap((section) => section.totalMappings || [])
+    .map((mapping) => snapshotTotalCell(mapping, matrix))
+    .sort((left, right) => String(left.mode).localeCompare(String(right.mode))
+      || String(left.kind).localeCompare(String(right.kind))
+      || String(left.lineId || left.derivedKind || '').localeCompare(String(right.lineId || right.derivedKind || '')));
+  const sheetFacts = extractCashflowSheetFacts({ template, matrix, cells, annualCells, totalCells });
+  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, totalCells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (cell.state === 'VALUE') counts.valueCount += 1;
@@ -475,6 +529,7 @@ export function createCashflowPinnedSnapshot({
     summary,
     cells,
     annualCells,
+    totalCells,
     sheetFacts,
   };
 }
