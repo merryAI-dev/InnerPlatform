@@ -35,8 +35,6 @@ import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
-import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation;
-import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseProjectionEntity;
@@ -70,7 +68,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -777,8 +774,8 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void multiMonthApplyRequiresOneLateReasonAndRecordsTheClosedMonthOnce() {
-        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-11"));
+    void multiMonthApplyReportsEveryLateClosedMonthAndRecordsEachOnce() {
+        Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-10-11"));
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-07", Map.of(
             "contractVersion", "cashflow-month-close-v1",
             "tenantId", "tenant-a",
@@ -792,6 +789,15 @@ class FirestoreCashflowLeaseGuardTest {
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
             lockedWeeklyCompletion("2026-07", 3, 1)
         );
+        fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-08", Map.of(
+            "contractVersion", "cashflow-month-close-v1",
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-08",
+            "status", "CLOSED",
+            "revision", 1L,
+            "reopenCount", 0L
+        ));
         String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
         CashflowSheetLabApplyRequest july = monthlyRequest("batch-late-july", targetRevision, "2026-07", "");
         CashflowSheetLabApplyRequest august = monthlyRequest("batch-late-august", targetRevision, "2026-08", "");
@@ -809,6 +815,8 @@ class FirestoreCashflowLeaseGuardTest {
             .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
                 assertThat(error.statusCode()).isEqualTo(409);
                 assertThat(error.code()).isEqualTo("cashflow_closed_month_reason_required");
+                assertThat(error.details().get("closedMonths"))
+                    .isEqualTo(List.of("2026-07", "2026-08"));
             });
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_month_amendments/"));
@@ -834,9 +842,13 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("amendmentCount", 1L)
             .containsEntry("postDeadlineAmendmentWarningCount", 1L)
             .containsEntry("lastAmendmentReason", "결산 후 다중 월 입금액 정정");
+        assertThat(fixture.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-08"))
+            .containsEntry("amendmentCount", 1L)
+            .containsEntry("postDeadlineAmendmentWarningCount", 1L)
+            .containsEntry("lastAmendmentReason", "결산 후 다중 월 입금액 정정");
         assertThat(fixture.documents.keySet().stream()
             .filter(path -> path.contains("/cashflow_month_amendments/")))
-            .hasSize(1);
+            .hasSize(2);
         assertThat(fixture.documents.keySet().stream()
             .filter(path -> path.contains("/weekly_api_audit_events/")))
             .hasSize(1);
@@ -1555,7 +1567,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void lockedCashflowWeekRejectsProjectionUntilAReasonedReopen() {
+    void lockedCashflowWeekRemainsOperationalStatusWhileProjectionChanges() {
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3",
@@ -1578,58 +1590,21 @@ class FirestoreCashflowLeaseGuardTest {
             service.completeCashflowWeeklyUpdate(ACTOR, "project-a", lock)
         );
 
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
             ACTOR,
             "project-a",
             FINAL_SESSION,
             new UpsertProjectionRequest("projection-while-locked", List.of(
                 new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 3, "SALES_IN", BigDecimal.valueOf(200))
             ))
-        )))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("locked");
-
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
-            service.reopenCashflowWeeklyUpdate(
-                ACTOR,
-                "project-a",
-                new ReopenCashflowWeeklyUpdateRequest("weekly-reopen-empty", "2026-07", 3, 1, "")
-            )
-        )).isInstanceOf(IllegalArgumentException.class);
-
-        CashflowWeeklyUpdateCompletionResponse reopened = fixture.persistence.runCommandTransaction(() ->
-            service.reopenCashflowWeeklyUpdate(
-                ACTOR,
-                "project-a",
-                new ReopenCashflowWeeklyUpdateRequest("weekly-reopen-1", "2026-07", 3, 1, "긴급 정정")
-            )
-        );
-        assertThat(reopened.status()).isEqualTo("OPEN");
-        assertThat(reopened.revision()).isEqualTo(2L);
-
-        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> service.upsertProjection(
-            ACTOR,
-            "project-a",
-            FINAL_SESSION,
-            new UpsertProjectionRequest("projection-after-reopen", List.of(
-                new UpsertProjectionRequest.ProjectionLinePatch("2026-07", 3, "SALES_IN", BigDecimal.valueOf(200))
-            ))
         ))).doesNotThrowAnyException();
 
-        CashflowWeeklyUpdateCompletionResponse relocked = fixture.persistence.runCommandTransaction(() ->
-            service.completeCashflowWeeklyUpdate(
-                ACTOR,
-                "project-a",
-                new CompleteCashflowWeeklyUpdateRequest(
-                    "weekly-lock-2", "2026-07", 3, "2026-07-16T11:00:00Z"
-                )
-            )
-        );
-        assertThat(relocked.status()).isEqualTo("LOCKED");
-        assertThat(relocked.revision()).isEqualTo(3L);
-        assertThat(fixture.documents).containsKey(
-            "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r3"
-        );
+        assertThat(fixture.documents.get("orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3"))
+            .hasEntrySatisfying("projection", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("SALES_IN", 200L));
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
+        )).containsEntry("status", "LOCKED");
     }
 
     @Test
@@ -1659,129 +1634,31 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void sheetApplyRejectsALockedChangedWeekWithoutPartialCanonicalWrites() {
+    void sheetApplyChangesASettledWeekWithoutWeeklyConfirmation() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3",
             lockedWeeklyCompletion("2026-07", 3, 1)
         );
         String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
-
-        CashflowSheetLabApplyRequest unconfirmed = monthlyRequest("locked-sheet-apply", targetRevision, "");
-        Throwable initialError = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+        CashflowSheetLabApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).applyCashflowSheetLab(
             ACTOR,
             "project-a",
             SESSION,
-            unconfirmed
-        )));
-        assertThat(initialError)
-            .isInstanceOf(CashflowSettledWeekChangeConfirmationRequiredException.class)
-            .hasMessageContaining("다릅니다");
-        CashflowSettledWeekChangeConfirmationRequiredException initialConfirmation =
-            (CashflowSettledWeekChangeConfirmationRequiredException) initialError;
+            monthlyRequest("locked-sheet-apply", targetRevision, "")
+        ));
 
-        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
-
-        CashflowSheetLabApplyRequest forgedConfirmation = new CashflowSheetLabApplyRequest(
-            "locked-sheet-apply-forged",
-            unconfirmed.sourceRevision(),
-            unconfirmed.targetRevision(),
-            unconfirmed.yearMonth(),
-            unconfirmed.replaceAllActualSources(),
-            new CashflowSettledWeekChangeConfirmation(
-                "9999999999.forgedconfirmationtoken0000000000.invalid",
-                targetRevision,
-                initialConfirmation.weeks()
-            ),
-            null,
-            unconfirmed.cells()
-        );
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
-            fixture.persistence
-        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, forgedConfirmation)))
-            .isInstanceOf(dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException.class);
-
-        String completionPath = "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3";
-        Map<String, Object> unlockedCompletion = new LinkedHashMap<>(fixture.documents.get(completionPath));
-        unlockedCompletion.put("status", "OPEN");
-        fixture.documents.put(completionPath, unlockedCompletion);
-        CashflowSheetLabApplyRequest expiredConfirmation = new CashflowSheetLabApplyRequest(
-            "locked-sheet-apply-expired",
-            unconfirmed.sourceRevision(),
-            unconfirmed.targetRevision(),
-            unconfirmed.yearMonth(),
-            unconfirmed.replaceAllActualSources(),
-            new CashflowSettledWeekChangeConfirmation(
-                initialConfirmation.confirmationId(), targetRevision, initialConfirmation.weeks()
-            ),
-            null,
-            unconfirmed.cells()
-        );
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
-            fixture.persistence
-        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, expiredConfirmation)))
-            .isInstanceOf(dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException.class);
-        fixture.documents.put(completionPath, lockedWeeklyCompletion("2026-07", 3, 1));
-        Map<String, Object> revisedCompletion = new LinkedHashMap<>(fixture.documents.get(completionPath));
-        revisedCompletion.put("revision", 2L);
-        fixture.documents.put(completionPath, revisedCompletion);
-        CashflowSheetLabApplyRequest staleConfirmation = new CashflowSheetLabApplyRequest(
-            "locked-sheet-apply-confirmed",
-            unconfirmed.sourceRevision(),
-            unconfirmed.targetRevision(),
-            unconfirmed.yearMonth(),
-            unconfirmed.replaceAllActualSources(),
-            new CashflowSettledWeekChangeConfirmation(
-                initialConfirmation.confirmationId(),
-                targetRevision,
-                initialConfirmation.weeks()
-            ),
-            null,
-            unconfirmed.cells()
-        );
-        Throwable staleError = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
-            fixture.persistence
-        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, staleConfirmation)));
-        assertThat(staleError).isInstanceOf(CashflowSettledWeekChangeConfirmationRequiredException.class);
-        CashflowSettledWeekChangeConfirmationRequiredException freshConfirmation =
-            (CashflowSettledWeekChangeConfirmationRequiredException) staleError;
-        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
-
-        CashflowSheetLabApplyRequest confirmed = new CashflowSheetLabApplyRequest(
-            "locked-sheet-apply-confirmed-fresh",
-            unconfirmed.sourceRevision(),
-            unconfirmed.targetRevision(),
-            unconfirmed.yearMonth(),
-            unconfirmed.replaceAllActualSources(),
-            new CashflowSettledWeekChangeConfirmation(
-                freshConfirmation.confirmationId(),
-                targetRevision,
-                freshConfirmation.weeks()
-            ),
-            null,
-            unconfirmed.cells()
-        );
-        CashflowSheetLabApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
-            fixture.persistence
-        ).applyCashflowSheetLab(ACTOR, "project-a", SESSION, confirmed));
-
-        assertThat(response.settledWeekChanges()).singleElement().satisfies(change -> {
-            assertThat(change.yearMonth()).isEqualTo("2026-07");
-            assertThat(change.weekNo()).isEqualTo(3);
-            assertThat(change.completionRevision()).isEqualTo(2);
-            assertThat(change.warningCount()).isEqualTo(1);
-        });
+        assertThat(response.settledWeekChanges()).isEmpty();
+        assertThat(fixture.documents.keySet()).anyMatch(path -> path.contains("/cashflow_weeks/"));
         assertThat(fixture.documents.get(
-            completionPath
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3"
         ))
             .containsEntry("status", "LOCKED")
-            .containsEntry("postSettlementChangeWarningCount", 1L)
-            .containsEntry("lastPostSettlementChangeByUid", ACTOR.id())
-            .containsEntry("lastPostSettlementChangeTargetRevisionBefore", targetRevision);
+            .doesNotContainKeys("postSettlementChangeWarningCount", "lastPostSettlementChangeByUid");
         assertThat(fixture.documents.keySet())
-            .anyMatch(path -> path.contains("/cashflow_weekly_settlement_change_warnings/"));
+            .noneMatch(path -> path.contains("/cashflow_weekly_settlement_change_warnings/"));
     }
 
     @Test
@@ -1883,7 +1760,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void weeklyExpenseActualReplacementRejectsALockedChangedWeek() {
+    void weeklyExpenseActualReplacementIgnoresWeeklySettlementStatus() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(weekPath(), draftWeek());
         fixture.documents.put(
@@ -1891,7 +1768,7 @@ class FirestoreCashflowLeaseGuardTest {
             lockedWeeklyCompletion("2026-07", 1, 1)
         );
 
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
             fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
             fixture.persistence.replaceActualLines(
                 "tenant-a",
@@ -1902,13 +1779,14 @@ class FirestoreCashflowLeaseGuardTest {
                 ))
             );
             return null;
-        }))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("locked");
+        })).doesNotThrowAnyException();
+        assertThat(fixture.documents.get(weekPath()))
+            .hasEntrySatisfying("actual", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("SALES_IN", 50L));
     }
 
     @Test
-    void weeklySheetActualReplacementRejectsALockedChangedWeek() {
+    void weeklySheetActualReplacementIgnoresWeeklySettlementStatus() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(weekPath(), draftWeek());
         fixture.documents.put(
@@ -1919,7 +1797,7 @@ class FirestoreCashflowLeaseGuardTest {
             "tenant-a", "project-a", "default", "Default"
         );
 
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+        assertThatCode(() -> fixture.persistence.runCommandTransaction(() -> {
             fixture.persistence.requireCashflowWritePermission(ACTOR, "project-a");
             fixture.persistence.replaceActuals(
                 sheet,
@@ -1928,13 +1806,14 @@ class FirestoreCashflowLeaseGuardTest {
                 ))
             );
             return null;
-        }))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("locked");
+        })).doesNotThrowAnyException();
+        assertThat(fixture.documents.get(weekPath()))
+            .hasEntrySatisfying("actual", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("SALES_IN", 50L));
     }
 
     @Test
-    void submitAndCloseCommandsCannotChangeStatusInsideALockedWeek() {
+    void submitAndCloseCommandsIgnoreWeeklySettlementStatus() {
         Fixture submitFixture = fixture(activeMember(), activeLease());
         submitFixture.documents.put(weekPath(), draftWeek());
         submitFixture.documents.put(
@@ -1942,16 +1821,14 @@ class FirestoreCashflowLeaseGuardTest {
             lockedWeeklyCompletion("2026-07", 1, 1)
         );
 
-        assertThatThrownBy(() -> submitFixture.persistence.runCommandTransaction(() -> commandService(
+        assertThatCode(() -> submitFixture.persistence.runCommandTransaction(() -> commandService(
             submitFixture.persistence
         ).submitWeek(
             ACTOR,
             "project-a",
             SESSION,
             new SubmitWeekRequest("locked-submit", "2026-07", 1)
-        )))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("locked");
+        ))).doesNotThrowAnyException();
 
         Fixture closeFixture = fixture(
             member(Map.of("role", "finance", "projectIds", List.of())),
@@ -1963,20 +1840,18 @@ class FirestoreCashflowLeaseGuardTest {
             lockedWeeklyCompletion("2026-07", 1, 1)
         );
 
-        assertThatThrownBy(() -> closeFixture.persistence.runCommandTransaction(() -> commandService(
+        assertThatCode(() -> closeFixture.persistence.runCommandTransaction(() -> commandService(
             closeFixture.persistence
         ).closeWeek(
             ACTOR,
             "project-a",
             SESSION,
             closeRequest("locked-close", BigDecimal.valueOf(100))
-        )))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("locked");
+        ))).doesNotThrowAnyException();
     }
 
     @Test
-    void submitWithASheetPreReadsTheWeekLockBeforeItsFirstWrite() {
+    void submitWithASheetDoesNotReadWeeklySettlementAsAWriteGuard() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(weekPath(), draftWeek());
         SubmitWeekRequest request = new SubmitWeekRequest(
@@ -1993,15 +1868,10 @@ class FirestoreCashflowLeaseGuardTest {
             request
         ));
 
-        org.mockito.InOrder order = inOrder(fixture.transaction);
-        order.verify(fixture.transaction).get(argThat((DocumentReference ref) -> ref.getPath().equals(
+        verify(fixture.transaction, never()).get(argThat((DocumentReference ref) -> ref.getPath().equals(
             "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w1"
         )));
-        order.verify(fixture.transaction).set(
-            argThat((DocumentReference ref) -> ref.getPath().equals(sheetPath())),
-            any(),
-            any()
-        );
+        verify(fixture.transaction).set(argThat((DocumentReference ref) -> ref.getPath().equals(sheetPath())), any(), any());
     }
 
     @Test

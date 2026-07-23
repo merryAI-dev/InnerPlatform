@@ -2720,6 +2720,10 @@ describe('cashflow sheet lab route', () => {
   });
 
   it('retries the same staged run with a reason after the JVM rejects a late closed-month change', async () => {
+    const twoFullMonths = [
+      ...JANUARY_FINANCE_WEEKS,
+      '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
+    ];
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2727,7 +2731,7 @@ describe('cashflow sheet lab route', () => {
           value: 'saved-spreadsheet-a',
           sheetName: 'cashflow(사용내역 연동)',
           startWeek: '26-1-1',
-          endWeek: '26-1-5',
+          endWeek: '26-2-5',
         },
       },
       initialDocuments: {
@@ -2736,7 +2740,14 @@ describe('cashflow sheet lab route', () => {
           tenantId: 'tenant-a',
           projectId: 'project-a',
           yearMonth: '2026-01',
-          status: 'CLOSED',
+          status: 'OPEN',
+        },
+        'orgs/tenant-a/monthly_closes/project-a-2026-02': {
+          contractVersion: 'cashflow-month-close-v1',
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-02',
+          status: 'OPEN',
         },
       },
     });
@@ -2744,19 +2755,20 @@ describe('cashflow sheet lab route', () => {
       spreadsheetId: 'spreadsheet-a',
       selectedSheetName: 'cashflow(사용내역 연동)',
       availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
-      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+      matrix: buildMatrixWithWeekLabels(twoFullMonths),
     }));
     const resultingTargetRevision = `sha256:${'4'.repeat(64)}`;
     let attempts = 0;
     const javaWeeklyClient = {
-      applyCashflowSheetLab: vi.fn(async (input) => {
+      applyCashflowSheetBatch: vi.fn(async (input) => {
         if (attempts++ === 0 && !input.closedMonthChangeReason) {
           throw Object.assign(new Error('reason required'), {
             statusCode: 409,
             code: 'cashflow_closed_month_reason_required',
+            details: { closedMonths: ['2026-01', '2026-02'] },
           });
         }
-        return javaApplyResponse(input, resultingTargetRevision);
+        return javaBatchApplyResponse(input, resultingTargetRevision);
       }),
     };
     const app = createApp({
@@ -2772,17 +2784,22 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-rejected-retry' })
       .expect(200);
+    expect(stage.body.closedMonthDifferences).toEqual([]);
     const headers = {
       'x-edit-session-id': 'session-a',
       'x-edit-lease-id': 'lease-a',
       'x-edit-fence': '7',
     };
 
-    await request(app)
+    const rejected = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set(headers)
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-rejected-first' })
       .expect(409);
+    expect(rejected.body.details.closedMonthDifferences).toEqual([
+      expect.objectContaining({ yearMonth: '2026-01', weeks: expect.any(Array) }),
+      expect.objectContaining({ yearMonth: '2026-02', weeks: expect.any(Array) }),
+    ]);
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
@@ -2794,8 +2811,8 @@ describe('cashflow sheet lab route', () => {
       })
       .expect(200);
 
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
-    const calls = javaWeeklyClient.applyCashflowSheetLab.mock.calls.map(([call]) => call);
+    expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(2);
+    const calls = javaWeeklyClient.applyCashflowSheetBatch.mock.calls.map(([call]) => call);
     expect(calls[0].idempotencyKey).not.toBe(calls[1].idempotencyKey);
     expect(calls[1].closedMonthChangeReason).toBe('결산 후 실제 입금액 정정');
   });
@@ -2840,7 +2857,7 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-settled-unconfirmed' })
       .expect(200);
-    expect(applied.body.settledWeekChanges).toEqual([]);
+    expect(applied.body.settledWeekChanges).toBeUndefined();
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].settledWeekChangeConfirmation).toBeUndefined();
   });

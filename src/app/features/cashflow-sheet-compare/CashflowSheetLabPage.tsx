@@ -58,6 +58,13 @@ function getErrorCode(error: unknown) {
   return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
 }
 
+function getClosedMonthDifferences(error: unknown) {
+  const apiError = error as {
+    body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
+  };
+  return apiError.body?.details?.closedMonthDifferences || [];
+}
+
 function logCashflowLab(event: string, details: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
   recordDevtoolsLog({
     kind: 'cashflow_transaction',
@@ -285,6 +292,7 @@ export function CashflowSheetLabPage({
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
+  const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
@@ -707,39 +715,51 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handleOverwriteSheetValues(monthCloseChangeReason = '') {
-    if (!projectId || loading || !spreadsheetId || mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey) return;
+  async function handleOverwriteSheetValues(
+    monthCloseChangeReason = '',
+    stagedOverride: CashflowSheetLabStageResult | null = null,
+  ) {
+    if (
+      !projectId
+      || loading
+      || !spreadsheetId
+      || (!stagedOverride && (mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey))
+    ) return;
     const startedAt = Date.now();
+    const expectedMirrorRevision = mirror?.sourceRevision || '';
     const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    let activeStep: 'stage' | 'apply' = 'stage';
-    let stagedRunId = '';
-    let closedMonthDifferences: NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']> = [];
+    let activeStep: 'stage' | 'apply' = stagedOverride ? 'apply' : 'stage';
+    let staged = stagedOverride;
+    let stageDurationMs = 0;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
-    setClosedMonthWarning([]);
-    setClosedMonthChangeReason('');
+    if (!stagedOverride) {
+      setClosedMonthWarning([]);
+      setClosedMonthStage(null);
+      setClosedMonthChangeReason('');
+    }
     setReflectResult(null);
     logCashflowLab('overwrite.sheet_values.start', {
       projectId,
       spreadsheetId,
     });
-    logCashflowLab('stage.sheet_values.start', {
-      projectId,
-      spreadsheetId,
-    });
     try {
-      const stageStartedAt = Date.now();
-      const staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
-        stageCashflowSheetLabViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          expectedMirrorRevision: mirror.sourceRevision,
-          idempotencyKey: stageIdempotencyKey,
-        })
-      ));
+      if (!staged) {
+        logCashflowLab('stage.sheet_values.start', { projectId, spreadsheetId });
+        const stageStartedAt = Date.now();
+        staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
+          stageCashflowSheetLabViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+            expectedMirrorRevision,
+            idempotencyKey: stageIdempotencyKey,
+          })
+        ));
+        stageDurationMs = Date.now() - stageStartedAt;
+      }
       if (!staged) {
         logCashflowLab('overwrite.sheet_values.cancelled', {
           projectId,
@@ -749,21 +769,20 @@ export function CashflowSheetLabPage({
         }, 'warn');
         return;
       }
-      const stageDurationMs = Date.now() - stageStartedAt;
-      stagedRunId = staged.runId || '';
-      closedMonthDifferences = staged.closedMonthDifferences || [];
-      setReviewedSourceKey(sourceKey);
-      logCashflowLab('stage.sheet_values.ok', {
-        projectId,
-        spreadsheetId: staged.spreadsheetId,
-        sheetName: staged.selectedSheetName,
-        stagedLineCount: staged.stagedLineCount,
-        projectionLineCount: staged.projectionLineCount,
-        actualLineCount: staged.actualLineCount,
-        riskLineCount: staged.riskLineCount,
-        durationMs: stageDurationMs,
-        totalDurationMs: Date.now() - startedAt,
-      });
+      if (!stagedOverride) {
+        setReviewedSourceKey(sourceKey);
+        logCashflowLab('stage.sheet_values.ok', {
+          projectId,
+          spreadsheetId: staged.spreadsheetId,
+          sheetName: staged.selectedSheetName,
+          stagedLineCount: staged.stagedLineCount,
+          projectionLineCount: staged.projectionLineCount,
+          actualLineCount: staged.actualLineCount,
+          riskLineCount: staged.riskLineCount,
+          durationMs: stageDurationMs,
+          totalDurationMs: Date.now() - startedAt,
+        });
+      }
       if (staged.status === 'BLOCKED') {
         logCashflowLab('overwrite.sheet_values.blocked', {
           projectId,
@@ -788,6 +807,7 @@ export function CashflowSheetLabPage({
       }
       activeStep = 'apply';
       const applyStartedAt = Date.now();
+      const stagedRunId = staged.runId;
       logCashflowLab('apply.sheet_values.start', {
         projectId,
         spreadsheetId,
@@ -800,7 +820,7 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          stageRunId: staged.runId,
+          stageRunId: stagedRunId,
           closedMonthChangeReason: monthCloseChangeReason,
           idempotencyKey: applyIdempotencyKey,
         })
@@ -824,6 +844,9 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
+      setClosedMonthStage(null);
+      setClosedMonthWarning([]);
+      setClosedMonthChangeReason('');
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
@@ -855,7 +878,13 @@ export function CashflowSheetLabPage({
         ...errorDiagnostics(error),
       }, 'warn');
       if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_closed_month_reason_required') {
-        setClosedMonthWarning(closedMonthDifferences);
+        const serverDifferences = getClosedMonthDifferences(error);
+        setClosedMonthStage(staged);
+        setClosedMonthWarning(
+          serverDifferences.length
+            ? serverDifferences
+            : staged?.closedMonthDifferences || [],
+        );
       } else {
         setErrorMessage(formatError(error));
       }
@@ -1079,7 +1108,15 @@ export function CashflowSheetLabPage({
         )}
       </section>
 
-      <Dialog open={closedMonthWarning.length > 0} onOpenChange={(open) => !open && setClosedMonthWarning([])}>
+      <Dialog
+        open={Boolean(closedMonthStage)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setClosedMonthStage(null);
+            setClosedMonthWarning([]);
+          }
+        }}
+      >
         <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
           <DialogHeader className="space-y-1 text-left">
             <DialogTitle className="text-[17px]">결산 후 값이 달라요</DialogTitle>
@@ -1087,12 +1124,14 @@ export function CashflowSheetLabPage({
               월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
-            {closedMonthWarning.slice(0, 3).map((summary) => (
-              <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
-            ))}
-            {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
-          </div>
+          {closedMonthWarning.length > 0 && (
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
+              {closedMonthWarning.slice(0, 3).map((summary) => (
+                <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
+              ))}
+              {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
+            </div>
+          )}
           <textarea
             value={closedMonthChangeReason}
             onChange={(event) => setClosedMonthChangeReason(event.target.value.slice(0, 1000))}
@@ -1101,10 +1140,15 @@ export function CashflowSheetLabPage({
             disabled={loading}
           />
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthWarning([])}>
+            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthStage(null)}>
               닫기
             </Button>
-            <Button type="button" className="h-9" disabled={loading || !closedMonthChangeReason.trim()} onClick={() => void handleOverwriteSheetValues(closedMonthChangeReason.trim())}>
+            <Button
+              type="button"
+              className="h-9"
+              disabled={loading || !closedMonthStage || !closedMonthChangeReason.trim()}
+              onClick={() => void handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)}
+            >
               사유와 함께 반영
             </Button>
           </DialogFooter>

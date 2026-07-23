@@ -384,8 +384,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
         CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
         String requestedReason = text(reason, "").trim();
-        List<CashflowClosedMonthAmendment> amendments = new ArrayList<>();
-        Map<String, CashflowClosedMonthAmendment> authorized = currentCashflowMonthAmendments.get();
+        Map<String, Map<String, Object>> closedMonthDocuments = new LinkedHashMap<>();
+        List<String> postDeadlineMonths = new ArrayList<>();
         for (String yearMonth : months) {
             requireYearMonth(yearMonth);
             String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
@@ -399,15 +399,28 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 if (states != null) states.put(key, status);
             }
             if (!"CLOSED".equals(status)) continue;
+            closedMonthDocuments.put(yearMonth, close);
+            if (businessDate.date().isAfter(YearMonth.parse(yearMonth).plusMonths(1).atDay(10))) {
+                postDeadlineMonths.add(yearMonth);
+            }
+        }
+        if (requestedReason.isBlank() && !postDeadlineMonths.isEmpty()) {
+            throw new WeeklyExpenseEditLeaseException(
+                409,
+                "cashflow_closed_month_reason_required",
+                String.join(", ", postDeadlineMonths) + " 마감 후 변경 사유를 입력해 주세요.",
+                Map.of("closedMonths", postDeadlineMonths)
+            );
+        }
+
+        List<CashflowClosedMonthAmendment> amendments = new ArrayList<>();
+        Map<String, CashflowClosedMonthAmendment> authorized = currentCashflowMonthAmendments.get();
+        for (String yearMonth : months) {
+            String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
+            Map<String, Object> close = closedMonthDocuments.get(yearMonth);
+            if (close == null) continue;
             LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
             boolean postDeadline = businessDate.date().isAfter(deadline);
-            if (postDeadline && requestedReason.isBlank()) {
-                throw new WeeklyExpenseEditLeaseException(
-                    409,
-                    "cashflow_closed_month_reason_required",
-                    yearMonth + " 마감 후 변경 사유를 입력해 주세요."
-                );
-            }
             long closeRevision = canonicalMonthCounter(close, "revision");
             long amendmentCount = addMonthCounters(optionalMonthCounter(close, "amendmentCount"), 1);
             long warningCount = addMonthCounters(optionalMonthCounter(close, "postDeadlineAmendmentWarningCount"), postDeadline ? 1 : 0);

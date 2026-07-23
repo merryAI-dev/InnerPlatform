@@ -1479,6 +1479,26 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
   };
 }
 
+function summarizeCandidateMonthDifferences(candidates, yearMonths = []) {
+  const requiredMonths = new Set((Array.isArray(yearMonths) ? yearMonths : [yearMonths])
+    .map(readOptionalText)
+    .filter(Boolean));
+  const summaries = new Map();
+  for (const candidate of candidates) {
+    const candidateMonth = readOptionalText(candidate?.yearMonth);
+    if (!candidateMonth || (requiredMonths.size > 0 && !requiredMonths.has(candidateMonth))) continue;
+    const summary = summaries.get(candidateMonth) || { yearMonth: candidateMonth, differenceCount: 0, weeks: new Set() };
+    summary.differenceCount += 1;
+    if (Number.isSafeInteger(Number(candidate?.weekNo))) summary.weeks.add(Number(candidate.weekNo));
+    summaries.set(candidateMonth, summary);
+  }
+  return [...summaries.values()].map((summary) => ({
+    yearMonth: summary.yearMonth,
+    differenceCount: summary.differenceCount,
+    weeks: [...summary.weeks].sort((left, right) => left - right),
+  })).sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
+}
+
 async function buildPinnedAnnualChangeCandidates({
   db,
   tenantId,
@@ -2094,6 +2114,15 @@ async function applyStagedCashflowSheetLab({
     }
   } catch (error) {
     const statusCode = Number(error?.statusCode || error?.status);
+    if (readOptionalText(error?.code) === 'cashflow_closed_month_reason_required') {
+      const requiredMonths = Array.isArray(error?.details?.closedMonths)
+        ? error.details.closedMonths
+        : [readOptionalText(error?.message).match(/\b20\d{2}-(?:0[1-9]|1[0-2])\b/)?.[0]].filter(Boolean);
+      error.details = {
+        ...(error?.details && typeof error.details === 'object' ? error.details : {}),
+        closedMonthDifferences: summarizeCandidateMonthDifferences(selectedCandidates, requiredMonths),
+      };
+    }
     if (completedOperationCount === 0 && statusCode >= 400 && statusCode < 500) {
       await restoreCashflowSheetApplyReady({
         db,

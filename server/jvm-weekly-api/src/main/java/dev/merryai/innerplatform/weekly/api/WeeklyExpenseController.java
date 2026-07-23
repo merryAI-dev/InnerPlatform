@@ -951,12 +951,13 @@ public class WeeklyExpenseController {
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler(WeeklyExpenseEditLeaseException.class)
-    public ResponseEntity<Map<String, String>> editLease(WeeklyExpenseEditLeaseException error) {
-        return ResponseEntity.status(error.statusCode()).body(Map.of(
-            "ok", "false",
-            "code", error.code(),
-            "message", error.getMessage()
-        ));
+    public ResponseEntity<Map<String, Object>> editLease(WeeklyExpenseEditLeaseException error) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("ok", false);
+        response.put("code", error.code());
+        response.put("message", error.getMessage());
+        if (!error.details().isEmpty()) response.put("details", error.details());
+        return ResponseEntity.status(error.statusCode()).body(response);
     }
 
     @org.springframework.web.bind.annotation.ExceptionHandler({

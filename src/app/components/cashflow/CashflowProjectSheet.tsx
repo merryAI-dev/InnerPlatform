@@ -1255,7 +1255,15 @@ export function CashflowProjectSheet({
       }
       logCashflowSettlement({ phase: 'error', operation: 'cashflow.sheet_apply', projectId, error: finalError });
       if (bffErrorCode(finalError) === 'cashflow_closed_month_reason_required') {
-        setLateSheetApply(stage);
+        const details = (finalError as {
+          body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
+        }).body?.details;
+        setLateSheetApply({
+          ...stage,
+          closedMonthDifferences: details?.closedMonthDifferences?.length
+            ? details.closedMonthDifferences
+            : stage.closedMonthDifferences,
+        });
         setLateSheetChangeReason('');
         return;
       }

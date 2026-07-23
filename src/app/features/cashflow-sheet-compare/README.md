@@ -220,6 +220,9 @@ network/query work if it:
 
 ### 2026-07-22: weekly settlement lock contract
 
+> Historical decision, superseded by the 2026-07-23 month-close-only contract
+> below. Weekly settlement is now status/audit data and does not block writes.
+
 **Planning**
 
 Weekly settlement previously recorded only an actor and timestamp. It did not
@@ -375,3 +378,27 @@ as a blocking-looking warning in the sheet UI.
 **Evaluation:** 83 focused client, JVM bridge, and sheet-page tests passed. The
 production Vite build transformed 2,910 modules successfully. Docker was not
 used.
+
+## 2026-07-23 applied annual totals and month-close race
+
+**Hypothesis:** annual Projection progress should not re-read and recompute
+separate annual documents when the applied sheet already contains the exact
+annual totals. The annual JVM rows still have to remain because month close
+uses their per-line value/empty states for the prior-year opening balance.
+Also, month status can change from `OPEN` to `CLOSED` after staging, so the JVM
+must remain the final authority and return the affected staged scope.
+
+**Execution:** the dashboard now reads annual `totalIn` from the applied pinned
+sheet revision and uses a `Map` lookup instead of one Firestore read per year.
+The existing JVM annual row persistence remains unchanged for row-preserving
+opening-balance evidence. When the JVM requests a post-deadline reason, it
+returns every affected closed month as structured error details. The BFF maps
+those months to week numbers from the already-pinned candidates. Both cashflow
+entry screens retry that same stage run with the reason; the sheet settings
+screen no longer stages a second copy.
+
+**Evaluation:** focused BFF/JVM/UI regressions passed 206/206 and the full JVM
+module passed 202/202, including a two-month `OPEN`-at-stage then
+`CLOSED`-at-apply retry. The production Vite build transformed 2,910 modules
+successfully. Independent read-only re-audit scored the phase 100/100. Docker
+was not used.
