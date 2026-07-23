@@ -78,8 +78,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('requestGeneration === monthCloseRequestGenerationRef.current');
     expect(source).toContain('monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear');
     expect(source).toContain('const canonicalReadModel = monthCloseResult?.dashboard?.canonical');
-    expect(source).toContain('openingBalances[mode]?.sources?.find((source) => source.year === year)');
-    expect(source).toContain('lineStates: jvmOpeningSource.lineStates');
     expect(source).toContain('const reviewedOpeningBalances = monthCloseResult?.dashboard?.openingBalances');
     expect(source).toContain('carryForwardCashflowRunningBalances({');
     expect(source).toContain('priorWeeklyNet: Number(priorServerWeek?.net || 0)');
@@ -211,15 +209,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('comparisonWeek?.lines?.find');
   });
 
-  it('shows legacy closed snapshots as evidence-only without a live-ledger fallback', () => {
+  it('keeps legacy closed snapshots as evidence-only without rendering annual-year views', () => {
     expect(source).toContain("snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY'");
     expect(source).toContain('이전 형식의 월 결산입니다.');
     expect(source).toContain('재오픈 승인 후 시트값을 다시 반영하고 재결산');
     expect(source).not.toContain('fetchCashflowSnapshotViaBff');
     expect(source).toContain('resolveCashflowEvidenceScope({');
-    expect(source).toContain('const canonicalAnnualTotal = !allowLiveAnnualYearView || hasWeeklyYearData');
-    expect(source).toContain('(allowLiveAnnualYearView && cashflowSheetMirror?.appliedWeeklyYears?.includes(selectedYear))');
-    expect(source).toContain('if (!allowLiveAnnualYearView) return null;');
+    expect(source).toContain('liveYearView: null');
+    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
+    expect(source).not.toContain('data-cashflow-block="multi-year-view"');
+    expect(source).not.toContain('data-cashflow-year-view');
     expect(source).toContain('const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata');
   });
 
@@ -291,17 +290,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
-  it('keeps adjacent-year navigation and renders annual-only ledgers without fake weeks', () => {
-    expect(source).toContain('getCashflowSheetLabYearViewViaBff');
-    expect(source).toContain('cashflowYearView');
+  it('keeps multi-year import data out of the cashflow view', () => {
+    expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
+    expect(source).not.toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-annual-summary="true"');
-    expect(source).toContain('cashflowEvidenceScope.yearView.navigationYears');
-    expect(source).toContain(': [selectedYear]');
-    expect(source).toContain('canonicalAnnualTotal');
-    expect(source).toContain('주차값으로 나누지 않고 시트 합계를 그대로 저장했습니다.');
-    expect(source).toContain('data-cashflow-block="multi-year-view"');
-    expect(source).toContain('data-cashflow-year-view={year}');
-    expect(source).toContain('{String(year).slice(-2)}년');
+    expect(source).not.toContain('data-cashflow-block="multi-year-view"');
+    expect(source).not.toContain('data-cashflow-year-view');
     expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months');
     expect(source).not.toContain('cashflowSnapshotRange');
   });
@@ -316,15 +310,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트의 최신 값을 불러왔습니다.');
   });
 
-  it('places prior annual totals before and later annual totals after the selected year weeks', () => {
-    expect(source).toContain('`${year}-01`');
-    expect(source).toContain('data-cashflow-year-view={year}');
-    expect(source).toContain('previousAnnualYears');
-    expect(source).toContain('followingAnnualYears');
-    expect(source).toContain('renderAnnualSummaryCell');
-    expect(source).toContain('{year}년');
-    expect(source).toContain('누적');
-    expect(source).toContain('합계');
+  it('renders only the selected year weekly ledger while retaining the server opening balance', () => {
+    expect(source).not.toContain('previousAnnualYears');
+    expect(source).not.toContain('followingAnnualYears');
+    expect(source).not.toContain('renderAnnualSummaryCell');
+    expect(source).toContain('const visibleWeeks = annualWeeks');
+    expect(source).toContain('openingBalances?.selectedYear === selectedYear');
+    expect(source).toContain('annualOpeningBalance: openingBalance');
     expect(source).not.toContain("'서버 값'");
     expect(source).not.toContain("'값 없음'");
     expect(source).toContain('>미입력</');
