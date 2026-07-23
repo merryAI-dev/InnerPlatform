@@ -883,8 +883,8 @@ export function CashflowSheetLabPage({
       }, 'warn');
       const settledWeekConfirmation = settledWeekConfirmationFromError(error);
       if (activeStep === 'apply' && settledWeekConfirmation) {
-        if (stageRunId) {
-          setSettledWeekWarning({ ...settledWeekConfirmation, stageRunId });
+        if (stagedRunId) {
+          setSettledWeekWarning({ ...settledWeekConfirmation, stageRunId: stagedRunId });
         } else {
           setErrorMessage(formatError(error));
         }

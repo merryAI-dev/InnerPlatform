@@ -52,6 +52,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
     expect(pageSource).toContain('settledWeekChangeConfirmationId: pending.confirmationId');
     expect(pageSource).toContain('주간 정산 값과 다릅니다');
+    expect(pageSource).toContain('stageRunId: stagedRunId');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
