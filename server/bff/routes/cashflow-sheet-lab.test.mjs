@@ -258,6 +258,7 @@ function buildConflictingAnnualWeeklyMatrix() {
 function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments = {}, onGet, onQuery } = {}) {
   const documents = new Map();
   const queries = [];
+  const batchCommitSizes = [];
   documents.set('orgs/tenant-a/projects/project-a', { ...project });
   for (const week of weeks) {
     documents.set(`orgs/tenant-a/cashflow_weeks/${week.id}`, { ...week });
@@ -284,6 +285,16 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
 
   return {
     doc: vi.fn(ref),
+    batch: vi.fn(() => {
+      const operations = [];
+      return {
+        set: (docRef, patch, options = {}) => operations.push(() => docRef.set(patch, options)),
+        commit: vi.fn(async () => {
+          batchCommitSizes.push(operations.length);
+          await Promise.all(operations.map((operation) => operation()));
+        }),
+      };
+    }),
     collection: vi.fn((path) => ({
       get: vi.fn(async () => ({
         docs: [...documents.entries()]
@@ -319,6 +330,7 @@ function createDb({ project = { id: 'project-a' }, weeks = [], initialDocuments 
       .filter(([path]) => path.startsWith(prefix))
       .map(([path, data]) => ({ path, data })),
     __getQueries: () => [...queries],
+    __getBatchCommitSizes: () => [...batchCommitSizes],
   };
 }
 
@@ -2568,6 +2580,7 @@ describe('cashflow sheet lab route', () => {
       resultingTargetRevision: `sha256:${'3'.repeat(64)}`,
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);
+    expect(db.__getBatchCommitSizes()).toEqual([49]);
     expect(editLeaseService.release).not.toHaveBeenCalled();
     expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({
       appliedSourceRevision: mirror.body.sourceRevision,
