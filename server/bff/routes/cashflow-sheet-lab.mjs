@@ -844,13 +844,19 @@ async function readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runI
 async function markCashflowChangeCandidatesStatus({ db, tenantId, candidates, status, now }) {
   if (!db || candidates.length === 0) return;
   for (let offset = 0; offset < candidates.length; offset += 450) {
-    await Promise.all(candidates.slice(offset, offset + 450).map((candidate) => db
-      .doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${candidate.id}`)
-      .set(stripUndefinedDeep({
+    const batch = db.batch();
+    for (const candidate of candidates.slice(offset, offset + 450)) {
+      batch.set(
+        db.doc(`orgs/${tenantId}/${CASHFLOW_CHANGE_CANDIDATES_COLLECTION_ID}/${candidate.id}`),
+        stripUndefinedDeep({
         status,
         updatedAt: now,
         appliedAt: status === 'applied' ? now : undefined,
-      }), { merge: true })));
+        }),
+        { merge: true },
+      );
+    }
+    await batch.commit();
   }
 }
 
