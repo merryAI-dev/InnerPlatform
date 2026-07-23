@@ -322,3 +322,21 @@ transaction that already owns these values.
 - This closes only the weekly settlement lock phase. UI work and Stage
   deployment require their own tracked contract and the relevant retrospective
   phase audits; Live deployment remains prohibited without explicit approval.
+
+## 2026-07-23 duplicate-read and JVM error propagation fix
+
+**Hypothesis:** the Stage `503 jvm_weekly_api_unreachable` was not a network
+failure. Cloud Run returned a business `409` after 18–19 seconds, while the BFF
+aborted at 12 seconds and repeated the same 300 KB mutation. Concurrent page
+mounts also created separate API clients, so identical GET requests were not
+coalesced.
+
+**Execution:** default browser clients are reused, identical concurrent GETs
+share one promise, and the JVM monthly batch apply now makes one request with a
+24-second budget. The original JVM status and error body are preserved. Annual
+reconciliation remains available to server contracts but is no longer rendered
+as a blocking-looking warning in the sheet UI.
+
+**Evaluation:** 83 focused client, JVM bridge, and sheet-page tests passed. The
+production Vite build transformed 2,910 modules successfully. Docker was not
+used.

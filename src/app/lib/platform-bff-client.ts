@@ -1607,8 +1607,10 @@ export async function fetchLatestProjectRequestViaBff(params: {
   return response.data?.item || null;
 }
 
+let defaultPlatformApiClient: PlatformApiClientLike | undefined;
+
 function resolveClient(client?: PlatformApiClientLike): PlatformApiClientLike {
-  return client || createPlatformApiClient();
+  return client || (defaultPlatformApiClient ||= createPlatformApiClient());
 }
 
 function encodeHeaderValue(value: string): string {

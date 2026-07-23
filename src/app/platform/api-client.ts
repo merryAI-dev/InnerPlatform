@@ -189,6 +189,7 @@ export class PlatformApiClient {
   private readonly retryDelayMs: number;
   private readonly retryOnStatuses: Set<number>;
   private readonly timeoutMs: number;
+  private readonly inFlightGets = new Map<string, Promise<ApiResponse<unknown>>>();
 
   constructor(options: PlatformApiClientOptions = {}) {
     this.baseUrl = (options.baseUrl || '').replace(/\/$/, '');
@@ -530,7 +531,27 @@ export class PlatformApiClient {
   }
 
   get<T>(path: string, options: Omit<PlatformRequestOptions, 'method'>): Promise<ApiResponse<T>> {
-    return this.request<T>(path, { ...options, method: 'GET' });
+    if (options.signal || options.requestId) {
+      return this.request<T>(path, { ...options, method: 'GET' });
+    }
+    const key = JSON.stringify([
+      path,
+      options.tenantId,
+      options.actor.id,
+      options.actor.role,
+      options.actor.idToken,
+      options.timeoutMs,
+      options.retries,
+      Array.from(new Headers(options.headers).entries()).sort(),
+    ]);
+    const existing = this.inFlightGets.get(key);
+    if (existing) return existing as Promise<ApiResponse<T>>;
+    const request = this.request<T>(path, { ...options, method: 'GET' });
+    this.inFlightGets.set(key, request);
+    void request.finally(() => {
+      if (this.inFlightGets.get(key) === request) this.inFlightGets.delete(key);
+    }).catch(() => undefined);
+    return request;
   }
 
   post<T>(path: string, options: Omit<PlatformRequestOptions, 'method'>): Promise<ApiResponse<T>> {

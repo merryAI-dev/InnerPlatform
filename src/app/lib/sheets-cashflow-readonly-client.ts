@@ -493,8 +493,10 @@ export interface CashflowSheetLabShareAccountResult {
 
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
+let sameOriginBffClient: PlatformApiClient | undefined;
+
 function createSameOriginBffClient(): PlatformApiClient {
-  return new PlatformApiClient({
+  return sameOriginBffClient ||= new PlatformApiClient({
     baseUrl: '',
     maxRetries: 1,
     retryDelayMs: 200,
