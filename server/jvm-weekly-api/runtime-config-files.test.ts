@@ -81,6 +81,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).not.toContain('gcloud auth print-identity-token');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest');
+    expect(cloudBuild).toContain('JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY=${_JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY_SECRET}:latest');
 
     expect(deployScript).toContain('STAGE_GCP_PROJECT_ID="inner-platform-qa-20260310"');
     expect(deployScript).toContain('STAGE_SERVICE_NAME="innerplatform-jvm-weekly-api-lease-stage"');
@@ -103,6 +104,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).not.toContain('gcloud secrets versions access latest');
     expect(deployScript).not.toContain('gcloud auth print-identity-token');
     expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET');
+    expect(deployScript).toContain('JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY_SECRET');
 
     expect(qaDateScript).toContain('STAGE_GCP_PROJECT_ID="inner-platform-qa-20260310"');
     expect(qaDateScript).toContain('STAGE_SERVICE_NAME="innerplatform-jvm-weekly-api-lease-stage"');

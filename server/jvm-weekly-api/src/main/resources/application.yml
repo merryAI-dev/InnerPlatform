@@ -24,6 +24,7 @@ weekly:
   storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
+  cashflow-settled-week-confirmation-key: ${JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY:}
   auth-mode: ${JVM_WEEKLY_AUTH_MODE:strict}
   workspace-email-domain: ${JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN:mysc.co.kr}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:${FIREBASE_PROJECT_ID:${GOOGLE_CLOUD_PROJECT:}}}

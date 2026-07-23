@@ -59,15 +59,26 @@ public interface WeeklyExpensePersistence {
         List<WeeklyExpenseActualEntity> actual,
         List<CashflowMonthWeekSnapshot> weeks,
         List<CashflowLedgerWeekSnapshot> ledgerWeeks,
-        String resultingTargetRevision
+        String resultingTargetRevision,
+        List<CashflowSettledWeekChange> settledWeekChanges
     ) {
+        public CashflowSheetMonthReplacement(
+            List<WeeklyExpenseProjectionEntity> projection,
+            List<WeeklyExpenseActualEntity> actual,
+            List<CashflowMonthWeekSnapshot> weeks,
+            List<CashflowLedgerWeekSnapshot> ledgerWeeks,
+            String resultingTargetRevision
+        ) {
+            this(projection, actual, weeks, ledgerWeeks, resultingTargetRevision, List.of());
+        }
+
         public CashflowSheetMonthReplacement(
             List<WeeklyExpenseProjectionEntity> projection,
             List<WeeklyExpenseActualEntity> actual,
             List<CashflowMonthWeekSnapshot> weeks,
             String resultingTargetRevision
         ) {
-            this(projection, actual, weeks, List.of(), resultingTargetRevision);
+            this(projection, actual, weeks, List.of(), resultingTargetRevision, List.of());
         }
     }
 
@@ -82,7 +93,16 @@ public interface WeeklyExpensePersistence {
     record CashflowSheetBatchReplacement(
         List<CashflowSheetBatchMonthReplacement> months,
         List<CashflowLedgerWeekSnapshot> ledgerWeeks,
-        String resultingTargetRevision
+        String resultingTargetRevision,
+        List<CashflowSettledWeekChange> settledWeekChanges
+    ) {
+    }
+
+    record CashflowSettledWeekChange(
+        String yearMonth,
+        int weekNo,
+        long completionRevision,
+        long warningCount
     ) {
     }
 
@@ -440,6 +460,25 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_month_batch_replace_backend_unavailable",
             "Authoritative multi-month cashflow replacement requires the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        boolean replaceAllActualSources,
+        dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String sourceRevision,
+        String idempotencyKey
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_month_replace_backend_unavailable",
+            "Authoritative monthly cashflow replacement requires the Firestore transaction backend."
         );
     }
 

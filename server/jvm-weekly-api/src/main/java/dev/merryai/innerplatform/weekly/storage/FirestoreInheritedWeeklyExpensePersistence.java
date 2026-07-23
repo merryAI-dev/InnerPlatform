@@ -26,6 +26,9 @@ import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
+import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation;
+import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException;
+import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
@@ -47,6 +50,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -66,6 +70,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 @Repository
 @ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "firestore")
@@ -74,6 +80,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private static final Set<String> CASHFLOW_WRITE_ROLES = Set.of("admin", "finance", "pm", "viewer", "tenant_admin");
     private static final Set<String> CASHFLOW_CROSS_PROJECT_ROLES = Set.of("admin", "finance", "tenant_admin");
     private static final String CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION = "cashflow-month-close-v1";
+    private static final Duration CASHFLOW_SETTLED_WEEK_CONFIRMATION_TTL = Duration.ofMinutes(10);
+    private static final String CASHFLOW_SETTLED_WEEK_CONFIRMATION_HMAC = "HmacSHA256";
+    private static final String TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY = "test-cashflow-settled-week-confirmation";
     private static final long MAX_SAFE_INTEGER = 9_007_199_254_740_991L;
     private static final List<String> CASHFLOW_IN_LINES = List.of(
         "MYSC_PREPAY_IN",
@@ -96,6 +105,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final String firestoreProjectId;
     private final Clock clock;
     private final CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate;
+    private final byte[] cashflowSettledWeekConfirmationKey;
     private final FirestoreWeeklyExpenseDocumentMapper sheetMapper = new FirestoreWeeklyExpenseDocumentMapper();
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
     private final ThreadLocal<Map<String, Map<String, Object>>> transactionDocumentCache = new ThreadLocal<>();
@@ -107,18 +117,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     @Autowired
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId,
+        @Value("${weekly.cashflow-settled-week-confirmation-key:}") String cashflowSettledWeekConfirmationKey,
         CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate
     ) {
         this(
             createFirestore(firestoreProjectId),
             normalizeFirestoreProjectId(firestoreProjectId),
             Clock.systemUTC(),
-            cashflowMonthCloseBusinessDate
+            cashflowMonthCloseBusinessDate,
+            cashflowSettledWeekConfirmationKey
         );
     }
 
     FirestoreInheritedWeeklyExpensePersistence(Firestore db, String firestoreProjectId, Clock clock) {
-        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(null));
+        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(null), TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
     }
 
     FirestoreInheritedWeeklyExpensePersistence(
@@ -127,19 +139,21 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Clock clock,
         LocalDate cashflowMonthCloseQaDate
     ) {
-        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(cashflowMonthCloseQaDate));
+        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(cashflowMonthCloseQaDate), TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
     }
 
     private FirestoreInheritedWeeklyExpensePersistence(
         Firestore db,
         String firestoreProjectId,
         Clock clock,
-        CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate
+        CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate,
+        String cashflowSettledWeekConfirmationKey
     ) {
         this.db = db;
         this.firestoreProjectId = normalizeFirestoreProjectId(firestoreProjectId);
         this.clock = clock;
         this.cashflowMonthCloseBusinessDate = cashflowMonthCloseBusinessDate;
+        this.cashflowSettledWeekConfirmationKey = requireCashflowSettledWeekConfirmationKey(cashflowSettledWeekConfirmationKey);
     }
 
     private static String normalizeFirestoreProjectId(String firestoreProjectId) {
@@ -161,6 +175,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         } catch (IOException error) {
             throw new IllegalStateException("Could not initialize Firestore credentials.", error);
         }
+    }
+
+    private static byte[] requireCashflowSettledWeekConfirmationKey(String key) {
+        String normalized = key == null ? "" : key.trim();
+        if (normalized.isBlank()) {
+            throw new IllegalStateException("weekly.cashflow-settled-week-confirmation-key is required for cashflow settlement confirmation.");
+        }
+        if (normalized.length() < 32) {
+            throw new IllegalStateException("weekly.cashflow-settled-week-confirmation-key must be at least 32 characters.");
+        }
+        return normalized.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
@@ -494,6 +519,256 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     + ". Reopen it with a reason before changing values."
             );
         }
+    }
+
+    private void requireCashflowWeeksOpenForSheetApply(
+        String tenantId,
+        String projectId,
+        Collection<CashflowWeekScope> weeks,
+        String targetRevision
+    ) {
+        List<CashflowSettledWeekChangeConfirmation.Week> locked = currentLockedWeekConfirmationState(
+            tenantId,
+            projectId,
+            weeks
+        );
+        if (!locked.isEmpty()) {
+            throwSettledWeekChangeConfirmationRequired(tenantId, projectId, targetRevision, locked);
+        }
+    }
+
+    private void requireExactSettledWeekConfirmation(
+        String tenantId,
+        String projectId,
+        Collection<CashflowWeekScope> changedWeeks,
+        String targetRevision,
+        CashflowSettledWeekChangeConfirmation confirmation
+    ) {
+        List<CashflowSettledWeekChangeConfirmation.Week> current = currentLockedWeekConfirmationState(
+            tenantId,
+            projectId,
+            changedWeeks
+        );
+        if (current.isEmpty()) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+        if (!targetRevision.equals(confirmation.targetRevision())) {
+            throwSettledWeekChangeConfirmationRequired(tenantId, projectId, targetRevision, current);
+        }
+        List<CashflowSettledWeekChangeConfirmation.Week> acknowledged = confirmation.weeks().stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted(Comparator
+                .comparing(CashflowSettledWeekChangeConfirmation.Week::yearMonth)
+                .thenComparingInt(CashflowSettledWeekChangeConfirmation.Week::weekNo))
+            .toList();
+        if (acknowledged.size() != confirmation.weeks().size() || !current.equals(acknowledged)) {
+            throwSettledWeekChangeConfirmationRequired(tenantId, projectId, targetRevision, current);
+        }
+        verifySettledWeekChangeConfirmation(tenantId, projectId, confirmation);
+    }
+
+    private void throwSettledWeekChangeConfirmationRequired(
+        String tenantId,
+        String projectId,
+        String targetRevision,
+        List<CashflowSettledWeekChangeConfirmation.Week> weeks
+    ) {
+        if (weeks.isEmpty()) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+        throw new CashflowSettledWeekChangeConfirmationRequiredException(
+            issueSettledWeekChangeConfirmationId(tenantId, projectId, targetRevision, weeks),
+            targetRevision,
+            weeks
+        );
+    }
+
+    private String issueSettledWeekChangeConfirmationId(
+        String tenantId,
+        String projectId,
+        String targetRevision,
+        List<CashflowSettledWeekChangeConfirmation.Week> weeks
+    ) {
+        long expiresAtEpochSecond = clock.instant().plus(CASHFLOW_SETTLED_WEEK_CONFIRMATION_TTL).getEpochSecond();
+        String nonce = UUID.randomUUID().toString().replace("-", "");
+        return expiresAtEpochSecond + "." + nonce + "." + signSettledWeekChangeConfirmation(
+            tenantId,
+            projectId,
+            targetRevision,
+            weeks,
+            expiresAtEpochSecond,
+            nonce
+        );
+    }
+
+    private void verifySettledWeekChangeConfirmation(
+        String tenantId,
+        String projectId,
+        CashflowSettledWeekChangeConfirmation confirmation
+    ) {
+        String[] parts = confirmation.confirmationId().split("\\.", -1);
+        if (parts.length != 3 || parts[1].length() != 32 || parts[2].isBlank()) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+        long expiresAtEpochSecond;
+        try {
+            expiresAtEpochSecond = Long.parseLong(parts[0]);
+        } catch (NumberFormatException error) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+        if (expiresAtEpochSecond < clock.instant().getEpochSecond()) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+        String expectedSignature = signSettledWeekChangeConfirmation(
+            tenantId,
+            projectId,
+            confirmation.targetRevision(),
+            confirmation.weeks(),
+            expiresAtEpochSecond,
+            parts[1]
+        );
+        if (!MessageDigest.isEqual(
+            expectedSignature.getBytes(StandardCharsets.US_ASCII),
+            parts[2].getBytes(StandardCharsets.US_ASCII)
+        )) {
+            throw new CashflowSettledWeekChangeConfirmationExpiredException();
+        }
+    }
+
+    private String signSettledWeekChangeConfirmation(
+        String tenantId,
+        String projectId,
+        String targetRevision,
+        List<CashflowSettledWeekChangeConfirmation.Week> weeks,
+        long expiresAtEpochSecond,
+        String nonce
+    ) {
+        String payload = tenantId + "\n" + projectId + "\n" + targetRevision + "\n" + expiresAtEpochSecond + "\n" + nonce + "\n"
+            + weeks.stream()
+                .sorted(Comparator.comparing(CashflowSettledWeekChangeConfirmation.Week::yearMonth)
+                    .thenComparingInt(CashflowSettledWeekChangeConfirmation.Week::weekNo))
+                .map(week -> week.yearMonth() + ":" + week.weekNo() + ":" + week.completionRevision())
+                .reduce("", (left, right) -> left.isEmpty() ? right : left + "\n" + right);
+        try {
+            Mac mac = Mac.getInstance(CASHFLOW_SETTLED_WEEK_CONFIRMATION_HMAC);
+            mac.init(new SecretKeySpec(cashflowSettledWeekConfirmationKey, CASHFLOW_SETTLED_WEEK_CONFIRMATION_HMAC));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not sign cashflow settlement confirmation.", error);
+        }
+    }
+
+    private List<CashflowSettledWeekChangeConfirmation.Week> currentLockedWeekConfirmationState(
+        String tenantId,
+        String projectId,
+        Collection<CashflowWeekScope> weeks
+    ) {
+        requireValidatedCashflowWriteScope(tenantId, projectId);
+        List<CashflowSettledWeekChangeConfirmation.Week> locked = new ArrayList<>();
+        for (CashflowWeekScope scope : (weeks == null ? List.<CashflowWeekScope>of() : weeks.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted(Comparator.comparing(CashflowWeekScope::yearMonth).thenComparingInt(CashflowWeekScope::weekNo))
+            .toList())) {
+            requireYearMonth(scope.yearMonth());
+            if (scope.weekNo() < 1 || scope.weekNo() > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
+                throw new IllegalArgumentException("Cashflow weekNo must be between 1 and 5.");
+            }
+            if (isAuthorizedCashflowMonthAmendment(monthStateKey(tenantId, projectId, scope.yearMonth()))) {
+                continue;
+            }
+            String documentId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
+            DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(tenantId, documentId));
+            Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
+                DocumentSnapshot snapshot = get(ref);
+                return snapshot.exists() ? data(snapshot) : Map.of();
+            });
+            if ("LOCKED".equals(text(document.get("status"), ""))) {
+                locked.add(new CashflowSettledWeekChangeConfirmation.Week(
+                    scope.yearMonth(),
+                    scope.weekNo(),
+                    longValue(document.get("revision"), 0)
+                ));
+            }
+        }
+        return List.copyOf(locked);
+    }
+
+    private List<CashflowSettledWeekChange> recordCashflowSettledWeekChanges(
+        String tenantId,
+        String projectId,
+        Collection<CashflowWeekScope> weeks,
+        String sourceRevision,
+        String targetRevisionBefore,
+        String idempotencyKey
+    ) {
+        requireValidatedCashflowWriteScope(tenantId, projectId);
+        CashflowWriteScope writeScope = currentCashflowWriteScope.get();
+        Instant now = clock.instant();
+        List<Map.Entry<CashflowWeekScope, Map<String, Object>>> locked = new ArrayList<>();
+        for (CashflowWeekScope scope : weeks.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted(Comparator.comparing(CashflowWeekScope::yearMonth).thenComparingInt(CashflowWeekScope::weekNo))
+            .toList()) {
+            String documentId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
+            DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(tenantId, documentId));
+            Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
+                DocumentSnapshot snapshot = get(ref);
+                return snapshot.exists() ? data(snapshot) : Map.of();
+            });
+            if ("LOCKED".equals(text(document.get("status"), ""))) {
+                locked.add(Map.entry(scope, document));
+            }
+        }
+
+        List<CashflowSettledWeekChange> changes = new ArrayList<>();
+        for (Map.Entry<CashflowWeekScope, Map<String, Object>> entry : locked) {
+            CashflowWeekScope scope = entry.getKey();
+            Map<String, Object> document = entry.getValue();
+            String completionId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
+            long completionRevision = longValue(document.get("revision"), 0);
+            long warningCount = Math.addExact(
+                longValue(document.get("postSettlementChangeWarningCount"), 0),
+                1
+            );
+            set(db.document(cashflowWeeklyUpdateCompletionPath(tenantId, completionId)), Map.of(
+                "postSettlementChangeWarningCount", warningCount,
+                "lastPostSettlementChangeAt", now.toString(),
+                "lastPostSettlementChangeByUid", writeScope.actorId(),
+                "lastPostSettlementChangeSourceRevision", text(sourceRevision, ""),
+                "lastPostSettlementChangeTargetRevisionBefore", text(targetRevisionBefore, ""),
+                "lastPostSettlementChangeIdempotencyKey", text(idempotencyKey, "")
+            ));
+            String warningId = safeDocId(projectId + "\n" + scope.yearMonth() + "\n"
+                + scope.weekNo() + "\n" + idempotencyKey);
+            Map<String, Object> warning = new LinkedHashMap<>();
+            warning.put("id", warningId);
+            warning.put("tenantId", tenantId);
+            warning.put("projectId", projectId);
+            warning.put("yearMonth", scope.yearMonth());
+            warning.put("weekNo", scope.weekNo());
+            warning.put("completionRevision", completionRevision);
+            warning.put("warningCount", warningCount);
+            warning.put("sourceRevision", text(sourceRevision, ""));
+            warning.put("targetRevisionBefore", text(targetRevisionBefore, ""));
+            warning.put("settledSnapshotHash", text(document.get("snapshotHash"), ""));
+            warning.put("actorUid", writeScope.actorId());
+            warning.put("idempotencyKey", text(idempotencyKey, ""));
+            warning.put("createdAt", now.toString());
+            set(
+                db.document("orgs/" + tenantId + "/cashflow_weekly_settlement_change_warnings/" + warningId),
+                warning
+            );
+            changes.add(new CashflowSettledWeekChange(
+                scope.yearMonth(),
+                scope.weekNo(),
+                completionRevision,
+                warningCount
+            ));
+        }
+        return List.copyOf(changes);
     }
 
     @Override
@@ -1157,6 +1432,33 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CashflowSheetLabApplyRequest.Cell> cells,
         boolean replaceAllActualSources
     ) {
+        return replaceCashflowSheetMonth(
+            tenantId,
+            projectId,
+            sourceSheetKey,
+            yearMonth,
+            targetRevision,
+            cells,
+            replaceAllActualSources,
+            null,
+            "",
+            ""
+        );
+    }
+
+    @Override
+    public CashflowSheetMonthReplacement replaceCashflowSheetMonth(
+        String tenantId,
+        String projectId,
+        String sourceSheetKey,
+        String yearMonth,
+        String targetRevision,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String sourceRevision,
+        String idempotencyKey
+    ) {
         NavigableMap<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = new TreeMap<>();
         cellsByMonth.put(yearMonth, CashflowSheetLabApplyRequest.requireCompleteMonth(cells));
         CashflowSheetBatchReplacement replacement = replaceCashflowSheetMonthsInternal(
@@ -1166,7 +1468,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             targetRevision,
             cellsByMonth,
             replaceAllActualSources,
-            false
+            false,
+            settledWeekChangeConfirmation,
+            sourceRevision,
+            idempotencyKey
         );
         CashflowSheetBatchMonthReplacement month = replacement.months().getFirst();
         return new CashflowSheetMonthReplacement(
@@ -1174,7 +1479,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             month.actual(),
             month.weeks(),
             replacement.ledgerWeeks(),
-            replacement.resultingTargetRevision()
+            replacement.resultingTargetRevision(),
+            replacement.settledWeekChanges()
         );
     }
 
@@ -1193,7 +1499,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             targetRevision,
             CashflowSheetBatchApplyRequest.requireCompleteMonths(request.months()),
             request.replaceAllActualSources(),
-            false
+            false,
+            request.settledWeekChangeConfirmation(),
+            request.sourceRevision(),
+            request.idempotencyKey()
         );
     }
 
@@ -1214,7 +1523,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             targetRevision,
             cellsByMonth,
             false,
-            true
+            true,
+            null,
+            "",
+            ""
         );
         CashflowSheetBatchMonthReplacement month = replacement.months().getFirst();
         return new CashflowSheetMonthReplacement(
@@ -1222,7 +1534,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             month.actual(),
             month.weeks(),
             replacement.ledgerWeeks(),
-            replacement.resultingTargetRevision()
+            replacement.resultingTargetRevision(),
+            replacement.settledWeekChanges()
         );
     }
 
@@ -1233,7 +1546,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String targetRevision,
         NavigableMap<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth,
         boolean replaceAllActualSources,
-        boolean allowLockedWeeks
+        boolean allowLockedWeeks,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String sourceRevision,
+        String idempotencyKey
     ) {
         requireValidatedCashflowWriteScope(tenantId, projectId);
         requireCashflowMonthsOpen(tenantId, projectId, cellsByMonth.navigableKeySet());
@@ -1403,6 +1719,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
 
         List<String> replacementKeysToWrite = replacements.keySet().stream().toList();
+        List<CashflowSettledWeekChange> settledWeekChanges = List.of();
         if (!allowLockedWeeks) {
             replacementKeysToWrite = replacements.entrySet().stream()
                 .filter(entry -> !allProjectWeeks.containsKey(entry.getKey())
@@ -1418,7 +1735,30 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                     return new CashflowWeekScope(parts.yearMonth(), parts.weekNo());
                 })
                 .toList();
-            requireCashflowWeeksOpen(tenantId, projectId, changedWeeks);
+            if (settledWeekChangeConfirmation != null) {
+                requireExactSettledWeekConfirmation(
+                    tenantId,
+                    projectId,
+                    changedWeeks,
+                    targetRevision,
+                    settledWeekChangeConfirmation
+                );
+                settledWeekChanges = recordCashflowSettledWeekChanges(
+                    tenantId,
+                    projectId,
+                    changedWeeks,
+                    sourceRevision,
+                    targetRevision,
+                    idempotencyKey
+                );
+            } else {
+                requireCashflowWeeksOpenForSheetApply(
+                    tenantId,
+                    projectId,
+                    changedWeeks,
+                    targetRevision
+                );
+            }
         }
         for (String replacementKey : replacementKeysToWrite) {
             replaceDocument(cashflowWeekRef(tenantId, replacementKey), replacements.get(replacementKey));
@@ -1458,7 +1798,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return new CashflowSheetBatchReplacement(
             List.copyOf(monthResults),
             ledgerWeeks,
-            resultingTargetRevision
+            resultingTargetRevision,
+            settledWeekChanges
         );
     }
 
