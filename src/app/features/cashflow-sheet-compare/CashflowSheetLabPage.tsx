@@ -8,7 +8,6 @@ import { getAuthInstance } from '../../lib/firebase';
 import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
-  getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
@@ -57,6 +56,28 @@ function formatError(error: unknown) {
 function getErrorCode(error: unknown) {
   const apiError = error as { code?: string; body?: { code?: string; error?: string } };
   return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
+}
+
+function settledWeekConfirmationFromError(error: unknown) {
+  const apiError = error as {
+    body?: {
+      details?: {
+        confirmationId?: unknown;
+        weeks?: Array<{ yearMonth?: unknown; weekNo?: unknown }>;
+      };
+    };
+  };
+  if (getErrorCode(error) !== 'cashflow_settled_week_change_confirmation_required') return null;
+  const confirmationId = typeof apiError?.body?.details?.confirmationId === 'string'
+    ? apiError.body.details.confirmationId.trim()
+    : '';
+  const weeks = Array.isArray(apiError?.body?.details?.weeks) ? apiError.body.details.weeks : [];
+  const labels = weeks.map((week) => (
+    typeof week?.yearMonth === 'string' && Number.isInteger(Number(week?.weekNo))
+      ? `${week.yearMonth} ${Number(week.weekNo)}주차`
+      : ''
+  )).filter(Boolean);
+  return confirmationId && labels.length > 0 ? { confirmationId, labels } : null;
 }
 
 function logCashflowLab(event: string, details: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
@@ -264,7 +285,9 @@ export function CashflowSheetLabPage({
       endWeek: resolveFinanceWeekForDate(endDate)?.label || `${String(year).slice(2)}-12-5`,
     };
   }, [myProject?.contractEnd, myProject?.contractStart, projectYears]);
-  const [sourceYear, setSourceYear] = useState(2026);
+  const [sourceYear, setSourceYear] = useState(() => (
+    projectYears.includes(2026) ? 2026 : projectYears[0] || 2026
+  ));
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('cashflow(사용내역 연동)');
   const [startWeek, setStartWeek] = useState('');
@@ -284,12 +307,18 @@ export function CashflowSheetLabPage({
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
+  const [settledWeekWarning, setSettledWeekWarning] = useState<{
+    labels: string[];
+    stageRunId: string;
+    confirmationId: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialSlide, setTutorialSlide] = useState(0);
   const sheetLinkRef = useRef<HTMLInputElement>(null);
   const saveConfigButtonRef = useRef<HTMLButtonElement>(null);
+  const configLoadGenerationRef = useRef(0);
   const refreshButtonRef = useRef<HTMLButtonElement>(null);
   const stageButtonRef = useRef<HTMLButtonElement>(null);
   const projectId = projectIdInput.trim();
@@ -524,8 +553,11 @@ export function CashflowSheetLabPage({
     setErrorMessage('');
   }
 
-  async function handleLoadShareAccount() {
-    if (!projectId || accountLoading) return;
+  async function handleLoadShareAccount({ forceHydrate = false } = {}) {
+    if (!projectId) return;
+    const requestedProjectId = projectId;
+    const requestedSourceYear = sourceYear;
+    const generation = ++configLoadGenerationRef.current;
     setAccountLoading(true);
     setStatusMessage('');
     try {
@@ -533,41 +565,58 @@ export function CashflowSheetLabPage({
         getCashflowSheetLabShareAccountViaBff({
           tenantId: orgId,
           actor: requestActor,
-          projectId,
-          sourceYear,
+          projectId: requestedProjectId,
+          sourceYear: requestedSourceYear,
         })
       ));
-      if (!result) return;
+      if (!result || generation !== configLoadGenerationRef.current) return;
       const email = result.systemAccountEmail || result.accessPolicy?.serviceAccountEmail || '';
       if (!email) {
         setErrorMessage('서버의 Google Sheets 서비스 계정 이메일을 확인하지 못했습니다.');
         return;
       }
       setSystemAccountEmail(email);
-      setSavedConfig(result.config || null);
-      setSavedConfigs(result.configs || []);
-      if (result.config?.value && (!hasSheetDraft || result.config.sourceYear !== savedConfig?.sourceYear)) {
-        setSheetLink(result.config.value);
-        setSheetName(result.config.sheetName || 'cashflow(사용내역 연동)');
-        setStartWeek(result.config.startWeek || '');
-        setEndWeek(result.config.endWeek || '');
+      const configs = Array.isArray(result.configs) ? result.configs : [];
+      const scopedConfig = configs.find((config) => config.sourceYear === requestedSourceYear)
+        || (result.config?.sourceYear === requestedSourceYear ? result.config : null);
+      setSavedConfig(scopedConfig);
+      setSavedConfigs(configs);
+      if (scopedConfig?.value && (forceHydrate || !hasSheetDraft || scopedConfig.sourceYear !== savedConfig?.sourceYear)) {
+        setSheetLink(scopedConfig.value);
+        setSheetName(scopedConfig.sheetName || 'cashflow(사용내역 연동)');
+        setStartWeek(scopedConfig.startWeek || '');
+        setEndWeek(scopedConfig.endWeek || '');
       }
-      const pinnedMirror = await runWithBffAuthRetry('mirror.read', (requestActor) => (
-        getCashflowSheetLabMirrorViaBff({ tenantId: orgId, actor: requestActor, projectId })
-      ));
-      if (pinnedMirror) setMirror(pinnedMirror);
-      if (!result.config?.value) setStatusMessage('공유 계정을 확인했습니다.');
+      if (!scopedConfig?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
         projectId,
         hasSystemAccountEmail: true,
       });
     } catch (error) {
       logCashflowLab('share_account.load.error', { projectId, ...errorDiagnostics(error) }, 'warn');
-      setErrorMessage(formatError(error));
+      if (generation === configLoadGenerationRef.current) setErrorMessage(formatError(error));
     } finally {
-      setAccountLoading(false);
+      if (generation === configLoadGenerationRef.current) setAccountLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!projectId || !actor.idToken) return;
+    configLoadGenerationRef.current += 1;
+    const range = projectWeekRange(sourceYear);
+    setSavedConfig(null);
+    setSavedConfigs([]);
+    setSheetLink('');
+    setSheetName('cashflow(사용내역 연동)');
+    setStartWeek(range.startWeek);
+    setEndWeek(range.endWeek);
+    setMirror(null);
+    setReviewedSourceKey('');
+    setReflectResult(null);
+    setStatusMessage('');
+    setErrorMessage('');
+    void handleLoadShareAccount({ forceHydrate: true });
+  }, [actor.idToken, projectId, sourceYear]);
 
   function handleCopyShareAccount() {
     if (!systemAccountEmail) return;
@@ -690,10 +739,12 @@ export function CashflowSheetLabPage({
     const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     let activeStep: 'stage' | 'apply' = 'stage';
+    let stagedRunId = '';
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
     setClosedMonthWarning([]);
+    setSettledWeekWarning(null);
     setReflectResult(null);
     logCashflowLab('overwrite.sheet_values.start', {
       projectId,
@@ -724,6 +775,7 @@ export function CashflowSheetLabPage({
         return;
       }
       const stageDurationMs = Date.now() - stageStartedAt;
+      stagedRunId = staged.runId || '';
       setReviewedSourceKey(sourceKey);
       logCashflowLab('stage.sheet_values.ok', {
         projectId,
@@ -829,7 +881,61 @@ export function CashflowSheetLabPage({
         totalDurationMs: Date.now() - startedAt,
         ...errorDiagnostics(error),
       }, 'warn');
+      const settledWeekConfirmation = settledWeekConfirmationFromError(error);
+      if (activeStep === 'apply' && settledWeekConfirmation) {
+        if (stageRunId) {
+          setSettledWeekWarning({ ...settledWeekConfirmation, stageRunId });
+        } else {
+          setErrorMessage(formatError(error));
+        }
+      } else {
+        setErrorMessage(formatError(error));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function confirmSettledWeekChanges() {
+    if (!settledWeekWarning || loading) return;
+    const pending = settledWeekWarning;
+    const startedAt = Date.now();
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const result = await runWithBffAuthRetry('apply.settled_week_changes', (requestActor) => (
+        applyCashflowSheetLabViaBff({
+          tenantId: orgId,
+          actor: requestActor,
+          projectId,
+          stageRunId: pending.stageRunId,
+          settledWeekChangeConfirmationId: pending.confirmationId,
+          idempotencyKey: `cashflow-sheet-lab-settled-change:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+        })
+      ));
+      if (!result) return;
+      setSettledWeekWarning(null);
+      setReflectResult({
+        appliedLineCount: result.appliedLineCount,
+        projectionLineCount: result.projectionLineCount,
+        actualLineCount: result.actualLineCount,
+        skippedRiskLineCount: result.skippedRiskLineCount,
+        lastAppliedAt: result.lastAppliedAt,
+      });
+      const warningCount = result.settledWeekChanges?.length || pending.labels.length;
+      setStatusMessage(`시트 값을 반영하고 정산 후 변경 경고 ${warningCount}건을 기록했습니다.`);
+      logCashflowLab('apply.settled_week_changes.ok', {
+        projectId,
+        settledWeekChangeCount: warningCount,
+        durationMs: Date.now() - startedAt,
+      }, 'warn');
+    } catch (error) {
       setErrorMessage(formatError(error));
+      logCashflowLab('apply.settled_week_changes.error', {
+        projectId,
+        durationMs: Date.now() - startedAt,
+        ...errorDiagnostics(error),
+      }, 'warn');
     } finally {
       setLoading(false);
     }
@@ -1077,6 +1183,31 @@ export function CashflowSheetLabPage({
               }}
             >
               월 결산으로 이동
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={settledWeekWarning !== null} onOpenChange={(open) => !open && setSettledWeekWarning(null)}>
+        <DialogContent className="max-w-[380px] gap-4 rounded-xl p-5 sm:max-w-[380px]">
+          <DialogHeader className="space-y-1 text-left">
+            <DialogTitle className="text-[17px]">주간 정산 값과 다릅니다</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
+              시트값을 반영하면 정산 이후 변경으로 기록되고 경고가 누적됩니다. 그래도 반영하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
+            {settledWeekWarning?.labels.slice(0, 4).map((label) => <div key={label}>{label}</div>)}
+            {(settledWeekWarning?.labels.length || 0) > 4 && (
+              <div>외 {(settledWeekWarning?.labels.length || 0) - 4}개 주차</div>
+            )}
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" className="h-9" onClick={() => setSettledWeekWarning(null)}>
+              취소
+            </Button>
+            <Button type="button" className="h-9" disabled={loading} onClick={() => void confirmSettledWeekChanges()}>
+              {loading ? '반영 중…' : '경고 기록 후 반영'}
             </Button>
           </DialogFooter>
         </DialogContent>

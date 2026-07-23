@@ -913,6 +913,33 @@ public class WeeklyExpenseController {
         ));
     }
 
+    @org.springframework.web.bind.annotation.ExceptionHandler(CashflowSettledWeekChangeConfirmationRequiredException.class)
+    public ResponseEntity<Map<String, Object>> settledWeekChangeConfirmationRequired(
+        CashflowSettledWeekChangeConfirmationRequiredException error
+    ) {
+        return ResponseEntity.status(409).body(Map.of(
+            "ok", false,
+            "code", "cashflow_settled_week_change_confirmation_required",
+            "message", error.getMessage(),
+            "details", Map.of(
+                "confirmationId", error.confirmationId(),
+                "targetRevision", error.targetRevision(),
+                "weeks", error.weeks()
+            )
+        ));
+    }
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(CashflowSettledWeekChangeConfirmationExpiredException.class)
+    public ResponseEntity<Map<String, Object>> settledWeekChangeConfirmationExpired(
+        CashflowSettledWeekChangeConfirmationExpiredException error
+    ) {
+        return ResponseEntity.status(409).body(Map.of(
+            "ok", false,
+            "code", "cashflow_settled_week_change_confirmation_expired",
+            "message", error.getMessage()
+        ));
+    }
+
     @org.springframework.web.bind.annotation.ExceptionHandler(WeeklyExpenseAtomicWriteLimitException.class)
     public ResponseEntity<Map<String, Object>> atomicWriteLimit(WeeklyExpenseAtomicWriteLimitException error) {
         return ResponseEntity.status(error.statusCode()).body(Map.of(

@@ -112,6 +112,11 @@ describe('Java weekly cashflow client', () => {
       targetRevision: monthlyContract.targetRevision,
       months,
       replaceAllActualSources: true,
+      settledWeekChangeConfirmation: {
+        confirmationId: 'confirmation-a',
+        targetRevision: monthlyContract.targetRevision,
+        weeks: [{ yearMonth: '2026-07', weekNo: 3, completionRevision: 1 }],
+      },
     });
 
     const [url, init] = fetchImpl.mock.calls[0];
@@ -123,6 +128,11 @@ describe('Java weekly cashflow client', () => {
       targetRevision: monthlyContract.targetRevision,
       months,
       replaceAllActualSources: true,
+      settledWeekChangeConfirmation: {
+        confirmationId: 'confirmation-a',
+        targetRevision: monthlyContract.targetRevision,
+        weeks: [{ yearMonth: '2026-07', weekNo: 3, completionRevision: 1 }],
+      },
     });
   });
 

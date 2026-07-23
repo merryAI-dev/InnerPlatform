@@ -1134,7 +1134,10 @@ public class WeeklyExpenseCommandService {
             request.yearMonth(),
             request.targetRevision(),
             cells,
-            request.replaceAllActualSources()
+            request.replaceAllActualSources(),
+            request.settledWeekChangeConfirmation(),
+            request.sourceRevision(),
+            request.idempotencyKey()
         );
         persistence.recordCashflowSheetMonthAmendments(
             writer,
@@ -1197,6 +1200,14 @@ public class WeeklyExpenseCommandService {
             actual.size(),
             projection,
             actual,
+            replacement.settledWeekChanges().stream()
+                .map(change -> new CashflowSheetBatchApplyResponse.SettledWeekChange(
+                    change.yearMonth(),
+                    change.weekNo(),
+                    change.completionRevision(),
+                    change.warningCount()
+                ))
+                .toList(),
             auditEvent.getId()
         );
         persistence.saveIdempotency(new WeeklyExpenseIdempotencyEntity(
@@ -1308,6 +1319,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("actualLineCount", actualLineCount);
         metadata.put("durationMs", durationMs);
         metadata.put("closedMonthAmendments", amendments);
+        metadata.put("settledWeekChanges", replacement.settledWeekChanges());
         putActorMetadata(metadata, writer);
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -1330,6 +1342,14 @@ public class WeeklyExpenseCommandService {
             projectionLineCount,
             actualLineCount,
             months,
+            replacement.settledWeekChanges().stream()
+                .map(change -> new CashflowSheetBatchApplyResponse.SettledWeekChange(
+                    change.yearMonth(),
+                    change.weekNo(),
+                    change.completionRevision(),
+                    change.warningCount()
+                ))
+                .toList(),
             durationMs,
             auditEvent.getId()
         );

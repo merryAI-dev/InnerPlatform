@@ -11,6 +11,7 @@ spring:
 weekly:
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:local-weekly-api-token}
+  cashflow-settled-week-confirmation-key: ${JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY:local-cashflow-settled-week-confirmation-key-32}
   firebase-project-id: ${JVM_WEEKLY_FIREBASE_PROJECT_ID:}
   firebase-auth-project-id: ${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID:${weekly.firebase-project-id}}
   firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}

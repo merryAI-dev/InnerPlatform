@@ -168,6 +168,12 @@ export interface CashflowSheetLabApplyResult {
   skippedInvalidWeekCount?: number;
   skippedInvalidWeeks?: string[];
   skippedRiskLineCount?: number;
+  settledWeekChanges?: Array<{
+    yearMonth: string;
+    weekNo: number;
+    completionRevision: number;
+    warningCount: number;
+  }>;
   verifiedLineCount?: number;
   lastAppliedAt?: string;
   runId?: string;
@@ -546,6 +552,7 @@ export async function applyCashflowSheetLabViaBff(params: {
   endWeek?: string;
   stageRunId?: string;
   applyRiskCandidates?: boolean;
+  settledWeekChangeConfirmationId?: string;
   closedMonthChangeReason?: string;
   idempotencyKey: string;
   lease?: CashflowMutationLease;
@@ -565,6 +572,9 @@ export async function applyCashflowSheetLabViaBff(params: {
         ...(params.endWeek ? { endWeek: params.endWeek } : {}),
         ...(params.stageRunId ? { stageRunId: params.stageRunId } : {}),
         ...(typeof params.applyRiskCandidates === 'boolean' ? { applyRiskCandidates: params.applyRiskCandidates } : {}),
+        ...(params.settledWeekChangeConfirmationId
+          ? { settledWeekChangeConfirmationId: params.settledWeekChangeConfirmationId }
+          : {}),
         ...(params.closedMonthChangeReason?.trim() ? { closedMonthChangeReason: params.closedMonthChangeReason.trim() } : {}),
         idempotencyKey: params.idempotencyKey,
       },

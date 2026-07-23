@@ -24,6 +24,7 @@ public record CashflowSheetLabApplyRequest(
     @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])")
     String yearMonth,
     boolean replaceAllActualSources,
+    @Valid CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
     @Size(max = 1000) String closedMonthChangeReason,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
 ) {
@@ -38,7 +39,28 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, cells);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, cells);
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        String closedMonthChangeReason,
+        List<Cell> cells
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            yearMonth,
+            replaceAllActualSources,
+            null,
+            closedMonthChangeReason,
+            cells
+        );
     }
 
     public record Cell(

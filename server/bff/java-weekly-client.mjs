@@ -79,7 +79,9 @@ function readJavaError(status, payload) {
     : (upstreamFailure ? 'jvm_weekly_api_internal_error' : 'java_weekly_api_error');
   const error = createHttpError(normalizedStatus, message, code);
   error.upstreamStatus = status;
-  if (Number.isSafeInteger(payload?.expectedWriteCount)) {
+  if (payload?.details && typeof payload.details === 'object' && !Array.isArray(payload.details)) {
+    error.details = payload.details;
+  } else if (Number.isSafeInteger(payload?.expectedWriteCount)) {
     error.details = { expectedWriteCount: payload.expectedWriteCount };
   }
   return error;
@@ -248,6 +250,7 @@ export function createJavaWeeklyClient({
     yearMonth,
     cells,
     replaceAllActualSources = false,
+    settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
@@ -276,6 +279,7 @@ export function createJavaWeeklyClient({
         yearMonth,
         cells,
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
+        ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
       },
     });
@@ -293,6 +297,7 @@ export function createJavaWeeklyClient({
     targetRevision,
     months,
     replaceAllActualSources = false,
+    settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
@@ -322,6 +327,7 @@ export function createJavaWeeklyClient({
         targetRevision,
         months,
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
+        ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
       },
     });
