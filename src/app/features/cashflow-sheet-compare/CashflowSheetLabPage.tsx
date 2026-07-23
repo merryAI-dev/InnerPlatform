@@ -58,26 +58,11 @@ function getErrorCode(error: unknown) {
   return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
 }
 
-function settledWeekConfirmationFromError(error: unknown) {
+function getClosedMonthDifferences(error: unknown) {
   const apiError = error as {
-    body?: {
-      details?: {
-        confirmationId?: unknown;
-        weeks?: Array<{ yearMonth?: unknown; weekNo?: unknown }>;
-      };
-    };
+    body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
   };
-  if (getErrorCode(error) !== 'cashflow_settled_week_change_confirmation_required') return null;
-  const confirmationId = typeof apiError?.body?.details?.confirmationId === 'string'
-    ? apiError.body.details.confirmationId.trim()
-    : '';
-  const weeks = Array.isArray(apiError?.body?.details?.weeks) ? apiError.body.details.weeks : [];
-  const labels = weeks.map((week) => (
-    typeof week?.yearMonth === 'string' && Number.isInteger(Number(week?.weekNo))
-      ? `${week.yearMonth} ${Number(week.weekNo)}주차`
-      : ''
-  )).filter(Boolean);
-  return confirmationId && labels.length > 0 ? { confirmationId, labels } : null;
+  return apiError.body?.details?.closedMonthDifferences || [];
 }
 
 function logCashflowLab(event: string, details: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
@@ -307,11 +292,8 @@ export function CashflowSheetLabPage({
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
-  const [settledWeekWarning, setSettledWeekWarning] = useState<{
-    labels: string[];
-    stageRunId: string;
-    confirmationId: string;
-  } | null>(null);
+  const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -733,38 +715,51 @@ export function CashflowSheetLabPage({
     }
   }
 
-  async function handleOverwriteSheetValues() {
-    if (!projectId || loading || !spreadsheetId || mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey) return;
+  async function handleOverwriteSheetValues(
+    monthCloseChangeReason = '',
+    stagedOverride: CashflowSheetLabStageResult | null = null,
+  ) {
+    if (
+      !projectId
+      || loading
+      || !spreadsheetId
+      || (!stagedOverride && (mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey))
+    ) return;
     const startedAt = Date.now();
+    const expectedMirrorRevision = mirror?.sourceRevision || '';
     const stageIdempotencyKey = `cashflow-sheet-lab-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const applyIdempotencyKey = `cashflow-sheet-lab-apply:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    let activeStep: 'stage' | 'apply' = 'stage';
-    let stagedRunId = '';
+    let activeStep: 'stage' | 'apply' = stagedOverride ? 'apply' : 'stage';
+    let staged = stagedOverride;
+    let stageDurationMs = 0;
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
-    setClosedMonthWarning([]);
-    setSettledWeekWarning(null);
+    if (!stagedOverride) {
+      setClosedMonthWarning([]);
+      setClosedMonthStage(null);
+      setClosedMonthChangeReason('');
+    }
     setReflectResult(null);
     logCashflowLab('overwrite.sheet_values.start', {
       projectId,
       spreadsheetId,
     });
-    logCashflowLab('stage.sheet_values.start', {
-      projectId,
-      spreadsheetId,
-    });
     try {
-      const stageStartedAt = Date.now();
-      const staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
-        stageCashflowSheetLabViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          expectedMirrorRevision: mirror.sourceRevision,
-          idempotencyKey: stageIdempotencyKey,
-        })
-      ));
+      if (!staged) {
+        logCashflowLab('stage.sheet_values.start', { projectId, spreadsheetId });
+        const stageStartedAt = Date.now();
+        staged = await runWithBffAuthRetry('stage.sheet_values', (requestActor) => (
+          stageCashflowSheetLabViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+            expectedMirrorRevision,
+            idempotencyKey: stageIdempotencyKey,
+          })
+        ));
+        stageDurationMs = Date.now() - stageStartedAt;
+      }
       if (!staged) {
         logCashflowLab('overwrite.sheet_values.cancelled', {
           projectId,
@@ -774,33 +769,29 @@ export function CashflowSheetLabPage({
         }, 'warn');
         return;
       }
-      const stageDurationMs = Date.now() - stageStartedAt;
-      stagedRunId = staged.runId || '';
-      setReviewedSourceKey(sourceKey);
-      logCashflowLab('stage.sheet_values.ok', {
-        projectId,
-        spreadsheetId: staged.spreadsheetId,
-        sheetName: staged.selectedSheetName,
-        stagedLineCount: staged.stagedLineCount,
-        projectionLineCount: staged.projectionLineCount,
-        actualLineCount: staged.actualLineCount,
-        riskLineCount: staged.riskLineCount,
-        durationMs: stageDurationMs,
-        totalDurationMs: Date.now() - startedAt,
-      });
-      if (staged.status === 'BLOCKED' || staged.riskLineCount > 0) {
+      if (!stagedOverride) {
+        setReviewedSourceKey(sourceKey);
+        logCashflowLab('stage.sheet_values.ok', {
+          projectId,
+          spreadsheetId: staged.spreadsheetId,
+          sheetName: staged.selectedSheetName,
+          stagedLineCount: staged.stagedLineCount,
+          projectionLineCount: staged.projectionLineCount,
+          actualLineCount: staged.actualLineCount,
+          riskLineCount: staged.riskLineCount,
+          durationMs: stageDurationMs,
+          totalDurationMs: Date.now() - startedAt,
+        });
+      }
+      if (staged.status === 'BLOCKED') {
         logCashflowLab('overwrite.sheet_values.blocked', {
           projectId,
           spreadsheetId,
           riskLineCount: staged.riskLineCount,
           durationMs: Date.now() - startedAt,
         }, 'warn');
-        if ((staged.closedMonthDifferences || []).length > 0) {
-          setClosedMonthWarning(staged.closedMonthDifferences || []);
-        } else {
-          const blockedMonths = staged.blockedMonths?.join(', ');
-          setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
-        }
+        const blockedMonths = staged.blockedMonths?.join(', ');
+        setErrorMessage(`반영할 수 없는 시트 범위가 있습니다.${blockedMonths ? ` 확인할 월: ${blockedMonths}` : ''}`);
         return;
       }
       if (staged.stagedLineCount === 0) {
@@ -816,6 +807,7 @@ export function CashflowSheetLabPage({
       }
       activeStep = 'apply';
       const applyStartedAt = Date.now();
+      const stagedRunId = staged.runId;
       logCashflowLab('apply.sheet_values.start', {
         projectId,
         spreadsheetId,
@@ -828,7 +820,8 @@ export function CashflowSheetLabPage({
           tenantId: orgId,
           actor: requestActor,
           projectId,
-          stageRunId: staged.runId,
+          stageRunId: stagedRunId,
+          closedMonthChangeReason: monthCloseChangeReason,
           idempotencyKey: applyIdempotencyKey,
         })
       ));
@@ -851,6 +844,9 @@ export function CashflowSheetLabPage({
         skippedRiskLineCount: result.skippedRiskLineCount,
         lastAppliedAt: result.lastAppliedAt,
       });
+      setClosedMonthStage(null);
+      setClosedMonthWarning([]);
+      setClosedMonthChangeReason('');
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
@@ -881,61 +877,17 @@ export function CashflowSheetLabPage({
         totalDurationMs: Date.now() - startedAt,
         ...errorDiagnostics(error),
       }, 'warn');
-      const settledWeekConfirmation = settledWeekConfirmationFromError(error);
-      if (activeStep === 'apply' && settledWeekConfirmation) {
-        if (stagedRunId) {
-          setSettledWeekWarning({ ...settledWeekConfirmation, stageRunId: stagedRunId });
-        } else {
-          setErrorMessage(formatError(error));
-        }
+      if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_closed_month_reason_required') {
+        const serverDifferences = getClosedMonthDifferences(error);
+        setClosedMonthStage(staged);
+        setClosedMonthWarning(
+          serverDifferences.length
+            ? serverDifferences
+            : staged?.closedMonthDifferences || [],
+        );
       } else {
         setErrorMessage(formatError(error));
       }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function confirmSettledWeekChanges() {
-    if (!settledWeekWarning || loading) return;
-    const pending = settledWeekWarning;
-    const startedAt = Date.now();
-    setLoading(true);
-    setErrorMessage('');
-    try {
-      const result = await runWithBffAuthRetry('apply.settled_week_changes', (requestActor) => (
-        applyCashflowSheetLabViaBff({
-          tenantId: orgId,
-          actor: requestActor,
-          projectId,
-          stageRunId: pending.stageRunId,
-          settledWeekChangeConfirmationId: pending.confirmationId,
-          idempotencyKey: `cashflow-sheet-lab-settled-change:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`,
-        })
-      ));
-      if (!result) return;
-      setSettledWeekWarning(null);
-      setReflectResult({
-        appliedLineCount: result.appliedLineCount,
-        projectionLineCount: result.projectionLineCount,
-        actualLineCount: result.actualLineCount,
-        skippedRiskLineCount: result.skippedRiskLineCount,
-        lastAppliedAt: result.lastAppliedAt,
-      });
-      const warningCount = result.settledWeekChanges?.length || pending.labels.length;
-      setStatusMessage(`시트 값을 반영하고 정산 후 변경 경고 ${warningCount}건을 기록했습니다.`);
-      logCashflowLab('apply.settled_week_changes.ok', {
-        projectId,
-        settledWeekChangeCount: warningCount,
-        durationMs: Date.now() - startedAt,
-      }, 'warn');
-    } catch (error) {
-      setErrorMessage(formatError(error));
-      logCashflowLab('apply.settled_week_changes.error', {
-        projectId,
-        durationMs: Date.now() - startedAt,
-        ...errorDiagnostics(error),
-      }, 'warn');
     } finally {
       setLoading(false);
     }
@@ -1156,62 +1108,53 @@ export function CashflowSheetLabPage({
         )}
       </section>
 
-      <Dialog open={closedMonthWarning.length > 0} onOpenChange={(open) => !open && setClosedMonthWarning([])}>
+      <Dialog
+        open={Boolean(closedMonthStage)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setClosedMonthStage(null);
+            setClosedMonthWarning([]);
+          }
+        }}
+      >
         <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
           <DialogHeader className="space-y-1 text-left">
             <DialogTitle className="text-[17px]">결산 후 값이 달라요</DialogTitle>
             <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
-              결산 원장과 시트값이 다른 주차입니다. 급한 수정은 월 결산을 재오픈한 뒤 다시 반영해 주세요.
+              월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
-            {closedMonthWarning.slice(0, 3).map((summary) => (
-              <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
-            ))}
-            {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
-          </div>
+          {closedMonthWarning.length > 0 && (
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
+              {closedMonthWarning.slice(0, 3).map((summary) => (
+                <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
+              ))}
+              {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
+            </div>
+          )}
+          <textarea
+            value={closedMonthChangeReason}
+            onChange={(event) => setClosedMonthChangeReason(event.target.value.slice(0, 1000))}
+            placeholder="예: 결산 후 확인된 실제 입금액 정정"
+            className="min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-[13px]"
+            disabled={loading}
+          />
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthWarning([])}>
+            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthStage(null)}>
               닫기
             </Button>
             <Button
               type="button"
               className="h-9"
-              onClick={() => {
-                setClosedMonthWarning([]);
-                navigate(`/portal/cashflow/${encodeURIComponent(projectId)}`);
-              }}
+              disabled={loading || !closedMonthStage || !closedMonthChangeReason.trim()}
+              onClick={() => void handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)}
             >
-              월 결산으로 이동
+              사유와 함께 반영
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={settledWeekWarning !== null} onOpenChange={(open) => !open && setSettledWeekWarning(null)}>
-        <DialogContent className="max-w-[380px] gap-4 rounded-xl p-5 sm:max-w-[380px]">
-          <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-[17px]">주간 정산 값과 다릅니다</DialogTitle>
-            <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
-              시트값을 반영하면 정산 이후 변경으로 기록되고 경고가 누적됩니다. 그래도 반영하시겠습니까?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
-            {settledWeekWarning?.labels.slice(0, 4).map((label) => <div key={label}>{label}</div>)}
-            {(settledWeekWarning?.labels.length || 0) > 4 && (
-              <div>외 {(settledWeekWarning?.labels.length || 0) - 4}개 주차</div>
-            )}
-          </div>
-          <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={() => setSettledWeekWarning(null)}>
-              취소
-            </Button>
-            <Button type="button" className="h-9" disabled={loading} onClick={() => void confirmSettledWeekChanges()}>
-              {loading ? '반영 중…' : '경고 기록 후 반영'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={tutorialOpen} onOpenChange={handleTutorialOpenChange}>
         <DialogContent

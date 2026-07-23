@@ -50,9 +50,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('saveCashflowSheetLabConfigViaBff');
     expect(pageSource).toContain('stageCashflowSheetLabViaBff');
     expect(pageSource).toContain('applyCashflowSheetLabViaBff');
-    expect(pageSource).toContain('settledWeekChangeConfirmationId: pending.confirmationId');
-    expect(pageSource).toContain('주간 정산 값과 다릅니다');
-    expect(pageSource).toContain('stageRunId: stagedRunId');
+    expect(pageSource).not.toContain('settledWeekChangeConfirmationId: pending.confirmationId');
+    expect(pageSource).not.toContain('주간 정산 값과 다릅니다');
+    expect(pageSource).toContain('cashflow_closed_month_reason_required');
+    expect(pageSource).toContain('stageRunId: staged.runId');
+    expect(pageSource).toContain('handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');
@@ -81,7 +83,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
     expect(pageSource).toContain('buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })');
-    expect(pageSource).toContain('expectedMirrorRevision: mirror.sourceRevision');
+    expect(pageSource).toContain('expectedMirrorRevision,');
     expect(pageSource).toContain('const refreshIdempotencyKey =');
     expect(pageSource).toContain('const stageIdempotencyKey =');
     expect(pageSource).toContain('const applyIdempotencyKey =');
@@ -132,10 +134,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('applyDialogOpen');
     expect(pageSource).toContain('별도 운영자 검토는 없으며');
     expect(pageSource).toContain("staged.status === 'BLOCKED'");
-    expect(pageSource).toContain('staged.closedMonthDifferences');
+    expect(pageSource).toContain('staged?.closedMonthDifferences');
     expect(pageSource).toContain('결산 후 값이 달라요');
     expect(pageSource).toContain('외 ${hiddenWeekCount}개 주차');
-    expect(pageSource).toContain('월 결산으로 이동');
+    expect(pageSource).toContain('캐시플로우로 이동');
     expect(pageSource).toContain('max-w-[360px]');
     expect(pageSource).toContain('max-h-28');
     expect(pageSource).not.toContain('stageCandidates');

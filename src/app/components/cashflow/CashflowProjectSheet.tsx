@@ -201,29 +201,6 @@ function bffErrorCode(error: unknown): string {
   return source.body?.code || source.body?.error || '';
 }
 
-function settledWeekConfirmation(error: unknown): { confirmationId: string; labels: string[] } | null {
-  const source = error as {
-    body?: {
-      details?: {
-        confirmationId?: unknown;
-        weeks?: Array<{ yearMonth?: unknown; weekNo?: unknown }>;
-      };
-    };
-  };
-  if (bffErrorCode(error) !== 'cashflow_settled_week_change_confirmation_required') return null;
-  const confirmationId = typeof source.body?.details?.confirmationId === 'string'
-    ? source.body.details.confirmationId.trim()
-    : '';
-  const labels = (Array.isArray(source.body?.details?.weeks) ? source.body.details.weeks : [])
-    .map((week) => (
-      typeof week?.yearMonth === 'string' && Number.isInteger(Number(week?.weekNo))
-        ? `${week.yearMonth} ${Number(week.weekNo)}주차`
-        : ''
-    ))
-    .filter(Boolean);
-  return confirmationId && labels.length > 0 ? { confirmationId, labels } : null;
-}
-
 export function CashflowProjectSheet({
   projectId,
   projectName,
@@ -329,12 +306,6 @@ export function CashflowProjectSheet({
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
   const [lateSheetApply, setLateSheetApply] = useState<CashflowSheetLabStageResult | null>(null);
   const [lateSheetChangeReason, setLateSheetChangeReason] = useState('');
-  const [settledSheetApply, setSettledSheetApply] = useState<{
-    stage: CashflowSheetLabStageResult;
-    confirmationId: string;
-    labels: string[];
-    closedMonthChangeReason: string;
-  } | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
@@ -1220,7 +1191,6 @@ export function CashflowProjectSheet({
   const handleApplyStagedSheetValues = useCallback(async (
     stage: CashflowSheetLabStageResult,
     closedMonthChangeReason = '',
-    settledWeekChangeConfirmationId = '',
   ): Promise<void> => {
     if (!stage.runId || stage.stagedLineCount <= 0) return;
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1232,7 +1202,6 @@ export function CashflowProjectSheet({
         stageRunId: stage.runId,
         applyRiskCandidates: true,
         closedMonthChangeReason,
-        settledWeekChangeConfirmationId: settledWeekChangeConfirmationId || undefined,
         idempotencyKey: applyIdempotencyKey,
       });
     };
@@ -1251,7 +1220,6 @@ export function CashflowProjectSheet({
       } : current);
       setLateSheetApply(null);
       setLateSheetChangeReason('');
-      setSettledSheetApply(null);
       toast.success(`시트 최신값 ${result.appliedLineCount.toLocaleString()}건을 원장에 반영했습니다.`);
     };
 
@@ -1287,17 +1255,16 @@ export function CashflowProjectSheet({
       }
       logCashflowSettlement({ phase: 'error', operation: 'cashflow.sheet_apply', projectId, error: finalError });
       if (bffErrorCode(finalError) === 'cashflow_closed_month_reason_required') {
-        setLateSheetApply(stage);
-        setLateSheetChangeReason('');
-        return;
-      }
-      const confirmation = settledWeekConfirmation(finalError);
-      if (confirmation) {
-        setSettledSheetApply({
-          stage,
-          ...confirmation,
-          closedMonthChangeReason,
+        const details = (finalError as {
+          body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
+        }).body?.details;
+        setLateSheetApply({
+          ...stage,
+          closedMonthDifferences: details?.closedMonthDifferences?.length
+            ? details.closedMonthDifferences
+            : stage.closedMonthDifferences,
         });
+        setLateSheetChangeReason('');
         return;
       }
       toast.error(resolveApiErrorMessage(finalError, '시트 값을 원장에 반영하지 못했습니다.'));
@@ -2920,43 +2887,6 @@ export function CashflowProjectSheet({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog
-        open={!!settledSheetApply}
-        onOpenChange={(open) => {
-          if (!open && !sheetStageApplyLoading) setSettledSheetApply(null);
-        }}
-      >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[420px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle>주간 정산 값과 다릅니다</AlertDialogTitle>
-            <AlertDialogDescription>
-              정산 완료 후 시트 값이 바뀐 주차입니다. 반영하면 잠금은 유지되고 변경 경고와 작업자가 서버 이력에 기록됩니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700">
-            {settledSheetApply?.labels.slice(0, 4).map((label) => <div key={label}>{label}</div>)}
-            {(settledSheetApply?.labels.length || 0) > 4 && (
-              <div>외 {(settledSheetApply?.labels.length || 0) - 4}개 주차</div>
-            )}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={sheetStageApplyLoading}>취소</AlertDialogCancel>
-            <Button
-              type="button"
-              className="bg-[#17324D] hover:bg-slate-800"
-              disabled={sheetStageApplyLoading || !settledSheetApply}
-              onClick={() => settledSheetApply && void handleApplyStagedSheetValues(
-                settledSheetApply.stage,
-                settledSheetApply.closedMonthChangeReason,
-                settledSheetApply.confirmationId,
-              )}
-            >
-              {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-              경고 기록 후 반영
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog
         open={blocker.state === 'blocked'}

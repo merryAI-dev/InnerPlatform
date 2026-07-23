@@ -1279,13 +1279,14 @@ describe('JVM weekly API BFF proxy', () => {
     const project = documents.get('orgs/tenant-a/projects/project-a');
     project.contractStart = '2026-01-01';
     project.contractEnd = '2027-12-31';
-    const annualId = Buffer.from('project-a\n2027', 'utf8').toString('base64url');
-    documents.set(`orgs/tenant-a/cashflow_sheet_year_totals/${annualId}`, {
-      projectId: 'project-a',
+    const mirror = documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    mirror.appliedAnnualYears = [2027];
+    mirror.appliedWeeklyYears = [2026];
+    mirror.sheetFacts.annualCashflowTotals = [{
       year: 2027,
-      projection: { SALES_IN: 650 },
-      projectionStates: { SALES_IN: 'VALUE' },
-    });
+      projection: { totalIn: 650 },
+      actual: { totalIn: 0 },
+    }];
     const cashflow = {
       projectId: 'project-a',
       readModel: {

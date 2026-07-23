@@ -384,8 +384,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
         CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
         String requestedReason = text(reason, "").trim();
-        List<CashflowClosedMonthAmendment> amendments = new ArrayList<>();
-        Map<String, CashflowClosedMonthAmendment> authorized = currentCashflowMonthAmendments.get();
+        Map<String, Map<String, Object>> closedMonthDocuments = new LinkedHashMap<>();
+        List<String> postDeadlineMonths = new ArrayList<>();
         for (String yearMonth : months) {
             requireYearMonth(yearMonth);
             String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
@@ -399,15 +399,28 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 if (states != null) states.put(key, status);
             }
             if (!"CLOSED".equals(status)) continue;
+            closedMonthDocuments.put(yearMonth, close);
+            if (businessDate.date().isAfter(YearMonth.parse(yearMonth).plusMonths(1).atDay(10))) {
+                postDeadlineMonths.add(yearMonth);
+            }
+        }
+        if (requestedReason.isBlank() && !postDeadlineMonths.isEmpty()) {
+            throw new WeeklyExpenseEditLeaseException(
+                409,
+                "cashflow_closed_month_reason_required",
+                String.join(", ", postDeadlineMonths) + " 마감 후 변경 사유를 입력해 주세요.",
+                Map.of("closedMonths", postDeadlineMonths)
+            );
+        }
+
+        List<CashflowClosedMonthAmendment> amendments = new ArrayList<>();
+        Map<String, CashflowClosedMonthAmendment> authorized = currentCashflowMonthAmendments.get();
+        for (String yearMonth : months) {
+            String key = monthStateKey(actor.tenantId(), projectId, yearMonth);
+            Map<String, Object> close = closedMonthDocuments.get(yearMonth);
+            if (close == null) continue;
             LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
             boolean postDeadline = businessDate.date().isAfter(deadline);
-            if (postDeadline && requestedReason.isBlank()) {
-                throw new WeeklyExpenseEditLeaseException(
-                    409,
-                    "cashflow_closed_month_reason_required",
-                    yearMonth + " 마감 후 변경 사유를 입력해 주세요."
-                );
-            }
             long closeRevision = canonicalMonthCounter(close, "revision");
             long amendmentCount = addMonthCounters(optionalMonthCounter(close, "amendmentCount"), 1);
             long warningCount = addMonthCounters(optionalMonthCounter(close, "postDeadlineAmendmentWarningCount"), postDeadline ? 1 : 0);
@@ -494,30 +507,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             .distinct()
             .sorted(Comparator.comparing(CashflowWeekScope::yearMonth).thenComparingInt(CashflowWeekScope::weekNo))
             .toList());
-        List<String> locked = new ArrayList<>();
         for (CashflowWeekScope scope : scopes) {
             requireYearMonth(scope.yearMonth());
             if (scope.weekNo() < 1 || scope.weekNo() > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
                 throw new IllegalArgumentException("Cashflow weekNo must be between 1 and 5.");
             }
-            if (isAuthorizedCashflowMonthAmendment(monthStateKey(tenantId, projectId, scope.yearMonth()))) {
-                continue;
-            }
-            String documentId = projectId + "-" + scope.yearMonth() + "-w" + scope.weekNo();
-            DocumentReference ref = db.document(cashflowWeeklyUpdateCompletionPath(tenantId, documentId));
-            Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
-                DocumentSnapshot snapshot = get(ref);
-                return snapshot.exists() ? data(snapshot) : Map.of();
-            });
-            if ("LOCKED".equals(text(document.get("status"), ""))) {
-                locked.add(scope.yearMonth() + " " + scope.weekNo() + "주차");
-            }
-        }
-        if (!locked.isEmpty()) {
-            throw new WeeklyExpenseConflictException(
-                "Cashflow week is locked: " + String.join(", ", locked)
-                    + ". Reopen it with a reason before changing values."
-            );
         }
     }
 
@@ -1718,48 +1712,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ));
         }
 
-        List<String> replacementKeysToWrite = replacements.keySet().stream().toList();
+        List<String> replacementKeysToWrite = replacements.entrySet().stream()
+            .filter(entry -> !allProjectWeeks.containsKey(entry.getKey())
+                || cashflowWeekFinancialContentChanged(
+                    allProjectWeeks.get(entry.getKey()),
+                    entry.getValue()
+                ))
+            .map(Map.Entry::getKey)
+            .toList();
+        // Weekly settlement is operational status only. Closed-month authorization above is the sole write guard.
         List<CashflowSettledWeekChange> settledWeekChanges = List.of();
-        if (!allowLockedWeeks) {
-            replacementKeysToWrite = replacements.entrySet().stream()
-                .filter(entry -> !allProjectWeeks.containsKey(entry.getKey())
-                    || cashflowWeekFinancialContentChanged(
-                        allProjectWeeks.get(entry.getKey()),
-                        entry.getValue()
-                    ))
-                .map(Map.Entry::getKey)
-                .toList();
-            List<CashflowWeekScope> changedWeeks = replacementKeysToWrite.stream()
-                .map(key -> {
-                    WeekDocParts parts = parseCashflowWeekId(projectId, key);
-                    return new CashflowWeekScope(parts.yearMonth(), parts.weekNo());
-                })
-                .toList();
-            if (settledWeekChangeConfirmation != null) {
-                requireExactSettledWeekConfirmation(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    targetRevision,
-                    settledWeekChangeConfirmation
-                );
-                settledWeekChanges = recordCashflowSettledWeekChanges(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    sourceRevision,
-                    targetRevision,
-                    idempotencyKey
-                );
-            } else {
-                requireCashflowWeeksOpenForSheetApply(
-                    tenantId,
-                    projectId,
-                    changedWeeks,
-                    targetRevision
-                );
-            }
-        }
         for (String replacementKey : replacementKeysToWrite) {
             replaceDocument(cashflowWeekRef(tenantId, replacementKey), replacements.get(replacementKey));
         }

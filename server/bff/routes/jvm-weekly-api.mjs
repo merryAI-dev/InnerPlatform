@@ -978,20 +978,25 @@ function projectFinancialYears(project = {}) {
     .filter(Number.isSafeInteger))].sort((left, right) => left - right);
 }
 
-async function composeProjectionTotal({ db, tenantId, projectId, project, cashflow, fallback, weeklyYearsHint = [] }) {
+function composeProjectionTotal({ project, cashflow, mirror, fallback, weeklyYearsHint = [] }) {
   const weekly = canonicalWeeklyProjection(cashflow, fallback);
   weekly.weeklyYears = [...new Set([...weekly.weeklyYears, ...weeklyYearsHint])].sort((left, right) => left - right);
   const annualYears = projectFinancialYears(project).filter((year) => !weekly.weeklyYears.includes(year));
-  const annual = await Promise.all(annualYears.map(async (year) => {
-    const id = Buffer.from(`${projectId}\n${year}`, 'utf8').toString('base64url');
-    const document = await readDocument(db, `orgs/${tenantId}/cashflow_sheet_year_totals/${id}`);
-    const values = objectValue(document?.projection) || {};
-    const states = objectValue(document?.projectionStates) || {};
-    const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => (
-      sum + (readOptionalText(states[lineId]) === 'VALUE' ? safeAmount(values[lineId]) : 0)
-    ), 0);
-    return { year, source: document ? 'ANNUAL' : 'MISSING', totalIn };
-  }));
+  const annualTotals = new Map((Array.isArray(mirror?.sheetFacts?.annualCashflowTotals)
+    ? mirror.sheetFacts.annualCashflowTotals
+    : []).map((row) => [Number(row?.year), row]));
+  const appliedAnnualYears = new Set((Array.isArray(mirror?.appliedAnnualYears)
+    ? mirror.appliedAnnualYears
+    : []).map(Number));
+  const sourceIsApplied = readOptionalText(mirror?.appliedSourceRevision) === readOptionalText(mirror?.sourceRevision);
+  const annual = annualYears.map((year) => {
+    const total = sourceIsApplied && appliedAnnualYears.has(year) ? annualTotals.get(year) : null;
+    return {
+      year,
+      source: total ? 'ANNUAL' : 'MISSING',
+      totalIn: safeAmount(total?.projection?.totalIn),
+    };
+  });
   return {
     totalIn: weekly.totalIn + annual.reduce((sum, row) => sum + row.totalIn, 0),
     years: [
@@ -1457,12 +1462,10 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       totalIn: safeAmount(canonicalWithComparison?.range?.projection?.totalIn ?? projection.totalIn),
       years: Array.isArray(closedSnapshot?.projectionYears) ? closedSnapshot.projectionYears : [],
     }
-    : await composeProjectionTotal({
-      db,
-      tenantId,
-      projectId,
+    : composeProjectionTotal({
       project,
       cashflow,
+      mirror,
       fallback: projection.totalIn,
       weeklyYearsHint: (Array.isArray(mirror?.appliedWeeklyYears) ? mirror.appliedWeeklyYears : mirror?.cells?.map((cell) => (
         Number(readOptionalText(cell?.yearMonth).slice(0, 4))
