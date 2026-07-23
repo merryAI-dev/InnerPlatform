@@ -1097,8 +1097,6 @@ export function CashflowProjectSheet({
             cells: mirror.cells || current.cells,
           }
         : mirror);
-      setSheetRefreshResult(null);
-      setSheetStageDialog(null);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
         setPendingAutoStageRevision(mirror.sourceRevision);
         void loadCashflowEvents();
@@ -2526,6 +2524,20 @@ export function CashflowProjectSheet({
       </section>
 
       {renderUnifiedMonthlyBoard()}
+
+      <AlertDialog open={sheetRefreshLoading}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[360px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-[#17324D]" />
+              시트 값을 불러오는 중입니다
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              시트의 값을 고정해 MYSCube 원장에 반영할 준비를 하고 있습니다. 완료될 때까지 이 창을 닫지 말고 잠시 기다려 주세요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">

@@ -184,6 +184,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('setInterval');
   });
 
+  it('keeps the sheet refresh loading state open until the successful response is processed', () => {
+    expect(source).toContain('open={sheetRefreshLoading}');
+    expect(source).toContain('시트 값을 불러오는 중입니다');
+    expect(source).not.toContain('setSheetRefreshResult');
+    expect(source).not.toContain('setSheetStageDialog');
+  });
+
   it('applies the pinned sheet directly and asks for a reason only when the JVM reports a late closed-month change', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
     expect(source).toContain('handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())');
