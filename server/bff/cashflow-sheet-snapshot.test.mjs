@@ -92,8 +92,8 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(first.summary).toEqual({ cellCount: 2, valueCount: 1, emptyCount: 1, invalidCount: 0 });
   });
 
-  it('pins business metadata, the five-week deposit schedule, and BO/BP controls', () => {
-    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+  it('pins business metadata, the five-week deposit schedule, and BS/BT controls', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 72 }, () => ''));
     matrix[0][1] = '최종 업데이트 : 2026.07.01 최종작성자: 보람';
     matrix[1][1] = 'Type1. 세금계산서발행+공급가액기준';
     matrix[2][1] = '전용계좌사업';
@@ -106,10 +106,10 @@ describe('cashflow sheet pinned snapshot', () => {
       matrix[13][columnIndex] = String((weekIndex + 1) * 10);
       matrix[36][columnIndex] = String((weekIndex + 1) * 5);
     }
-    matrix[8][66] = '15,000';
-    matrix[8][67] = '85,000';
-    matrix[13][66] = '150';
-    matrix[36][66] = '75';
+    matrix[8][70] = '15,000';
+    matrix[8][71] = '85,000';
+    matrix[13][70] = '150';
+    matrix[36][70] = '75';
 
     const weekColumns = Array.from({ length: 5 }, (_, weekIndex) => ({
       yearMonth: '2026-06', weekNo: weekIndex + 1, columnIndex: 3 + weekIndex,
@@ -155,14 +155,14 @@ describe('cashflow sheet pinned snapshot', () => {
       }],
       annualCashflowTotals: [],
       controlTotals: {
-        deposit: { sourceCell: 'BO9', value: 15000, computed: 15000, matches: true },
-        unpaid: { sourceCell: 'BP9', value: 85000 },
+        deposit: { sourceCell: 'BS9', value: 15000, computed: 15000, matches: true },
+        unpaid: { sourceCell: 'BT9', value: 85000 },
         projection: [{
-          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO14', value: 150, computed: 150, matches: true,
+          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BS14', value: 150, computed: 150, matches: true,
           annualValues: [{ year: 2026, value: 150 }],
         }],
         actual: [{
-          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BO37', value: 75, computed: 75, matches: true,
+          kind: 'line', lineId: 'SALES_IN', sourceCell: 'BS37', value: 75, computed: 75, matches: true,
           annualValues: [{ year: 2026, value: 75 }],
         }],
       },
@@ -170,17 +170,17 @@ describe('cashflow sheet pinned snapshot', () => {
     });
   });
 
-  it('treats future blank week cells as zero for BO sums without inventing deposit values', () => {
-    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+  it('treats future blank week cells as zero for BS sums without inventing deposit values', () => {
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 72 }, () => ''));
     const weekColumns = Array.from({ length: 60 }, (_, index) => ({
       yearMonth: `2026-${String(Math.floor(index / 5) + 1).padStart(2, '0')}`,
       weekNo: (index % 5) + 1,
       columnIndex: 3 + index,
     }));
     matrix[8][3] = '1000';
-    matrix[8][66] = '1000';
+    matrix[8][70] = '1000';
     matrix[13][3] = '100';
-    matrix[13][66] = '100';
+    matrix[13][70] = '100';
     const facts = extractCashflowSheetFacts({
       matrix,
       template: {
@@ -196,20 +196,18 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(facts.controlTotals.projection[0]).toMatchObject({ computed: 100, value: 100, matches: true });
   });
 
-  it('finds the moving Total columns and keeps week values beyond the 2026 layout', () => {
+  it('uses the official fixed BS/BT control columns', () => {
     const matrix = Array.from({ length: 55 }, () => Array.from({ length: 72 }, () => ''));
-    matrix[0][68] = '입금\nTotal';
-    matrix[0][69] = '미지급 Total';
     const weekColumns = [
       { yearMonth: '2027-01', weekNo: 4, columnIndex: 63 },
-      { yearMonth: '2027-01', weekNo: 5, columnIndex: 64 },
+      { yearMonth: '2027-01', weekNo: 5, columnIndex: 62 },
     ];
     matrix[8][63] = '1000';
-    matrix[8][64] = '2000';
-    matrix[8][68] = '3000';
+    matrix[8][62] = '2000';
+    matrix[8][70] = '3000';
     matrix[13][63] = '100';
-    matrix[13][64] = '200';
-    matrix[13][68] = '300';
+    matrix[13][62] = '200';
+    matrix[13][70] = '300';
 
     const facts = extractCashflowSheetFacts({
       matrix,
@@ -222,28 +220,28 @@ describe('cashflow sheet pinned snapshot', () => {
     });
 
     expect(facts.depositScheduleRows).toHaveLength(2);
-    expect(facts.controlTotals.deposit).toMatchObject({ sourceCell: 'BQ9', value: 3000, computed: 3000, matches: true });
-    expect(facts.controlTotals.projection[0]).toMatchObject({ sourceCell: 'BQ14', value: 300, computed: 300, matches: true });
+    expect(facts.controlTotals.deposit).toMatchObject({ sourceCell: 'BS9', value: 3000, computed: 3000, matches: true });
+    expect(facts.controlTotals.projection[0]).toMatchObject({ sourceCell: 'BS14', value: 300, computed: 300, matches: true });
   });
 
   it('groups sheet finance checks by calendar year using the registered cashflow lines', () => {
-    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 68 }, () => ''));
+    const matrix = Array.from({ length: 55 }, () => Array.from({ length: 72 }, () => ''));
     const weekColumns = [
       { yearMonth: '2025-12', weekNo: 5, columnIndex: 3 },
       { yearMonth: '2026-01', weekNo: 1, columnIndex: 4 },
     ];
     matrix[8][3] = '100';
     matrix[8][4] = '200';
-    matrix[8][66] = '300';
+    matrix[8][70] = '300';
     matrix[13][3] = '10';
     matrix[13][4] = '20';
-    matrix[13][66] = '30';
+    matrix[13][70] = '30';
     matrix[14][3] = '30';
     matrix[14][4] = '40';
-    matrix[14][66] = '70';
+    matrix[14][70] = '70';
     matrix[15][3] = '50';
     matrix[15][4] = '60';
-    matrix[15][66] = '110';
+    matrix[15][70] = '110';
 
     const facts = extractCashflowSheetFacts({
       matrix,

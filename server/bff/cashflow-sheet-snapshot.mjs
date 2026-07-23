@@ -269,15 +269,6 @@ function readWholeWon(
   return classified.amount;
 }
 
-function findControlColumnIndex(template, matrix, headerText, legacyColumnIndex) {
-  const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
-  if (!Number.isInteger(projectionSection?.headerRowIndex)) return legacyColumnIndex;
-  const header = matrix?.[projectionSection.headerRowIndex] || [];
-  const normalizedTarget = normalizedText(headerText).replace(/\s+/g, '').toLowerCase();
-  const found = header.findIndex((value) => normalizedText(value).replace(/\s+/g, '').toLowerCase() === normalizedTarget);
-  return found >= 0 ? found : null;
-}
-
 function controlRow({ matrix, row, weekColumns, issues, controlColumnIndex }) {
   const field = `${row.kind}:${row.lineId || row.derivedKind}`;
   const amounts = weekColumns.map((week) => readWholeWon(
@@ -341,8 +332,8 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = 
   const projectionSection = template?.sections?.find((section) => section.mode === 'projection');
   const weekColumns = (projectionSection?.weekColumns || [])
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
-  const depositControlColumnIndex = findControlColumnIndex(template, matrix, '입금Total', 66);
-  const unpaidControlColumnIndex = findControlColumnIndex(template, matrix, '미지급Total', 67);
+  const depositControlColumnIndex = 70; // BS
+  const unpaidControlColumnIndex = 71; // BT
   const depositScheduleRows = weekColumns.map((week) => {
     const taxInvoiceIssuedDate = normalizeDateCell(matrix?.[6]?.[week.columnIndex]);
     const expectedDepositDate = normalizeDateCell(matrix?.[7]?.[week.columnIndex]);

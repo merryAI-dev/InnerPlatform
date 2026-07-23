@@ -1587,7 +1587,7 @@ export function CashflowProjectSheet({
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-p`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <div className="py-0.5 text-center text-[12px] text-slate-300">-</div>
+          <div className="py-0.5 text-center text-[12px] text-slate-400">미입력</div>
         ) : (
           <div className={`h-5 px-1 text-right text-[12px] leading-5 tabular-nums ${shouldHighlightMismatch ? 'font-semibold text-red-700' : 'text-slate-900'}`}>
             {fmt(projection)}
@@ -1613,7 +1613,7 @@ export function CashflowProjectSheet({
     return (
       <td key={`${input.lineId}-${input.targetYearMonth}-${input.weekNo}-a`} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${bgClass}`}>
         {isCollapsedEmpty ? (
-          <div className="py-0.5 text-center text-[12px] text-slate-300">-</div>
+          <div className="py-0.5 text-center text-[12px] text-slate-400">미입력</div>
         ) : (
           <div className="h-5 px-1 text-right text-[12px] leading-5 tabular-nums text-slate-700">
             {fmt(actual)}
@@ -1764,7 +1764,7 @@ export function CashflowProjectSheet({
       const value = total?.lineAmounts?.[lineId] || 0;
       return (
         <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
-          {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-300">-</span>}
+          {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-400">미입력</span>}
         </td>
       );
     };
@@ -1897,7 +1897,7 @@ export function CashflowProjectSheet({
               {renderCashflowLineLabel(getCashflowModeLineLabel(lineId, mode))}
             </td>
             <td className={`px-4 py-2 text-right text-[12px] tabular-nums text-slate-700 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
-              {state === 'VALUE' || state === 'ZERO' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-300">-</span>}
+              {state === 'VALUE' || state === 'ZERO' ? fmt(total.lineAmounts[lineId] || 0) : <span className="text-slate-400">미입력</span>}
             </td>
           </tr>
         );
@@ -2068,7 +2068,7 @@ export function CashflowProjectSheet({
                           className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`}
                           title={cell.difference === null ? `${cell.weekRange}\nBFF 비교 대상 기간 아님` : `${cell.weekRange}\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}\n${diffColorExplanation(row.section, cell.difference)}`}
                         >
-                          {cell.difference === null ? '-' : fmtSigned(cell.difference)}
+                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
                         </td>
                       );
                     })}

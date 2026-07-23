@@ -29,7 +29,7 @@ import {
   parseWithSchema,
 } from '../schemas.mjs';
 
-const CASHFLOW_SHEET_LAB_READ_RANGE = 'A1:ZZ220';
+const CASHFLOW_SHEET_LAB_READ_RANGE = 'A1:BT60';
 const DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS = 15_000;
 const CASHFLOW_USAGE_SHEET_NAME_PARTS = ['cashflow', '사용내역', '연동'];
 const CASHFLOW_WEEK_BASIS = 'sheet_range';
