@@ -2525,19 +2525,19 @@ export function CashflowProjectSheet({
 
       {renderUnifiedMonthlyBoard()}
 
-      <AlertDialog open={sheetRefreshLoading}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[360px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
+      {sheetRefreshLoading ? (
+        <div className="fixed inset-0 z-[100] grid place-items-start bg-transparent px-4 pt-24" aria-live="polite" aria-busy="true">
+          <div role="status" className="w-full max-w-[420px] rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-xl">
+            <div className="flex items-center gap-2 text-[14px] font-bold text-slate-950">
               <Loader2 className="h-4 w-4 animate-spin text-[#17324D]" />
               시트 값을 불러오는 중입니다
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              시트의 값을 고정해 MYSCube 원장에 반영할 준비를 하고 있습니다. 완료될 때까지 이 창을 닫지 말고 잠시 기다려 주세요.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-        </AlertDialogContent>
-      </AlertDialog>
+            </div>
+            <div className="mt-1 text-[12px] leading-5 text-slate-600">
+              시트의 최신 값을 고정하고 변경된 항목을 확인하고 있습니다. 완료될 때까지 잠시 기다려 주세요.
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">

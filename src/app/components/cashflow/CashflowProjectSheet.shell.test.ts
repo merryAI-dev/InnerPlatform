@@ -185,7 +185,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps the sheet refresh loading state open until the successful response is processed', () => {
-    expect(source).toContain('open={sheetRefreshLoading}');
+    expect(source).toContain('{sheetRefreshLoading ? (');
+    expect(source).toContain('aria-busy="true"');
     expect(source).toContain('시트 값을 불러오는 중입니다');
     expect(source).not.toContain('setSheetRefreshResult');
     expect(source).not.toContain('setSheetStageDialog');
