@@ -8,6 +8,7 @@ import { getAuthInstance } from '../../lib/firebase';
 import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
+  getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
@@ -294,6 +295,7 @@ export function CashflowSheetLabPage({
   const [statusMessage, setStatusMessage] = useState('');
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
   const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const [applyResumeRequired, setApplyResumeRequired] = useState(false);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [loadingOperation, setLoadingOperation] = useState<CashflowSheetSyncOperation | null>(null);
   const loading = loadingOperation !== null;
@@ -474,6 +476,34 @@ export function CashflowSheetLabPage({
     if (!projectId) return;
     rememberRecentPortalProject(projectId);
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId || !actor.idToken) return () => { cancelled = true; };
+    const loadApplyStatus = async (): Promise<void> => {
+      try {
+        const result = await runWithBffAuthRetry('apply.status', (requestActor) => (
+          getCashflowSheetLabApplyStatusViaBff({
+            tenantId: orgId,
+            actor: requestActor,
+            projectId,
+          })
+        ));
+        if (cancelled || result?.status !== 'APPLYING' || !result.stagedRun) return;
+        setClosedMonthStage(result.stagedRun);
+        setClosedMonthWarning(result.stagedRun.closedMonthDifferences || []);
+        setClosedMonthChangeReason(result.applyInput?.closedMonthChangeReason || '');
+        setApplyResumeRequired(true);
+        setErrorMessage('이전에 완료 응답을 받지 못한 시트 반영이 있습니다. 같은 검토본으로 이어서 완료해 주세요.');
+      } catch {
+        // 복구 상태 조회 실패는 시트 설정 화면 진입 자체를 막지 않는다.
+      }
+    };
+    void loadApplyStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor.idToken, orgId, projectId]);
 
   useEffect(() => {
     if (projectYears.includes(sourceYear)) return;
@@ -848,6 +878,7 @@ export function CashflowSheetLabPage({
         lastAppliedAt: result.lastAppliedAt,
       });
       setClosedMonthStage(null);
+      setApplyResumeRequired(false);
       setClosedMonthWarning([]);
       setClosedMonthChangeReason('');
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
@@ -888,6 +919,12 @@ export function CashflowSheetLabPage({
             ? serverDifferences
             : staged?.closedMonthDifferences || [],
         );
+        setApplyResumeRequired(false);
+      } else if (activeStep === 'apply' && staged) {
+        setClosedMonthStage(staged);
+        setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
+        setApplyResumeRequired(true);
+        setErrorMessage(`${formatError(error)} 같은 검토본으로 이어서 완료할 수 있습니다.`);
       } else {
         setErrorMessage(formatError(error));
       }
@@ -1115,20 +1152,23 @@ export function CashflowSheetLabPage({
       <Dialog
         open={Boolean(closedMonthStage)}
         onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !applyResumeRequired) {
             setClosedMonthStage(null);
+            setApplyResumeRequired(false);
             setClosedMonthWarning([]);
           }
         }}
       >
         <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
           <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-[17px]">결산 후 값이 달라요</DialogTitle>
+            <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 이어서 완료' : '결산 후 값이 달라요'}</DialogTitle>
             <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
-              월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.
+              {applyResumeRequired
+                ? '이전 반영의 응답을 확인하지 못했습니다. 새 검토본을 만들지 않고 같은 작업을 이어서 완료합니다.'
+                : '월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.'}
             </DialogDescription>
           </DialogHeader>
-          {closedMonthWarning.length > 0 && (
+          {!applyResumeRequired && closedMonthWarning.length > 0 && (
             <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
               {closedMonthWarning.slice(0, 3).map((summary) => (
                 <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
@@ -1136,24 +1176,28 @@ export function CashflowSheetLabPage({
               {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
             </div>
           )}
-          <textarea
-            value={closedMonthChangeReason}
-            onChange={(event) => setClosedMonthChangeReason(event.target.value.slice(0, 1000))}
-            placeholder="예: 결산 후 확인된 실제 입금액 정정"
-            className="min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-[13px]"
-            disabled={loading}
-          />
+          {!applyResumeRequired && (
+            <textarea
+              value={closedMonthChangeReason}
+              onChange={(event) => setClosedMonthChangeReason(event.target.value.slice(0, 1000))}
+              placeholder="예: 결산 후 확인된 실제 입금액 정정"
+              className="min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-[13px]"
+              disabled={loading}
+            />
+          )}
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthStage(null)}>
-              닫기
-            </Button>
+            {!applyResumeRequired && (
+              <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthStage(null)}>
+                닫기
+              </Button>
+            )}
             <Button
               type="button"
               className="h-9"
-              disabled={loading || !closedMonthStage || !closedMonthChangeReason.trim()}
+              disabled={loading || !closedMonthStage || (!applyResumeRequired && !closedMonthChangeReason.trim())}
               onClick={() => void handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)}
             >
-              사유와 함께 반영
+              {applyResumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}
             </Button>
           </DialogFooter>
         </DialogContent>

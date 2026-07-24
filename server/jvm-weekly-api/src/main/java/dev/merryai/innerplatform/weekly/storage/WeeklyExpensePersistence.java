@@ -109,6 +109,7 @@ public interface WeeklyExpensePersistence {
     record CashflowClosedMonthAmendment(
         String yearMonth,
         long closeRevision,
+        String closeSnapshotHash,
         String deadline,
         boolean postDeadline,
         long amendmentCount,
@@ -142,12 +143,22 @@ public interface WeeklyExpensePersistence {
     record CashflowLedgerSource(
         List<WeeklyExpenseProjectionEntity> projection,
         List<WeeklyExpenseActualEntity> actual,
-        List<Integer> weeklyYears
+        List<Integer> weeklyYears,
+        String targetRevision
     ) {
+        public CashflowLedgerSource(
+            List<WeeklyExpenseProjectionEntity> projection,
+            List<WeeklyExpenseActualEntity> actual,
+            List<Integer> weeklyYears
+        ) {
+            this(projection, actual, weeklyYears, "");
+        }
+
         public CashflowLedgerSource {
             projection = projection == null ? List.of() : List.copyOf(projection);
             actual = actual == null ? List.of() : List.copyOf(actual);
             weeklyYears = weeklyYears == null ? List.of() : weeklyYears.stream().distinct().sorted().toList();
+            targetRevision = targetRevision == null ? "" : targetRevision;
         }
     }
 
@@ -199,6 +210,7 @@ public interface WeeklyExpensePersistence {
         String lastAmendmentReason,
         String lastAmendmentDeadline,
         boolean lastAmendmentPostDeadline,
+        Map<String, Object> lastAmendmentEvidence,
         String snapshotHash,
         String previousSnapshotHash,
         Map<String, Object> snapshot,
@@ -502,6 +514,9 @@ public interface WeeklyExpensePersistence {
         String projectId,
         List<CashflowClosedMonthAmendment> amendments,
         String sourceRevision,
+        String targetRevision,
+        String resultingTargetRevision,
+        Map<String, List<Map<String, Object>>> calculationChecksByMonth,
         String reason,
         String idempotencyKey
     ) {

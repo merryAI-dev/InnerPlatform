@@ -82,13 +82,20 @@ describe('cashflow sheet pinned snapshot', () => {
     const template = { sections: [section('projection', 10), section('actual', 20)] };
 
     const valid = extractCashflowSheetFacts({ template, matrix });
-    expect(valid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2)?.matches)
-      .toEqual({ depositTotal: true, withdrawalTotal: true, balance: true });
+    expect(valid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2))
+      .toMatchObject({
+        reported: { depositTotal: 100, withdrawalTotal: 30, balance: 140 },
+        matches: { depositTotal: true, withdrawalTotal: true, balance: true },
+      });
 
     matrix[12][4] = '101';
+    matrix[14][4] = '999';
     const invalid = extractCashflowSheetFacts({ template, matrix });
-    expect(invalid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2)?.matches.depositTotal)
-      .toBe(false);
+    expect(invalid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2))
+      .toMatchObject({
+        reported: { depositTotal: 101, withdrawalTotal: 30, balance: 999 },
+        matches: { depositTotal: false, withdrawalTotal: true, balance: false },
+      });
   });
 
   it('pins normalized cells and keeps source and target revisions separate', () => {

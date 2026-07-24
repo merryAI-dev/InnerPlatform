@@ -422,11 +422,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
             boolean postDeadline = businessDate.date().isAfter(deadline);
             long closeRevision = canonicalMonthCounter(close, "revision");
+            String closeSnapshotHash = text(close.get("snapshotHash"), "");
+            if (!closeSnapshotHash.matches("sha256:[a-f0-9]{64}")) {
+                throw new WeeklyExpenseConflictException(
+                    "Closed cashflow month is missing its immutable snapshot hash. Reopen and close it again before applying sheet changes."
+                );
+            }
             long amendmentCount = addMonthCounters(optionalMonthCounter(close, "amendmentCount"), 1);
             long warningCount = addMonthCounters(optionalMonthCounter(close, "postDeadlineAmendmentWarningCount"), postDeadline ? 1 : 0);
             CashflowClosedMonthAmendment amendment = new CashflowClosedMonthAmendment(
                 yearMonth,
                 closeRevision,
+                closeSnapshotHash,
                 deadline.toString(),
                 postDeadline,
                 amendmentCount,
@@ -444,6 +451,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String projectId,
         List<CashflowClosedMonthAmendment> amendments,
         String sourceRevision,
+        String targetRevision,
+        String resultingTargetRevision,
+        Map<String, List<Map<String, Object>>> calculationChecksByMonth,
         String reason,
         String idempotencyKey
     ) {
@@ -454,16 +464,29 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String actorName = text(actor.name(), text(actor.email(), actor.id()));
         Instant now = clock.instant();
         for (CashflowClosedMonthAmendment amendment : amendments == null ? List.<CashflowClosedMonthAmendment>of() : amendments) {
-            set(db.document(monthlyClosePath(actor.tenantId(), projectId, amendment.yearMonth())), Map.of(
-                "amendmentCount", amendment.amendmentCount(),
-                "postDeadlineAmendmentWarningCount", amendment.warningCount(),
-                "lastAmendmentAt", now.toString(),
-                "lastAmendmentByUid", actor.id(),
-                "lastAmendmentByName", actorName,
-                "lastAmendmentReason", normalizedReason,
-                "lastAmendmentDeadline", amendment.deadline(),
-                "lastAmendmentPostDeadline", amendment.postDeadline()
-            ));
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("closeRevision", amendment.closeRevision());
+            evidence.put("closeSnapshotHash", amendment.closeSnapshotHash());
+            evidence.put("sourceRevision", sourceRevision);
+            evidence.put("targetRevision", targetRevision);
+            evidence.put("resultingTargetRevision", resultingTargetRevision);
+            evidence.put(
+                "calculationChecks",
+                List.copyOf(calculationChecksByMonth == null
+                    ? List.of()
+                    : calculationChecksByMonth.getOrDefault(amendment.yearMonth(), List.of()))
+            );
+            Map<String, Object> closePatch = new LinkedHashMap<>();
+            closePatch.put("amendmentCount", amendment.amendmentCount());
+            closePatch.put("postDeadlineAmendmentWarningCount", amendment.warningCount());
+            closePatch.put("lastAmendmentAt", now.toString());
+            closePatch.put("lastAmendmentByUid", actor.id());
+            closePatch.put("lastAmendmentByName", actorName);
+            closePatch.put("lastAmendmentReason", normalizedReason);
+            closePatch.put("lastAmendmentDeadline", amendment.deadline());
+            closePatch.put("lastAmendmentPostDeadline", amendment.postDeadline());
+            closePatch.put("lastAmendmentEvidence", evidence);
+            set(db.document(monthlyClosePath(actor.tenantId(), projectId, amendment.yearMonth())), closePatch);
             String amendmentId = safeDocId(projectId + "\n" + amendment.yearMonth() + "\n" + idempotencyKey);
             Map<String, Object> amendmentDocument = new LinkedHashMap<>();
             amendmentDocument.put("id", amendmentId);
@@ -471,9 +494,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             amendmentDocument.put("projectId", projectId);
             amendmentDocument.put("yearMonth", amendment.yearMonth());
             amendmentDocument.put("closeRevision", amendment.closeRevision());
+            amendmentDocument.put("closeSnapshotHash", amendment.closeSnapshotHash());
             amendmentDocument.put("deadline", amendment.deadline());
             amendmentDocument.put("postDeadline", amendment.postDeadline());
             amendmentDocument.put("sourceRevision", sourceRevision);
+            amendmentDocument.put("targetRevision", targetRevision);
+            amendmentDocument.put("resultingTargetRevision", resultingTargetRevision);
+            amendmentDocument.put("calculationChecks", evidence.get("calculationChecks"));
             amendmentDocument.put("reason", normalizedReason);
             amendmentDocument.put("warningCount", amendment.warningCount());
             amendmentDocument.put("actorUid", actor.id());
@@ -904,6 +931,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         CloseCashflowMonthRequest request
     ) {
         requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
+        requireCashflowSheetPublicationReady(actor.tenantId(), projectId);
         YearMonth targetMonth = requireYearMonth(request.yearMonth());
         CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
         LocalDate today = businessDate.date();
@@ -994,6 +1022,15 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         patch.put("closedAt", now.toString());
         patch.put("closedByUid", actor.id());
         patch.put("closedByName", actor.name());
+        patch.put("amendmentCount", 0);
+        patch.put("postDeadlineAmendmentWarningCount", 0);
+        patch.put("lastAmendmentAt", "");
+        patch.put("lastAmendmentByUid", "");
+        patch.put("lastAmendmentByName", "");
+        patch.put("lastAmendmentReason", "");
+        patch.put("lastAmendmentDeadline", "");
+        patch.put("lastAmendmentPostDeadline", false);
+        patch.put("lastAmendmentEvidence", Map.of());
         patch.put("reopenRequest", Map.of());
         patch.put("reopenDecision", Map.of());
         patch.put("createdAt", text(current.get("createdAt"), now.toString()));
@@ -1869,8 +1906,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
         List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
         Set<Integer> weeklyYears = new java.util.TreeSet<>();
+        List<Map<String, Object>> documents = new ArrayList<>();
         for (DocumentSnapshot doc : snapshot.getDocuments()) {
             Map<String, Object> document = data(doc);
+            documents.add(document);
             String yearMonth = text(document.get("yearMonth"), "");
             int weekNo = intValue(document.get("weekNo"), 0);
             if (yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])")) {
@@ -1899,7 +1938,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 }
             }
         }
-        return new CashflowLedgerSource(projection, actual, List.copyOf(weeklyYears));
+        return new CashflowLedgerSource(
+            projection,
+            actual,
+            List.copyOf(weeklyYears),
+            computeCashflowTargetRevision(documents)
+        );
     }
 
     static String computeCashflowTargetRevision(Collection<Map<String, Object>> documents) {
@@ -2838,6 +2882,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(document.get("lastAmendmentReason"), ""),
             text(document.get("lastAmendmentDeadline"), ""),
             bool(document.get("lastAmendmentPostDeadline")),
+            nestedMap(document.get("lastAmendmentEvidence")),
             text(document.get("snapshotHash"), ""),
             text(document.get("previousSnapshotHash"), ""),
             nestedMap(document.get("snapshot")),
@@ -2857,6 +2902,21 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(reopenDecision.get("decidedAt"), ""),
             text(reopenDecision.get("decidedByUid"), "")
         );
+    }
+
+    private void requireCashflowSheetPublicationReady(String tenantId, String projectId) {
+        DocumentSnapshot publicationSnapshot = get(db.document(
+            "orgs/" + tenantId + "/cashflow_sheet_publications/" + projectId
+        ));
+        if (!publicationSnapshot.exists()) {
+            return;
+        }
+        String status = text(data(publicationSnapshot).get("status"), "").toUpperCase(Locale.ROOT);
+        if ("APPLYING".equals(status)) {
+            throw new WeeklyExpenseConflictException(
+                "Cashflow sheet values are being applied. Retry the month close after the apply finishes."
+            );
+        }
     }
 
     private CashflowWeeklyUpdateCompletionRecord toWeeklyCompletionRecord(

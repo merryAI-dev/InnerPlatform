@@ -19,6 +19,7 @@ public record CashflowMonthCloseResponse(
     String lastAmendmentReason,
     String lastAmendmentDeadline,
     boolean lastAmendmentPostDeadline,
+    Map<String, Object> lastAmendmentEvidence,
     String snapshotHash,
     String previousSnapshotHash,
     Map<String, Object> snapshot,
@@ -42,6 +43,7 @@ public record CashflowMonthCloseResponse(
     public CashflowMonthCloseResponse {
         snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
         previousSnapshot = previousSnapshot == null ? Map.of() : Map.copyOf(previousSnapshot);
+        lastAmendmentEvidence = lastAmendmentEvidence == null ? Map.of() : Map.copyOf(lastAmendmentEvidence);
         snapshotHash = nullableText(snapshotHash);
         previousSnapshotHash = nullableText(previousSnapshotHash);
         lastAmendmentAt = nullableText(lastAmendmentAt);

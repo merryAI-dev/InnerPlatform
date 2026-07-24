@@ -26,6 +26,7 @@ public record CashflowSheetLabApplyRequest(
     boolean replaceAllActualSources,
     @Valid CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
     @Size(max = 1000) String closedMonthChangeReason,
+    @Size(max = 10) List<Map<String, Object>> calculationChecks,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
@@ -39,7 +40,7 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, cells);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), cells);
     }
 
     public CashflowSheetLabApplyRequest(
@@ -59,8 +60,43 @@ public record CashflowSheetLabApplyRequest(
             replaceAllActualSources,
             null,
             closedMonthChangeReason,
+            List.of(),
             cells
         );
+    }
+
+    public CashflowSheetLabApplyRequest {
+        calculationChecks = calculationChecks == null ? List.of() : List.copyOf(calculationChecks);
+    }
+
+    public static List<Map<String, Object>> requireCompleteCalculationChecks(
+        String yearMonth,
+        List<Map<String, Object>> checks
+    ) {
+        if (checks == null || checks.size() != 10) {
+            throw new IllegalArgumentException("Cashflow sheet month must contain 10 displayed calculation checks.");
+        }
+        Map<String, Map<String, Object>> checksByKey = new LinkedHashMap<>();
+        for (Map<String, Object> check : checks) {
+            if (check == null) throw new IllegalArgumentException("Cashflow calculation check is required.");
+            String checkYearMonth = String.valueOf(check.getOrDefault("yearMonth", ""));
+            String mode = String.valueOf(check.getOrDefault("mode", ""));
+            int weekNo = check.get("weekNo") instanceof Number number ? number.intValue() : -1;
+            if (!yearMonth.equals(checkYearMonth)
+                || (!"projection".equals(mode) && !"actual".equals(mode))
+                || weekNo < 1 || weekNo > FINANCE_WEEK_COUNT
+                || !(check.get("reported") instanceof Map<?, ?> reported)
+                || !reported.containsKey("depositTotal")
+                || !reported.containsKey("withdrawalTotal")
+                || !reported.containsKey("balance")) {
+                throw new IllegalArgumentException("Cashflow calculation check contract is invalid.");
+            }
+            String key = mode + ":" + weekNo;
+            if (checksByKey.putIfAbsent(key, Map.copyOf(check)) != null) {
+                throw new IllegalArgumentException("Cashflow calculation checks contain duplicate weeks.");
+            }
+        }
+        return List.copyOf(checksByKey.values());
     }
 
     public record Cell(

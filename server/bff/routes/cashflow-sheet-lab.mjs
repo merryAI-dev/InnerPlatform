@@ -1310,7 +1310,14 @@ function validateCompletePinnedYear(year, cells = []) {
   };
 }
 
-function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMonth, cells, now }) {
+function monthCalculationChecks(mirror, yearMonth) {
+  const checks = Array.isArray(mirror?.sheetFacts?.weeklyCalculationChecks)
+    ? mirror.sheetFacts.weeklyCalculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
+    : [];
+  return checks.length === 10 ? checks : [];
+}
+
+function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMonth, cells, calculationChecks, now }) {
   return stripUndefinedDeep({
     tenantId,
     projectId,
@@ -1320,6 +1327,7 @@ function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMo
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
     cells,
+    calculationChecks,
     createdAt: now,
   });
 }
@@ -1621,9 +1629,19 @@ function assertApplyRequestMatches(stageRun, applyRequestHash) {
   }
 }
 
-async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId, idempotencyKey, applyRequestHash, now }) {
+async function reserveCashflowSheetApply({
+  db,
+  tenantId,
+  projectId,
+  stagedRunId,
+  idempotencyKey,
+  applyRequestHash,
+  applyInput,
+  now,
+}) {
   const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`);
   const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+  const publicationRef = db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`);
   const result = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(runRef);
     if (!snap.exists) {
@@ -1639,8 +1657,28 @@ async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId,
       if (stageRun.applyResponse) return { replay: stageRun.applyResponse, resume: false, stageRun };
       throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
     }
+    const publicationSnap = await transaction.get(publicationRef);
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
+    if (
+      readOptionalText(publication.status).toUpperCase() === 'APPLYING'
+      && readOptionalText(publication.stagedRunId) !== stagedRunId
+    ) {
+      throw createHttpError(
+        409,
+        '이 프로젝트의 다른 시트 반영 작업이 진행 중입니다.',
+        'cashflow_sheet_apply_in_progress',
+      );
+    }
     if (status === 'APPLYING') {
       assertApplyRequestMatches(stageRun, applyRequestHash);
+      transaction.set(publicationRef, stripUndefinedDeep({
+        projectId,
+        status: 'APPLYING',
+        stagedRunId,
+        sourceRevision: stageRun.sourceRevision,
+        targetRevisionAtFetch: stageRun.targetRevisionAtFetch,
+        applyStartedAt: readOptionalText(stageRun.applyStartedAt) || now,
+      }), { merge: true });
       return { replay: null, resume: true, stageRun };
     }
     if (status !== 'READY') {
@@ -1664,6 +1702,16 @@ async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId,
       applyStartedAt: now,
       appliedIdempotencyKey: idempotencyKey,
       applyRequestHash,
+      applyInput,
+    }), { merge: true });
+    transaction.set(publicationRef, stripUndefinedDeep({
+      projectId,
+      status: 'APPLYING',
+      stagedRunId,
+      sourceRevision: stageRun.sourceRevision,
+      targetRevisionAtFetch: stageRun.targetRevisionAtFetch,
+      applyStartedAt: now,
+      appliedAt: null,
     }), { merge: true });
     return {
       replay: null,
@@ -1677,12 +1725,74 @@ async function reserveCashflowSheetApply({ db, tenantId, projectId, stagedRunId,
       },
     };
   });
-  return { ...result, runRef };
+  return { ...result, runRef, publicationRef };
+}
+
+async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
+  const publicationRef = db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`);
+  const publicationSnap = await publicationRef.get();
+  const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
+  if (readOptionalText(publication.status).toUpperCase() !== 'APPLYING') {
+    return { projectId, status: 'IDLE', stagedRun: null, applyInput: null };
+  }
+  const stagedRunId = readOptionalText(publication.stagedRunId);
+  if (!stagedRunId) {
+    throw createHttpError(
+      409,
+      '시트 반영 상태에 검토 run 정보가 없습니다. 관리자 확인이 필요합니다.',
+      'cashflow_sheet_apply_recovery_invalid',
+    );
+  }
+  const runSnap = await db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`).get();
+  const stageRunDocument = runSnap.exists ? (runSnap.data() || {}) : {};
+  if (
+    readOptionalText(stageRunDocument.projectId) !== readOptionalText(projectId)
+    || readOptionalText(stageRunDocument.status) !== 'APPLYING'
+  ) {
+    throw createHttpError(
+      409,
+      '진행 중인 시트 반영의 검토본을 확인할 수 없습니다. 관리자 확인이 필요합니다.',
+      'cashflow_sheet_apply_recovery_invalid',
+    );
+  }
+  const stagedRun = (
+    stageRunDocument.response
+    && typeof stageRunDocument.response === 'object'
+    && !Array.isArray(stageRunDocument.response)
+  ) ? stageRunDocument.response : {
+    ok: true,
+    commandName: 'cashflowSheetLab.stage.firebase',
+    projectId,
+    runId: stagedRunId,
+    status: 'READY',
+    stagedLineCount: Number(stageRunDocument.stagedLineCount) || 0,
+    projectionLineCount: Number(stageRunDocument.projectionLineCount) || 0,
+    actualLineCount: Number(stageRunDocument.actualLineCount) || 0,
+    riskLineCount: Number(stageRunDocument.riskLineCount) || 0,
+    closedMonthDifferences: Array.isArray(stageRunDocument.closedMonthDifferences) ? stageRunDocument.closedMonthDifferences : [],
+    stagedMonths: Array.isArray(stageRunDocument.stagedMonths) ? stageRunDocument.stagedMonths : [],
+    stagedYears: Array.isArray(stageRunDocument.stagedYears) ? stageRunDocument.stagedYears : [],
+  };
+  return {
+    projectId,
+    status: 'APPLYING',
+    stagedRun: { ...stagedRun, runId: stagedRunId, status: 'READY' },
+    applyInput: (
+      stageRunDocument.applyInput
+      && typeof stageRunDocument.applyInput === 'object'
+      && !Array.isArray(stageRunDocument.applyInput)
+    ) ? stageRunDocument.applyInput : {
+      applyRiskCandidates: true,
+      closedMonthChangeReason: '',
+      replaceAllActualSources: stageRunDocument.replaceAllActualSources === true,
+    },
+  };
 }
 
 async function restoreCashflowSheetApplyReady({
   db,
   runRef,
+  publicationRef,
   idempotencyKey,
   applyRequestHash,
   error,
@@ -1691,15 +1801,24 @@ async function restoreCashflowSheetApplyReady({
     const snap = await transaction.get(runRef);
     if (!snap.exists) return;
     const stageRun = snap.data() || {};
+    const publicationSnap = await transaction.get(publicationRef);
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
     if (
       readOptionalText(stageRun.status) !== 'APPLYING'
       || readOptionalText(stageRun.appliedIdempotencyKey) !== readOptionalText(idempotencyKey)
       || readOptionalText(stageRun.applyRequestHash) !== readOptionalText(applyRequestHash)
+      || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
+      || readOptionalText(publication.stagedRunId) !== readOptionalText(stageRun.runId)
     ) return;
     transaction.set(runRef, stripUndefinedDeep({
       status: 'READY',
       appliedIdempotencyKey: null,
       applyRequestHash: null,
+      applyFailedAt: new Date().toISOString(),
+      applyFailure: routeErrorDetails(error),
+    }), { merge: true });
+    transaction.set(publicationRef, stripUndefinedDeep({
+      status: 'READY',
       applyFailedAt: new Date().toISOString(),
       applyFailure: routeErrorDetails(error),
     }), { merge: true });
@@ -1852,20 +1971,34 @@ async function applyStagedCashflowSheetLab({
 
   let stageRun = await readCashflowSheetStageRun(db, tenantId, projectId, stagedRunId);
   const replaceAllActualSources = stageRun.replaceAllActualSources === true;
+  const stageStatus = readOptionalText(stageRun.status);
+  const resuming = stageStatus === 'APPLYING';
+  const replaying = stageStatus === 'APPLIED';
+  const storedApplyInput = (
+    (resuming || replaying)
+    && stageRun.applyInput
+    && typeof stageRun.applyInput === 'object'
+    && !Array.isArray(stageRun.applyInput)
+  ) ? stageRun.applyInput : null;
+  const applyRiskCandidates = storedApplyInput
+    ? storedApplyInput.applyRiskCandidates === true
+    : Boolean(parsed.applyRiskCandidates);
+  const closedMonthChangeReason = storedApplyInput
+    ? readOptionalText(storedApplyInput.closedMonthChangeReason)
+    : readOptionalText(parsed.closedMonthChangeReason);
   const applyRequestHash = stableHash({
     stagedRunId,
-    applyRiskCandidates: Boolean(parsed.applyRiskCandidates),
-    ...(readOptionalText(parsed.closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason) } : {}),
+    applyRiskCandidates,
+    ...(closedMonthChangeReason ? { closedMonthChangeReason } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
   });
-  if (readOptionalText(stageRun.status) === 'APPLIED') {
+  if (replaying) {
     assertApplyRequestMatches(stageRun, applyRequestHash);
     if (stageRun.applyResponse) return stageRun.applyResponse;
     throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
   }
-  const resuming = readOptionalText(stageRun.status) === 'APPLYING';
   if (resuming) assertApplyRequestMatches(stageRun, applyRequestHash);
-  if (!resuming && readOptionalText(stageRun.status) !== 'READY') {
+  if (!resuming && stageStatus !== 'READY') {
     throw createHttpError(409, '반영 가능한 상태의 시트 검토 run이 아닙니다.', 'cashflow_sheet_stage_run_blocked');
   }
   const candidates = await readCashflowChangeCandidatesByRun({ db, tenantId, projectId, runId: stagedRunId });
@@ -1912,7 +2045,11 @@ async function applyStagedCashflowSheetLab({
     if (!validated.ok) {
       throw createHttpError(409, '검토 당시 고정한 월 시트 구조가 완전하지 않습니다.', 'cashflow_sheet_stage_month_incomplete');
     }
-    return { yearMonth, cells: validated.cells };
+    return {
+      yearMonth,
+      cells: validated.cells,
+      calculationChecks: monthCalculationChecks({ sheetFacts: { weeklyCalculationChecks: stagedMonth.calculationChecks } }, yearMonth),
+    };
   }));
   const stagedYears = await Promise.all(candidateYears.map(async (year) => {
     const stagedYear = await readCashflowSheetStageYear({ db, tenantId, projectId, runId: stagedRunId, year });
@@ -1964,6 +2101,11 @@ async function applyStagedCashflowSheetLab({
     stagedRunId,
     idempotencyKey,
     applyRequestHash,
+    applyInput: {
+      applyRiskCandidates,
+      closedMonthChangeReason,
+      replaceAllActualSources,
+    },
     now,
   });
   if (reservation.replay) return reservation.replay;
@@ -2006,8 +2148,9 @@ async function applyStagedCashflowSheetLab({
         targetRevision,
         yearMonth: month.yearMonth,
         cells: month.cells,
+        calculationChecks: month.calculationChecks,
         replaceAllActualSources,
-        closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
+        closedMonthChangeReason,
       });
       targetRevision = assertResultingTargetRevision(javaResult);
       verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, {
@@ -2037,9 +2180,13 @@ async function applyStagedCashflowSheetLab({
         editSession: monthEditSession,
         sourceRevision: stageRun.sourceRevision,
         targetRevision,
-        months: stagedMonths.map((month) => ({ yearMonth: month.yearMonth, cells: month.cells })),
+        months: stagedMonths.map((month) => ({
+          yearMonth: month.yearMonth,
+          cells: month.cells,
+          calculationChecks: month.calculationChecks,
+        })),
         replaceAllActualSources,
-        closedMonthChangeReason: readOptionalText(parsed.closedMonthChangeReason),
+        closedMonthChangeReason,
       });
       if (
         batchResult?.ok !== true
@@ -2147,6 +2294,7 @@ async function applyStagedCashflowSheetLab({
       await restoreCashflowSheetApplyReady({
         db,
         runRef: reservation.runRef,
+        publicationRef: reservation.publicationRef,
         idempotencyKey: effectiveIdempotencyKey,
         applyRequestHash,
         error,
@@ -2239,15 +2387,28 @@ async function applyStagedCashflowSheetLab({
   await db.runTransaction(async (transaction) => {
     const currentRunSnap = await transaction.get(reservation.runRef);
     const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+    const publicationSnap = await transaction.get(reservation.publicationRef);
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
     if (
       readOptionalText(currentRun.status) !== 'APPLYING'
       || readOptionalText(currentRun.appliedIdempotencyKey) !== effectiveIdempotencyKey
       || readOptionalText(currentRun.applyRequestHash) !== applyRequestHash
+      || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
+      || readOptionalText(publication.stagedRunId) !== stagedRunId
     ) {
       throw createHttpError(409, '시트 반영 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_apply_completion_conflict');
     }
     transaction.set(reservation.runRef, runCompletionPatch, { merge: true });
     transaction.set(mirrorRef, mirrorCompletionPatch, { merge: true });
+    transaction.set(reservation.publicationRef, stripUndefinedDeep({
+      projectId,
+      status: 'APPLIED',
+      stagedRunId,
+      sourceRevision: stageRun.sourceRevision,
+      appliedTargetRevision: targetRevision,
+      appliedAt: now,
+      applyFailure: null,
+    }), { merge: true });
   });
   try {
     await markCashflowChangeCandidatesStatus({
@@ -2379,6 +2540,7 @@ async function stagePinnedCashflowSheetLab({
       mirror,
       yearMonth,
       cells: validated.cells,
+      calculationChecks: monthCalculationChecks(mirror, yearMonth),
       now,
     });
   });
@@ -2588,6 +2750,14 @@ export function mountCashflowSheetLabRoutes(app, {
     const project = await readProjectDocument(db, tenantId, projectId);
     const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
     res.status(200).json(attachFinancialYearChecks(mirror, project) || { projectId, status: 'EMPTY' });
+  }));
+
+  app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/apply-status', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    await readProjectDocument(db, tenantId, projectId);
+    res.status(200).json(await readCashflowSheetApplyStatus({ db, tenantId, projectId }));
   }));
 
   app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/years', asyncHandler(async (req, res) => {

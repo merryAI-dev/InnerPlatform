@@ -381,20 +381,49 @@ public class WeeklyExpenseController {
         @RequestHeader("x-actor-role") String actorRole,
         @RequestHeader(value = "x-actor-email", required = false) String actorEmail
     ) {
-        CashflowMonthCloseResponse monthClose = commandService.readCashflowMonthClose(
-            actorContext(tenantId, actorId, actorRole, actorEmail),
-            projectId,
-            yearMonth
+        TrustedActorContext actor = actorContext(tenantId, actorId, actorRole, actorEmail);
+        for (int attempt = 0; attempt < 2; attempt += 1) {
+            CashflowMonthDashboardSourceResponse response = readCashflowMonthDashboardSourceAttempt(
+                actor,
+                tenantId,
+                projectId,
+                yearMonth
+            );
+            if (response != null) {
+                return response;
+            }
+        }
+        throw new WeeklyExpenseConflictException(
+            "Cashflow ledger changed while the closed-month evidence was being read. Reload and try again."
         );
+    }
+
+    private CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSourceAttempt(
+        TrustedActorContext actor,
+        String tenantId,
+        String projectId,
+        String yearMonth
+    ) {
+        CashflowMonthCloseResponse monthClose = commandService.readCashflowMonthClose(actor, projectId, yearMonth);
         boolean open = "OPEN".equals(monthClose.status());
-        CashflowMonthDashboardSourceResponse.SnapshotCompatibility snapshotCompatibility = open
-            ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
-            : frozenSnapshotCompatibility(monthClose);
-        WeeklyExpensePersistence.CashflowLedgerSource source = open
+        String amendmentSnapshotHash = String.valueOf(
+            monthClose.lastAmendmentEvidence().getOrDefault("closeSnapshotHash", "")
+        );
+        boolean amendedClosed = "CLOSED".equals(monthClose.status())
+            && monthClose.amendmentCount() > 0
+            && !amendmentSnapshotHash.isBlank()
+            && amendmentSnapshotHash.equals(monthClose.snapshotHash());
+        boolean currentLedgerView = open || amendedClosed;
+        CashflowMonthDashboardSourceResponse.SnapshotCompatibility snapshotCompatibility = amendedClosed
+            ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_AMENDED", List.of())
+            : open
+                ? new CashflowMonthDashboardSourceResponse.SnapshotCompatibility("LIVE_CURRENT", List.of())
+                : frozenSnapshotCompatibility(monthClose);
+        WeeklyExpensePersistence.CashflowLedgerSource source = currentLedgerView
             ? readCashflowSource(tenantId, projectId)
             : null;
-        CashflowSnapshotResponse cashflow = open ? buildCashflowSnapshot(projectId, source) : null;
-        CashflowOpeningBalancesResponse openingBalances = open
+        CashflowSnapshotResponse cashflow = currentLedgerView ? buildCashflowSnapshot(projectId, source) : null;
+        CashflowOpeningBalancesResponse openingBalances = currentLedgerView
             ? toOpeningBalancesResponse(persistence.findCashflowOpeningBalance(
                 tenantId,
                 projectId,
@@ -406,6 +435,23 @@ public class WeeklyExpenseController {
                 : frozenOpeningBalances(monthClose, yearMonth);
         if (openingBalances != null) {
             CloseCashflowMonthRequest.requireOpeningBalances(openingBalances, yearMonth);
+        }
+        if (amendedClosed) {
+            CashflowMonthCloseResponse verified = commandService.readCashflowMonthClose(actor, projectId, yearMonth);
+            String expectedTargetRevision = String.valueOf(
+                verified.lastAmendmentEvidence().getOrDefault("resultingTargetRevision", "")
+            );
+            boolean stableEvidence =
+                "CLOSED".equals(verified.status())
+                && verified.amendmentCount() > 0
+                && monthClose.snapshotHash().equals(verified.snapshotHash())
+                && monthClose.lastAmendmentEvidence().equals(verified.lastAmendmentEvidence());
+            if (!stableEvidence
+                || expectedTargetRevision.isBlank()
+                || !expectedTargetRevision.equals(source.targetRevision())) {
+                return null;
+            }
+            monthClose = verified;
         }
         return new CashflowMonthDashboardSourceResponse(
             monthClose,

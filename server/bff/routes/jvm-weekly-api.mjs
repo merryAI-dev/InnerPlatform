@@ -328,6 +328,27 @@ function buildMonthModeReadModel(cells, mode) {
   };
 }
 
+function canonicalMonthCells(month, yearMonth) {
+  return ['projection', 'actual'].flatMap((mode) => {
+    const weeks = new Map((Array.isArray(month?.[mode]?.weeks) ? month[mode].weeks : [])
+      .map((week) => [Number(week?.weekNo), objectValue(week?.amounts) || {}]));
+    return Array.from({ length: 5 }, (_, index) => index + 1).flatMap((weekNo) => {
+      const amounts = weeks.get(weekNo) || {};
+      return CASHFLOW_ALL_LINES.map((cashflowLine) => {
+        const hasValue = Object.hasOwn(amounts, cashflowLine);
+        return {
+          yearMonth,
+          mode,
+          weekNo,
+          cashflowLine,
+          cellState: hasValue ? 'VALUE' : 'EMPTY',
+          ...(hasValue ? { amount: safeAmount(amounts[cashflowLine]) } : {}),
+        };
+      });
+    });
+  });
+}
+
 function monthWeeksFromCells(cells, yearMonth) {
   const modes = {
     projection: buildMonthModeReadModel(cells, 'projection'),
@@ -1121,6 +1142,37 @@ function monthsBetween(startYearMonth, endYearMonth) {
   return result;
 }
 
+async function readCashflowSheetPublicationState({ db, tenantId, projectId }) {
+  if (!db?.doc) {
+    return { blocked: false, fingerprint: '{}' };
+  }
+  const snapshot = await db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`).get();
+  const data = snapshot.exists ? snapshot.data() || {} : {};
+  const publication = {
+    status: readOptionalText(data.status).toUpperCase(),
+    stagedRunId: readOptionalText(data.stagedRunId),
+    sourceRevision: readOptionalText(data.sourceRevision),
+    targetRevisionAtFetch: readOptionalText(data.targetRevisionAtFetch),
+    appliedTargetRevision: readOptionalText(data.appliedTargetRevision),
+    applyStartedAt: readOptionalText(data.applyStartedAt),
+    applyFailedAt: readOptionalText(data.applyFailedAt),
+    appliedAt: readOptionalText(data.appliedAt),
+  };
+  return {
+    blocked: publication.status === 'APPLYING',
+    fingerprint: stableStringify(publication),
+  };
+}
+
+function assertCashflowSheetPublicationReady(state) {
+  if (!state.blocked) return;
+  throw createHttpError(
+    409,
+    '시트 값을 원장에 반영 중입니다. 반영이 끝난 뒤 다시 확인해 주세요.',
+    'cashflow_sheet_apply_in_progress',
+  );
+}
+
 async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
   if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks: [], weeklyStatuses: [] };
   const [runSnap, completionSnap] = await Promise.all([
@@ -1209,7 +1261,28 @@ async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
     .get();
   return snapshot.docs
     .map((doc) => doc.data() || {})
-    .map((value) => ({ yearMonth: readOptionalText(value.yearMonth), status: readOptionalText(value.status).toUpperCase() || 'OPEN' }))
+    .map((value) => {
+      const yearMonth = readOptionalText(value.yearMonth);
+      const status = readOptionalText(value.status).toUpperCase() || 'OPEN';
+      const snapshotFacts = objectValue(objectValue(value.snapshot)?.sheetFacts);
+      const amendmentEvidence = objectValue(value.lastAmendmentEvidence);
+      const amendedCurrent = (
+        status === 'CLOSED'
+        && Number(value.amendmentCount) > 0
+        && readOptionalText(amendmentEvidence.closeSnapshotHash)
+        && readOptionalText(amendmentEvidence.closeSnapshotHash) === readOptionalText(value.snapshotHash)
+      );
+      const calculationChecks = amendedCurrent
+        ? amendmentEvidence.calculationChecks
+        : snapshotFacts?.weeklyCalculationChecks;
+      return {
+        yearMonth,
+        status,
+        sheetCalculationChecks: Array.isArray(calculationChecks)
+          ? calculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
+          : [],
+      };
+    })
     .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth));
 }
 
@@ -1419,6 +1492,8 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     missingEvidence: closedSnapshot ? ['OPENING_BALANCES', 'LEDGER_WEEKS'] : [],
   };
   const legacyEvidenceOnly = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY';
+  const amendedCurrent = snapshotCompatibility.status === 'LIVE_AMENDED';
+  const amendmentEvidence = objectValue(close?.lastAmendmentEvidence) || {};
   const tenantId = readOptionalText(req.context?.tenantId);
   const deadlineSummaryPromise = readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
   const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
@@ -1431,9 +1506,23 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   const project = closedSnapshot?.project || projectDocument || {};
   const sheetFacts = closedSnapshot?.sheetFacts || mirror?.sheetFacts || null;
   const mirrorCells = normalizeMonthCloseCells(mirror?.cells, yearMonth);
-  const cells = closedSnapshot
+  const frozenCells = closedSnapshot
     ? closeSnapshotCells(closedSnapshot, yearMonth)
     : mirrorCells;
+  const selectedYear = Number(yearMonth.slice(0, 4));
+  const frozenCanonical = closedSnapshot
+    ? objectValue(closedSnapshot?.canonical) || frozenCashflowReadModel(closedSnapshot?.ledgerWeeks)
+    : null;
+  const canonicalReadModel = cashflowReadModelForYear(
+    amendedCurrent ? objectValue(cashflow?.readModel) : frozenCanonical || objectValue(cashflow?.readModel),
+    selectedYear,
+  );
+  const currentCanonicalMonth = amendedCurrent
+    ? canonicalReadModel?.months?.find((month) => month.yearMonth === yearMonth) || null
+    : null;
+  const cells = amendedCurrent
+    ? canonicalMonthCells(currentCanonicalMonth, yearMonth)
+    : frozenCells;
   const projectionMode = buildMonthModeReadModel(cells, 'projection');
   const actualMode = buildMonthModeReadModel(cells, 'actual');
   const projection = dashboardTotals(projectionMode);
@@ -1451,18 +1540,12 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   const depositScheduleRows = closedSnapshot?.depositScheduleRows
     || sourceRows
     || [];
-  const openingBalanceCandidate = objectValue(closedSnapshot?.openingBalances) || openingBalances;
+  const openingBalanceCandidate = amendedCurrent
+    ? openingBalances
+    : objectValue(closedSnapshot?.openingBalances) || openingBalances;
   const authoritativeOpeningBalances = openingBalanceCandidate
     ? requireJvmOpeningBalances({ openingBalances: openingBalanceCandidate }, yearMonth)
     : null;
-  const selectedYear = Number(yearMonth.slice(0, 4));
-  const frozenCanonical = closedSnapshot
-    ? objectValue(closedSnapshot?.canonical) || frozenCashflowReadModel(closedSnapshot?.ledgerWeeks)
-    : null;
-  const canonicalReadModel = cashflowReadModelForYear(
-    frozenCanonical || objectValue(cashflow?.readModel),
-    selectedYear,
-  );
   const canonicalComparison = canonicalReadModel
     ? buildCashflowProjectionActualComparison({ projectId, readModel: canonicalReadModel }, comparisonBoundary)
     : null;
@@ -1473,20 +1556,31 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       comparison: canonicalComparison?.months?.find((candidate) => candidate.yearMonth === month.yearMonth) || null,
     })),
   } : null;
-  const managementChecks = Array.isArray(closedSnapshot?.managementChecks)
-    ? closedSnapshot.managementChecks
-    : legacyEvidenceOnly
-      ? []
-    : buildCashflowManagementChecks({
+  const managementChecks = amendedCurrent
+    ? buildCashflowManagementChecks({
       project,
       cashflow,
       cells,
       yearMonth,
       depositScheduleRows: sheetFacts?.depositScheduleRows || depositScheduleRows,
       comparisonBoundary,
-      pinnedSheetCells: mirror?.cells,
+      pinnedSheetCells: null,
       projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
-    });
+    })
+    : Array.isArray(closedSnapshot?.managementChecks)
+      ? closedSnapshot.managementChecks
+      : legacyEvidenceOnly
+      ? []
+      : buildCashflowManagementChecks({
+        project,
+        cashflow,
+        cells,
+        yearMonth,
+        depositScheduleRows: sheetFacts?.depositScheduleRows || depositScheduleRows,
+        comparisonBoundary,
+        pinnedSheetCells: mirror?.cells,
+        projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
+      });
   const liveDeadlineSummary = await deadlineSummaryPromise;
   const deadlineSummary = closedSnapshot
     ? {
@@ -1546,11 +1640,17 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   ) / 100;
   const settlement = settlementProgress(comparison, confirmations, yearMonth, comparisonBoundary);
   const source = closedSnapshot ? {
-    kind: 'MONTH_CLOSE_SNAPSHOT',
+    kind: amendedCurrent ? 'MONTH_CLOSE_AMENDED_CURRENT' : 'MONTH_CLOSE_SNAPSHOT',
     status: readOptionalText(close?.status),
-    sourceRevision: readOptionalText(closedSnapshot?.sourceFingerprint),
-    targetRevision: readOptionalText(closedSnapshot?.targetRevision),
-    capturedAt: readOptionalText(closedSnapshot?.sourceReadAt),
+    sourceRevision: amendedCurrent
+      ? readOptionalText(amendmentEvidence.sourceRevision)
+      : readOptionalText(closedSnapshot?.sourceFingerprint),
+    targetRevision: amendedCurrent
+      ? readOptionalText(amendmentEvidence.resultingTargetRevision)
+      : readOptionalText(closedSnapshot?.targetRevision),
+    capturedAt: amendedCurrent
+      ? readOptionalText(close?.lastAmendmentAt)
+      : readOptionalText(closedSnapshot?.sourceReadAt),
   } : {
     kind: 'PINNED_MIRROR',
     status: readOptionalText(mirror?.status) || 'EMPTY',
@@ -1579,6 +1679,11 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     project,
     projectMetadata: projectMetadata(project),
     sheetMetadata: sheetFacts?.metadata || {},
+    sheetCalculationChecks: amendedCurrent
+      ? (Array.isArray(amendmentEvidence.calculationChecks) ? amendmentEvidence.calculationChecks : [])
+      : (Array.isArray(sheetFacts?.weeklyCalculationChecks)
+        ? sheetFacts.weeklyCalculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
+        : []),
     sheetControlTotals: {
       deposit: objectValue(sheetFacts?.controlTotals?.deposit) || null,
       unpaid: objectValue(sheetFacts?.controlTotals?.unpaid) || null,
@@ -1962,42 +2067,63 @@ export function mountJvmWeeklyApiRoutes(app, {
         ...resolveCashflowComparisonAsOf('', qaClock.now),
         asOfMs: qaClock.now.getTime(),
       };
-      const source = await proxyJavaWeeklyRequest({
-        context: req.context,
-        method: 'GET',
-        path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
-      });
-      const result = objectValue(source?.monthClose);
-      const cashflow = objectValue(source?.cashflow);
-      const snapshotCompatibility = objectValue(source?.snapshotCompatibility) || {
-        status: readOptionalText(result?.status) === 'OPEN' ? 'LIVE_CURRENT' : 'LEGACY_EVIDENCE_ONLY',
-        missingEvidence: readOptionalText(result?.status) === 'OPEN' ? [] : ['OPENING_BALANCES', 'LEDGER_WEEKS'],
-      };
-      result.snapshotCompatibility = snapshotCompatibility;
-      const openingBalances = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY'
-        && snapshotCompatibility.missingEvidence?.includes('OPENING_BALANCES')
-        ? null
-        : requireJvmOpeningBalances(source, yearMonth);
-      if (readOptionalText(result?.projectId) !== rawProjectId || readOptionalText(result?.yearMonth) !== yearMonth) {
-        throw createHttpError(502, 'JVM cashflow month response scope does not match the request.', 'jvm_weekly_project_mismatch');
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const publicationBefore = await readCashflowSheetPublicationState({
+          db,
+          tenantId: req.context.tenantId,
+          projectId: rawProjectId,
+        });
+        assertCashflowSheetPublicationReady(publicationBefore);
+        const source = await proxyJavaWeeklyRequest({
+          context: req.context,
+          method: 'GET',
+          path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+        });
+        const result = objectValue(source?.monthClose);
+        const cashflow = objectValue(source?.cashflow);
+        const snapshotCompatibility = objectValue(source?.snapshotCompatibility) || {
+          status: readOptionalText(result?.status) === 'OPEN' ? 'LIVE_CURRENT' : 'LEGACY_EVIDENCE_ONLY',
+          missingEvidence: readOptionalText(result?.status) === 'OPEN' ? [] : ['OPENING_BALANCES', 'LEDGER_WEEKS'],
+        };
+        result.snapshotCompatibility = snapshotCompatibility;
+        const openingBalances = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY'
+          && snapshotCompatibility.missingEvidence?.includes('OPENING_BALANCES')
+          ? null
+          : requireJvmOpeningBalances(source, yearMonth);
+        if (readOptionalText(result?.projectId) !== rawProjectId || readOptionalText(result?.yearMonth) !== yearMonth) {
+          throw createHttpError(502, 'JVM cashflow month response scope does not match the request.', 'jvm_weekly_project_mismatch');
+        }
+        if (db?.doc && readOptionalText(result?.status) === 'OPEN' && !cashflow) {
+          throw createHttpError(502, 'JVM cashflow month source is incomplete.', 'jvm_weekly_response_invalid');
+        }
+        if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
+          throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+        }
+        const dashboard = await composeCashflowMonthDashboard({
+          db,
+          req,
+          projectId: rawProjectId,
+          yearMonth,
+          close: result,
+          cashflow,
+          openingBalances,
+          comparisonBoundary,
+        });
+        const publicationAfter = await readCashflowSheetPublicationState({
+          db,
+          tenantId: req.context.tenantId,
+          projectId: rawProjectId,
+        });
+        assertCashflowSheetPublicationReady(publicationAfter);
+        if (publicationBefore.fingerprint === publicationAfter.fingerprint) {
+          return { ...result, dashboard };
+        }
       }
-      if (db?.doc && readOptionalText(result?.status) === 'OPEN' && !cashflow) {
-        throw createHttpError(502, 'JVM cashflow month source is incomplete.', 'jvm_weekly_response_invalid');
-      }
-      if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
-        throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
-      }
-      const dashboard = await composeCashflowMonthDashboard({
-        db,
-        req,
-        projectId: rawProjectId,
-        yearMonth,
-        close: result,
-        cashflow,
-        openingBalances,
-        comparisonBoundary,
-      });
-      return { ...result, dashboard };
+      throw createHttpError(
+        409,
+        '시트 반영 상태가 조회 중 변경되었습니다. 잠시 후 다시 확인해 주세요.',
+        'cashflow_sheet_publication_changed',
+      );
     }, monthCloseRouteTimeoutMs);
     res.status(200).json(body);
   }));
@@ -2182,6 +2308,12 @@ export function mountJvmWeeklyApiRoutes(app, {
         projectId: rawProjectId,
         fallbackNow: now(),
       });
+      const publicationBefore = await readCashflowSheetPublicationState({
+        db,
+        tenantId: req.context.tenantId,
+        projectId: rawProjectId,
+      });
+      assertCashflowSheetPublicationReady(publicationBefore);
       const comparisonBoundary = {
         ...resolveCashflowComparisonAsOf('', qaClock.now),
         asOfMs: qaClock.now.getTime(),
@@ -2214,9 +2346,35 @@ export function mountJvmWeeklyApiRoutes(app, {
         openingBalances: reviewedOpeningBalances,
         comparisonBoundary,
       });
-      return { projectId, closeBody };
+      const publicationAfter = await readCashflowSheetPublicationState({
+        db,
+        tenantId: req.context.tenantId,
+        projectId: rawProjectId,
+      });
+      assertCashflowSheetPublicationReady(publicationAfter);
+      if (publicationBefore.fingerprint !== publicationAfter.fingerprint) {
+        throw createHttpError(
+          409,
+          '월 결산 검토 중 시트 반영 상태가 변경되었습니다. 다시 확인해 주세요.',
+          'cashflow_sheet_publication_changed',
+        );
+      }
+      return { projectId, rawProjectId, closeBody, publicationFingerprint: publicationAfter.fingerprint };
     }, preflightTimeoutMs);
     if (Date.now() >= routeDeadlineAtMs) throw cashflowMonthCloseTimeoutError();
+    const publicationAtMutation = await readCashflowSheetPublicationState({
+      db,
+      tenantId: req.context.tenantId,
+      projectId: prepared.rawProjectId,
+    });
+    assertCashflowSheetPublicationReady(publicationAtMutation);
+    if (publicationAtMutation.fingerprint !== prepared.publicationFingerprint) {
+      throw createHttpError(
+        409,
+        '월 결산 저장 직전에 시트 반영 상태가 변경되었습니다. 다시 확인해 주세요.',
+        'cashflow_sheet_publication_changed',
+      );
+    }
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${prepared.projectId}/month-close`,

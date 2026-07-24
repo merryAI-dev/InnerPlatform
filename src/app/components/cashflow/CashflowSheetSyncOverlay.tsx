@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+
 export type CashflowSheetSyncOperation = 'saving' | 'refresh' | 'staging' | 'applying';
 
 const copy: Record<CashflowSheetSyncOperation, { title: string; detail: string; activeStep: number }> = {
@@ -28,7 +30,8 @@ const steps = ['시트 읽기', '변경 확인', '원장 반영'];
 export function CashflowSheetSyncOverlay({ operation }: { operation: CashflowSheetSyncOperation }) {
   const current = copy[operation];
 
-  return (
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <div className="fixed inset-0 z-[120] grid place-items-center bg-[#EAF4FB]/90 px-5 py-8 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="cashflow-sheet-sync-title">
       <div role="status" aria-live="assertive" className="w-full max-w-[360px] rounded-2xl border border-white/80 bg-white/95 px-7 py-8 text-center shadow-[0_24px_60px_rgba(23,50,77,0.20)]">
         <div className="mx-auto flex h-24 items-center justify-center" aria-hidden="true">
@@ -45,6 +48,7 @@ export function CashflowSheetSyncOverlay({ operation }: { operation: CashflowShe
           ))}
         </ol>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -622,6 +622,12 @@ describe('cashflow sheet lab route', () => {
     expect(annual2025.projection).toHaveProperty('MYSC_PREPAY_IN', 0);
     expect(annual2025.projectionStates).toHaveProperty('MYSC_PREPAY_IN', 'ZERO');
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/')).toHaveLength(0);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toMatchObject({
+      projectId: 'project-a',
+      status: 'APPLIED',
+      stagedRunId: stage.body.runId,
+      appliedTargetRevision: applied.body.resultingTargetRevision,
+    });
 
     const yearView = await request(app)
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/years?selectedYear=2025')
@@ -689,6 +695,10 @@ describe('cashflow sheet lab route', () => {
       });
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status)
       .toBe('APPLYING');
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toMatchObject({
+      status: 'APPLYING',
+      stagedRunId: stage.body.runId,
+    });
   });
 
   it('resumes a bounded parallel annual apply after one year fails', async () => {
@@ -747,16 +757,41 @@ describe('cashflow sheet lab route', () => {
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-resume-first' })
       .expect(503);
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('APPLYING');
+    const recovery = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/apply-status')
+      .expect(200);
+    expect(recovery.body).toMatchObject({
+      projectId: 'project-a',
+      status: 'APPLYING',
+      stagedRun: {
+        runId: stage.body.runId,
+        stagedLineCount: stage.body.stagedLineCount,
+      },
+      applyInput: {
+        applyRiskCandidates: false,
+        closedMonthChangeReason: '',
+        replaceAllActualSources: false,
+      },
+    });
 
     const replay = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-resume-second' })
+      .send({
+        stageRunId: stage.body.runId,
+        idempotencyKey: 'annual-resume-second',
+        applyRiskCandidates: true,
+        closedMonthChangeReason: '다른 화면에서 임의로 바꾼 재시도 입력',
+      })
       .expect(200);
     expect(replay.body.appliedYears).toEqual([2024, 2025, 2028]);
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(6);
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].idempotencyKey)
       .toBe(javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0].idempotencyKey);
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toMatchObject({
+      status: 'APPLIED',
+      stagedRunId: stage.body.runId,
+    });
     const annualCalls = javaWeeklyClient.applyCashflowSheetAnnualTotal.mock.calls.map(([call]) => call);
     for (const year of [2024, 2025, 2028]) {
       const calls = annualCalls.filter((call) => call.year === year);
@@ -2413,6 +2448,7 @@ describe('cashflow sheet lab route', () => {
     expect(editLeaseService.acquire).not.toHaveBeenCalled();
     expect(editLeaseService.release).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].cells).toHaveLength(160);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].calculationChecks).toHaveLength(10);
     expect(db.__getQueries()).toContainEqual({
       path: 'orgs/tenant-a/cashflow_change_candidates',
       field: 'runId',
@@ -2749,7 +2785,12 @@ describe('cashflow sheet lab route', () => {
       'x-edit-fence': '7',
       'x-edit-finalize': 'true',
     };
-    const firstPayload = { stageRunId: stage.body.runId, idempotencyKey: 'apply-resume-first' };
+    const firstPayload = {
+      stageRunId: stage.body.runId,
+      idempotencyKey: 'apply-resume-first',
+      applyRiskCandidates: true,
+      closedMonthChangeReason: '최초 서버 고정 사유',
+    };
 
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
@@ -2761,7 +2802,12 @@ describe('cashflow sheet lab route', () => {
     const retry = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .set(headers)
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-resume-after-reload' })
+      .send({
+        stageRunId: stage.body.runId,
+        idempotencyKey: 'apply-resume-after-reload',
+        applyRiskCandidates: false,
+        closedMonthChangeReason: '',
+      })
       .expect(200);
 
     expect(retry.body.resultingTargetRevision).toBe(resultingTargetRevision);
@@ -2771,6 +2817,8 @@ describe('cashflow sheet lab route', () => {
     expect(calls[0].idempotencyKey).toBe(calls[1].idempotencyKey);
     expect(calls[0].targetRevision).toBe(mirror.body.targetRevisionAtFetch);
     expect(calls[1].targetRevision).toBe(mirror.body.targetRevisionAtFetch);
+    expect(calls[0].closedMonthChangeReason).toBe('최초 서버 고정 사유');
+    expect(calls[1].closedMonthChangeReason).toBe('최초 서버 고정 사유');
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
   });
 
