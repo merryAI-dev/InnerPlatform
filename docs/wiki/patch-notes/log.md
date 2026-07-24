@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-07-24] hotfix | cashflow-legacy-close-summary | 이전 월 결산 합계 표시 복구
+- pages: [portal-cashflow](./pages/portal-cashflow.md)
+- summary: 이전 형식의 월 결산 기록에 주차별 `reported` 합계가 없어도 현금흐름 화면이 중단되지 않도록 보강했다. 해당 값이 없을 때는 저장된 행 값의 합계를 사용한다.
+
 ## [2026-07-24] patch-note | cashflow-sheet-close-atomicity | 시트 표시값·월 결산 증거 원자성
 - pages: [portal-cashflow](./pages/portal-cashflow.md), [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
 - pr: [#353](https://github.com/merryAI-dev/MYSCube/pull/353)
