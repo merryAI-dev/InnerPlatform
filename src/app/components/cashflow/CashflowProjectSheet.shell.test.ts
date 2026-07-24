@@ -125,15 +125,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('week.weekStart.slice(5)');
   });
 
-  it('groups each month with an explicit close band and marks completed weekly settlements without extra requests', () => {
-    expect(source).toContain('const monthCloseStatusByMonth = new Map');
-    expect(source).toContain('const settledWeekKeys = new Set');
-    expect(source).toContain('const monthGroups = visibleWeeks.reduce');
-    expect(source).toContain('colSpan={month.weeks.length}');
-    expect(source).toContain("'월 결산 완료'");
-    expect(source).toContain("'주간 정산 완료'");
-    expect(source).toContain("input.monthCloseStatus === 'CLOSED'");
-    expect(source).toContain("? 'bg-slate-200'");
+  it('uses server weekly settlement status to color the whole weekly column without monthly status bands', () => {
+    expect(source).toContain('const weeklyStatusByWeek = new Map');
+    expect(source).toContain('weeklySettlementSurface(input.weeklyStatus)');
+    expect(source).toContain("return 'bg-emerald-50'");
+    expect(source).toContain("return 'bg-red-50'");
+    expect(source).toContain("return 'bg-yellow-50'");
+    expect(source).toContain("? '정산 완료'");
+    expect(source).not.toContain('월 결산 전');
+    expect(source).not.toContain('monthCloseStatusByMonth');
   });
 
   it('keeps explicit zero ledger values distinct from unentered cells outside the as-of comparison range', () => {
