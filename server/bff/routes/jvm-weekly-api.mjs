@@ -1122,7 +1122,7 @@ function monthsBetween(startYearMonth, endYearMonth) {
 }
 
 async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
-  if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
+  if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks: [] };
   const [runSnap, completionSnap] = await Promise.all([
     db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
       .where('projectId', '==', projectId)
@@ -1151,8 +1151,17 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     .map((value) => readOptionalText(value.completedAt))
     .filter((value) => Number.isFinite(Date.parse(value)))
     .sort();
+  const completedWeeks = completionRows
+    .map((value) => ({
+      yearMonth: readOptionalText(value.yearMonth),
+      weekNo: Number(value.weekNo),
+      completedAt: readOptionalText(value.completedAt) || null,
+      completedBy: readOptionalText(value.completedByEmail) || readOptionalText(value.completedByUid) || null,
+    }))
+    .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth) && Number.isInteger(value.weekNo) && value.weekNo >= 1 && value.weekNo <= 5)
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
   const trackingStartedAt = [...runs, ...completionDates].sort()[0] || null;
-  if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null };
+  if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks };
   const asOfDate = readOptionalText(comparisonBoundary?.asOfDate);
   const startYearMonth = trackingStartedAt.slice(0, 7);
   const endYearMonth = asOfDate.slice(0, 7);
@@ -1185,7 +1194,23 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
       };
     }
   }
-  return { trackingStartedAt, missedCount, completedCount, current };
+  return { trackingStartedAt, missedCount, completedCount, current, completedWeeks };
+}
+
+async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
+  if (!db?.collection) return [];
+  const snapshot = await db.collection(`orgs/${tenantId}/monthly_closes`)
+    .where('projectId', '==', projectId)
+    .limit(500)
+    .get();
+  return snapshot.docs
+    .map((doc) => doc.data() || {})
+    .map((value) => ({
+      yearMonth: readOptionalText(value.yearMonth),
+      status: readOptionalText(value.status).toUpperCase() || 'OPEN',
+    }))
+    .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth))
+    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
 }
 
 function sheetControlBlockers(sheetFacts) {
@@ -1395,9 +1420,15 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   };
   const legacyEvidenceOnly = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY';
   const tenantId = readOptionalText(req.context?.tenantId);
-  const [projectDocument, mirror] = closedSnapshot
-    ? [null, null]
+  const deadlineSummaryPromise = readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
+  const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
+    ? await Promise.all([
+      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
+      Promise.resolve(null),
+      Promise.resolve(null),
+    ])
     : await Promise.all([
+      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
       readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
     ]);
@@ -1460,9 +1491,13 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       pinnedSheetCells: mirror?.cells,
       projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
     });
+  const liveDeadlineSummary = await deadlineSummaryPromise;
   const deadlineSummary = closedSnapshot
-    ? closedSnapshot?.deadlineSummary || { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null }
-    : await readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
+    ? {
+      ...(closedSnapshot?.deadlineSummary || liveDeadlineSummary),
+      completedWeeks: liveDeadlineSummary.completedWeeks,
+    }
+    : liveDeadlineSummary;
   const blockers = [];
   if (readOptionalText(close?.status) !== 'OPEN') {
     blockers.push({ code: 'MONTH_NOT_OPEN', message: '결산 또는 재오픈 검토 중인 월은 수정할 수 없습니다.' });
@@ -1560,6 +1595,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     openingBalances: authoritativeOpeningBalances,
     snapshotCompatibility,
     deadlineSummary,
+    monthCloseStatuses,
     postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
     draftRevision: null,
     totals: { projection, actual, difference },
