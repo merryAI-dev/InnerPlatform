@@ -95,7 +95,7 @@ function matchingControlRows(startRow, matches = true) {
   }));
 }
 
-function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, contractAmount = 1000 } = {}) {
+function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, calculationMismatch = false, contractAmount = 1000 } = {}) {
   const sourceRevision = `sha256:${'c'.repeat(64)}`;
   const targetRevision = `sha256:${'d'.repeat(64)}`;
   const cells = [];
@@ -148,6 +148,17 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
       projection: matchingControlRows(14, controlMatches),
       actual: matchingControlRows(37, controlMatches),
     },
+    ...(calculationMismatch ? {
+      weeklyCalculationChecks: Array.from({ length: 10 }, (_, index) => ({
+        mode: index < 5 ? 'projection' : 'actual',
+        yearMonth: '2026-06',
+        weekNo: (index % 5) + 1,
+        sourceCells: {},
+        matches: index === 0
+          ? { depositTotal: false, withdrawalTotal: true, balance: true }
+          : { depositTotal: true, withdrawalTotal: true, balance: true },
+      })),
+    } : {}),
     issues: [],
   };
   const draftId = `v1_${Buffer.from(JSON.stringify(['cashflow', 'project-a', 'pm-1']), 'utf8').toString('base64url')}`;
@@ -1490,6 +1501,29 @@ describe('JVM weekly API BFF proxy', () => {
         })
         .expect(409);
     }
+  });
+
+  it('blocks month close when the pinned sheet total does not equal its item values', async () => {
+    const source = fullMonthCloseSource({ calculationMismatch: true });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.validation.canClose).toBe(false);
+        expect(response.body.dashboard.validation.blockers).toEqual(expect.arrayContaining([
+          expect.objectContaining({ code: 'SHEET_CALCULATION_MISMATCH' }),
+        ]));
+      });
   });
 
   it('requires explicit reviewed close input before forwarding a month close', async () => {

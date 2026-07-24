@@ -1221,6 +1221,32 @@ function sheetControlBlockers(sheetFacts) {
   return blockers;
 }
 
+function monthSheetCalculationBlockers(sheetFacts, yearMonth) {
+  if (!Array.isArray(sheetFacts?.weeklyCalculationChecks)) return [];
+  const checks = sheetFacts.weeklyCalculationChecks
+    .filter((check) => readOptionalText(check?.yearMonth) === yearMonth);
+  if (checks.length !== 10) {
+    return [{
+      code: 'SHEET_CALCULATION_CHECK_MISSING',
+      message: '시트 합계·잔액 검산값이 없습니다. 시트값을 다시 불러와 주세요.',
+    }];
+  }
+  const invalid = checks.filter((check) => Object.values(check?.matches || {}).some((match) => match === null));
+  if (invalid.length > 0) {
+    return [{
+      code: 'SHEET_CALCULATION_VALUE_INVALID',
+      message: '월 결산 대상의 입금·출금 합계 또는 잔액 값을 확인해 주세요.',
+      details: invalid.map((check) => ({ mode: check.mode, weekNo: check.weekNo, sourceCells: check.sourceCells })),
+    }];
+  }
+  const mismatches = checks.filter((check) => Object.values(check?.matches || {}).some((match) => match === false));
+  return mismatches.length === 0 ? [] : [{
+    code: 'SHEET_CALCULATION_MISMATCH',
+    message: '월 결산 대상의 시트 합계 또는 잔액이 항목 합계와 다릅니다.',
+    details: mismatches.map((check) => ({ mode: check.mode, weekNo: check.weekNo, matches: check.matches, sourceCells: check.sourceCells })),
+  }];
+}
+
 function sourceDepositRows(sheetFacts, yearMonth) {
   return (Array.isArray(sheetFacts?.depositScheduleRows) ? sheetFacts.depositScheduleRows : [])
     .filter((row) => readOptionalText(row?.yearMonth) === yearMonth)
@@ -1453,6 +1479,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
       blockers.push({ code: 'SHEET_SOURCE_NOT_APPLIED', message: '불러온 시트값을 원장에 반영해 주세요.' });
     }
     blockers.push(...sheetControlBlockers(sheetFacts));
+    blockers.push(...monthSheetCalculationBlockers(sheetFacts, yearMonth));
     if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
   }

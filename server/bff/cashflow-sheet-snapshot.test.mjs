@@ -49,6 +49,48 @@ describe('cashflow sheet pinned snapshot', () => {
     });
   });
 
+  it('keeps monthly derived totals as verification evidence without replacing sheet values', () => {
+    const matrix = Array.from({ length: 30 }, () => Array.from({ length: 8 }, () => ''));
+    const weekColumns = Array.from({ length: 5 }, (_, index) => ({
+      yearMonth: '2026-07', weekNo: index + 1, columnIndex: index + 3,
+    }));
+    const section = (mode, rowOffset) => ({
+      mode,
+      weekColumns,
+      annualColumns: [{ year: 2025, columnIndex: 2 }],
+      lineRows: [
+        { rowIndex: rowOffset, lineId: 'SALES_IN', direction: 'IN' },
+        { rowIndex: rowOffset + 1, lineId: 'DIRECT_COST_OUT', direction: 'OUT' },
+      ],
+      derivedRows: [
+        { rowIndex: rowOffset + 2, kind: 'deposit_total' },
+        { rowIndex: rowOffset + 3, kind: 'withdrawal_total' },
+        { rowIndex: rowOffset + 4, kind: 'balance' },
+      ],
+    });
+    for (const rowOffset of [10, 20]) {
+      matrix[rowOffset + 4][2] = '0';
+      for (let index = 0; index < 5; index += 1) {
+        const column = index + 3;
+        matrix[rowOffset][column] = '100';
+        matrix[rowOffset + 1][column] = '30';
+        matrix[rowOffset + 2][column] = '100';
+        matrix[rowOffset + 3][column] = '30';
+        matrix[rowOffset + 4][column] = String((index + 1) * 70);
+      }
+    }
+    const template = { sections: [section('projection', 10), section('actual', 20)] };
+
+    const valid = extractCashflowSheetFacts({ template, matrix });
+    expect(valid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2)?.matches)
+      .toEqual({ depositTotal: true, withdrawalTotal: true, balance: true });
+
+    matrix[12][4] = '101';
+    const invalid = extractCashflowSheetFacts({ template, matrix });
+    expect(invalid.weeklyCalculationChecks.find((check) => check.mode === 'projection' && check.weekNo === 2)?.matches.depositTotal)
+      .toBe(false);
+  });
+
   it('pins normalized cells and keeps source and target revisions separate', () => {
     const mappings = [
       {
