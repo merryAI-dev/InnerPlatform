@@ -1177,6 +1177,7 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
   for (const week of weeks) {
     const deadlineMs = thursdayDeadlineMs(week);
     const startMs = Date.parse(`${week.weekStart}T00:00:00+09:00`);
+    if (startMs > asOfMs) continue;
     const completion = completions.get(`${week.yearMonth}:${week.weekNo}`) || null;
     const recordedAt = readOptionalText(completion?.completedAt) || null;
     const completionMs = recordedAt ? Date.parse(recordedAt) : Number.NaN;
@@ -1198,6 +1199,18 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     }
   }
   return { trackingStartedAt, missedCount, completedCount, current, completedWeeks, weeklyStatuses };
+}
+
+async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
+  if (!db?.collection) return [];
+  const snapshot = await db.collection(`orgs/${tenantId}/monthly_closes`)
+    .where('projectId', '==', projectId)
+    .limit(500)
+    .get();
+  return snapshot.docs
+    .map((doc) => doc.data() || {})
+    .map((value) => ({ yearMonth: readOptionalText(value.yearMonth), status: readOptionalText(value.status).toUpperCase() || 'OPEN' }))
+    .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth));
 }
 
 function sheetControlBlockers(sheetFacts) {
@@ -1408,9 +1421,10 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   const legacyEvidenceOnly = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY';
   const tenantId = readOptionalText(req.context?.tenantId);
   const deadlineSummaryPromise = readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
-  const [projectDocument, mirror] = closedSnapshot
-    ? [null, null]
+  const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
+    ? await Promise.all([readCashflowMonthCloseStatuses({ db, tenantId, projectId }), Promise.resolve(null), Promise.resolve(null)])
     : await Promise.all([
+      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
       readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
     ]);
@@ -1478,6 +1492,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     ? {
       ...(closedSnapshot?.deadlineSummary || liveDeadlineSummary),
       completedWeeks: liveDeadlineSummary.completedWeeks,
+      weeklyStatuses: liveDeadlineSummary.weeklyStatuses,
     }
     : liveDeadlineSummary;
   const blockers = [];
@@ -1577,6 +1592,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     openingBalances: authoritativeOpeningBalances,
     snapshotCompatibility,
     deadlineSummary,
+    monthCloseStatuses,
     postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
     draftRevision: null,
     totals: { projection, actual, difference },

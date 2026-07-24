@@ -923,6 +923,10 @@ export interface CashflowMonthCloseDashboard {
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
   deadlineSummary: CashflowDeadlineSummary;
+  monthCloseStatuses?: Array<{
+    yearMonth: string;
+    status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
+  }>;
   postCloseAdjustment: {
     reason: string;
     changedCount: number;

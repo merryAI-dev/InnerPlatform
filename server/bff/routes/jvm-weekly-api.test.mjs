@@ -630,7 +630,12 @@ describe('JVM weekly API BFF proxy', () => {
     await request(before.app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
       .expect(200)
-      .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({ status: 'PENDING' }));
+      .expect((response) => {
+        expect(response.body.dashboard.deadlineSummary.current).toMatchObject({ status: 'PENDING' });
+        expect(response.body.dashboard.deadlineSummary.weeklyStatuses).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-07', weekNo: 4, status: 'PENDING' }),
+        ]));
+      });
 
     source.documents.set(qaPath, { active: true, qaDateTime: '2026-07-17T00:01:00+09:00' });
     const after = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
@@ -687,6 +692,9 @@ describe('JVM weekly API BFF proxy', () => {
 
     const saved = source.documents.get('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3');
     expect(saved).toMatchObject({ projectId: 'project-a', yearMonth: '2026-07', weekNo: 3 });
+    source.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-06', {
+      projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED',
+    });
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://jvm-weekly.local/api/v1/cashflow/project-a/weekly-update-complete',
       expect.objectContaining({ method: 'POST' }),
@@ -704,6 +712,9 @@ describe('JVM weekly API BFF proxy', () => {
         ]));
         expect(response.body.dashboard.deadlineSummary.weeklyStatuses).toEqual(expect.arrayContaining([
           expect.objectContaining({ yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED' }),
+        ]));
+        expect(response.body.dashboard.monthCloseStatuses).toEqual(expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-06', status: 'CLOSED' }),
         ]));
       });
   });
