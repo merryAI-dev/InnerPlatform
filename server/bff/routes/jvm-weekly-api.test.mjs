@@ -702,6 +702,9 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.deadlineSummary.completedWeeks).toEqual(expect.arrayContaining([
           expect.objectContaining({ yearMonth: '2026-07', weekNo: 3, completedBy: 'pm@example.com' }),
         ]));
+        expect(response.body.dashboard.deadlineSummary.weeklyStatuses).toEqual(expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED' }),
+        ]));
       });
   });
 

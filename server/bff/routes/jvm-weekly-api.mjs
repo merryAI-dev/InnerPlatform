@@ -1122,7 +1122,7 @@ function monthsBetween(startYearMonth, endYearMonth) {
 }
 
 async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
-  if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks: [] };
+  if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks: [], weeklyStatuses: [] };
   const [runSnap, completionSnap] = await Promise.all([
     db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
       .where('projectId', '==', projectId)
@@ -1161,7 +1161,7 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth) && Number.isInteger(value.weekNo) && value.weekNo >= 1 && value.weekNo <= 5)
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
   const trackingStartedAt = [...runs, ...completionDates].sort()[0] || null;
-  if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks };
+  if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks, weeklyStatuses: [] };
   const asOfDate = readOptionalText(comparisonBoundary?.asOfDate);
   const startYearMonth = trackingStartedAt.slice(0, 7);
   const endYearMonth = asOfDate.slice(0, 7);
@@ -1173,6 +1173,7 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
   let missedCount = 0;
   let completedCount = 0;
   let current = null;
+  const weeklyStatuses = [];
   for (const week of weeks) {
     const deadlineMs = thursdayDeadlineMs(week);
     const startMs = Date.parse(`${week.weekStart}T00:00:00+09:00`);
@@ -1181,6 +1182,8 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     const completionMs = recordedAt ? Date.parse(recordedAt) : Number.NaN;
     const completedOnTime = Number.isFinite(completionMs) && completionMs >= startMs && completionMs <= deadlineMs;
     const deadlinePassed = asOfMs >= deadlineMs;
+    const status = completedOnTime ? 'COMPLETED' : recordedAt ? 'COMPLETED_LATE' : deadlinePassed ? 'MISSED' : 'PENDING';
+    weeklyStatuses.push({ yearMonth: week.yearMonth, weekNo: week.weekNo, status });
     if (completedOnTime) completedCount += 1;
     if (deadlinePassed && !completedOnTime) missedCount += 1;
     if (week.yearMonth === comparisonBoundary?.asOfWeek?.yearMonth && week.weekNo === comparisonBoundary?.asOfWeek?.weekNo) {
@@ -1190,27 +1193,11 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
         deadline: new Date(deadlineMs).toISOString(),
         completedAt: recordedAt,
         completedBy: readOptionalText(completion?.completedByEmail) || readOptionalText(completion?.completedByUid) || null,
-        status: completedOnTime ? 'COMPLETED' : recordedAt ? 'COMPLETED_LATE' : deadlinePassed ? 'MISSED' : 'PENDING',
+        status,
       };
     }
   }
-  return { trackingStartedAt, missedCount, completedCount, current, completedWeeks };
-}
-
-async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
-  if (!db?.collection) return [];
-  const snapshot = await db.collection(`orgs/${tenantId}/monthly_closes`)
-    .where('projectId', '==', projectId)
-    .limit(500)
-    .get();
-  return snapshot.docs
-    .map((doc) => doc.data() || {})
-    .map((value) => ({
-      yearMonth: readOptionalText(value.yearMonth),
-      status: readOptionalText(value.status).toUpperCase() || 'OPEN',
-    }))
-    .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth))
-    .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
+  return { trackingStartedAt, missedCount, completedCount, current, completedWeeks, weeklyStatuses };
 }
 
 function sheetControlBlockers(sheetFacts) {
@@ -1421,14 +1408,9 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   const legacyEvidenceOnly = snapshotCompatibility.status === 'LEGACY_EVIDENCE_ONLY';
   const tenantId = readOptionalText(req.context?.tenantId);
   const deadlineSummaryPromise = readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
-  const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
-    ? await Promise.all([
-      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
-      Promise.resolve(null),
-      Promise.resolve(null),
-    ])
+  const [projectDocument, mirror] = closedSnapshot
+    ? [null, null]
     : await Promise.all([
-      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
       readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
     ]);
@@ -1595,7 +1577,6 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     openingBalances: authoritativeOpeningBalances,
     snapshotCompatibility,
     deadlineSummary,
-    monthCloseStatuses,
     postCloseAdjustment: closedSnapshot ? postCloseAdjustment(close, closedSnapshot) : null,
     draftRevision: null,
     totals: { projection, actual, difference },
