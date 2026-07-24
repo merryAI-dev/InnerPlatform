@@ -333,6 +333,21 @@ export interface CashflowSheetLabMirrorResult {
       projection: CashflowSheetLabAnnualModeTotal;
       actual: CashflowSheetLabAnnualModeTotal;
     }>;
+    weeklyCalculationChecks?: Array<{
+      mode: 'projection' | 'actual';
+      yearMonth: string;
+      weekNo: number;
+      reported: {
+        depositTotal: number | null;
+        withdrawalTotal: number | null;
+        balance: number | null;
+      };
+      matches: {
+        depositTotal: boolean | null;
+        withdrawalTotal: boolean | null;
+        balance: boolean | null;
+      };
+    }>;
     cashflowGrandTotalsBySourceYear?: Array<{
       sourceYear: number;
       projection: CashflowSheetLabGrandTotal;

@@ -367,6 +367,7 @@ function buildWeeklyCalculationChecks({ template, matrix }) {
         mode: section.mode,
         yearMonth: week.yearMonth,
         weekNo: week.weekNo,
+        reported: { depositTotal, withdrawalTotal, balance },
         sourceCells: {
           depositTotal: toA1(derivedByKind.get('deposit_total')?.rowIndex, week.columnIndex),
           withdrawalTotal: toA1(derivedByKind.get('withdrawal_total')?.rowIndex, week.columnIndex),

@@ -87,6 +87,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toMatch(/\}, \[orgId, projectId, resolveBffActor, selectedYear, user\?\.uid, yearMonth\]\);/);
   });
 
+  it('renders the pinned sheet formula results instead of recomputing summary cells in the browser', () => {
+    expect(source).toContain('cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks');
+    expect(source).toContain('check?.reported.balance');
+    expect(source).toContain('getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
+  });
+
   it('keeps the ready placeholder out of the issue count', () => {
     expect(source).not.toContain("inbox.push({ id: 'all-clear'");
     expect(source).toContain('{opsSummary.status.count}건');
