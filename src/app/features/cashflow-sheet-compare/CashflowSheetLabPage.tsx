@@ -31,6 +31,7 @@ import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../p
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { resolveFinanceWeekForDate } from '../../platform/cashflow-weeks';
+import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
 
 function formatError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
@@ -294,7 +295,8 @@ export function CashflowSheetLabPage({
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
   const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingOperation, setLoadingOperation] = useState<CashflowSheetSyncOperation | null>(null);
+  const loading = loadingOperation !== null;
   const [accountLoading, setAccountLoading] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialSlide, setTutorialSlide] = useState(0);
@@ -609,7 +611,7 @@ export function CashflowSheetLabPage({
 
   async function handleSaveSheetConfig() {
     if (!projectId || loading || !spreadsheetId) return;
-    setLoading(true);
+    setLoadingOperation('saving');
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
@@ -636,14 +638,14 @@ export function CashflowSheetLabPage({
       logCashflowLab('settings.save.error', { projectId, spreadsheetId, ...errorDiagnostics(error) }, 'warn');
       setErrorMessage(formatError(error));
     } finally {
-      setLoading(false);
+      setLoadingOperation(null);
     }
   }
   async function handleRefreshSheetMirror() {
     if (!projectId || loading || !spreadsheetId) return;
     const startedAt = Date.now();
     const refreshIdempotencyKey = `cashflow-sheet-lab-refresh:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-    setLoading(true);
+    setLoadingOperation('refresh');
     setErrorMessage('');
     setStatusMessage('');
     setReviewedSourceKey('');
@@ -711,7 +713,7 @@ export function CashflowSheetLabPage({
         void handleLoadShareAccount();
       }
     } finally {
-      setLoading(false);
+      setLoadingOperation(null);
     }
   }
 
@@ -732,7 +734,7 @@ export function CashflowSheetLabPage({
     let activeStep: 'stage' | 'apply' = stagedOverride ? 'apply' : 'stage';
     let staged = stagedOverride;
     let stageDurationMs = 0;
-    setLoading(true);
+    setLoadingOperation(stagedOverride ? 'applying' : 'staging');
     setErrorMessage('');
     setStatusMessage('');
     if (!stagedOverride) {
@@ -806,6 +808,7 @@ export function CashflowSheetLabPage({
         return;
       }
       activeStep = 'apply';
+      setLoadingOperation('applying');
       const applyStartedAt = Date.now();
       const stagedRunId = staged.runId;
       logCashflowLab('apply.sheet_values.start', {
@@ -889,7 +892,7 @@ export function CashflowSheetLabPage({
         setErrorMessage(formatError(error));
       }
     } finally {
-      setLoading(false);
+      setLoadingOperation(null);
     }
   }
 
@@ -922,7 +925,8 @@ export function CashflowSheetLabPage({
   }
 
   return (
-    <div className="bg-white px-5 py-6 sm:bg-slate-100 sm:px-6">
+    <>
+    <div className="bg-white px-5 py-6 sm:bg-slate-100 sm:px-6" inert={loading || undefined} aria-busy={loading}>
       <section className="mx-auto max-w-[560px] bg-white sm:border sm:border-slate-200 sm:p-8 sm:shadow-sm">
         <header>
           <CashflowSheetHeroAnimation />
@@ -1328,5 +1332,7 @@ export function CashflowSheetLabPage({
         </DialogContent>
       </Dialog>
     </div>
+    {loadingOperation ? <CashflowSheetSyncOverlay operation={loadingOperation} /> : null}
+    </>
   );
 }

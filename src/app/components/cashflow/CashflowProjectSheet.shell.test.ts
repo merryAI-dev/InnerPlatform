@@ -185,9 +185,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('keeps the sheet refresh loading state open until the successful response is processed', () => {
-    expect(source).toContain('{sheetRefreshLoading ? (');
-    expect(source).toContain('aria-busy="true"');
-    expect(source).toContain('시트 값을 불러오는 중입니다');
+    expect(source).toContain('CashflowSheetSyncOverlay');
+    expect(source).toContain('{sheetRefreshLoading ? <CashflowSheetSyncOverlay operation="refresh" /> : null}');
+    expect(source).toContain('inert={sheetRefreshLoading || undefined}');
+    expect(source).toContain('aria-busy={sheetRefreshLoading}');
     expect(source).not.toContain('setSheetRefreshResult');
     expect(source).not.toContain('setSheetStageDialog');
   });
@@ -277,6 +278,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('결산 상태 다시 확인');
     expect(source).toContain('recordDevtoolsLog');
     expect(source).toContain('toDevtoolsError');
+  });
+
+  it('locks the cashflow screen with the shared sheet sync overlay while a sheet refresh is running', () => {
+    expect(source).toContain('CashflowSheetSyncOverlay');
+    expect(source).toContain('inert={sheetRefreshLoading || undefined}');
+    expect(source).toContain('<CashflowSheetSyncOverlay operation="refresh" />');
   });
 
   it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {

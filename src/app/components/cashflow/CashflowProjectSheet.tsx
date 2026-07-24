@@ -71,6 +71,7 @@ import {
   type CashflowMonthCloseDepositReviewRow,
   type CashflowManagementDecisionMap,
 } from './cashflow-month-close';
+import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -2563,7 +2564,8 @@ export function CashflowProjectSheet({
   const legacyCloseEvidence = monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY';
 
   return (
-    <div className="space-y-5 bg-background p-4">
+    <>
+    <div className="space-y-5 bg-background p-4" inert={sheetRefreshLoading || undefined} aria-busy={sheetRefreshLoading}>
       {legacyCloseEvidence ? (
         <div role="status" className="rounded-md border border-slate-300 bg-slate-50 px-4 py-3 text-[12px] leading-5 text-[#17324D]">
           <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 원장은 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
@@ -2588,20 +2590,6 @@ export function CashflowProjectSheet({
       </section>
 
       {renderUnifiedMonthlyBoard()}
-
-      {sheetRefreshLoading ? (
-        <div className="fixed inset-0 z-[100] grid place-items-start bg-transparent px-4 pt-24" aria-live="polite" aria-busy="true">
-          <div role="status" className="w-full max-w-[420px] rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-xl">
-            <div className="flex items-center gap-2 text-[14px] font-bold text-slate-950">
-              <Loader2 className="h-4 w-4 animate-spin text-[#17324D]" />
-              시트 값을 불러오는 중입니다
-            </div>
-            <div className="mt-1 text-[12px] leading-5 text-slate-600">
-              시트의 최신 값을 고정하고 변경된 항목을 확인하고 있습니다. 완료될 때까지 잠시 기다려 주세요.
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">
@@ -2917,5 +2905,7 @@ export function CashflowProjectSheet({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    {sheetRefreshLoading ? <CashflowSheetSyncOverlay operation="refresh" /> : null}
+    </>
   );
 }

@@ -547,3 +547,34 @@ a,
     scale: 1;
   }
 }
+
+@keyframes cashflow-sync-blob {
+  0%,
+  100% {
+    border-radius: 48% 52% 46% 54% / 54% 44% 56% 46%;
+    rotate: -8deg;
+    scale: 0.94;
+  }
+  50% {
+    border-radius: 56% 44% 55% 45% / 45% 56% 44% 55%;
+    rotate: 8deg;
+    scale: 1.05;
+  }
+}
+
+.cashflow-sync-blob {
+  width: 78px;
+  aspect-ratio: 1;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(211, 228, 255, 0.98) 0 8%, transparent 36%),
+    radial-gradient(circle at 70% 70%, rgba(26, 72, 194, 0.92), transparent 58%),
+    linear-gradient(135deg, #6B9ED1, #17324D 72%);
+  box-shadow: inset 13px 13px 18px rgba(255, 255, 255, 0.46), inset -14px -12px 20px rgba(0, 24, 79, 0.34), 0 13px 28px rgba(23, 50, 77, 0.24);
+  animation: cashflow-sync-blob 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cashflow-sync-blob {
+    animation: none;
+  }
+}
