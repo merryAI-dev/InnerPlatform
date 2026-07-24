@@ -1,5 +1,16 @@
 # Patch Notes Log
 
+## [2026-07-24] hotfix | cashflow-legacy-close-summary | 이전 월 결산 합계 표시 복구
+- pages: [portal-cashflow](./pages/portal-cashflow.md)
+- summary: 이전 형식의 월 결산 기록에 주차별 `reported` 합계가 없어도 현금흐름 화면이 중단되지 않도록 보강했다. 해당 값이 없을 때는 저장된 행 값의 합계를 사용한다.
+
+## [2026-07-24] patch-note | cashflow-sheet-close-atomicity | 시트 표시값·월 결산 증거 원자성
+- pages: [portal-cashflow](./pages/portal-cashflow.md), [admin-cashflow-project-sheet](./pages/admin-cashflow-project-sheet.md)
+- pr: [#353](https://github.com/merryAI-dev/MYSCube/pull/353)
+- commit: `b50afea`
+- stage: `innerplatform-jvm-weekly-api-lease-stage-00020-ptw`
+- summary: 공식 Google Sheet의 표시값을 재계산하지 않고 `미입력`, `0`, 금액과 전년도 행별 이월값까지 그대로 고정한다. 시트 반영과 월 결산이 겹치면 JVM이 미완료 revision의 결산을 차단하고, 결산 후 변경은 원본 스냅샷·사유·경고 누적을 남긴다. 중단된 반영은 서버 입력과 상태를 기준으로 복구하며 Stage 프론트와 JVM에 같은 main SHA를 배포했다.
+
 ## [2026-07-20] patch-note | project-registration-approval-code-flow | 프로젝트 등록 승인·코드 부여 흐름
 - pages: [shared-portal-architecture](./pages/shared-portal-architecture.md)
 - summary: 프로젝트 등록/수정의 제출 서류와 결재선을 기획안 기준으로 정렬하고, 조직장 승인과 경영기획실 코드 부여를 분리했다. 지정 조직장 외 승인, PM self-approval, 코드 중복 부여를 BFF에서 차단하고, 경영기획실 반려는 PM 재제출 흐름으로 되돌린다.

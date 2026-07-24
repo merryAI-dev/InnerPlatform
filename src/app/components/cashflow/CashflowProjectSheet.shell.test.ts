@@ -92,7 +92,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('monthCloseResult?.dashboard?.sheetCalculationChecks');
     expect(source).toContain('closedMonthStatus?.sheetCalculationChecks');
     expect(source).toContain('const check = monthIsClosed');
-    expect(source).toContain('check?.reported.balance');
+    expect(source).toContain('check?.reported?.depositTotal');
+    expect(source).toContain('check?.reported?.withdrawalTotal');
+    expect(source).toContain('check?.reported?.balance');
     expect(source).toContain('getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
   });
 

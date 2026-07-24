@@ -1602,10 +1602,10 @@ export function CashflowProjectSheet({
         ))
         : null;
     const value = kind === 'totalIn'
-      ? check?.reported.depositTotal
+      ? check?.reported?.depositTotal
       : kind === 'totalOut'
-        ? check?.reported.withdrawalTotal
-        : check?.reported.balance;
+        ? check?.reported?.withdrawalTotal
+        : check?.reported?.balance;
     return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
   }
 
