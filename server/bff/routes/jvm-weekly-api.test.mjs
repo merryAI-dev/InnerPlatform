@@ -695,9 +695,14 @@ describe('JVM weekly API BFF proxy', () => {
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
       .expect(200)
-      .expect((response) => expect(response.body.dashboard.deadlineSummary.current).toMatchObject({
-        yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED',
-      }));
+      .expect((response) => {
+        expect(response.body.dashboard.deadlineSummary.current).toMatchObject({
+          yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED',
+        });
+        expect(response.body.dashboard.deadlineSummary.completedWeeks).toEqual(expect.arrayContaining([
+          expect.objectContaining({ yearMonth: '2026-07', weekNo: 3, completedBy: 'pm@example.com' }),
+        ]));
+      });
   });
 
   it('forwards an explicit weekly scope and a reasoned reopen without an edit lease', async () => {

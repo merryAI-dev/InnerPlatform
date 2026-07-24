@@ -1519,12 +1519,17 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
     isAltRow: boolean;
+    monthCloseStatus?: string;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'projection' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const shouldHighlightMismatch = persisted.mismatch;
-    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
+    const bgClass = input.monthCloseStatus === 'CLOSED'
+      ? 'bg-slate-200'
+      : input.monthCloseStatus === 'REOPEN_REQUESTED'
+        ? 'bg-[#EAF0F5]'
+        : input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1546,11 +1551,16 @@ export function CashflowProjectSheet({
     lineId: CashflowSheetLineId;
     isThisWeek: boolean;
     isAltRow: boolean;
+    monthCloseStatus?: string;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'actual' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const bgClass = input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
+    const bgClass = input.monthCloseStatus === 'CLOSED'
+      ? 'bg-slate-200'
+      : input.monthCloseStatus === 'REOPEN_REQUESTED'
+        ? 'bg-[#EAF0F5]'
+        : input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white';
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1572,11 +1582,16 @@ export function CashflowProjectSheet({
     mode: 'projection' | 'actual';
     isThisWeek?: boolean;
     isAltRow?: boolean;
+    monthCloseStatus?: string;
     emphasis?: 'income' | 'expense' | 'balance';
     stickyRight?: boolean;
     rowTone?: 'income' | 'expense';
   }) {
-    const bgClass = input.emphasis
+    const bgClass = input.monthCloseStatus === 'CLOSED'
+      ? 'bg-slate-200'
+      : input.monthCloseStatus === 'REOPEN_REQUESTED'
+        ? 'bg-[#EAF0F5]'
+      : input.emphasis
       ? 'bg-[#EAF0F5]'
       : input.isThisWeek
         ? 'bg-[#EAF0F5]'
@@ -1619,6 +1634,25 @@ export function CashflowProjectSheet({
       .sort((left, right) => left - right);
     const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
     const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
+    const monthCloseStatusByMonth = new Map(
+      (monthCloseResult?.dashboard?.monthCloseStatuses || []).map((item) => [item.yearMonth, item.status]),
+    );
+    if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
+      monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
+    }
+    const settledWeekKeys = new Set(
+      (monthCloseResult?.dashboard?.deadlineSummary?.completedWeeks || [])
+        .map((week) => `${week.yearMonth}:${week.weekNo}`),
+    );
+    const monthGroups = visibleWeeks.reduce<Array<{ yearMonth: string; weeks: typeof visibleWeeks }>>((groups, week) => {
+      const current = groups.at(-1);
+      if (!current || current.yearMonth !== week.yearMonth) {
+        groups.push({ yearMonth: week.yearMonth, weeks: [week] });
+      } else {
+        current.weeks.push(week);
+      }
+      return groups;
+    }, []);
     const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
       const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
         ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
@@ -1765,9 +1799,10 @@ export function CashflowProjectSheet({
           {previousAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+            const monthCloseStatus = monthCloseStatusByMonth.get(week.yearMonth);
             return mode === 'projection'
-              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 })
-              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1 });
+              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus })
+              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus });
           })}
           {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {renderSummaryCell({
@@ -1800,6 +1835,7 @@ export function CashflowProjectSheet({
             value: derived[mode].weekTotals[index]?.[kind] || 0,
             mode,
             isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
+            monthCloseStatus: monthCloseStatusByMonth.get(week.yearMonth),
             emphasis,
             rowTone,
           }))}
@@ -1819,34 +1855,61 @@ export function CashflowProjectSheet({
       <table className="w-full border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${192 + (boardColumnCount - 1) * 84}px` }}>
         <thead className="sticky top-0 z-40 bg-white/95 text-slate-600 backdrop-blur shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
           <tr>
-            <th className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[12px] font-bold text-slate-800">
+            <th rowSpan={3} className="sticky left-0 z-50 w-[192px] min-w-[192px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left text-[12px] font-bold text-slate-800">
               항목
             </th>
             {previousAnnualYears.map((year) => (
-              <th key={`${mode}-${year}-before`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
+              <th rowSpan={3} key={`${mode}-${year}-before`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-middle font-semibold">
                 <div className="text-[12px] font-bold text-slate-800">{year}년</div>
                 <div className="text-[12px] font-normal text-slate-400">누적</div>
               </th>
             ))}
-            {visibleWeeks.map((week) => {
-              const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+            {monthGroups.map((month) => {
+              const status = monthCloseStatusByMonth.get(month.yearMonth);
+              const monthLabel = `${Number(month.yearMonth.slice(5, 7))}월`;
               return (
-              <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-2 text-center align-top font-semibold ${isThisWeek ? 'bg-[#EAF0F5]' : 'bg-slate-50'}`}>
-                  <div className="min-h-5">
-                    <span className="block truncate text-[12px] font-bold leading-5 text-slate-800">{week.label}</span>
+                <th colSpan={month.weeks.length} key={`${mode}-${month.yearMonth}-month-close`} className={`border-l-[6px] border-l-white px-2 py-1.5 text-left align-middle ${status === 'CLOSED' ? 'bg-slate-700 text-white' : status === 'REOPEN_REQUESTED' ? 'bg-[#17324D] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  <div className="flex items-center justify-between gap-2 whitespace-nowrap">
+                    <span className="font-bold">{status === 'CLOSED' ? '월 결산 완료' : status === 'REOPEN_REQUESTED' ? '재오픈 검토 중' : '월 결산 전'}</span>
+                    <span className={`text-[11px] font-medium ${status === 'CLOSED' || status === 'REOPEN_REQUESTED' ? 'text-white/75' : 'text-slate-400'}`}>{monthLabel}</span>
                   </div>
                 </th>
               );
             })}
             {followingAnnualYears.map((year) => (
-              <th key={`${mode}-${year}-after`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-top font-semibold">
+              <th rowSpan={3} key={`${mode}-${year}-after`} data-cashflow-board-column="true" className="min-w-[84px] border-l-[6px] border-l-white bg-slate-100 px-1 py-2 text-center align-middle font-semibold">
                 <div className="text-[12px] font-bold text-slate-800">{year}년</div>
                 <div className="text-[12px] font-normal text-slate-400">합계</div>
               </th>
             ))}
-            <th className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[12px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
+            <th rowSpan={3} className="sticky right-0 z-50 min-w-[84px] border-l-[6px] border-l-white bg-white px-1 py-2 text-left text-[12px] font-bold text-slate-800 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">
               Total
             </th>
+          </tr>
+          <tr>
+            {visibleWeeks.map((week) => {
+              const completed = settledWeekKeys.has(`${week.yearMonth}:${week.weekNo}`);
+              const status = monthCloseStatusByMonth.get(week.yearMonth);
+              return (
+                <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${status === 'CLOSED' ? 'bg-slate-200' : status === 'REOPEN_REQUESTED' ? 'bg-[#EAF0F5]' : 'bg-white'}`}>
+                  <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${completed ? 'text-slate-700' : 'text-slate-400'}`}>
+                    <CheckCircle2 className={`h-3 w-3 ${completed ? 'text-[#17324D]' : 'text-slate-300'}`} />
+                    {completed ? '주간 정산 완료' : '주간 정산 전'}
+                  </span>
+                </th>
+              );
+            })}
+          </tr>
+          <tr>
+            {visibleWeeks.map((week) => {
+              const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
+              const status = monthCloseStatusByMonth.get(week.yearMonth);
+              return (
+                <th key={`${mode}-${week.yearMonth}-${week.weekNo}`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1.5 text-center align-top font-semibold ${status === 'CLOSED' ? 'bg-slate-200' : status === 'REOPEN_REQUESTED' ? 'bg-[#EAF0F5]' : isThisWeek ? 'bg-[#EAF0F5]' : 'bg-slate-50'}`}>
+                  <span className="block truncate text-[12px] font-bold leading-5 text-slate-800">{week.label}</span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

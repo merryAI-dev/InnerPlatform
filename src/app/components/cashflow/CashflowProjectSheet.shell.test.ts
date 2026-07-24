@@ -125,6 +125,17 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('week.weekStart.slice(5)');
   });
 
+  it('groups each month with an explicit close band and marks completed weekly settlements without extra requests', () => {
+    expect(source).toContain('const monthCloseStatusByMonth = new Map');
+    expect(source).toContain('const settledWeekKeys = new Set');
+    expect(source).toContain('const monthGroups = visibleWeeks.reduce');
+    expect(source).toContain('colSpan={month.weeks.length}');
+    expect(source).toContain("'월 결산 완료'");
+    expect(source).toContain("'주간 정산 완료'");
+    expect(source).toContain("input.monthCloseStatus === 'CLOSED'");
+    expect(source).toContain("? 'bg-slate-200'");
+  });
+
   it('keeps explicit zero ledger values distinct from unentered cells outside the as-of comparison range', () => {
     expect(source).toContain('Object.prototype.hasOwnProperty.call(amounts, params.lineId)');
     expect(source).not.toContain("? Boolean(comparisonLine?.projectionHadValue)");
