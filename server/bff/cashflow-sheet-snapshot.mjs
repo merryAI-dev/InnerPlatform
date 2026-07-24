@@ -313,6 +313,78 @@ function readWholeWon(
   return classified.amount;
 }
 
+function readComputedWholeWon(matrix, rowIndex, columnIndex, emptyValue = null) {
+  const classified = classifyCashflowSheetCell(matrix?.[rowIndex]?.[columnIndex]);
+  if (classified.state === 'EMPTY') return emptyValue;
+  if (classified.state !== 'VALUE' || !Number.isSafeInteger(classified.amount)) return null;
+  return classified.amount;
+}
+
+function buildWeeklyCalculationChecks({ template, matrix }) {
+  return (template?.sections || []).flatMap((section) => {
+    const lineRows = Array.isArray(section?.lineRows) ? section.lineRows : [];
+    const derivedRows = Array.isArray(section?.derivedRows) ? section.derivedRows : [];
+    const derivedByKind = new Map(derivedRows.map((row) => [row.kind, row]));
+    if (
+      !['deposit_total', 'withdrawal_total', 'balance'].every((kind) => derivedByKind.has(kind))
+      || lineRows.some((row) => row.direction !== 'IN' && row.direction !== 'OUT')
+    ) return [];
+    const firstYear = Number(String(section?.weekColumns?.[0]?.yearMonth || '').slice(0, 4));
+    const openingColumn = (section?.annualColumns || [])
+      .filter((column) => Number(column?.year) < firstYear)
+      .sort((left, right) => Number(right.year) - Number(left.year))[0];
+    let priorBalance = openingColumn
+      ? readComputedWholeWon(matrix, derivedByKind.get('balance').rowIndex, openingColumn.columnIndex)
+      : null;
+    return (section?.weekColumns || []).map((week) => {
+      const amounts = lineRows.map((row) => ({
+        direction: row.direction,
+        amount: readComputedWholeWon(matrix, row.rowIndex, week.columnIndex, 0),
+      }));
+      const totalFor = (direction) => {
+        const values = amounts.filter((row) => row.direction === direction).map((row) => row.amount);
+        if (values.some((amount) => amount === null)) return null;
+        try {
+          return values.reduce((sum, amount) => addWholeWon(sum, amount), 0);
+        } catch {
+          return null;
+        }
+      };
+      const depositTotal = readComputedWholeWon(matrix, derivedByKind.get('deposit_total')?.rowIndex, week.columnIndex);
+      const withdrawalTotal = readComputedWholeWon(matrix, derivedByKind.get('withdrawal_total')?.rowIndex, week.columnIndex);
+      const balance = readComputedWholeWon(matrix, derivedByKind.get('balance')?.rowIndex, week.columnIndex);
+      const computedDepositTotal = totalFor('IN');
+      const computedWithdrawalTotal = totalFor('OUT');
+      let computedBalance = null;
+      if (priorBalance !== null && computedDepositTotal !== null && computedWithdrawalTotal !== null) {
+        try {
+          computedBalance = addWholeWon(priorBalance, addWholeWon(computedDepositTotal, -computedWithdrawalTotal));
+        } catch {
+          computedBalance = null;
+        }
+      }
+      const result = {
+        mode: section.mode,
+        yearMonth: week.yearMonth,
+        weekNo: week.weekNo,
+        sourceCells: {
+          depositTotal: toA1(derivedByKind.get('deposit_total')?.rowIndex, week.columnIndex),
+          withdrawalTotal: toA1(derivedByKind.get('withdrawal_total')?.rowIndex, week.columnIndex),
+          balance: toA1(derivedByKind.get('balance')?.rowIndex, week.columnIndex),
+          openingBalance: openingColumn ? toA1(derivedByKind.get('balance').rowIndex, openingColumn.columnIndex) : '',
+        },
+        matches: {
+          depositTotal: depositTotal === null || computedDepositTotal === null ? null : depositTotal === computedDepositTotal,
+          withdrawalTotal: withdrawalTotal === null || computedWithdrawalTotal === null ? null : withdrawalTotal === computedWithdrawalTotal,
+          balance: balance === null || computedBalance === null ? null : balance === computedBalance,
+        },
+      };
+      priorBalance = balance;
+      return result;
+    });
+  });
+}
+
 function controlRow({ matrix, row, weekColumns, issues, controlColumnIndex }) {
   const field = `${row.kind}:${row.lineId || row.derivedKind}`;
   const amounts = weekColumns.map((week) => readWholeWon(
@@ -440,6 +512,7 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = 
 
   const projectionControls = modeControls('projection');
   const actualControls = modeControls('actual');
+  const weeklyCalculationChecks = buildWeeklyCalculationChecks({ template, matrix });
 
   return {
     metadata: {
@@ -451,6 +524,7 @@ export function extractCashflowSheetFacts({ template = {}, matrix = [], cells = 
     depositScheduleRows,
     annualFinancialTotals: annualSheetFinancialTotals({ depositScheduleRows, projectionControls }),
     annualCashflowTotals: buildAnnualCashflowTotals({ cells, annualCells }),
+    ...(weeklyCalculationChecks.length > 0 ? { weeklyCalculationChecks } : {}),
     cashflowGrandTotals: {
       projection: buildCashflowSheetTotal(totalCells, 'projection'),
       actual: buildCashflowSheetTotal(totalCells, 'actual'),
