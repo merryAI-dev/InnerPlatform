@@ -151,11 +151,13 @@ function buildOfficialMatrix({
   annualYears = [],
   projectionAnnualValue = '',
   actualAnnualValue = '',
+  projectionAnnualValues = {},
+  actualAnnualValues = {},
 } = {}) {
   const matrix = Array.from({ length: 60 }, () => Array(72).fill(''));
   const sourceYear = 2000 + Number.parseInt(String(weekLabels[0] || '26').split('-')[0], 10);
   const annualColumns = officialAnnualColumns(sourceYear);
-  const writeSection = (actual, annualValue) => {
+  const writeSection = (actual, annualValue, annualValues) => {
     const headerRowIndex = actual ? 34 : 11;
     const weekRowIndex = actual ? 35 : 12;
     const lineRowIndexes = actual
@@ -181,7 +183,11 @@ function buildOfficialMatrix({
       });
       for (const year of annualYears) {
         const columnIndex = annualColumns.get(year);
-        if (columnIndex !== undefined) matrix[rowIndex][columnIndex] = year === 2027 ? '' : annualValue;
+        if (columnIndex !== undefined) {
+          matrix[rowIndex][columnIndex] = Object.hasOwn(annualValues, year)
+            ? annualValues[year]
+            : year === 2027 ? '' : annualValue;
+        }
       }
     });
     derivedRows.forEach(([rowIndex, label]) => {
@@ -192,8 +198,8 @@ function buildOfficialMatrix({
     });
   };
   matrix[0][0] = 'title';
-  writeSection(false, projectionAnnualValue);
-  writeSection(true, actualAnnualValue);
+  writeSection(false, projectionAnnualValue, projectionAnnualValues);
+  writeSection(true, actualAnnualValue, actualAnnualValues);
   return matrix;
 }
 
@@ -1303,6 +1309,55 @@ describe('cashflow sheet lab route', () => {
       2027: { sourceYear: 2027, spreadsheetId: 'spreadsheet-2027' },
     });
     expect([...new Set(mirror.body.cells.map((cell) => Number(cell.yearMonth.slice(0, 4))))]).toEqual([2026, 2027]);
+  });
+
+  it('keeps each annual year from one closest sheet source instead of double-counting overlapping 2024/2025 totals', async () => {
+    const db = createDb({
+      project: { id: 'project-a', contractStart: '2024-01-01', contractEnd: '2028-12-31' },
+    });
+    const previewSpreadsheet = vi.fn(async ({ value }) => {
+      const year = String(value).includes('2027') ? 2027 : 2026;
+      const weekLabels = Array.from({ length: 12 }, (_, monthIndex) => (
+        Array.from({ length: 5 }, (_unused, weekIndex) => `${String(year).slice(2)}-${monthIndex + 1}-${weekIndex + 1}`)
+      )).flat();
+      return {
+        spreadsheetId: `spreadsheet-${year}`,
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildOfficialMatrix({
+          weekLabels,
+          annualYears: [2025],
+          projectionAnnualValues: { 2025: year === 2026 ? '100' : '200' },
+          actualAnnualValues: { 2025: year === 2026 ? '50' : '80' },
+        }),
+      };
+    });
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+
+    for (const year of [2026, 2027]) {
+      await request(app)
+        .put('/api/v1/projects/project-a/cashflow-sheet-lab/config')
+        .send({
+          sourceYear: year,
+          value: `https://docs.google.com/spreadsheets/d/spreadsheet-${year}/edit`,
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: `${String(year).slice(2)}-1-1`,
+          endWeek: `${String(year).slice(2)}-12-5`,
+        })
+        .expect(200);
+      await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+        .send({ sourceYear: year, idempotencyKey: `refresh-overlap-${year}` })
+        .expect(200);
+    }
+
+    const mirror = await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
+      .expect(200);
+    const cells2025 = mirror.body.annualCells.filter((cell) => cell.year === 2025);
+    expect(cells2025).toHaveLength(32);
+    expect(new Set(cells2025.map((cell) => cell.sourceYear))).toEqual(new Set([2026]));
+    expect(mirror.body.sheetFacts.annualCashflowTotals.find((row) => row.year === 2025).projection.totalIn).toBe(700);
   });
 
   it('invalidates the pinned mirror and staged run when the saved sheet config changes', async () => {

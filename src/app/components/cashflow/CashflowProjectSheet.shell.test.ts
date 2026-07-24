@@ -125,6 +125,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('week.weekStart.slice(5)');
   });
 
+  it('keeps explicit zero ledger values distinct from unentered cells outside the as-of comparison range', () => {
+    expect(source).toContain('Object.prototype.hasOwnProperty.call(amounts, params.lineId)');
+    expect(source).not.toContain("? Boolean(comparisonLine?.projectionHadValue)");
+  });
+
   it('places the operations dashboard before comparison and the monthly board', () => {
     const operations = source.indexOf('{renderOperationsPanel()}');
     const comparison = source.indexOf('data-cashflow-block="comparison"');

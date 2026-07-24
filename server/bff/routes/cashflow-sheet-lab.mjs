@@ -625,6 +625,28 @@ function buildActiveWeeksFromTemplate(template, weekRange) {
     .filter(Boolean);
 }
 
+function selectCanonicalAnnualCells(cells = []) {
+  const byYear = new Map();
+  for (const cell of cells) {
+    const year = Number(cell?.year);
+    const sourceYear = Number(cell?.sourceYear);
+    if (!Number.isSafeInteger(year) || !Number.isSafeInteger(sourceYear)) continue;
+    const candidates = byYear.get(year) || new Map();
+    const sourceCells = candidates.get(sourceYear) || [];
+    sourceCells.push(cell);
+    candidates.set(sourceYear, sourceCells);
+    byYear.set(year, candidates);
+  }
+  return [...byYear.entries()].flatMap(([year, candidates]) => {
+    const sourceYear = [...candidates.keys()].sort((left, right) => (
+      Math.abs(left - year) - Math.abs(right - year) || right - left
+    ))[0];
+    return candidates.get(sourceYear) || [];
+  }).sort((left, right) => Number(left.year) - Number(right.year)
+    || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
+    || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
+}
+
 function mergeCashflowSourceMirror(previous, next, sourceYear) {
   const weeklyYears = [...new Set((next.cells || [])
     .map((cell) => Number(readOptionalText(cell?.yearMonth).slice(0, 4)))
@@ -653,12 +675,10 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
       || Number(left.weekNo) - Number(right.weekNo)
       || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
       || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
-  const annualCells = [
+  const annualCells = selectCanonicalAnnualCells([
     ...previousAnnualCells,
     ...(next.annualCells || []).map((cell) => ({ ...cell, sourceYear })),
-  ].sort((left, right) => Number(left.year) - Number(right.year)
-    || readOptionalText(left.mode).localeCompare(readOptionalText(right.mode))
-    || readOptionalText(left.lineId).localeCompare(readOptionalText(right.lineId)));
+  ]);
   const previousTotalCells = readOptionalText(previous?.sourceRevision)
     ? (previous.totalCells || [])
       .map((cell) => ({ ...cell, sourceYear: Number(cell?.sourceYear) || previousSourceYear }))

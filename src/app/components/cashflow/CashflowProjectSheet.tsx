@@ -1496,11 +1496,10 @@ export function CashflowProjectSheet({
     const comparisonLine = month?.comparison?.weeks
       ?.find((candidate) => candidate.weekNo === params.weekNo)
       ?.lines?.find((candidate) => candidate.lineId === params.lineId);
+    const amounts = week?.amounts || {};
     return {
-      amount: Number(week?.amounts[params.lineId] || 0),
-      hasValue: params.mode === 'projection'
-        ? Boolean(comparisonLine?.projectionHadValue)
-        : Boolean(comparisonLine?.actualHadValue),
+      amount: Number(amounts[params.lineId] || 0),
+      hasValue: Object.prototype.hasOwnProperty.call(amounts, params.lineId),
       mismatch: comparisonLine?.mismatch === true,
     };
   }
