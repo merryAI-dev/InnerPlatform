@@ -3,49 +3,56 @@
 - route: `/portal/cashflow`
 - primary users: PM, projection 입력 담당자
 - status: active
-- last updated: 2026-04-15
+- last updated: 2026-07-24
 
 ## Purpose
 
-주차별 projection 캐시플로를 입력하고 기존 시트를 가져와 현재 프로젝트 시트에 반영하는 작업 화면이다.
+공식 Google Sheet의 현금흐름 값을 명시적으로 불러와 프로젝트 원장과 결산 상태를 조회하는 작업 화면이다.
 
 ## Current UX Summary
 
-- 기본 화면은 시트 작업면과 가져오기 액션만 먼저 보여준다.
-- 형식 설명은 import wizard 안으로 밀고, 상단에는 import action만 남긴다.
-- projection 입력/수정은 프로젝트 시트 화면에서 직접 처리한다.
+- `시트 값 불러오기`를 눌렀을 때만 공식 시트의 최신 표시값을 가져온다.
+- 현금흐름 표는 조회 전용이며, 시트의 `미입력`, `0`, 금액을 서로 다른 값으로 유지한다.
+- 반영 중에는 화면을 잠그고 완료 또는 복구 결과가 확정될 때까지 진행 상태를 표시한다.
 
 ## Current Feature Checklist
 
-- [x] 주차별 projection 시트 입력 가능
-- [x] 기존 Google Sheets / `.xlsx` / `.csv` 가져오기 가능
-- [x] 상단 explainer 카드 없이 compact import action 유지
-- [x] 가져오기 이후 주간 제출 상태와 연결 가능
+- [x] 명시적 버튼으로 Google Sheet 최신값 불러오기
+- [x] 시트 표시값을 재계산하지 않고 원장에 반영
+- [x] `미입력`, `0`, 금액을 구분해 표시
+- [x] 전년도 행별 누적값, 기준연도 주차값, 이후 연도 합계와 Total 표시
+- [x] 주간 정산과 월 결산 상태를 표에서 구분
+- [x] 결산 이후 변경은 경고·사유·경고 누적 절차로 반영
+- [x] 반영 중 화면 잠금과 불확실한 요청 복구 지원
 - [x] PM 포털 부팅 시 cashflow 실시간 구독이 연도 범위 composite index에 직접 의존하지 않음
-- [ ] import wizard 내부 안내 문구 추가 감산 여지 있음
 
 ## Recent Changes
 
+- [2026-07-24] 공식 시트의 계산 결과를 그대로 고정하는 one-way 연동으로 정리했다. `미입력`, `0`, 금액과 전년도 행별 이월값을 보존하고, 결산된 월의 값이 달라지면 서버가 사유와 경고 누적을 요구한다. 시트 반영과 월 결산이 겹칠 때는 한쪽이 미완료 데이터를 읽지 않도록 차단하며, 중단된 반영은 서버 상태를 기준으로 복구한다.
 - [2026-04-14] migration 설명 카드와 긴 형식 안내를 제거하고 compact import action만 남겼다.
 - [2026-04-15] PM용 cashflow 주차 구독은 Firestore에서 project 기준으로만 listen하고, 연도 범위는 클라이언트에서 필터링하도록 바꿔 PM 포털 전체가 cashflow index drift에 덜 민감하게 만들었다.
 
 ## Known Notes
 
-- 이 화면은 actual 분석면이 아니라 projection 운영 입력면이다.
-- 가져오기 이후 제출 상태와 admin 캐시플로 추출 화면까지 간접적으로 연결된다.
+- 시트가 입력 원본이고 MYSCube는 반영된 고정본과 결산 증거를 관리한다.
+- 연간 합계와 잔액도 시트 표시값을 사용하며 플랫폼에서 다시 계산하지 않는다.
 
 ## Related Files
 
 - `src/app/components/portal/PortalCashflowPage.tsx`
 - `src/app/components/cashflow/CashflowProjectSheet.tsx`
+- `src/app/features/cashflow-sheet-compare/CashflowSheetLabPage.tsx`
+- `server/bff/routes/cashflow-sheet-lab.mjs`
 - `src/app/routes.tsx`
 
 ## Related Tests
 
 - `src/app/components/portal/PortalMinimalSweep.layout.test.ts`
-- `src/app/components/cashflow/CashflowProjectSheet.test.tsx`
+- `src/app/components/cashflow/CashflowProjectSheet.shell.test.ts`
+- `src/app/features/cashflow-sheet-compare/CashflowSheetLabPage.shell.test.ts`
+- `server/bff/routes/cashflow-sheet-lab.test.mjs`
 
 ## Next Watch Points
 
-- import wizard 바깥에 다시 설명 카드가 늘어나지 않는지
-- projection 편집과 제출 상태 반영이 계속 같이 움직이는지
+- 실제 Stage 시트에서 `미입력`, `0`, 금액과 의도적으로 잘못된 수식 결과가 그대로 고정되는지
+- 월 결산과 시트 반영을 동시에 실행해도 미완료 revision이 대시보드에 노출되지 않는지
