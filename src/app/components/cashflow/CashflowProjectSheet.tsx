@@ -52,6 +52,7 @@ import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
   applyCashflowSheetLabViaBff,
+  getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
@@ -317,6 +318,7 @@ export function CashflowProjectSheet({
   const [pendingAutoStageRevision, setPendingAutoStageRevision] = useState('');
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
   const [lateSheetApply, setLateSheetApply] = useState<CashflowSheetLabStageResult | null>(null);
+  const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
   const [lateSheetChangeReason, setLateSheetChangeReason] = useState('');
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
@@ -1069,6 +1071,7 @@ export function CashflowProjectSheet({
         idempotencyKey: refreshIdempotencyKey,
       })
     );
+    let handingOffToAutoStage = false;
     const rememberMirror = (mirror: CashflowSheetLabMirrorResult) => {
       setCashflowSheetMirror((current) => mirror.status === 'STALE' && current?.sourceRevision
         ? {
@@ -1081,6 +1084,7 @@ export function CashflowProjectSheet({
           }
         : mirror);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
+        handingOffToAutoStage = true;
         setPendingAutoStageRevision(mirror.sourceRevision);
         void loadCashflowEvents();
         toast.success('시트값을 불러왔습니다. 원장 반영 전 금액을 확인합니다.');
@@ -1153,7 +1157,7 @@ export function CashflowProjectSheet({
       });
       toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
     } finally {
-      setSheetRefreshLoading(false);
+      if (!handingOffToAutoStage) setSheetRefreshLoading(false);
     }
   }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor, selectedYear, yearMonth]);
 
@@ -1231,6 +1235,7 @@ export function CashflowProjectSheet({
         lastActualLineCount: result.actualLineCount,
       } : current);
       setLateSheetApply(null);
+      setSheetApplyResumeRequired(false);
       setLateSheetChangeReason('');
       toast.success(`시트 최신값 ${result.appliedLineCount.toLocaleString()}건을 원장에 반영했습니다.`);
     };
@@ -1277,13 +1282,38 @@ export function CashflowProjectSheet({
             : stage.closedMonthDifferences,
         });
         setLateSheetChangeReason('');
+        setSheetApplyResumeRequired(false);
         return;
       }
+      setLateSheetApply(stage);
+      setSheetApplyResumeRequired(true);
       toast.error(resolveApiErrorMessage(finalError, '시트 값을 원장에 반영하지 못했습니다.'));
     } finally {
       setSheetStageApplyLoading(false);
     }
   }, [loadCashflowEvents, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
+    const loadApplyStatus = async (): Promise<void> => {
+      try {
+        const actor = await resolveBffActor();
+        if (!actor?.idToken) return;
+        const status = await getCashflowSheetLabApplyStatusViaBff({ tenantId: orgId, actor, projectId });
+        if (cancelled || status.status !== 'APPLYING' || !status.stagedRun) return;
+        setLateSheetApply(status.stagedRun);
+        setLateSheetChangeReason(status.applyInput?.closedMonthChangeReason || '');
+        setSheetApplyResumeRequired(true);
+      } catch {
+        // 복구 상태 조회 실패는 일반 조회를 막지 않는다. 실제 반영 시 서버가 다시 차단한다.
+      }
+    };
+    void loadApplyStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, projectId, resolveBffActor, user?.uid]);
 
   const handleStagePinnedSheetValues = useCallback(async (
     replaceAllActualSources = false,
@@ -1487,8 +1517,11 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): { amount: number; hasValue: boolean; mismatch: boolean } {
-    const monthIsClosed = monthCloseResult?.dashboard?.monthCloseStatuses?.some((month) => (
-      month.yearMonth === params.targetYearMonth && month.status === 'CLOSED'
+    const monthIsClosed = (
+      monthCloseResult?.yearMonth === params.targetYearMonth
+      && ['CLOSED', 'REOPEN_REQUESTED'].includes(monthCloseResult.status)
+    ) || monthCloseResult?.dashboard?.monthCloseStatuses?.some((month) => (
+      month.yearMonth === params.targetYearMonth && ['CLOSED', 'REOPEN_REQUESTED'].includes(month.status)
     ));
     const pinned = !monthIsClosed && cashflowSheetMirror?.status === 'FRESH'
       ? cashflowSheetMirror.cells?.find((candidate) => (
@@ -1544,18 +1577,30 @@ export function CashflowProjectSheet({
 
   function getPinnedDerivedAmount(
     mode: 'projection' | 'actual',
-    yearMonth: string,
+    targetYearMonth: string,
     weekNo: number,
     kind: 'totalIn' | 'totalOut' | 'net',
   ): number | null {
-    const monthIsClosed = monthCloseResult?.dashboard?.monthCloseStatuses?.some((month) => (
-      month.yearMonth === yearMonth && month.status === 'CLOSED'
+    const selectedMonthIsClosed = (
+      monthCloseResult?.yearMonth === targetYearMonth
+      && ['CLOSED', 'REOPEN_REQUESTED'].includes(monthCloseResult.status)
+    );
+    const closedMonthStatus = monthCloseResult?.dashboard?.monthCloseStatuses?.find((month) => (
+      month.yearMonth === targetYearMonth && ['CLOSED', 'REOPEN_REQUESTED'].includes(month.status)
     ));
-    const check = !monthIsClosed && cashflowSheetMirror?.status === 'FRESH'
-      ? cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks?.find((candidate) => (
-        candidate.mode === mode && candidate.yearMonth === yearMonth && candidate.weekNo === weekNo
+    const monthIsClosed = selectedMonthIsClosed || Boolean(closedMonthStatus);
+    const frozenChecks = selectedMonthIsClosed
+      ? monthCloseResult?.dashboard?.sheetCalculationChecks
+      : closedMonthStatus?.sheetCalculationChecks;
+    const check = monthIsClosed
+      ? frozenChecks?.find((candidate) => (
+        candidate.mode === mode && candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo
       ))
-      : null;
+      : cashflowSheetMirror?.status === 'FRESH'
+        ? cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks?.find((candidate) => (
+          candidate.mode === mode && candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo
+        ))
+        : null;
     const value = kind === 'totalIn'
       ? check?.reported.depositTotal
       : kind === 'totalOut'
@@ -1939,7 +1984,7 @@ export function CashflowProjectSheet({
                 : status === 'MISSED' ? '미정산' : status === 'PENDING' ? '정산 대기' : '';
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${cashflowWeekSurface(monthlyStatus, status) || 'bg-white'}`}>
-                  <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${monthlyStatus === 'CLOSED' ? 'text-slate-600' : status === 'MISSED' ? 'text-red-700' : status ? 'text-slate-700' : 'text-slate-300'}`}>
+                  <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-semibold ${monthlyStatus === 'CLOSED' ? 'text-slate-600' : status === 'MISSED' ? 'text-red-700' : status ? 'text-slate-700' : 'text-slate-300'}`}>
                     {monthlyStatus === 'CLOSED' ? <LockKeyhole className="h-3 w-3" /> : <CheckCircle2 className={`h-3 w-3 ${status === 'MISSED' ? 'text-red-600' : status ? 'text-[#17324D]' : 'text-slate-300'}`} />}
                     {monthlyStatus === 'CLOSED' ? '월 결산 완료' : label}
                   </span>
@@ -2934,52 +2979,61 @@ export function CashflowProjectSheet({
       <AlertDialog
         open={!!lateSheetApply}
         onOpenChange={(open) => {
-          if (!open && !sheetStageApplyLoading) {
+          if (!open && !sheetStageApplyLoading && !sheetApplyResumeRequired) {
             setLateSheetApply(null);
+            setSheetApplyResumeRequired(false);
             setLateSheetChangeReason('');
           }
         }}
       >
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[440px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>마감 후 시트값 변경</AlertDialogTitle>
+            <AlertDialogTitle>{sheetApplyResumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
             <AlertDialogDescription>
-              결산 마감일이 지난 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.
+              {sheetApplyResumeRequired
+                ? '이전 반영의 응답을 확인하지 못했습니다. 같은 검토본으로 안전하게 이어서 완료해 주세요.'
+                : '결산 마감일이 지난 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {lateSheetApply && (
             <div className="space-y-3">
-              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700">
-                {(lateSheetApply.closedMonthDifferences || []).map((difference) => (
-                  <div key={difference.yearMonth}>
-                    {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+              {!sheetApplyResumeRequired && (
+                <>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700">
+                    {(lateSheetApply.closedMonthDifferences || []).map((difference) => (
+                      <div key={difference.yearMonth}>
+                        {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">
-                변경 사유
-              </label>
-              <textarea
-                id="late-sheet-change-reason"
-                value={lateSheetChangeReason}
-                onChange={(event) => setLateSheetChangeReason(event.target.value.slice(0, 1000))}
-                placeholder="예: 결산 후 확인된 실제 입금액을 시트 기준으로 정정"
-                className="min-h-[96px] w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] leading-5 text-slate-900 outline-none focus:border-[#17324D] focus:ring-2 focus:ring-[#17324D]/10"
-                disabled={sheetStageApplyLoading}
-              />
-              <div className="text-right text-[12px] text-slate-400">{lateSheetChangeReason.length}/1000</div>
+                  <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">
+                    변경 사유
+                  </label>
+                  <textarea
+                    id="late-sheet-change-reason"
+                    value={lateSheetChangeReason}
+                    onChange={(event) => setLateSheetChangeReason(event.target.value.slice(0, 1000))}
+                    placeholder="예: 결산 후 확인된 실제 입금액을 시트 기준으로 정정"
+                    className="min-h-[96px] w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-[13px] leading-5 text-slate-900 outline-none focus:border-[#17324D] focus:ring-2 focus:ring-[#17324D]/10"
+                    disabled={sheetStageApplyLoading}
+                  />
+                  <div className="text-right text-[12px] text-slate-400">{lateSheetChangeReason.length}/1000</div>
+                </>
+              )}
             </div>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={sheetStageApplyLoading}>취소</AlertDialogCancel>
+            {!sheetApplyResumeRequired && (
+              <AlertDialogCancel disabled={sheetStageApplyLoading}>취소</AlertDialogCancel>
+            )}
             <Button
               type="button"
               className="bg-[#17324D] hover:bg-slate-800"
-              disabled={sheetStageApplyLoading || !lateSheetApply || !lateSheetChangeReason.trim()}
+              disabled={sheetStageApplyLoading || !lateSheetApply || (!sheetApplyResumeRequired && !lateSheetChangeReason.trim())}
               onClick={() => lateSheetApply && void handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())}
             >
               {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-              사유와 함께 반영
+              {sheetApplyResumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

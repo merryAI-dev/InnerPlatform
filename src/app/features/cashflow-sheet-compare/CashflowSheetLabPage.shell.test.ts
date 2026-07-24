@@ -132,6 +132,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('시트 고정본 ·');
     expect(pageSource).not.toContain('검토 범위');
     expect(pageSource).toContain('시트 값으로 덮어쓰기');
+    expect(pageSource).toContain('!open && !applyResumeRequired');
+    expect(pageSource).toContain('!applyResumeRequired && (');
     expect(pageSource).not.toContain('변경 내용 검토');
     expect(pageSource).not.toContain('전체 MYSCube에 저장할까요?');
     expect(pageSource).not.toContain('applyDialogOpen');

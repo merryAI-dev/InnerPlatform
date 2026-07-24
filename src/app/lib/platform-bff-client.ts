@@ -883,7 +883,7 @@ export interface CashflowDeadlineSummary {
 
 export interface CashflowMonthCloseDashboard {
   source: {
-    kind: 'PINNED_MIRROR' | 'MONTH_CLOSE_SNAPSHOT';
+    kind: 'PINNED_MIRROR' | 'MONTH_CLOSE_SNAPSHOT' | 'MONTH_CLOSE_AMENDED_CURRENT';
     status: string;
     sourceRevision: string;
     targetRevision: string;
@@ -892,6 +892,16 @@ export interface CashflowMonthCloseDashboard {
   project: Record<string, unknown>;
   projectMetadata: { businessType: string; accountType: string; settlementStatus: string };
   sheetMetadata: Record<string, unknown>;
+  sheetCalculationChecks: Array<{
+    mode: 'projection' | 'actual';
+    yearMonth: string;
+    weekNo: number;
+    reported: {
+      depositTotal: number | null;
+      withdrawalTotal: number | null;
+      balance: number | null;
+    };
+  }>;
   sheetControlTotals: {
     deposit: {
       sourceCell: string;
@@ -919,13 +929,14 @@ export interface CashflowMonthCloseDashboard {
   managementConfirmations: CashflowManagementConfirmation[];
   openingBalances?: CashflowOpeningBalances;
   snapshotCompatibility: {
-    status: 'LIVE_CURRENT' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY';
+    status: 'LIVE_CURRENT' | 'LIVE_AMENDED' | 'FROZEN_COMPLETE' | 'LEGACY_EVIDENCE_ONLY';
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
   deadlineSummary: CashflowDeadlineSummary;
   monthCloseStatuses?: Array<{
     yearMonth: string;
     status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
+    sheetCalculationChecks?: CashflowMonthCloseDashboard['sheetCalculationChecks'];
   }>;
   postCloseAdjustment: {
     reason: string;

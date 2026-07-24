@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -40,6 +41,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -1450,6 +1452,7 @@ class WeeklyExpenseControllerTest {
             true, "cashflowMonth.read", "project-month-dashboard", "2026-06", "OPEN",
             0, 0, 0,
             0, 0, null, null, null, null, null, false,
+            Map.of(),
             null, null, Map.of(), Map.of(), false,
             "2026-07-20", "2026-07-10", true,
             null, null, null, null, null, null, null, null, null, null, null
@@ -1534,6 +1537,7 @@ class WeeklyExpenseControllerTest {
                 true, "cashflowMonth.read", "project-frozen", "2026-06", "CLOSED",
                 1, 0, 0,
                 0, 0, null, null, null, null, null, false,
+                Map.of(),
                 "sha256:" + "a".repeat(64), null,
                 Map.of("openingBalances", Map.of(
                     "selectedYear", 2026,
@@ -1567,6 +1571,175 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void amendedClosedCashflowDashboardUsesCurrentLedgerWithoutReplacingFrozenSnapshot() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        String snapshotHash = "sha256:" + "a".repeat(64);
+        String targetRevision = "sha256:" + "c".repeat(64);
+        Map<String, Object> emptyMode = Map.of(
+            "amount", 0,
+            "lineAmounts", Map.of(),
+            "sources", List.of(),
+            "includedYears", List.of(),
+            "excludedWeeklyYears", List.of()
+        );
+        Map<String, Object> frozenSnapshot = Map.of(
+            "openingBalances", Map.of(
+                "selectedYear", 2026,
+                "projection", emptyMode,
+                "actual", emptyMode
+            ),
+            "ledgerWeeks", List.of()
+        );
+        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-amended"), eq("2026-06")))
+            .thenReturn(new CashflowMonthCloseResponse(
+                true, "cashflowMonth.read", "project-amended", "2026-06", "CLOSED",
+                2, 0, 1,
+                1, 0, "2026-07-09T00:00:00Z", "finance-2", "보람", "시트 정정", "2026-07-10", false,
+                Map.of(
+                    "closeRevision", 1,
+                    "closeSnapshotHash", snapshotHash,
+                    "resultingTargetRevision", targetRevision
+                ),
+                snapshotHash, null,
+                frozenSnapshot,
+                Map.of(), true,
+                "2026-07-09", "2026-07-10", false,
+                "2026-07-08T00:00:00Z", "finance-1", "재무",
+                null, null, null, null, null, null, null, "audit-amended"
+            ));
+        WeeklyExpensePersistence.CashflowLedgerSource liveSource =
+            new WeeklyExpensePersistence.CashflowLedgerSource(
+                List.of(),
+                List.of(),
+                List.of(),
+                targetRevision
+            );
+        when(dashboardPersistence.findCashflowLedgerSource("tenant-amended", "project-amended"))
+            .thenReturn(liveSource);
+        when(dashboardPersistence.findCashflowOpeningBalance(
+            "tenant-amended",
+            "project-amended",
+            2026,
+            List.of()
+        )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+            2026,
+            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            ),
+            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            )
+        ));
+
+        CashflowMonthDashboardSourceResponse response = new WeeklyExpenseController(
+            dashboardCommandService,
+            dashboardPersistence,
+            false
+        ).readCashflowMonthDashboardSource(
+            "project-amended",
+            "2026-06",
+            "tenant-amended",
+            "viewer-amended",
+            "viewer",
+            "viewer@example.com"
+        );
+
+        assertThat(response.monthClose().snapshot()).isEqualTo(frozenSnapshot);
+        assertThat(response.cashflow()).isNotNull();
+        assertThat(response.openingBalances().selectedYear()).isEqualTo(2026);
+        assertThat(response.snapshotCompatibility().status()).isEqualTo("LIVE_AMENDED");
+        verify(dashboardCommandService, times(2)).readCashflowMonthClose(
+            any(),
+            eq("project-amended"),
+            eq("2026-06")
+        );
+        verify(dashboardPersistence).findCashflowLedgerSource("tenant-amended", "project-amended");
+        verify(dashboardPersistence).findCashflowOpeningBalance(
+            "tenant-amended",
+            "project-amended",
+            2026,
+            List.of()
+        );
+    }
+
+    @Test
+    void amendedClosedCashflowDashboardFailsAfterTwoEvidenceDrifts() {
+        WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
+        WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        String snapshotHash = "sha256:" + "a".repeat(64);
+        String targetRevision = "sha256:" + "c".repeat(64);
+        Map<String, Object> openingBalances = Map.of(
+            "openingBalances", Map.of(
+                "selectedYear", 2026,
+                "projection", Map.of("amount", 0, "lineAmounts", Map.of(), "sources", List.of(),
+                    "includedYears", List.of(), "excludedWeeklyYears", List.of()),
+                "actual", Map.of("amount", 0, "lineAmounts", Map.of(), "sources", List.of(),
+                    "includedYears", List.of(), "excludedWeeklyYears", List.of())
+            ),
+            "ledgerWeeks", List.of()
+        );
+        Map<String, Object> firstEvidence = Map.of(
+            "closeRevision", 1,
+            "closeSnapshotHash", snapshotHash,
+            "resultingTargetRevision", targetRevision
+        );
+        Map<String, Object> driftedEvidence = Map.of(
+            "closeRevision", 2,
+            "closeSnapshotHash", snapshotHash,
+            "resultingTargetRevision", targetRevision
+        );
+        CashflowMonthCloseResponse first = new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-drift", "2026-06", "CLOSED",
+            2, 0, 1, 1, 0, null, null, null, null, null, false,
+            firstEvidence, snapshotHash, null, openingBalances, Map.of(), true,
+            "2026-07-09", "2026-07-10", false, null, null, null,
+            null, null, null, null, null, null, null, "audit-drift"
+        );
+        CashflowMonthCloseResponse drifted = new CashflowMonthCloseResponse(
+            true, "cashflowMonth.read", "project-drift", "2026-06", "CLOSED",
+            2, 0, 1, 1, 0, null, null, null, null, null, false,
+            driftedEvidence, snapshotHash, null, openingBalances, Map.of(), true,
+            "2026-07-09", "2026-07-10", false, null, null, null,
+            null, null, null, null, null, null, null, "audit-drift"
+        );
+        when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-drift"), eq("2026-06")))
+            .thenReturn(first, drifted, first, drifted);
+        when(dashboardPersistence.findCashflowLedgerSource("tenant-drift", "project-drift"))
+            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(
+                List.of(), List.of(), List.of(), targetRevision
+            ));
+        when(dashboardPersistence.findCashflowOpeningBalance(
+            "tenant-drift", "project-drift", 2026, List.of()
+        )).thenReturn(new WeeklyExpensePersistence.CashflowOpeningBalance(
+            2026,
+            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            ),
+            new WeeklyExpensePersistence.CashflowOpeningBalance.Mode(
+                java.math.BigDecimal.ZERO, Map.of(), List.of(), List.of(), List.of()
+            )
+        ));
+
+        WeeklyExpenseController controller = new WeeklyExpenseController(
+            dashboardCommandService,
+            dashboardPersistence,
+            false
+        );
+        assertThatThrownBy(() -> controller.readCashflowMonthDashboardSource(
+            "project-drift",
+            "2026-06",
+            "tenant-drift",
+            "viewer-drift",
+            "viewer",
+            "viewer@example.com"
+        )).isInstanceOf(WeeklyExpenseConflictException.class);
+        verify(dashboardCommandService, times(4)).readCashflowMonthClose(
+            any(), eq("project-drift"), eq("2026-06")
+        );
+    }
+
+    @Test
     void legacyClosedCashflowDashboardReturnsAvailableEvidenceWithoutReadingLiveLedger() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
@@ -1575,6 +1748,7 @@ class WeeklyExpenseControllerTest {
                 true, "cashflowMonth.read", "project-legacy-frozen", "2026-06", "CLOSED",
                 1, 0, 0,
                 0, 0, null, null, null, null, null, false,
+                Map.of(),
                 "sha256:" + "b".repeat(64), null,
                 Map.of("weeklyTotals", List.of()),
                 Map.of(), true,

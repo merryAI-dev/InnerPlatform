@@ -506,6 +506,17 @@ export interface CashflowSheetLabStageResult {
   } | null;
 }
 
+export interface CashflowSheetLabApplyStatusResult {
+  projectId: string;
+  status: 'IDLE' | 'APPLYING';
+  stagedRun: CashflowSheetLabStageResult | null;
+  applyInput: {
+    applyRiskCandidates?: boolean;
+    closedMonthChangeReason?: string;
+    replaceAllActualSources?: boolean;
+  } | null;
+}
+
 export interface CashflowSheetLabShareAccountResult {
   projectId: string;
   configured?: boolean;
@@ -627,6 +638,26 @@ export async function applyCashflowSheetLabViaBff(params: {
         },
       } : {}),
       timeoutMs: 30000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function getCashflowSheetLabApplyStatusViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetLabApplyStatusResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.request<CashflowSheetLabApplyStatusResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/apply-status`,
+    {
+      method: 'GET',
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      timeoutMs: 15000,
       retries: 0,
     },
   );

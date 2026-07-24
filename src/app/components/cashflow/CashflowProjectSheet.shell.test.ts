@@ -89,6 +89,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('renders the pinned sheet formula results instead of recomputing summary cells in the browser', () => {
     expect(source).toContain('cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks');
+    expect(source).toContain('monthCloseResult?.dashboard?.sheetCalculationChecks');
+    expect(source).toContain('closedMonthStatus?.sheetCalculationChecks');
+    expect(source).toContain('const check = monthIsClosed');
     expect(source).toContain('check?.reported.balance');
     expect(source).toContain('getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
   });
@@ -139,7 +142,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("month.yearMonth.replace('-', '년 ')}월");
     expect(source).toContain('LockKeyhole');
     expect(source).toContain("monthCloseStatus === 'CLOSED' ? 'bg-slate-200'");
-    expect(source).toContain('weeklySettlementSurface(input.weeklyStatus)');
+    expect(source).toContain('cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus)');
     expect(source).toContain("return 'bg-emerald-50'");
     expect(source).toContain("return 'bg-red-50'");
     expect(source).toContain("return 'bg-yellow-50'");
@@ -218,6 +221,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('aria-busy={sheetRefreshLoading}');
     expect(source).not.toContain('setSheetRefreshResult');
     expect(source).not.toContain('setSheetStageDialog');
+    expect(source).toContain('handingOffToAutoStage');
   });
 
   it('applies the pinned sheet directly and asks for a reason only when the JVM reports a late closed-month change', () => {
@@ -311,6 +315,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('CashflowSheetSyncOverlay');
     expect(source).toContain('inert={sheetRefreshLoading || undefined}');
     expect(source).toContain('<CashflowSheetSyncOverlay operation="refresh" />');
+  });
+
+  it('resumes the same staged sheet apply after an uncertain server response', () => {
+    expect(source).toContain('getCashflowSheetLabApplyStatusViaBff');
+    expect(source).toContain("status.status !== 'APPLYING'");
+    expect(source).toContain('setLateSheetApply(stage)');
+    expect(source).toContain('setSheetApplyResumeRequired(true)');
+    expect(source).toContain('같은 작업 이어서 완료');
+    expect(source).toContain('!sheetStageApplyLoading && !sheetApplyResumeRequired');
+    expect(source).toContain('!sheetApplyResumeRequired && (');
   });
 
   it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {

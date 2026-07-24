@@ -59,9 +59,10 @@ function monthDashboardSource(
     missingEvidence: [],
   },
 ) {
+  const liveCurrent = monthClose.status === 'OPEN' || snapshotCompatibility.status === 'LIVE_AMENDED';
   return {
     monthClose,
-    cashflow: monthClose.status === 'OPEN' ? cashflow : null,
+    cashflow: liveCurrent ? cashflow : null,
     openingBalances,
     snapshotCompatibility,
   };
@@ -468,6 +469,32 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
   });
 
+  it('does not publish a month dashboard while a sheet apply is in progress', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_publications/project-a', {
+      projectId: 'project-a',
+      status: 'APPLYING',
+      stagedRunId: 'run-in-flight',
+      sourceRevision: source.sourceRevision,
+      targetRevisionAtFetch: source.targetRevision,
+      applyStartedAt: '2026-07-24T08:00:00.000Z',
+    });
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db: source.db,
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_apply_in_progress');
+      });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('combines explicit sheet refresh and JVM month-close audit records for the activity timeline', async () => {
     const eventsByCollection = {
       cashflow_sheet_refresh_runs: [{
@@ -695,6 +722,21 @@ describe('JVM weekly API BFF proxy', () => {
     source.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-06', {
       projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED',
     });
+    source.documents.set('orgs/tenant-a/monthly_closes/project-a-2026-05', {
+      projectId: 'project-a',
+      yearMonth: '2026-05',
+      status: 'CLOSED',
+      snapshot: {
+        sheetFacts: {
+          weeklyCalculationChecks: [{
+            mode: 'projection',
+            yearMonth: '2026-05',
+            weekNo: 1,
+            reported: { depositTotal: 111, withdrawalTotal: 222, balance: 333 },
+          }],
+        },
+      },
+    });
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://jvm-weekly.local/api/v1/cashflow/project-a/weekly-update-complete',
       expect.objectContaining({ method: 'POST' }),
@@ -715,6 +757,16 @@ describe('JVM weekly API BFF proxy', () => {
         ]));
         expect(response.body.dashboard.monthCloseStatuses).toEqual(expect.arrayContaining([
           expect.objectContaining({ yearMonth: '2026-06', status: 'CLOSED' }),
+          expect.objectContaining({
+            yearMonth: '2026-05',
+            status: 'CLOSED',
+            sheetCalculationChecks: [expect.objectContaining({
+              mode: 'projection',
+              yearMonth: '2026-05',
+              weekNo: 1,
+              reported: { depositTotal: 111, withdrawalTotal: 222, balance: 333 },
+            })],
+          }),
         ]));
       });
   });
@@ -1432,6 +1484,132 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the current JVM ledger after an approved CLOSED-month amendment while preserving the original snapshot', async () => {
+    const frozenWeeklyTotals = Array.from({ length: 5 }, (_, index) => ({
+      weekNo: index + 1,
+      projection: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, lineId === 'SALES_IN' && index === 0 ? 100 : 0])),
+      actual: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 0])),
+    }));
+    const currentWeeklyTotals = frozenWeeklyTotals.map((week, index) => ({
+      ...week,
+      projection: index === 0 ? { ...week.projection, SALES_IN: 101 } : week.projection,
+    }));
+    const currentReadModel = {
+      months: [{
+        yearMonth: '2026-06',
+        projection: {
+          rowTotals: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, lineId === 'SALES_IN' ? 101 : 0])),
+          weeks: currentWeeklyTotals.map((week) => ({
+            weekNo: week.weekNo,
+            amounts: week.projection,
+            totalIn: week.projection.SALES_IN,
+            totalOut: 0,
+            weekIn: week.projection.SALES_IN,
+            weekOut: 0,
+            net: 101,
+          })),
+          monthTotals: { totalIn: 101, totalOut: 0, net: 101 },
+        },
+        actual: {
+          rowTotals: Object.fromEntries(cashflowLineIds.map((lineId) => [lineId, 0])),
+          weeks: currentWeeklyTotals.map((week) => ({
+            weekNo: week.weekNo,
+            amounts: week.actual,
+            totalIn: 0,
+            totalOut: 0,
+            weekIn: 0,
+            weekOut: 0,
+            net: 0,
+          })),
+          monthTotals: { totalIn: 0, totalOut: 0, net: 0 },
+        },
+      }],
+    };
+    const close = {
+      ok: true,
+      projectId: 'project-a',
+      yearMonth: '2026-06',
+      status: 'CLOSED',
+      revision: 2,
+      reopenCount: 0,
+      projectWarningCount: 1,
+      amendmentCount: 1,
+      lastAmendmentAt: '2026-07-09T00:00:00.000Z',
+      lastAmendmentByName: '보람',
+      lastAmendmentReason: '시트 정정',
+      lastAmendmentEvidence: {
+        closeRevision: 2,
+        sourceRevision: `sha256:${'1'.repeat(64)}`,
+        targetRevision: `sha256:${'2'.repeat(64)}`,
+        resultingTargetRevision: `sha256:${'3'.repeat(64)}`,
+        calculationChecks: Array.from({ length: 10 }, (_, index) => ({
+          mode: index < 5 ? 'projection' : 'actual',
+          yearMonth: '2026-06',
+          weekNo: (index % 5) + 1,
+          reported: { depositTotal: index === 0 ? 999 : 0, withdrawalTotal: 0, balance: index === 0 ? 999 : 0 },
+        })),
+      },
+      snapshot: {
+        project: { contractAmount: 101 },
+        sourceFingerprint: `sha256:${'f'.repeat(64)}`,
+        weeklyTotals: frozenWeeklyTotals,
+        ledgerWeeks: frozenWeeklyTotals.map((week) => ({
+          yearMonth: '2026-06',
+          weekNo: week.weekNo,
+          projection: week.projection,
+          actual: week.actual,
+        })),
+        depositScheduleRows: [],
+        confirmations: [],
+      },
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource(
+        close,
+        { projectId: 'project-a', projection: [], actual: [], readModel: currentReadModel },
+        {
+          selectedYear: 2026,
+          projection: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+          actual: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
+        },
+        { status: 'LIVE_AMENDED', missingEvidence: [] },
+      )),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: createMonthCloseDb() });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.source.kind).toBe('MONTH_CLOSE_AMENDED_CURRENT');
+        expect(response.body.dashboard.snapshotCompatibility.status).toBe('LIVE_AMENDED');
+        expect(response.body.dashboard.totals.projection.totalIn).toBe(101);
+        expect(response.body.dashboard.canonical.months[0].projection.weeks[0].amounts.SALES_IN).toBe(101);
+        expect(response.body.dashboard.cells).toHaveLength(160);
+        expect(response.body.dashboard.cells.find((cell) => (
+          cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'SALES_IN'
+        ))).toMatchObject({ cellState: 'VALUE', amount: 101 });
+        expect(response.body.dashboard.sheetCalculationChecks[0].reported.depositTotal).toBe(999);
+        expect(response.body.dashboard.source).toMatchObject({
+          sourceRevision: `sha256:${'1'.repeat(64)}`,
+          targetRevision: `sha256:${'3'.repeat(64)}`,
+        });
+      });
+    currentReadModel.months = [];
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.cells).toHaveLength(160);
+        expect(response.body.dashboard.cells.every((cell) => cell.cellState === 'EMPTY')).toBe(true);
+        expect(response.body.dashboard.totals.projection.totalIn).toBe(0);
+      });
+    expect(close.snapshot.weeklyTotals[0].projection.SALES_IN).toBe(100);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('serves a legacy CLOSED snapshot as evidence-only without falling back to live ledger data', async () => {
     const legacyMonthClose = {
       ok: true,
@@ -1843,6 +2021,166 @@ describe('JVM weekly API BFF proxy', () => {
       expectedRevision: 4,
       reason: '증빙 정정 필요',
     });
+  });
+
+  it('blocks month close while a sheet publication is APPLYING', async () => {
+    const source = fullMonthCloseSource();
+    const fetchImpl = vi.fn(async (url, init) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(url.includes('/dashboard-source')
+        ? monthDashboardSource({
+          ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+          reopenCount: 0, projectWarningCount: 0, snapshot: {},
+        })
+        : { ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED' }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db: source.db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+    const read = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200);
+    source.documents.set('orgs/tenant-a/cashflow_sheet_publications/project-a', {
+      projectId: 'project-a',
+      status: 'APPLYING',
+      stagedRunId: 'run-in-flight',
+      sourceRevision: `sha256:${'a'.repeat(64)}`,
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close')
+      .set('idempotency-key', 'month-close-publication-applying')
+      .send({
+        yearMonth: '2026-06',
+        expectedRevision: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_apply_in_progress');
+      });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the sheet publication changes during month-close preflight', async () => {
+    const source = fullMonthCloseSource();
+    let publicationReadCount = 0;
+    let publicationRaceActive = false;
+    const baseDoc = source.db.doc;
+    source.db.doc = (path) => {
+      if (!publicationRaceActive || path !== 'orgs/tenant-a/cashflow_sheet_publications/project-a') return baseDoc(path);
+      return {
+        get: async () => {
+          publicationReadCount += 1;
+          return {
+            exists: true,
+            data: () => ({
+              projectId: 'project-a',
+              status: 'APPLIED',
+              stagedRunId: publicationReadCount < 2 ? 'run-before' : 'run-after',
+              sourceRevision: `sha256:${'a'.repeat(64)}`,
+            }),
+          };
+        },
+      };
+    };
+    const fetchImpl = vi.fn(async (url) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db: source.db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+    const read = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200);
+    publicationRaceActive = true;
+    publicationReadCount = 0;
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close')
+      .set('idempotency-key', 'month-close-publication-preflight-race')
+      .send({
+        yearMonth: '2026-06',
+        expectedRevision: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_publication_changed');
+      });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not call the JVM mutation when publication changes after preflight', async () => {
+    const source = fullMonthCloseSource();
+    let publicationReadCount = 0;
+    let publicationRaceActive = false;
+    const baseDoc = source.db.doc;
+    source.db.doc = (path) => {
+      if (!publicationRaceActive || path !== 'orgs/tenant-a/cashflow_sheet_publications/project-a') return baseDoc(path);
+      return {
+        get: async () => {
+          publicationReadCount += 1;
+          return {
+            exists: true,
+            data: () => ({
+              projectId: 'project-a',
+              status: 'APPLIED',
+              stagedRunId: publicationReadCount < 3 ? 'run-stable' : 'run-changed',
+              sourceRevision: `sha256:${'a'.repeat(64)}`,
+            }),
+          };
+        },
+      };
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: stageEnv,
+      db: source.db,
+      now: () => new Date('2026-07-10T00:00:00.000Z'),
+    });
+    const read = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200);
+    publicationRaceActive = true;
+    publicationReadCount = 0;
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close')
+      .set('idempotency-key', 'month-close-publication-mutation-race')
+      .send({
+        yearMonth: '2026-06',
+        expectedRevision: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_publication_changed');
+      });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it.each(['admin', 'finance'])(

@@ -1125,6 +1125,12 @@ public class WeeklyExpenseCommandService {
                 request.closedMonthChangeReason(),
                 request.idempotencyKey()
             );
+        List<Map<String, Object>> calculationChecks = amendments.isEmpty()
+            ? request.calculationChecks()
+            : CashflowSheetLabApplyRequest.requireCompleteCalculationChecks(
+                request.yearMonth(),
+                request.calculationChecks()
+            );
         assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
@@ -1144,6 +1150,9 @@ public class WeeklyExpenseCommandService {
             projectId,
             amendments,
             request.sourceRevision(),
+            request.targetRevision(),
+            replacement.resultingTargetRevision(),
+            Map.of(request.yearMonth(), calculationChecks),
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
@@ -1256,6 +1265,18 @@ public class WeeklyExpenseCommandService {
                 request.closedMonthChangeReason(),
                 request.idempotencyKey()
             );
+        Map<String, List<Map<String, Object>>> calculationChecksByMonth = new LinkedHashMap<>();
+        for (CashflowSheetBatchApplyRequest.Month month : request.months()) {
+            calculationChecksByMonth.put(
+                month.yearMonth(),
+                amendments.stream().anyMatch(amendment -> amendment.yearMonth().equals(month.yearMonth()))
+                    ? CashflowSheetLabApplyRequest.requireCompleteCalculationChecks(
+                        month.yearMonth(),
+                        month.calculationChecks()
+                    )
+                    : month.calculationChecks()
+            );
+        }
         assertAtomicWriteBudget(
             Math.multiplyExact(cellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
             3,
@@ -1274,6 +1295,9 @@ public class WeeklyExpenseCommandService {
             projectId,
             amendments,
             request.sourceRevision(),
+            request.targetRevision(),
+            replacement.resultingTargetRevision(),
+            calculationChecksByMonth,
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
@@ -3076,6 +3100,7 @@ public class WeeklyExpenseCommandService {
             close.lastAmendmentReason(),
             close.lastAmendmentDeadline(),
             close.lastAmendmentPostDeadline(),
+            close.lastAmendmentEvidence(),
             close.snapshotHash(),
             close.previousSnapshotHash(),
             close.snapshot(),
