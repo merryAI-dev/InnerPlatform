@@ -65,10 +65,11 @@
     "security:firebase:whitehat": "node scripts/firebase_whitehat_demo.mjs",
     "pii:rotate": "node scripts/pii_rotate_fields.mjs",
     "pii:setup:vercel": "bash scripts/pii_setup_vercel_local.sh",
-    "policy:verify": "node scripts/verify_rbac_policy.mjs && node scripts/assert_vercel_edge_route_policy.mjs && node scripts/verify_privacy_by_design_policy.mjs",
+    "policy:verify": "node scripts/verify_rbac_policy.mjs && node scripts/extract_jvm_command_roles.mjs && node scripts/assert_vercel_edge_route_policy.mjs && node scripts/verify_privacy_by_design_policy.mjs",
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
     "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "policy:jvm-roles:write": "node scripts/extract_jvm_command_roles.mjs --write"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
