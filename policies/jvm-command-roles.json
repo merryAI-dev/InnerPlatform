@@ -1,0 +1,262 @@
+{
+  "$comment": "생성물이다. 직접 고치지 말고 JVM 권한맵을 고친 뒤 npm run policy:jvm-roles:write 를 실행한다.",
+  "source": "server/jvm-weekly-api/src/main/java/dev/merryai/innerplatform/weekly/service/WeeklyExpenseAuthorizationService.java",
+  "roles": [
+    "admin",
+    "auditor",
+    "finance",
+    "pm",
+    "security",
+    "support",
+    "tenant_admin",
+    "viewer"
+  ],
+  "commands": {
+    "AUDIT_EXPORT_CREATE_COMMAND": {
+      "command": "weeklyExpense.auditExport.create",
+      "roles": [
+        "admin",
+        "finance"
+      ]
+    },
+    "BANK_IMPORT_APPLY_ITEMS_COMMAND": {
+      "command": "weeklyExpense.bankStatement.applyItems",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "BANK_IMPORT_BATCH_COMMAND": {
+      "command": "weeklyExpense.bankStatement.importBatch",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "BANK_IMPORT_LIST_LINES_COMMAND": {
+      "command": "weeklyExpense.bankStatement.listLines",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "CASHFLOW_MONTH_CLOSE_READ_COMMAND": {
+      "command": "cashflowMonth.read",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "CASHFLOW_READ_COMMAND": {
+      "command": "weeklyExpense.cashflow.read",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "CASHFLOW_SHEET_LAB_APPLY_COMMAND": {
+      "command": "weeklyExpense.cashflowSheetLab.apply",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "CASHFLOW_VARIANCE_COMMAND": {
+      "command": "cashflowVariance.update",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin"
+      ]
+    },
+    "CELLS_COPY_COMMAND": {
+      "command": "weeklyExpense.cells.copy",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "CELLS_CUT_COMMAND": {
+      "command": "weeklyExpense.cells.cut",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "CELLS_PASTE_COMMAND": {
+      "command": "weeklyExpense.cells.paste",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "CELL_PATCH_COMMAND": {
+      "command": "weeklyExpense.cell.patch",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "CLOSE_CASHFLOW_MONTH_COMMAND": {
+      "command": "cashflowMonth.close",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "CLOSE_WEEK_COMMAND": {
+      "command": "weeklyExpense.closeWeek",
+      "roles": [
+        "admin",
+        "finance"
+      ]
+    },
+    "COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
+      "command": "cashflowWeeklyUpdate.complete",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "DECIDE_CASHFLOW_MONTH_REOPEN_COMMAND": {
+      "command": "cashflowMonth.decideReopen",
+      "roles": [
+        "admin",
+        "finance"
+      ]
+    },
+    "READ_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
+      "command": "cashflowWeeklyUpdate.read",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "REOPEN_CASHFLOW_WEEKLY_UPDATE_COMMAND": {
+      "command": "cashflowWeeklyUpdate.reopen",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "REQUEST_CASHFLOW_MONTH_REOPEN_COMMAND": {
+      "command": "cashflowMonth.requestReopen",
+      "roles": [
+        "admin",
+        "finance",
+        "pm",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "ROW_DELETE_COMMAND": {
+      "command": "weeklyExpense.row.delete",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "ROW_INSERT_COMMAND": {
+      "command": "weeklyExpense.row.insert",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "SAVE_DRAFT_COMMAND": {
+      "command": "weeklyExpense.saveDraft",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "SHEET_READ_COMMAND": {
+      "command": "weeklyExpense.sheet.read",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    },
+    "SUBMIT_WEEK_COMMAND": {
+      "command": "weeklyExpense.submitWeek",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "UPSERT_PROJECTION_COMMAND": {
+      "command": "weeklyExpense.projection.upsert",
+      "roles": [
+        "admin",
+        "finance",
+        "pm"
+      ]
+    },
+    "WEEKLY_STATUS_READ_COMMAND": {
+      "command": "weeklyExpense.status.read",
+      "roles": [
+        "admin",
+        "auditor",
+        "finance",
+        "pm",
+        "security",
+        "support",
+        "tenant_admin",
+        "viewer"
+      ]
+    }
+  }
+}
