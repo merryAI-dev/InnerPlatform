@@ -126,4 +126,49 @@ describe('devtools transaction log', () => {
       durationMs: 12_345,
     })).toBe('[MYSCube:cashflow_transaction] success cashflow.sheet_lab.overwrite.sheet_values.ok 12345ms');
   });
+
+  it('carries the BFF diagnostic code and wording into the developer log', () => {
+    // BFF 오류 응답은 { error, message, requestId } 형태다. 사용자 화면에는 문구만 보이고
+    // 코드는 여기에만 남는다.
+    const sanitized = toDevtoolsError({
+      name: 'PlatformApiError',
+      status: 503,
+      requestId: 'req-42',
+      body: {
+        error: 'jvm_weekly_api_unreachable',
+        message: '저장을 처리하는 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      },
+    });
+
+    expect(sanitized).toEqual({
+      name: 'PlatformApiError',
+      message: '[jvm_weekly_api_unreachable] 저장을 처리하는 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      status: 503,
+      requestId: 'req-42',
+    });
+  });
+
+  it('still reads a code from body.code so older callers keep working', () => {
+    expect(toDevtoolsError({ body: { code: 'cashflow_month_closed' } })?.message)
+      .toBe('[cashflow_month_closed] Request failed');
+  });
+
+  it('keeps the wording even when the code is rejected as unsafe', () => {
+    const sanitized = toDevtoolsError({
+      status: 503,
+      body: { error: 'sk_live_9999', message: '서버 연결 정보가 설정되지 않았습니다. 담당자에게 문의해 주세요.' },
+    });
+
+    expect(sanitized?.message).toBe('서버 연결 정보가 설정되지 않았습니다. 담당자에게 문의해 주세요.');
+    expect(sanitized?.message).not.toContain('sk_live');
+  });
+
+  it('masks sensitive text that a server message interpolated', () => {
+    const sanitized = toDevtoolsError({
+      status: 400,
+      body: { error: 'request_error', message: 'person@mysc.co.kr 님의 요청을 처리할 수 없습니다.' },
+    });
+
+    expect(sanitized?.message).not.toContain('person@mysc.co.kr');
+  });
 });

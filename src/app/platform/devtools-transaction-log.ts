@@ -129,15 +129,23 @@ export function toDevtoolsError(error: unknown): DevtoolsLogEntry['error'] {
     status?: unknown;
     requestId?: unknown;
     code?: unknown;
-    body?: { code?: unknown; error?: unknown };
+    body?: { code?: unknown; error?: unknown; message?: unknown };
   };
-  const code = [maybe?.code, maybe?.body?.code].find(isSafeDiagnosticCode);
+  // BFF 오류 응답은 { error, message, requestId } 형태다. 진단 코드는 body.error 에 담겨 오는데
+  // 여기서는 body.code 만 보고 있어서 지금까지 어떤 코드도 로그에 남지 않았다.
+  const code = [maybe?.code, maybe?.body?.code, maybe?.body?.error].find(isSafeDiagnosticCode);
   const name = typeof maybe?.name === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(maybe.name)
     ? maybe.name
     : 'RequestError';
+  // 서버가 직접 정한 문구는 무엇이 왜 실패했는지를 담고 있다. 화면에는 이 문구만 보이고
+  // 코드는 개발자 도구에서만 확인한다. truncateString 이 길이 제한과 민감어 마스킹을 담당한다.
+  // 이 함수의 반환값은 그 자체로 안전해야 한다. 마스킹은 recordDevtoolsLog 단계에도 있지만
+  // toDevtoolsError 를 직접 쓰는 곳이 있으므로 여기서 먼저 거른다.
+  const rawServerMessage = typeof maybe?.body?.message === 'string' ? maybe.body.message.trim() : '';
+  const detail = rawServerMessage ? truncateString(rawServerMessage) : 'Request failed';
   return {
     name,
-    message: code ? `[${code}] Request failed` : 'Request failed',
+    message: code ? `[${code}] ${detail}` : detail,
     status: typeof maybe?.status === 'number' && Number.isInteger(maybe.status) && maybe.status >= 100 && maybe.status <= 599
       ? maybe.status
       : undefined,

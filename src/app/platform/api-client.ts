@@ -233,8 +233,11 @@ export class PlatformApiClient {
       return await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (error) {
       if (didTimeout) {
-        const timeoutError = new Error(`API request timed out after ${timeoutMs}ms`);
+        // 이 문구는 사용자 화면에 그대로 나간다. 대기 시간(ms)은 개발자 도구 로그의
+        // durationMs 로 남으므로 여기에 숫자를 넣지 않는다.
+        const timeoutError = new Error('서버 응답이 늦어 요청을 중단했습니다. 잠시 후 다시 시도해 주세요.');
         timeoutError.name = 'TimeoutError';
+        (timeoutError as Error & { timeoutMs?: number }).timeoutMs = timeoutMs;
         throw timeoutError;
       }
       throw error;
@@ -416,7 +419,9 @@ export class PlatformApiClient {
             });
           }
           throw new PlatformApiError(
-            `API request failed with status ${response.status}`,
+            // 서버가 문구를 보냈다면 resolveApiErrorMessage 가 body.message 를 먼저 쓴다.
+            // 이 문구는 응답 본문이 비어 있을 때(게이트웨이 오류 등)만 사용자에게 보인다.
+            '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.',
             response.status,
             requestId,
             responseBody,
