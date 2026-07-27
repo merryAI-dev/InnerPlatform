@@ -63,6 +63,13 @@ describe('admin nav access control', () => {
     expect(canAccessAdminPath('finance', '/projects/migration-audit')).toBe(false);
   });
 
+  it('keeps participation management admin-only', () => {
+    expect(canAccessAdminPath('admin', '/participation')).toBe(true);
+    expect(canAccessAdminPath('finance', '/participation')).toBe(false);
+    expect(canAccessAdminPath('pm', '/participation')).toBe(false);
+    expect(canAccessAdminPath('viewer', '/participation')).toBe(false);
+  });
+
   it('shows management-planning project code issuance only to finance and admin', () => {
     expect(canShowAdminNavItem('admin', '/management-planning/project-codes')).toBe(true);
     expect(canShowAdminNavItem('finance', '/management-planning/project-codes')).toBe(true);

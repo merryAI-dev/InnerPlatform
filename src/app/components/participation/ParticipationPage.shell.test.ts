@@ -34,4 +34,11 @@ describe('ParticipationPage shell contract', () => {
     expect(source).not.toContain('투입율');
     expect(source).not.toContain('투입률');
   });
+
+  it('keeps the monthly document-rate matrix read-only for administrators', () => {
+    expect(source).toContain('월별 서류 참여율');
+    expect(source).toContain('관리자 조회 전용');
+    expect(source).toContain('getMonthlyParticipationRate(entry, yearMonth)');
+    expect(source).not.toContain('월별 실제 참여율');
+  });
 });
