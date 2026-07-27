@@ -2921,7 +2921,7 @@ export function CashflowProjectSheet({
           }
         }}
       >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[440px]">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{sheetApplyResumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -2934,10 +2934,42 @@ export function CashflowProjectSheet({
             <div className="space-y-3">
               {!sheetApplyResumeRequired && (
                 <>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700">
+                  <div className="max-h-[260px] space-y-2 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                     {(lateSheetApply.closedMonthDifferences || []).map((difference) => (
                       <div key={difference.yearMonth}>
-                        {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+                        <div className="text-[12px] font-semibold leading-5 text-slate-800">
+                          {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+                        </div>
+                        {(difference.changes || []).length > 0 && (
+                          <table className="mt-1 w-full border-collapse text-[12px] leading-4 text-slate-700">
+                            <tbody>
+                              {(difference.changes || []).map((change) => (
+                                <tr key={`${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200">
+                                  <td className="py-1 pr-2 align-top whitespace-nowrap text-slate-500">
+                                    {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차
+                                  </td>
+                                  <td className="py-1 pr-2 align-top">
+                                    {CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}
+                                  </td>
+                                  <td className="py-1 align-top whitespace-nowrap text-right tabular-nums">
+                                    <span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>
+                                      {change.beforeHadValue ? `${fmt(Number(change.beforeAmount || 0))}원` : '미작성'}
+                                    </span>
+                                    <span className="px-1 text-slate-400">→</span>
+                                    <span className="font-semibold text-slate-900">
+                                      {change.afterHadValue ? `${fmt(Number(change.afterAmount || 0))}원` : '미작성'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {Number(difference.truncatedChangeCount) > 0 && (
+                          <div className="mt-1 text-[12px] leading-4 text-slate-500">
+                            외 {Number(difference.truncatedChangeCount).toLocaleString()}건은 반영 후 변경 이력에서 확인할 수 있습니다.
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -240,7 +240,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())');
     expect(source).toContain('closedMonthChangeReason');
     expect(source).toContain('마감 후 시트값 변경');
-    expect(source).toContain('max-w-[440px]');
     expect(source).toContain('사유와 함께 반영');
     expect(source).not.toContain('renderSheetStageReviewGrid');
     expect(source).not.toContain('sheetStageDialog');

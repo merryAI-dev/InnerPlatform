@@ -1403,6 +1403,18 @@ async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, year
   return closedMonths;
 }
 
+// 마감된 달의 변경분은 사람이 판단해야 하므로 항목별 before → after를 함께 내려보낸다.
+// 응답 크기를 묶기 위해 월별 상위 항목만 싣고 나머지는 건수로만 알린다.
+const CLOSED_MONTH_CHANGE_DETAIL_LIMIT = 20;
+
+function sortMonthDifferenceChanges(changes) {
+  return [...changes].sort((left, right) => (
+    left.weekNo - right.weekNo
+    || String(left.mode).localeCompare(String(right.mode))
+    || String(left.lineId).localeCompare(String(right.lineId))
+  ));
+}
+
 function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, cashflowSnapshot, closedMonths = new Set(), context, now, forceFullReplacement = false }) {
   const amountIndex = buildSnapshotAmountIndex(cashflowSnapshot);
   const weekIndex = new Map((cashflowSnapshot?.weeks || []).map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
@@ -1436,9 +1448,26 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       yearMonth,
       differenceCount: 0,
       weeks: new Set(),
+      changes: [],
     };
     summary.differenceCount += 1;
     summary.weeks.add(Number(cell.weekNo));
+    const mapping = {
+      mode: cell.mode,
+      yearMonth: cell.yearMonth,
+      weekNo: cell.weekNo,
+      lineId: cell.lineId,
+    };
+    const beforeHadValue = hasIndexedSnapshotAmount(amountIndex, mapping);
+    summary.changes.push({
+      mode: cell.mode,
+      weekNo: Number(cell.weekNo),
+      lineId: cell.lineId,
+      beforeHadValue,
+      beforeAmount: beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null,
+      afterHadValue: cell.state === 'VALUE',
+      afterAmount: cell.state === 'VALUE' ? normalizeAppliedAmount(cell.amount) : null,
+    });
     closedMonthDifferenceMap.set(yearMonth, summary);
   }
   const closedMonthDifferences = [...closedMonthDifferenceMap.values()]
@@ -1446,6 +1475,8 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       yearMonth: summary.yearMonth,
       differenceCount: summary.differenceCount,
       weeks: [...summary.weeks].filter(Number.isSafeInteger).sort((left, right) => left - right),
+      changes: sortMonthDifferenceChanges(summary.changes).slice(0, CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
+      truncatedChangeCount: Math.max(0, summary.changes.length - CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
     }))
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
   const riskLineCount = closedDifferences.length;
@@ -1515,15 +1546,26 @@ function summarizeCandidateMonthDifferences(candidates, yearMonths = []) {
   for (const candidate of candidates) {
     const candidateMonth = readOptionalText(candidate?.yearMonth);
     if (!candidateMonth || (requiredMonths.size > 0 && !requiredMonths.has(candidateMonth))) continue;
-    const summary = summaries.get(candidateMonth) || { yearMonth: candidateMonth, differenceCount: 0, weeks: new Set() };
+    const summary = summaries.get(candidateMonth) || { yearMonth: candidateMonth, differenceCount: 0, weeks: new Set(), changes: [] };
     summary.differenceCount += 1;
     if (Number.isSafeInteger(Number(candidate?.weekNo))) summary.weeks.add(Number(candidate.weekNo));
+    summary.changes.push({
+      mode: candidate.mode,
+      weekNo: Number(candidate.weekNo),
+      lineId: candidate.lineId,
+      beforeHadValue: Boolean(candidate.beforeHadValue),
+      beforeAmount: candidate.beforeHadValue ? candidate.beforeAmount : null,
+      afterHadValue: Boolean(candidate.proposedHadValue),
+      afterAmount: candidate.proposedHadValue ? candidate.proposedAmount : null,
+    });
     summaries.set(candidateMonth, summary);
   }
   return [...summaries.values()].map((summary) => ({
     yearMonth: summary.yearMonth,
     differenceCount: summary.differenceCount,
     weeks: [...summary.weeks].sort((left, right) => left - right),
+    changes: sortMonthDifferenceChanges(summary.changes).slice(0, CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
+    truncatedChangeCount: Math.max(0, summary.changes.length - CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
   })).sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
 }
 
