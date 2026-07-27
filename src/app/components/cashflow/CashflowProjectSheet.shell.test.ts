@@ -98,10 +98,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
   });
 
-  it('keeps the ready placeholder out of the issue count', () => {
+  it('drops the inbox card but keeps the issue count badge', () => {
     expect(source).not.toContain("inbox.push({ id: 'all-clear'");
     expect(source).toContain('{opsSummary.status.count}건');
-    expect(source).toContain('visibleInbox.length === 0');
+    expect(source).not.toContain('visibleInbox');
+    expect(source).not.toContain('text-muted-foreground">확인할 항목</div>');
+    expect(source).not.toContain('xl:max-h-[126px]');
+  });
+
+  it('labels rate tiles by loading, over, under, and OK', () => {
+    expect(source).toContain('function rateStatusLabel');
+    expect(source).toContain("if (monthCloseLoading || !monthCloseResult?.dashboard) return '확인 중';");
+    expect(source).toContain("if (percent === 100) return 'OK';");
+    expect(source).toContain("return percent > 100 ? '초과' : '미달';");
+    expect(source).not.toContain("rate.percent === 100 ? 'OK' : '확인 중'");
   });
 
   it('keeps Projection then ACTUAL row order and uses navy for difference rows', () => {
@@ -122,7 +132,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('text-card-foreground">월 결산');
     expect(source).toContain('text-secondary-foreground">{check.title}');
     expect(source).toContain('text-muted-foreground">프로젝트 전체 기간 · BFF/JVM 서버 판정');
-    expect(source).toContain('divide-y divide-border');
     expect(source).toContain('bg-accent px-2.5 py-1 font-semibold text-accent-foreground');
     expect(source).toContain('space-y-5 bg-background p-4');
     expect(source).not.toMatch(/FFF7DE|E4C974|D6A92C|FCE8A8/);
