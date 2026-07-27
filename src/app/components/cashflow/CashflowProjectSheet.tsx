@@ -1460,28 +1460,15 @@ export function CashflowProjectSheet({
     const dashboard = monthCloseResult?.dashboard;
     const blockers = dashboard?.validation?.blockers || [];
     const warnings = dashboard?.validation?.warnings || [];
-    const inbox = [
-      ...blockers.map((item) => ({ id: `blocker-${item.code}`, tone: 'danger' as CashflowOpsTone, title: item.message, detail: item.code })),
-      ...warnings.map((item) => ({ id: `warning-${item.code}`, tone: 'warning' as CashflowOpsTone, title: item.message, detail: item.code })),
-      ...(dashboard && (dashboard.summary?.settlementIncompleteWeeks?.length || 0) > 0
-        ? [{
-            id: 'projection-actual-diff',
-            tone: 'warning' as CashflowOpsTone,
-            title: `Projection/Actual 확인이 필요한 주차 ${dashboard.summary.settlementIncompleteWeeks.length}건`,
-            detail: dashboard.summary.settlementIncompleteWeeks
-              .slice(0, 5)
-              .map((week) => `${week.yearMonth} ${week.weekNo}주차`)
-              .join(', '),
-          }]
-        : []),
-    ];
-    if (!dashboard && !monthCloseLoading) {
-      inbox.push({ id: 'dashboard-unavailable', tone: 'danger', title: '월 결산 서버 상태를 불러오지 못했습니다.', detail: monthCloseError || '잠시 후 다시 시도해 주세요.' });
-    }
-    const issueCount = inbox.length;
-    const kind = blockers.length > 0 || (!dashboard && !monthCloseLoading)
+    const settlementIncompleteCount = dashboard?.summary?.settlementIncompleteWeeks?.length || 0;
+    const dashboardUnavailable = !dashboard && !monthCloseLoading;
+    const issueCount = blockers.length
+      + warnings.length
+      + (settlementIncompleteCount > 0 ? 1 : 0)
+      + (dashboardUnavailable ? 1 : 0);
+    const kind = blockers.length > 0 || dashboardUnavailable
       ? 'blocked' as const
-      : warnings.length > 0 || (dashboard?.summary?.settlementIncompleteWeeks?.length || 0) > 0
+      : warnings.length > 0 || settlementIncompleteCount > 0
         ? 'review' as const
         : 'ready' as const;
     const tone: CashflowOpsTone = kind === 'blocked' ? 'danger' : kind === 'review' ? 'warning' : 'success';
@@ -1503,9 +1490,8 @@ export function CashflowProjectSheet({
         actual: rate(dashboard?.summary?.actualProgressPercent || 0),
         confirmation: rate(dashboard?.summary?.settlementProgressPercent || 0),
       },
-      inbox,
     };
-  }, [monthCloseError, monthCloseLoading, monthCloseResult?.dashboard]);
+  }, [monthCloseLoading, monthCloseResult?.dashboard]);
 
   function diffTextClass(diff: number): string {
     return diff === 0 ? 'text-slate-400' : 'text-slate-800';
@@ -2175,12 +2161,10 @@ export function CashflowProjectSheet({
     return 'bg-secondary';
   }
 
-  function opsTextClass(tone: CashflowOpsTone): string {
-    if (tone === 'danger') return 'text-red-700';
-    if (tone === 'warning') return 'text-accent-foreground';
-    if (tone === 'success') return 'text-secondary-foreground';
-    if (tone === 'info') return 'text-primary';
-    return 'text-secondary-foreground';
+  function rateStatusLabel(percent: number): string {
+    if (monthCloseLoading || !monthCloseResult?.dashboard) return '확인 중';
+    if (percent === 100) return 'OK';
+    return percent > 100 ? '초과' : '미달';
   }
 
   function renderRateTile(label: string, rate: { percent: number }) {
@@ -2207,7 +2191,7 @@ export function CashflowProjectSheet({
           <span className={`text-[22px] font-bold leading-6 tabular-nums ${tone.value}`}>
             {rate.percent}%
           </span>
-          <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{rate.percent === 100 ? 'OK' : '확인 중'}</span>
+          <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{rateStatusLabel(rate.percent)}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
           <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
@@ -2217,70 +2201,21 @@ export function CashflowProjectSheet({
     );
   }
 
-  function renderOperationsSummary(input: {
-    hiddenInboxCount: number;
-    visibleInbox: typeof opsSummary.inbox;
-  }) {
+  function renderOperationsSummary() {
     return (
-      <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_240px]">
-        <div className="grid gap-2 md:grid-cols-3">
-          {renderRateTile('Projection', opsSummary.rates.projection)}
-          {renderRateTile('Actual', opsSummary.rates.actual)}
-          {renderRateTile('결산', opsSummary.rates.confirmation)}
-        </div>
-
-        <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card shadow-none xl:max-h-[126px]">
-          <div className="flex items-center justify-between gap-2 px-3 py-2">
-            <div className="min-w-0">
-              <div className="text-[12px] font-semibold text-muted-foreground">확인할 항목</div>
-              <div className={`mt-0.5 text-[12px] font-bold tabular-nums ${opsTextClass(opsSummary.status.tone)}`}>
-                {opsSummary.status.count}건
-              </div>
-            </div>
-          </div>
-          <div className="divide-y divide-border">
-            {input.visibleInbox.length === 0 ? (
-              <div className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
-                <div className="flex h-4 items-center justify-center">
-                  <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass('success')}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass('success')}`}>확인할 항목이 없습니다.</div>
-                  <div className="mt-0.5 truncate text-[12px] leading-4 text-muted-foreground">서버 검증 기준으로 준비되었습니다.</div>
-                </div>
-              </div>
-            ) : input.visibleInbox.map((item) => (
-              <div key={item.id} className="grid grid-cols-[14px_minmax(0,1fr)] gap-1.5 px-3 py-1.5">
-                <div className="flex h-4 items-center justify-center">
-                  <span className={`h-1.5 w-1.5 rounded-full ${opsDotClass(item.tone)}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className={`truncate text-[12px] font-bold leading-4 ${opsTextClass(item.tone)}`}>{item.title}</div>
-                  <div className="mt-0.5 truncate text-[12px] leading-4 text-muted-foreground">{item.detail}</div>
-                </div>
-              </div>
-            ))}
-            {input.hiddenInboxCount > 0 && (
-              <div className="px-2 py-1 text-[12px] font-semibold text-muted-foreground">
-                외 {input.hiddenInboxCount}건
-              </div>
-            )}
-          </div>
-        </div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {renderRateTile('Projection', opsSummary.rates.projection)}
+        {renderRateTile('Actual', opsSummary.rates.actual)}
+        {renderRateTile('결산', opsSummary.rates.confirmation)}
       </div>
     );
   }
 
   function renderOperationsPanel() {
-    const visibleInbox = opsSummary.inbox.slice(0, 4);
-    const hiddenInboxCount = Math.max(0, opsSummary.status.count - visibleInbox.length);
     const statusBadgeLabel = opsSummary.status.kind === 'ready'
       ? opsSummary.status.label
       : `확인 항목 ${opsSummary.status.count}건`;
-    const dashboardSummary = renderOperationsSummary({
-      hiddenInboxCount,
-      visibleInbox,
-    });
+    const dashboardSummary = renderOperationsSummary();
     return (
       <Card className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <CardContent className="space-y-3 p-4">
