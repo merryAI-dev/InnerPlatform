@@ -33,7 +33,10 @@ import {
 } from '../../data/participation-data';
 import type { MemberParticipationSummary } from '../../data/participation-data';
 import { buildAllProjectTeamParticipationEntries } from '../../platform/project-team-participation';
-import { getMonthlyParticipationRate } from '../../platform/participation-monthly-rates';
+import {
+  resolveParticipationRateForMonth,
+  summarizeMemberMonthlyAllocations,
+} from '../../platform/participation-monthly-rates';
 
 // ── Helpers ──
 
@@ -44,18 +47,33 @@ const riskColors = {
 };
 const riskLabels = { SAFE: '안전', WARNING: '경고', DANGER: '위험' };
 
-function monthKeys(year: string) {
-  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
-}
-
 function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] }) {
-  const years = useMemo(() => Array.from(new Set(
-    entries.flatMap((entry) => Object.keys(entry.monthlyRates || {}).map((yearMonth) => yearMonth.slice(0, 4))),
-  )).filter((year) => /^\d{4}$/.test(year)).sort(), [entries]);
-  const [selectedYear, setSelectedYear] = useState(() => years.at(-1) || String(new Date().getFullYear()));
-  const activeYear = years.includes(selectedYear) ? selectedYear : (years.at(-1) || selectedYear);
-  const months = monthKeys(activeYear);
-  const rows = entries;
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(
+    () => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+  );
+  const monthlyRows = useMemo(() => entries.flatMap((entry) => {
+    const resolved = resolveParticipationRateForMonth(entry, selectedMonth);
+    return resolved === null ? [] : [{ entry, ...resolved }];
+  }), [entries, selectedMonth]);
+  const projectGroups = useMemo(() => {
+    const grouped = new Map<string, typeof monthlyRows>();
+    monthlyRows.forEach((row) => {
+      const rows = grouped.get(row.entry.projectId) || [];
+      rows.push(row);
+      grouped.set(row.entry.projectId, rows);
+    });
+    return Array.from(grouped.entries())
+      .map(([projectId, rows]) => ({ projectId, rows }))
+      .sort((a, b) => (
+        (a.rows[0].entry.projectShortName || a.rows[0].entry.projectName)
+          .localeCompare(b.rows[0].entry.projectShortName || b.rows[0].entry.projectName, 'ko')
+      ));
+  }, [monthlyRows]);
+  const memberTotals = useMemo(() => summarizeMemberMonthlyAllocations(
+    monthlyRows.map(({ entry, rate }) => ({ memberId: entry.memberId, projectId: entry.projectId, rate })),
+  ), [monthlyRows]);
+  const overAllocatedCount = Array.from(memberTotals.values()).filter(({ total }) => total > 100).length;
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -66,7 +84,7 @@ function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] 
           </div>
           <div>
             <h2 className="text-sm font-semibold text-slate-900">월별 서류 참여율</h2>
-            <p className="mt-0.5 text-xs text-slate-500">프로젝트에 등록된 전체 참여자를 보여줍니다. 월별 값이 없으면 미입력으로 표시합니다.</p>
+            <p className="mt-0.5 text-xs text-slate-500">선택한 월의 사업별 참여자를 보여줍니다. 서류 월별값이 없으면 프로젝트 등록값을 표시합니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -74,61 +92,80 @@ function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] 
             <LockKeyhole className="h-3 w-3" /> 관리자 조회 전용
           </Badge>
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            기준 연도
-            <select
-              aria-label="월별 서류 참여율 기준 연도"
-              value={activeYear}
-              onChange={(event) => setSelectedYear(event.target.value)}
+            기준 월
+            <input
+              type="month"
+              aria-label="월별 서류 참여율 기준 월"
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
               className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-800 outline-none focus:border-slate-700 focus:ring-2 focus:ring-slate-200"
-            >
-              {(years.length ? years : [activeYear]).map((year) => <option key={year} value={year}>{year}년</option>)}
-            </select>
+            />
           </label>
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      <div className="grid grid-cols-3 border-b border-slate-200 bg-white text-center">
+        <div className="border-r border-slate-100 px-3 py-2">
+          <p className="text-[10px] text-slate-500">사업</p>
+          <p className="text-sm font-semibold text-slate-900">{projectGroups.length}개</p>
+        </div>
+        <div className="border-r border-slate-100 px-3 py-2">
+          <p className="text-[10px] text-slate-500">참여자</p>
+          <p className="text-sm font-semibold text-slate-900">{memberTotals.size}명</p>
+        </div>
+        <div className="px-3 py-2">
+          <p className="text-[10px] text-slate-500">100% 초과</p>
+          <p className={`text-sm font-semibold ${overAllocatedCount > 0 ? 'text-rose-700' : 'text-slate-900'}`}>{overAllocatedCount}명</p>
+        </div>
+      </div>
+
+      {projectGroups.length === 0 ? (
         <div className="px-4 py-10 text-center">
-          <p className="text-sm font-medium text-slate-700">등록된 프로젝트 참여자가 없습니다.</p>
-          <p className="mt-1 text-xs text-slate-500">프로젝트에 참여자를 등록하면 이 표에 표시됩니다.</p>
+          <p className="text-sm font-medium text-slate-700">{selectedMonth.replace('-', '년 ')}월에 참여하는 사람이 없습니다.</p>
+          <p className="mt-1 text-xs text-slate-500">프로젝트 참여기간과 등록 참여율을 확인해 주세요.</p>
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <Table className="min-w-[1220px]">
+          <Table className="min-w-[860px]">
             <TableHeader>
               <TableRow className="border-slate-200 bg-slate-100 hover:bg-slate-100">
-                <TableHead className="sticky left-0 z-10 min-w-[120px] bg-slate-100 text-xs font-semibold text-slate-700">이름</TableHead>
-                <TableHead className="sticky left-[120px] z-10 min-w-[130px] border-r border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700">직무 · 프로젝트</TableHead>
-                {months.map((yearMonth) => <TableHead key={yearMonth} className="min-w-[70px] text-center text-xs font-semibold text-slate-700">{Number(yearMonth.slice(5))}월</TableHead>)}
+                <TableHead className="min-w-[180px] text-xs font-semibold text-slate-700">사업</TableHead>
+                <TableHead className="min-w-[120px] text-xs font-semibold text-slate-700">참여자</TableHead>
+                <TableHead className="min-w-[140px] text-xs font-semibold text-slate-700">역할</TableHead>
+                <TableHead className="w-[120px] text-right text-xs font-semibold text-slate-700">사업 참여율</TableHead>
+                <TableHead className="w-[140px] text-right text-xs font-semibold text-slate-700">개인 월 합계</TableHead>
+                <TableHead className="w-[130px] text-center text-xs font-semibold text-slate-700">값 출처</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((entry) => (
-                <TableRow key={entry.id} className="group border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="sticky left-0 z-10 bg-white text-xs font-medium text-slate-800 group-hover:bg-slate-50">
-                    {entry.memberName}
-                  </TableCell>
-                  <TableCell className="sticky left-[120px] z-10 border-r border-slate-100 bg-white text-xs text-slate-600 group-hover:bg-slate-50">
-                    <p className="font-medium text-slate-700">{entry.note || '직무 미입력'}</p>
-                    <p className="mt-0.5 truncate text-[10px] text-slate-500">{entry.projectShortName || entry.projectName}</p>
-                  </TableCell>
-                  {months.map((yearMonth) => {
-                    const rate = getMonthlyParticipationRate(entry, yearMonth);
-                    return (
-                      <TableCell key={yearMonth} className="px-2 py-2 text-center">
-                        <span className={rate === null
-                          ? 'text-[11px] text-slate-400'
-                          : rate === 0
-                            ? 'text-[11px] tabular-nums text-slate-500'
-                            : 'text-[11px] font-semibold tabular-nums text-slate-800'}
-                        >
-                          {rate === null ? '미입력' : `${rate}%`}
-                        </span>
+              {projectGroups.flatMap((group) => group.rows.map(({ entry, rate, source }, entryIndex) => {
+                const memberTotal = memberTotals.get(entry.memberId);
+                const isOverAllocated = (memberTotal?.total || 0) > 100;
+                return (
+                  <TableRow key={entry.id} className="border-slate-100 hover:bg-slate-50/70">
+                    {entryIndex === 0 ? (
+                      <TableCell rowSpan={group.rows.length} className="border-r border-slate-200 align-top text-xs font-semibold text-slate-800">
+                        {entry.projectShortName || entry.projectName}
+                        <p className="mt-1 text-[10px] font-normal text-slate-400">{group.rows.length}명 참여</p>
                       </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
+                    ) : null}
+                    <TableCell className="text-xs font-medium text-slate-800">{entry.memberName}</TableCell>
+                    <TableCell className="text-xs text-slate-500">{entry.note || '직무 미입력'}</TableCell>
+                    <TableCell className="text-right text-xs font-semibold tabular-nums text-slate-800">{rate}%</TableCell>
+                    <TableCell className={`text-right text-xs font-semibold tabular-nums ${isOverAllocated ? 'text-rose-700' : 'text-slate-800'}`}>
+                      {memberTotal?.total || 0}%
+                      {(memberTotal?.projectIds.size || 0) > 1 ? (
+                        <p className="mt-0.5 text-[10px] font-normal text-slate-400">{memberTotal?.projectIds.size}개 사업 합계</p>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline" className="border-slate-200 bg-slate-50 text-[10px] font-normal text-slate-600">
+                        {source === 'DOCUMENT' ? '월별 서류값' : '프로젝트 등록값'}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                );
+              }))}
             </TableBody>
           </Table>
         </div>

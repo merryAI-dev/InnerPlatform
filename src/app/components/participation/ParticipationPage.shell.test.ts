@@ -38,9 +38,13 @@ describe('ParticipationPage shell contract', () => {
   it('keeps the monthly document-rate matrix read-only for administrators', () => {
     expect(source).toContain('월별 서류 참여율');
     expect(source).toContain('관리자 조회 전용');
-    expect(source).toContain('getMonthlyParticipationRate(entry, yearMonth)');
+    expect(source).toContain('type="month"');
+    expect(source).toContain('resolveParticipationRateForMonth(entry, selectedMonth)');
     expect(source).toContain('MonthlyDocumentRateMatrix entries={displayParticipationEntries}');
-    expect(source).toContain('const rows = entries;');
+    expect(source).toContain('projectGroups.flatMap');
+    expect(source).toContain('개인 월 합계');
+    expect(source).toContain('월별 서류값');
+    expect(source).toContain('프로젝트 등록값');
     expect(source).not.toContain('시트 원본을 불러오면');
     expect(source).not.toContain('월별 실제 참여율');
   });
