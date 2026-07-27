@@ -5,6 +5,7 @@ import {
   Search,
   UserCheck, FolderKanban, Download,
   AlertCircle, CheckCircle2, XCircle, Eye, Network, Info, Building2,
+  CalendarDays, LockKeyhole,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -32,6 +33,7 @@ import {
 } from '../../data/participation-data';
 import type { MemberParticipationSummary } from '../../data/participation-data';
 import { buildAllProjectTeamParticipationEntries } from '../../platform/project-team-participation';
+import { getMonthlyParticipationRate } from '../../platform/participation-monthly-rates';
 
 // ── Helpers ──
 
@@ -41,6 +43,101 @@ const riskColors = {
   DANGER: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-500' },
 };
 const riskLabels = { SAFE: '안전', WARNING: '경고', DANGER: '위험' };
+
+function monthKeys(year: string) {
+  return Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`);
+}
+
+function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] }) {
+  const years = useMemo(() => Array.from(new Set(
+    entries.flatMap((entry) => Object.keys(entry.monthlyRates || {}).map((yearMonth) => yearMonth.slice(0, 4))),
+  )).filter((year) => /^\d{4}$/.test(year)).sort(), [entries]);
+  const [selectedYear, setSelectedYear] = useState(() => years.at(-1) || String(new Date().getFullYear()));
+  const activeYear = years.includes(selectedYear) ? selectedYear : (years.at(-1) || selectedYear);
+  const months = monthKeys(activeYear);
+  const rows = useMemo(() => entries.filter((entry) => (
+    months.some((yearMonth) => getMonthlyParticipationRate(entry, yearMonth) !== null)
+  )), [entries, months]);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-start gap-2.5">
+          <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md bg-slate-800 text-white">
+            <CalendarDays className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">월별 서류 참여율</h2>
+            <p className="mt-0.5 text-xs text-slate-500">원본 시트의 월별 서류 참여율을 조회합니다. 이 화면에서는 값을 수정할 수 없습니다.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="gap-1 border-slate-300 bg-white text-[11px] text-slate-600">
+            <LockKeyhole className="h-3 w-3" /> 관리자 조회 전용
+          </Badge>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            기준 연도
+            <select
+              aria-label="월별 서류 참여율 기준 연도"
+              value={activeYear}
+              onChange={(event) => setSelectedYear(event.target.value)}
+              className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-800 outline-none focus:border-slate-700 focus:ring-2 focus:ring-slate-200"
+            >
+              {(years.length ? years : [activeYear]).map((year) => <option key={year} value={year}>{year}년</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="px-4 py-10 text-center">
+          <p className="text-sm font-medium text-slate-700">{activeYear}년 월별 서류 참여율이 아직 없습니다.</p>
+          <p className="mt-1 text-xs text-slate-500">시트 원본을 불러오면 월별 값이 이 표에 그대로 표시됩니다.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1220px]">
+            <TableHeader>
+              <TableRow className="border-slate-200 bg-slate-100 hover:bg-slate-100">
+                <TableHead className="sticky left-0 z-10 min-w-[120px] bg-slate-100 text-xs font-semibold text-slate-700">이름</TableHead>
+                <TableHead className="sticky left-[120px] z-10 min-w-[130px] border-r border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700">직무 · 프로젝트</TableHead>
+                {months.map((yearMonth) => <TableHead key={yearMonth} className="min-w-[70px] text-center text-xs font-semibold text-slate-700">{Number(yearMonth.slice(5))}월</TableHead>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((entry) => (
+                <TableRow key={entry.id} className="group border-slate-100 hover:bg-slate-50/70">
+                  <TableCell className="sticky left-0 z-10 bg-white text-xs font-medium text-slate-800 group-hover:bg-slate-50">
+                    {entry.memberName}
+                  </TableCell>
+                  <TableCell className="sticky left-[120px] z-10 border-r border-slate-100 bg-white text-xs text-slate-600 group-hover:bg-slate-50">
+                    <p className="font-medium text-slate-700">{entry.note || '직무 미입력'}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-slate-500">{entry.projectShortName || entry.projectName}</p>
+                  </TableCell>
+                  {months.map((yearMonth) => {
+                    const rate = getMonthlyParticipationRate(entry, yearMonth);
+                    return (
+                      <TableCell key={yearMonth} className="px-2 py-2 text-center">
+                        <span className={rate === null
+                          ? 'text-[11px] text-slate-400'
+                          : rate === 0
+                            ? 'text-[11px] tabular-nums text-slate-500'
+                            : 'text-[11px] font-semibold tabular-nums text-slate-800'}
+                        >
+                          {rate === null ? '미입력' : `${rate}%`}
+                        </span>
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function RateBar({ rate, showLabel = true }: { rate: number; showLabel?: boolean }) {
   const pct = Math.min(rate, 200);
@@ -700,10 +797,15 @@ export function ParticipationPage() {
         {/* Tabs */}
         <Tabs defaultValue="member">
           <TabsList>
+            <TabsTrigger value="monthly" className="gap-1"><CalendarDays className="w-3.5 h-3.5" /> 월별 서류 참여율</TabsTrigger>
             <TabsTrigger value="member" className="gap-1"><Users className="w-3.5 h-3.5" /> 인원별 현황 (100-1)</TabsTrigger>
             <TabsTrigger value="project" className="gap-1"><FolderKanban className="w-3.5 h-3.5" /> 프로젝트별 현황</TabsTrigger>
             <TabsTrigger value="matrix" className="gap-1"><Network className="w-3.5 h-3.5" /> 교차검증 매트릭스</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="monthly" className="mt-4">
+            <MonthlyDocumentRateMatrix entries={formalParticipationEntries} />
+          </TabsContent>
 
           {/* ─── Member View ─── */}
           <TabsContent value="member" className="mt-4 space-y-3">
