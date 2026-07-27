@@ -39,6 +39,9 @@ describe('ParticipationPage shell contract', () => {
     expect(source).toContain('월별 서류 참여율');
     expect(source).toContain('관리자 조회 전용');
     expect(source).toContain('getMonthlyParticipationRate(entry, yearMonth)');
+    expect(source).toContain('MonthlyDocumentRateMatrix entries={displayParticipationEntries}');
+    expect(source).toContain('const rows = entries;');
+    expect(source).not.toContain('시트 원본을 불러오면');
     expect(source).not.toContain('월별 실제 참여율');
   });
 });
