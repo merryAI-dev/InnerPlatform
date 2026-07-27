@@ -774,7 +774,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
 
 async function saveCashflowSheetLabConfig({ db, tenantId, projectId, project, parsed, context, existingConfig = null }) {
   if (!db) {
-    throw createHttpError(503, 'Firestore is required to save cashflow sheet config.', 'firestore_unconfigured');
+    throw createHttpError(503, '시트 설정을 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'firestore_unconfigured');
   }
   const now = new Date().toISOString();
   const sourceYear = resolveSourceYear(parsed.sourceYear, existingConfig || parsed, project);
@@ -914,7 +914,7 @@ async function readCashflowWeeksSnapshot(db, tenantId, projectId) {
 
 async function readCashflowSheetMirror(db, tenantId, projectId) {
   if (!db) {
-    throw createHttpError(503, 'Firestore is required to read the cashflow sheet mirror.', 'firestore_unconfigured');
+    throw createHttpError(503, '불러온 시트 값을 읽을 수 없습니다. 담당자에게 문의해 주세요.', 'firestore_unconfigured');
   }
   const snap = await db.doc(cashflowSheetMirrorDocPath(tenantId, projectId)).get();
   return snap.exists ? snap.data() : null;
@@ -1916,7 +1916,7 @@ function javaAppliedLineIndex(lines, { mode, yearMonth }) {
     const amount = Number(line?.amount);
     const key = `${weekNo}:${lineId}`;
     if (!Number.isInteger(weekNo) || !CASHFLOW_LINE_ORDER.has(lineId) || !Number.isSafeInteger(amount) || index.has(key)) {
-      throw createHttpError(502, 'JVM 캐시플로 저장 검증값이 올바르지 않습니다.', 'cashflow_jvm_apply_verification_failed');
+      throw createHttpError(502, '저장 결과 검산이 맞지 않아 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
     }
     index.set(key, amount);
   }
@@ -1938,18 +1938,18 @@ function verifyJavaMonthAppliedCells(result, month, {
     || readOptionalText(result?.sourceRevision) !== sourceRevision
     || readOptionalText(result?.targetRevision) !== targetRevision
   ) {
-    throw createHttpError(502, 'JVM 캐시플로 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+    throw createHttpError(502, '저장 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
   }
   let verifiedLineCount = 0;
   for (const mode of CASHFLOW_MODES) {
     const index = javaAppliedLineIndex(result?.[mode], { mode, yearMonth: month.yearMonth });
     const expected = month.cells.filter((cell) => cell.mode === mode && cell.cellState === 'VALUE');
     if (index.size !== expected.length) {
-      throw createHttpError(502, 'JVM 캐시플로 저장 건수가 시트 고정본과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+      throw createHttpError(502, '저장된 항목 수가 불러온 시트 값과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
     }
     for (const cell of expected) {
       if (index.get(`${cell.weekNo}:${cell.cashflowLine}`) !== Number(cell.amount)) {
-        throw createHttpError(502, 'JVM 캐시플로 저장 금액이 시트 고정본과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+        throw createHttpError(502, '저장된 금액이 불러온 시트 값과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
       }
       verifiedLineCount += 1;
     }
@@ -1967,7 +1967,7 @@ function verifyJavaAnnualAppliedCells(result, stagedYear, { projectId, sourceRev
     || readOptionalText(result?.sourceRevision) !== sourceRevision
     || Number(result?.revision) !== Number(stagedYear.expectedRevision) + 1
   ) {
-    throw createHttpError(502, 'JVM 연간 합계 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
+    throw createHttpError(502, '연간 합계의 저장 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_annual_apply_verification_failed');
   }
   let verifiedLineCount = 0;
   for (const mode of CASHFLOW_MODES) {
@@ -1977,10 +1977,10 @@ function verifyJavaAnnualAppliedCells(result, stagedYear, { projectId, sourceRev
       : {};
     for (const cell of stagedYear.cells.filter((candidate) => candidate.mode === mode)) {
       if (readOptionalText(states[cell.cashflowLine]) !== cell.cellState) {
-        throw createHttpError(502, 'JVM 연간 합계의 공란·값 상태가 시트 고정본과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
+        throw createHttpError(502, '연간 합계의 빈 칸 여부가 불러온 시트 값과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_annual_apply_verification_failed');
       }
       if (['VALUE', 'ZERO'].includes(cell.cellState) && Number(values[cell.cashflowLine]) !== Number(cell.amount)) {
-        throw createHttpError(502, 'JVM 연간 합계 금액이 시트 고정본과 다릅니다.', 'cashflow_jvm_annual_apply_verification_failed');
+        throw createHttpError(502, '연간 합계 금액이 불러온 시트 값과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_annual_apply_verification_failed');
       }
       verifiedLineCount += 1;
     }
@@ -2062,7 +2062,7 @@ async function applyStagedCashflowSheetLab({
   ));
 
   if (!javaWeeklyClient) {
-    throw createHttpError(503, 'Cashflow final apply requires the JVM authority service.', 'cashflow_jvm_authority_unavailable');
+    throw createHttpError(503, '저장을 처리하는 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_jvm_authority_unavailable');
   }
 
   const stagedMonths = await Promise.all(selectedMonths.map(async (yearMonth) => {
@@ -2238,18 +2238,18 @@ async function applyStagedCashflowSheetLab({
         || readOptionalText(batchResult?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
         || readOptionalText(batchResult?.targetRevision) !== batchTargetRevision
       ) {
-        throw createHttpError(502, 'JVM 월 배치 저장 계약이 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+        throw createHttpError(502, '저장 형식이 올바르지 않아 저장을 취소했습니다. 담당자에게 문의해 주세요.', 'cashflow_jvm_apply_verification_failed');
       }
       targetRevision = assertResultingTargetRevision(batchResult);
       const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
         .map((month) => [readOptionalText(month?.yearMonth), month]));
       if (returnedMonths.size !== stagedMonths.length) {
-        throw createHttpError(502, 'JVM 월 배치 저장 건수가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+        throw createHttpError(502, '저장된 항목 수가 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
       }
       for (const month of stagedMonths) {
         const monthResult = returnedMonths.get(month.yearMonth);
         if (!monthResult) {
-          throw createHttpError(502, 'JVM 월 배치 저장 범위가 요청과 다릅니다.', 'cashflow_jvm_apply_verification_failed');
+          throw createHttpError(502, '여러 달 저장의 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
         }
         const compatibleResult = {
           ...monthResult,
@@ -3079,7 +3079,7 @@ export function mountCashflowSheetLabRoutes(app, {
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/apply', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
     if (!authoritativeWritesEnabled) {
-      throw createHttpError(503, 'Cashflow writes are available only in the Stage write runtime.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     const { tenantId } = req.context;
     const { projectId } = req.params;

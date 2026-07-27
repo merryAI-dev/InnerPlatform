@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
+import { createHttpError } from './bff-utils.mjs';
 
 const MODEL = 'claude-sonnet-4-20250514';
 const MAX_GUIDE_CHARS = 500_000;
@@ -9,18 +10,12 @@ const MAX_CALIBRATION_TURNS = 6; // 3 user + 3 assistant
 const ALL_ROLES = ['admin', 'tenant_admin', 'finance', 'pm', 'viewer', 'auditor', 'support', 'security'];
 const ADMIN_ROLES = ['admin', 'tenant_admin'];
 
-function createHttpError(statusCode, message, code = 'request_error') {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-  return error;
-}
 
 let _anthropic = null;
 function getClient() {
   if (!_anthropic) {
     const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) throw createHttpError(503, 'ANTHROPIC_API_KEY is not configured');
+    if (!key) throw createHttpError(503, 'AI 도우미 서비스가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'ai_assistant_unconfigured');
     _anthropic = new Anthropic({ apiKey: key });
   }
   return _anthropic;

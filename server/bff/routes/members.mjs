@@ -14,7 +14,7 @@ import {
 
 async function listAllAuthUsers(authAdminService) {
   if (!authAdminService || typeof authAdminService.listUsers !== 'function') {
-    throw createHttpError(503, 'Firebase auth admin service is not configured', 'auth_admin_unavailable');
+    throw createHttpError(503, '로그인 확인 서비스가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'auth_admin_unavailable');
   }
 
   const users = [];

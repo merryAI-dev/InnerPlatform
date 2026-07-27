@@ -122,13 +122,8 @@ import {
   createCashflowEditDraftService,
   mountCashflowEditDraftRoutes,
 } from './routes/cashflow-edit-drafts.mjs';
+import { createHttpError, resolveErrorResponse } from './bff-utils.mjs';
 
-function createHttpError(statusCode, message, code = 'request_error') {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-  return error;
-}
 
 function parseLimit(raw, fallback = 50, max = 200) {
   const n = Number.parseInt(String(raw ?? ''), 10);
@@ -1555,9 +1550,7 @@ export function createBffApp(options = {}) {
   });
 
   app.use((error, req, res, _next) => {
-    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    const message = statusCode >= 500 ? 'Internal server error' : (error?.message || 'Request failed');
-    const errorCode = error?.code || (statusCode >= 500 ? 'internal_error' : 'request_error');
+    const { statusCode, code: errorCode, message } = resolveErrorResponse(error);
     res.locals.errorCode = errorCode;
 
     if (statusCode >= 500) {

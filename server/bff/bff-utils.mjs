@@ -10,11 +10,29 @@ import { actorHasPermission } from './rbac-policy.mjs';
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+// 이 함수로 만든 오류는 문구를 개발자가 직접 정한 것이므로 그대로 응답에 실어도 안전하다.
+// 예상하지 못한 예외(TypeError, Firestore 오류 등)는 이 표식이 없으므로 5xx에서 계속 가려진다.
+// app.mjs 의 최종 오류 핸들러가 이 표식을 읽는다.
 export function createHttpError(statusCode, message, code = 'request_error') {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = true;
   return error;
+}
+
+// 최종 오류 응답의 상태·코드·문구를 결정한다. app.mjs 의 오류 핸들러가 이 결과를 그대로 내보낸다.
+// 판단 기준은 하나다. 문구를 개발자가 직접 정한 오류인가(createHttpError), 아니면 예상하지 못한
+// 예외인가. 후자는 내부 정보를 담을 수 있으므로 5xx에서 가린다.
+export function resolveErrorResponse(error) {
+  const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+  const exposeMessage = statusCode < 500 || error?.expose === true;
+  return {
+    statusCode,
+    code: error?.code || (statusCode >= 500 ? 'internal_error' : 'request_error'),
+    message: exposeMessage ? (error?.message || 'Request failed') : 'Internal server error',
+    exposed: exposeMessage,
+  };
 }
 
 export function parseLimit(raw, fallback = 50, max = 200) {

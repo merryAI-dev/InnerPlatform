@@ -138,7 +138,7 @@ export function createJavaWeeklyClient({
     retry = true,
   }) {
     if (!baseUrl) {
-      throw createHttpError(503, 'JVM weekly API base URL is not configured.', 'jvm_weekly_api_unconfigured');
+      throw createHttpError(503, '캐시플로 서버 주소가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_unconfigured');
     }
     const requestStartedAt = Date.now();
     const callerDeadlineAtMs = Number.isFinite(Number(deadlineAtMs))
@@ -259,14 +259,14 @@ export function createJavaWeeklyClient({
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
     }
     const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
     if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     const result = await requestJson({
       context,
@@ -286,7 +286,7 @@ export function createJavaWeeklyClient({
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
-      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+      throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
     }
     return result;
   }
@@ -307,14 +307,14 @@ export function createJavaWeeklyClient({
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
     }
     const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
     if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     const result = await requestJson({
       context,
@@ -334,7 +334,7 @@ export function createJavaWeeklyClient({
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
-      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+      throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
     }
     return result;
   }
@@ -351,14 +351,14 @@ export function createJavaWeeklyClient({
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
     }
     const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
     if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     const result = await requestJson({
       context,
@@ -368,7 +368,7 @@ export function createJavaWeeklyClient({
       body: { idempotencyKey, sourceRevision, year, expectedRevision, cells },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
-      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+      throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
     }
     return result;
   }
