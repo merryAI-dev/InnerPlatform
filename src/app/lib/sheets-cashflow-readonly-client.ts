@@ -378,7 +378,20 @@ export interface CashflowSheetLabMirrorResult {
   activeWeekRange?: CashflowSheetLabApplyResult['activeWeekRange'] & { activeWeeks?: unknown[] };
   lastRefreshAttemptAt?: string;
   lastRefreshIdempotencyKey?: string;
-  lastRefreshError?: { code: string; message: string; statusCode?: number; at?: string } | null;
+  lastRefreshError?: {
+    code: string;
+    message: string;
+    statusCode?: number;
+    at?: string;
+    diagnosticCount?: number;
+    diagnostics?: Array<{
+      code: string;
+      message: string;
+      mode?: 'projection' | 'actual';
+      sourceCell?: string;
+      lineIds?: string[];
+    }>;
+  } | null;
 }
 
 function isCashflowSheetLabMirrorResult(

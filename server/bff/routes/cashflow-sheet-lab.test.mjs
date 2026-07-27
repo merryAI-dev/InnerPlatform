@@ -1034,6 +1034,43 @@ describe('cashflow sheet lab route', () => {
     expect(response.body.sourceRevision).toBeUndefined();
   });
 
+  it('returns the exact cells that make a cashflow sheet structure unsupported', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const matrix = buildMatrix();
+    matrix[12][4] = 'broken-week-header';
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix,
+        })),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-unsupported-template' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'ERROR',
+      lastRefreshError: {
+        code: 'cashflow_sheet_template_unsupported',
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'cashflow_week_header_invalid', sourceCell: 'E13' }),
+        ]),
+      },
+    });
+  });
+
   it('replays an explicit mirror refresh idempotently without rereading Google', async () => {
     const db = createDb({
       project: {

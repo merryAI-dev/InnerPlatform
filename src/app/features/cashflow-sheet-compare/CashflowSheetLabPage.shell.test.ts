@@ -128,6 +128,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('시트 값 가져오기');
     expect(pageSource).toContain('시트 값 다시 가져오기');
     expect(pageSource).toContain("mirror?.lastRefreshError?.message");
+    expect(pageSource).toContain('mirror.lastRefreshError.diagnostics');
+    expect(pageSource).toContain('diagnostic.sourceCell');
     expect(pageSource).toContain('시트 연동 오류');
     expect(pageSource).not.toContain('시트 고정본 ·');
     expect(pageSource).not.toContain('검토 범위');

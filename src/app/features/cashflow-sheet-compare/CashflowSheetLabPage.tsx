@@ -1090,6 +1090,19 @@ export function CashflowSheetLabPage({
               {mirror?.lastRefreshError?.message ? (
                 <div className="border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-900">
                   <span className="font-bold">시트 연동 오류</span> · {mirror.lastRefreshError.message}
+                  {mirror.lastRefreshError.diagnostics?.length ? (
+                    <ul className="mt-2 space-y-1 border-t border-red-200 pt-2">
+                      {mirror.lastRefreshError.diagnostics.map((diagnostic, index) => (
+                        <li key={`${diagnostic.code}-${diagnostic.sourceCell || index}`}>
+                          {diagnostic.sourceCell ? `${diagnostic.sourceCell} · ` : ''}{diagnostic.message}
+                          <span className="ml-1 text-red-700">({diagnostic.code})</span>
+                        </li>
+                      ))}
+                      {(mirror.lastRefreshError.diagnosticCount || 0) > mirror.lastRefreshError.diagnostics.length ? (
+                        <li>외 {(mirror.lastRefreshError.diagnosticCount || 0) - mirror.lastRefreshError.diagnostics.length}건</li>
+                      ) : null}
+                    </ul>
+                  ) : null}
                 </div>
               ) : null}
             </div>
