@@ -523,6 +523,8 @@ export interface ParticipationEntry {
   note: string;
   source?: 'MANUAL' | 'PROJECT_TEAM_SYNC';
   projectTeamMemberKey?: string;
+  /** YYYY-MM별 서류 참여율. null은 원본 시트 미입력, 0은 명시적 0%다. */
+  monthlyRates?: Record<string, number | null>;
   updatedAt: string;
 }
 
