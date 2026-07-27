@@ -2897,11 +2897,14 @@ export function mountCashflowSheetLabRoutes(app, {
       const template = analyzeCashflowSheetTemplate(preview.matrix);
       assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
       if (!template.supported) {
-        throw createHttpError(
+        throw Object.assign(createHttpError(
           400,
           '지원하지 않는 cashflow 시트 구조라 연동할 수 없습니다.',
           'cashflow_sheet_template_unsupported',
-        );
+        ), {
+          diagnostics: template.reasons.slice(0, 20),
+          diagnosticCount: template.reasons.length,
+        });
       }
 
       const targetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
@@ -2953,11 +2956,16 @@ export function mountCashflowSheetLabRoutes(app, {
       res.status(200).json(completedMirror);
     } catch (error) {
       const normalized = normalizeRouteError(error);
+      const diagnostics = Array.isArray(normalized?.diagnostics) ? normalized.diagnostics : [];
       const lastRefreshError = {
         code: normalized?.code || normalized?.name || 'error',
         message: normalized?.message || '시트 연동에 실패했습니다.',
         statusCode: normalized?.statusCode || 500,
         at: attemptedAt,
+        ...(diagnostics.length > 0 ? {
+          diagnostics,
+          diagnosticCount: Number(normalized?.diagnosticCount) || diagnostics.length,
+        } : {}),
       };
       const mirror = previousMirror?.sourceRevision
         ? {
