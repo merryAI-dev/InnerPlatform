@@ -55,9 +55,7 @@ function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] 
   const [selectedYear, setSelectedYear] = useState(() => years.at(-1) || String(new Date().getFullYear()));
   const activeYear = years.includes(selectedYear) ? selectedYear : (years.at(-1) || selectedYear);
   const months = monthKeys(activeYear);
-  const rows = useMemo(() => entries.filter((entry) => (
-    months.some((yearMonth) => getMonthlyParticipationRate(entry, yearMonth) !== null)
-  )), [entries, months]);
+  const rows = entries;
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -68,7 +66,7 @@ function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] 
           </div>
           <div>
             <h2 className="text-sm font-semibold text-slate-900">월별 서류 참여율</h2>
-            <p className="mt-0.5 text-xs text-slate-500">원본 시트의 월별 서류 참여율을 조회합니다. 이 화면에서는 값을 수정할 수 없습니다.</p>
+            <p className="mt-0.5 text-xs text-slate-500">프로젝트에 등록된 전체 참여자를 보여줍니다. 월별 값이 없으면 미입력으로 표시합니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -91,8 +89,8 @@ function MonthlyDocumentRateMatrix({ entries }: { entries: ParticipationEntry[] 
 
       {rows.length === 0 ? (
         <div className="px-4 py-10 text-center">
-          <p className="text-sm font-medium text-slate-700">{activeYear}년 월별 서류 참여율이 아직 없습니다.</p>
-          <p className="mt-1 text-xs text-slate-500">시트 원본을 불러오면 월별 값이 이 표에 그대로 표시됩니다.</p>
+          <p className="text-sm font-medium text-slate-700">등록된 프로젝트 참여자가 없습니다.</p>
+          <p className="mt-1 text-xs text-slate-500">프로젝트에 참여자를 등록하면 이 표에 표시됩니다.</p>
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -649,7 +647,7 @@ export function ParticipationPage() {
               </div>
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">Participation Object</p>
-                <h1 className="text-[18px] font-semibold text-slate-950">참여율 관리 (100-1)</h1>
+                <h1 className="text-[18px] font-semibold text-slate-950">참여율 대시보드</h1>
                 <p className="text-[12px] text-slate-500">e나라도움·KOICA·회계사정산 기준으로 누적 참여율을 확인합니다</p>
               </div>
             </div>
@@ -804,7 +802,7 @@ export function ParticipationPage() {
           </TabsList>
 
           <TabsContent value="monthly" className="mt-4">
-            <MonthlyDocumentRateMatrix entries={formalParticipationEntries} />
+            <MonthlyDocumentRateMatrix entries={displayParticipationEntries} />
           </TabsContent>
 
           {/* ─── Member View ─── */}
