@@ -23,7 +23,7 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
   try {
     credentials = JSON.parse(serviceAccountJson);
   } catch {
-    throw createHttpError(503, 'JVM weekly API invoker credential is invalid.', 'jvm_weekly_api_identity_token_unavailable');
+    throw createHttpError(503, '서버 인증 정보가 올바르지 않습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
   try {
     const auth = new GoogleAuth({ credentials });
@@ -33,7 +33,7 @@ async function fetchCredentialIdentityToken(audience, serviceAccountJson) {
     if (!token) throw new Error('Missing identity token');
     return token;
   } catch {
-    throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
+    throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
 }
 
@@ -43,7 +43,7 @@ export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccou
     if (typeof resolveIdentityToken === 'function') {
       const token = await resolveIdentityToken({ audience, serviceAccountJson, signal });
       if (!readOptionalText(token)) {
-        throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
+        throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
       }
       return String(token).trim();
     }
@@ -57,7 +57,7 @@ export async function fetchGoogleIdentityToken(fetchImpl, audience, serviceAccou
   });
   const token = await response.text();
   if (!response.ok || !readOptionalText(token)) {
-    throw createHttpError(503, 'JVM weekly API identity token could not be resolved.', 'jvm_weekly_api_identity_token_unavailable');
+    throw createHttpError(503, '서버 인증에 실패했습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_identity_token_unavailable');
   }
   return token.trim();
 }
@@ -76,7 +76,7 @@ export async function buildJavaWeeklyTrustedHeaders({
   signal,
 }) {
   if (!serviceToken) {
-    throw createHttpError(503, 'JVM weekly API service token is not configured.', 'jvm_weekly_api_token_unconfigured');
+    throw createHttpError(503, '서버 연결 정보가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_token_unconfigured');
   }
   const actorRole = isWorkspaceAuthMode(authMode) && isWorkspaceUser(context, workspaceEmailDomain)
     ? 'workspace_user'

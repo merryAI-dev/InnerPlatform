@@ -381,7 +381,7 @@ export function mountCashflowLaborRiskRoutes(app, { db, now } = {}) {
   app.get('/api/v1/projects/:projectId/cashflow-labor-risk', asyncHandler(async (req, res) => {
     assertCashflowLaborRiskAccess(req);
     if (!db) {
-      throw createHttpError(503, 'Firestore is required to read cashflow labor risk.', 'firestore_unconfigured');
+      throw createHttpError(503, '인건비 위험 정보를 읽을 수 없습니다. 담당자에게 문의해 주세요.', 'firestore_unconfigured');
     }
 
     const tenantId = readOptionalText(req.context?.tenantId);

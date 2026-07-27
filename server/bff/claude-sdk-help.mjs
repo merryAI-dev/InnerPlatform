@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { claudeSdkHelpAskSchema, parseWithSchema } from './schemas.mjs';
+import { createHttpError } from './bff-utils.mjs';
 
 const MODEL = process.env.ANTHROPIC_PLATFORM_HELP_MODEL || process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
 const MAX_ANSWER_TOKENS = 2200;
@@ -195,18 +196,12 @@ function buildHelpSystemPrompt(question) {
   ].join('\n');
 }
 
-function createHttpError(statusCode, message, code = 'request_error') {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-  return error;
-}
 
 let _anthropic = null;
 function getClient() {
   if (!_anthropic) {
     const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) throw createHttpError(503, 'ANTHROPIC_API_KEY is not configured');
+    if (!key) throw createHttpError(503, 'AI 도우미 서비스가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'ai_assistant_unconfigured');
     _anthropic = new Anthropic({ apiKey: key });
   }
   return _anthropic;

@@ -812,25 +812,25 @@ function buildCashflowRangeTotals(months, mode, range) {
       for (const lineId of CASHFLOW_ALL_LINES) {
         const next = rowTotals[lineId] + safeAmount(amounts[lineId]);
         if (!Number.isSafeInteger(next)) {
-          throw createHttpError(502, 'JVM cashflow range totals are unsafe.', 'jvm_weekly_cashflow_totals_invalid');
+          throw createHttpError(502, '합계 금액에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
         }
         rowTotals[lineId] = next;
       }
       const weekIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => amounts[lineId]));
       const weekOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => amounts[lineId]));
       if (weekIn === null || weekOut === null) {
-        throw createHttpError(502, 'JVM cashflow range totals are unsafe.', 'jvm_weekly_cashflow_totals_invalid');
+        throw createHttpError(502, '합계 금액에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
       }
       totalIn += weekIn;
       totalOut += weekOut;
       if (!Number.isSafeInteger(totalIn) || !Number.isSafeInteger(totalOut)) {
-        throw createHttpError(502, 'JVM cashflow range totals are unsafe.', 'jvm_weekly_cashflow_totals_invalid');
+        throw createHttpError(502, '합계 금액에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
       }
     }
   }
   const net = totalIn - totalOut;
   if (!Number.isSafeInteger(net)) {
-    throw createHttpError(502, 'JVM cashflow range totals are unsafe.', 'jvm_weekly_cashflow_totals_invalid');
+    throw createHttpError(502, '합계 금액에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
   }
   return { rowTotals, totalIn, totalOut, net };
 }
@@ -869,7 +869,7 @@ function frozenCashflowReadModel(ledgerWeeks) {
           if (!Object.prototype.hasOwnProperty.call(rawAmounts, lineId)) continue;
           const amount = Number(rawAmounts[lineId]);
           if (!Number.isSafeInteger(amount)) {
-            throw createHttpError(502, 'Closed cashflow snapshot contains an unsafe row amount.', 'jvm_weekly_cashflow_totals_invalid');
+            throw createHttpError(502, '결산된 달의 금액 중 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
           }
           amounts[lineId] = amount;
         }
@@ -900,7 +900,7 @@ function frozenCashflowReadModel(ledgerWeeks) {
       const weekIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => amounts[lineId]));
       const weekOut = sumSafe(CASHFLOW_OUT_LINES.map((lineId) => amounts[lineId]));
       if (weekIn === null || weekOut === null) {
-        throw createHttpError(502, 'Closed cashflow snapshot contains unsafe row totals.', 'jvm_weekly_cashflow_totals_invalid');
+        throw createHttpError(502, '결산된 달의 항목 합계에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
       }
       running[mode].totalIn += weekIn;
       running[mode].totalOut += weekOut;
@@ -913,7 +913,7 @@ function frozenCashflowReadModel(ledgerWeeks) {
         month[mode].totalOut,
       ]) {
         if (!Number.isSafeInteger(value)) {
-          throw createHttpError(502, 'Closed cashflow snapshot contains unsafe cumulative totals.', 'jvm_weekly_cashflow_totals_invalid');
+          throw createHttpError(502, '결산된 달의 누적 합계에 올바르지 않은 값이 있어 화면에 표시할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_cashflow_totals_invalid');
         }
       }
       month[mode].weeks.push({
@@ -1731,7 +1731,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
 
 async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, openingBalances, comparisonBoundary }) {
   if (!db?.doc) {
-    throw createHttpError(503, 'Cashflow month close source storage is unavailable.', 'cashflow_month_close_source_unavailable');
+    throw createHttpError(503, '월 결산 자료를 보관하는 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_month_close_source_unavailable');
   }
   const tenantId = readOptionalText(req.context?.tenantId);
   const requested = commandBody(req);
@@ -1872,18 +1872,18 @@ export function mountJvmWeeklyApiRoutes(app, {
     let dataProjectId;
     if (cashflowWrite) {
       if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-        throw createHttpError(503, 'Cashflow writes are restricted to Stage.', 'unsafe_bff_runtime');
+        throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
       }
       const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
       if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-        throw createHttpError(503, 'BFF and JVM cashflow data projects do not match.', 'jvm_weekly_data_project_mismatch');
+        throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
       }
       if (bffDataProjectId === liveProjectId) {
-        throw createHttpError(503, 'Cashflow Stage writes cannot target the Live data project.', 'unsafe_bff_runtime');
+        throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
       }
       if (requireWeeklyExpenseLease) {
         if (!weeklyExpenseEditLeasesEnabled) {
-          throw createHttpError(503, 'Weekly expense writes require the Stage edit-lease runtime.', 'cashflow_edit_leases_disabled');
+          throw createHttpError(503, '현재 환경에서는 주간 비용을 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'cashflow_edit_leases_disabled');
         }
         editSession = readWeeklyExpenseEditSession(req);
       }
@@ -2091,13 +2091,13 @@ export function mountJvmWeeklyApiRoutes(app, {
           ? null
           : requireJvmOpeningBalances(source, yearMonth);
         if (readOptionalText(result?.projectId) !== rawProjectId || readOptionalText(result?.yearMonth) !== yearMonth) {
-          throw createHttpError(502, 'JVM cashflow month response scope does not match the request.', 'jvm_weekly_project_mismatch');
+          throw createHttpError(502, '요청한 달과 다른 달의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
         }
         if (db?.doc && readOptionalText(result?.status) === 'OPEN' && !cashflow) {
-          throw createHttpError(502, 'JVM cashflow month source is incomplete.', 'jvm_weekly_response_invalid');
+          throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
         }
         if (cashflow && readOptionalText(cashflow?.projectId) !== rawProjectId) {
-          throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+          throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
         }
         const dashboard = await composeCashflowMonthDashboard({
           db,
@@ -2133,7 +2133,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
       throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
     }
-    if (!db?.doc) throw createHttpError(503, 'QA 기준시각 저장소를 사용할 수 없습니다.', 'cashflow_qa_clock_unavailable');
+    if (!db?.doc) throw createHttpError(503, '기준 날짜 설정을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_qa_clock_unavailable');
     const projectId = readOptionalText(req.params.projectId);
     const snapshot = await db.doc(cashflowMonthCloseQaDatePath(req.context.tenantId, projectId)).get();
     const setting = snapshot.exists ? snapshot.data() || {} : {};
@@ -2151,7 +2151,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
       throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
     }
-    if (!db?.doc) throw createHttpError(503, 'QA 기준시각 저장소를 사용할 수 없습니다.', 'cashflow_qa_clock_unavailable');
+    if (!db?.doc) throw createHttpError(503, '기준 날짜 설정을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_qa_clock_unavailable');
     const projectId = readOptionalText(req.params.projectId);
     const qaDateTime = normalizeCashflowMonthCloseQaDateTime(commandBody(req).qaDateTime);
     const nowIso = now().toISOString();
@@ -2201,7 +2201,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
     if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, '현금흐름 쓰기는 Stage에서만 사용할 수 있습니다.', 'unsafe_bff_runtime');
+      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
     const projectId = readOptionalText(req.params.projectId);
     const qaClock = await readCashflowMonthCloseQaClock({
@@ -2336,7 +2336,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         || !cashflow
         || readOptionalText(cashflow?.projectId) !== rawProjectId
       ) {
-        throw createHttpError(502, 'JVM cashflow month source is incomplete.', 'jvm_weekly_response_invalid');
+        throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
       const closeBody = await composeCashflowMonthCloseBody({
         db,
@@ -2432,7 +2432,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       path: `/api/v1/cashflow/${projectId}`,
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(req.params.projectId)) {
-      throw createHttpError(502, 'JVM cashflow response project does not match the request.', 'jvm_weekly_project_mismatch');
+      throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
     }
     const comparison = buildCashflowProjectionActualComparison(result, comparisonBoundary);
     const comparisonByMonth = new Map(comparison.months.map((month) => [month.yearMonth, month]));
