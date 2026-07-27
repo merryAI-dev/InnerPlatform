@@ -324,6 +324,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('toDevtoolsError');
   });
 
+  it('shows a saved sheet structure error and its failing cells in the cashflow dashboard', () => {
+    expect(source).toContain('시트 연동 오류: ');
+    expect(source).toContain('cashflowSheetMirror.lastRefreshError.diagnostics');
+    expect(source).toContain('diagnostic.sourceCell');
+    expect(source).toContain('시트 설정');
+    expect(source).not.toContain('min-w-0 truncate">시트 연동 오류');
+  });
+
   it('locks the cashflow screen with the shared sheet sync overlay while a sheet refresh is running', () => {
     expect(source).toContain('CashflowSheetSyncOverlay');
     expect(source).toContain('inert={sheetRefreshLoading || undefined}');
