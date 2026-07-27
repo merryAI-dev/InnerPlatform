@@ -2384,8 +2384,22 @@ export function CashflowProjectSheet({
           </section>
 
           {cashflowSheetMirror?.lastRefreshError?.message ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
-              <span className="min-w-0 truncate">시트 연동 오류: {cashflowSheetMirror.lastRefreshError.message}</span>
+            <div className="flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
+              <div className="min-w-0">
+                <span className="font-semibold">시트 연동 오류: </span>{cashflowSheetMirror.lastRefreshError.message}
+                {cashflowSheetMirror.lastRefreshError.diagnostics?.length ? (
+                  <ul className="mt-2 space-y-1 border-t border-red-200 pt-2">
+                    {cashflowSheetMirror.lastRefreshError.diagnostics.map((diagnostic, index) => (
+                      <li key={`${diagnostic.code}-${diagnostic.sourceCell || index}`}>
+                        {diagnostic.sourceCell ? `${diagnostic.sourceCell} · ` : ''}{diagnostic.message}
+                      </li>
+                    ))}
+                    {(cashflowSheetMirror.lastRefreshError.diagnosticCount || 0) > cashflowSheetMirror.lastRefreshError.diagnostics.length ? (
+                      <li>외 {(cashflowSheetMirror.lastRefreshError.diagnosticCount || 0) - cashflowSheetMirror.lastRefreshError.diagnostics.length}건</li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 size="sm"
