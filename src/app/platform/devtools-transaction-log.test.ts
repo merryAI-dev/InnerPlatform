@@ -8,6 +8,7 @@ import {
   sanitizeDevtoolsValue,
   summarizeAmountMap,
   toDevtoolsError,
+  toSafeDiagnosticCode,
 } from './devtools-transaction-log';
 
 describe('devtools transaction log', () => {
@@ -170,5 +171,28 @@ describe('devtools transaction log', () => {
     });
 
     expect(sanitized?.message).not.toContain('person@mysc.co.kr');
+  });
+
+  it('accepts auth-related codes, which the old word blocklist silently dropped', () => {
+    expect(toSafeDiagnosticCode('jvm_weekly_api_token_unconfigured')).toBe('jvm_weekly_api_token_unconfigured');
+    expect(toSafeDiagnosticCode('jvm_weekly_api_identity_token_unavailable')).toBe('jvm_weekly_api_identity_token_unavailable');
+    expect(toSafeDiagnosticCode('auth_admin_unavailable')).toBe('auth_admin_unavailable');
+  });
+
+  it('still refuses anything that does not look like a code, which is what protects values', () => {
+    // 실제 비밀값은 숫자·대문자·특수문자를 포함하므로 모양 검사에서 걸린다.
+    expect(toSafeDiagnosticCode('sk_live_1234567890')).toBeUndefined();
+    expect(toSafeDiagnosticCode('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc')).toBeUndefined();
+    expect(toSafeDiagnosticCode('AKIAIOSFODNN7EXAMPLE')).toBeUndefined();
+    expect(toSafeDiagnosticCode('ghp_16C7e42F292c6912E7710c838347Ae178B4a')).toBeUndefined();
+    expect(toSafeDiagnosticCode('Bearer abc123')).toBeUndefined();
+    expect(toSafeDiagnosticCode('single')).toBeUndefined();
+    expect(toSafeDiagnosticCode('')).toBeUndefined();
+    expect(toSafeDiagnosticCode(undefined)).toBeUndefined();
+  });
+
+  it('bounds the length so a long lowercase blob cannot ride through', () => {
+    expect(toSafeDiagnosticCode(`${'a'.repeat(60)}_code`)).toBeUndefined();
+    expect(toSafeDiagnosticCode('a_b_c_d_e_f_g_h_i')).toBeUndefined();
   });
 });

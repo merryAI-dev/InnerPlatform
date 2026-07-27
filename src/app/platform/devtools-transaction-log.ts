@@ -75,12 +75,18 @@ function truncateString(value: string): string {
   return redacted.length > 500 ? `${redacted.slice(0, 500)}...` : redacted;
 }
 
+// 진단 코드는 소문자와 밑줄로만 이루어진 2~8마디 식별자다. 실제 토큰·키·비밀번호는 base64,
+// hex, JWT 형태라 이 모양을 만족할 수 없으므로 모양 검사만으로 값 유출을 막을 수 있다.
+//
+// 예전에는 여기에 token, secret, key 같은 단어가 들어간 코드를 버리는 목록이 있었다. 그 목록은
+// 값이 아니라 이름을 보고 판단하기 때문에, 막아야 할 값은 어차피 모양 검사에서 걸리고 정작
+// 인증 실패를 가리키는 코드만 사라졌다. jvm_weekly_api_token_unconfigured 와
+// jvm_weekly_api_identity_token_unavailable 이 그렇게 로그에서 빠져 있었다.
+const MAX_DIAGNOSTIC_CODE_LENGTH = 64;
+
 export function toSafeDiagnosticCode(value: unknown): string | undefined {
-  if (!(typeof value === 'string'
-    && /^(?:[a-z]+_){1,7}[a-z]+$/.test(value)
-    && !/(token|secret|credential|password|bearer|authorization|private|key)/.test(value))) {
-    return undefined;
-  }
+  if (typeof value !== 'string' || value.length > MAX_DIAGNOSTIC_CODE_LENGTH) return undefined;
+  if (!/^(?:[a-z]+_){1,7}[a-z]+$/.test(value)) return undefined;
   return value;
 }
 
