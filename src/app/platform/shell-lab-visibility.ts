@@ -21,7 +21,6 @@ export const ADMIN_LAB_ROUTES = [
   '/payroll',
   '/budget-summary',
   '/expense-management',
-  '/participation',
   '/koica-personnel',
   '/personnel-changes',
   '/approvals',

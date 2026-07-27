@@ -44,7 +44,6 @@ describe('shell LAB visibility', () => {
       '/payroll',
       '/budget-summary',
       '/expense-management',
-      '/participation',
       '/koica-personnel',
       '/personnel-changes',
       '/approvals',
@@ -78,6 +77,7 @@ describe('shell LAB visibility', () => {
     expect(shouldShowShellRoute('/projects/migration-audit', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/management-planning/project-codes', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/cashflow', 'admin', 'nav', { labEnabled: false })).toBe(true);
+    expect(shouldShowShellRoute('/participation', 'admin', 'nav', { labEnabled: false })).toBe(true);
     expect(shouldShowShellRoute('/users', 'admin', 'nav', { labEnabled: false })).toBe(true);
   });
 
