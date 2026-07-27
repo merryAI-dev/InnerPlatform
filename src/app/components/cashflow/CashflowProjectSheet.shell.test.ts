@@ -152,8 +152,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('colSpan={month.weeks.length}');
     expect(source).toContain("month.yearMonth.replace('-', '년 ')}월");
     expect(source).toContain('LockKeyhole');
-    expect(source).toContain("monthCloseStatus === 'CLOSED' ? 'bg-slate-200'");
-    expect(source).toContain('cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus)');
+    expect(source).toContain("if (monthCloseStatus === 'CLOSED') return 'bg-slate-200';");
+    expect(source).toContain('cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue)');
+    // 지난 달은 월 결산 상태가, 이번 달은 주간 정산 상태가 앞선다.
+    expect(source).toContain("if (closeOverdue) return 'bg-red-100';");
+    expect(source).toContain('월 결산 기한 초과');
     expect(source).toContain("return 'bg-emerald-50'");
     expect(source).toContain("return 'bg-red-50'");
     expect(source).toContain("return 'bg-yellow-50'");
@@ -240,7 +243,6 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())');
     expect(source).toContain('closedMonthChangeReason');
     expect(source).toContain('마감 후 시트값 변경');
-    expect(source).toContain('max-w-[440px]');
     expect(source).toContain('사유와 함께 반영');
     expect(source).not.toContain('renderSheetStageReviewGrid');
     expect(source).not.toContain('sheetStageDialog');

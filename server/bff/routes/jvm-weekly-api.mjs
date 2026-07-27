@@ -1253,7 +1253,17 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
   return { trackingStartedAt, missedCount, completedCount, current, completedWeeks, weeklyStatuses };
 }
 
-async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
+// 월 결산 기한은 대상월 다음 달 10일이다. 판정 주체는 JVM이며(WeeklyExpensePersistence.closeDeadline),
+// 대시보드는 선택된 달 하나가 아니라 모든 달을 한 번에 그려야 해서 같은 규칙이 여기에도 필요하다.
+export function cashflowMonthCloseDeadline(yearMonth) {
+  const [year, month] = String(yearMonth).split('-').map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) return null;
+  const deadlineYear = month === 12 ? year + 1 : year;
+  const deadlineMonth = month === 12 ? 1 : month + 1;
+  return `${deadlineYear}-${String(deadlineMonth).padStart(2, '0')}-10`;
+}
+
+async function readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate = '' }) {
   if (!db?.collection) return [];
   const snapshot = await db.collection(`orgs/${tenantId}/monthly_closes`)
     .where('projectId', '==', projectId)
@@ -1275,9 +1285,13 @@ async function readCashflowMonthCloseStatuses({ db, tenantId, projectId }) {
       const calculationChecks = amendedCurrent
         ? amendmentEvidence.calculationChecks
         : snapshotFacts?.weeklyCalculationChecks;
+      const closeDeadline = cashflowMonthCloseDeadline(yearMonth);
       return {
         yearMonth,
         status,
+        closeDeadline,
+        // 기준일을 모르면 기한 초과를 단정하지 않는다.
+        closeOverdue: Boolean(businessDate && closeDeadline && status !== 'CLOSED' && businessDate > closeDeadline),
         sheetCalculationChecks: Array.isArray(calculationChecks)
           ? calculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
           : [],
@@ -1496,10 +1510,11 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   const amendmentEvidence = objectValue(close?.lastAmendmentEvidence) || {};
   const tenantId = readOptionalText(req.context?.tenantId);
   const deadlineSummaryPromise = readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
+  const businessDate = readOptionalText(close?.evaluatedBusinessDate);
   const [monthCloseStatuses, projectDocument, mirror] = closedSnapshot
-    ? await Promise.all([readCashflowMonthCloseStatuses({ db, tenantId, projectId }), Promise.resolve(null), Promise.resolve(null)])
+    ? await Promise.all([readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate }), Promise.resolve(null), Promise.resolve(null)])
     : await Promise.all([
-      readCashflowMonthCloseStatuses({ db, tenantId, projectId }),
+      readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate }),
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
       readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
     ]);

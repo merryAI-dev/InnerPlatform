@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { buildCashflowManagementChecks, mountJvmWeeklyApiRoutes } from './jvm-weekly-api.mjs';
+import { buildCashflowManagementChecks, cashflowMonthCloseDeadline, mountJvmWeeklyApiRoutes } from './jvm-weekly-api.mjs';
 
 function createIdempotencyService() {
   return {
@@ -756,6 +756,9 @@ describe('JVM weekly API BFF proxy', () => {
           expect.objectContaining({ yearMonth: '2026-07', weekNo: 3, status: 'COMPLETED' }),
         ]));
         expect(response.body.dashboard.monthCloseStatuses).toEqual(expect.arrayContaining([
+          // 결산 기한은 대상월 다음 달 10일이고, 이미 닫힌 달은 기한이 지나도 초과가 아니다.
+          expect.objectContaining({ yearMonth: '2026-06', closeDeadline: '2026-07-10', closeOverdue: false }),
+          expect.objectContaining({ yearMonth: '2026-05', closeDeadline: '2026-06-10', closeOverdue: false }),
           expect.objectContaining({ yearMonth: '2026-06', status: 'CLOSED' }),
           expect.objectContaining({
             yearMonth: '2026-05',
@@ -3063,5 +3066,20 @@ describe('JVM weekly API BFF proxy', () => {
       'x-actor-id': 'pm-1',
       'x-actor-role': 'pm',
     });
+  });
+});
+
+describe('cashflowMonthCloseDeadline', () => {
+  it('is the tenth of the following month and rolls over the year in December', () => {
+    expect(cashflowMonthCloseDeadline('2026-07')).toBe('2026-08-10');
+    expect(cashflowMonthCloseDeadline('2026-09')).toBe('2026-10-10');
+    // 12월은 다음 해 1월로 넘어간다. 자릿수도 두 자리를 유지해야 문자열 비교가 성립한다.
+    expect(cashflowMonthCloseDeadline('2026-12')).toBe('2027-01-10');
+    expect(cashflowMonthCloseDeadline('2026-01')).toBe('2026-02-10');
+  });
+
+  it('returns null for a malformed month instead of guessing', () => {
+    expect(cashflowMonthCloseDeadline('not-a-month')).toBeNull();
+    expect(cashflowMonthCloseDeadline('')).toBeNull();
   });
 });

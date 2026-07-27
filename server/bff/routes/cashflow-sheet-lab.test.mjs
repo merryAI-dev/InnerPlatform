@@ -2903,6 +2903,21 @@ describe('cashflow sheet lab route', () => {
       expect.objectContaining({ yearMonth: '2026-01', weeks: expect.any(Array) }),
       expect.objectContaining({ yearMonth: '2026-02', weeks: expect.any(Array) }),
     ]);
+    // 마감된 달을 바꾸는 사람은 건수가 아니라 어떤 값이 얼마로 바뀌는지를 보고 판단해야 한다.
+    for (const difference of rejected.body.details.closedMonthDifferences) {
+      expect(difference.changes.length).toBeGreaterThan(0);
+      expect(difference.changes.length + difference.truncatedChangeCount).toBe(difference.differenceCount);
+      for (const change of difference.changes) {
+        expect(difference.weeks).toContain(change.weekNo);
+        expect(['projection', 'actual']).toContain(change.mode);
+        expect(typeof change.lineId).toBe('string');
+        // before와 after가 실제로 다른 항목만 실려야 한다.
+        expect([change.beforeHadValue, change.beforeAmount])
+          .not.toEqual([change.afterHadValue, change.afterAmount]);
+        if (!change.beforeHadValue) expect(change.beforeAmount).toBeNull();
+        if (!change.afterHadValue) expect(change.afterAmount).toBeNull();
+      }
+    }
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')

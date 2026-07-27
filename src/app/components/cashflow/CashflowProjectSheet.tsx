@@ -117,8 +117,12 @@ function weeklySettlementSurface(status?: string): string {
   return '';
 }
 
-function cashflowWeekSurface(monthCloseStatus?: string, weeklyStatus?: string): string {
-  return monthCloseStatus === 'CLOSED' ? 'bg-slate-200' : weeklySettlementSurface(weeklyStatus);
+// 지난 달은 "닫혔나"가, 이번 달은 "이번 주 뭘 해야 하나"가 유일하게 중요한 질문이다.
+// 현재 달은 아직 결산할 수 없으므로(대상월이 끝나야 결산 가능) 주간 정산 상태를 그대로 보여준다.
+function cashflowWeekSurface(monthCloseStatus?: string, weeklyStatus?: string, closeOverdue?: boolean): string {
+  if (monthCloseStatus === 'CLOSED') return 'bg-slate-200';
+  if (closeOverdue) return 'bg-red-100';
+  return weeklySettlementSurface(weeklyStatus);
 }
 
 function logCashflowSettlement(input: {
@@ -1603,12 +1607,13 @@ export function CashflowProjectSheet({
     isAltRow: boolean;
     monthCloseStatus?: string;
     weeklyStatus?: string;
+    closeOverdue?: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'projection' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
     const shouldHighlightMismatch = persisted.mismatch;
-    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus) || (input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white');
+    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue) || (input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white');
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1632,11 +1637,12 @@ export function CashflowProjectSheet({
     isAltRow: boolean;
     monthCloseStatus?: string;
     weeklyStatus?: string;
+    closeOverdue?: boolean;
   }) {
     const persisted = getServerReadCell({ ...input, mode: 'actual' });
     const projection = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'projection', weekNo: input.weekNo, lineId: input.lineId });
     const actual = getBoardEffectiveAmount({ targetYearMonth: input.targetYearMonth, mode: 'actual', weekNo: input.weekNo, lineId: input.lineId });
-    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus) || (input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white');
+    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue) || (input.isThisWeek ? 'bg-[#EAF0F5]' : input.isAltRow ? 'bg-slate-50' : 'bg-white');
     const isCollapsedEmpty = projection === 0 && actual === 0 && !persisted.hasValue;
 
     return (
@@ -1660,11 +1666,12 @@ export function CashflowProjectSheet({
     isAltRow?: boolean;
     monthCloseStatus?: string;
     weeklyStatus?: string;
+    closeOverdue?: boolean;
     emphasis?: 'income' | 'expense' | 'balance';
     stickyRight?: boolean;
     rowTone?: 'income' | 'expense';
   }) {
-    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus) || (input.emphasis
+    const bgClass = cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue) || (input.emphasis
       ? 'bg-[#EAF0F5]'
       : input.isThisWeek
         ? 'bg-[#EAF0F5]'
@@ -1713,6 +1720,9 @@ export function CashflowProjectSheet({
     if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
       monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
     }
+    const monthCloseOverdueByMonth = new Map(
+      (monthCloseResult?.dashboard?.monthCloseStatuses || []).map((month) => [month.yearMonth, Boolean(month.closeOverdue)]),
+    );
     const weeklyStatusByWeek = new Map(
       (monthCloseResult?.dashboard?.deadlineSummary?.weeklyStatuses || [])
         .map((week) => [`${week.yearMonth}:${week.weekNo}`, week.status]),
@@ -1874,10 +1884,11 @@ export function CashflowProjectSheet({
           {visibleWeeks.map((week) => {
             const isThisWeek = todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd;
             const monthCloseStatus = monthCloseStatusByMonth.get(week.yearMonth);
+            const closeOverdue = monthCloseOverdueByMonth.get(week.yearMonth);
             const weeklyStatus = weeklyStatusByWeek.get(`${week.yearMonth}:${week.weekNo}`);
             return mode === 'projection'
-              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus, weeklyStatus })
-              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus, weeklyStatus });
+              ? renderProjectionCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus, weeklyStatus, closeOverdue })
+              : renderActualCell({ targetYearMonth: week.yearMonth, weekNo: week.weekNo, lineId, isThisWeek, isAltRow: rowIndex % 2 === 1, monthCloseStatus, weeklyStatus, closeOverdue });
           })}
           {followingAnnualYears.map((year) => renderAnnualLineCell(mode, lineId, year, rowIndex % 2 === 1))}
           {renderSummaryCell({
@@ -1912,6 +1923,7 @@ export function CashflowProjectSheet({
             isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
             monthCloseStatus: monthCloseStatusByMonth.get(week.yearMonth),
             weeklyStatus: weeklyStatusByWeek.get(`${week.yearMonth}:${week.weekNo}`),
+            closeOverdue: monthCloseOverdueByMonth.get(week.yearMonth),
             emphasis,
             rowTone,
           }))}
@@ -1942,11 +1954,20 @@ export function CashflowProjectSheet({
             ))}
             {monthGroups.map((month) => {
               const closed = monthCloseStatusByMonth.get(month.yearMonth) === 'CLOSED';
+              const overdue = !closed && Boolean(monthCloseOverdueByMonth.get(month.yearMonth));
+              const monthHeadClass = closed
+                ? 'border-b-slate-500 bg-slate-300 text-slate-800'
+                : overdue
+                  ? 'border-b-red-400 bg-red-200 text-red-900'
+                  : 'border-b-slate-200 bg-slate-100 text-slate-600';
               return (
-                <th colSpan={month.weeks.length} key={`${mode}-${month.yearMonth}-month`} className={`border-b-2 border-l-[6px] border-l-white px-2 py-1.5 text-left align-middle ${closed ? 'border-b-slate-500 bg-slate-300 text-slate-800' : 'border-b-slate-200 bg-slate-100 text-slate-600'}`}>
+                <th colSpan={month.weeks.length} key={`${mode}-${month.yearMonth}-month`} className={`border-b-2 border-l-[6px] border-l-white px-2 py-1.5 text-left align-middle ${monthHeadClass}`}>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px] font-bold">
                     {month.yearMonth.replace('-', '년 ')}월
                     {closed ? <LockKeyhole className="h-3.5 w-3.5" aria-label="월 결산 완료" /> : null}
+                    {overdue ? (
+                      <span className="rounded bg-red-700 px-1.5 py-0.5 text-[12px] font-bold text-white">월 결산 기한 초과</span>
+                    ) : null}
                   </span>
                 </th>
               );
@@ -2921,7 +2942,7 @@ export function CashflowProjectSheet({
           }
         }}
       >
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[440px]">
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[560px]">
           <AlertDialogHeader>
             <AlertDialogTitle>{sheetApplyResumeRequired ? '시트 반영 이어서 완료' : '마감 후 시트값 변경'}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -2934,10 +2955,42 @@ export function CashflowProjectSheet({
             <div className="space-y-3">
               {!sheetApplyResumeRequired && (
                 <>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-700">
+                  <div className="max-h-[260px] space-y-2 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                     {(lateSheetApply.closedMonthDifferences || []).map((difference) => (
                       <div key={difference.yearMonth}>
-                        {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+                        <div className="text-[12px] font-semibold leading-5 text-slate-800">
+                          {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
+                        </div>
+                        {(difference.changes || []).length > 0 && (
+                          <table className="mt-1 w-full border-collapse text-[12px] leading-4 text-slate-700">
+                            <tbody>
+                              {(difference.changes || []).map((change) => (
+                                <tr key={`${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200">
+                                  <td className="py-1 pr-2 align-top whitespace-nowrap text-slate-500">
+                                    {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차
+                                  </td>
+                                  <td className="py-1 pr-2 align-top">
+                                    {CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}
+                                  </td>
+                                  <td className="py-1 align-top whitespace-nowrap text-right tabular-nums">
+                                    <span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>
+                                      {change.beforeHadValue ? `${fmt(Number(change.beforeAmount || 0))}원` : '미작성'}
+                                    </span>
+                                    <span className="px-1 text-slate-400">→</span>
+                                    <span className="font-semibold text-slate-900">
+                                      {change.afterHadValue ? `${fmt(Number(change.afterAmount || 0))}원` : '미작성'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {Number(difference.truncatedChangeCount) > 0 && (
+                          <div className="mt-1 text-[12px] leading-4 text-slate-500">
+                            외 {Number(difference.truncatedChangeCount).toLocaleString()}건은 반영 후 변경 이력에서 확인할 수 있습니다.
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

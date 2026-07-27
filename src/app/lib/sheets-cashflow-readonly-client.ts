@@ -492,6 +492,16 @@ export interface CashflowSheetLabStageResult {
     yearMonth: string;
     differenceCount: number;
     weeks: number[];
+    changes?: Array<{
+      mode: string;
+      weekNo: number;
+      lineId: string;
+      beforeHadValue: boolean;
+      beforeAmount: number | null;
+      afterHadValue: boolean;
+      afterAmount: number | null;
+    }>;
+    truncatedChangeCount?: number;
   }>;
   stagedMonths?: string[];
   stagedYears?: number[];
