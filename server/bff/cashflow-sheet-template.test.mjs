@@ -113,8 +113,10 @@ describe('cashflow official fixed template', () => {
     ]);
     expect(result.sections[0].totalColumn).toMatchObject({ a1: 'BS12' });
     expect(result.sections[0].annualDerivedMappings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ year: 2024, derivedKind: 'balance', a1: 'C33' }),
-      expect.objectContaining({ year: 2025, derivedKind: 'balance', a1: 'D33' }),
+      expect.objectContaining({ year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'C33' }),
+      expect.objectContaining({ year: 2025, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'D33' }),
+      expect.objectContaining({ year: 2027, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'BM33' }),
+      expect.objectContaining({ year: 2026, periodKind: 'GRAND_TOTAL', derivedKind: 'balance', a1: 'BS33' }),
     ]));
   });
 

@@ -51,10 +51,10 @@ describe('cashflow sheet pinned snapshot', () => {
         sections: [{
           mode: 'projection',
           annualDerivedMappings: [
-            { mode: 'projection', year: 2024, derivedKind: 'deposit_total', rowIndex: 0, columnIndex: 2, a1: 'C1' },
-            { mode: 'projection', year: 2024, derivedKind: 'withdrawal_total', rowIndex: 1, columnIndex: 2, a1: 'C2' },
-            { mode: 'projection', year: 2024, derivedKind: 'balance', rowIndex: 2, columnIndex: 2, a1: 'C3' },
-            { mode: 'projection', year: 2025, derivedKind: 'balance', rowIndex: 2, columnIndex: 3, a1: 'D3' },
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'deposit_total', rowIndex: 0, columnIndex: 2, a1: 'C1' },
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'withdrawal_total', rowIndex: 1, columnIndex: 2, a1: 'C2' },
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', rowIndex: 2, columnIndex: 2, a1: 'C3' },
+            { mode: 'projection', year: 2025, periodKind: 'ANNUAL', derivedKind: 'balance', rowIndex: 2, columnIndex: 3, a1: 'D3' },
           ],
         }],
       },

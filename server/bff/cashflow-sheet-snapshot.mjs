@@ -106,6 +106,7 @@ function snapshotAnnualCell(mapping, matrix) {
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
+    periodKind: mapping.periodKind,
     lineId: mapping.lineId,
     direction: mapping.direction,
     sourceCell: mapping.a1,
@@ -119,6 +120,7 @@ function snapshotAnnualDerivedCell(mapping, matrix) {
   return {
     mode: mapping.mode,
     year: Number(mapping.year),
+    periodKind: mapping.periodKind,
     derivedKind: mapping.derivedKind,
     sourceCell: mapping.a1,
     ...(classified.state === 'VALUE' && classified.amount === 0

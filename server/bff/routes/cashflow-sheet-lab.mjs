@@ -679,6 +679,15 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     ...previousAnnualCells,
     ...(next.annualCells || []).map((cell) => ({ ...cell, sourceYear })),
   ]);
+  const previousAnnualDerivedCells = readOptionalText(previous?.sourceRevision)
+    ? (previous.annualDerivedCells || [])
+      .map((cell) => ({ ...cell, sourceYear: Number(cell?.sourceYear) || previousSourceYear }))
+      .filter((cell) => cell.sourceYear !== sourceYear)
+    : [];
+  const annualDerivedCells = selectCanonicalAnnualCells([
+    ...previousAnnualDerivedCells,
+    ...(next.annualDerivedCells || []).map((cell) => ({ ...cell, sourceYear })),
+  ]);
   const previousTotalCells = readOptionalText(previous?.sourceRevision)
     ? (previous.totalCells || [])
       .map((cell) => ({ ...cell, sourceYear: Number(cell?.sourceYear) || previousSourceYear }))
@@ -708,7 +717,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
       activeWeekRange: next.activeWeekRange,
     },
   };
-  const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells, totalCells })}`;
+  const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells, annualDerivedCells, totalCells })}`;
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (['VALUE', 'ZERO'].includes(cell.state)) counts.valueCount += 1;
@@ -750,6 +759,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
     sourceRevision,
     cells,
     annualCells,
+    annualDerivedCells,
     totalCells,
     yearMonths: [...new Set(cells.map((cell) => readOptionalText(cell.yearMonth)).filter(Boolean))].sort(),
     years: [...new Set([
@@ -1316,6 +1326,68 @@ function monthCalculationChecks(mirror, yearMonth) {
     ? mirror.sheetFacts.weeklyCalculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
     : [];
   return checks.length === 10 ? checks : [];
+}
+
+function cashflowFormulaPreflightInput(mirror) {
+  const sourceYear = Number(mirror?.sourceYear);
+  if (!Number.isSafeInteger(sourceYear)) {
+    throw createHttpError(409, '시트의 기준 연도를 확인할 수 없습니다. 시트 값을 다시 불러와 주세요.', 'cashflow_sheet_formula_evidence_incomplete');
+  }
+  const annualCells = [];
+  const annualYears = [...new Set((mirror?.annualCells || []).map((cell) => Number(cell?.year)))]
+    .filter(Number.isSafeInteger)
+    .sort((left, right) => left - right);
+  for (const year of annualYears) {
+    const validated = validateCompletePinnedYear(
+      year,
+      (mirror.annualCells || []).filter((cell) => Number(cell?.year) === year),
+    );
+    if (!validated.ok) {
+      throw createHttpError(409, `${year}년 연간 원장 행을 확인할 수 없습니다. 시트 값을 다시 불러와 주세요.`, 'cashflow_sheet_formula_evidence_incomplete');
+    }
+    annualCells.push(...validated.cells.map((cell) => ({ year, ...cell })));
+  }
+
+  const fieldByKind = {
+    deposit_total: 'depositTotal',
+    withdrawal_total: 'withdrawalTotal',
+    balance: 'balance',
+  };
+  const annualDerivedCells = (mirror?.annualDerivedCells || []).map((cell) => {
+    const field = fieldByKind[readOptionalText(cell?.derivedKind)];
+    const state = readOptionalText(cell?.state);
+    if (
+      !field
+      || !['ANNUAL', 'GRAND_TOTAL'].includes(readOptionalText(cell?.periodKind))
+      || !CASHFLOW_MODES.includes(readOptionalText(cell?.mode))
+      || !['VALUE', 'ZERO', 'EMPTY'].includes(state)
+      || (['VALUE', 'ZERO'].includes(state) && !Number.isSafeInteger(cell?.amount))
+    ) {
+      throw createHttpError(409, `${readOptionalText(cell?.sourceCell) || '연간 합계'} 셀 값을 숫자로 확인해 주세요.`, 'cashflow_sheet_formula_evidence_incomplete');
+    }
+    return stripUndefinedDeep({
+      year: Number(cell.year),
+      periodKind: cell.periodKind,
+      mode: cell.mode,
+      field,
+      amount: ['VALUE', 'ZERO'].includes(state) ? cell.amount : undefined,
+      sourceCell: readOptionalText(cell.sourceCell) || undefined,
+    });
+  });
+
+  const cellsByMonth = groupPinnedCellsByMonth((mirror?.cells || [])
+    .filter((cell) => Number(readOptionalText(cell?.yearMonth).slice(0, 4)) === sourceYear));
+  const months = [];
+  const yearMonths = [...cellsByMonth.keys()].sort();
+  for (const yearMonth of yearMonths) {
+    const validated = validateCompletePinnedMonth(yearMonth, cellsByMonth.get(yearMonth) || []);
+    const calculationChecks = monthCalculationChecks(mirror, yearMonth);
+    if (!validated.ok || calculationChecks.length !== 10) {
+      throw createHttpError(409, `${yearMonth} 계산 근거를 확인할 수 없습니다. 시트 값을 다시 불러와 주세요.`, 'cashflow_sheet_formula_evidence_incomplete');
+    }
+    months.push({ yearMonth, cells: validated.cells, calculationChecks, apply: false });
+  }
+  return { sourceYear, annualCells, annualDerivedCells, months };
 }
 
 function stageMonthSnapshotDocument({ tenantId, projectId, runId, mirror, yearMonth, cells, calculationChecks, now }) {
@@ -2165,20 +2237,28 @@ async function applyStagedCashflowSheetLab({
     ? stageRun.openingBalanceCells
     : [];
 
+  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+  assertFreshCashflowSheetMirror(mirror);
+  if (
+    readOptionalText(mirror?.configRevision) !== readOptionalText(stageRun.configRevision)
+    || readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+  ) {
+    throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
+  }
   if (!resuming) {
-    const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-    assertFreshCashflowSheetMirror(mirror);
-    if (
-      readOptionalText(mirror?.configRevision) !== readOptionalText(stageRun.configRevision)
-      || readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
-    ) {
-      throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
-    }
     const currentTargetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
     if (computeCashflowTargetRevision(currentTargetSnapshot) !== readOptionalText(stageRun.targetRevisionAtFetch)) {
       throw createHttpError(409, '검토 후 캐시플로우 값이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_target_revision_conflict');
     }
   }
+
+  const preflightInput = cashflowFormulaPreflightInput(mirror);
+  await javaWeeklyClient.validateCashflowSheetFormulas({
+    context,
+    projectId,
+    ...preflightInput,
+    acceptFormulaMismatches,
+  });
 
   const reservation = await reserveCashflowSheetApply({
     db,

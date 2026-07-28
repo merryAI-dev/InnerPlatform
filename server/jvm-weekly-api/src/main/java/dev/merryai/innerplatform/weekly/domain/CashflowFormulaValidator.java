@@ -110,7 +110,9 @@ public final class CashflowFormulaValidator {
                 BigDecimal withdrawalTotal = total(sourceByKey, mode, 1, CashflowLineCatalog.OUT_LINES);
                 BigDecimal balance = balances.get(mode).add(depositTotal).subtract(withdrawalTotal);
                 results.add(new AnnualCheck(
-                    year, mode, balances.get(mode), depositTotal, withdrawalTotal, balance,
+                    year, mode, balances.get(mode),
+                    reported.depositTotal(), reported.withdrawalTotal(), reported.balance(),
+                    depositTotal, withdrawalTotal, balance,
                     matches(reported.depositTotal(), depositTotal),
                     matches(reported.withdrawalTotal(), withdrawalTotal),
                     matches(reported.balance(), balance),
@@ -250,7 +252,7 @@ public final class CashflowFormulaValidator {
     }
 
     private static Boolean matches(BigDecimal reported, BigDecimal calculated) {
-        if (reported == null) return null;
+        if (reported == null) return false;
         return requiredWholeWon(reported, "reported value").compareTo(calculated) == 0;
     }
 
@@ -282,6 +284,9 @@ public final class CashflowFormulaValidator {
         int year,
         String mode,
         BigDecimal openingBalance,
+        BigDecimal reportedDepositTotal,
+        BigDecimal reportedWithdrawalTotal,
+        BigDecimal reportedBalance,
         BigDecimal depositTotal,
         BigDecimal withdrawalTotal,
         BigDecimal balance,

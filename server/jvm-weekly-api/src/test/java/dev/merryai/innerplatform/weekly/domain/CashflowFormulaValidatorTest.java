@@ -54,6 +54,20 @@ class CashflowFormulaValidatorTest {
     }
 
     @Test
+    void treatsAMissingDerivedFormulaAsAMismatch() {
+        List<CashflowFormulaValidator.Cell> cells = completeCells();
+        List<CashflowFormulaValidator.ReportedWeek> reported = reportedWeeks(0);
+        CashflowFormulaValidator.ReportedWeek first = reported.getFirst();
+        reported.set(0, new CashflowFormulaValidator.ReportedWeek(
+            first.mode(), first.weekNo(), first.openingBalance(), null,
+            first.withdrawalTotal(), first.balance(), first.sourceCells()
+        ));
+
+        assertThat(check(CashflowFormulaValidator.validateMonth(cells, reported), "projection", 1)
+            .depositTotalMatches()).isFalse();
+    }
+
+    @Test
     void keepsExplicitZeroValidAndRejectsDecimalWon() {
         List<CashflowFormulaValidator.Cell> cells = completeCells();
         replace(cells, "projection", 1, "SALES_IN", "ZERO", 0);
@@ -152,6 +166,34 @@ class CashflowFormulaValidatorTest {
 
         assertThat(firstWeek.openingBalance()).isEqualByComparingTo("2000000");
         assertThat(firstWeek.balance()).isEqualByComparingTo("2000100");
+    }
+
+    @Test
+    void carriesFutureAnnualBalancesButCalculatesTheGrandTotalIndependently() {
+        List<CashflowFormulaValidator.OpeningCell> futureCells = completeOpeningCells(2027, 2028);
+        replaceOpening(futureCells, 2027, "projection", "SALES_IN", "VALUE", 50);
+        replaceOpening(futureCells, 2028, "projection", "DIRECT_COST_OUT", "VALUE", 20);
+        List<CashflowFormulaValidator.AnnualCheck> future = CashflowFormulaValidator.validateAnnualPeriods(
+            futureCells,
+            reportedAnnuals(2027, 2028),
+            Map.of("projection", BigDecimal.valueOf(100), "actual", BigDecimal.ZERO)
+        );
+
+        assertThat(annualCheck(future, 2027, "projection").balance()).isEqualByComparingTo("150");
+        assertThat(annualCheck(future, 2028, "projection").openingBalance()).isEqualByComparingTo("150");
+        assertThat(annualCheck(future, 2028, "projection").balance()).isEqualByComparingTo("130");
+
+        List<CashflowFormulaValidator.OpeningCell> totalCells = completeOpeningCells(2026);
+        replaceOpening(totalCells, 2026, "projection", "SALES_IN", "VALUE", 200);
+        replaceOpening(totalCells, 2026, "projection", "DIRECT_COST_OUT", "VALUE", 50);
+        List<CashflowFormulaValidator.AnnualCheck> total = CashflowFormulaValidator.validateAnnualPeriods(
+            totalCells,
+            reportedAnnuals(2026),
+            Map.of("projection", BigDecimal.ZERO, "actual", BigDecimal.ZERO)
+        );
+
+        assertThat(annualCheck(total, 2026, "projection").openingBalance()).isEqualByComparingTo("0");
+        assertThat(annualCheck(total, 2026, "projection").balance()).isEqualByComparingTo("150");
     }
 
     private static List<CashflowFormulaValidator.Cell> completeCells() {

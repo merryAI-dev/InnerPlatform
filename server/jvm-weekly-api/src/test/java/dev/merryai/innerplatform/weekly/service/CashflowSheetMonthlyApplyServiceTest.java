@@ -6,6 +6,9 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalanceCell;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
@@ -320,6 +323,28 @@ class CashflowSheetMonthlyApplyServiceTest {
     }
 
     @Test
+    void rejectsAnnualFormulaMismatchBeforeAnyCanonicalWriteAndAllowsExplicitConfirmation() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        CashflowSheetFormulaPreflightRequest rejected = formulaPreflightRequest(false);
+
+        assertThatThrownBy(() -> service(persistence).validateCashflowSheetFormulas(ACTOR, "project-a", rejected))
+            .isInstanceOf(WeeklyExpenseEditLeaseException.class)
+            .hasMessageContaining("시트 합산 수식");
+        verify(persistence, never()).replaceCashflowSheetMonths(any(), any(), any(), any(), any());
+        verify(persistence, never()).replaceCashflowSheetYearTotal(any(), any(), any(), any());
+
+        CashflowSheetFormulaPreflightResponse accepted = service(persistence).validateCashflowSheetFormulas(
+            ACTOR,
+            "project-a",
+            formulaPreflightRequest(true)
+        );
+        assertThat(accepted.ok()).isTrue();
+        assertThat(accepted.annualCheckCount()).isEqualTo(18);
+        assertThat(accepted.weeklyCheckCount()).isEqualTo(120);
+    }
+
+    @Test
     void rejectsAnIncompleteMonthBeforeLeaseOrCanonicalWrites() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
@@ -476,6 +501,44 @@ class CashflowSheetMonthlyApplyServiceTest {
             }
         }
         return List.copyOf(checks);
+    }
+
+    private static CashflowSheetFormulaPreflightRequest formulaPreflightRequest(boolean accepted) {
+        List<CashflowOpeningBalanceCell> annualCells = new ArrayList<>();
+        List<CashflowSheetFormulaPreflightRequest.AnnualDerivedCell> derived = new ArrayList<>();
+        for (int year = 2024; year <= 2032; year += 1) {
+            String periodKind = year == 2026 ? "GRAND_TOTAL" : "ANNUAL";
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    annualCells.add(new CashflowOpeningBalanceCell(year, mode, lineId, "ZERO", BigDecimal.ZERO));
+                }
+                for (String field : List.of("depositTotal", "withdrawalTotal", "balance")) {
+                    BigDecimal amount = year == 2024 && mode.equals("projection") && field.equals("balance")
+                        ? BigDecimal.ONE
+                        : BigDecimal.ZERO;
+                    derived.add(new CashflowSheetFormulaPreflightRequest.AnnualDerivedCell(
+                        year, periodKind, mode, field, amount, year + ":" + field
+                    ));
+                }
+            }
+        }
+        List<CashflowSheetBatchApplyRequest.Month> months = new ArrayList<>();
+        for (int month = 1; month <= 12; month += 1) {
+            String yearMonth = "2026-" + String.format("%02d", month);
+            months.add(new CashflowSheetBatchApplyRequest.Month(
+                yearMonth,
+                calculationChecks(yearMonth),
+                emptyCells(),
+                false
+            ));
+        }
+        return new CashflowSheetFormulaPreflightRequest(2026, annualCells, derived, months, accepted);
+    }
+
+    private static List<CashflowSheetLabApplyRequest.Cell> emptyCells() {
+        return completeCells(5).stream().map(cell -> new CashflowSheetLabApplyRequest.Cell(
+            cell.mode(), cell.weekNo(), cell.cashflowLine(), "EMPTY", null, cell.sourceCell(), cell.sourceLabel()
+        )).toList();
     }
 
     private static List<CashflowSheetLabApplyRequest.Cell> completeCells(int weekCount) {

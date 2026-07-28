@@ -115,6 +115,7 @@ function annualColumn(matrix, rowIndex, columnIndex) {
   if (!match) return null;
   return {
     year: Number.parseInt(match[1], 10),
+    periodKind: 'ANNUAL',
     columnIndex,
     a1: toA1(rowIndex, columnIndex),
   };
@@ -156,6 +157,7 @@ function fixedSection(matrix, layout, reasons) {
   if (totalColumn) {
     annualColumns.push({
       year: sourceYear,
+      periodKind: 'GRAND_TOTAL',
       columnIndex: totalColumn.columnIndex,
       a1: totalColumn.a1,
     });
@@ -230,6 +232,7 @@ function fixedSection(matrix, layout, reasons) {
     canonicalLabel: lineRow.canonicalLabel,
     direction: lineRow.direction,
     year: column.year,
+    periodKind: column.periodKind,
     rowIndex: lineRow.rowIndex,
     columnIndex: column.columnIndex,
     a1: toA1(lineRow.rowIndex, column.columnIndex),
@@ -240,6 +243,7 @@ function fixedSection(matrix, layout, reasons) {
     derivedKind: row.kind,
     label: row.label,
     year: column.year,
+    periodKind: column.periodKind,
     rowIndex: row.rowIndex,
     columnIndex: column.columnIndex,
     a1: toA1(row.rowIndex, column.columnIndex),
