@@ -1345,7 +1345,13 @@ function cashflowFormulaPreflightInput(mirror) {
     if (!validated.ok) {
       throw createHttpError(409, `${year}년 연간 원장 행을 확인할 수 없습니다. 시트 값을 다시 불러와 주세요.`, 'cashflow_sheet_formula_evidence_incomplete');
     }
-    annualCells.push(...validated.cells.map((cell) => ({ year, ...cell })));
+    annualCells.push(...validated.cells.map((cell) => stripUndefinedDeep({
+      year,
+      mode: cell.mode,
+      cashflowLine: cell.cashflowLine,
+      cellState: cell.cellState,
+      amount: ['VALUE', 'ZERO'].includes(cell.cellState) ? cell.amount : undefined,
+    })));
   }
 
   const fieldByKind = {

@@ -3166,6 +3166,8 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(2);
+    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].annualCells[0]).not.toHaveProperty('sourceCell');
+    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].annualCells[0]).not.toHaveProperty('sourceLabel');
     expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
     expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
