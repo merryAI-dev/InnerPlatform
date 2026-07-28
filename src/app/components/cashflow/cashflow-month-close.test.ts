@@ -128,12 +128,31 @@ describe('cashflow month close contract', () => {
     expect(() => buildCashflowMonthCloseDraftInput({
       mirror: mirror(),
       yearMonth: '2026-07',
+      humanReviewed: true,
       decisions: {},
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
       managementChecks,
       managementDecisions: {},
       deadlineSummary,
     })).toThrow('확인');
+  });
+
+  it('does not turn a server-derived cell state into a confirmation without an explicit review', () => {
+    const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
+    const decisions = Object.fromEntries(cells.map((cell) => [
+      cashflowMonthCloseConfirmationKey(cell),
+      requiredCashflowMonthCloseDecision(cell),
+    ]));
+    expect(() => buildCashflowMonthCloseDraftInput({
+      mirror: mirror(),
+      yearMonth: '2026-07',
+      humanReviewed: false,
+      decisions,
+      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({ ...row, decision: 'NOT_APPLICABLE' as const })),
+      managementChecks,
+      managementDecisions,
+      deadlineSummary,
+    })).toThrow('직접 확인');
   });
 
   it('keeps untouched deposit rows incomplete until a human chooses an action', () => {
@@ -165,6 +184,7 @@ describe('cashflow month close contract', () => {
     const result = buildCashflowMonthCloseDraftInput({
       mirror: source,
       yearMonth: '2026-07',
+      humanReviewed: true,
       decisions,
       projectionDrafts: { [key]: '12,345' },
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
@@ -190,6 +210,7 @@ describe('cashflow month close contract', () => {
     const result = buildCashflowMonthCloseDraftInput({
       mirror: source,
       yearMonth: '2026-07',
+      humanReviewed: true,
       decisions,
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
         ...row,

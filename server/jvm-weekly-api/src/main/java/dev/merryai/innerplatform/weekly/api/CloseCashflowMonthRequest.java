@@ -28,6 +28,7 @@ public record CloseCashflowMonthRequest(
     String yearMonth,
     @PositiveOrZero long expectedRevision,
     @PositiveOrZero long expectedDraftRevision,
+    boolean humanReviewed,
     @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT, max = CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
     List<DepositScheduleRow> depositScheduleRows,
     @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
@@ -327,6 +328,12 @@ public record CloseCashflowMonthRequest(
             }
         }
         return List.copyOf(byKey.values());
+    }
+
+    public static void requireHumanReviewed(boolean humanReviewed) {
+        if (!humanReviewed) {
+            throw new IllegalArgumentException("Cashflow month close requires an explicit human review.");
+        }
     }
 
     public static List<ManagementCheck> requireCompleteManagementChecks(List<ManagementCheck> checks) {

@@ -768,6 +768,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
             .containsExactly("2026-07", "2026-08");
         assertThat(fixture.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-08"))
+            .containsEntry("revision", 2L)
             .containsEntry("amendmentCount", 1L)
             .containsEntry("postDeadlineAmendmentWarningCount", 0L)
             .containsEntry("lastAmendmentPostDeadline", false);
@@ -1031,12 +1032,14 @@ class FirestoreCashflowLeaseGuardTest {
         ));
         assertThat(closedResponse.yearMonth()).isEqualTo("2026-07");
         assertThat(closed.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-07"))
+            .containsEntry("revision", 2L)
             .containsEntry("amendmentCount", 1L)
             .containsEntry("postDeadlineAmendmentWarningCount", 0L)
             .hasEntrySatisfying("lastAmendmentEvidence", value -> {
                 Map<String, Object> evidence = (Map<String, Object>) value;
                 assertThat(evidence)
                     .containsEntry("closeRevision", 1L)
+                    .containsEntry("resultingCloseRevision", 2L)
                     .containsEntry("closeSnapshotHash", "sha256:" + "f".repeat(64))
                     .containsEntry("sourceRevision", SOURCE_REVISION)
                     .containsEntry("targetRevision", "sha256:298012959db83e193536ff7f60735889252ceaa4325de6944465e2dd197fcb44");
@@ -2184,6 +2187,7 @@ class FirestoreCashflowLeaseGuardTest {
             pinned.yearMonth(),
             pinned.expectedRevision(),
             pinned.expectedDraftRevision(),
+            pinned.humanReviewed(),
             pinned.depositScheduleRows(),
             changedCells,
             pinned.confirmations(),
@@ -2240,6 +2244,7 @@ class FirestoreCashflowLeaseGuardTest {
             base.yearMonth(),
             base.expectedRevision(),
             base.expectedDraftRevision(),
+            base.humanReviewed(),
             base.depositScheduleRows(),
             base.cells(),
             base.confirmations(),
@@ -2974,6 +2979,7 @@ class FirestoreCashflowLeaseGuardTest {
             month.yearMonth(),
             expectedRevision,
             expectedDraftRevision,
+            true,
             depositScheduleRows,
             month.cells(),
             confirmations,

@@ -31,13 +31,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
-  it('closes the month from one compact confirmation while preserving the server snapshot contract', () => {
+  it('requires an explicit human review before the compact month close is enabled', () => {
     expect(source).toContain('결산 기준을 먼저 점검한 뒤, 준비된 경우에만 이 달의 수정을 잠급니다.');
     expect(source).toContain('월 결산 확정');
     expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
     expect(source).not.toContain('세금계산서·입금 일정</h3>');
-    expect(source).toContain("decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE'");
+    expect(source).toContain('monthCloseHumanReviewed');
+    expect(source).toContain('humanReviewed: monthCloseHumanReviewed');
+    expect(source).toContain('직접 확인했습니다');
     expect(source).not.toContain('!monthCloseProgress.complete');
   });
 
