@@ -20,7 +20,7 @@ const fieldLabels: Record<CashflowFormulaMismatch['field'], string> = {
 function periodLabel(issue: CashflowFormulaMismatch): string {
   if (issue.yearMonth && issue.weekNo) {
     const [year, month] = issue.yearMonth.split('-');
-    return `${year.slice(-2)}-${Number(month)}-${issue.weekNo}`;
+    return `${year}년 ${Number(month)}월 ${issue.weekNo}주차`;
   }
   return issue.year ? `${issue.year}년` : '연간 합계';
 }
@@ -29,37 +29,26 @@ function amount(value: number | null): string {
   return value == null ? '미입력' : `${value.toLocaleString('ko-KR')}원`;
 }
 
-function columnFromCell(cell?: string): string {
-  return cell?.match(/^[A-Z]+/)?.[0] || '해당';
-}
-
 function expectedCalculation(issue: CashflowFormulaMismatch): string {
-  const column = columnFromCell(issue.sourceCell);
-  const isActual = issue.mode === 'actual';
-  const rows = isActual
-    ? { income: '38~44', expense: '46~54', incomeTotal: '45', expenseTotal: '55', balance: '56' }
-    : { income: '15~21', expense: '23~31', incomeTotal: '22', expenseTotal: '32', balance: '33' };
-
   if (issue.field === 'depositTotal') {
-    return `입금 합계 = ${column}${rows.income} 행의 입금 항목을 모두 더한 값`;
+    return '해당 기간의 입금 항목을 모두 더한 값';
   }
   if (issue.field === 'withdrawalTotal') {
-    return `출금 합계 = ${column}${rows.expense} 행의 출금 항목을 모두 더한 값`;
+    return '해당 기간의 출금 항목을 모두 더한 값';
   }
 
   if (issue.year === 2024) {
-    return `잔액 = ${column}${rows.incomeTotal} 입금 합계 − ${column}${rows.expenseTotal} 출금 합계`;
+    return '해당 기간의 입금 합계에서 출금 합계를 뺀 값';
   }
-  return `잔액 = 직전 기간 잔액 + ${column}${rows.incomeTotal} 입금 합계 − ${column}${rows.expenseTotal} 출금 합계`;
+  return '직전 기간의 잔액에 이번 기간 입금 합계를 더하고 출금 합계를 뺀 값';
 }
 
 export function describeCashflowFormulaMismatch(issue: CashflowFormulaMismatch): {
   expected: string;
   current: string;
 } {
-  const cell = issue.sourceCell || `${fieldLabels[issue.field]} 셀`;
   return {
-    expected: `${cell}은 ${expectedCalculation(issue)}입니다. 따라서 ${amount(issue.calculated)}이 표시되어야 합니다.`,
+    expected: `이 칸은 ${expectedCalculation(issue)}입니다. 시트에는 ${amount(issue.calculated)}이 표시되어야 합니다.`,
     current: issue.reported == null
       ? '현재 시트에는 이 값이 비어 있습니다.'
       : `현재 시트에는 ${amount(issue.reported)}이 표시되어 있습니다.`,
@@ -95,9 +84,7 @@ export function CashflowFormulaMismatchDialog({
             const description = describeCashflowFormulaMismatch(issue);
             return (
             <div key={`${issue.year || issue.yearMonth}:${issue.mode}:${issue.weekNo || 0}:${issue.field}:${index}`}>
-              <div className="font-semibold">
-                {periodLabel(issue)} · {issue.mode === 'projection' ? 'Projection' : 'Actual'} · {fieldLabels[issue.field]}
-              </div>
+              <div className="font-semibold">{periodLabel(issue)} · {issue.mode === 'projection' ? 'Projection' : 'Actual'} · {fieldLabels[issue.field]}</div>
               <div className="mt-1 text-slate-700">{description.expected}</div>
               <div className="text-slate-600">{description.current}</div>
             </div>

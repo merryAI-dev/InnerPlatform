@@ -13,8 +13,7 @@ describe('CashflowFormulaMismatchDialog', () => {
       sourceCell: 'BL22',
     });
 
-    expect(result.expected).toContain('BL15~21 행의 입금 항목을 모두 더한 값');
-    expect(result.expected).toContain('0원이 표시되어야');
+    expect(result.expected).toBe('이 칸은 해당 기간의 입금 항목을 모두 더한 값입니다. 시트에는 0원이 표시되어야 합니다.');
     expect(result.current).toBe('현재 시트에는 이 값이 비어 있습니다.');
   });
 
@@ -28,7 +27,7 @@ describe('CashflowFormulaMismatchDialog', () => {
       sourceCell: 'C56',
     });
 
-    expect(result.expected).toContain('C45 입금 합계 − C55 출금 합계');
+    expect(result.expected).toContain('해당 기간의 입금 합계에서 출금 합계를 뺀 값');
     expect(result.expected).not.toContain('직전 기간 잔액');
   });
 
@@ -42,7 +41,7 @@ describe('CashflowFormulaMismatchDialog', () => {
       sourceCell: 'BM33',
     });
 
-    expect(result.expected).toContain('직전 기간 잔액 + BM22 입금 합계 − BM32 출금 합계');
+    expect(result.expected).toContain('직전 기간의 잔액에 이번 기간 입금 합계를 더하고 출금 합계를 뺀 값');
     expect(result.current).toContain('10원이 표시되어 있습니다.');
   });
 });
