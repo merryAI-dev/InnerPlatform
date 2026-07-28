@@ -42,17 +42,20 @@ console.log(JSON.stringify({ projectId, tenantId: tenantId || null, apply, docum
 if (!apply) process.exit(0);
 if (!tenantId) throw new Error('No weekly QA records found. Nothing was changed.');
 
+const qaSnapshot = await db.doc(`orgs/${tenantId}/cashflow_month_close_qa_dates/${projectId}`).get();
+const qaDateTime = qaSnapshot.exists && qaSnapshot.data()?.active ? String(qaSnapshot.data()?.qaDateTime || '') : '';
+const resetAt = Number.isFinite(Date.parse(qaDateTime)) ? qaDateTime : new Date().toISOString();
 const backupDirectory = resolve(process.env.TMPDIR || '/tmp', 'myscube-stage-reset-backups');
 const backupPath = resolve(backupDirectory, `${projectId}-${Date.now()}.json`);
 await mkdir(backupDirectory, { recursive: true });
-await writeFile(backupPath, JSON.stringify({ projectId, tenantId, resetAt: new Date().toISOString(), documents }, null, 2));
+await writeFile(backupPath, JSON.stringify({ projectId, tenantId, resetAt, documents }, null, 2));
 
 const batch = db.batch();
 for (const snapshot of snapshots) for (const doc of snapshot.docs) batch.delete(doc.ref);
 batch.set(db.doc(`orgs/${tenantId}/cashflow_weekly_update_reset_controls/${projectId}`), {
   projectId,
-  trackingStartedAt: new Date().toISOString(),
-  resetAt: new Date().toISOString(),
+  trackingStartedAt: resetAt,
+  resetAt,
   resetBy: 'stage-qa-reset',
 });
 await batch.commit();
