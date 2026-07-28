@@ -43,6 +43,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('!monthCloseProgress.complete');
   });
 
+  it('initializes the pinned source before effects read its revision', () => {
+    const declaration = source.indexOf('const monthClosePinnedSource = useMemo');
+    const revisionEffect = source.indexOf(
+      '[yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]',
+    );
+    expect(declaration).toBeGreaterThan(-1);
+    expect(revisionEffect).toBeGreaterThan(declaration);
+  });
+
   it('prefills immutable sheet-authored deposit facts for the compact month close', () => {
     expect(source).toContain('dashboard?.sheetDepositScheduleRows');
     expect(source).toContain('taxInvoiceIssuedDate: row.taxInvoiceIssuedDate');

@@ -375,10 +375,6 @@ export function CashflowProjectSheet({
     setMonthCloseReviewDirty(false);
   }, [projectId]);
 
-  useEffect(() => {
-    setMonthCloseHumanReviewed(false);
-  }, [yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]);
-
   const discardChangesAndLeave = useCallback(async (): Promise<void> => {
     if (blocker.state !== 'blocked') return;
     setExitBusy(true);
@@ -728,6 +724,10 @@ export function CashflowProjectSheet({
       })),
     };
   }, [cashflowSheetMirror, monthCloseResult?.dashboard, projectId, yearMonth]);
+
+  useEffect(() => {
+    setMonthCloseHumanReviewed(false);
+  }, [yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]);
 
   useEffect(() => {
     const sourceRows = monthCloseResult?.dashboard?.sheetDepositScheduleRows || [];
