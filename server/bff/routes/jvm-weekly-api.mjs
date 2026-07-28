@@ -1180,7 +1180,7 @@ function assertCashflowSheetPublicationReady(state) {
 
 async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary }) {
   if (!db?.collection) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks: [], weeklyStatuses: [] };
-  const [runSnap, completionSnap] = await Promise.all([
+  const [runSnap, completionSnap, resetSnap] = await Promise.all([
     db.collection(`orgs/${tenantId}/cashflow_sheet_stage_runs`)
       .where('projectId', '==', projectId)
       .limit(500)
@@ -1189,6 +1189,7 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
       .where('projectId', '==', projectId)
       .limit(500)
       .get(),
+    db.doc(`orgs/${tenantId}/cashflow_weekly_update_reset_controls/${projectId}`).get(),
   ]);
   const runs = runSnap.docs.map((doc) => doc.data() || {})
     .filter((run) => run.status === 'APPLIED' || (run.status === 'READY' && safeAmount(run.stagedLineCount) === 0))
@@ -1217,7 +1218,12 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     }))
     .filter((value) => /^20\d{2}-(0[1-9]|1[0-2])$/.test(value.yearMonth) && Number.isInteger(value.weekNo) && value.weekNo >= 1 && value.weekNo <= 5)
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth) || left.weekNo - right.weekNo);
-  const trackingStartedAt = [...runs, ...completionDates].sort()[0] || null;
+  const resetAt = resetSnap.exists ? readOptionalText(resetSnap.data()?.trackingStartedAt) : '';
+  const resetAtMs = Date.parse(resetAt);
+  const hasResetPoint = Number.isFinite(resetAtMs);
+  const trackingStartedAt = hasResetPoint
+    ? resetAt
+    : [...runs, ...completionDates].sort()[0] || null;
   if (!trackingStartedAt) return { trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null, completedWeeks, weeklyStatuses: [] };
   const asOfDate = readOptionalText(comparisonBoundary?.asOfDate);
   const startYearMonth = trackingStartedAt.slice(0, 7);
@@ -1226,7 +1232,9 @@ async function readCashflowDeadlineSummary({ db, tenantId, projectId, comparison
     ? comparisonBoundary.asOfMs
     : Date.parse(`${asOfDate}T23:59:59+09:00`);
   const weeks = monthsBetween(startYearMonth, endYearMonth).flatMap(getMonthFinanceWeeks)
-    .filter((week) => Date.parse(`${week.weekEnd}T23:59:59+09:00`) >= Date.parse(trackingStartedAt));
+    .filter((week) => (hasResetPoint
+      ? Date.parse(`${week.weekStart}T00:00:00+09:00`) >= resetAtMs
+      : Date.parse(`${week.weekEnd}T23:59:59+09:00`) >= Date.parse(trackingStartedAt)));
   let missedCount = 0;
   let completedCount = 0;
   let current = null;

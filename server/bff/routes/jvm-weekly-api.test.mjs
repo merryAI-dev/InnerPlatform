@@ -680,6 +680,39 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
+  it('starts weekly QA tracking again from an explicit project reset point', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
+      projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
+    });
+    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
+      active: true, qaDateTime: '2026-07-17T00:01:00+09:00',
+    });
+    source.documents.set('orgs/tenant-a/cashflow_weekly_update_reset_controls/project-a', {
+      projectId: 'project-a', trackingStartedAt: '2026-07-17T00:01:00+09:00',
+    });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.deadlineSummary).toMatchObject({
+          trackingStartedAt: '2026-07-17T00:01:00+09:00',
+          missedCount: 0,
+          completedCount: 0,
+        });
+      });
+  });
+
   it('persists the explicit weekly settlement completion with its actor and exposes it in the dashboard', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
