@@ -711,7 +711,7 @@ function mergeCashflowSourceMirror(previous, next, sourceYear) {
   const sourceRevision = `sha256:${stableHash({ sources, cells, annualCells, totalCells })}`;
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
-    if (cell.state === 'VALUE') counts.valueCount += 1;
+    if (['VALUE', 'ZERO'].includes(cell.state)) counts.valueCount += 1;
     if (cell.state === 'EMPTY') counts.emptyCount += 1;
     if (cell.state === 'INVALID') counts.invalidCount += 1;
     return counts;
@@ -1217,8 +1217,9 @@ function validateCompletePinnedMonth(yearMonth, cells = []) {
       || !CASHFLOW_LINE_ORDER.has(lineId)
       || !Number.isInteger(weekNo)
       || !expectedWeekSet.has(weekNo)
-      || !['VALUE', 'EMPTY'].includes(state)
-      || (state === 'VALUE' && !Number.isSafeInteger(cell?.amount))
+      || !['VALUE', 'ZERO', 'EMPTY'].includes(state)
+      || (['VALUE', 'ZERO'].includes(state) && !Number.isSafeInteger(cell?.amount))
+      || (state === 'ZERO' && cell?.amount !== 0)
       || (state === 'EMPTY' && cell?.amount !== undefined)
     ) {
       return { ok: false, reason: 'invalid_cell' };
@@ -1257,7 +1258,7 @@ function validateCompletePinnedMonth(yearMonth, cells = []) {
         weekNo: Number(cell.weekNo),
         cashflowLine: cell.lineId,
         cellState: cell.state,
-        amount: cell.state === 'VALUE' ? cell.amount : undefined,
+        amount: ['VALUE', 'ZERO'].includes(cell.state) ? cell.amount : undefined,
         sourceCell: readOptionalText(cell.sourceCell) || undefined,
         sourceLabel: readOptionalText(cell.sourceLabel) || cell.lineId,
       })),
@@ -1427,7 +1428,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
   }
   const closedDifferences = (mirror?.cells || []).filter((cell) => {
     if (!closedMonths.has(readOptionalText(cell?.yearMonth))) return false;
-    if (cell?.state !== 'VALUE' && cell?.state !== 'EMPTY') return false;
+    if (!['VALUE', 'ZERO', 'EMPTY'].includes(cell?.state)) return false;
     const mapping = {
       mode: cell.mode,
       yearMonth: cell.yearMonth,
@@ -1435,7 +1436,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       lineId: cell.lineId,
     };
     const beforeHadValue = hasIndexedSnapshotAmount(amountIndex, mapping);
-    const proposedHadValue = cell.state === 'VALUE';
+    const proposedHadValue = ['VALUE', 'ZERO'].includes(cell.state);
     if (beforeHadValue !== proposedHadValue) return true;
     if (!proposedHadValue) return false;
     return normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping))
@@ -1465,8 +1466,8 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       lineId: cell.lineId,
       beforeHadValue,
       beforeAmount: beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null,
-      afterHadValue: cell.state === 'VALUE',
-      afterAmount: cell.state === 'VALUE' ? normalizeAppliedAmount(cell.amount) : null,
+      afterHadValue: ['VALUE', 'ZERO'].includes(cell.state),
+      afterAmount: ['VALUE', 'ZERO'].includes(cell.state) ? normalizeAppliedAmount(cell.amount) : null,
     });
     closedMonthDifferenceMap.set(yearMonth, summary);
   }
@@ -1484,7 +1485,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
 
   const candidates = (mirror?.cells || [])
     .filter((cell) => !nonWritableMonths.has(readOptionalText(cell.yearMonth)))
-    .filter((cell) => cell.state === 'VALUE' || cell.state === 'EMPTY')
+    .filter((cell) => ['VALUE', 'ZERO', 'EMPTY'].includes(cell.state))
     .map((cell) => {
       const mapping = {
         mode: cell.mode,
@@ -1494,7 +1495,7 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       };
       const beforeHadValue = hasIndexedSnapshotAmount(amountIndex, mapping);
       const beforeAmount = beforeHadValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amountIndex, mapping)) : null;
-      const proposedHadValue = cell.state === 'VALUE';
+      const proposedHadValue = ['VALUE', 'ZERO'].includes(cell.state);
       const proposedAmount = proposedHadValue ? normalizeAppliedAmount(cell.amount) : null;
       if (!forceFullReplacement && beforeHadValue === proposedHadValue && (!proposedHadValue || beforeAmount === proposedAmount)) return null;
 
@@ -1940,10 +1941,32 @@ function verifyJavaMonthAppliedCells(result, month, {
   ) {
     throw createHttpError(502, '저장 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
   }
+  const calculationChecks = Array.isArray(result?.calculationChecks) ? result.calculationChecks : [];
+  const calculationKeys = new Set(calculationChecks.map((check) => (
+    `${readOptionalText(check?.mode)}:${Number(check?.weekNo)}`
+  )));
+  if (
+    calculationChecks.length !== 10
+    || calculationKeys.size !== 10
+    || CASHFLOW_MODES.some((mode) => Array.from({ length: 5 }, (_, index) => (
+      !calculationKeys.has(`${mode}:${index + 1}`)
+    )).some(Boolean))
+    || calculationChecks.some((check) => (
+      !['openingBalance', 'depositTotal', 'withdrawalTotal', 'balance'].every((field) => (
+        check?.calculated?.[field] !== null
+        && check?.calculated?.[field] !== undefined
+        && Number.isSafeInteger(Number(check.calculated[field]))
+      ))
+    ))
+  ) {
+    throw createHttpError(502, 'JVM 계산 검증 결과가 불완전해 저장을 확인할 수 없습니다.', 'cashflow_jvm_calculation_verification_failed');
+  }
   let verifiedLineCount = 0;
   for (const mode of CASHFLOW_MODES) {
     const index = javaAppliedLineIndex(result?.[mode], { mode, yearMonth: month.yearMonth });
-    const expected = month.cells.filter((cell) => cell.mode === mode && cell.cellState === 'VALUE');
+    const expected = month.cells.filter((cell) => (
+      cell.mode === mode && ['VALUE', 'ZERO'].includes(cell.cellState)
+    ));
     if (index.size !== expected.length) {
       throw createHttpError(502, '저장된 항목 수가 불러온 시트 값과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
     }
@@ -2087,10 +2110,17 @@ async function applyStagedCashflowSheetLab({
     if (!validated.ok) {
       throw createHttpError(409, '검토 당시 고정한 월 시트 구조가 완전하지 않습니다.', 'cashflow_sheet_stage_month_incomplete');
     }
+    const calculationChecks = monthCalculationChecks(
+      { sheetFacts: { weeklyCalculationChecks: stagedMonth.calculationChecks } },
+      yearMonth,
+    );
+    if (calculationChecks.length !== 10) {
+      throw createHttpError(409, '검토 당시 고정한 월 계산 근거가 완전하지 않습니다. 시트 값을 다시 불러와 주세요.', 'cashflow_sheet_stage_calculation_incomplete');
+    }
     return {
       yearMonth,
       cells: validated.cells,
-      calculationChecks: monthCalculationChecks({ sheetFacts: { weeklyCalculationChecks: stagedMonth.calculationChecks } }, yearMonth),
+      calculationChecks,
     };
   }));
   const stagedYears = await Promise.all(candidateYears.map(async (year) => {
@@ -2376,6 +2406,9 @@ async function applyStagedCashflowSheetLab({
       role: readOptionalText(context?.actorRole) || 'workspace_user',
     },
     verifiedLineCount,
+    formulaValidation: javaResults.flatMap((result) => (
+      Array.isArray(result?.calculationChecks) ? result.calculationChecks : []
+    )),
     firebaseResult: {
       ok: true,
       commandName: CASHFLOW_SHEET_APPLY_COMMAND,

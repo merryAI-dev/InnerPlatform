@@ -1,7 +1,7 @@
 # Cashflow Formula Validation Contract
 
 **Date:** 2026-07-28  
-**Status:** Proposed - implementation requires product approval  
+**Status:** Approved - Phase 1-2 implementation in progress
 **Scope:** `cashflow(사용내역 연동)` fixed-format sheet, BFF transport, Spring JVM validation, sheet apply, month close  
 **Out of scope:** variable `사용내역` sheet formulas and generic Excel formula execution
 
@@ -108,11 +108,14 @@ C55 = SUM(C46:C54)
 
 ### 4.3 Running balance and prior-year carry-forward
 
-The first period starts from zero:
+The first weekly period starts from the imported prior-period balance. When the
+sheet has no earlier period, the opening balance is zero:
 
 ```text
 calculatedBalance[M,first]
-  = 0 + inflowTotal[M,first] - outflowTotal[M,first]
+  = importedOpeningBalance[M]
+  + inflowTotal[M,first]
+  - outflowTotal[M,first]
 ```
 
 Every following period uses the JVM-calculated prior balance:
@@ -393,3 +396,17 @@ Implementation starts only after approval of all four decisions:
 3. Allow canonical source-row import on calculation mismatch, but block month close until corrected.
 4. Keep project contract-amount mismatch as a separate non-blocking warning.
 
+## 13. Phase 1-2 implementation checkpoint
+
+Implemented on 2026-07-28:
+
+- BFF preserves explicit `0` as `ZERO` instead of collapsing it into a generic value.
+- JVM independently recalculates five weekly inflow totals, outflow totals, and running balances for Projection and Actual.
+- Only the first selected month's imported opening balance is used; every later week and later month in the same batch uses the prior JVM-calculated balance.
+- JVM calculation results replace BFF comparison results in the apply response and persisted amendment evidence.
+- Missing calculation evidence or a JVM response without ten weekly checks fails closed.
+- Explicit `ZERO` survives the month-close BFF path and remains distinct from `EMPTY`.
+- New month-close snapshots retain all 160 source cells and their states; amended and legacy amount maps infer `ZERO` only when an explicit zero-valued key exists.
+- Sheet apply behavior remains unchanged; calculation mismatches are not blocking yet.
+
+Verified by the full JVM module test suite and the BFF cashflow-sheet fixture tests. The first selected month's opening balance still comes from the sheet's reported prior balance; replacing it with a JVM sum of pinned prior-period canonical rows remains mandatory before Phase 3 is complete. Phase 3 also owns row totals, grand totals, Projection-Actual differences, deposit-schedule totals, calculation revision persistence, and month-close blocking.

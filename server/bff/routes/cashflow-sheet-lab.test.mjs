@@ -67,7 +67,17 @@ const CASHFLOW_LINE_IDS = [
 ];
 
 function javaApplyResponse(request, resultingTargetRevision) {
-  const lines = (request.cells || []).filter((cell) => cell.cellState === 'VALUE');
+  const lines = (request.cells || []).filter((cell) => ['VALUE', 'ZERO'].includes(cell.cellState));
+  const calculationChecks = (request.calculationChecks || []).map((check) => ({
+    ...check,
+    calculated: {
+      openingBalance: check.reported.openingBalance ?? 0,
+      depositTotal: check.reported.depositTotal ?? 0,
+      withdrawalTotal: check.reported.withdrawalTotal ?? 0,
+      balance: check.reported.balance ?? 0,
+    },
+    matches: { depositTotal: true, withdrawalTotal: true, balance: true },
+  }));
   return {
     ok: true,
     commandName: 'weeklyExpense.cashflowSheetLab.apply',
@@ -95,6 +105,7 @@ function javaApplyResponse(request, resultingTargetRevision) {
         amount: cell.amount,
       })),
     settledWeekChanges: [],
+    calculationChecks,
   };
 }
 
@@ -107,6 +118,7 @@ function javaBatchApplyResponse(request, resultingTargetRevision) {
       savedActualLineCount: result.actual.length,
       projection: result.projection,
       actual: result.actual,
+      calculationChecks: result.calculationChecks,
     };
   });
   return {
@@ -2577,7 +2589,7 @@ describe('cashflow sheet lab route', () => {
     expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
-  it('fails closed when a multi-month JVM response reports ok=false', async () => {
+  it('fails closed when a multi-month JVM response omits calculation evidence', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -2594,10 +2606,13 @@ describe('cashflow sheet lab route', () => {
       '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
     ];
     const javaWeeklyClient = {
-      applyCashflowSheetBatch: vi.fn(async (input) => ({
-        ...javaBatchApplyResponse(input, `sha256:${'2'.repeat(64)}`),
-        ok: false,
-      })),
+      applyCashflowSheetBatch: vi.fn(async (input) => {
+        const response = javaBatchApplyResponse(input, `sha256:${'2'.repeat(64)}`);
+        return {
+          ...response,
+          months: response.months.map(({ calculationChecks: _calculationChecks, ...month }) => month),
+        };
+      }),
     };
     const app = createApp({
       db,
@@ -2625,7 +2640,7 @@ describe('cashflow sheet lab route', () => {
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'batch-contract-apply' })
       .expect(502)
       .expect((response) => {
-        expect(response.body.code).toBe('cashflow_jvm_apply_verification_failed');
+        expect(response.body.code).toBe('cashflow_jvm_calculation_verification_failed');
       });
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status)
       .toBe('APPLYING');

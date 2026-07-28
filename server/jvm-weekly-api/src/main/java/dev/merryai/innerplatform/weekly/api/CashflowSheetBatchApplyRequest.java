@@ -56,7 +56,7 @@ public record CashflowSheetBatchApplyRequest(
         @Size(min = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH, max = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH)
         @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])")
         String yearMonth,
-        @Size(max = 10) List<Map<String, Object>> calculationChecks,
+        @NotNull @Size(min = 10, max = 10) List<Map<String, Object>> calculationChecks,
         @Valid @NotNull @Size(
             min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT,
             max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT

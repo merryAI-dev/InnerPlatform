@@ -19,6 +19,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -118,6 +119,25 @@ class CashflowSheetMonthlyApplyServiceTest {
             eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION), any(),
             eq(true), isNull(), eq(SOURCE_REVISION), eq("apply-replace-all")
         );
+    }
+
+    @Test
+    void rejectsASheetApplyWithoutDisplayedCalculationEvidence() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+        CashflowSheetLabApplyRequest request = new CashflowSheetLabApplyRequest(
+            "apply-without-checks",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            "2026-07",
+            false,
+            completeCells(5)
+        );
+
+        assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("10 displayed calculation checks");
     }
 
     @Test
@@ -355,8 +375,31 @@ class CashflowSheetMonthlyApplyServiceTest {
             TARGET_REVISION,
             "2026-07",
             replaceAllActualSources,
+            null,
+            null,
+            calculationChecks("2026-07"),
             cells
         );
+    }
+
+    private static List<Map<String, Object>> calculationChecks(String yearMonth) {
+        List<Map<String, Object>> checks = new ArrayList<>();
+        for (String mode : List.of("projection", "actual")) {
+            for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+                checks.add(Map.of(
+                    "mode", mode,
+                    "yearMonth", yearMonth,
+                    "weekNo", weekNo,
+                    "reported", Map.of(
+                        "openingBalance", 0,
+                        "depositTotal", 0,
+                        "withdrawalTotal", 0,
+                        "balance", 0
+                    )
+                ));
+            }
+        }
+        return List.copyOf(checks);
     }
 
     private static List<CashflowSheetLabApplyRequest.Cell> completeCells(int weekCount) {
