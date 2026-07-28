@@ -63,6 +63,11 @@ function getErrorCode(error: unknown) {
   return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
 }
 
+function isApplyResultUncertain(error: unknown) {
+  const status = Number((error as { status?: unknown })?.status);
+  return !Number.isInteger(status) || status >= 500;
+}
+
 function getClosedMonthDifferences(error: unknown) {
   const apiError = error as {
     body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
@@ -946,7 +951,7 @@ export function CashflowSheetLabPage({
         );
         setApplyResumeRequired(false);
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
-      } else if (activeStep === 'apply' && staged) {
+      } else if (activeStep === 'apply' && staged && isApplyResultUncertain(error)) {
         setClosedMonthStage(staged);
         setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
@@ -986,6 +991,14 @@ export function CashflowSheetLabPage({
       target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       if (target && !target.disabled) target.focus({ preventScroll: true });
     }, 150);
+  }
+
+  function closeClosedMonthDialog() {
+    setClosedMonthStage(null);
+    setApplyResumeRequired(false);
+    setClosedMonthWarning([]);
+    setClosedMonthChangeReason('');
+    setClosedMonthFormulaAccepted(false);
   }
 
   return (
@@ -1204,20 +1217,15 @@ export function CashflowSheetLabPage({
       <Dialog
         open={Boolean(closedMonthStage)}
         onOpenChange={(open) => {
-          if (!open && !applyResumeRequired) {
-            setClosedMonthStage(null);
-            setApplyResumeRequired(false);
-            setClosedMonthWarning([]);
-            setClosedMonthFormulaAccepted(false);
-          }
+          if (!open) closeClosedMonthDialog();
         }}
       >
         <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
           <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 이어서 완료' : '결산 후 값이 달라요'}</DialogTitle>
+            <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 결과 다시 확인' : '결산 후 값이 달라요'}</DialogTitle>
             <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
               {applyResumeRequired
-                ? '이전 반영의 응답을 확인하지 못했습니다. 새 검토본을 만들지 않고 같은 작업을 이어서 완료합니다.'
+                ? '시트 값을 MYSCube 현금흐름 관리시트에 반영하는 중 연결이 끊겼습니다. 시트 값을 새로 불러오거나 중복 저장하지 않고, 기존 검토본의 반영 결과를 다시 확인한 뒤 남은 저장만 이어갑니다.'
                 : '월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.'}
             </DialogDescription>
           </DialogHeader>
@@ -1239,11 +1247,9 @@ export function CashflowSheetLabPage({
             />
           )}
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            {!applyResumeRequired && (
-              <Button type="button" variant="outline" className="h-9" onClick={() => setClosedMonthStage(null)}>
-                닫기
-              </Button>
-            )}
+            <Button type="button" variant="outline" className="h-9" onClick={closeClosedMonthDialog}>
+              닫기
+            </Button>
             <Button
               type="button"
               className="h-9"
@@ -1254,7 +1260,7 @@ export function CashflowSheetLabPage({
                 closedMonthFormulaAccepted,
               )}
             >
-              {applyResumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}
+              {applyResumeRequired ? '반영 상태 확인 및 이어서 완료' : '사유와 함께 반영'}
             </Button>
           </DialogFooter>
         </DialogContent>

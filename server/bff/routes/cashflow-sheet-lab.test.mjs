@@ -3134,6 +3134,18 @@ describe('cashflow sheet lab route', () => {
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-formula-mismatch' })
       .expect(200);
 
+    const currentMirror = db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
+    const originalDerivedCell = currentMirror.annualDerivedCells[0];
+    currentMirror.annualDerivedCells[0] = { ...originalDerivedCell, sourceCell: '' };
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-formula-evidence-incomplete' })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_formula_evidence_incomplete'));
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).not.toHaveBeenCalled();
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
+    currentMirror.annualDerivedCells[0] = originalDerivedCell;
+
     const rejected = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-formula-mismatch-first' })

@@ -1354,26 +1354,43 @@ function cashflowFormulaPreflightInput(mirror) {
     balance: 'balance',
   };
   const annualDerivedCells = (mirror?.annualDerivedCells || []).map((cell) => {
+    const year = Number(cell?.year);
+    const periodKind = readOptionalText(cell?.periodKind);
     const field = fieldByKind[readOptionalText(cell?.derivedKind)];
     const state = readOptionalText(cell?.state);
+    const sourceCell = readOptionalText(cell?.sourceCell);
     if (
-      !field
-      || !['ANNUAL', 'GRAND_TOTAL'].includes(readOptionalText(cell?.periodKind))
+      !annualYears.includes(year)
+      || !field
+      || periodKind !== (year === sourceYear ? 'GRAND_TOTAL' : 'ANNUAL')
       || !CASHFLOW_MODES.includes(readOptionalText(cell?.mode))
       || !['VALUE', 'ZERO', 'EMPTY'].includes(state)
       || (['VALUE', 'ZERO'].includes(state) && !Number.isSafeInteger(cell?.amount))
+      || !sourceCell || sourceCell.length > 20
     ) {
-      throw createHttpError(409, `${readOptionalText(cell?.sourceCell) || '연간 합계'} 셀 값을 숫자로 확인해 주세요.`, 'cashflow_sheet_formula_evidence_incomplete');
+      throw createHttpError(409, '기존 검토본에는 연도별 합계·잔액 확인 정보가 없어 반영하지 않았습니다. 시트 양식이나 수식 오류는 아닙니다. 시트 값 다시 불러오기를 눌러 새 검토본을 만든 뒤 반영해 주세요.', 'cashflow_sheet_formula_evidence_incomplete');
     }
     return stripUndefinedDeep({
-      year: Number(cell.year),
-      periodKind: cell.periodKind,
+      year,
+      periodKind,
       mode: cell.mode,
       field,
       amount: ['VALUE', 'ZERO'].includes(state) ? cell.amount : undefined,
-      sourceCell: readOptionalText(cell.sourceCell) || undefined,
+      sourceCell,
     });
   });
+
+  const expectedDerivedKeys = new Set(annualYears.flatMap((year) => (
+    CASHFLOW_MODES.flatMap((mode) => Object.values(fieldByKind).map((field) => `${year}:${mode}:${field}`))
+  )));
+  const actualDerivedKeys = new Set(annualDerivedCells.map((cell) => `${cell.year}:${cell.mode}:${cell.field}`));
+  if (
+    annualDerivedCells.length !== expectedDerivedKeys.size
+    || actualDerivedKeys.size !== expectedDerivedKeys.size
+    || [...actualDerivedKeys].some((key) => !expectedDerivedKeys.has(key))
+  ) {
+    throw createHttpError(409, '기존 검토본의 연도별 합계·잔액 확인 정보가 완전하지 않아 반영하지 않았습니다. 시트 양식이나 수식 오류는 아닙니다. 시트 값 다시 불러오기를 눌러 새 검토본을 만든 뒤 반영해 주세요.', 'cashflow_sheet_formula_evidence_incomplete');
+  }
 
   const cellsByMonth = groupPinnedCellsByMonth((mirror?.cells || [])
     .filter((cell) => Number(readOptionalText(cell?.yearMonth).slice(0, 4)) === sourceYear));
