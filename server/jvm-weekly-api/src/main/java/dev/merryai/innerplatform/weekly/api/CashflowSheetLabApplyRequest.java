@@ -29,7 +29,8 @@ public record CashflowSheetLabApplyRequest(
     @Size(max = 1000) String closedMonthChangeReason,
     @Valid @NotNull @Size(max = 288) List<CashflowOpeningBalanceCell> openingBalanceCells,
     @NotNull @Size(min = 10, max = 10) List<Map<String, Object>> calculationChecks,
-    @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
+    @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells,
+    boolean acceptFormulaMismatches
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
     public static final int EXPECTED_CELL_COUNT = 160;
@@ -42,7 +43,7 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells, true);
     }
 
     public CashflowSheetLabApplyRequest(
@@ -64,7 +65,8 @@ public record CashflowSheetLabApplyRequest(
             closedMonthChangeReason,
             List.of(),
             List.of(),
-            cells
+            cells,
+            true
         );
     }
 
@@ -89,7 +91,35 @@ public record CashflowSheetLabApplyRequest(
             closedMonthChangeReason,
             List.of(),
             calculationChecks,
-            cells
+            cells,
+            true
+        );
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason,
+        List<CashflowOpeningBalanceCell> openingBalanceCells,
+        List<Map<String, Object>> calculationChecks,
+        List<Cell> cells
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            yearMonth,
+            replaceAllActualSources,
+            settledWeekChangeConfirmation,
+            closedMonthChangeReason,
+            openingBalanceCells,
+            calculationChecks,
+            cells,
+            true
         );
     }
 

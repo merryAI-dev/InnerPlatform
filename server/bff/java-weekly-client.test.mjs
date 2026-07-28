@@ -157,10 +157,12 @@ describe('Java weekly cashflow client', () => {
       targetRevision: monthlyContract.targetRevision,
       months: [{ yearMonth: '2026-07', cells: monthlyContract.cells }],
       closedMonthChangeReason: '결산 후 실제 입금액 정정',
+      acceptFormulaMismatches: true,
     });
 
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toMatchObject({
       closedMonthChangeReason: '결산 후 실제 입금액 정정',
+      acceptFormulaMismatches: true,
     });
   });
 

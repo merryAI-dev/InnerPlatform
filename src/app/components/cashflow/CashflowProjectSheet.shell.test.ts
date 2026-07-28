@@ -251,13 +251,20 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('applies the pinned sheet directly and asks for a reason only when the JVM reports a late closed-month change', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
-    expect(source).toContain('handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())');
+    expect(source).toContain('lateSheetChangeReason.trim(),');
+    expect(source).toContain('lateSheetFormulaAccepted,');
     expect(source).toContain('closedMonthChangeReason');
     expect(source).toContain('마감 후 시트값 변경');
     expect(source).toContain('사유와 함께 반영');
     expect(source).not.toContain('renderSheetStageReviewGrid');
     expect(source).not.toContain('sheetStageDialog');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
+  });
+
+  it('asks before applying a sheet whose displayed formulas differ from the JVM calculation', () => {
+    expect(source).toContain("bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required'");
+    expect(source).toContain('cashflowFormulaMismatchesFromError');
+    expect(source).toContain('handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true)');
   });
 
   it('keeps an unlinked project usable and guides the user to sheet setup', () => {

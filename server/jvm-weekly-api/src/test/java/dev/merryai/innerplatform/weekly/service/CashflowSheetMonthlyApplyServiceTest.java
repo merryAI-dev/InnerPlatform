@@ -7,6 +7,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseIdempotencyEntity;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
@@ -138,6 +139,35 @@ class CashflowSheetMonthlyApplyServiceTest {
         assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("10 displayed calculation checks");
+    }
+
+    @Test
+    void requiresExplicitConfirmationBeforeWritingFormulaMismatches() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+        CashflowSheetLabApplyRequest request = new CashflowSheetLabApplyRequest(
+            "apply-formula-mismatch",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            "2026-07",
+            false,
+            null,
+            null,
+            List.of(),
+            calculationChecks("2026-07"),
+            completeCells(5),
+            false
+        );
+
+        assertThatThrownBy(() -> service(persistence).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request))
+            .isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
+                assertThat(error.code()).isEqualTo("cashflow_formula_mismatch_confirmation_required");
+                assertThat((List<?>) error.details().get("mismatches")).isNotEmpty();
+            });
+
+        verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
+        verify(persistence, never()).saveAuditEvent(any());
     }
 
     @Test

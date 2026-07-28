@@ -1,7 +1,7 @@
 # Cashflow Formula Validation Contract
 
 **Date:** 2026-07-28  
-**Status:** Approved - weekly formulas and prior-year carry-forward implemented
+**Status:** Approved - weekly formulas, prior-year carry-forward, and explicit mismatch confirmation implemented
 **Scope:** `cashflow(사용내역 연동)` fixed-format sheet, BFF transport, Spring JVM validation, sheet apply, month close  
 **Out of scope:** variable `사용내역` sheet formulas and generic Excel formula execution
 
@@ -373,6 +373,9 @@ The implementation records JVM validation duration and finding count. Performanc
 ### Phase 4 - UI and audit
 
 - Show compact warning text with first affected period and count.
+- Before any write, return `409 cashflow_formula_mismatch_confirmation_required` with the affected week, mode, total type, sheet value, JVM value, and source cell.
+- Keep the staged run `READY`; only retry the same staged run with `acceptFormulaMismatches=true` after the user selects `그래도 현재 시트값 반영`.
+- Use human-readable Korean in the dialog. Keep the server code in developer logs only.
 - Store actor, timestamp, source revision, calculation revision, and findings.
 - Do not expose raw internal stack traces or duplicate warnings.
 

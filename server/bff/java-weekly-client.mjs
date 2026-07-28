@@ -254,6 +254,7 @@ export function createJavaWeeklyClient({
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -285,6 +286,7 @@ export function createJavaWeeklyClient({
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
@@ -304,6 +306,7 @@ export function createJavaWeeklyClient({
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -335,6 +338,7 @@ export function createJavaWeeklyClient({
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {

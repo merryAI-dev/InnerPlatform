@@ -1827,6 +1827,7 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
     ) ? stageRunDocument.applyInput : {
       applyRiskCandidates: true,
       closedMonthChangeReason: '',
+      acceptFormulaMismatches: false,
       replaceAllActualSources: stageRunDocument.replaceAllActualSources === true,
     },
   };
@@ -2051,9 +2052,13 @@ async function applyStagedCashflowSheetLab({
   const closedMonthChangeReason = storedApplyInput
     ? readOptionalText(storedApplyInput.closedMonthChangeReason)
     : readOptionalText(parsed.closedMonthChangeReason);
+  const acceptFormulaMismatches = storedApplyInput
+    ? storedApplyInput.acceptFormulaMismatches === true
+    : parsed.acceptFormulaMismatches === true;
   const applyRequestHash = stableHash({
     stagedRunId,
     applyRiskCandidates,
+    ...(acceptFormulaMismatches ? { acceptFormulaMismatches: true } : {}),
     ...(closedMonthChangeReason ? { closedMonthChangeReason } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
   });
@@ -2185,6 +2190,7 @@ async function applyStagedCashflowSheetLab({
     applyInput: {
       applyRiskCandidates,
       closedMonthChangeReason,
+      acceptFormulaMismatches,
       replaceAllActualSources,
     },
     now,
@@ -2233,6 +2239,7 @@ async function applyStagedCashflowSheetLab({
         openingBalanceCells,
         replaceAllActualSources,
         closedMonthChangeReason,
+        acceptFormulaMismatches,
       });
       targetRevision = assertResultingTargetRevision(javaResult);
       verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, {
@@ -2271,6 +2278,7 @@ async function applyStagedCashflowSheetLab({
         })),
         replaceAllActualSources,
         closedMonthChangeReason,
+        acceptFormulaMismatches,
       });
       if (
         batchResult?.ok !== true

@@ -22,7 +22,8 @@ public record CashflowSheetBatchApplyRequest(
     @Valid CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
     @Size(max = 1000) String closedMonthChangeReason,
     @Valid @NotNull @Size(max = 288) List<CashflowOpeningBalanceCell> openingBalanceCells,
-    @Valid @NotNull @Size(min = 1, max = 12) List<Month> months
+    @Valid @NotNull @Size(min = 1, max = 12) List<Month> months,
+    boolean acceptFormulaMismatches
 ) {
     public static final int MAX_MONTH_COUNT = 12;
 
@@ -33,7 +34,7 @@ public record CashflowSheetBatchApplyRequest(
         boolean replaceAllActualSources,
         List<Month> months
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, replaceAllActualSources, null, null, List.of(), months);
+        this(idempotencyKey, sourceRevision, targetRevision, replaceAllActualSources, null, null, List.of(), months, true);
     }
 
     public CashflowSheetBatchApplyRequest(
@@ -52,7 +53,31 @@ public record CashflowSheetBatchApplyRequest(
             null,
             closedMonthChangeReason,
             List.of(),
-            months
+            months,
+            true
+        );
+    }
+
+    public CashflowSheetBatchApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason,
+        List<CashflowOpeningBalanceCell> openingBalanceCells,
+        List<Month> months
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            replaceAllActualSources,
+            settledWeekChangeConfirmation,
+            closedMonthChangeReason,
+            openingBalanceCells,
+            months,
+            true
         );
     }
 

@@ -1131,6 +1131,10 @@ public class WeeklyExpenseCommandService {
             request.calculationChecks(),
             request.calculatedOpeningBalances()
         );
+        requireFormulaMismatchConfirmation(
+            Map.of(request.yearMonth(), calculationChecks),
+            request.acceptFormulaMismatches()
+        );
         assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
@@ -1285,6 +1289,7 @@ public class WeeklyExpenseCommandService {
             calculationChecksByMonth.put(month.yearMonth(), calculationChecks);
             openingBalances = CashflowSheetLabApplyRequest.closingBalances(calculationChecks);
         }
+        requireFormulaMismatchConfirmation(calculationChecksByMonth, request.acceptFormulaMismatches());
         assertAtomicWriteBudget(
             Math.multiplyExact(appliedCellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
             3,
@@ -1397,6 +1402,44 @@ public class WeeklyExpenseCommandService {
             writeJson(response)
         ));
         return response;
+    }
+
+    private void requireFormulaMismatchConfirmation(
+        Map<String, List<Map<String, Object>>> checksByMonth,
+        boolean accepted
+    ) {
+        if (accepted) return;
+        List<Map<String, Object>> mismatches = new ArrayList<>();
+        for (Map.Entry<String, List<Map<String, Object>>> month : checksByMonth.entrySet()) {
+            for (Map<String, Object> check : month.getValue()) {
+                Map<?, ?> matches = check.get("matches") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> reported = check.get("reported") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> calculated = check.get("calculated") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> sourceCells = check.get("sourceCells") instanceof Map<?, ?> value ? value : Map.of();
+                for (String field : List.of("depositTotal", "withdrawalTotal", "balance")) {
+                    if (!Boolean.FALSE.equals(matches.get(field))) continue;
+                    Map<String, Object> mismatch = new LinkedHashMap<>();
+                    mismatch.put("yearMonth", month.getKey());
+                    mismatch.put("mode", String.valueOf(check.getOrDefault("mode", "")));
+                    mismatch.put("weekNo", check.get("weekNo"));
+                    mismatch.put("field", field);
+                    mismatch.put("reported", reported.get(field));
+                    mismatch.put("calculated", calculated.get(field));
+                    if (sourceCells.get(field) != null) mismatch.put("sourceCell", sourceCells.get(field));
+                    mismatches.add(java.util.Collections.unmodifiableMap(mismatch));
+                }
+            }
+        }
+        if (mismatches.isEmpty()) return;
+        throw new WeeklyExpenseEditLeaseException(
+            409,
+            "cashflow_formula_mismatch_confirmation_required",
+            "시트 합산 수식과 JVM 계산 결과가 다릅니다. 확인 후 다시 반영해 주세요.",
+            Map.of(
+                "mismatchCount", mismatches.size(),
+                "mismatches", List.copyOf(mismatches)
+            )
+        );
     }
 
     @Transactional

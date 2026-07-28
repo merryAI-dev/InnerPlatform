@@ -3069,6 +3069,84 @@ describe('cashflow sheet lab route', () => {
     expect(calls[1].closedMonthChangeReason).toBe('결산 후 실제 입금액 정정');
   });
 
+  it('keeps the staged run atomic until formula mismatches are explicitly accepted', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+    });
+    const previewSpreadsheet = vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+    }));
+    const resultingTargetRevision = `sha256:${'6'.repeat(64)}`;
+    const mismatch = {
+      yearMonth: '2026-01',
+      mode: 'projection',
+      weekNo: 1,
+      field: 'depositTotal',
+      reported: 6_800_000,
+      calculated: 6_700_000,
+      sourceCell: 'BO12',
+    };
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => {
+        if (!input.acceptFormulaMismatches) {
+          throw Object.assign(new Error('formula confirmation required'), {
+            statusCode: 409,
+            code: 'cashflow_formula_mismatch_confirmation_required',
+            details: { mismatchCount: 1, mismatches: [mismatch] },
+          });
+        }
+        return javaApplyResponse(input, resultingTargetRevision);
+      }),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-formula-mismatch' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-formula-mismatch' })
+      .expect(200);
+
+    const rejected = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-formula-mismatch-first' })
+      .expect(409);
+    expect(rejected.body).toMatchObject({
+      code: 'cashflow_formula_mismatch_confirmation_required',
+      details: { mismatchCount: 1, mismatches: [mismatch] },
+    });
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({
+        stageRunId: stage.body.runId,
+        idempotencyKey: 'apply-formula-mismatch-confirmed',
+        acceptFormulaMismatches: true,
+      })
+      .expect(200);
+
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
+  });
+
   it('applies a settled-week sheet change without a weekly confirmation', async () => {
     const db = createDb({
       project: {
