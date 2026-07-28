@@ -228,6 +228,28 @@ describe('cashflow month close contract', () => {
     expect(result.managementConfirmations).toHaveLength(4);
   });
 
+  it('does not turn an unreviewed management check into an automatic confirmation', () => {
+    const source = mirror();
+    const cells = normalizeCashflowMonthCloseCells(source, '2026-07');
+    const decisions = Object.fromEntries(cells.map((cell) => [
+      cashflowMonthCloseConfirmationKey(cell),
+      requiredCashflowMonthCloseDecision(cell),
+    ]));
+    expect(() => buildCashflowMonthCloseDraftInput({
+      mirror: source,
+      yearMonth: '2026-07',
+      humanReviewed: true,
+      decisions,
+      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
+        ...row,
+        decision: 'NOT_APPLICABLE' as const,
+      })),
+      managementChecks,
+      managementDecisions: { ...managementDecisions, 'labor-transfer': undefined },
+      deadlineSummary,
+    })).toThrow('확인 또는 해당 없음');
+  });
+
   it('rejects an invalid or incomplete pinned mirror', () => {
     const source = mirror();
     source.cells = source.cells?.slice(0, -1);

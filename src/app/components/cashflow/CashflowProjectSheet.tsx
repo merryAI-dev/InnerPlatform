@@ -889,10 +889,7 @@ export function CashflowProjectSheet({
         decisions,
         depositScheduleRows,
         managementChecks,
-        managementDecisions: Object.fromEntries(managementChecks.map((check) => [
-          check.id,
-          managementDecisions[check.id] || 'CONFIRMED',
-        ])),
+        managementDecisions,
         deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
           trackingStartedAt: null,
           missedCount: 0,
