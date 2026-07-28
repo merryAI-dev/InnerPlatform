@@ -84,6 +84,16 @@ export interface CashflowSheetLabTemplateSection {
     year: number;
     source: 'sheet_annual_total';
   }>;
+  annualDerivedMappings: Array<{
+    mode: 'projection' | 'actual';
+    derivedKind: 'deposit_total' | 'withdrawal_total' | 'balance';
+    label: string;
+    year: number;
+    rowIndex: number;
+    columnIndex: number;
+    a1: string;
+    source: 'sheet_annual_derived';
+  }>;
   missingLineIds: string[];
   duplicateLineIds: string[];
 }

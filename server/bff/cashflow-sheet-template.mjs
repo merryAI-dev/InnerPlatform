@@ -235,6 +235,16 @@ function fixedSection(matrix, layout, reasons) {
     a1: toA1(lineRow.rowIndex, column.columnIndex),
     source: 'sheet_annual_total',
   })));
+  const annualDerivedMappings = derivedRows.flatMap((row) => annualColumns.map((column) => ({
+    mode: layout.mode,
+    derivedKind: row.kind,
+    label: row.label,
+    year: column.year,
+    rowIndex: row.rowIndex,
+    columnIndex: column.columnIndex,
+    a1: toA1(row.rowIndex, column.columnIndex),
+    source: 'sheet_annual_derived',
+  })));
   const totalMappings = [
     ...lineRows.map((lineRow) => ({
       mode: layout.mode,
@@ -269,6 +279,7 @@ function fixedSection(matrix, layout, reasons) {
     ignoredRows: [],
     mappings,
     annualMappings,
+    annualDerivedMappings,
     totalMappings,
     missingLineIds: [],
     duplicateLineIds: [],

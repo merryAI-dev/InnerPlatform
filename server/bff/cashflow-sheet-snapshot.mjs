@@ -114,6 +114,19 @@ function snapshotAnnualCell(mapping, matrix) {
   };
 }
 
+function snapshotAnnualDerivedCell(mapping, matrix) {
+  const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+  return {
+    mode: mapping.mode,
+    year: Number(mapping.year),
+    derivedKind: mapping.derivedKind,
+    sourceCell: mapping.a1,
+    ...(classified.state === 'VALUE' && classified.amount === 0
+      ? { state: 'ZERO', amount: 0 }
+      : classified),
+  };
+}
+
 function snapshotTotalCell(mapping, matrix) {
   const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
   const totalClassified = classified.state === 'VALUE' && classified.amount === 0
@@ -568,6 +581,12 @@ export function createCashflowPinnedSnapshot({
     .flatMap((section) => section.annualMappings || [])
     .map((mapping) => snapshotAnnualCell(mapping, matrix))
     .sort(compareAnnualCells);
+  const annualDerivedCells = (template?.sections || [])
+    .flatMap((section) => section.annualDerivedMappings || [])
+    .map((mapping) => snapshotAnnualDerivedCell(mapping, matrix))
+    .sort((left, right) => Number(left.year) - Number(right.year)
+      || String(left.mode).localeCompare(String(right.mode))
+      || String(left.derivedKind).localeCompare(String(right.derivedKind)));
   const totalCells = (template?.sections || [])
     .flatMap((section) => section.totalMappings || [])
     .map((mapping) => snapshotTotalCell(mapping, matrix))
@@ -575,7 +594,7 @@ export function createCashflowPinnedSnapshot({
       || String(left.kind).localeCompare(String(right.kind))
       || String(left.lineId || left.derivedKind || '').localeCompare(String(right.lineId || right.derivedKind || '')));
   const sheetFacts = extractCashflowSheetFacts({ template, matrix, cells, annualCells, totalCells });
-  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, totalCells, sheetFacts });
+  const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, annualDerivedCells, totalCells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
     if (cell.state === 'VALUE' || cell.state === 'ZERO') counts.valueCount += 1;
@@ -607,6 +626,7 @@ export function createCashflowPinnedSnapshot({
     summary,
     cells,
     annualCells,
+    annualDerivedCells,
     totalCells,
     sheetFacts,
   };
