@@ -250,9 +250,11 @@ export function createJavaWeeklyClient({
     yearMonth,
     cells,
     calculationChecks,
+    openingBalanceCells = [],
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -280,9 +282,11 @@ export function createJavaWeeklyClient({
         yearMonth,
         cells,
         calculationChecks,
+        ...(openingBalanceCells.length > 0 ? { openingBalanceCells } : {}),
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
@@ -298,9 +302,11 @@ export function createJavaWeeklyClient({
     sourceRevision,
     targetRevision,
     months,
+    openingBalanceCells = [],
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) {
@@ -328,9 +334,11 @@ export function createJavaWeeklyClient({
         sourceRevision,
         targetRevision,
         months,
+        ...(openingBalanceCells.length > 0 ? { openingBalanceCells } : {}),
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
     if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {

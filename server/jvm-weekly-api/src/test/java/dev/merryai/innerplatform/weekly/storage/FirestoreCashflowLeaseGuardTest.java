@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalanceCell;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
@@ -706,7 +707,9 @@ class FirestoreCashflowLeaseGuardTest {
                 yearMonth,
                 ""
             );
-            requestedMonths.add(new CashflowSheetBatchApplyRequest.Month(yearMonth, monthly.cells()));
+            requestedMonths.add(new CashflowSheetBatchApplyRequest.Month(
+                yearMonth, monthly.calculationChecks(), monthly.cells()
+            ));
             expectedMonths.addFirst(yearMonth);
         }
         CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
@@ -714,6 +717,9 @@ class FirestoreCashflowLeaseGuardTest {
             SOURCE_REVISION,
             targetRevision,
             false,
+            null,
+            null,
+            openingBalanceCells(),
             requestedMonths
         );
 
@@ -723,6 +729,10 @@ class FirestoreCashflowLeaseGuardTest {
 
         assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
             .containsExactlyElementsOf(expectedMonths);
+        assertThat(response.months().get(1).calculationChecks())
+            .filteredOn(check -> check.mode().equals("projection") && check.weekNo() == 1)
+            .singleElement()
+            .satisfies(check -> assertThat(check.calculated().openingBalance()).isEqualByComparingTo("1999000"));
         assertThat(response.savedProjectionLineCount()).isEqualTo(960);
         assertThat(response.savedActualLineCount()).isEqualTo(960);
         assertThat(fixture.documents.keySet().stream()
@@ -881,7 +891,9 @@ class FirestoreCashflowLeaseGuardTest {
             targetRevision,
             false,
             "승인 전 변경 시도",
-            List.of(new CashflowSheetBatchApplyRequest.Month("2026-07", july.cells()))
+            List.of(new CashflowSheetBatchApplyRequest.Month(
+                "2026-07", july.calculationChecks(), july.cells()
+            ))
         );
 
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
@@ -1031,6 +1043,15 @@ class FirestoreCashflowLeaseGuardTest {
             )
         ));
         assertThat(closedResponse.yearMonth()).isEqualTo("2026-07");
+        assertThat(closedResponse.calculationChecks())
+            .filteredOn(check -> check.mode().equals("projection") && check.weekNo() == 1)
+            .singleElement()
+            .satisfies(check -> {
+                assertThat(check.reported().depositTotal()).isEqualByComparingTo("800");
+                assertThat(check.calculated().depositTotal()).isEqualByComparingTo("700");
+                assertThat(check.calculated().withdrawalTotal()).isEqualByComparingTo("900");
+                assertThat(check.matches().depositTotal()).isFalse();
+            });
         assertThat(closed.documents.get("orgs/tenant-a/monthly_closes/project-a-2026-07"))
             .containsEntry("revision", 2L)
             .containsEntry("amendmentCount", 1L)
@@ -1457,8 +1478,11 @@ class FirestoreCashflowLeaseGuardTest {
             .containsKeys(
                 "project", "sheetFacts", "depositScheduleRows", "confirmations",
                 "managementChecks", "managementConfirmations", "deadlineSummary",
-                "openingBalances", "weeklyTotals", "projectionTotal", "actualTotal"
+                "openingBalances", "cells", "weeklyTotals", "projectionTotal", "actualTotal"
             );
+        assertThat((List<Map<String, Object>>) ((Map<String, Object>) close.get("snapshot")).get("cells"))
+            .hasSize(CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
+            .allSatisfy(cell -> assertThat(cell).containsEntry("cellState", "VALUE"));
         assertThat(closeVersion)
             .containsEntry("projectId", "project-a")
             .containsEntry("yearMonth", "2026-06")
@@ -1831,6 +1855,9 @@ class FirestoreCashflowLeaseGuardTest {
             initial.resultingTargetRevision(),
             "2026-07",
             false,
+            null,
+            null,
+            initialRequest.calculationChecks(),
             changedCells
         );
 
@@ -1865,6 +1892,9 @@ class FirestoreCashflowLeaseGuardTest {
             base.targetRevision(),
             base.yearMonth(),
             base.replaceAllActualSources(),
+            null,
+            null,
+            base.calculationChecks(),
             cells
         );
 
@@ -1887,6 +1917,9 @@ class FirestoreCashflowLeaseGuardTest {
             first.resultingTargetRevision(),
             "2026-07",
             false,
+            null,
+            null,
+            base.calculationChecks(),
             cells
         );
         CashflowSheetLabApplyResponse second = fixture.persistence.runCommandTransaction(() -> commandService(
@@ -3094,9 +3127,29 @@ class FirestoreCashflowLeaseGuardTest {
             false,
             null,
             null,
+            List.of(),
             completeCalculationChecks(yearMonth),
             cells
         );
+    }
+
+    private static List<CashflowOpeningBalanceCell> openingBalanceCells() {
+        List<CashflowOpeningBalanceCell> cells = new ArrayList<>();
+        for (int year : List.of(2024, 2025)) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    boolean opening = year == 2025 && mode.equals("projection") && lineId.equals("SALES_IN");
+                    cells.add(new CashflowOpeningBalanceCell(
+                        year,
+                        mode,
+                        lineId,
+                        opening ? "VALUE" : "EMPTY",
+                        opening ? BigDecimal.valueOf(2_000_000) : null
+                    ));
+                }
+            }
+        }
+        return List.copyOf(cells);
     }
 
     private static List<Map<String, Object>> completeCalculationChecks(String yearMonth) {
@@ -3108,6 +3161,7 @@ class FirestoreCashflowLeaseGuardTest {
                     "yearMonth", yearMonth,
                     "weekNo", weekNo,
                     "reported", Map.of(
+                        "openingBalance", 0L,
                         "depositTotal", 800L,
                         "withdrawalTotal", 800L,
                         "balance", 0L

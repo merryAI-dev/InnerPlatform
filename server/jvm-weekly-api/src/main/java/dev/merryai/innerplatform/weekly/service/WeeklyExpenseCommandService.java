@@ -1125,12 +1125,16 @@ public class WeeklyExpenseCommandService {
                 request.closedMonthChangeReason(),
                 request.idempotencyKey()
             );
-        List<Map<String, Object>> calculationChecks = amendments.isEmpty()
-            ? request.calculationChecks()
-            : CashflowSheetLabApplyRequest.requireCompleteCalculationChecks(
-                request.yearMonth(),
-                request.calculationChecks()
-            );
+        List<Map<String, Object>> calculationChecks = CashflowSheetLabApplyRequest.recalculateCalculationChecks(
+            request.yearMonth(),
+            cells,
+            request.calculationChecks(),
+            request.calculatedOpeningBalances()
+        );
+        requireFormulaMismatchConfirmation(
+            Map.of(request.yearMonth(), calculationChecks),
+            request.acceptFormulaMismatches()
+        );
         assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
@@ -1209,6 +1213,7 @@ public class WeeklyExpenseCommandService {
             actual.size(),
             projection,
             actual,
+            CashflowSheetLabApplyRequest.calculationCheckResponses(calculationChecks),
             replacement.settledWeekChanges().stream()
                 .map(change -> new CashflowSheetBatchApplyResponse.SettledWeekChange(
                     change.yearMonth(),
@@ -1254,31 +1259,39 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        Map<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = CashflowSheetBatchApplyRequest
+        var cellsByMonth = CashflowSheetBatchApplyRequest
             .requireCompleteMonths(request.months());
+        var appliedCellsByMonth = request.requireAppliedMonths();
         List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
             .authorizeCashflowSheetMonthAmendments(
                 writer,
                 projectId,
-                cellsByMonth.keySet(),
+                appliedCellsByMonth.keySet(),
                 request.sourceRevision(),
                 request.closedMonthChangeReason(),
                 request.idempotencyKey()
             );
         Map<String, List<Map<String, Object>>> calculationChecksByMonth = new LinkedHashMap<>();
-        for (CashflowSheetBatchApplyRequest.Month month : request.months()) {
-            calculationChecksByMonth.put(
+        Map<String, CashflowSheetBatchApplyRequest.Month> requestMonthsByYearMonth = request.months().stream()
+            .collect(java.util.stream.Collectors.toMap(
+                CashflowSheetBatchApplyRequest.Month::yearMonth,
+                month -> month
+            ));
+        Map<String, BigDecimal> openingBalances = request.calculatedOpeningBalances(cellsByMonth.firstKey());
+        for (Map.Entry<String, List<CashflowSheetLabApplyRequest.Cell>> entry : cellsByMonth.entrySet()) {
+            CashflowSheetBatchApplyRequest.Month month = requestMonthsByYearMonth.get(entry.getKey());
+            List<Map<String, Object>> calculationChecks = CashflowSheetLabApplyRequest.recalculateCalculationChecks(
                 month.yearMonth(),
-                amendments.stream().anyMatch(amendment -> amendment.yearMonth().equals(month.yearMonth()))
-                    ? CashflowSheetLabApplyRequest.requireCompleteCalculationChecks(
-                        month.yearMonth(),
-                        month.calculationChecks()
-                    )
-                    : month.calculationChecks()
+                entry.getValue(),
+                month.calculationChecks(),
+                openingBalances
             );
+            calculationChecksByMonth.put(month.yearMonth(), calculationChecks);
+            openingBalances = CashflowSheetLabApplyRequest.closingBalances(calculationChecks);
         }
+        requireFormulaMismatchConfirmation(calculationChecksByMonth, request.acceptFormulaMismatches());
         assertAtomicWriteBudget(
-            Math.multiplyExact(cellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
+            Math.multiplyExact(appliedCellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
             3,
             "Cashflow sheet batch apply"
         );
@@ -1301,7 +1314,7 @@ public class WeeklyExpenseCommandService {
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
-        List<String> requestedMonths = List.copyOf(cellsByMonth.keySet());
+        List<String> requestedMonths = List.copyOf(appliedCellsByMonth.keySet());
         List<String> replacedMonths = replacement.months().stream()
             .map(WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement::yearMonth)
             .toList();
@@ -1325,7 +1338,10 @@ public class WeeklyExpenseCommandService {
                     line.getWeekNo(),
                     line.getCashflowLine(),
                     line.getAmount()
-                )).toList()
+                )).toList(),
+                CashflowSheetLabApplyRequest.calculationCheckResponses(
+                    calculationChecksByMonth.getOrDefault(month.yearMonth(), List.of())
+                )
             ))
             .toList();
         int projectionLineCount = months.stream().mapToInt(CashflowSheetBatchApplyResponse.MonthResult::savedProjectionLineCount).sum();
@@ -1386,6 +1402,44 @@ public class WeeklyExpenseCommandService {
             writeJson(response)
         ));
         return response;
+    }
+
+    private void requireFormulaMismatchConfirmation(
+        Map<String, List<Map<String, Object>>> checksByMonth,
+        boolean accepted
+    ) {
+        if (accepted) return;
+        List<Map<String, Object>> mismatches = new ArrayList<>();
+        for (Map.Entry<String, List<Map<String, Object>>> month : checksByMonth.entrySet()) {
+            for (Map<String, Object> check : month.getValue()) {
+                Map<?, ?> matches = check.get("matches") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> reported = check.get("reported") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> calculated = check.get("calculated") instanceof Map<?, ?> value ? value : Map.of();
+                Map<?, ?> sourceCells = check.get("sourceCells") instanceof Map<?, ?> value ? value : Map.of();
+                for (String field : List.of("depositTotal", "withdrawalTotal", "balance")) {
+                    if (!Boolean.FALSE.equals(matches.get(field))) continue;
+                    Map<String, Object> mismatch = new LinkedHashMap<>();
+                    mismatch.put("yearMonth", month.getKey());
+                    mismatch.put("mode", String.valueOf(check.getOrDefault("mode", "")));
+                    mismatch.put("weekNo", check.get("weekNo"));
+                    mismatch.put("field", field);
+                    mismatch.put("reported", reported.get(field));
+                    mismatch.put("calculated", calculated.get(field));
+                    if (sourceCells.get(field) != null) mismatch.put("sourceCell", sourceCells.get(field));
+                    mismatches.add(java.util.Collections.unmodifiableMap(mismatch));
+                }
+            }
+        }
+        if (mismatches.isEmpty()) return;
+        throw new WeeklyExpenseEditLeaseException(
+            409,
+            "cashflow_formula_mismatch_confirmation_required",
+            "시트 합산 수식과 JVM 계산 결과가 다릅니다. 확인 후 다시 반영해 주세요.",
+            Map.of(
+                "mismatchCount", mismatches.size(),
+                "mismatches", List.copyOf(mismatches)
+            )
+        );
     }
 
     @Transactional

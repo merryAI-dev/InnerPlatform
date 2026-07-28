@@ -83,6 +83,9 @@ export function computeCashflowTargetRevision(snapshot = {}) {
 
 function snapshotCell(mapping, matrix) {
   const classified = classifyCashflowSheetCell(matrix?.[mapping.rowIndex]?.[mapping.columnIndex]);
+  const cell = classified.state === 'VALUE' && classified.amount === 0
+    ? { state: 'ZERO', amount: 0 }
+    : classified;
   return {
     mode: mapping.mode,
     yearMonth: mapping.yearMonth,
@@ -91,7 +94,7 @@ function snapshotCell(mapping, matrix) {
     direction: mapping.direction,
     sourceCell: mapping.a1,
     sourceLabel: mapping.label || mapping.canonicalLabel || mapping.lineId,
-    ...classified,
+    ...cell,
   };
 }
 
@@ -334,8 +337,8 @@ function buildWeeklyCalculationChecks({ template, matrix }) {
       .filter((column) => Number(column?.year) < firstYear)
       .sort((left, right) => Number(right.year) - Number(left.year))[0];
     let priorBalance = openingColumn
-      ? readComputedWholeWon(matrix, derivedByKind.get('balance').rowIndex, openingColumn.columnIndex)
-      : null;
+      ? readComputedWholeWon(matrix, derivedByKind.get('balance').rowIndex, openingColumn.columnIndex, 0)
+      : 0;
     return (section?.weekColumns || []).map((week) => {
       const amounts = lineRows.map((row) => ({
         direction: row.direction,
@@ -367,7 +370,7 @@ function buildWeeklyCalculationChecks({ template, matrix }) {
         mode: section.mode,
         yearMonth: week.yearMonth,
         weekNo: week.weekNo,
-        reported: { depositTotal, withdrawalTotal, balance },
+        reported: { openingBalance: priorBalance, depositTotal, withdrawalTotal, balance },
         sourceCells: {
           depositTotal: toA1(derivedByKind.get('deposit_total')?.rowIndex, week.columnIndex),
           withdrawalTotal: toA1(derivedByKind.get('withdrawal_total')?.rowIndex, week.columnIndex),
@@ -575,7 +578,7 @@ export function createCashflowPinnedSnapshot({
   const sourceRevision = revisionOf({ spreadsheetId, selectedSheetName, cells, annualCells, totalCells, sheetFacts });
   const summary = cells.reduce((counts, cell) => {
     counts.cellCount += 1;
-    if (cell.state === 'VALUE') counts.valueCount += 1;
+    if (cell.state === 'VALUE' || cell.state === 'ZERO') counts.valueCount += 1;
     if (cell.state === 'EMPTY') counts.emptyCount += 1;
     if (cell.state === 'INVALID') counts.invalidCount += 1;
     return counts;

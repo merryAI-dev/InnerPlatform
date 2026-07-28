@@ -53,8 +53,18 @@ public record CashflowSheetBatchApplyResponse(
         int savedProjectionLineCount,
         int savedActualLineCount,
         List<CashflowSnapshotResponse.ProjectionLine> projection,
-        List<CashflowSnapshotResponse.ActualLine> actual
+        List<CashflowSnapshotResponse.ActualLine> actual,
+        List<CashflowFormulaCheckResponse> calculationChecks
     ) {
+        public MonthResult(
+            String yearMonth,
+            int savedProjectionLineCount,
+            int savedActualLineCount,
+            List<CashflowSnapshotResponse.ProjectionLine> projection,
+            List<CashflowSnapshotResponse.ActualLine> actual
+        ) {
+            this(yearMonth, savedProjectionLineCount, savedActualLineCount, projection, actual, List.of());
+        }
     }
 
     public record SettledWeekChange(

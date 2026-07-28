@@ -8,6 +8,7 @@ import { getAuthInstance } from '../../lib/firebase';
 import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
+  cashflowFormulaMismatchesFromError,
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
@@ -16,6 +17,7 @@ import {
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabMirrorResult,
   type CashflowSheetLabStageResult,
+  type CashflowFormulaMismatch,
 } from '../../lib/sheets-cashflow-readonly-client';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -33,6 +35,7 @@ import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { resolveFinanceWeekForDate } from '../../platform/cashflow-weeks';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
+import { CashflowFormulaMismatchDialog } from '../../components/cashflow/CashflowFormulaMismatchDialog';
 
 function formatError(error: unknown) {
   const apiError = error as { body?: { code?: string; error?: string; message?: string }; requestId?: string; status?: number };
@@ -297,6 +300,12 @@ export function CashflowSheetLabPage({
   const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
   const [applyResumeRequired, setApplyResumeRequired] = useState(false);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
+  const [closedMonthFormulaAccepted, setClosedMonthFormulaAccepted] = useState(false);
+  const [formulaMismatchPrompt, setFormulaMismatchPrompt] = useState<{
+    stage: CashflowSheetLabStageResult;
+    issues: CashflowFormulaMismatch[];
+    closedMonthChangeReason: string;
+  } | null>(null);
   const [loadingOperation, setLoadingOperation] = useState<CashflowSheetSyncOperation | null>(null);
   const loading = loadingOperation !== null;
   const [accountLoading, setAccountLoading] = useState(false);
@@ -493,6 +502,7 @@ export function CashflowSheetLabPage({
         setClosedMonthStage(result.stagedRun);
         setClosedMonthWarning(result.stagedRun.closedMonthDifferences || []);
         setClosedMonthChangeReason(result.applyInput?.closedMonthChangeReason || '');
+        setClosedMonthFormulaAccepted(result.applyInput?.acceptFormulaMismatches === true);
         setApplyResumeRequired(true);
         setErrorMessage('이전에 완료 응답을 받지 못한 시트 반영이 있습니다. 같은 검토본으로 이어서 완료해 주세요.');
       } catch {
@@ -750,6 +760,7 @@ export function CashflowSheetLabPage({
   async function handleOverwriteSheetValues(
     monthCloseChangeReason = '',
     stagedOverride: CashflowSheetLabStageResult | null = null,
+    acceptFormulaMismatches = false,
   ) {
     if (
       !projectId
@@ -855,6 +866,7 @@ export function CashflowSheetLabPage({
           projectId,
           stageRunId: stagedRunId,
           closedMonthChangeReason: monthCloseChangeReason,
+          acceptFormulaMismatches,
           idempotencyKey: applyIdempotencyKey,
         })
       ));
@@ -881,6 +893,8 @@ export function CashflowSheetLabPage({
       setApplyResumeRequired(false);
       setClosedMonthWarning([]);
       setClosedMonthChangeReason('');
+      setClosedMonthFormulaAccepted(false);
+      setFormulaMismatchPrompt(null);
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
         projectId,
@@ -911,6 +925,17 @@ export function CashflowSheetLabPage({
         totalDurationMs: Date.now() - startedAt,
         ...errorDiagnostics(error),
       }, 'warn');
+      if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_formula_mismatch_confirmation_required' && staged) {
+        const issues = cashflowFormulaMismatchesFromError(error);
+        if (issues.length > 0) {
+          setFormulaMismatchPrompt({
+            stage: staged,
+            issues,
+            closedMonthChangeReason: monthCloseChangeReason,
+          });
+          return;
+        }
+      }
       if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_closed_month_reason_required') {
         const serverDifferences = getClosedMonthDifferences(error);
         setClosedMonthStage(staged);
@@ -920,9 +945,11 @@ export function CashflowSheetLabPage({
             : staged?.closedMonthDifferences || [],
         );
         setApplyResumeRequired(false);
+        setClosedMonthFormulaAccepted(acceptFormulaMismatches);
       } else if (activeStep === 'apply' && staged) {
         setClosedMonthStage(staged);
         setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
+        setClosedMonthFormulaAccepted(acceptFormulaMismatches);
         setApplyResumeRequired(true);
         setErrorMessage(`${formatError(error)} 같은 검토본으로 이어서 완료할 수 있습니다.`);
       } else {
@@ -1162,6 +1189,18 @@ export function CashflowSheetLabPage({
         )}
       </section>
 
+      <CashflowFormulaMismatchDialog
+        issues={formulaMismatchPrompt?.issues || []}
+        busy={loading}
+        onCancel={() => setFormulaMismatchPrompt(null)}
+        onConfirm={() => {
+          if (!formulaMismatchPrompt) return;
+          const pending = formulaMismatchPrompt;
+          setFormulaMismatchPrompt(null);
+          void handleOverwriteSheetValues(pending.closedMonthChangeReason, pending.stage, true);
+        }}
+      />
+
       <Dialog
         open={Boolean(closedMonthStage)}
         onOpenChange={(open) => {
@@ -1169,6 +1208,7 @@ export function CashflowSheetLabPage({
             setClosedMonthStage(null);
             setApplyResumeRequired(false);
             setClosedMonthWarning([]);
+            setClosedMonthFormulaAccepted(false);
           }
         }}
       >
@@ -1208,7 +1248,11 @@ export function CashflowSheetLabPage({
               type="button"
               className="h-9"
               disabled={loading || !closedMonthStage || (!applyResumeRequired && !closedMonthChangeReason.trim())}
-              onClick={() => void handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)}
+              onClick={() => void handleOverwriteSheetValues(
+                closedMonthChangeReason.trim(),
+                closedMonthStage,
+                closedMonthFormulaAccepted,
+              )}
             >
               {applyResumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}
             </Button>

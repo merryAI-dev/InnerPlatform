@@ -1533,7 +1533,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectId,
             sourceSheetKey,
             targetRevision,
-            CashflowSheetBatchApplyRequest.requireCompleteMonths(request.months()),
+            request.requireAppliedMonths(),
             request.replaceAllActualSources(),
             false,
             request.settledWeekChangeConfirmation(),
@@ -1682,7 +1682,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 Map<String, BigDecimal> projectionAmounts = new LinkedHashMap<>();
                 List<SaveDraftResponse.ActualDelta> actualDeltas = new ArrayList<>();
                 for (CashflowSheetLabApplyRequest.Cell cell : weekCells) {
-                    if (!"VALUE".equals(cell.cellState())) continue;
+                    if (!List.of("VALUE", "ZERO").contains(cell.cellState())) continue;
                     if ("projection".equals(cell.mode())) {
                         projectionAmounts.put(cell.cashflowLine(), amount(cell.amount()));
                     } else {
@@ -1721,7 +1721,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
             List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
             for (CashflowSheetLabApplyRequest.Cell cell : cells) {
-                if (!"VALUE".equals(cell.cellState())) continue;
+                if (!List.of("VALUE", "ZERO").contains(cell.cellState())) continue;
                 if ("projection".equals(cell.mode())) {
                     WeeklyExpenseProjectionEntity line = new WeeklyExpenseProjectionEntity(
                         tenantId, projectId, yearMonth, cell.weekNo(), cell.cashflowLine()
@@ -2359,7 +2359,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             String sourceState = text(source == null ? null : source.get("state"), "").toUpperCase(Locale.ROOT);
             if (source == null
                 || !cell.cellState().equals(sourceState)
-                || ("VALUE".equals(cell.cellState()) && !sameOptionalAmount(cell.amount(), source.get("amount")))
+                || (List.of("VALUE", "ZERO").contains(cell.cellState())
+                    && !sameOptionalAmount(cell.amount(), source.get("amount")))
                 || !text(cell.sourceCell(), "").equals(text(source.get("sourceCell"), ""))
                 || !text(cell.sourceLabel(), "").equals(text(source.get("sourceLabel"), ""))) {
                 throw new WeeklyExpenseConflictException(
@@ -2608,7 +2609,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         for (CashflowSheetLabApplyRequest.Cell cell : cells) {
             String key = cell.mode() + ":" + cell.weekNo() + ":" + cell.cashflowLine();
             CloseCashflowMonthRequest.Confirmation confirmation = byKey.get(key);
-            String requiredDecision = "VALUE".equals(cell.cellState()) ? "CONFIRMED" : "NOT_APPLICABLE";
+            String requiredDecision = List.of("VALUE", "ZERO").contains(cell.cellState())
+                ? "CONFIRMED"
+                : "NOT_APPLICABLE";
             if (confirmation == null || !requiredDecision.equals(confirmation.decision())) {
                 throw new IllegalArgumentException(
                     "Each cashflow value must be CONFIRMED and each empty cell must be explicitly NOT_APPLICABLE."
@@ -2760,6 +2763,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             })
             .toList();
 
+        List<Map<String, Object>> cellSnapshot = request.cells().stream().map(cell -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("mode", cell.mode());
+            item.put("weekNo", cell.weekNo());
+            item.put("cashflowLine", cell.cashflowLine());
+            item.put("cellState", cell.cellState());
+            if (cell.amount() != null) item.put("amount", cell.amount());
+            if (cell.sourceCell() != null) item.put("sourceCell", cell.sourceCell());
+            if (cell.sourceLabel() != null) item.put("sourceLabel", cell.sourceLabel());
+            return Map.copyOf(item);
+        }).toList();
+
         Map<String, Object> projectDocument = cachedDocumentIfPresent(
             db.document("orgs/" + actor.tenantId() + "/projects/" + projectId)
         ).orElseThrow(() -> leaseError(
@@ -2791,6 +2806,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         snapshot.put("managementConfirmations", managementConfirmationSnapshot);
         snapshot.put("openingBalances", JSON.convertValue(openingBalance, Map.class));
         snapshot.put("deadlineSummary", JSON.convertValue(request.deadlineSummary(), Map.class));
+        snapshot.put("cells", cellSnapshot);
         snapshot.put("weeklyTotals", weeklyTotals);
         snapshot.put("ledgerWeeks", JSON.convertValue(replacement.ledgerWeeks(), List.class));
         snapshot.put("projectionTotal", FirestoreCashflowWeekActualMerge.cashflowTotals(projectionTotal));

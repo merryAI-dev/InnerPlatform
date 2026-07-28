@@ -52,6 +52,7 @@ import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
 import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
   applyCashflowSheetLabViaBff,
+  cashflowFormulaMismatchesFromError,
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
@@ -60,6 +61,7 @@ import {
   type CashflowSheetLabMirrorResult,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabStageResult,
+  type CashflowFormulaMismatch,
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
@@ -73,6 +75,7 @@ import {
   type CashflowManagementDecisionMap,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
+import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -325,6 +328,12 @@ export function CashflowProjectSheet({
   const [lateSheetApply, setLateSheetApply] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
   const [lateSheetChangeReason, setLateSheetChangeReason] = useState('');
+  const [lateSheetFormulaAccepted, setLateSheetFormulaAccepted] = useState(false);
+  const [formulaMismatchPrompt, setFormulaMismatchPrompt] = useState<{
+    stage: CashflowSheetLabStageResult;
+    issues: CashflowFormulaMismatch[];
+    closedMonthChangeReason: string;
+  } | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
@@ -1216,6 +1225,7 @@ export function CashflowProjectSheet({
   const handleApplyStagedSheetValues = useCallback(async (
     stage: CashflowSheetLabStageResult,
     closedMonthChangeReason = '',
+    acceptFormulaMismatches = false,
   ): Promise<void> => {
     if (!stage.runId || stage.stagedLineCount <= 0) return;
     const applyIdempotencyKey = `cashflow-sheet-apply-stage:${projectId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
@@ -1227,6 +1237,7 @@ export function CashflowProjectSheet({
         stageRunId: stage.runId,
         applyRiskCandidates: true,
         closedMonthChangeReason,
+        acceptFormulaMismatches,
         idempotencyKey: applyIdempotencyKey,
       });
     };
@@ -1246,6 +1257,8 @@ export function CashflowProjectSheet({
       setLateSheetApply(null);
       setSheetApplyResumeRequired(false);
       setLateSheetChangeReason('');
+      setLateSheetFormulaAccepted(false);
+      setFormulaMismatchPrompt(null);
       toast.success(`시트 최신값 ${result.appliedLineCount.toLocaleString()}건을 원장에 반영했습니다.`);
     };
 
@@ -1280,6 +1293,13 @@ export function CashflowProjectSheet({
         }
       }
       logCashflowSettlement({ phase: 'error', operation: 'cashflow.sheet_apply', projectId, error: finalError });
+      if (bffErrorCode(finalError) === 'cashflow_formula_mismatch_confirmation_required') {
+        const issues = cashflowFormulaMismatchesFromError(finalError);
+        if (issues.length > 0) {
+          setFormulaMismatchPrompt({ stage, issues, closedMonthChangeReason });
+          return;
+        }
+      }
       if (bffErrorCode(finalError) === 'cashflow_closed_month_reason_required') {
         const details = (finalError as {
           body?: { details?: { closedMonthDifferences?: CashflowSheetLabStageResult['closedMonthDifferences'] } };
@@ -1291,10 +1311,12 @@ export function CashflowProjectSheet({
             : stage.closedMonthDifferences,
         });
         setLateSheetChangeReason('');
+        setLateSheetFormulaAccepted(acceptFormulaMismatches);
         setSheetApplyResumeRequired(false);
         return;
       }
       setLateSheetApply(stage);
+      setLateSheetFormulaAccepted(acceptFormulaMismatches);
       setSheetApplyResumeRequired(true);
       toast.error(resolveApiErrorMessage(finalError, '시트 값을 원장에 반영하지 못했습니다.'));
     } finally {
@@ -1313,6 +1335,7 @@ export function CashflowProjectSheet({
         if (cancelled || status.status !== 'APPLYING' || !status.stagedRun) return;
         setLateSheetApply(status.stagedRun);
         setLateSheetChangeReason(status.applyInput?.closedMonthChangeReason || '');
+        setLateSheetFormulaAccepted(status.applyInput?.acceptFormulaMismatches === true);
         setSheetApplyResumeRequired(true);
       } catch {
         // 복구 상태 조회 실패는 일반 조회를 막지 않는다. 실제 반영 시 서버가 다시 차단한다.
@@ -2835,6 +2858,18 @@ export function CashflowProjectSheet({
         </AlertDialogContent>
       </AlertDialog>
 
+      <CashflowFormulaMismatchDialog
+        issues={formulaMismatchPrompt?.issues || []}
+        busy={sheetStageApplyLoading}
+        onCancel={() => setFormulaMismatchPrompt(null)}
+        onConfirm={() => {
+          if (!formulaMismatchPrompt) return;
+          const pending = formulaMismatchPrompt;
+          setFormulaMismatchPrompt(null);
+          void handleApplyStagedSheetValues(pending.stage, pending.closedMonthChangeReason, true);
+        }}
+      />
+
       <AlertDialog
         open={reopenAction !== null}
         onOpenChange={(open) => {
@@ -2972,6 +3007,7 @@ export function CashflowProjectSheet({
             setLateSheetApply(null);
             setSheetApplyResumeRequired(false);
             setLateSheetChangeReason('');
+            setLateSheetFormulaAccepted(false);
           }
         }}
       >
@@ -3051,7 +3087,11 @@ export function CashflowProjectSheet({
               type="button"
               className="bg-[#17324D] hover:bg-slate-800"
               disabled={sheetStageApplyLoading || !lateSheetApply || (!sheetApplyResumeRequired && !lateSheetChangeReason.trim())}
-              onClick={() => lateSheetApply && void handleApplyStagedSheetValues(lateSheetApply, lateSheetChangeReason.trim())}
+              onClick={() => lateSheetApply && void handleApplyStagedSheetValues(
+                lateSheetApply,
+                lateSheetChangeReason.trim(),
+                lateSheetFormulaAccepted,
+              )}
             >
               {sheetStageApplyLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
               {sheetApplyResumeRequired ? '같은 작업 이어서 완료' : '사유와 함께 반영'}

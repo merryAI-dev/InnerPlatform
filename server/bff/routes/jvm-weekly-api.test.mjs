@@ -96,7 +96,10 @@ function matchingControlRows(startRow, matches = true) {
   }));
 }
 
-function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, calculationMismatch = false, contractAmount = 1000 } = {}) {
+function fullMonthCloseSource({
+  mirrorStatus = 'FRESH', controlMatches = true, calculationMismatch = false,
+  contractAmount = 1000, explicitZero = false,
+} = {}) {
   const sourceRevision = `sha256:${'c'.repeat(64)}`;
   const targetRevision = `sha256:${'d'.repeat(64)}`;
   const cells = [];
@@ -104,9 +107,10 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
   for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
     for (const mode of ['projection', 'actual']) {
       for (const lineId of cashflowLineIds) {
+        const zero = explicitZero && mode === 'projection' && weekNo === 1 && lineId === 'SALES_IN';
         cells.push({
           mode, yearMonth: '2026-06', weekNo, lineId, direction: cashflowLineIds.indexOf(lineId) < 7 ? 'IN' : 'OUT',
-          state: 'VALUE', amount: mode === 'projection' ? 10 : 5,
+          state: zero ? 'ZERO' : 'VALUE', amount: zero ? 0 : (mode === 'projection' ? 10 : 5),
         });
         confirmations.push({ mode, weekNo, cashflowLine: lineId, decision: 'CONFIRMED' });
       }
@@ -1595,6 +1599,9 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.cells.find((cell) => (
           cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'SALES_IN'
         ))).toMatchObject({ cellState: 'VALUE', amount: 101 });
+        expect(response.body.dashboard.cells.find((cell) => (
+          cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'BANK_INTEREST_IN'
+        ))).toMatchObject({ cellState: 'ZERO', amount: 0 });
         expect(response.body.dashboard.sheetCalculationChecks[0].reported.depositTotal).toBe(999);
         expect(response.body.dashboard.source).toMatchObject({
           sourceRevision: `sha256:${'1'.repeat(64)}`,
@@ -1724,6 +1731,55 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.validation.blockers).toEqual(expect.arrayContaining([
           expect.objectContaining({ code: 'SHEET_CALCULATION_MISMATCH' }),
         ]));
+      });
+  });
+
+  it('keeps an explicit sheet zero in the complete month-close evidence', async () => {
+    const source = fullMonthCloseSource({ explicitZero: true });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.cells).toHaveLength(160);
+        expect(response.body.dashboard.cells.find((cell) => (
+          cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'SALES_IN'
+        ))).toMatchObject({ cellState: 'ZERO', amount: 0 });
+        expect(response.body.dashboard.validation.blockers).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ code: 'SHEET_MONTH_INCOMPLETE' }),
+        ]));
+      });
+  });
+
+  it('keeps an explicit zero when reading a closed month snapshot', async () => {
+    const source = fullMonthCloseSource({ explicitZero: true });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'CLOSED', revision: 1,
+        reopenCount: 0, projectWarningCount: 0,
+        snapshot: { cells: source.closeInput.cells, weeklyTotals: [] },
+      }, undefined, undefined, { status: 'LIVE_CURRENT', missingEvidence: [] })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.dashboard.cells.find((cell) => (
+          cell.mode === 'projection' && cell.weekNo === 1 && cell.cashflowLine === 'SALES_IN'
+        ))).toMatchObject({ cellState: 'ZERO', amount: 0 });
       });
   });
 

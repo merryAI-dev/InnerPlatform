@@ -840,11 +840,28 @@ class WeeklyExpenseControllerTest {
                 }
             }
         }
+        List<Map<String, Object>> calculationChecks = new ArrayList<>();
+        for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+            for (String mode : List.of("projection", "actual")) {
+                calculationChecks.add(Map.of(
+                    "yearMonth", "2026-06",
+                    "mode", mode,
+                    "weekNo", weekNo,
+                    "reported", Map.of(
+                        "openingBalance", 0,
+                        "depositTotal", 0,
+                        "withdrawalTotal", 0,
+                        "balance", 0
+                    )
+                ));
+            }
+        }
         String body = objectMapper.writeValueAsString(Map.of(
             "idempotencyKey", "sheet-lab-apply-001",
             "sourceRevision", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "targetRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "yearMonth", "2026-06",
+            "calculationChecks", calculationChecks,
             "cells", cells
         ));
 

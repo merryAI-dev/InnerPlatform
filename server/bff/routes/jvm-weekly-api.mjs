@@ -260,11 +260,12 @@ function normalizeMonthCloseCell(cell, yearMonth) {
     || weekNo < 1
     || weekNo > 5
     || !CASHFLOW_ALL_LINES.includes(cashflowLine)
-    || !['VALUE', 'EMPTY'].includes(cellState)
+    || !['VALUE', 'ZERO', 'EMPTY'].includes(cellState)
     || (readOptionalText(value.yearMonth) && readOptionalText(value.yearMonth) !== yearMonth)
   ) return null;
-  const amount = cellState === 'VALUE' ? Number(value.amount) : null;
-  if (cellState === 'VALUE' && !Number.isSafeInteger(amount)) return null;
+  const amount = ['VALUE', 'ZERO'].includes(cellState) ? Number(value.amount) : null;
+  if (['VALUE', 'ZERO'].includes(cellState) && !Number.isSafeInteger(amount)) return null;
+  if (cellState === 'ZERO' && amount !== 0) return null;
   return {
     mode,
     weekNo,
@@ -308,7 +309,7 @@ function buildMonthModeReadModel(cells, mode) {
       const cell = cells.find((candidate) => (
         candidate.mode === mode && candidate.weekNo === weekNo && candidate.cashflowLine === lineId
       ));
-      return [lineId, cell?.cellState === 'VALUE' ? safeAmount(cell.amount) : 0];
+      return [lineId, ['VALUE', 'ZERO'].includes(cell?.cellState) ? safeAmount(cell.amount) : 0];
     }));
     for (const lineId of CASHFLOW_ALL_LINES) rowTotals[lineId] += amounts[lineId];
     const weekIn = sumSafe(CASHFLOW_IN_LINES.map((lineId) => amounts[lineId]));
@@ -336,13 +337,14 @@ function canonicalMonthCells(month, yearMonth) {
       const amounts = weeks.get(weekNo) || {};
       return CASHFLOW_ALL_LINES.map((cashflowLine) => {
         const hasValue = Object.hasOwn(amounts, cashflowLine);
+        const amount = hasValue ? safeAmount(amounts[cashflowLine]) : null;
         return {
           yearMonth,
           mode,
           weekNo,
           cashflowLine,
-          cellState: hasValue ? 'VALUE' : 'EMPTY',
-          ...(hasValue ? { amount: safeAmount(amounts[cashflowLine]) } : {}),
+          cellState: hasValue ? (amount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+          ...(hasValue ? { amount } : {}),
         };
       });
     });
@@ -1055,16 +1057,19 @@ function completeMonthCloseConfirmations(confirmations) {
 }
 
 function closeSnapshotCells(snapshot, yearMonth) {
+  const pinnedCells = normalizeMonthCloseCells(snapshot?.cells, yearMonth);
+  if (pinnedCells.length > 0) return pinnedCells;
   return (Array.isArray(snapshot?.weeklyTotals) ? snapshot.weeklyTotals : []).flatMap((week) => (
     ['projection', 'actual'].flatMap((mode) => CASHFLOW_ALL_LINES.map((cashflowLine) => {
       const amounts = objectValue(week?.[mode]) || {};
       const hasValue = Object.hasOwn(amounts, cashflowLine);
+      const amount = hasValue ? safeAmount(amounts[cashflowLine]) : null;
       return normalizeMonthCloseCell({
         mode,
         weekNo: week?.weekNo,
         cashflowLine,
-        cellState: hasValue ? 'VALUE' : 'EMPTY',
-        ...(hasValue ? { amount: amounts[cashflowLine] } : {}),
+        cellState: hasValue ? (amount === 0 ? 'ZERO' : 'VALUE') : 'EMPTY',
+        ...(hasValue ? { amount } : {}),
       }, yearMonth);
     }))
   )).filter(Boolean);

@@ -163,6 +163,7 @@ describe('sheets cashflow readonly client', () => {
       projectId: 'p001',
       stageRunId: 'stage-001',
       settledWeekChangeConfirmationId: 'confirmation-001',
+      acceptFormulaMismatches: true,
       idempotencyKey: 'apply-without-ui-lease',
       client,
     });
@@ -171,6 +172,7 @@ describe('sheets cashflow readonly client', () => {
     expect(client.post.mock.calls[0]?.[1]?.body).toEqual({
       stageRunId: 'stage-001',
       settledWeekChangeConfirmationId: 'confirmation-001',
+      acceptFormulaMismatches: true,
       idempotencyKey: 'apply-without-ui-lease',
     });
   });

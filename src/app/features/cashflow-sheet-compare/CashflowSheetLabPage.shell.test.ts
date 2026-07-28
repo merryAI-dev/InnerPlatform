@@ -53,8 +53,11 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('settledWeekChangeConfirmationId: pending.confirmationId');
     expect(pageSource).not.toContain('주간 정산 값과 다릅니다');
     expect(pageSource).toContain('cashflow_closed_month_reason_required');
+    expect(pageSource).toContain('cashflow_formula_mismatch_confirmation_required');
+    expect(pageSource).toContain('cashflowFormulaMismatchesFromError');
+    expect(pageSource).toContain('handleOverwriteSheetValues(pending.closedMonthChangeReason, pending.stage, true)');
     expect(pageSource).toContain('stageRunId: staged.runId');
-    expect(pageSource).toContain('handleOverwriteSheetValues(closedMonthChangeReason.trim(), closedMonthStage)');
+    expect(pageSource).toContain('closedMonthFormulaAccepted,');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
     expect(pageSource).toContain('resolveBffActor');
     expect(pageSource).toContain('requireBffActor');

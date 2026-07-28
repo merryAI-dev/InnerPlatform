@@ -1,6 +1,7 @@
 package dev.merryai.innerplatform.weekly.api;
 
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
+import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -26,8 +27,10 @@ public record CashflowSheetLabApplyRequest(
     boolean replaceAllActualSources,
     @Valid CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
     @Size(max = 1000) String closedMonthChangeReason,
-    @Size(max = 10) List<Map<String, Object>> calculationChecks,
-    @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
+    @Valid @NotNull @Size(max = 288) List<CashflowOpeningBalanceCell> openingBalanceCells,
+    @NotNull @Size(min = 10, max = 10) List<Map<String, Object>> calculationChecks,
+    @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells,
+    boolean acceptFormulaMismatches
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
     public static final int EXPECTED_CELL_COUNT = 160;
@@ -40,7 +43,7 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), cells);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells, true);
     }
 
     public CashflowSheetLabApplyRequest(
@@ -61,12 +64,78 @@ public record CashflowSheetLabApplyRequest(
             null,
             closedMonthChangeReason,
             List.of(),
-            cells
+            List.of(),
+            cells,
+            true
+        );
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason,
+        List<Map<String, Object>> calculationChecks,
+        List<Cell> cells
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            yearMonth,
+            replaceAllActualSources,
+            settledWeekChangeConfirmation,
+            closedMonthChangeReason,
+            List.of(),
+            calculationChecks,
+            cells,
+            true
+        );
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason,
+        List<CashflowOpeningBalanceCell> openingBalanceCells,
+        List<Map<String, Object>> calculationChecks,
+        List<Cell> cells
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            yearMonth,
+            replaceAllActualSources,
+            settledWeekChangeConfirmation,
+            closedMonthChangeReason,
+            openingBalanceCells,
+            calculationChecks,
+            cells,
+            true
         );
     }
 
     public CashflowSheetLabApplyRequest {
+        openingBalanceCells = openingBalanceCells == null ? List.of() : List.copyOf(openingBalanceCells);
         calculationChecks = calculationChecks == null ? List.of() : List.copyOf(calculationChecks);
+    }
+
+    public Map<String, BigDecimal> calculatedOpeningBalances() {
+        if (!yearMonth.endsWith("-01")) return Map.of();
+        return CashflowFormulaValidator.calculateOpeningBalances(
+            openingBalanceCells.stream().map(cell -> new CashflowFormulaValidator.OpeningCell(
+                cell.year(), cell.mode(), cell.cashflowLine(), cell.cellState(), cell.amount()
+            )).toList(),
+            Integer.parseInt(yearMonth.substring(0, 4))
+        );
     }
 
     public static List<Map<String, Object>> requireCompleteCalculationChecks(
@@ -86,6 +155,7 @@ public record CashflowSheetLabApplyRequest(
                 || (!"projection".equals(mode) && !"actual".equals(mode))
                 || weekNo < 1 || weekNo > FINANCE_WEEK_COUNT
                 || !(check.get("reported") instanceof Map<?, ?> reported)
+                || !reported.containsKey("openingBalance")
                 || !reported.containsKey("depositTotal")
                 || !reported.containsKey("withdrawalTotal")
                 || !reported.containsKey("balance")) {
@@ -103,7 +173,7 @@ public record CashflowSheetLabApplyRequest(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,
         @Min(1) @Max(FINANCE_WEEK_COUNT) int weekNo,
         @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_CASHFLOW_LINE_LENGTH) String cashflowLine,
-        @NotBlank @Pattern(regexp = "VALUE|EMPTY") String cellState,
+        @NotBlank @Pattern(regexp = "VALUE|ZERO|EMPTY") String cellState,
         BigDecimal amount,
         @Size(max = 20) String sourceCell,
         @Size(max = 200) String sourceLabel
@@ -129,10 +199,10 @@ public record CashflowSheetLabApplyRequest(
             String state = cell.cellState() == null
                 ? ""
                 : cell.cellState().trim().toUpperCase(Locale.ROOT);
-            if ("VALUE".equals(state) && cell.amount() == null) {
+            if (("VALUE".equals(state) || "ZERO".equals(state)) && cell.amount() == null) {
                 throw new IllegalArgumentException("VALUE cashflow cells require an amount.");
             }
-            if ("VALUE".equals(state)) {
+            if ("VALUE".equals(state) || "ZERO".equals(state)) {
                 try {
                     cell.amount().longValueExact();
                 } catch (ArithmeticException error) {
@@ -141,11 +211,14 @@ public record CashflowSheetLabApplyRequest(
                     );
                 }
             }
+            if ("ZERO".equals(state) && cell.amount().compareTo(BigDecimal.ZERO) != 0) {
+                throw new IllegalArgumentException("ZERO cashflow cells require an explicit zero amount.");
+            }
             if ("EMPTY".equals(state) && cell.amount() != null) {
                 throw new IllegalArgumentException("EMPTY cashflow cells must not include an amount.");
             }
-            if (!"VALUE".equals(state) && !"EMPTY".equals(state)) {
-                throw new IllegalArgumentException("Cashflow cellState must be VALUE or EMPTY.");
+            if (!"VALUE".equals(state) && !"ZERO".equals(state) && !"EMPTY".equals(state)) {
+                throw new IllegalArgumentException("Cashflow cellState must be VALUE, ZERO, or EMPTY.");
             }
 
             Cell canonical = new Cell(
@@ -175,5 +248,130 @@ public record CashflowSheetLabApplyRequest(
             }
         }
         return List.copyOf(cellsByKey.values());
+    }
+
+    public static List<Map<String, Object>> recalculateCalculationChecks(
+        String yearMonth,
+        List<Cell> cells,
+        List<Map<String, Object>> checks
+    ) {
+        return recalculateCalculationChecks(yearMonth, cells, checks, Map.of());
+    }
+
+    public static List<Map<String, Object>> recalculateCalculationChecks(
+        String yearMonth,
+        List<Cell> cells,
+        List<Map<String, Object>> checks,
+        Map<String, BigDecimal> openingBalances
+    ) {
+        List<Map<String, Object>> completeChecks = requireCompleteCalculationChecks(yearMonth, checks);
+        List<CashflowFormulaValidator.Cell> formulaCells = requireCompleteMonth(cells).stream()
+            .map(cell -> new CashflowFormulaValidator.Cell(
+                cell.mode(), cell.weekNo(), cell.cashflowLine(), cell.cellState(), cell.amount()
+            ))
+            .toList();
+        List<CashflowFormulaValidator.ReportedWeek> reportedWeeks = completeChecks.stream()
+            .map(check -> {
+                Map<?, ?> reported = (Map<?, ?>) check.get("reported");
+                Map<String, String> sourceCells = stringMap(check.get("sourceCells"));
+                return new CashflowFormulaValidator.ReportedWeek(
+                    String.valueOf(check.get("mode")),
+                    ((Number) check.get("weekNo")).intValue(),
+                    decimal(reported.get("openingBalance")),
+                    decimal(reported.get("depositTotal")),
+                    decimal(reported.get("withdrawalTotal")),
+                    decimal(reported.get("balance")),
+                    sourceCells
+                );
+            })
+            .toList();
+        Map<String, Map<String, Object>> originals = new LinkedHashMap<>();
+        completeChecks.forEach(check -> originals.put(
+            check.get("mode") + ":" + check.get("weekNo"),
+            check
+        ));
+        return CashflowFormulaValidator.validateMonth(formulaCells, reportedWeeks, openingBalances).stream()
+            .map(result -> {
+                Map<String, Object> recalculated = new LinkedHashMap<>(
+                    originals.get(result.mode() + ":" + result.weekNo())
+                );
+                recalculated.put("calculated", Map.of(
+                    "openingBalance", result.openingBalance(),
+                    "depositTotal", result.depositTotal(),
+                    "withdrawalTotal", result.withdrawalTotal(),
+                    "balance", result.balance()
+                ));
+                Map<String, Object> matches = new LinkedHashMap<>();
+                matches.put("depositTotal", result.depositTotalMatches());
+                matches.put("withdrawalTotal", result.withdrawalTotalMatches());
+                matches.put("balance", result.balanceMatches());
+                recalculated.put("matches", matches);
+                return java.util.Collections.unmodifiableMap(recalculated);
+            })
+            .toList();
+    }
+
+    public static Map<String, BigDecimal> closingBalances(List<Map<String, Object>> checks) {
+        Map<String, BigDecimal> balances = new LinkedHashMap<>();
+        checks.stream()
+            .filter(check -> check.get("weekNo") instanceof Number number && number.intValue() == FINANCE_WEEK_COUNT)
+            .forEach(check -> {
+                Map<?, ?> calculated = check.get("calculated") instanceof Map<?, ?> value ? value : Map.of();
+                balances.put(String.valueOf(check.get("mode")), decimal(calculated.get("balance")));
+            });
+        if (!balances.keySet().containsAll(List.of("projection", "actual"))) {
+            throw new IllegalArgumentException("Cashflow calculation checks are missing closing balances.");
+        }
+        return Map.copyOf(balances);
+    }
+
+    private static BigDecimal decimal(Object value) {
+        if (value == null) return null;
+        if (value instanceof BigDecimal decimal) return decimal;
+        if (value instanceof Number number) return new BigDecimal(number.toString());
+        throw new IllegalArgumentException("Cashflow calculation check amount is invalid.");
+    }
+
+    public static List<CashflowFormulaCheckResponse> calculationCheckResponses(
+        List<Map<String, Object>> checks
+    ) {
+        return checks.stream().map(check -> {
+            Map<?, ?> reported = check.get("reported") instanceof Map<?, ?> value ? value : Map.of();
+            Map<?, ?> calculated = check.get("calculated") instanceof Map<?, ?> value ? value : Map.of();
+            Map<?, ?> matches = check.get("matches") instanceof Map<?, ?> value ? value : Map.of();
+            return new CashflowFormulaCheckResponse(
+                String.valueOf(check.getOrDefault("yearMonth", "")),
+                String.valueOf(check.getOrDefault("mode", "")),
+                check.get("weekNo") instanceof Number number ? number.intValue() : 0,
+                amounts(reported),
+                amounts(calculated),
+                new CashflowFormulaCheckResponse.Matches(
+                    bool(matches.get("depositTotal")),
+                    bool(matches.get("withdrawalTotal")),
+                    bool(matches.get("balance"))
+                ),
+                stringMap(check.get("sourceCells"))
+            );
+        }).toList();
+    }
+
+    private static CashflowFormulaCheckResponse.Amounts amounts(Map<?, ?> values) {
+        return new CashflowFormulaCheckResponse.Amounts(
+            decimal(values.get("openingBalance")),
+            decimal(values.get("depositTotal")),
+            decimal(values.get("withdrawalTotal")),
+            decimal(values.get("balance"))
+        );
+    }
+
+    private static Boolean bool(Object value) {
+        return value instanceof Boolean bool ? bool : null;
+    }
+
+    private static Map<String, String> stringMap(Object value) {
+        if (!(value instanceof Map<?, ?> source)) return Map.of();
+        Map<String, String> result = new LinkedHashMap<>();
+        source.forEach((key, item) -> result.put(String.valueOf(key), String.valueOf(item)));
+        return Map.copyOf(result);
     }
 }

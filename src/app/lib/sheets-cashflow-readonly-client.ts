@@ -529,6 +529,21 @@ export interface CashflowSheetLabStageResult {
   } | null;
 }
 
+export interface CashflowFormulaMismatch {
+  yearMonth: string;
+  mode: 'projection' | 'actual';
+  weekNo: number;
+  field: 'depositTotal' | 'withdrawalTotal' | 'balance';
+  reported: number | null;
+  calculated: number | null;
+  sourceCell?: string;
+}
+
+export function cashflowFormulaMismatchesFromError(error: unknown): CashflowFormulaMismatch[] {
+  const details = (error as { body?: { details?: { mismatches?: unknown } } })?.body?.details;
+  return Array.isArray(details?.mismatches) ? details.mismatches as CashflowFormulaMismatch[] : [];
+}
+
 export interface CashflowSheetLabApplyStatusResult {
   projectId: string;
   status: 'IDLE' | 'APPLYING';
@@ -536,6 +551,7 @@ export interface CashflowSheetLabApplyStatusResult {
   applyInput: {
     applyRiskCandidates?: boolean;
     closedMonthChangeReason?: string;
+    acceptFormulaMismatches?: boolean;
     replaceAllActualSources?: boolean;
   } | null;
 }
@@ -629,6 +645,7 @@ export async function applyCashflowSheetLabViaBff(params: {
   applyRiskCandidates?: boolean;
   settledWeekChangeConfirmationId?: string;
   closedMonthChangeReason?: string;
+  acceptFormulaMismatches?: boolean;
   idempotencyKey: string;
   lease?: CashflowMutationLease;
   finalize?: boolean;
@@ -651,6 +668,7 @@ export async function applyCashflowSheetLabViaBff(params: {
           ? { settledWeekChangeConfirmationId: params.settledWeekChangeConfirmationId }
           : {}),
         ...(params.closedMonthChangeReason?.trim() ? { closedMonthChangeReason: params.closedMonthChangeReason.trim() } : {}),
+        ...(params.acceptFormulaMismatches ? { acceptFormulaMismatches: true } : {}),
         idempotencyKey: params.idempotencyKey,
       },
       idempotencyKey: params.idempotencyKey,
