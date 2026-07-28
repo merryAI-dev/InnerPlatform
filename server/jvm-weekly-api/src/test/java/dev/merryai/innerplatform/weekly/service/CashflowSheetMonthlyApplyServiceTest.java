@@ -244,6 +244,52 @@ class CashflowSheetMonthlyApplyServiceTest {
     }
 
     @Test
+    void calculatesThroughAnUnchangedBridgeMonthWithoutSavingIt() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");
+        when(persistence.findIdempotency(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(persistence.replaceCashflowSheetMonths(any(), any(), any(), any(), any())).thenReturn(
+            new WeeklyExpensePersistence.CashflowSheetBatchReplacement(
+                List.of(
+                    new WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement("2026-07", List.of(), List.of(), List.of()),
+                    new WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement("2026-09", List.of(), List.of(), List.of())
+                ),
+                List.of(),
+                TARGET_REVISION,
+                List.of()
+            )
+        );
+        when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        List<CashflowSheetLabApplyRequest.Cell> cells = completeCells(5);
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "apply-with-bridge-month",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            false,
+            null,
+            null,
+            List.of(),
+            List.of(
+                new CashflowSheetBatchApplyRequest.Month("2026-07", calculationChecks("2026-07"), cells, true),
+                new CashflowSheetBatchApplyRequest.Month("2026-08", calculationChecks("2026-08"), cells, false),
+                new CashflowSheetBatchApplyRequest.Month("2026-09", calculationChecks("2026-09"), cells, true)
+            )
+        );
+
+        CashflowSheetBatchApplyResponse response = service(persistence).applyCashflowSheetBatch(
+            ACTOR, "project-a", SESSION, request
+        );
+
+        assertThat(response.months()).extracting(CashflowSheetBatchApplyResponse.MonthResult::yearMonth)
+            .containsExactly("2026-07", "2026-09");
+        assertThat(response.months().get(1).calculationChecks())
+            .filteredOn(check -> check.mode().equals("projection") && check.weekNo() == 1)
+            .singleElement()
+            .satisfies(check -> assertThat(check.calculated().openingBalance()).isEqualByComparingTo("-6000"));
+    }
+
+    @Test
     void rejectsAnIncompleteMonthBeforeLeaseOrCanonicalWrites() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowWritePermission(ACTOR, "project-a")).thenReturn("pm");

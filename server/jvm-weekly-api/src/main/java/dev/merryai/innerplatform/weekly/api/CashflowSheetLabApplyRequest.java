@@ -27,6 +27,7 @@ public record CashflowSheetLabApplyRequest(
     boolean replaceAllActualSources,
     @Valid CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
     @Size(max = 1000) String closedMonthChangeReason,
+    @Valid @NotNull @Size(max = 288) List<CashflowOpeningBalanceCell> openingBalanceCells,
     @NotNull @Size(min = 10, max = 10) List<Map<String, Object>> calculationChecks,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells
 ) {
@@ -41,7 +42,7 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), cells);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells);
     }
 
     public CashflowSheetLabApplyRequest(
@@ -62,12 +63,49 @@ public record CashflowSheetLabApplyRequest(
             null,
             closedMonthChangeReason,
             List.of(),
+            List.of(),
+            cells
+        );
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        boolean replaceAllActualSources,
+        CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason,
+        List<Map<String, Object>> calculationChecks,
+        List<Cell> cells
+    ) {
+        this(
+            idempotencyKey,
+            sourceRevision,
+            targetRevision,
+            yearMonth,
+            replaceAllActualSources,
+            settledWeekChangeConfirmation,
+            closedMonthChangeReason,
+            List.of(),
+            calculationChecks,
             cells
         );
     }
 
     public CashflowSheetLabApplyRequest {
+        openingBalanceCells = openingBalanceCells == null ? List.of() : List.copyOf(openingBalanceCells);
         calculationChecks = calculationChecks == null ? List.of() : List.copyOf(calculationChecks);
+    }
+
+    public Map<String, BigDecimal> calculatedOpeningBalances() {
+        if (!yearMonth.endsWith("-01")) return Map.of();
+        return CashflowFormulaValidator.calculateOpeningBalances(
+            openingBalanceCells.stream().map(cell -> new CashflowFormulaValidator.OpeningCell(
+                cell.year(), cell.mode(), cell.cashflowLine(), cell.cellState(), cell.amount()
+            )).toList(),
+            Integer.parseInt(yearMonth.substring(0, 4))
+        );
     }
 
     public static List<Map<String, Object>> requireCompleteCalculationChecks(

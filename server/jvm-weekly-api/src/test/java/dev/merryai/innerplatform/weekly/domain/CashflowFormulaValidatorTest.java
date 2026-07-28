@@ -80,6 +80,29 @@ class CashflowFormulaValidatorTest {
         assertThat(result.balance()).isEqualByComparingTo("-100");
     }
 
+    @Test
+    void calculatesTheFirstOpeningBalanceFromPriorYearSourceRows() {
+        List<CashflowFormulaValidator.OpeningCell> cells = completeOpeningCells(2024, 2025);
+        replaceOpening(cells, 2024, "projection", "SALES_IN", "VALUE", 1_000_000);
+        replaceOpening(cells, 2025, "projection", "TEAM_SUPPORT_IN", "VALUE", 2_000_000);
+        replaceOpening(cells, 2025, "projection", "DIRECT_COST_OUT", "VALUE", 500_000);
+        replaceOpening(cells, 2025, "actual", "SALES_IN", "ZERO", 0);
+
+        assertThat(CashflowFormulaValidator.calculateOpeningBalances(cells, 2026))
+            .containsEntry("projection", BigDecimal.valueOf(2_500_000))
+            .containsEntry("actual", BigDecimal.ZERO);
+    }
+
+    @Test
+    void rejectsACompletelyMissingPriorYear() {
+        assertThatThrownBy(() -> CashflowFormulaValidator.calculateOpeningBalances(
+            completeOpeningCells(2025),
+            2026
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("every source row");
+    }
+
     private static List<CashflowFormulaValidator.Cell> completeCells() {
         List<CashflowFormulaValidator.Cell> cells = new ArrayList<>();
         for (String mode : List.of("projection", "actual")) {
@@ -90,6 +113,38 @@ class CashflowFormulaValidatorTest {
             }
         }
         return cells;
+    }
+
+    private static List<CashflowFormulaValidator.OpeningCell> completeOpeningCells(int... years) {
+        List<CashflowFormulaValidator.OpeningCell> cells = new ArrayList<>();
+        for (int year : years) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    cells.add(new CashflowFormulaValidator.OpeningCell(year, mode, lineId, "EMPTY", null));
+                }
+            }
+        }
+        return cells;
+    }
+
+    private static void replaceOpening(
+        List<CashflowFormulaValidator.OpeningCell> cells,
+        int year,
+        String mode,
+        String lineId,
+        String state,
+        long amount
+    ) {
+        for (int index = 0; index < cells.size(); index += 1) {
+            CashflowFormulaValidator.OpeningCell cell = cells.get(index);
+            if (cell.year() == year && cell.mode().equals(mode) && cell.lineId().equals(lineId)) {
+                cells.set(index, new CashflowFormulaValidator.OpeningCell(
+                    year, mode, lineId, state, BigDecimal.valueOf(amount)
+                ));
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Test opening-balance cell not found.");
     }
 
     private static List<CashflowFormulaValidator.ReportedWeek> reportedWeeks(long openingBalance) {

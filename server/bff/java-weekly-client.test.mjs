@@ -66,6 +66,9 @@ describe('Java weekly cashflow client', () => {
       init,
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const openingBalanceCells = [
+      { year: 2025, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 },
+    ];
 
     await client.applyCashflowSheetLab({
       context,
@@ -76,6 +79,7 @@ describe('Java weekly cashflow client', () => {
       yearMonth: '2026-07',
       sourceSheetKey: 'caller-controlled',
       cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
+      openingBalanceCells,
     });
 
     const [, init] = fetchImpl.mock.calls[0];
@@ -89,6 +93,7 @@ describe('Java weekly cashflow client', () => {
       targetRevision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       yearMonth: '2026-07',
       cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
+      openingBalanceCells,
     });
   });
 

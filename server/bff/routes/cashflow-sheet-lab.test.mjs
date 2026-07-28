@@ -110,7 +110,7 @@ function javaApplyResponse(request, resultingTargetRevision) {
 }
 
 function javaBatchApplyResponse(request, resultingTargetRevision) {
-  const months = (request.months || []).map((month) => {
+  const months = (request.months || []).filter((month) => month.apply !== false).map((month) => {
     const result = javaApplyResponse({ ...request, ...month }, resultingTargetRevision);
     return {
       yearMonth: month.yearMonth,
@@ -618,6 +618,13 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(applied.body).toMatchObject({ appliedMonths: ['2026-01'], appliedYears: [2024, 2025, 2028], appliedLineCount: 256 });
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
+      openingBalanceCells: expect.arrayContaining([
+        expect.objectContaining({ year: 2025, mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
+        expect.objectContaining({ year: 2025, mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
+      ]),
+    }));
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].openingBalanceCells).toHaveLength(64);
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'project-a',
       year: 2025,
@@ -2587,6 +2594,81 @@ describe('cashflow sheet lab route', () => {
       ],
     }));
     expect(editLeaseService.release).not.toHaveBeenCalled();
+  });
+
+  it('includes unchanged bridge months for explicit month replacement without applying them', async () => {
+    const lineAmounts = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 999]));
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-3-5',
+        },
+      },
+      weeks: Array.from({ length: 5 }, (_unused, index) => ({
+        id: `project-a-2026-02-w${index + 1}`,
+        projectId: 'project-a',
+        yearMonth: '2026-02',
+        weekNo: index + 1,
+        projection: { ...lineAmounts },
+        actual: { ...lineAmounts },
+      })),
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'3'.repeat(64)}`)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels([
+            ...JANUARY_FINANCE_WEEKS,
+            '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
+            '26-3-1', '26-3-2', '26-3-3', '26-3-4', '26-3-5',
+          ]),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-bridge-month' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        yearMonth: '2026-03',
+        replaceAllActualSources: true,
+        idempotencyKey: 'stage-bridge-month',
+      })
+      .expect(200);
+
+    expect(stage.body.stagedMonths).toEqual(['2026-03']);
+    expect(stage.body.calculationMonths).toEqual(['2026-01', '2026-02', '2026-03']);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(3);
+
+    const applied = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-bridge-month' })
+      .expect(200);
+
+    expect(applied.body.appliedMonths).toEqual(['2026-03']);
+    expect(javaWeeklyClient.applyCashflowSheetBatch.mock.calls[0][0].months.map((month) => ({
+      yearMonth: month.yearMonth,
+      apply: month.apply,
+    }))).toEqual([
+      { yearMonth: '2026-01', apply: false },
+      { yearMonth: '2026-02', apply: false },
+      { yearMonth: '2026-03', apply: true },
+    ]);
   });
 
   it('fails closed when a multi-month JVM response omits calculation evidence', async () => {

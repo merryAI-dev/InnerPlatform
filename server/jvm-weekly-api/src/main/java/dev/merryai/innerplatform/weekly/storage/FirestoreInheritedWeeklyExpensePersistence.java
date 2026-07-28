@@ -1533,7 +1533,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectId,
             sourceSheetKey,
             targetRevision,
-            CashflowSheetBatchApplyRequest.requireCompleteMonths(request.months()),
+            request.requireAppliedMonths(),
             request.replaceAllActualSources(),
             false,
             request.settledWeekChangeConfirmation(),

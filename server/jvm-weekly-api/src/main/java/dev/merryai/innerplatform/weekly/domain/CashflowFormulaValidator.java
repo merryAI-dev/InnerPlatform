@@ -7,8 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public final class CashflowFormulaValidator {
+    private static final int FIRST_ANNUAL_SOURCE_YEAR = 2024;
+
     private CashflowFormulaValidator() {
     }
 
@@ -17,6 +23,41 @@ public final class CashflowFormulaValidator {
         List<ReportedWeek> reportedWeeks
     ) {
         return validateMonth(cells, reportedWeeks, Map.of());
+    }
+
+    public static Map<String, BigDecimal> calculateOpeningBalances(
+        List<OpeningCell> cells,
+        int selectedYear
+    ) {
+        Set<Integer> expectedYears = IntStream.range(FIRST_ANNUAL_SOURCE_YEAR, selectedYear)
+            .boxed()
+            .collect(Collectors.toUnmodifiableSet());
+        Map<Integer, Set<String>> keysByYear = new TreeMap<>();
+        Map<String, BigDecimal> balances = new LinkedHashMap<>(Map.of(
+            "projection", BigDecimal.ZERO,
+            "actual", BigDecimal.ZERO
+        ));
+        for (OpeningCell cell : cells == null ? List.<OpeningCell>of() : cells) {
+            String mode = normalizeMode(cell.mode());
+            String lineId = CashflowLineCatalog.canonicalize(cell.lineId());
+            if (!expectedYears.contains(cell.year())
+                || !List.of("projection", "actual").contains(mode)
+                || !CashflowLineCatalog.ALL_LINES.contains(lineId)) {
+                throw new IllegalArgumentException("Cashflow opening-balance cell is invalid.");
+            }
+            String key = mode + ":" + lineId;
+            if (!keysByYear.computeIfAbsent(cell.year(), ignored -> new java.util.HashSet<>()).add(key)) {
+                throw new IllegalArgumentException("Cashflow opening-balance cells contain duplicates.");
+            }
+            BigDecimal signed = amount(new Cell(mode, 1, lineId, cell.state(), cell.amount()));
+            if (CashflowLineCatalog.OUT_LINES.contains(lineId)) signed = signed.negate();
+            balances.put(mode, balances.get(mode).add(signed));
+        }
+        if (!keysByYear.keySet().equals(expectedYears)
+            || keysByYear.values().stream().anyMatch(keys -> keys.size() != CashflowLineCatalog.ALL_LINES.size() * 2)) {
+            throw new IllegalArgumentException("Cashflow opening-balance year must contain every source row.");
+        }
+        return Map.copyOf(balances);
     }
 
     public static List<WeeklyCheck> validateMonth(
@@ -157,6 +198,9 @@ public final class CashflowFormulaValidator {
     }
 
     public record Cell(String mode, int weekNo, String lineId, String state, BigDecimal amount) {
+    }
+
+    public record OpeningCell(int year, String mode, String lineId, String state, BigDecimal amount) {
     }
 
     public record ReportedWeek(

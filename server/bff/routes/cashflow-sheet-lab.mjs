@@ -2076,8 +2076,13 @@ async function applyStagedCashflowSheetLab({
     .filter((candidate) => readOptionalText(candidate.scope) === 'annual')
     .map((candidate) => Number(candidate.year))
     .filter(Number.isSafeInteger))].sort((left, right) => left - right);
-  const selectedMonths = candidateMonths;
-  const selectedMonthSet = new Set(selectedMonths);
+  const selectedMonths = Array.isArray(stageRun.calculationMonths) && stageRun.calculationMonths.length > 0
+    ? stageRun.calculationMonths.map(readOptionalText).filter(Boolean)
+    : candidateMonths;
+  const selectedMonthSet = new Set(candidateMonths);
+  if (candidateMonths.some((yearMonth) => !selectedMonths.includes(yearMonth))) {
+    throw createHttpError(409, '검토 당시 월 계산 범위가 완전하지 않습니다.', 'cashflow_sheet_stage_month_incomplete');
+  }
   const selectedYearSet = new Set(candidateYears);
   const selectedCandidates = candidates.filter((candidate) => (
     selectedMonthSet.has(readOptionalText(candidate.yearMonth))
@@ -2121,6 +2126,7 @@ async function applyStagedCashflowSheetLab({
       yearMonth,
       cells: validated.cells,
       calculationChecks,
+      apply: selectedMonthSet.has(yearMonth),
     };
   }));
   const stagedYears = await Promise.all(candidateYears.map(async (year) => {
@@ -2150,6 +2156,9 @@ async function applyStagedCashflowSheetLab({
       cells: validated.cells,
     };
   }));
+  const openingBalanceCells = Array.isArray(stageRun.openingBalanceCells)
+    ? stageRun.openingBalanceCells
+    : [];
 
   if (!resuming) {
     const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
@@ -2221,6 +2230,7 @@ async function applyStagedCashflowSheetLab({
         yearMonth: month.yearMonth,
         cells: month.cells,
         calculationChecks: month.calculationChecks,
+        openingBalanceCells,
         replaceAllActualSources,
         closedMonthChangeReason,
       });
@@ -2252,10 +2262,12 @@ async function applyStagedCashflowSheetLab({
         editSession: monthEditSession,
         sourceRevision: stageRun.sourceRevision,
         targetRevision,
+        openingBalanceCells,
         months: stagedMonths.map((month) => ({
           yearMonth: month.yearMonth,
           cells: month.cells,
           calculationChecks: month.calculationChecks,
+          apply: month.apply,
         })),
         replaceAllActualSources,
         closedMonthChangeReason,
@@ -2273,10 +2285,11 @@ async function applyStagedCashflowSheetLab({
       targetRevision = assertResultingTargetRevision(batchResult);
       const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
         .map((month) => [readOptionalText(month?.yearMonth), month]));
-      if (returnedMonths.size !== stagedMonths.length) {
+      const appliedMonths = stagedMonths.filter((month) => month.apply);
+      if (returnedMonths.size !== appliedMonths.length) {
         throw createHttpError(502, '저장된 항목 수가 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
       }
-      for (const month of stagedMonths) {
+      for (const month of appliedMonths) {
         const monthResult = returnedMonths.get(month.yearMonth);
         if (!monthResult) {
           throw createHttpError(502, '여러 달 저장의 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
@@ -2302,7 +2315,7 @@ async function applyStagedCashflowSheetLab({
       }
       logger('months.ok', {
         projectId,
-        monthCount: stagedMonths.length,
+        monthCount: appliedMonths.length,
         durationMs: Date.now() - operationStartedAt,
         jvmDurationMs: Number(batchResult?.durationMs) || 0,
       });
@@ -2375,8 +2388,9 @@ async function applyStagedCashflowSheetLab({
     throw error;
   }
 
+  const appliedMonthSnapshots = stagedMonths.filter((month) => month.apply);
   const appliedCells = [
-    ...stagedMonths.flatMap((month) => month.cells),
+    ...appliedMonthSnapshots.flatMap((month) => month.cells),
     ...stagedYears.flatMap((year) => year.cells),
   ];
   const projectionLineCount = appliedCells.filter((cell) => cell.mode === 'projection').length;
@@ -2389,7 +2403,7 @@ async function applyStagedCashflowSheetLab({
     sourceRevision: stageRun.sourceRevision,
     targetRevisionAtStart: stageRun.targetRevisionAtFetch,
     resultingTargetRevision: targetRevision,
-    appliedMonths: selectedMonths,
+    appliedMonths: candidateMonths,
     appliedYears: candidateYears,
     weekBasis: CASHFLOW_WEEK_BASIS,
     totalBasis: CASHFLOW_WEEK_BASIS,
@@ -2437,7 +2451,7 @@ async function applyStagedCashflowSheetLab({
     applyResponse: response,
     appliedBy: response.lastAppliedBy,
   };
-  const appliedWeeklyYears = [...new Set(selectedMonths
+  const appliedWeeklyYears = [...new Set(candidateMonths
     .map((yearMonth) => Number(yearMonth.slice(0, 4)))
     .filter(Number.isSafeInteger))];
   const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
@@ -2544,10 +2558,30 @@ async function stagePinnedCashflowSheetLab({
     }
   }
 
+  const stageYear = parsed.yearMonth
+    ? Number(parsed.yearMonth.slice(0, 4))
+    : Number(mirror.sourceYear);
+  const calculationCells = (mirror.cells || [])
+    .filter((cell) => Number(readOptionalText(cell.yearMonth).slice(0, 4)) === stageYear);
   const pinnedCells = parsed.yearMonth
-    ? (mirror.cells || []).filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth)
-    : (mirror.cells || []);
+    ? calculationCells.filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth)
+    : calculationCells;
   const pinnedMonths = [...groupPinnedCellsByMonth(pinnedCells).keys()].sort();
+  const calculationSourceMonths = [...groupPinnedCellsByMonth(calculationCells).keys()].sort();
+  const firstWeeklyYear = calculationSourceMonths[0]?.endsWith('-01')
+    ? Number(calculationSourceMonths[0].slice(0, 4))
+    : Number.NaN;
+  const openingBalanceCells = Number.isSafeInteger(firstWeeklyYear)
+    ? (mirror.annualCells || [])
+      .filter((cell) => Number(cell?.year) < firstWeeklyYear)
+      .map((cell) => stripUndefinedDeep({
+        year: Number(cell.year),
+        mode: readOptionalText(cell.mode),
+        cashflowLine: readOptionalText(cell.lineId),
+        cellState: readOptionalText(cell.state),
+        ...(['VALUE', 'ZERO'].includes(readOptionalText(cell.state)) ? { amount: Number(cell.amount) } : {}),
+      }))
+    : [];
   const hasAnnualCells = !parsed.yearMonth && (mirror.annualCells || []).length > 0;
   if (pinnedMonths.length === 0 && !hasAnnualCells) {
     throw createHttpError(
@@ -2595,11 +2629,15 @@ async function stagePinnedCashflowSheetLab({
   const riskLineCount = weekly.riskLineCount;
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
   const actualLineCount = candidates.filter((candidate) => candidate.mode === 'actual').length;
-  const cellsByMonth = groupPinnedCellsByMonth(pinnedCells);
+  const cellsByMonth = groupPinnedCellsByMonth(calculationCells);
   const stagedMonths = [...new Set(candidates
     .map((candidate) => readOptionalText(candidate.yearMonth))
     .filter(Boolean))].sort();
-  const stagedMonthDocuments = stagedMonths.map((yearMonth) => {
+  const lastStagedMonth = stagedMonths.at(-1) || '';
+  const calculationMonths = lastStagedMonth
+    ? calculationSourceMonths.filter((yearMonth) => yearMonth <= lastStagedMonth)
+    : [];
+  const stagedMonthDocuments = calculationMonths.map((yearMonth) => {
     const validated = validateCompletePinnedMonth(yearMonth, cellsByMonth.get(yearMonth) || []);
     if (!validated.ok) {
       throw createHttpError(
@@ -2641,6 +2679,7 @@ async function stagePinnedCashflowSheetLab({
     blockedMonths,
     closedMonthDifferences: weekly.closedMonthDifferences,
     stagedMonths,
+    calculationMonths,
     stagedYears: annual.stagedYears,
     annualLineCount: annual.candidates.length,
     candidates: responseCandidates,
@@ -2667,7 +2706,9 @@ async function stagePinnedCashflowSheetLab({
     blockedMonths,
     closedMonthDifferences: weekly.closedMonthDifferences,
     stagedMonths,
+    calculationMonths,
     stagedYears: annual.stagedYears,
+    openingBalanceCells,
     appliedAnnualYears: Array.isArray(mirror.appliedAnnualYears) ? mirror.appliedAnnualYears.map(Number) : [],
     appliedWeeklyYears: Array.isArray(mirror.appliedWeeklyYears) ? mirror.appliedWeeklyYears.map(Number) : [],
     createdAt: now,

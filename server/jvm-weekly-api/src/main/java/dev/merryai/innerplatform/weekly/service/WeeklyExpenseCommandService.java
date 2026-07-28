@@ -1128,7 +1128,8 @@ public class WeeklyExpenseCommandService {
         List<Map<String, Object>> calculationChecks = CashflowSheetLabApplyRequest.recalculateCalculationChecks(
             request.yearMonth(),
             cells,
-            request.calculationChecks()
+            request.calculationChecks(),
+            request.calculatedOpeningBalances()
         );
         assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
@@ -1254,13 +1255,14 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        Map<String, List<CashflowSheetLabApplyRequest.Cell>> cellsByMonth = CashflowSheetBatchApplyRequest
+        var cellsByMonth = CashflowSheetBatchApplyRequest
             .requireCompleteMonths(request.months());
+        var appliedCellsByMonth = request.requireAppliedMonths();
         List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
             .authorizeCashflowSheetMonthAmendments(
                 writer,
                 projectId,
-                cellsByMonth.keySet(),
+                appliedCellsByMonth.keySet(),
                 request.sourceRevision(),
                 request.closedMonthChangeReason(),
                 request.idempotencyKey()
@@ -1271,7 +1273,7 @@ public class WeeklyExpenseCommandService {
                 CashflowSheetBatchApplyRequest.Month::yearMonth,
                 month -> month
             ));
-        Map<String, BigDecimal> openingBalances = Map.of();
+        Map<String, BigDecimal> openingBalances = request.calculatedOpeningBalances(cellsByMonth.firstKey());
         for (Map.Entry<String, List<CashflowSheetLabApplyRequest.Cell>> entry : cellsByMonth.entrySet()) {
             CashflowSheetBatchApplyRequest.Month month = requestMonthsByYearMonth.get(entry.getKey());
             List<Map<String, Object>> calculationChecks = CashflowSheetLabApplyRequest.recalculateCalculationChecks(
@@ -1284,7 +1286,7 @@ public class WeeklyExpenseCommandService {
             openingBalances = CashflowSheetLabApplyRequest.closingBalances(calculationChecks);
         }
         assertAtomicWriteBudget(
-            Math.multiplyExact(cellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
+            Math.multiplyExact(appliedCellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
             3,
             "Cashflow sheet batch apply"
         );
@@ -1307,7 +1309,7 @@ public class WeeklyExpenseCommandService {
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
-        List<String> requestedMonths = List.copyOf(cellsByMonth.keySet());
+        List<String> requestedMonths = List.copyOf(appliedCellsByMonth.keySet());
         List<String> replacedMonths = replacement.months().stream()
             .map(WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement::yearMonth)
             .toList();

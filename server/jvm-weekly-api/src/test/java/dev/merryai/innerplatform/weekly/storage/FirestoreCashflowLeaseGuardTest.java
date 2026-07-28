@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalanceCell;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
@@ -716,6 +717,9 @@ class FirestoreCashflowLeaseGuardTest {
             SOURCE_REVISION,
             targetRevision,
             false,
+            null,
+            null,
+            openingBalanceCells(),
             requestedMonths
         );
 
@@ -728,7 +732,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(response.months().get(1).calculationChecks())
             .filteredOn(check -> check.mode().equals("projection") && check.weekNo() == 1)
             .singleElement()
-            .satisfies(check -> assertThat(check.calculated().openingBalance()).isEqualByComparingTo("-1000"));
+            .satisfies(check -> assertThat(check.calculated().openingBalance()).isEqualByComparingTo("1999000"));
         assertThat(response.savedProjectionLineCount()).isEqualTo(960);
         assertThat(response.savedActualLineCount()).isEqualTo(960);
         assertThat(fixture.documents.keySet().stream()
@@ -3123,9 +3127,29 @@ class FirestoreCashflowLeaseGuardTest {
             false,
             null,
             null,
+            List.of(),
             completeCalculationChecks(yearMonth),
             cells
         );
+    }
+
+    private static List<CashflowOpeningBalanceCell> openingBalanceCells() {
+        List<CashflowOpeningBalanceCell> cells = new ArrayList<>();
+        for (int year : List.of(2024, 2025)) {
+            for (String mode : List.of("projection", "actual")) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    boolean opening = year == 2025 && mode.equals("projection") && lineId.equals("SALES_IN");
+                    cells.add(new CashflowOpeningBalanceCell(
+                        year,
+                        mode,
+                        lineId,
+                        opening ? "VALUE" : "EMPTY",
+                        opening ? BigDecimal.valueOf(2_000_000) : null
+                    ));
+                }
+            }
+        }
+        return List.copyOf(cells);
     }
 
     private static List<Map<String, Object>> completeCalculationChecks(String yearMonth) {

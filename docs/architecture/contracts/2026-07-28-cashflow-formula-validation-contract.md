@@ -1,7 +1,7 @@
 # Cashflow Formula Validation Contract
 
 **Date:** 2026-07-28  
-**Status:** Approved - Phase 1-2 implementation in progress
+**Status:** Approved - weekly formulas and prior-year carry-forward implemented
 **Scope:** `cashflow(사용내역 연동)` fixed-format sheet, BFF transport, Spring JVM validation, sheet apply, month close  
 **Out of scope:** variable `사용내역` sheet formulas and generic Excel formula execution
 
@@ -108,8 +108,16 @@ C55 = SUM(C46:C54)
 
 ### 4.3 Running balance and prior-year carry-forward
 
-The first weekly period starts from the imported prior-period balance. When the
-sheet has no earlier period, the opening balance is zero:
+The first weekly period starts from the JVM sum of every prior-year canonical
+source row. The reported annual balance cell is comparison evidence only and is
+not used as an input. When the sheet has no earlier annual source rows, the
+opening balance is zero:
+
+```text
+importedOpeningBalance[M]
+  = SUM(prior-year inflow source rows[M])
+  - SUM(prior-year outflow source rows[M])
+```
 
 ```text
 calculatedBalance[M,first]
@@ -142,6 +150,10 @@ E56 = D56 + E45 - E55
 The JVM must not use a reported sheet balance as the next period's input. It uses its own calculated prior balance. This identifies the first broken period instead of propagating a broken displayed balance as trusted input.
 
 Consequently, a 2025 ending balance of `2,000,000` won becomes the 2026 week-1 opening balance before the first 2026 movement is applied.
+
+The BFF reuses annual cells already present in the pinned mirror. It performs no
+additional Google Sheets or database read and does not calculate the opening
+balance itself.
 
 ### 4.4 Projection minus Actual
 
@@ -396,17 +408,18 @@ Implementation starts only after approval of all four decisions:
 3. Allow canonical source-row import on calculation mismatch, but block month close until corrected.
 4. Keep project contract-amount mismatch as a separate non-blocking warning.
 
-## 13. Phase 1-2 implementation checkpoint
+## 13. Implementation checkpoint
 
 Implemented on 2026-07-28:
 
 - BFF preserves explicit `0` as `ZERO` instead of collapsing it into a generic value.
 - JVM independently recalculates five weekly inflow totals, outflow totals, and running balances for Projection and Actual.
-- Only the first selected month's imported opening balance is used; every later week and later month in the same batch uses the prior JVM-calculated balance.
+- The first January opening balance is calculated from all 2024-through-prior-year canonical source rows; a missing year or source row is rejected.
+- Every later week and month uses the prior JVM-calculated balance. Unchanged bridge months participate in calculation but are not rewritten or logged as applied months.
 - JVM calculation results replace BFF comparison results in the apply response and persisted amendment evidence.
 - Missing calculation evidence or a JVM response without ten weekly checks fails closed.
 - Explicit `ZERO` survives the month-close BFF path and remains distinct from `EMPTY`.
 - New month-close snapshots retain all 160 source cells and their states; amended and legacy amount maps infer `ZERO` only when an explicit zero-valued key exists.
 - Sheet apply behavior remains unchanged; calculation mismatches are not blocking yet.
 
-Verified by the full JVM module test suite and the BFF cashflow-sheet fixture tests. The first selected month's opening balance still comes from the sheet's reported prior balance; replacing it with a JVM sum of pinned prior-period canonical rows remains mandatory before Phase 3 is complete. Phase 3 also owns row totals, grand totals, Projection-Actual differences, deposit-schedule totals, calculation revision persistence, and month-close blocking.
+Verified by the full JVM module test suite and the BFF cashflow-sheet fixture tests. Row totals, grand totals, deposit-schedule totals, calculation revision persistence, and month-close blocking remain later phases. The existing dashboard-to-ledger `Projection - Actual 차이` table remains in place; moving its arithmetic authority fully into the JVM remains part of the later difference-validation phase.
