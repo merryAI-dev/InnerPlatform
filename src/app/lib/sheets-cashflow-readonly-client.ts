@@ -84,6 +84,17 @@ export interface CashflowSheetLabTemplateSection {
     year: number;
     source: 'sheet_annual_total';
   }>;
+  annualDerivedMappings: Array<{
+    mode: 'projection' | 'actual';
+    derivedKind: 'deposit_total' | 'withdrawal_total' | 'balance';
+    label: string;
+    year: number;
+    periodKind: 'ANNUAL' | 'GRAND_TOTAL';
+    rowIndex: number;
+    columnIndex: number;
+    a1: string;
+    source: 'sheet_annual_derived';
+  }>;
   missingLineIds: string[];
   duplicateLineIds: string[];
 }
@@ -530,9 +541,10 @@ export interface CashflowSheetLabStageResult {
 }
 
 export interface CashflowFormulaMismatch {
-  yearMonth: string;
+  yearMonth?: string;
+  year?: number;
   mode: 'projection' | 'actual';
-  weekNo: number;
+  weekNo?: number;
   field: 'depositTotal' | 'withdrawalTotal' | 'balance';
   reported: number | null;
   calculated: number | null;

@@ -347,6 +347,34 @@ export function createJavaWeeklyClient({
     return result;
   }
 
+  async function validateCashflowSheetFormulas({
+    context,
+    projectId,
+    sourceYear,
+    annualCells,
+    annualDerivedCells,
+    months,
+    acceptFormulaMismatches = false,
+  }) {
+    const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
+    if (!normalizedProjectId) {
+      throw createHttpError(400, 'projectId is required.', 'project_id_required');
+    }
+    return requestJson({
+      context,
+      method: 'POST',
+      path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/formulas/preflight`,
+      dataProjectId: bffDataProjectId,
+      body: {
+        sourceYear,
+        annualCells,
+        annualDerivedCells,
+        months,
+        ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
+      },
+    });
+  }
+
   async function applyCashflowSheetAnnualTotal({
     context,
     projectId,
@@ -386,6 +414,7 @@ export function createJavaWeeklyClient({
     getCashflowSnapshot,
     applyCashflowSheetLab,
     applyCashflowSheetBatch,
+    validateCashflowSheetFormulas,
     applyCashflowSheetAnnualTotal,
     authMode,
     workspaceEmailDomain,

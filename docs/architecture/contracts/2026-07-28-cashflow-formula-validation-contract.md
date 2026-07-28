@@ -138,13 +138,19 @@ calculatedBalance[M,P]
 Excel equivalents:
 
 ```excel
-C33 = B33 + C22 - C32
+C33 = C22 - C32
 D33 = C33 + D22 - D32
 E33 = D33 + E22 - E32
+BM33 = BL33 + BM22 - BM32
+BN33 = BM33 + BN22 - BN32
+BR33 = BQ33 + BR22 - BR32
 
-C56 = B56 + C45 - C55
+C56 = C45 - C55
 D56 = C56 + D45 - D55
 E56 = D56 + E45 - E55
+BM56 = BL56 + BM45 - BM55
+BN56 = BM56 + BN45 - BN55
+BR56 = BQ56 + BR45 - BR55
 ```
 
 The JVM must not use a reported sheet balance as the next period's input. It uses its own calculated prior balance. This identifies the first broken period instead of propagating a broken displayed balance as trusted input.
@@ -200,6 +206,9 @@ Excel equivalents:
 BS33 = BS22 - BS32
 BS56 = BS45 - BS55
 ```
+
+`BS` is a grand total, not the next running-balance period. It is therefore
+validated independently and never receives `BR33` or `BR56` as an opening balance.
 
 ### 4.6 Deposit schedule total
 

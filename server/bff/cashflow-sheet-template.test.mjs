@@ -91,6 +91,7 @@ describe('cashflow official fixed template', () => {
     expect(result.mappingCandidates).toHaveLength(1_920);
     expect(result.sections.map((section) => section.weekColumns.length)).toEqual([60, 60]);
     expect(result.sections.map((section) => section.annualMappings.length)).toEqual([144, 144]);
+    expect(result.sections.map((section) => section.annualDerivedMappings.length)).toEqual([27, 27]);
     expect(result.sections.map((section) => section.totalMappings.length)).toEqual([19, 19]);
     expect(result.sections[0].mappings[0]).toMatchObject({
       mode: 'projection',
@@ -111,6 +112,12 @@ describe('cashflow official fixed template', () => {
       [2029, 'BO12'], [2030, 'BP12'], [2031, 'BQ12'], [2032, 'BR12'], [2026, 'BS12'],
     ]);
     expect(result.sections[0].totalColumn).toMatchObject({ a1: 'BS12' });
+    expect(result.sections[0].annualDerivedMappings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'C33' }),
+      expect.objectContaining({ year: 2025, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'D33' }),
+      expect.objectContaining({ year: 2027, periodKind: 'ANNUAL', derivedKind: 'balance', a1: 'BM33' }),
+      expect.objectContaining({ year: 2026, periodKind: 'GRAND_TOTAL', derivedKind: 'balance', a1: 'BS33' }),
+    ]));
   });
 
   it('fails closed instead of guessing when an official coordinate changes', () => {

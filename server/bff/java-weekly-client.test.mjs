@@ -166,6 +166,40 @@ describe('Java weekly cashflow client', () => {
     });
   });
 
+  it('forwards annual and weekly formula evidence to the JVM preflight authority', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const annualCells = [{ year: 2024, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'ZERO', amount: 0 }];
+    const annualDerivedCells = [{
+      year: 2024, periodKind: 'ANNUAL', mode: 'projection', field: 'balance', amount: 0, sourceCell: 'C33',
+    }];
+    const months = [{ yearMonth: '2026-01', cells: monthlyContract.cells, calculationChecks: [] }];
+
+    await client.validateCashflowSheetFormulas({
+      context,
+      projectId: 'project-a',
+      sourceYear: 2026,
+      annualCells,
+      annualDerivedCells,
+      months,
+      acceptFormulaMismatches: true,
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toContain('/api/v1/cashflow/project-a/sheet-lab/formulas/preflight');
+    expect(JSON.parse(init.body)).toEqual({
+      sourceYear: 2026,
+      annualCells,
+      annualDerivedCells,
+      months,
+      acceptFormulaMismatches: true,
+    });
+  });
+
   it('waits once for a slow batch conflict instead of retrying and masking it as unreachable', async () => {
     vi.useFakeTimers();
     try {

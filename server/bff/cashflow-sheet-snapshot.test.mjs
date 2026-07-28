@@ -42,6 +42,33 @@ describe('cashflow sheet pinned snapshot', () => {
     expect(zero.sourceRevision).not.toBe(empty.sourceRevision);
   });
 
+  it('pins annual totals and running balances as sheet evidence', () => {
+    const snapshot = createCashflowPinnedSnapshot({
+      projectId: 'project-a',
+      spreadsheetId: 'sheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      template: {
+        sections: [{
+          mode: 'projection',
+          annualDerivedMappings: [
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'deposit_total', rowIndex: 0, columnIndex: 2, a1: 'C1' },
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'withdrawal_total', rowIndex: 1, columnIndex: 2, a1: 'C2' },
+            { mode: 'projection', year: 2024, periodKind: 'ANNUAL', derivedKind: 'balance', rowIndex: 2, columnIndex: 2, a1: 'C3' },
+            { mode: 'projection', year: 2025, periodKind: 'ANNUAL', derivedKind: 'balance', rowIndex: 2, columnIndex: 3, a1: 'D3' },
+          ],
+        }],
+      },
+      matrix: [['', '', '100'], ['', '', '30'], ['', '', '70', '170']],
+    });
+
+    expect(snapshot.annualDerivedCells).toEqual([
+      expect.objectContaining({ year: 2024, derivedKind: 'balance', amount: 70, sourceCell: 'C3' }),
+      expect.objectContaining({ year: 2024, derivedKind: 'deposit_total', amount: 100, sourceCell: 'C1' }),
+      expect.objectContaining({ year: 2024, derivedKind: 'withdrawal_total', amount: 30, sourceCell: 'C2' }),
+      expect.objectContaining({ year: 2025, derivedKind: 'balance', amount: 170, sourceCell: 'D3' }),
+    ]);
+  });
+
   it('marks non-numeric sheet contents invalid instead of silently converting them to zero', () => {
     expect(classifyCashflowSheetCell('확인 필요')).toEqual({
       state: 'INVALID',

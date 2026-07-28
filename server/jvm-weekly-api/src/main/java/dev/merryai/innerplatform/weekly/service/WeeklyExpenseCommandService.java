@@ -13,6 +13,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
@@ -55,6 +57,7 @@ import dev.merryai.innerplatform.weekly.domain.CellValidationIssue;
 import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
+import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import dev.merryai.innerplatform.weekly.domain.ClipboardCell;
 import dev.merryai.innerplatform.weekly.domain.ClipboardPayload;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
@@ -1404,8 +1407,144 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
+    public CashflowSheetFormulaPreflightResponse validateCashflowSheetFormulas(
+        TrustedActorContext actor,
+        String projectId,
+        CashflowSheetFormulaPreflightRequest request
+    ) {
+        requireCashflowWritePermission(CASHFLOW_SHEET_LAB_APPLY_COMMAND, actor, projectId);
+        requireCompleteAnnualFormulaEvidence(request);
+        var cellsByMonth = CashflowSheetBatchApplyRequest.requireCompleteMonths(request.months());
+        if (cellsByMonth.keySet().stream().anyMatch(yearMonth -> !yearMonth.startsWith(request.sourceYear() + "-"))) {
+            throw new IllegalArgumentException("Cashflow formula preflight months must belong to the source year.");
+        }
+
+        List<CashflowFormulaValidator.OpeningCell> annualCells = request.annualCells().stream()
+            .map(cell -> new CashflowFormulaValidator.OpeningCell(
+                cell.year(), cell.mode(), cell.cashflowLine(), cell.cellState(), cell.amount()
+            ))
+            .toList();
+        List<CashflowFormulaValidator.AnnualCheck> annualChecks = new ArrayList<>();
+        Map<String, BigDecimal> balances = Map.of("projection", BigDecimal.ZERO, "actual", BigDecimal.ZERO);
+        List<CashflowFormulaValidator.AnnualCheck> priorChecks = CashflowFormulaValidator.validateAnnualPeriods(
+            annualCells.stream().filter(cell -> cell.year() < request.sourceYear()).toList(),
+            reportedAnnuals(request, "ANNUAL", true),
+            balances
+        );
+        annualChecks.addAll(priorChecks);
+        balances = annualClosingBalances(priorChecks, balances);
+        boolean completeSourceYear = cellsByMonth.firstKey().equals(request.sourceYear() + "-01")
+            && cellsByMonth.lastKey().equals(request.sourceYear() + "-12")
+            && cellsByMonth.size() == 12;
+        if (!cellsByMonth.firstKey().endsWith("-01")) balances = Map.of();
+
+        Map<String, List<Map<String, Object>>> weeklyChecksByMonth = new LinkedHashMap<>();
+        Map<String, CashflowSheetBatchApplyRequest.Month> monthsByKey = request.months().stream()
+            .collect(java.util.stream.Collectors.toMap(CashflowSheetBatchApplyRequest.Month::yearMonth, month -> month));
+        for (Map.Entry<String, List<CashflowSheetLabApplyRequest.Cell>> monthEntry : cellsByMonth.entrySet()) {
+            CashflowSheetBatchApplyRequest.Month month = monthsByKey.get(monthEntry.getKey());
+            List<Map<String, Object>> checks = CashflowSheetLabApplyRequest.recalculateCalculationChecks(
+                month.yearMonth(), monthEntry.getValue(), month.calculationChecks(), balances
+            );
+            weeklyChecksByMonth.put(month.yearMonth(), checks);
+            balances = CashflowSheetLabApplyRequest.closingBalances(checks);
+        }
+
+        List<CashflowFormulaValidator.AnnualCheck> futureChecks = completeSourceYear
+            ? CashflowFormulaValidator.validateAnnualPeriods(
+                annualCells.stream().filter(cell -> cell.year() > request.sourceYear()).toList(),
+                reportedAnnuals(request, "ANNUAL", false),
+                balances
+            )
+            : List.of();
+        annualChecks.addAll(futureChecks);
+        List<CashflowFormulaValidator.AnnualCheck> grandTotalChecks = CashflowFormulaValidator.validateAnnualPeriods(
+            annualCells.stream().filter(cell -> cell.year() == request.sourceYear()).toList(),
+            reportedAnnuals(request, "GRAND_TOTAL", false),
+            Map.of("projection", BigDecimal.ZERO, "actual", BigDecimal.ZERO)
+        );
+        annualChecks.addAll(grandTotalChecks);
+
+        requireFormulaMismatchConfirmation(weeklyChecksByMonth, annualChecks, request.acceptFormulaMismatches());
+        return new CashflowSheetFormulaPreflightResponse(
+            true,
+            projectId,
+            annualChecks.size(),
+            weeklyChecksByMonth.values().stream().mapToInt(List::size).sum()
+        );
+    }
+
+    private void requireCompleteAnnualFormulaEvidence(CashflowSheetFormulaPreflightRequest request) {
+        Set<Integer> years = request.annualCells().stream()
+            .map(cell -> cell.year())
+            .collect(java.util.stream.Collectors.toSet());
+        Set<String> keys = new java.util.HashSet<>();
+        for (CashflowSheetFormulaPreflightRequest.AnnualDerivedCell cell : request.annualDerivedCells()) {
+            String expectedKind = cell.year() == request.sourceYear() ? "GRAND_TOTAL" : "ANNUAL";
+            if (!years.contains(cell.year()) || !expectedKind.equals(cell.periodKind())
+                || !keys.add(cell.year() + ":" + cell.mode() + ":" + cell.field())) {
+                throw new IllegalArgumentException("Cashflow annual formula evidence is invalid.");
+            }
+        }
+        if (keys.size() != years.size() * 2 * 3) {
+            throw new IllegalArgumentException("Cashflow annual formula evidence is incomplete.");
+        }
+    }
+
+    private List<CashflowFormulaValidator.ReportedAnnual> reportedAnnuals(
+        CashflowSheetFormulaPreflightRequest request,
+        String periodKind,
+        boolean beforeSourceYear
+    ) {
+        Map<String, Map<String, CashflowSheetFormulaPreflightRequest.AnnualDerivedCell>> byPeriod = new LinkedHashMap<>();
+        request.annualDerivedCells().stream()
+            .filter(cell -> cell.periodKind().equals(periodKind))
+            .filter(cell -> "GRAND_TOTAL".equals(periodKind)
+                ? cell.year() == request.sourceYear()
+                : beforeSourceYear ? cell.year() < request.sourceYear() : cell.year() > request.sourceYear())
+            .forEach(cell -> byPeriod
+                .computeIfAbsent(cell.year() + ":" + cell.mode(), ignored -> new LinkedHashMap<>())
+                .put(cell.field(), cell));
+        return byPeriod.entrySet().stream().map(entry -> {
+            Map<String, CashflowSheetFormulaPreflightRequest.AnnualDerivedCell> fields = entry.getValue();
+            if (!fields.keySet().equals(Set.of("depositTotal", "withdrawalTotal", "balance"))) {
+                throw new IllegalArgumentException("Cashflow annual formula evidence is incomplete.");
+            }
+            CashflowSheetFormulaPreflightRequest.AnnualDerivedCell balance = fields.get("balance");
+            Map<String, String> sourceCells = new LinkedHashMap<>();
+            sourceCells.put("depositTotal", fields.get("depositTotal").sourceCell());
+            sourceCells.put("withdrawalTotal", fields.get("withdrawalTotal").sourceCell());
+            sourceCells.put("balance", balance.sourceCell());
+            return new CashflowFormulaValidator.ReportedAnnual(
+                balance.year(),
+                balance.mode(),
+                fields.get("depositTotal").amount(),
+                fields.get("withdrawalTotal").amount(),
+                balance.amount(),
+                sourceCells
+            );
+        }).toList();
+    }
+
+    private Map<String, BigDecimal> annualClosingBalances(
+        List<CashflowFormulaValidator.AnnualCheck> checks,
+        Map<String, BigDecimal> fallback
+    ) {
+        Map<String, BigDecimal> balances = new LinkedHashMap<>(fallback);
+        checks.forEach(check -> balances.put(check.mode(), check.balance()));
+        return Map.copyOf(balances);
+    }
+
     private void requireFormulaMismatchConfirmation(
         Map<String, List<Map<String, Object>>> checksByMonth,
+        boolean accepted
+    ) {
+        requireFormulaMismatchConfirmation(checksByMonth, List.of(), accepted);
+    }
+
+    private void requireFormulaMismatchConfirmation(
+        Map<String, List<Map<String, Object>>> checksByMonth,
+        List<CashflowFormulaValidator.AnnualCheck> annualChecks,
         boolean accepted
     ) {
         if (accepted) return;
@@ -1430,6 +1569,30 @@ public class WeeklyExpenseCommandService {
                 }
             }
         }
+        for (CashflowFormulaValidator.AnnualCheck check : annualChecks) {
+            Map<String, Boolean> matches = Map.of(
+                "depositTotal", check.depositTotalMatches(),
+                "withdrawalTotal", check.withdrawalTotalMatches(),
+                "balance", check.balanceMatches()
+            );
+            Map<String, BigDecimal> reported = annualReportedValues(check);
+            Map<String, BigDecimal> calculated = Map.of(
+                "depositTotal", check.depositTotal(),
+                "withdrawalTotal", check.withdrawalTotal(),
+                "balance", check.balance()
+            );
+            for (String field : List.of("depositTotal", "withdrawalTotal", "balance")) {
+                if (!Boolean.FALSE.equals(matches.get(field))) continue;
+                Map<String, Object> mismatch = new LinkedHashMap<>();
+                mismatch.put("year", check.year());
+                mismatch.put("mode", check.mode());
+                mismatch.put("field", field);
+                mismatch.put("reported", reported.get(field));
+                mismatch.put("calculated", calculated.get(field));
+                if (check.sourceCells().get(field) != null) mismatch.put("sourceCell", check.sourceCells().get(field));
+                mismatches.add(java.util.Collections.unmodifiableMap(mismatch));
+            }
+        }
         if (mismatches.isEmpty()) return;
         throw new WeeklyExpenseEditLeaseException(
             409,
@@ -1440,6 +1603,14 @@ public class WeeklyExpenseCommandService {
                 "mismatches", List.copyOf(mismatches)
             )
         );
+    }
+
+    private Map<String, BigDecimal> annualReportedValues(CashflowFormulaValidator.AnnualCheck check) {
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        values.put("depositTotal", check.reportedDepositTotal());
+        values.put("withdrawalTotal", check.reportedWithdrawalTotal());
+        values.put("balance", check.reportedBalance());
+        return values;
     }
 
     @Transactional

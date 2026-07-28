@@ -366,6 +366,14 @@ function createApp({ context = {}, db = createDb(), googleSheetsService, routeOp
     };
     next();
   });
+  if (routeOptions.javaWeeklyClient && !routeOptions.javaWeeklyClient.validateCashflowSheetFormulas) {
+    routeOptions.javaWeeklyClient.validateCashflowSheetFormulas = vi.fn(async (input) => ({
+      ok: true,
+      projectId: input.projectId,
+      annualCheckCount: 0,
+      weeklyCheckCount: 0,
+    }));
+  }
   mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService: googleSheetsService || {
@@ -3098,7 +3106,7 @@ describe('cashflow sheet lab route', () => {
       sourceCell: 'BO12',
     };
     const javaWeeklyClient = {
-      applyCashflowSheetLab: vi.fn(async (input) => {
+      validateCashflowSheetFormulas: vi.fn(async (input) => {
         if (!input.acceptFormulaMismatches) {
           throw Object.assign(new Error('formula confirmation required'), {
             statusCode: 409,
@@ -3106,6 +3114,9 @@ describe('cashflow sheet lab route', () => {
             details: { mismatchCount: 1, mismatches: [mismatch] },
           });
         }
+        return { ok: true };
+      }),
+      applyCashflowSheetLab: vi.fn(async (input) => {
         return javaApplyResponse(input, resultingTargetRevision);
       }),
     };
@@ -3142,9 +3153,10 @@ describe('cashflow sheet lab route', () => {
       })
       .expect(200);
 
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
-    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
-    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(2);
+    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
+    expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
   });
 
   it('applies a settled-week sheet change without a weekly confirmation', async () => {

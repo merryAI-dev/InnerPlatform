@@ -54,6 +54,20 @@ class CashflowFormulaValidatorTest {
     }
 
     @Test
+    void treatsAMissingDerivedFormulaAsAMismatch() {
+        List<CashflowFormulaValidator.Cell> cells = completeCells();
+        List<CashflowFormulaValidator.ReportedWeek> reported = reportedWeeks(0);
+        CashflowFormulaValidator.ReportedWeek first = reported.getFirst();
+        reported.set(0, new CashflowFormulaValidator.ReportedWeek(
+            first.mode(), first.weekNo(), first.openingBalance(), null,
+            first.withdrawalTotal(), first.balance(), first.sourceCells()
+        ));
+
+        assertThat(check(CashflowFormulaValidator.validateMonth(cells, reported), "projection", 1)
+            .depositTotalMatches()).isFalse();
+    }
+
+    @Test
     void keepsExplicitZeroValidAndRejectsDecimalWon() {
         List<CashflowFormulaValidator.Cell> cells = completeCells();
         replace(cells, "projection", 1, "SALES_IN", "ZERO", 0);
@@ -103,6 +117,85 @@ class CashflowFormulaValidatorTest {
             .hasMessageContaining("every source row");
     }
 
+    @Test
+    void validatesAnnualBalancesAsAContinuousChainWithoutTrustingWrongReportedBalances() {
+        List<CashflowFormulaValidator.OpeningCell> cells = completeOpeningCells(2024, 2025);
+        replaceOpening(cells, 2024, "projection", "SALES_IN", "VALUE", 100);
+        replaceOpening(cells, 2025, "projection", "DIRECT_COST_OUT", "VALUE", 30);
+        List<CashflowFormulaValidator.ReportedAnnual> reported = reportedAnnuals(2024, 2025);
+        replaceReportedAnnual(reported, 2024, "projection", 100, 0, 1);
+        replaceReportedAnnual(reported, 2025, "projection", 0, 30, 2);
+
+        List<CashflowFormulaValidator.AnnualCheck> checks = CashflowFormulaValidator.validateAnnualPeriods(
+            cells,
+            reported,
+            Map.of()
+        );
+
+        CashflowFormulaValidator.AnnualCheck year2024 = annualCheck(checks, 2024, "projection");
+        assertThat(year2024.balance()).isEqualByComparingTo("100");
+        assertThat(year2024.balanceMatches()).isFalse();
+        CashflowFormulaValidator.AnnualCheck year2025 = annualCheck(checks, 2025, "projection");
+        assertThat(year2025.openingBalance()).isEqualByComparingTo("100");
+        assertThat(year2025.balance()).isEqualByComparingTo("70");
+        assertThat(year2025.balanceMatches()).isFalse();
+    }
+
+    @Test
+    void carriesTheCalculatedAnnualBalanceIntoTheFirstWeeklyPeriod() {
+        List<CashflowFormulaValidator.OpeningCell> annualCells = completeOpeningCells(2024, 2025);
+        replaceOpening(annualCells, 2024, "projection", "SALES_IN", "VALUE", 1_000_000);
+        replaceOpening(annualCells, 2025, "projection", "TEAM_SUPPORT_IN", "VALUE", 1_000_000);
+        List<CashflowFormulaValidator.AnnualCheck> annualChecks = CashflowFormulaValidator.validateAnnualPeriods(
+            annualCells,
+            reportedAnnuals(2024, 2025),
+            Map.of()
+        );
+        Map<String, BigDecimal> opening = Map.of(
+            "projection", annualCheck(annualChecks, 2025, "projection").balance(),
+            "actual", annualCheck(annualChecks, 2025, "actual").balance()
+        );
+        List<CashflowFormulaValidator.Cell> weeklyCells = completeCells();
+        replace(weeklyCells, "projection", 1, "SALES_IN", "VALUE", 100);
+
+        CashflowFormulaValidator.WeeklyCheck firstWeek = check(
+            CashflowFormulaValidator.validateMonth(weeklyCells, reportedWeeks(0), opening),
+            "projection",
+            1
+        );
+
+        assertThat(firstWeek.openingBalance()).isEqualByComparingTo("2000000");
+        assertThat(firstWeek.balance()).isEqualByComparingTo("2000100");
+    }
+
+    @Test
+    void carriesFutureAnnualBalancesButCalculatesTheGrandTotalIndependently() {
+        List<CashflowFormulaValidator.OpeningCell> futureCells = completeOpeningCells(2027, 2028);
+        replaceOpening(futureCells, 2027, "projection", "SALES_IN", "VALUE", 50);
+        replaceOpening(futureCells, 2028, "projection", "DIRECT_COST_OUT", "VALUE", 20);
+        List<CashflowFormulaValidator.AnnualCheck> future = CashflowFormulaValidator.validateAnnualPeriods(
+            futureCells,
+            reportedAnnuals(2027, 2028),
+            Map.of("projection", BigDecimal.valueOf(100), "actual", BigDecimal.ZERO)
+        );
+
+        assertThat(annualCheck(future, 2027, "projection").balance()).isEqualByComparingTo("150");
+        assertThat(annualCheck(future, 2028, "projection").openingBalance()).isEqualByComparingTo("150");
+        assertThat(annualCheck(future, 2028, "projection").balance()).isEqualByComparingTo("130");
+
+        List<CashflowFormulaValidator.OpeningCell> totalCells = completeOpeningCells(2026);
+        replaceOpening(totalCells, 2026, "projection", "SALES_IN", "VALUE", 200);
+        replaceOpening(totalCells, 2026, "projection", "DIRECT_COST_OUT", "VALUE", 50);
+        List<CashflowFormulaValidator.AnnualCheck> total = CashflowFormulaValidator.validateAnnualPeriods(
+            totalCells,
+            reportedAnnuals(2026),
+            Map.of("projection", BigDecimal.ZERO, "actual", BigDecimal.ZERO)
+        );
+
+        assertThat(annualCheck(total, 2026, "projection").openingBalance()).isEqualByComparingTo("0");
+        assertThat(annualCheck(total, 2026, "projection").balance()).isEqualByComparingTo("150");
+    }
+
     private static List<CashflowFormulaValidator.Cell> completeCells() {
         List<CashflowFormulaValidator.Cell> cells = new ArrayList<>();
         for (String mode : List.of("projection", "actual")) {
@@ -125,6 +218,50 @@ class CashflowFormulaValidatorTest {
             }
         }
         return cells;
+    }
+
+    private static List<CashflowFormulaValidator.ReportedAnnual> reportedAnnuals(int... years) {
+        List<CashflowFormulaValidator.ReportedAnnual> reported = new ArrayList<>();
+        for (int year : years) {
+            for (String mode : List.of("projection", "actual")) {
+                reported.add(new CashflowFormulaValidator.ReportedAnnual(
+                    year, mode, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Map.of()
+                ));
+            }
+        }
+        return reported;
+    }
+
+    private static void replaceReportedAnnual(
+        List<CashflowFormulaValidator.ReportedAnnual> reported,
+        int year,
+        String mode,
+        long depositTotal,
+        long withdrawalTotal,
+        long balance
+    ) {
+        for (int index = 0; index < reported.size(); index += 1) {
+            CashflowFormulaValidator.ReportedAnnual value = reported.get(index);
+            if (value.year() == year && value.mode().equals(mode)) {
+                reported.set(index, new CashflowFormulaValidator.ReportedAnnual(
+                    year, mode, BigDecimal.valueOf(depositTotal), BigDecimal.valueOf(withdrawalTotal),
+                    BigDecimal.valueOf(balance), Map.of()
+                ));
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Test annual report not found.");
+    }
+
+    private static CashflowFormulaValidator.AnnualCheck annualCheck(
+        List<CashflowFormulaValidator.AnnualCheck> checks,
+        int year,
+        String mode
+    ) {
+        return checks.stream()
+            .filter(check -> check.year() == year && check.mode().equals(mode))
+            .findFirst()
+            .orElseThrow();
     }
 
     private static void replaceOpening(
