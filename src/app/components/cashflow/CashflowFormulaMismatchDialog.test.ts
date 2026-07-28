@@ -13,7 +13,7 @@ describe('CashflowFormulaMismatchDialog', () => {
       sourceCell: 'BL22',
     });
 
-    expect(result.expected).toBe('이 칸은 해당 기간의 입금 항목을 모두 더한 값입니다. 시트에는 0원이 표시되어야 합니다.');
+    expect(result.expected).toBe('BL22 셀은 해당 기간의 입금 항목을 모두 더한 값입니다. 시트에는 0원이 표시되어야 합니다.');
     expect(result.current).toBe('현재 시트에는 이 값이 비어 있습니다.');
   });
 

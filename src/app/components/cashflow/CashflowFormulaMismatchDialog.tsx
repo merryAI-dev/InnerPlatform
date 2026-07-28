@@ -47,8 +47,9 @@ export function describeCashflowFormulaMismatch(issue: CashflowFormulaMismatch):
   expected: string;
   current: string;
 } {
+  const cell = issue.sourceCell ? `${issue.sourceCell} 셀` : '이 칸';
   return {
-    expected: `이 칸은 ${expectedCalculation(issue)}입니다. 시트에는 ${amount(issue.calculated)}이 표시되어야 합니다.`,
+    expected: `${cell}은 ${expectedCalculation(issue)}입니다. 시트에는 ${amount(issue.calculated)}이 표시되어야 합니다.`,
     current: issue.reported == null
       ? '현재 시트에는 이 값이 비어 있습니다.'
       : `현재 시트에는 ${amount(issue.reported)}이 표시되어 있습니다.`,
