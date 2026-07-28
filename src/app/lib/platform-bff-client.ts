@@ -848,6 +848,7 @@ export interface CashflowMonthCloseDraftInput {
   sourceRevision: string;
   targetRevision: string;
   yearMonth: string;
+  humanReviewed: boolean;
   depositScheduleRows: CashflowMonthCloseDepositScheduleRow[];
   cells: CashflowMonthCloseCell[];
   confirmations: CashflowMonthCloseConfirmation[];

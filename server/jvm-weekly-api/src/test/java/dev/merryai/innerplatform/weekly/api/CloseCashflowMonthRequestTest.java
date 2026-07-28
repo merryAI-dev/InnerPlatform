@@ -12,6 +12,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CloseCashflowMonthRequestTest {
     @Test
+    void monthCloseRejectsAnUnattestedHumanReview() {
+        assertThatThrownBy(() -> CloseCashflowMonthRequest.requireHumanReviewed(false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("explicit human review");
+    }
+
+    @Test
     void depositScheduleRejectsImpossibleCalendarDate() {
         List<CloseCashflowMonthRequest.DepositScheduleRow> rows = validNotApplicableRows();
         rows.set(0, new CloseCashflowMonthRequest.DepositScheduleRow(

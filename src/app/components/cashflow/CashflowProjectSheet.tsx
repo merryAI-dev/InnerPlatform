@@ -311,6 +311,7 @@ export function CashflowProjectSheet({
   const [qaClockSetting, setQaClockSetting] = useState<CashflowMonthCloseQaDateTimeSetting | null>(null);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
+  const [monthCloseHumanReviewed, setMonthCloseHumanReviewed] = useState(false);
   const [managementDecisions, setManagementDecisions] = useState<CashflowManagementDecisionMap>({});
   const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
     () => createEmptyCashflowMonthCloseDepositRows(),
@@ -370,8 +371,13 @@ export function CashflowProjectSheet({
     setMonthCloseResult(null);
     setManagementDecisions({});
     setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
+    setMonthCloseHumanReviewed(false);
     setMonthCloseReviewDirty(false);
   }, [projectId]);
+
+  useEffect(() => {
+    setMonthCloseHumanReviewed(false);
+  }, [yearMonth, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.targetRevisionAtFetch]);
 
   const discardChangesAndLeave = useCallback(async (): Promise<void> => {
     if (blocker.state !== 'blocked') return;
@@ -879,13 +885,11 @@ export function CashflowProjectSheet({
       monthCloseInput = buildCashflowMonthCloseDraftInput({
         mirror: monthClosePinnedSource,
         yearMonth,
+        humanReviewed: monthCloseHumanReviewed,
         decisions,
         depositScheduleRows,
         managementChecks,
-        managementDecisions: Object.fromEntries(managementChecks.map((check) => [
-          check.id,
-          managementDecisions[check.id] || 'CONFIRMED',
-        ])),
+        managementDecisions,
         deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
           trackingStartedAt: null,
           missedCount: 0,
@@ -984,6 +988,7 @@ export function CashflowProjectSheet({
     loadCashflowMonthClose,
     monthCloseCellsState,
     monthCloseDepositRows,
+    monthCloseHumanReviewed,
     managementDecisions,
     monthCloseResult,
     orgId,
@@ -2789,6 +2794,20 @@ export function CashflowProjectSheet({
             결산 후에는 재오픈 승인을 받기 전까지 이 월을 수정할 수 없습니다.
           </div>
 
+          <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-3 text-[13px] leading-5 text-slate-800">
+            <input
+              type="checkbox"
+              checked={monthCloseHumanReviewed}
+              disabled={monthCloseBusy || monthClosePreparation.status !== 'READY'}
+              onChange={(event) => setMonthCloseHumanReviewed(event.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-slate-300 text-[#17324D]"
+            />
+            <span>
+              시트 고정본의 현금흐름·입금 일정과 주요 관리 항목을 직접 확인했습니다.
+              이 확인은 결산 스냅샷에 제 이름과 서버 시각으로 기록됩니다.
+            </span>
+          </label>
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={monthCloseBusy}>닫기</AlertDialogCancel>
             {monthClosePreparation.actionLabel ? (
@@ -2803,7 +2822,7 @@ export function CashflowProjectSheet({
               </Button>
             ) : null}
             <AlertDialogAction
-              disabled={!canFinalizeMonth || monthCloseBusy || monthClosePreparation.status !== 'READY' || monthCloseResult?.status !== 'OPEN'}
+              disabled={!canFinalizeMonth || !monthCloseHumanReviewed || monthCloseBusy || monthClosePreparation.status !== 'READY' || monthCloseResult?.status !== 'OPEN'}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();

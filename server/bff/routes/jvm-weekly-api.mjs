@@ -1745,9 +1745,6 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
 }
 
 async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, openingBalances, comparisonBoundary }) {
-  if (!db?.doc) {
-    throw createHttpError(503, '월 결산 자료를 보관하는 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_month_close_source_unavailable');
-  }
   const tenantId = readOptionalText(req.context?.tenantId);
   const requested = commandBody(req);
   const yearMonth = readOptionalText(requested.yearMonth);
@@ -1758,6 +1755,12 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   }
   if (!closeInput || readOptionalText(closeInput.yearMonth) !== yearMonth) {
     throw createHttpError(400, 'Cashflow month close review input is required.', 'cashflow_month_close_request_invalid');
+  }
+  if (closeInput.humanReviewed !== true) {
+    throw createHttpError(409, '시트값과 결산 항목을 직접 확인한 뒤 결산해 주세요.', 'cashflow_month_close_human_review_required');
+  }
+  if (!db?.doc) {
+    throw createHttpError(503, '월 결산 자료를 보관하는 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_month_close_source_unavailable');
   }
 
   const [mirrorSnap, projectSnap] = await Promise.all([
@@ -1805,6 +1808,7 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     yearMonth,
     expectedRevision,
     expectedDraftRevision: 0,
+    humanReviewed: true,
     sourceRevision: closeInput.sourceRevision,
     targetRevision: closeInput.targetRevision,
     depositScheduleRows: closeInput.depositScheduleRows,

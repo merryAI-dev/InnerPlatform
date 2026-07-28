@@ -244,6 +244,7 @@ function normalizeDepositRows(
 export function buildCashflowMonthCloseDraftInput(input: {
   mirror: CashflowSheetLabMirrorResult | null;
   yearMonth: string;
+  humanReviewed: boolean;
   decisions: CashflowMonthCloseDecisionMap;
   depositScheduleRows: CashflowMonthCloseDepositReviewRow[];
   projectionDrafts?: Record<string, string>;
@@ -251,6 +252,9 @@ export function buildCashflowMonthCloseDraftInput(input: {
   managementDecisions: CashflowManagementDecisionMap;
   deadlineSummary: CashflowDeadlineSummary;
 }): CashflowMonthCloseDraftInput {
+  if (!input.humanReviewed) {
+    throw new Error('시트값과 결산 항목을 직접 확인한 뒤 결산 확인을 선택해 주세요.');
+  }
   const cells = applyCashflowMonthCloseProjectionDrafts(
     normalizeCashflowMonthCloseCells(input.mirror, input.yearMonth),
     input.projectionDrafts || {},
@@ -284,6 +288,7 @@ export function buildCashflowMonthCloseDraftInput(input: {
     sourceRevision: input.mirror.sourceRevision,
     targetRevision: input.mirror.targetRevisionAtFetch,
     yearMonth: input.yearMonth,
+    humanReviewed: true,
     depositScheduleRows: normalizeDepositRows(input.depositScheduleRows),
     cells,
     confirmations,

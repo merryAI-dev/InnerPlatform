@@ -122,6 +122,7 @@ function fullMonthCloseSource({ mirrorStatus = 'FRESH', controlMatches = true, c
   }));
   const closeInput = {
     yearMonth: '2026-06', sourceRevision, targetRevision,
+    humanReviewed: true,
     depositScheduleRows,
     cells: cells.map(({ lineId, state, yearMonth: _yearMonth, direction: _direction, ...cell }) => ({
       ...cell, cashflowLine: lineId, cellState: state,
@@ -1868,7 +1869,7 @@ describe('JVM weekly API BFF proxy', () => {
         yearMonth: '2026-06',
         expectedRevision: 0,
         expectedOpeningBalances: { selectedYear: 2026 },
-        closeInput: { yearMonth: '2026-06' },
+        closeInput: { yearMonth: '2026-06', humanReviewed: true },
       })
       .expect(504)
       .expect((response) => {
@@ -1876,6 +1877,36 @@ describe('JVM weekly API BFF proxy', () => {
       });
 
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a month close that has not been explicitly reviewed by a person', async () => {
+    const source = fullMonthCloseSource();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: stageEnv, db: source.db });
+    const read = await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close')
+      .set('idempotency-key', 'month-close-human-review-required')
+      .send({
+        yearMonth: '2026-06',
+        expectedRevision: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, humanReviewed: false, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_human_review_required'));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it.each(['viewer', 'pm', 'finance', 'admin'])('forwards a reviewed %s month close without edit-lease headers', async (actorRole) => {
@@ -1933,6 +1964,7 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       expectedRevision: 3,
       expectedDraftRevision: 0,
+      humanReviewed: true,
       sourceRevision: `sha256:${'c'.repeat(64)}`,
       targetRevision: `sha256:${'d'.repeat(64)}`,
       openingBalances: {
