@@ -60,6 +60,71 @@ public final class CashflowFormulaValidator {
         return Map.copyOf(balances);
     }
 
+    public static List<AnnualCheck> validateAnnualPeriods(
+        List<OpeningCell> cells,
+        List<ReportedAnnual> reportedAnnuals,
+        Map<String, BigDecimal> openingBalances
+    ) {
+        Map<Integer, List<OpeningCell>> cellsByYear = (cells == null ? List.<OpeningCell>of() : cells).stream()
+            .collect(Collectors.groupingBy(OpeningCell::year, TreeMap::new, Collectors.toList()));
+        Map<String, ReportedAnnual> reportedByKey = new LinkedHashMap<>();
+        for (ReportedAnnual reported : reportedAnnuals == null ? List.<ReportedAnnual>of() : reportedAnnuals) {
+            String mode = normalizeMode(reported.mode());
+            ReportedAnnual canonical = new ReportedAnnual(
+                reported.year(), mode, reported.depositTotal(), reported.withdrawalTotal(), reported.balance(),
+                reported.sourceCells() == null ? Map.of() : Map.copyOf(reported.sourceCells())
+            );
+            if (reportedByKey.putIfAbsent(reported.year() + ":" + mode, canonical) != null) {
+                throw new IllegalArgumentException("Cashflow annual formula input contains duplicate reported periods.");
+            }
+        }
+        Map<String, BigDecimal> balances = new LinkedHashMap<>(Map.of(
+            "projection", requiredWholeWon(openingBalances.getOrDefault("projection", BigDecimal.ZERO), "opening balance"),
+            "actual", requiredWholeWon(openingBalances.getOrDefault("actual", BigDecimal.ZERO), "opening balance")
+        ));
+        List<AnnualCheck> results = new ArrayList<>();
+        for (Map.Entry<Integer, List<OpeningCell>> yearEntry : cellsByYear.entrySet()) {
+            int year = yearEntry.getKey();
+            Map<String, Cell> sourceByKey = new LinkedHashMap<>();
+            for (OpeningCell source : yearEntry.getValue()) {
+                String mode = normalizeMode(source.mode());
+                String lineId = CashflowLineCatalog.canonicalize(source.lineId());
+                if (!List.of("projection", "actual").contains(mode) || !CashflowLineCatalog.ALL_LINES.contains(lineId)) {
+                    throw new IllegalArgumentException("Cashflow annual formula input contains an unsupported cell.");
+                }
+                Cell canonical = new Cell(mode, 1, lineId, source.state(), source.amount());
+                amount(canonical);
+                if (sourceByKey.putIfAbsent(key(mode, 1, lineId), canonical) != null) {
+                    throw new IllegalArgumentException("Cashflow annual formula input contains duplicate cells.");
+                }
+            }
+            if (sourceByKey.size() != CashflowLineCatalog.ALL_LINES.size() * 2) {
+                throw new IllegalArgumentException("Cashflow annual formula input must contain every source row.");
+            }
+            for (String mode : List.of("projection", "actual")) {
+                ReportedAnnual reported = reportedByKey.get(year + ":" + mode);
+                if (reported == null) {
+                    throw new IllegalArgumentException("Cashflow annual formula input must contain every reported period.");
+                }
+                BigDecimal depositTotal = total(sourceByKey, mode, 1, CashflowLineCatalog.IN_LINES);
+                BigDecimal withdrawalTotal = total(sourceByKey, mode, 1, CashflowLineCatalog.OUT_LINES);
+                BigDecimal balance = balances.get(mode).add(depositTotal).subtract(withdrawalTotal);
+                results.add(new AnnualCheck(
+                    year, mode, balances.get(mode), depositTotal, withdrawalTotal, balance,
+                    matches(reported.depositTotal(), depositTotal),
+                    matches(reported.withdrawalTotal(), withdrawalTotal),
+                    matches(reported.balance(), balance),
+                    reported.sourceCells()
+                ));
+                balances.put(mode, balance);
+            }
+        }
+        if (reportedByKey.size() != results.size()) {
+            throw new IllegalArgumentException("Cashflow annual formula input contains an unsupported reported period.");
+        }
+        return List.copyOf(results);
+    }
+
     public static List<WeeklyCheck> validateMonth(
         List<Cell> cells,
         List<ReportedWeek> reportedWeeks,
@@ -201,6 +266,30 @@ public final class CashflowFormulaValidator {
     }
 
     public record OpeningCell(int year, String mode, String lineId, String state, BigDecimal amount) {
+    }
+
+    public record ReportedAnnual(
+        int year,
+        String mode,
+        BigDecimal depositTotal,
+        BigDecimal withdrawalTotal,
+        BigDecimal balance,
+        Map<String, String> sourceCells
+    ) {
+    }
+
+    public record AnnualCheck(
+        int year,
+        String mode,
+        BigDecimal openingBalance,
+        BigDecimal depositTotal,
+        BigDecimal withdrawalTotal,
+        BigDecimal balance,
+        Boolean depositTotalMatches,
+        Boolean withdrawalTotalMatches,
+        Boolean balanceMatches,
+        Map<String, String> sourceCells
+    ) {
     }
 
     public record ReportedWeek(

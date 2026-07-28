@@ -138,11 +138,13 @@ calculatedBalance[M,P]
 Excel equivalents:
 
 ```excel
-C33 = B33 + C22 - C32
+C33 = C22 - C32
 D33 = C33 + D22 - D32
 E33 = D33 + E22 - E32
 
-C56 = B56 + C45 - C55
+C56 = C45 - C55
+D56 = C56 + D45 - D55
+E56 = D56 + E45 - E55
 D56 = C56 + D45 - D55
 E56 = D56 + E45 - E55
 ```
