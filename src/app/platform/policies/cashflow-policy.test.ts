@@ -36,7 +36,7 @@ describe('cashflow-policy', () => {
     expect(getCashflowModeLineLabel('MYSC_PREPAY_IN', 'actual')).toBe('MYSC 선입금 - 직접사업비 등(입금)');
     expect(getCashflowModeLineLabel('MYSC_PREPAY_LABOR_IN', 'projection')).toBe('MYSC 선입금 - MYSC 인건비');
     expect(getCashflowModeLineLabel('MYSC_PREPAY_LABOR_IN', 'actual')).toBe('MYSC 선입금 - MYSC 인건비(입금)');
-    expect(getCashflowModeLineLabel('MYSC_PREPAY_INPUT_VAT_IN', 'projection')).toBe('MYSC 선입금 - 메입부가세');
+    expect(getCashflowModeLineLabel('MYSC_PREPAY_INPUT_VAT_IN', 'projection')).toBe('MYSC 선입금 - 매입부가세');
     expect(getCashflowModeLineLabel('MYSC_PREPAY_INPUT_VAT_IN', 'actual')).toBe('MYSC 선입금 - 매입부가세(입금)');
     expect(getCashflowModeLineLabel('MYSC_PREPAY_DIRECT_OUT', 'projection')).toBe('MYSC 선입금 - 직접사업비 등');
     expect(getCashflowModeLineLabel('MYSC_PREPAY_DIRECT_OUT', 'actual')).toBe('MYSC 선입금 - 직접사업비 등(출금)');
@@ -62,6 +62,7 @@ describe('cashflow-policy', () => {
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등')).toBe('MYSC_PREPAY_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등(입금)')).toBe('MYSC_PREPAY_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - MYSC 인건비(입금)')).toBe('MYSC_PREPAY_LABOR_IN');
+    expect(parseCashflowLineLabelAlias('MYSC 선입금 - 매입부가세')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 메입부가세')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 매입부가세(입금)')).toBe('MYSC_PREPAY_INPUT_VAT_IN');
     expect(parseCashflowLineLabelAlias('MYSC 선입금 - 직접사업비 등(출금)')).toBe('MYSC_PREPAY_DIRECT_OUT');

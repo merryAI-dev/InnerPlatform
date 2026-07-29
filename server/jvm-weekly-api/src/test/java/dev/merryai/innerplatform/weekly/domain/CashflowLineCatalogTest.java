@@ -40,6 +40,8 @@ class CashflowLineCatalogTest {
             .isEqualTo("MYSC_PREPAY_LABOR_IN");
         assertThat(CashflowLineCatalog.canonicalize("MYSC선입금-매입부가세(입금)"))
             .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");
+        assertThat(CashflowLineCatalog.canonicalize("MYSC선입금-매입부가세"))
+            .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");
         assertThat(CashflowLineCatalog.canonicalize("MYSC선입금-메입부가세"))
             .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");
         assertThat(CashflowLineCatalog.canonicalize("MYSC선입금-직접사업비등(출금)"))
@@ -65,6 +67,8 @@ class CashflowLineCatalogTest {
         assertThat(CashflowLineCatalog.canonicalize("MYSC 선입금 - MYSC 인건비(입금)"))
             .isEqualTo("MYSC_PREPAY_LABOR_IN");
         assertThat(CashflowLineCatalog.canonicalize("MYSC 선입금 - 매입부가세(입금)"))
+            .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");
+        assertThat(CashflowLineCatalog.canonicalize("MYSC 선입금 - 매입부가세"))
             .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");
         assertThat(CashflowLineCatalog.canonicalize("MYSC 선입금 - 메입부가세"))
             .isEqualTo("MYSC_PREPAY_INPUT_VAT_IN");

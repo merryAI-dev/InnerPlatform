@@ -9,7 +9,7 @@ import {
 const PROJECTION_LABELS = [
   'MYSC 선입금 - 직접사업비 등',
   'MYSC 선입금 - MYSC 인건비',
-  'MYSC 선입금 - 메입부가세',
+  'MYSC 선입금 - 매입부가세',
   '매출액(입금)',
   '매출부가세(입금)',
   '팀지원금(입금)',

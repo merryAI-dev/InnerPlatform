@@ -39,11 +39,11 @@
     {
       "lineId": "MYSC_PREPAY_INPUT_VAT_IN",
       "label": "MYSC 선입금 - 매입부가세(입금)",
-      "projectionLabel": "MYSC 선입금 - 메입부가세",
+      "projectionLabel": "MYSC 선입금 - 매입부가세",
       "actualLabel": "MYSC 선입금 - 매입부가세(입금)",
       "direction": "IN",
       "defaultCategory": "VAT_REFUND",
-      "aliases": ["MYSC 선입금 - 메입부가세"]
+      "aliases": ["MYSC 선입금 - 매입부가세", "MYSC 선입금 - 메입부가세"]
     },
     {
       "lineId": "SALES_IN",

@@ -624,7 +624,7 @@ fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
         "MYSC선입금" | "MYSC선입금(입금필요시)" | "MYSC 선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
         "MYSC 선입금 - 직접사업비 등(입금)" => Some("MYSC_PREPAY_IN"),
         "MYSC 선입금 - MYSC 인건비(입금)" => Some("MYSC_PREPAY_LABOR_IN"),
-        "MYSC 선입금 - 매입부가세(입금)" | "MYSC 선입금 - 메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
+        "MYSC 선입금 - 매입부가세" | "MYSC 선입금 - 매입부가세(입금)" | "MYSC 선입금 - 메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
         "매출액(입금)" | "매출액" => Some("SALES_IN"),
         "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
         "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
@@ -644,7 +644,7 @@ fn parse_cashflow_line_label(raw: &str) -> Option<&'static str> {
                 "MYSC선입금" | "MYSC선입금(입금필요시)" => Some("MYSC_PREPAY_IN"),
                 "MYSC선입금-직접사업비등(입금)" => Some("MYSC_PREPAY_IN"),
                 "MYSC선입금-MYSC인건비(입금)" => Some("MYSC_PREPAY_LABOR_IN"),
-                "MYSC선입금-매입부가세(입금)" | "MYSC선입금-메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
+                "MYSC선입금-매입부가세" | "MYSC선입금-매입부가세(입금)" | "MYSC선입금-메입부가세" => Some("MYSC_PREPAY_INPUT_VAT_IN"),
                 "매출액(입금)" | "매출액" => Some("SALES_IN"),
                 "매출부가세(입금)" | "매출부가세" => Some("SALES_VAT_IN"),
                 "팀지원금(입금)" => Some("TEAM_SUPPORT_IN"),
@@ -1480,6 +1480,7 @@ mod tests {
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 직접사업비 등(입금)"), Some("MYSC_PREPAY_IN"));
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - MYSC 인건비(입금)"), Some("MYSC_PREPAY_LABOR_IN"));
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 매입부가세(입금)"), Some("MYSC_PREPAY_INPUT_VAT_IN"));
+        assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 매입부가세"), Some("MYSC_PREPAY_INPUT_VAT_IN"));
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 메입부가세"), Some("MYSC_PREPAY_INPUT_VAT_IN"));
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - 직접사업비 등(출금)"), Some("MYSC_PREPAY_DIRECT_OUT"));
         assert_eq!(parse_cashflow_line_label("MYSC 선입금 - MYSC 인건비(출금)"), Some("MYSC_PREPAY_LABOR_OUT"));
