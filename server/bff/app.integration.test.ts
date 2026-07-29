@@ -1498,6 +1498,38 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     ]);
   });
 
+  it('exports only the explicitly selected project ids', async () => {
+    for (const [id, name] of [['p-selected-a', 'Selected A'], ['p-selected-b', 'Selected B']]) {
+      await api
+        .post('/api/v1/projects')
+        .set({ ...defaultHeaders, 'idempotency-key': `idem-${id}` })
+        .send({ id, name, accountType: 'NONE' });
+    }
+
+    const response = await downloadCashflowExport({
+      scope: 'all',
+      projectIds: ['p-selected-b'],
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+
+    expect(response.status).toBe(200);
+    const workbook = await readWorkbook(response.body);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Selected B']);
+
+    const mismatchedFilter = await downloadCashflowExport({
+      scope: 'all',
+      projectIds: ['p-selected-b'],
+      accountType: 'DEDICATED',
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    });
+    expect(mismatchedFilter.status).toBe(404);
+    expect(JSON.parse(mismatchedFilter.body.toString()).error).toBe('selected_project_not_found');
+  });
+
   it('accepts legacy basis payloads for export requests', async () => {
     await api
       .post('/api/v1/projects')

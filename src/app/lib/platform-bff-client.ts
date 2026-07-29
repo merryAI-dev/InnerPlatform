@@ -3066,6 +3066,7 @@ export async function exportCashflowWorkbookViaBff(params: {
   body: {
     scope: 'all' | 'single';
     projectId?: string;
+    projectIds?: string[];
     accountType?: AccountType;
     startYearMonth: string;
     endYearMonth: string;

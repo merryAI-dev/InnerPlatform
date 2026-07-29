@@ -12,6 +12,26 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('BFF 서버의 최신 현금흐름 데이터');
     expect(source).not.toContain('buildCashflowExportWorkbookSpec');
     expect(source).not.toContain('loadExcelJs');
+    expect(source).toContain('projectIds: scope === \'selected\'');
+  });
+
+  it('supports organization filtering, multi-project selection, and the 2024 year', () => {
+    expect(source).toContain('소속(CIC/센터)');
+    expect(source).toContain('selectedProjectIds');
+    expect(source).toContain('사업 다중선택');
+    expect(source).toContain("years.add('2024')");
+    expect(source).toContain("scope === 'selected' || departmentFilter !== 'ALL'");
+  });
+
+  it('shows the selected project status table from canonical cashflow weeks', () => {
+    expect(source).toContain('buildCashflowExportProjectRows');
+    expect(source).toContain('weeksLoading');
+    expect(source).toContain('weeksLoadError');
+    expect(source).toContain('Projection-Actual');
+    expect(source).toContain('projectionActualInDifference');
+    expect(source).toContain('projectionActualOutDifference');
+    expect(source).toContain('최근 업데이트');
+    expect(source).toContain('사업 보기');
   });
 
   it('does not infer export readiness from the legacy weekly status collection', () => {

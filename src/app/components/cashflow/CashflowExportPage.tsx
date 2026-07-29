@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
 import {
   BarChart3,
   CalendarRange,
+  Check,
+  ChevronsUpDown,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   FolderSearch,
   Layers3,
@@ -16,12 +20,15 @@ import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../ui/command';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { triggerDownload } from '../../platform/csv-utils';
 import { filterCashflowExportTargetProjects } from '../../platform/cashflow-export-filters';
+import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 import {
   expandCashflowYearMonthRange,
@@ -29,11 +36,26 @@ import {
   type CashflowExportWorkbookVariant,
 } from '../../platform/cashflow-export';
 import { hasPermission } from '../../platform/rbac';
+import { getSeoulTodayIso } from '../../platform/business-days';
 import { ACCOUNT_TYPE_LABELS, type AccountType } from '../../data/types';
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
 const monochromeSurfaceClass = 'border-stone-200 bg-stone-50';
+
+function formatDateTime(value?: string): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+}
+
+function formatDifference(value?: number): string {
+  if (typeof value !== 'number') return '-';
+  return `${value.toLocaleString('ko-KR')}원`;
+}
 
 function SelectionField(props: {
   step: string;
@@ -60,12 +82,15 @@ function SelectionField(props: {
 }
 
 export function CashflowExportPage() {
+  const navigate = useNavigate();
   const { projects } = useAppStore();
-  const { yearMonth } = useCashflowWeeks();
+  const { yearMonth, weeks, isLoading: weeksLoading, loadError: weeksLoadError } = useCashflowWeeks();
   const { user } = useAuth();
   const { orgId } = useFirebase();
-  const [scope, setScope] = useState<'all' | 'single'>('all');
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
+  const [scope, setScope] = useState<'all' | 'selected'>('all');
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');
   const [rangeMode, setRangeMode] = useState<'year' | 'custom'>('year');
   const [selectedYear, setSelectedYear] = useState<string>(yearMonth.slice(0, 4));
@@ -82,12 +107,17 @@ export function CashflowExportPage() {
     [projects],
   );
 
+  const departments = useMemo(() => Array.from(new Set(
+    sortedProjects.map((project) => project.department).filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, 'ko')), [sortedProjects]);
+
   const availableYears = useMemo(() => {
     const years = new Set<string>();
     for (const project of sortedProjects) {
       if (/^\d{4}/.test(project.contractStart)) years.add(project.contractStart.slice(0, 4));
       if (/^\d{4}/.test(project.contractEnd)) years.add(project.contractEnd.slice(0, 4));
     }
+    years.add('2024');
     years.add(yearMonth.slice(0, 4));
     return Array.from(years).sort();
   }, [sortedProjects, yearMonth]);
@@ -102,29 +132,31 @@ export function CashflowExportPage() {
   const targetProjects = useMemo(() => {
     return filterCashflowExportTargetProjects(sortedProjects, {
       scope,
-      selectedProjectId,
+      selectedProjectIds,
+      departmentFilter,
       accountTypeFilter,
     });
-  }, [accountTypeFilter, scope, selectedProjectId, sortedProjects]);
+  }, [accountTypeFilter, departmentFilter, scope, selectedProjectIds, sortedProjects]);
 
-  const workbookVariant: CashflowExportWorkbookVariant = scope === 'single' ? 'single-project' : multiProjectVariant;
+  const workbookVariant: CashflowExportWorkbookVariant = multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
   const accountTypeFilterLabel = accountTypeFilter === 'ALL' ? '전체 통장 유형' : ACCOUNT_TYPE_LABELS[accountTypeFilter];
-  const projectSelectionLabel = scope === 'single'
-    ? (sortedProjects.find((project) => project.id === selectedProjectId)?.name || '사업을 선택해 주세요')
+  const projectSelectionLabel = scope === 'selected'
+    ? `${targetProjects.length}개 사업 선택`
     : '전체 사업';
-  const workbookVariantLabel = scope === 'single'
-    ? '사업별 단일 워크북'
-    : workbookVariant === 'combined'
-      ? '전체 사업 통합 시트'
-      : '전체 사업 개별 시트';
-  useEffect(() => {
-    if (scope !== 'single') return;
-    const selectedExists = sortedProjects.some((project) => project.id === selectedProjectId);
-    if (!selectedExists && sortedProjects[0]?.id) {
-      setSelectedProjectId(sortedProjects[0].id);
-    }
-  }, [scope, selectedProjectId, sortedProjects]);
+  const workbookVariantLabel = workbookVariant === 'combined' ? '대상 사업 통합 시트' : '대상 사업 개별 시트';
+  const exportRows = useMemo(() => buildCashflowExportProjectRows({
+    projects: targetProjects,
+    weeks,
+    targetYearMonths: yearMonths,
+    todayIso: getSeoulTodayIso(),
+  }), [targetProjects, weeks, yearMonths]);
+
+  function toggleProject(projectId: string) {
+    setSelectedProjectIds((current) => current.includes(projectId)
+      ? current.filter((id) => id !== projectId)
+      : [...current, projectId]);
+  }
 
   async function handleDownload() {
     if (!canExport) {
@@ -152,8 +184,10 @@ export function CashflowExportPage() {
             googleAccessToken: user.googleAccessToken,
           },
           body: {
-            scope,
-            projectId: scope === 'single' ? targetProjects[0]?.id : undefined,
+            scope: 'all',
+            projectIds: scope === 'selected' || departmentFilter !== 'ALL'
+              ? targetProjects.map((project) => project.id)
+              : undefined,
             accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
             startYearMonth: yearMonths[0],
             endYearMonth: yearMonths[yearMonths.length - 1],
@@ -189,7 +223,7 @@ export function CashflowExportPage() {
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
         title="현금흐름 내보내기"
         description="프로젝트와 기간을 선택해 서버 기준 현금흐름 엑셀을 다운로드합니다."
-        badge={scope === 'single' ? '사업별 추출' : '전체 추출'}
+        badge={scope === 'selected' ? '선택 사업 추출' : '전체 추출'}
         badgeVariant="outline"
         actions={(
           <Button
@@ -208,23 +242,23 @@ export function CashflowExportPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-[14px] font-semibold text-zinc-950">내보내기 설정</CardTitle>
           <p className="text-[12px] text-stone-600">
-            {scope === 'single' ? '사업별' : '전체 사업'} · {projectSelectionLabel} · {accountTypeFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
+            {scope === 'selected' ? '선택 사업' : '전체 사업'} · {projectSelectionLabel} · {accountTypeFilterLabel} · {periodSummary || '기간 미선택'} · {workbookVariantLabel}
           </p>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <SelectionField
             step="1"
             icon={Layers3}
             label="대상 범위"
-            helper="전체 사업 일괄 추출인지, 특정 사업 단건 추출인지 먼저 고릅니다."
-            value={scope === 'single' ? '사업별 추출' : '전체 사업'}
+            helper="전체 사업을 한 번에 받을지, 필요한 사업을 여러 개 고를지 선택합니다."
+            value={scope === 'selected' ? '사업 선택' : '전체 사업'}
             testId="cashflow-export-step-range"
             toneClass={monochromeSurfaceClass}
           >
             <Select
               value={scope}
               onValueChange={(value) => {
-                if (value === 'all' || value === 'single') setScope(value);
+                if (value === 'all' || value === 'selected') setScope(value);
               }}
             >
               <SelectTrigger
@@ -236,47 +270,82 @@ export function CashflowExportPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체 사업</SelectItem>
-                <SelectItem value="single">사업별 추출</SelectItem>
+                <SelectItem value="selected">사업 선택</SelectItem>
               </SelectContent>
             </Select>
           </SelectionField>
 
           <SelectionField
             step="2"
-            icon={FolderSearch}
-            label="사업 선택"
-            helper={scope === 'single' ? '단일 사업 워크북으로 내릴 대상을 고릅니다.' : '전체 사업 범위에서는 자동으로 모든 사업이 포함됩니다.'}
-            value={scope === 'single' ? projectSelectionLabel : '자동 포함'}
-            testId="cashflow-export-step-project"
+            icon={Layers3}
+            label="소속(CIC/센터)"
+            helper="담당 조직을 기준으로 다운로드 대상을 좁힙니다."
+            value={departmentFilter === 'ALL' ? '전체 소속' : departmentFilter}
+            testId="cashflow-export-step-department"
             toneClass={monochromeSurfaceClass}
           >
-            <Select
-              value={scope === 'single' ? selectedProjectId : 'ALL'}
-              onValueChange={setSelectedProjectId}
-              disabled={scope !== 'single'}
-            >
-              <SelectTrigger
-                data-testid="cashflow-export-project"
-                className={`${strongFieldBaseClass} ${
-                  scope === 'single'
-                    ? 'border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200'
-                    : activeDisabledFieldClass
-                }`}
-                style={{ borderWidth: 2 }}
-              >
-                <SelectValue placeholder="사업을 선택해 주세요" />
+            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+              <SelectTrigger data-testid="cashflow-export-department" className={`${strongFieldBaseClass} border-stone-300 hover:border-stone-400 focus-visible:ring-stone-200`} style={{ borderWidth: 2 }}>
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {scope !== 'single' && <SelectItem value="ALL">전체 사업</SelectItem>}
-                {sortedProjects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-                ))}
+                <SelectItem value="ALL">전체 소속</SelectItem>
+                {departments.map((department) => <SelectItem key={department} value={department}>{department}</SelectItem>)}
               </SelectContent>
             </Select>
           </SelectionField>
 
           <SelectionField
-            step="2B"
+            step="3"
+            icon={FolderSearch}
+            label="사업 다중선택"
+            helper={scope === 'selected' ? '다운로드할 사업을 여러 개 선택합니다.' : '전체 사업 범위에서는 자동으로 모든 사업이 포함됩니다.'}
+            value={scope === 'selected' ? projectSelectionLabel : '자동 포함'}
+            testId="cashflow-export-step-project"
+            toneClass={monochromeSurfaceClass}
+          >
+            <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  data-testid="cashflow-export-project"
+                  disabled={scope !== 'selected'}
+                  className={`${strongFieldBaseClass} w-full justify-between px-3 ${scope === 'selected' ? 'border-stone-300' : activeDisabledFieldClass}`}
+                >
+                  <span className="truncate">{scope === 'selected' ? projectSelectionLabel : '전체 사업 자동 포함'}</span>
+                  <ChevronsUpDown className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+                <Command>
+                  <CommandInput placeholder="사업명 또는 소속 검색" />
+                  <CommandList className="max-h-[300px]">
+                    <CommandEmpty>조건에 맞는 사업이 없습니다.</CommandEmpty>
+                    <CommandGroup heading="다운로드할 사업">
+                      {sortedProjects
+                        .filter((project) => departmentFilter === 'ALL' || project.department === departmentFilter)
+                        .filter((project) => accountTypeFilter === 'ALL' || project.accountType === accountTypeFilter)
+                        .map((project) => {
+                          const selected = selectedProjectIds.includes(project.id);
+                          return (
+                            <CommandItem key={project.id} value={`${project.name} ${project.department}`} onSelect={() => toggleProject(project.id)}>
+                              <Check className={`h-4 w-4 ${selected ? 'opacity-100' : 'opacity-0'}`} />
+                              <span className="truncate">{project.name}</span>
+                              <span className="ml-auto text-[10px] text-muted-foreground">{project.department}</span>
+                            </CommandItem>
+                          );
+                        })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </SelectionField>
+
+          <SelectionField
+            step="4"
             icon={BarChart3}
             label="통장 유형"
             helper="프로젝트 등록 시 선택한 통장 유형별로 추출 대상을 걸러냅니다."
@@ -309,7 +378,7 @@ export function CashflowExportPage() {
           </SelectionField>
 
           <SelectionField
-            step="3"
+            step="5"
             icon={CalendarRange}
             label="기간 범위"
             helper="기본은 연간 일괄이며, 필요하면 시작 월과 종료 월을 직접 지정할 수 있습니다."
@@ -338,7 +407,7 @@ export function CashflowExportPage() {
           </SelectionField>
 
           <SelectionField
-            step="4"
+            step="6"
             icon={FileSpreadsheet}
             label="워크북 형식"
             helper="경영기획실 후처리 방식에 맞춰 통합 시트 또는 사업별 시트를 선택합니다."
@@ -349,12 +418,7 @@ export function CashflowExportPage() {
             <Select
               value={workbookVariant}
               onValueChange={(value) => {
-                if (value === 'single-project') {
-                  setScope('single');
-                  return;
-                }
                 if (value === 'combined' || value === 'multi-sheet') {
-                  setScope('all');
                   setMultiProjectVariant(value as 'combined' | 'multi-sheet');
                 }
               }}
@@ -367,16 +431,15 @@ export function CashflowExportPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="single-project">사업별 단일 워크북</SelectItem>
-                <SelectItem value="combined">전체 사업 통합 시트</SelectItem>
-                <SelectItem value="multi-sheet">전체 사업 개별 시트</SelectItem>
+                <SelectItem value="combined">대상 사업 통합 시트</SelectItem>
+                <SelectItem value="multi-sheet">대상 사업 개별 시트</SelectItem>
               </SelectContent>
             </Select>
           </SelectionField>
 
           {rangeMode === 'year' ? (
             <SelectionField
-              step="3A"
+              step="7"
               icon={CalendarRange}
               label="추출 연도"
               helper="월당 5주 고정 슬롯으로 1년 전체를 한 번에 구성합니다."
@@ -403,7 +466,7 @@ export function CashflowExportPage() {
           ) : (
             <>
               <SelectionField
-                step="3A"
+                step="7A"
                 icon={CalendarRange}
                 label="시작 월"
                 helper="직접 추출을 시작할 월입니다."
@@ -421,7 +484,7 @@ export function CashflowExportPage() {
                 />
               </SelectionField>
               <SelectionField
-                step="3B"
+                step="7B"
                 icon={CalendarRange}
                 label="종료 월"
                 helper="마지막으로 포함할 월입니다."
@@ -458,6 +521,85 @@ export function CashflowExportPage() {
             <p className="mt-1 font-semibold text-zinc-950">BFF 서버의 최신 현금흐름 데이터</p>
           </div>
           {!bffEnabled ? <p className="sm:col-span-3 text-red-700">내보내기 서버 연결을 확인해 주세요.</p> : null}
+        </CardContent>
+      </Card>
+
+      <Card className="border-stone-200 bg-white shadow-none">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-[14px] font-semibold text-zinc-950">다운로드 대상 사업</CardTitle>
+          <p className="text-[11px] text-stone-600">
+            상태는 지난 목요일 자정 이후 해당 사업의 현금흐름이 한 번이라도 수정되었는지 보여줍니다.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="max-h-[520px] overflow-auto">
+            <table className="w-full min-w-[900px] text-[11px]">
+              <thead className="sticky top-0 z-10 bg-stone-50">
+                <tr className="border-y border-stone-200">
+                  <th className="px-4 py-2 text-left font-semibold">사업명</th>
+                  <th className="px-3 py-2 text-left font-semibold">담당자</th>
+                  <th className="px-3 py-2 text-center font-semibold">상태</th>
+                  <th className="px-3 py-2 text-center font-semibold">Projection-Actual</th>
+                  <th className="px-3 py-2 text-left font-semibold">최근 업데이트</th>
+                  <th className="px-4 py-2 text-right font-semibold">이동</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weeksLoading ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-stone-500">
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> 현금흐름 상태를 불러오는 중입니다.
+                    </td>
+                  </tr>
+                ) : weeksLoadError ? (
+                  <tr>
+                    <td colSpan={6} className="bg-red-50 px-4 py-10 text-center font-medium text-red-700">{weeksLoadError}</td>
+                  </tr>
+                ) : exportRows.map((row) => (
+                  <tr key={row.id} className="border-b border-stone-100 hover:bg-stone-50/70">
+                    <td className="px-4 py-3 font-semibold text-zinc-950">{row.name}</td>
+                    <td className="px-3 py-3 text-stone-700">{row.managerName || '-'}</td>
+                    <td className="px-3 py-3 text-center">
+                      <Badge variant="outline" className={row.updated ? 'border-teal-200 bg-teal-50 text-teal-700' : 'border-stone-200 bg-stone-50 text-stone-600'}>
+                        {row.updated ? '업데이트됨' : '미업데이트'}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {typeof row.projectionActualMatches !== 'boolean' ? (
+                        <span className="text-stone-500">
+                          {row.currentWeekLabel} · {row.comparisonMissing === 'actual' ? 'Actual 미작성' : 'Projection 미작성'}
+                        </span>
+                      ) : (
+                        <div>
+                          <span className={row.projectionActualMatches ? 'font-semibold text-teal-700' : 'font-semibold text-red-700'}>
+                            {row.currentWeekLabel} · {row.projectionActualMatches ? '일치' : '불일치'}
+                          </span>
+                          <div className="mt-0.5 tabular-nums text-stone-500">
+                            입금 {formatDifference(row.projectionActualInDifference)} · 출금 {formatDifference(row.projectionActualOutDifference)} · 순액 {formatDifference(row.projectionActualDifference)}
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-stone-600">{formatDateTime(row.latestUpdatedAt)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1 text-[11px]"
+                        onClick={() => navigate(`/cashflow/projects/${row.id}?ym=${encodeURIComponent(yearMonth)}&view=compare#projection-actual-comparison`)}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" /> 사업 보기
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {!weeksLoading && !weeksLoadError && exportRows.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-10 text-center text-stone-500">조건에 맞는 사업이 없습니다.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>

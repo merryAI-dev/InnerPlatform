@@ -11,6 +11,20 @@ describe('CashflowWeeklyPage read-only status surface', () => {
     expect(source).toContain('actualTotals: week.actualTotals || emptyTotals()');
     expect(source).toContain('const difference = projection.net - actual.net');
     expect(source).toContain('Projection·Actual·차이');
+    expect(source).toContain('Projection-Actual 일치 여부');
+    expect(source).toContain('Projection-Actual 차액');
+  });
+
+  it('keeps the project summary visible and uses only the requested writing states', () => {
+    expect(source).toContain('sticky top-0');
+    expect(source).toContain('sticky left-0');
+    expect(source).toContain('>요약<');
+    expect(source).toContain('작성완료');
+    expect(source).toContain('미작성');
+    expect(source).not.toContain('결산 완료');
+    expect(source).not.toContain('D-7');
+    expect(source).not.toContain('최종 확정과 수정 잠금은 프로젝트별 월 결산 승인에서 처리합니다.');
+    expect(source).toContain("toLocaleString('ko-KR')");
   });
 
   it('is read-only and routes detailed work to the project cashflow screen', () => {
@@ -19,7 +33,7 @@ describe('CashflowWeeklyPage read-only status surface', () => {
     expect(source).not.toContain('EditLeaseDialogs');
     expect(source).not.toContain('checkBeforeMutation');
     expect(source).toContain('&view=compare');
+    expect(source).toContain('#projection-actual-comparison');
     expect(source).toContain('현금흐름 보기');
-    expect(source).toContain('최종 확정과 수정 잠금은 프로젝트별 월 결산 승인에서 처리합니다.');
   });
 });

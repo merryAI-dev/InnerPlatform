@@ -49,10 +49,19 @@ export function mountCashflowExportRoutes(app, { db, rbacPolicy }) {
         .filter((project) => !project.trashedAt);
     }
 
+    if (payload.projectIds) {
+      const selectedProjectIds = new Set(payload.projectIds);
+      projects = projects.filter((project) => selectedProjectIds.has(project.id));
+    }
+
     if (payload.accountType) {
       projects = projects.filter((project) => project.accountType === payload.accountType);
     } else if (payload.basis) {
       projects = projects.filter((project) => project.basis === payload.basis);
+    }
+
+    if (payload.projectIds && projects.length !== new Set(payload.projectIds).size) {
+      throw createHttpError(404, '선택한 프로젝트 중 조회 조건에 맞지 않거나 접근할 수 없는 항목이 있습니다.', 'selected_project_not_found');
     }
 
     if (projects.length === 0) {

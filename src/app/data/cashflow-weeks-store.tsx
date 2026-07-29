@@ -36,6 +36,7 @@ interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
   weeks: CashflowWeekSheet[];
   isLoading: boolean;
+  loadError: string | null;
 }
 
 interface CashflowWeekActions {
@@ -113,6 +114,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const setYearMonth = useCallback((value: string) => {
     const next = typeof value === 'string' ? value.trim() : '';
@@ -164,6 +166,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (authLoading || !isAuthenticated || !user) {
       setWeeks([]);
       setIsLoading(false);
+      setLoadError(null);
       return () => {
         cancelled = true;
       };
@@ -172,12 +175,14 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     if (!firestoreEnabled || !db) {
       setWeeks([]);
       setIsLoading(false);
+      setLoadError(null);
       return () => {
         cancelled = true;
       };
     }
 
     setIsLoading(true);
+    setLoadError(null);
 
     const base = collection(db, getOrgCollectionPath(orgId, 'cashflowWeeks'));
     const selectedYear = Number.parseInt(yearMonth.slice(0, 4), 10);
@@ -204,12 +209,14 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         });
         setWeeks(docs);
         setIsLoading(false);
+        setLoadError(null);
       })
       .catch((err) => {
         if (cancelled) return;
         console.error('[CashflowWeeks] fetch error:', err);
         setWeeks([]);
         setIsLoading(false);
+        setLoadError('현금흐름 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
       });
 
     return () => {
@@ -519,6 +526,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth,
     weeks,
     isLoading,
+    loadError,
     setYearMonth,
     goPrevMonth,
     goNextMonth,
@@ -532,6 +540,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
     yearMonth,
     weeks,
     isLoading,
+    loadError,
     setYearMonth,
     goPrevMonth,
     goNextMonth,

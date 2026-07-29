@@ -2894,7 +2894,7 @@ export function CashflowProjectSheet({
         {renderOpsTimeline()}
       </section>
 
-      <section data-cashflow-block="comparison" className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section id="projection-actual-comparison" data-cashflow-block="comparison" className="scroll-mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#EAF0F5]">
             <Columns2 className="h-4 w-4 text-[#17324D]" />

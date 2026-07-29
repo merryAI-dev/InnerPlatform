@@ -1,4 +1,4 @@
-import type { CashflowWeekSheet, WeeklySubmissionStatus } from '../data/types';
+import type { CashflowWeekSheet } from '../data/types';
 import { findWeekForDate, getMonthMondayWeeks, type MonthMondayWeek } from './cashflow-weeks';
 
 export interface CashflowExportSurfaceProject {
@@ -12,14 +12,14 @@ export interface CashflowExportProjectRow {
   name: string;
   managerName?: string;
   updated: boolean;
-  latestProjectionUpdatedAt?: string;
+  latestUpdatedAt?: string;
   currentWeekNo?: number;
   currentWeekLabel: string;
-  currentWeekUpdated: boolean;
-}
-
-function buildStatusKey(projectId: string, yearMonth: string, weekNo: number): string {
-  return `${projectId}-${yearMonth}-w${weekNo}`;
+  projectionActualMatches?: boolean;
+  projectionActualInDifference?: number;
+  projectionActualOutDifference?: number;
+  projectionActualDifference?: number;
+  comparisonMissing?: 'projection' | 'actual';
 }
 
 export function resolveCurrentCashflowWeek(todayIso: string): MonthMondayWeek | undefined {
@@ -28,36 +28,33 @@ export function resolveCurrentCashflowWeek(todayIso: string): MonthMondayWeek | 
   return findWeekForDate(todayIso, getMonthMondayWeeks(yearMonth));
 }
 
+export function resolveLatestThursdayCutoffIso(todayIso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(todayIso)) return '';
+  const date = new Date(`${todayIso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return '';
+  const daysSinceThursday = (date.getUTCDay() - 4 + 7) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceThursday);
+  return `${date.toISOString().slice(0, 10)}T00:00:00+09:00`;
+}
+
 export function buildCashflowExportProjectRows(input: {
   projects: CashflowExportSurfaceProject[];
   weeks: CashflowWeekSheet[];
-  weeklySubmissionStatuses: WeeklySubmissionStatus[];
   targetYearMonths: string[];
   todayIso: string;
 }): CashflowExportProjectRow[] {
-  const targetYearMonths = new Set(input.targetYearMonths);
   const currentWeek = resolveCurrentCashflowWeek(input.todayIso);
-  const statusMap = new Map<string, WeeklySubmissionStatus>();
-
-  for (const status of input.weeklySubmissionStatuses) {
-    statusMap.set(buildStatusKey(status.projectId, status.yearMonth, status.weekNo), status);
-  }
+  const cutoffAt = resolveLatestThursdayCutoffIso(input.todayIso);
+  const cutoffTimestamp = Date.parse(cutoffAt);
 
   return input.projects.map((project) => {
-    const projectWeeks = input.weeks.filter((week) => week.projectId === project.id && targetYearMonths.has(week.yearMonth));
-    const projectStatuses = input.weeklySubmissionStatuses.filter((status) => (
-      status.projectId === project.id && targetYearMonths.has(status.yearMonth)
-    ));
-
-    const latestProjectionUpdatedAt = projectStatuses.reduce<string | undefined>((latest, status) => {
-      if (!status.projectionUpdatedAt) return latest;
-      if (!latest || status.projectionUpdatedAt > latest) return status.projectionUpdatedAt;
+    const projectWeeks = input.weeks.filter((week) => week.projectId === project.id);
+    const latestUpdatedAt = projectWeeks.reduce<string | undefined>((latest, week) => {
+      if (!week.updatedAt) return latest;
+      if (!latest || Date.parse(week.updatedAt) > Date.parse(latest)) return week.updatedAt;
       return latest;
     }, undefined);
 
-    const currentWeekStatus = currentWeek
-      ? statusMap.get(buildStatusKey(project.id, currentWeek.yearMonth, currentWeek.weekNo))
-      : undefined;
     const currentWeekSheet = currentWeek
       ? input.weeks.find((week) => (
         week.projectId === project.id
@@ -65,18 +62,34 @@ export function buildCashflowExportProjectRows(input: {
         && week.weekNo === currentWeek.weekNo
       ))
       : undefined;
+    const projectionTotals = currentWeekSheet?.projectionTotals;
+    const actualTotals = currentWeekSheet?.actualTotals;
+    const projectionNet = projectionTotals?.net || 0;
+    const actualNet = actualTotals?.net || 0;
+    const projectionActualInDifference = (projectionTotals?.totalIn || 0) - (actualTotals?.totalIn || 0);
+    const projectionActualOutDifference = (projectionTotals?.totalOut || 0) - (actualTotals?.totalOut || 0);
+    const projectionActualDifference = projectionNet - actualNet;
+    const projectionReady = Boolean(currentWeekSheet?.projectionUpdated && projectionTotals);
+    const actualReady = Boolean(actualTotals && currentWeekSheet?.actual && Object.keys(currentWeekSheet.actual).length > 0);
+    const hasCurrentWeekData = projectionReady && actualReady;
+    const projectionActualMatches = hasCurrentWeekData
+      && projectionTotals?.totalIn === actualTotals?.totalIn
+      && projectionTotals?.totalOut === actualTotals?.totalOut
+      && projectionTotals?.net === actualTotals?.net;
 
     return {
       id: project.id,
       name: project.name,
       managerName: project.managerName,
-      updated: projectWeeks.length > 0,
-      latestProjectionUpdatedAt,
+      updated: Boolean(latestUpdatedAt) && Number.isFinite(cutoffTimestamp) && Date.parse(latestUpdatedAt) >= cutoffTimestamp,
+      latestUpdatedAt,
       currentWeekNo: currentWeek?.weekNo,
       currentWeekLabel: currentWeek ? `${currentWeek.weekNo}주차` : '-',
-      currentWeekUpdated: typeof currentWeekStatus?.projectionUpdated === 'boolean'
-        ? currentWeekStatus.projectionUpdated
-        : Boolean(currentWeekSheet?.updatedAt),
+      projectionActualMatches: hasCurrentWeekData ? projectionActualMatches : undefined,
+      projectionActualInDifference: hasCurrentWeekData ? projectionActualInDifference : undefined,
+      projectionActualOutDifference: hasCurrentWeekData ? projectionActualOutDifference : undefined,
+      projectionActualDifference: hasCurrentWeekData ? projectionActualDifference : undefined,
+      comparisonMissing: !projectionReady ? 'projection' : !actualReady ? 'actual' : undefined,
     };
   });
 }

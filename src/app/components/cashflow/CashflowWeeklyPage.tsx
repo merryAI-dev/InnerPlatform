@@ -13,7 +13,7 @@ import type { CashflowWeekTotals } from '../../data/types';
 function fmtShort(value: number): string {
   const absolute = Math.abs(value);
   if (absolute >= 1e8) return `${(value / 1e8).toFixed(1)}억`;
-  if (absolute >= 1e4) return `${(value / 1e4).toFixed(0)}만`;
+  if (absolute >= 1e4) return `${Math.round(value / 1e4).toLocaleString('ko-KR')}만`;
   return value.toLocaleString('ko-KR');
 }
 
@@ -44,7 +44,7 @@ export function CashflowWeeklyPage() {
   }, [weeks, yearMonth]);
 
   function openProject(projectId: string) {
-    navigate(`/cashflow/projects/${projectId}?ym=${encodeURIComponent(yearMonth)}&view=compare`);
+    navigate(`/cashflow/projects/${projectId}?ym=${encodeURIComponent(yearMonth)}&view=compare#projection-actual-comparison`);
   }
 
   return (
@@ -68,29 +68,73 @@ export function CashflowWeeklyPage() {
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1040px] text-[11px]">
+          <div className="max-h-[calc(100vh-190px)] overflow-auto">
+            <table className="w-full min-w-[1260px] border-separate border-spacing-0 text-[11px]">
               <thead>
                 <tr className="bg-muted/30">
-                  <th className="min-w-[220px] px-4 py-2 text-left font-bold">프로젝트</th>
-                  <th className="min-w-[120px] px-3 py-2 text-left font-bold">담당자</th>
+                  <th className="sticky left-0 top-0 z-40 min-w-[220px] border-b bg-slate-50 px-4 py-2 text-left font-bold">프로젝트</th>
+                  <th className="sticky left-[220px] top-0 z-40 min-w-[120px] border-b bg-slate-50 px-3 py-2 text-left font-bold">담당자</th>
+                  <th className="sticky left-[340px] top-0 z-40 min-w-[210px] border-b border-r bg-slate-50 px-3 py-2 text-left font-bold">요약</th>
                   {monthWeeks.map((week) => (
-                    <th key={week.weekNo} className="min-w-[170px] px-3 py-2 text-center font-bold">
+                    <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
                       <div>{week.label}</div>
                       <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
                     </th>
                   ))}
-                  <th className="min-w-[120px] px-4 py-2 text-right font-bold">현금흐름</th>
+                  <th className="sticky top-0 z-30 min-w-[120px] border-b bg-slate-50 px-4 py-2 text-right font-bold">현금흐름</th>
                 </tr>
               </thead>
               <tbody>
-                {projects.map((project) => (
+                {projects.map((project) => {
+                  const projectWeeks = monthWeeks.map((week) => byProjectWeek.get(`${project.id}:${week.weekNo}`));
+                  const completedCount = projectWeeks.filter((status) => status?.projectionUpdated).length;
+                  const monthlyProjection = projectWeeks.reduce((totals, status) => ({
+                    totalIn: totals.totalIn + (status?.projectionTotals.totalIn || 0),
+                    totalOut: totals.totalOut + (status?.projectionTotals.totalOut || 0),
+                    net: totals.net + (status?.projectionTotals.net || 0),
+                  }), emptyTotals());
+                  const monthlyActual = projectWeeks.reduce((totals, status) => ({
+                    totalIn: totals.totalIn + (status?.actualTotals.totalIn || 0),
+                    totalOut: totals.totalOut + (status?.actualTotals.totalOut || 0),
+                    net: totals.net + (status?.actualTotals.net || 0),
+                  }), emptyTotals());
+                  const monthlyDifference = monthlyProjection.net - monthlyActual.net;
+                  const monthlyMatches = monthlyProjection.totalIn === monthlyActual.totalIn
+                    && monthlyProjection.totalOut === monthlyActual.totalOut
+                    && monthlyProjection.net === monthlyActual.net;
+                  const hasProjection = completedCount === monthWeeks.length;
+                  return (
                   <tr key={project.id} className="border-t border-border/30 transition-colors hover:bg-muted/20">
-                    <td className="px-4 py-3">
+                    <td className="sticky left-0 z-20 bg-white px-4 py-3">
                       <p className="truncate font-semibold">{project.name}</p>
                       <p className="truncate text-[10px] text-muted-foreground">{project.department} · {project.clientOrg}</p>
                     </td>
-                    <td className="px-3 py-3 font-medium">{project.managerName}</td>
+                    <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{project.managerName}</td>
+                    <td className="sticky left-[340px] z-20 border-r bg-white px-3 py-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">상태</span>
+                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                            {completedCount === monthWeeks.length ? '작성완료' : '미작성'} {completedCount}/{monthWeeks.length}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">Projection-Actual 일치 여부</span>
+                          <span className={`font-semibold ${hasProjection && !monthlyMatches ? 'text-red-700' : 'text-slate-700'}`}>
+                            {!hasProjection ? '미작성' : monthlyMatches ? '일치' : '불일치'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">Projection-Actual 차액</span>
+                          <span className="font-semibold tabular-nums">{hasProjection ? fmtShort(monthlyDifference) : '-'}</span>
+                        </div>
+                        {hasProjection && !monthlyMatches ? (
+                          <button type="button" className="text-[10px] font-semibold text-teal-700 underline underline-offset-2" onClick={() => openProject(project.id)}>
+                            프로젝션 보기
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
                     {monthWeeks.map((week) => {
                       const status = byProjectWeek.get(`${project.id}:${week.weekNo}`);
                       const projection = status?.projectionTotals || emptyTotals();
@@ -99,19 +143,21 @@ export function CashflowWeeklyPage() {
                       return (
                         <td key={week.weekNo} className={`px-3 py-3 ${status?.projectionUpdated ? '' : 'bg-red-50 dark:bg-red-950/30'}`}>
                           <div className="space-y-1.5">
+                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                              {status?.projectionUpdated ? '작성완료' : '미작성'}
+                            </Badge>
                             <div className="flex items-center justify-between gap-2">
-                              <Badge variant="outline" className="h-5 px-1.5 text-[10px]">Projection</Badge>
+                              <span className="text-[10px] text-muted-foreground">Projection</span>
                               <span className="font-semibold tabular-nums">{fmtShort(projection.net)}</span>
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <Badge variant="outline" className="h-5 px-1.5 text-[10px]">Actual</Badge>
+                              <span className="text-[10px] text-muted-foreground">Actual</span>
                               <span className="font-semibold tabular-nums">{fmtShort(actual.net)}</span>
                             </div>
                             <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
                               <span>차이</span>
                               <span className={difference < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-700'}>{fmtShort(difference)}</span>
                             </div>
-                            {!status?.projectionUpdated ? <p className="text-center text-[10px] font-semibold text-red-700">Projection 미작성</p> : null}
                           </div>
                         </td>
                       );
@@ -122,22 +168,17 @@ export function CashflowWeeklyPage() {
                       </Button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {projects.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={monthWeeks.length + 3}>프로젝트가 없습니다.</td>
+                    <td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={monthWeeks.length + 4}>프로젝트가 없습니다.</td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
           {isLoading ? <div className="border-t border-border/40 px-4 py-3 text-[11px] text-muted-foreground">불러오는 중…</div> : null}
-          {!isLoading ? (
-            <div className="flex flex-wrap items-center gap-2 border-t border-border/40 px-4 py-3 text-[10px] text-muted-foreground">
-              <Badge variant="outline" className="h-4 px-1.5 text-[9px]">조회 전용</Badge>
-              Projection과 Actual은 저장된 주차 합계이며, 최종 확정과 수정 잠금은 프로젝트별 월 결산 승인에서 처리합니다.
-            </div>
-          ) : null}
         </CardContent>
       </Card>
     </div>

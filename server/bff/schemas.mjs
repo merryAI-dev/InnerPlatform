@@ -401,6 +401,7 @@ export const memberDeepSyncSchema = memberRoleUpdateSchema;
 export const cashflowExportSchema = z.object({
   scope: z.enum(['all', 'single']),
   projectId: z.string().trim().optional(),
+  projectIds: z.array(z.string().trim().min(1).max(200).regex(/^[^/]+$/)).min(1).max(200).optional(),
   accountType: z.enum(['DEDICATED', 'OPERATING', 'NONE']).optional(),
   basis: z.enum(['공급가액', '공급대가', '기타', 'NONE']).optional(),
   startYearMonth: z.string().trim().regex(/^\d{4}-\d{2}$/),
@@ -419,6 +420,20 @@ export const cashflowExportSchema = z.object({
       code: 'custom',
       path: ['variant'],
       message: 'single-project variant requires scope=single',
+    });
+  }
+  if (value.scope === 'single' && value.projectIds) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['projectIds'],
+      message: 'projectIds is only supported when scope=all',
+    });
+  }
+  if (value.projectIds && new Set(value.projectIds).size !== value.projectIds.length) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['projectIds'],
+      message: 'projectIds must not contain duplicates',
     });
   }
 });

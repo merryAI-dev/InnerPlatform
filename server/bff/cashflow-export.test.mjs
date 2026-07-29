@@ -32,6 +32,23 @@ describe('cashflow export bff helper', () => {
     })).not.toThrow();
   });
 
+  it('accepts a bounded list of selected project ids and rejects unsafe ids', () => {
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      scope: 'all',
+      projectIds: ['project-a', 'project-b'],
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    })).not.toThrow();
+    expect(() => parseWithSchema(cashflowExportSchema, {
+      scope: 'all',
+      projectIds: ['other/project'],
+      startYearMonth: '2026-01',
+      endYearMonth: '2026-01',
+      variant: 'multi-sheet',
+    })).toThrow();
+  });
+
   it('rejects raw week 6 for cashflow week writes because storage uses financeWeek 1..5', () => {
     expect(() => parseWithSchema(cashflowWeekAmountsSchema, {
       yearMonth: '2026-08',
