@@ -6,6 +6,10 @@ import {
   buildInitialCashflowWeekDoc,
   resolveWeekDocId,
 } from './cashflow-weeks.persistence';
+import {
+  cashflowWeeklyCompletionKey,
+  isCashflowWeeklySettlementCompleted,
+} from './cashflow-weeks.helpers';
 
 const describeIfEmulator = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
 
@@ -24,10 +28,38 @@ describeIfEmulator('cashflow-weeks persistence integration (Firestore emulator)'
 
   beforeEach(async () => {
     await clearCollection(`orgs/${tenantId}/cashflow_weeks`);
+    await clearCollection(`orgs/${tenantId}/cashflow_weekly_update_completions`);
   });
 
   afterAll(async () => {
     await clearCollection(`orgs/${tenantId}/cashflow_weeks`);
+    await clearCollection(`orgs/${tenantId}/cashflow_weekly_update_completions`);
+  });
+
+  it('reads locked weekly settlement completions and excludes reopened weeks', async () => {
+    const completionPath = `orgs/${tenantId}/cashflow_weekly_update_completions`;
+    await db.doc(`${completionPath}/${projectId}-2026-03-w1`).set({
+      projectId,
+      yearMonth: '2026-03',
+      weekNo: 1,
+      status: 'LOCKED',
+      completedAt: '2026-04-02T00:00:00.000Z',
+    });
+    await db.doc(`${completionPath}/${projectId}-2026-03-w2`).set({
+      projectId,
+      yearMonth: '2026-03',
+      weekNo: 2,
+      status: 'OPEN',
+      completedAt: '2026-04-03T00:00:00.000Z',
+    });
+
+    const snapshot = await db.collection(completionPath).where('yearMonth', '==', '2026-03').get();
+    const completedKeys = snapshot.docs
+      .map((item) => item.data())
+      .filter(isCashflowWeeklySettlementCompleted)
+      .map(cashflowWeeklyCompletionKey);
+
+    expect(completedKeys).toEqual([`${projectId}:2026-03:1`]);
   });
 
   it('creates the initial actual week document with normalized amounts', async () => {

@@ -230,6 +230,7 @@ describe('firestore rules policy alignment', () => {
       'project_requests',
       'projectRequests',
       'cashflow_weeks',
+      'cashflow_weekly_update_completions',
       'monthly_closes',
       'weekly_submission_status',
       'transactions',

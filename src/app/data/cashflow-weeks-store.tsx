@@ -16,7 +16,11 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './auth-store';
 import type { CashflowSheetLineId, CashflowWeekSheet } from './types';
-import { filterCashflowWeeksThroughSelectedYear } from './cashflow-weeks.helpers';
+import {
+  cashflowWeeklyCompletionKey,
+  filterCashflowWeeksThroughSelectedYear,
+  isCashflowWeeklySettlementCompleted,
+} from './cashflow-weeks.helpers';
 import { applyWeekAmountsToLocalWeeks } from './cashflow-weeks.local-state';
 import { useFirebase } from '../lib/firebase-context';
 import { getOrgCollectionPath } from '../lib/firebase';
@@ -35,6 +39,7 @@ import { recordDevtoolsLog, summarizeAmountMap, toDevtoolsError } from '../platf
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
   weeks: CashflowWeekSheet[];
+  weeklySettlementCompletedKeys: string[];
   isLoading: boolean;
   loadError: string | null;
 }
@@ -113,6 +118,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
   const [yearMonth, setYearMonthState] = useState(() => getSeoulTodayIso().slice(0, 7));
   const [weeks, setWeeks] = useState<CashflowWeekSheet[]>([]);
+  const [weeklySettlementCompletedKeys, setWeeklySettlementCompletedKeys] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -165,6 +171,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     if (authLoading || !isAuthenticated || !user) {
       setWeeks([]);
+      setWeeklySettlementCompletedKeys([]);
       setIsLoading(false);
       setLoadError(null);
       return () => {
@@ -174,6 +181,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
 
     if (!firestoreEnabled || !db) {
       setWeeks([]);
+      setWeeklySettlementCompletedKeys([]);
       setIsLoading(false);
       setLoadError(null);
       return () => {
@@ -194,9 +202,14 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
       where('yearMonth', '<=', selectedYearEnd),
       limit(5000),
     );
+    const completionQuery = query(
+      collection(db, getOrgCollectionPath(orgId, 'cashflowWeeklyUpdateCompletions')),
+      where('yearMonth', '==', yearMonth),
+      limit(5000),
+    );
 
-    void getDocs(q)
-      .then((snap) => {
+    void Promise.all([getDocs(q), getDocs(completionQuery)])
+      .then(([snap, completionSnap]) => {
         if (cancelled) return;
         const docs = filterCashflowWeeksThroughSelectedYear(
           snap.docs.map((d) => d.data() as CashflowWeekSheet),
@@ -208,6 +221,11 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
           return (a.weekNo || 0) - (b.weekNo || 0);
         });
         setWeeks(docs);
+        setWeeklySettlementCompletedKeys(completionSnap.docs
+          .map((item) => item.data())
+          .filter(isCashflowWeeklySettlementCompleted)
+          .map(cashflowWeeklyCompletionKey)
+          .filter(Boolean));
         setIsLoading(false);
         setLoadError(null);
       })
@@ -215,6 +233,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         console.error('[CashflowWeeks] fetch error:', err);
         setWeeks([]);
+        setWeeklySettlementCompletedKeys([]);
         setIsLoading(false);
         setLoadError('현금흐름 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
       });
@@ -525,6 +544,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     yearMonth,
     weeks,
+    weeklySettlementCompletedKeys,
     isLoading,
     loadError,
     setYearMonth,
@@ -539,6 +559,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
   }), [
     yearMonth,
     weeks,
+    weeklySettlementCompletedKeys,
     isLoading,
     loadError,
     setYearMonth,

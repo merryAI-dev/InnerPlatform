@@ -29,6 +29,7 @@ describe('firebase org path builders', () => {
     expect(getOrgCollectionPath('mysc', 'payrollSchedules')).toBe('orgs/mysc/payroll_schedules');
     expect(getOrgCollectionPath('mysc', 'payrollRuns')).toBe('orgs/mysc/payroll_runs');
     expect(getOrgCollectionPath('mysc', 'cashflowWeeks')).toBe('orgs/mysc/cashflow_weeks');
+    expect(getOrgCollectionPath('mysc', 'cashflowWeeklyUpdateCompletions')).toBe('orgs/mysc/cashflow_weekly_update_completions');
     expect(getOrgCollectionPath('mysc', 'cashflowEvents')).toBe('orgs/mysc/cashflow_events');
     expect(getOrgCollectionPath('mysc', 'cashflowChangeCandidates')).toBe('orgs/mysc/cashflow_change_candidates');
     expect(getOrgCollectionPath('mysc', 'careerProfiles')).toBe('orgs/mysc/careerProfiles');

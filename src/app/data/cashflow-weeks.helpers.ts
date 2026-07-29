@@ -32,3 +32,24 @@ export function filterCashflowWeeksThroughSelectedYear<
     return /^\d{4}-\d{2}$/.test(value) && value <= yearEnd;
   });
 }
+
+export function cashflowWeeklyCompletionKey(value: {
+  projectId?: unknown;
+  yearMonth?: unknown;
+  weekNo?: unknown;
+}): string {
+  const projectId = typeof value.projectId === 'string' ? value.projectId.trim() : '';
+  const yearMonth = typeof value.yearMonth === 'string' ? value.yearMonth.trim() : '';
+  const weekNo = Number(value.weekNo);
+  return projectId && /^\d{4}-\d{2}$/.test(yearMonth) && Number.isInteger(weekNo) && weekNo >= 1 && weekNo <= 5
+    ? `${projectId}:${yearMonth}:${weekNo}`
+    : '';
+}
+
+export function isCashflowWeeklySettlementCompleted(value: {
+  status?: unknown;
+  completedAt?: unknown;
+}): boolean {
+  const status = typeof value.status === 'string' ? value.status.trim().toUpperCase() : '';
+  return status ? status === 'LOCKED' : typeof value.completedAt === 'string' && value.completedAt.trim().length > 0;
+}

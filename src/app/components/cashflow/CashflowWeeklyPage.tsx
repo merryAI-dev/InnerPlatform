@@ -24,8 +24,9 @@ function emptyTotals(): CashflowWeekTotals {
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
   const { projects } = useAppStore();
-  const { yearMonth, weeks, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
+  const { yearMonth, weeks, weeklySettlementCompletedKeys, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
+  const completedSettlements = useMemo(() => new Set(weeklySettlementCompletedKeys), [weeklySettlementCompletedKeys]);
 
   const byProjectWeek = useMemo(() => {
     const map = new Map<string, {
@@ -87,7 +88,8 @@ export function CashflowWeeklyPage() {
               <tbody>
                 {projects.map((project) => {
                   const projectWeeks = monthWeeks.map((week) => byProjectWeek.get(`${project.id}:${week.weekNo}`));
-                  const completedCount = projectWeeks.filter((status) => status?.projectionUpdated).length;
+                  const projectionCompletedCount = projectWeeks.filter((status) => status?.projectionUpdated).length;
+                  const completedSettlementCount = monthWeeks.filter((week) => completedSettlements.has(`${project.id}:${yearMonth}:${week.weekNo}`)).length;
                   const monthlyProjection = projectWeeks.reduce((totals, status) => ({
                     totalIn: totals.totalIn + (status?.projectionTotals.totalIn || 0),
                     totalOut: totals.totalOut + (status?.projectionTotals.totalOut || 0),
@@ -102,7 +104,7 @@ export function CashflowWeeklyPage() {
                   const monthlyMatches = monthlyProjection.totalIn === monthlyActual.totalIn
                     && monthlyProjection.totalOut === monthlyActual.totalOut
                     && monthlyProjection.net === monthlyActual.net;
-                  const hasProjection = completedCount === monthWeeks.length;
+                  const hasProjection = projectionCompletedCount === monthWeeks.length;
                   return (
                   <tr key={project.id} className="border-t border-border/30 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-20 bg-white px-4 py-3">
@@ -115,7 +117,7 @@ export function CashflowWeeklyPage() {
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground">상태</span>
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                            {completedCount === monthWeeks.length ? '작성완료' : '미작성'} {completedCount}/{monthWeeks.length}
+                            {completedSettlementCount === monthWeeks.length ? '완료' : '미완료'} {completedSettlementCount}/{monthWeeks.length}
                           </Badge>
                         </div>
                         <div className="flex items-center justify-between gap-2">
@@ -140,11 +142,12 @@ export function CashflowWeeklyPage() {
                       const projection = status?.projectionTotals || emptyTotals();
                       const actual = status?.actualTotals || emptyTotals();
                       const difference = projection.net - actual.net;
+                      const settlementCompleted = completedSettlements.has(`${project.id}:${yearMonth}:${week.weekNo}`);
                       return (
-                        <td key={week.weekNo} className={`px-3 py-3 ${status?.projectionUpdated ? '' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                        <td key={week.weekNo} className={`px-3 py-3 ${settlementCompleted ? '' : 'bg-red-50 dark:bg-red-950/30'}`}>
                           <div className="space-y-1.5">
                             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                              {status?.projectionUpdated ? '작성완료' : '미작성'}
+                              {settlementCompleted ? '완료' : '미완료'}
                             </Badge>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[10px] text-muted-foreground">Projection</span>
