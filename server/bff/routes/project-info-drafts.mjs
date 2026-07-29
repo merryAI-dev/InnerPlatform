@@ -171,9 +171,7 @@ function resumableDraftAttachments(tenantId, draftId, request = {}) {
 }
 
 function replacementDocumentKinds(documentKind) {
-  return ['proposal', 'rfp_request_evidence'].includes(documentKind)
-    ? ['proposal', 'rfp_request_evidence']
-    : [documentKind];
+  return [documentKind];
 }
 
 function payloadWithoutAttachment(payload, documentKind, removedAttachments) {

@@ -1008,6 +1008,8 @@ export interface CashflowMonthCloseDashboard {
 export interface CloseCashflowMonthPayload {
   yearMonth: string;
   expectedRevision: number;
+  expectedApproverUid: string;
+  expectedProjectVersion: number;
   expectedOpeningBalances: CashflowOpeningBalances;
   closeInput: CashflowMonthCloseDraftInput;
 }
@@ -1032,6 +1034,15 @@ export interface ReviewCashflowMonthCloseRequestPayload {
   decision: 'APPROVE' | 'REJECT';
   expectedRevision: number;
   reason?: string;
+}
+
+export interface CashflowMonthCloseApproverResult {
+  projectId: string;
+  executiveApproverId: string;
+  executiveApproverName: string;
+  executiveApproverEmail: string;
+  version: number;
+  updatedAt: string;
 }
 
 export interface RequestCashflowMonthReopenPayload {
@@ -2711,6 +2722,28 @@ export async function requestCashflowMonthCloseViaBff(params: {
       idempotencyKey: params.idempotencyKey,
       retries: 0,
       timeoutMs: 27_000,
+    },
+  );
+  return response.data;
+}
+
+export async function saveCashflowMonthCloseApproverViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  payload: { approverUid: string; yearMonth: string; expectedVersion?: number };
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseApproverResult> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseApproverResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/approver`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 12000,
     },
   );
   return response.data;

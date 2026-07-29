@@ -540,6 +540,7 @@ function ProjectInfoEditor({
         requesterId={actor.uid}
         departmentOptions={departmentOptions}
         topSlot={topSlot}
+        showCheckoutEntry
         readOnly={!editorCanEdit}
         canRemoveContractDocument={Boolean(record?.attachmentRefs.some((attachment) => attachment.documentKind === 'contract'))}
         canRemoveProjectDocuments

@@ -796,11 +796,6 @@ export function PortalBudget() {
     setBudgetImportAiResolvedKey('');
   }, []);
 
-  const openBudgetImport = useCallback(() => {
-    resetBudgetImport();
-    setBudgetImportOpen(true);
-  }, [resetBudgetImport]);
-
   const closeBudgetImport = useCallback(() => {
     if (budgetImportApplying) return;
     setBudgetImportOpen(false);
@@ -1037,21 +1032,6 @@ export function PortalBudget() {
     setDraggedSubCode(null);
     setDropTarget(null);
   }, []);
-
-  const startEdit = useCallback(() => {
-    setDraftRows(buildDraftRowsFromTree(activeTreeCodes));
-    setEditMode(true);
-  }, [activeTreeCodes]);
-
-  const startCodeBookEdit = useCallback(() => {
-    setDraftTreeCodes(cloneBudgetTreeCodes(activeTreeCodes));
-    setOpenedLeafEditors(new Set());
-    setCodeBookEditorTab('manual');
-    setCodeBookImportText('');
-    setCodeBookImportFileName('');
-    setCodeBookReplaceMode(false);
-    setCodeBookMode(true);
-  }, [activeTreeCodes]);
 
   const cancelEdit = useCallback(() => {
     setEditMode(false);
@@ -1403,38 +1383,10 @@ export function PortalBudget() {
         <PageHeader
           icon={Calculator}
           iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-          title="예산 편집"
+          title="예산총괄"
           description={myProject ? myProject.name : '예산 현황'}
           badge={`${meta.year}년`}
           headingVisible={false}
-          actions={(
-            <div className="flex items-center gap-2">
-              {editMode ? (
-                <>
-                  <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
-                    취소
-                  </Button>
-                  <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
-                    {settingsSaving ? '저장 중...' : '저장'}
-                  </Button>
-                </>
-              ) : !codeBookMode ? (
-                <>
-                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={openBudgetImport}>
-                    <Upload className="w-3.5 h-3.5" />
-                    예산 가져오기
-                  </Button>
-                  <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
-                    예산 편집
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={startCodeBookEdit}>
-                    <Settings className="w-3.5 h-3.5" />
-                    구조 관리
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          )}
         />
         <Dialog open={budgetImportOpen} onOpenChange={(open) => !open && closeBudgetImport()}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">

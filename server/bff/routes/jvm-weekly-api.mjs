@@ -180,6 +180,23 @@ async function readCanonicalCashflowApprover({ db, tenantId, projectId, requeste
   return approverUid;
 }
 
+function memberProjectIds(member = {}) {
+  const profile = objectValue(member.portalProfile) || {};
+  return new Set([
+    member.projectId,
+    ...(Array.isArray(member.projectIds) ? member.projectIds : []),
+    profile.projectId,
+    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
+  ].map(readOptionalText).filter(Boolean));
+}
+
+function canManageCashflowApprover({ member, project, projectId, actorId }) {
+  return memberProjectIds(member).has(projectId)
+    || [project?.registeredById, project?.managerId, project?.createdBy]
+      .map(readOptionalText)
+      .includes(actorId);
+}
+
 function commandBody(req) {
   const body = {
     ...(req.body && typeof req.body === 'object' ? req.body : {}),
@@ -2516,6 +2533,124 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json({ items, count: items.length });
   }));
 
+  app.post('/api/v1/cashflow/:projectId/month-close/approver', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'set cashflow month-close approver', authMode, workspaceEmailDomain);
+    if (!db?.doc || !db?.runTransaction) {
+      throw createHttpError(503, '프로젝트 조직장 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
+    }
+    const projectId = readOptionalText(req.params.projectId);
+    const approverUid = readOptionalText(req.body?.approverUid);
+    const yearMonth = readOptionalText(req.body?.yearMonth);
+    const expectedVersion = req.body?.expectedVersion;
+    if (
+      !projectId || projectId.includes('/')
+      || !approverUid || approverUid.includes('/')
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+      || (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0))
+    ) {
+      throw createHttpError(400, '프로젝트 조직장 지정값이 올바르지 않습니다.', 'cashflow_month_close_approver_invalid');
+    }
+    const actorId = readOptionalText(req.context.actorId);
+    const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`);
+    const actorRef = db.doc(`orgs/${req.context.tenantId}/members/${actorId}`);
+    const approverRef = db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`);
+    const requestId = `${projectId}-${yearMonth}`;
+    const pendingRequestsQuery = db.collection(`orgs/${req.context.tenantId}/cashflow_month_close_requests`)
+      .where('projectId', '==', projectId)
+      .limit(100);
+    const updatedAt = now().toISOString();
+    let result;
+
+    await db.runTransaction(async (transaction) => {
+      const [projectSnapshot, actorSnapshot, approverSnapshot, requestSnapshot] = await Promise.all([
+        transaction.get(projectRef),
+        transaction.get(actorRef),
+        transaction.get(approverRef),
+        transaction.get(pendingRequestsQuery),
+      ]);
+      if (!projectSnapshot.exists) {
+        throw createHttpError(404, '프로젝트를 찾을 수 없습니다.', 'not_found');
+      }
+      const project = projectSnapshot.data() || {};
+      const actor = actorSnapshot.exists ? actorSnapshot.data() || {} : null;
+      const approver = approverSnapshot.exists ? approverSnapshot.data() || {} : null;
+      if (
+        !actor
+        || readOptionalText(actor.uid) !== actorId
+        || readOptionalText(actor.status).toUpperCase() !== 'ACTIVE'
+      ) {
+        throw createHttpError(403, '활성 구성원만 프로젝트 조직장을 지정할 수 있습니다.', 'cashflow_month_close_member_inactive');
+      }
+      if (!canManageCashflowApprover({ member: actor, project, projectId, actorId })) {
+        throw createHttpError(403, '이 프로젝트의 조직장을 지정할 권한이 없습니다.', 'cashflow_month_close_project_forbidden');
+      }
+      if (
+        !approver
+        || readOptionalText(approver.uid) !== approverUid
+        || readOptionalText(approver.status).toUpperCase() !== 'ACTIVE'
+      ) {
+        throw createHttpError(403, '같은 조직의 활성 구성원만 조직장으로 지정할 수 있습니다.', 'cashflow_month_close_member_inactive');
+      }
+      if ([actorId, project.registeredById, project.managerId].map(readOptionalText).includes(approverUid)) {
+        throw createHttpError(409, '월 결산 요청자는 자신의 요청을 승인할 수 없습니다.', 'cashflow_month_close_self_approval_forbidden');
+      }
+      const hasPendingRequest = requestSnapshot.docs.some((doc) => (
+        ['PENDING', 'APPROVING'].includes(readOptionalText(doc.data()?.status))
+      ));
+      if (hasPendingRequest) {
+        throw createHttpError(409, '승인 대기 중인 월 결산의 조직장은 변경할 수 없습니다.', 'cashflow_month_close_approver_locked');
+      }
+      const currentVersion = Number.isSafeInteger(project.version) ? project.version : 0;
+      if (readOptionalText(project.executiveApproverId) === approverUid) {
+        result = {
+          projectId,
+          executiveApproverId: approverUid,
+          executiveApproverName: readOptionalText(project.executiveApproverName) || readOptionalText(approver.name),
+          executiveApproverEmail: readOptionalText(project.executiveApproverEmail) || readOptionalText(approver.email),
+          version: currentVersion,
+          updatedAt: readOptionalText(project.updatedAt) || updatedAt,
+        };
+        return;
+      }
+      if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+        throw createHttpError(409, '프로젝트 정보가 변경되었습니다. 새로고침 후 다시 지정해 주세요.', 'version_conflict');
+      }
+      const version = currentVersion + 1;
+      result = {
+        projectId,
+        executiveApproverId: approverUid,
+        executiveApproverName: readOptionalText(approver.name),
+        executiveApproverEmail: readOptionalText(approver.email),
+        version,
+        updatedAt,
+      };
+      transaction.set(projectRef, {
+        executiveApproverId: result.executiveApproverId,
+        executiveApproverName: result.executiveApproverName,
+        executiveApproverEmail: result.executiveApproverEmail,
+        version,
+        updatedAt,
+        updatedBy: actorId,
+      }, { merge: true });
+      transaction.set(
+        db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, version, 'approver-updated')),
+        {
+          requestId,
+          projectId,
+          yearMonth,
+          action: 'APPROVER_UPDATED',
+          revision: version,
+          actorUid: actorId,
+          approverUid,
+          idempotencyKey: readOptionalText(req.context.idempotencyKey),
+          createdAt: updatedAt,
+        },
+      );
+    });
+
+    res.status(200).json(result);
+  }));
+
   app.get('/api/v1/cashflow/:projectId/month-close/requests/current', asyncHandler(async (req, res) => {
     if (!db?.doc) {
       throw createHttpError(503, '월 결산 요청 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
@@ -2546,6 +2681,11 @@ export function mountJvmWeeklyApiRoutes(app, {
       throw createHttpError(503, '월 결산 요청 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
     }
     const rawProjectId = readOptionalText(req.params.projectId);
+    const expectedApproverUid = readOptionalText(req.body?.expectedApproverUid);
+    const expectedProjectVersion = Number(req.body?.expectedProjectVersion);
+    if (!expectedApproverUid || !Number.isSafeInteger(expectedProjectVersion) || expectedProjectVersion < 0) {
+      throw createHttpError(400, '확정한 프로젝트 조직장 정보가 필요합니다.', 'cashflow_month_close_approver_expectation_required');
+    }
     await readActiveCashflowMember({
       db,
       tenantId: req.context.tenantId,
@@ -2563,6 +2703,8 @@ export function mountJvmWeeklyApiRoutes(app, {
     const requestPayload = {
       yearMonth,
       expectedRevision: prepared.closeBody.expectedRevision,
+      expectedApproverUid,
+      expectedProjectVersion,
       expectedOpeningBalances: req.body.expectedOpeningBalances,
       closeInput: req.body.closeInput,
     };
@@ -2570,22 +2712,40 @@ export function mountJvmWeeklyApiRoutes(app, {
     const requestRef = db.doc(cashflowMonthCloseRequestPath(req.context.tenantId, requestId));
     const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${prepared.rawProjectId}`);
     const approverRef = db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`);
+    const requesterRef = db.doc(`orgs/${req.context.tenantId}/members/${readOptionalText(req.context.actorId)}`);
     const requestedAt = now().toISOString();
     let storedRecord;
     await db.runTransaction(async (transaction) => {
-      const [projectSnapshot, approverSnapshot, snapshot] = await Promise.all([
+      const [projectSnapshot, approverSnapshot, requesterSnapshot, snapshot] = await Promise.all([
         transaction.get(projectRef),
         transaction.get(approverRef),
+        transaction.get(requesterRef),
         transaction.get(requestRef),
       ]);
       const currentProject = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
       const currentApprover = approverSnapshot.exists ? approverSnapshot.data() || {} : {};
+      const currentRequester = requesterSnapshot.exists ? requesterSnapshot.data() || {} : {};
+      const currentVersion = Number.isSafeInteger(currentProject.version) ? currentProject.version : 0;
       if (
         readOptionalText(currentProject.executiveApproverId) !== approverUid
+        || approverUid !== expectedApproverUid
+        || currentVersion !== expectedProjectVersion
         || readOptionalText(currentApprover.uid) !== approverUid
         || readOptionalText(currentApprover.status).toUpperCase() !== 'ACTIVE'
       ) {
         throw createHttpError(409, '프로젝트 조직장 정보가 변경되었습니다. 다시 요청해 주세요.', 'cashflow_month_close_approver_stale');
+      }
+      if (
+        readOptionalText(currentRequester.uid) !== readOptionalText(req.context.actorId)
+        || readOptionalText(currentRequester.status).toUpperCase() !== 'ACTIVE'
+        || !canManageCashflowApprover({
+          member: currentRequester,
+          project: currentProject,
+          projectId: prepared.rawProjectId,
+          actorId: readOptionalText(req.context.actorId),
+        })
+      ) {
+        throw createHttpError(403, '이 프로젝트의 월 결산을 요청할 권한이 없습니다.', 'cashflow_month_close_project_forbidden');
       }
       if (snapshot.exists) {
         const existing = snapshot.data() || {};
@@ -2677,6 +2837,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       || !['APPROVE', 'REJECT'].includes(decision)
       || !Number.isSafeInteger(expectedRevision)
       || expectedRevision < 0
+      || (decision === 'REJECT' && !reason)
       || reason.length > 1_000
     ) {
       throw createHttpError(400, '월 결산 검토 입력값이 올바르지 않습니다.', 'cashflow_month_close_review_invalid');

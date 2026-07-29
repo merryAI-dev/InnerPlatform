@@ -328,8 +328,8 @@ const ADMIN_COMMAND_DEFINITIONS: AdminCommandItem[] = [
 const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
   {
     id: 'pm:budget',
-    label: 'PM 예산 편집',
-    description: '예산 구조, 비목, 세목, 사업비 계획을 편집합니다.',
+    label: 'PM 예산총괄',
+    description: '예산 배정, 소진, 잔액 현황을 조회합니다.',
     category: 'PM',
     scope: 'pm',
     to: '/portal/budget',
@@ -337,7 +337,7 @@ const PM_COMMAND_DEFINITIONS: AdminCommandItem[] = [
     kind: 'page',
     priority: 106,
     featured: true,
-    keywords: ['예산', '예산 편집', '사업비', '사업비 계획', '비목', '세목', '예산 구성', '예산 항목', '편성', '총예산', '지원금', '수익'],
+    keywords: ['예산', '예산총괄', '사업비', '사업비 계획', '비목', '세목', '예산 구성', '예산 항목', '총예산', '지원금', '수익'],
   },
   {
     id: 'pm:cashflow',

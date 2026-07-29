@@ -5,9 +5,27 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'ProjectEditorWizard.tsx'), 'utf8');
 const adminWizardSource = readFileSync(resolve(import.meta.dirname, 'ProjectWizard.tsx'), 'utf8');
 const portalRegisterSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectRegister.tsx'), 'utf8');
+const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/PortalProjectEdit.tsx'), 'utf8');
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
+  it('renders the seven PPT page 29 registration uploads without alternative-document rules', () => {
+    expect(source).toContain("label: '계약서 *'");
+    expect(source).toContain("description: '아직 날인 전이라면 날인 후 업로드 필수'");
+    expect(source).toContain("label: '고객사 사업자등록증 *'");
+    expect(source).toContain("label: '견적서 *'");
+    expect(source).toContain("label: '제안서(워드) *'");
+    expect(source).toContain("label: '제안서(PPT 원본) *'");
+    expect(source).toContain("label: '발표자료(PPT 원본) *'");
+    expect(source).toContain("label: 'RFP *'");
+    expect(source.match(/description: '있을 시'/g)).toHaveLength(3);
+    expect(source).toContain("description: '없으면 사업요청사항을 확인할 수 있는 메일 본문 등 첨부'");
+    expect(source).toContain("const hasRequiredRegistrationDocuments = REGISTRATION_DOCUMENT_KINDS.every");
+    expect(source).toContain("mode === 'portal-register' && !hasRequiredRegistrationDocuments");
+    expect(source).not.toContain("kinds: ['proposal', 'rfp_request_evidence']");
+    expect(source).not.toContain('제안서와 RFP/요청 메일 중 하나만 남겨주세요.');
+  });
+
   it('lets the portal shell own the page title without rendering a duplicate editor header', () => {
     expect(source.match(/>\{title\}<\/h1>/g)).toHaveLength(1);
     expect(source).toContain('{embeddedInShell ? (');
@@ -26,6 +44,12 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('ContractDocumentPreview');
     expect(source).toContain('draft.contractDocument');
     expect(source).not.toContain('<Input value={draft.contractType}');
+  });
+
+  it('uses the PPT settlement-system options and keeps a selected legacy value representable', () => {
+    expect(source).toContain('PROJECT_SETTLEMENT_SYSTEM_CODES');
+    expect(source).toContain('PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem)');
+    expect(source).toContain('[draft.settlementSystem]');
   });
 
   it('keeps select values representable in their option lists', () => {
@@ -232,6 +256,34 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('const updateProjectName = (value: string)');
   });
 
+  it('shows persistent guidance below the purpose and main-content labels', () => {
+    const purposeField = source.slice(
+      source.indexOf('<Label className="text-xs">프로젝트 목적'),
+      source.indexOf('<Label className="text-xs">프로젝트 주요 내용'),
+    );
+    const mainContentField = source.slice(
+      source.indexOf('<Label className="text-xs">프로젝트 주요 내용'),
+      source.indexOf('const renderContractTypeSelect'),
+    );
+
+    expect(purposeField.indexOf('어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력')).toBeLessThan(
+      purposeField.indexOf('<Textarea'),
+    );
+    expect(purposeField).toContain('<p className="mt-1 text-[11px] leading-5 text-muted-foreground">');
+    expect(purposeField).toContain('예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성');
+    expect(mainContentField.indexOf('프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약')).toBeLessThan(
+      mainContentField.indexOf('<Textarea'),
+    );
+    expect(mainContentField).toContain('<p className="mt-1 text-[11px] leading-5 text-muted-foreground">');
+    expect(mainContentField).toContain('<span className="block">1. 사업제안서 작성 교육</span>');
+    expect(mainContentField).toContain('<span className="block">2. 사업제안서 작성 - 25개팀 이상 1:1 코칭</span>');
+    expect(mainContentField).toContain('<span className="block">3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅</span>');
+    expect(purposeField).not.toContain('placeholder=');
+    expect(mainContentField).not.toContain('placeholder=');
+    expect(portalRegisterSource).toContain('<ProjectEditorWizard');
+    expect(portalEditSource).toContain('<ProjectEditorWizard');
+  });
+
   it('uses the PPT financial total labels in both entry and review surfaces', () => {
     expect(source).toContain('총매출부가세');
     expect(source).toContain('총지원금');
@@ -293,15 +345,10 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('등록 제출서류 7종');
     expect(source).toContain('stacked');
     expect(source).toContain("className=\"grid gap-1.5 text-left\"");
-    expect(source).toContain('4번은 제안서 PDF 또는 RFP/요청 메일 증빙 중 하나만 제출하면 됩니다.');
-    expect(source).toContain('제안서 PDF 또는 RFP/요청 메일 증빙 *');
-    expect(source).toContain("if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument)");
-    expect(source).toContain('if (draft.proposalDocument && draft.rfpRequestEvidenceDocument)');
-    expect(source).toContain('제안서와 RFP/요청 메일 중 하나만 남겨주세요.');
+    expect(source).toContain('프로젝트 유형과 관계없이 7개 서류를 모두 첨부해야 저장할 수 있습니다.');
     expect(source).toContain('등록 제출서류');
     expect(source).toContain("if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' })");
     expect(source).toContain('고객사 사업자등록증 PDF');
-    expect(source).toContain('원본 파일 또는 미첨부 사유');
     expect(source).toContain('계약 종료일은 시작일 이후여야 합니다.');
     expect(source).toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
     expect(source).toContain('실제 투입 운영 매니저 1인 이상');
@@ -309,19 +356,14 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
     expect(source).toContain('md:grid-cols-2 xl:grid-cols-4');
     expect(source).not.toContain('xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]');
-    expect(source).toContain('alternativeDocumentAttached');
-    expect(source).toContain("rfpRequestEvidenceDocument: kind === 'proposal' ? null : prev.rfpRequestEvidenceDocument");
-    expect(source).toContain("proposalDocument: kind === 'rfp_request_evidence' ? null : prev.proposalDocument");
-    expect(source).toContain('업로드하면 기존 대체서류를 교체합니다.');
-    expect(source).not.toContain('disabled: alternativeDocumentAttached');
-    expect(source).toContain('제안서: ${draft.proposalDocument.name}');
-    expect(source).toContain('RFP/요청 메일: ${draft.rfpRequestEvidenceDocument.name}');
+    expect(source).not.toContain('alternativeDocumentAttached');
     expect(source).toContain('특이사항 (메모란)');
     expect(source).not.toContain('lg:sticky lg:bottom-4');
     expect(source).not.toContain('발주처');
-    expect(source).toMatch(/number: 5,\s+label: '제안서 Word 원본'/);
-    expect(source).toMatch(/number: 6,\s+label: '제안서 PPT 원본'/);
-    expect(source).toMatch(/number: 7,\s+label: '발표자료 PPT 원본'/);
+    expect(source).toMatch(/number: 4,\s+label: '제안서\(워드\) \*'/);
+    expect(source).toMatch(/number: 5,\s+label: '제안서\(PPT 원본\) \*'/);
+    expect(source).toMatch(/number: 6,\s+label: '발표자료\(PPT 원본\) \*'/);
+    expect(source).toMatch(/number: 7,\s+label: 'RFP \*'/);
     expect(source).toContain('연도별 계약·재무 *');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
     expect(source).toContain('4대보험 포함 확인');
@@ -366,7 +408,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('disabled={readOnly || autosaveState');
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId");
     expect(source).toContain('shouldResetProjectEditorDraft({');
-    expect(source).toContain('autosave?.onSave, draftKey, hasPendingRetryFile, readOnly, uploadInProgress');
+    expect(source).toContain('autosave?.onSave, draftKey, hasPendingRetryFile, hasRequiredRegistrationDocuments, mode, readOnly, uploadInProgress');
   });
 
   it('keeps failed attachment files retryable and clears the input only after success', () => {
@@ -395,7 +437,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('if (uploadInProgress || hasPendingRetryFile) return false;');
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 임시저장해 주세요.')");
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.')");
-    expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile}");
+    expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || (mode === 'portal-register' && !hasRequiredRegistrationDocuments)}");
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId || action.disabled || !canSubmit}");
   });
 

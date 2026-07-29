@@ -49,6 +49,22 @@ function formatChartAmount(amount: number) {
   return fmtFull(amount);
 }
 
+function isSettlementProject(project: Project) {
+  return project.registrationRequirementsVersion === 2
+    ? project.basis !== 'NONE'
+    : normalizeSettlementType(project.settlementType) !== 'NONE';
+}
+
+function checkoutBadge(done: boolean) {
+  return done
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-slate-200 bg-slate-50 text-slate-500';
+}
+
+export function projectCheckoutFileStatus(applicable: boolean, uploaded: boolean) {
+  return uploaded ? '첨부 완료' : applicable ? '미첨부' : '해당 없음';
+}
+
 type SortKey = 'name' | 'contractAmount' | 'totalRevenueAmount' | 'status';
 type SortDir = 'asc' | 'desc';
 
@@ -346,6 +362,50 @@ export function ProjectListPage() {
                             <div className="flex justify-between gap-3"><dt className="text-slate-500">프로젝트 유형</dt><dd className="text-right">{p.type || '-'}</dd></div>
                             <div className="flex justify-between gap-3"><dt className="text-slate-500">담당조직(CIC)</dt><dd className="text-right">{normalizeProjectDepartment(p.department) || '-'}</dd></div>
                           </dl>
+                        </div>
+                        <div className="border-t border-slate-200 pt-3 md:col-span-3" data-testid={`project-checkout-state-${p.id}`}>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Project Check out</p>
+                          {!['COMPLETED', 'COMPLETED_PENDING_PAYMENT'].includes(p.status) ? (
+                            <p className="mt-2 text-slate-500">프로젝트 종료 단계에서 확인합니다.</p>
+                          ) : (
+                            <div className="mt-2 grid gap-4 lg:grid-cols-2">
+                              <div>
+                                <p className="font-semibold text-slate-700">체크리스트</p>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {([
+                                    ['최종 잔금', p.checkout?.finalPaymentReceived === true],
+                                    ['계좌 잔액 0원', p.checkout?.bankBalanceZero === true],
+                                    ['실적증명 제출', p.checkout?.performanceCertificateReceived === true],
+                                    ...(isSettlementProject(p) ? [
+                                      ['정산 자료 USB·재무팀 제출', p.checkout?.usbEvidenceSubmitted === true],
+                                      ['사용 내역 유지·증빙 삭제', p.checkout?.evidenceDeletedAfterUsb === true],
+                                    ] as const : []),
+                                  ] satisfies Array<readonly [string, boolean]>).map(([label, done]) => (
+                                    <span key={label} className={`rounded-full border px-2 py-1 ${checkoutBadge(done)}`}>
+                                      {label} · {done ? '완료' : '미완료'}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-slate-700">적용 증빙 PDF</p>
+                                <dl className="mt-2 space-y-1.5">
+                                  {([
+                                    ['고객 실적증명', p.checkout?.performanceCertificateDocumentApplicable === true || Boolean(p.performanceCertificateDocument?.path), Boolean(p.performanceCertificateDocument?.path)],
+                                    ['발행 세금계산서 전체', p.checkout?.taxInvoiceEvidenceConfirmed === true, Boolean(p.taxInvoiceDocument?.path)],
+                                    ['회계사 최종 정산보고서', isSettlementProject(p) && p.checkout?.finalSettlementReportConfirmed === true, Boolean(p.finalSettlementReportDocument?.path)],
+                                  ] satisfies Array<readonly [string, boolean, boolean]>).map(([label, applicable, uploaded]) => (
+                                    <div key={String(label)} className="flex justify-between gap-3 text-slate-700">
+                                      <dt>{label}</dt>
+                                      <dd className={uploaded ? 'font-semibold text-emerald-700' : applicable ? 'font-semibold text-red-700' : 'text-slate-500'}>
+                                        {projectCheckoutFileStatus(applicable, uploaded)}
+                                      </dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </TableCell>

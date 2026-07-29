@@ -15,7 +15,15 @@ import {
   tryRenameManagedProjectRootFolder,
 } from './projects.mjs';
 
-const registrationV2AttachmentKinds = ['contract', 'customer_business_registration', 'quote', 'proposal'];
+const registrationV2AttachmentKinds = [
+  'contract',
+  'customer_business_registration',
+  'quote',
+  'proposal_word_original',
+  'proposal_ppt_original',
+  'presentation_ppt_original',
+  'rfp_request_evidence',
+];
 
 function registrationV2Payload(overrides: Record<string, unknown> = {}) {
   return {
@@ -429,26 +437,19 @@ describe('project route helpers', () => {
     });
   });
 
-  it('requires proposal or RFP evidence while accepting either alternative', () => {
-    const fixedDocumentKinds = ['contract', 'customer_business_registration', 'quote'];
+  it.each(registrationV2AttachmentKinds)('requires the %s registration attachment', (missingKind) => {
+    expect(() => registrationV2Canonical(
+      registrationV2Payload(),
+      registrationV2AttachmentKinds.filter((kind) => kind !== missingKind),
+    )).toThrowError(`Project registration required attachment is missing: ${missingKind}`);
+  });
 
-    expect(() => registrationV2Canonical(registrationV2Payload(), [...fixedDocumentKinds, 'proposal'])).not.toThrow();
-    expect(() => registrationV2Canonical(registrationV2Payload(), [...fixedDocumentKinds, 'rfp_request_evidence'])).not.toThrow();
-    expect(() => registrationV2Canonical(registrationV2Payload(), [
-      ...fixedDocumentKinds,
-      'proposal',
-      'rfp_request_evidence',
-    ])).toThrowError('Project registration requires exactly one of proposal or RFP evidence');
-    expect(() => registrationV2Canonical(registrationV2Payload(), fixedDocumentKinds))
-      .toThrowError('Project registration requires proposal or RFP evidence');
-    expect(() => registrationV2Canonical(registrationV2Payload({
-      registrationOptionalDocumentNotes: {
-        proposalWordOriginal: '',
-        proposalPptOriginal: '',
-        presentationPptOriginal: '',
-      },
-    }), [...fixedDocumentKinds, 'proposal']))
-      .toThrowError('Project registration optional attachment note is missing: proposal_word_original');
+  it('accepts all seven required attachments and preserves a legacy proposal as an extra document', () => {
+    expect(() => registrationV2Canonical(
+      registrationV2Payload(),
+      [...registrationV2AttachmentKinds, 'proposal'],
+      [...registrationV2AttachmentKinds, 'proposal'],
+    )).not.toThrow();
   });
 
   it('accepts the PPT settlement-none basis for registration v2', () => {
@@ -476,6 +477,13 @@ describe('project route helpers', () => {
     }));
 
     expect(canonical.projectRequest.payload.accountType).toBe('OTHER');
+  });
+
+  it.each(['IRIS', 'ACCOUNTANT'])('preserves supported %s settlement-system codes', (settlementSystem) => {
+    const canonical = registrationV2Canonical(registrationV2Payload({ settlementSystem }));
+
+    expect(canonical.projectRequest.payload.settlementSystem).toBe(settlementSystem);
+    expect(canonical.project.settlementSystem).toBe(settlementSystem);
   });
 
   it.each([

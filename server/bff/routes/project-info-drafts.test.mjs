@@ -158,7 +158,18 @@ function validV2Payload(overrides = {}) {
     },
     quoteDocument: { path: 'orgs/tenant-a/project-registration-documents/project-a/quote.pdf' },
     proposalDocument: { path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pdf' },
-    rfpRequestEvidenceDocument: null,
+    proposalWordOriginalDocument: {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.docx',
+    },
+    proposalPptOriginalDocument: {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/proposal.pptx',
+    },
+    presentationPptOriginalDocument: {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/presentation.pptx',
+    },
+    rfpRequestEvidenceDocument: {
+      path: 'orgs/tenant-a/project-registration-documents/project-a/rfp.pdf',
+    },
     ...overrides,
   });
 }
@@ -473,9 +484,10 @@ describe('project information private drafts', () => {
       buffer: VALID_PDF,
     });
 
-    expect(replacement.body.draft.attachmentRefs).toEqual([
+    expect(replacement.body.draft.attachmentRefs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ documentKind: 'proposal', name: 'proposal-v1.pdf' }),
       expect.objectContaining({ documentKind: 'rfp_request_evidence', name: 'rfp-v2.pdf' }),
-    ]);
+    ]));
     expect(storageService.deleteDraftAttachment).not.toHaveBeenCalled();
     expect([...h.db.documents.values()].some((value) => value?.eventType === 'draft.attachments.cleanup'))
       .toBe(false);
@@ -826,6 +838,18 @@ describe('project information private drafts', () => {
     };
     const h = harness({ storageService: storage });
     await openedDraft(h);
+    await expect(h.service.addAttachment({
+      ...h.base,
+      actorId: 'actor-admin',
+      actorRole: 'admin',
+      idempotencyKey: 'checkout-upload-forbidden',
+      expectedDraftRevision: 0,
+      documentKind: 'performance_certificate',
+      fileName: 'forbidden.pdf',
+      mimeType: 'application/pdf',
+      fileSize: VALID_PDF.byteLength,
+      buffer: VALID_PDF,
+    })).rejects.toMatchObject({ statusCode: 404 });
     const kinds = ['performance_certificate', 'tax_invoice', 'final_settlement_report'];
     for (const [revision, documentKind] of kinds.entries()) {
       await h.service.addAttachment({
@@ -857,12 +881,14 @@ describe('project information private drafts', () => {
       }),
     });
 
-    await h.service.submit({
+    const submitInput = {
       ...h.base,
       idempotencyKey: 'checkout-submit',
       expectedDraftRevision: 4,
       expectedVersion: 3,
-    });
+    };
+    const submitted = await h.service.submit(submitInput);
+    const replay = await h.service.submit(submitInput);
 
     const request = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a');
     expect(request.proposedSnapshot).toMatchObject({
@@ -880,9 +906,89 @@ describe('project information private drafts', () => {
       finalSettlementReportDocument: { documentKind: 'final_settlement_report' },
     });
     expect(h.db.documents.get('outbox/outbox-a').payload.attachmentRefs.map((item) => item.documentKind)).toEqual(kinds);
+    expect(replay).toEqual({ ...submitted, replayed: true });
   });
 
-  it('rejects a completed-project evidence confirmation without the matching PDF', async () => {
+  it('does not require settlement-only checkout evidence for a non-settlement project', async () => {
+    const h = harness();
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'non-settlement-checkout-save',
+      expectedDraftRevision: 0,
+      payload: validV2Payload({
+        status: 'COMPLETED',
+        basis: 'NONE',
+        accountType: 'NONE',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: false,
+          taxInvoiceEvidenceConfirmed: false,
+          finalSettlementReportConfirmed: true,
+          usbEvidenceSubmitted: true,
+          evidenceDeletedAfterUsb: true,
+        },
+      }),
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'non-settlement-checkout-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot).toMatchObject({
+      basis: 'NONE',
+      checkout: {
+        usbEvidenceSubmitted: false,
+        evidenceDeletedAfterUsb: false,
+        finalSettlementReportConfirmed: false,
+      },
+      finalSettlementReportDocument: null,
+    });
+  });
+
+  it('allows electronic performance-certificate completion when no customer PDF applies', async () => {
+    const h = harness();
+    await openedDraft(h);
+    await h.service.update({
+      ...h.base,
+      idempotencyKey: 'electronic-certificate-checkout-save',
+      expectedDraftRevision: 0,
+      payload: validV2Payload({
+        status: 'COMPLETED',
+        checkout: {
+          finalPaymentReceived: true,
+          bankBalanceZero: true,
+          performanceCertificateReceived: true,
+          performanceCertificateDocumentApplicable: false,
+          taxInvoiceEvidenceConfirmed: false,
+          finalSettlementReportConfirmed: false,
+          usbEvidenceSubmitted: false,
+          evidenceDeletedAfterUsb: false,
+        },
+      }),
+    });
+
+    await h.service.submit({
+      ...h.base,
+      idempotencyKey: 'electronic-certificate-checkout-submit',
+      expectedDraftRevision: 1,
+      expectedVersion: 3,
+    });
+
+    expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot).toMatchObject({
+      checkout: {
+        performanceCertificateReceived: true,
+        performanceCertificateDocumentApplicable: false,
+      },
+      performanceCertificateDocument: null,
+    });
+  });
+
+  it('rejects an applicable completed-project performance certificate without the matching PDF', async () => {
     const h = harness();
     await openedDraft(h);
     await h.service.update({
@@ -895,6 +1001,7 @@ describe('project information private drafts', () => {
           finalPaymentReceived: true,
           bankBalanceZero: true,
           performanceCertificateReceived: true,
+          performanceCertificateDocumentApplicable: true,
           taxInvoiceEvidenceConfirmed: false,
           finalSettlementReportConfirmed: false,
           usbEvidenceSubmitted: false,
@@ -949,6 +1056,7 @@ describe('project information private drafts', () => {
           finalPaymentReceived: true,
           bankBalanceZero: true,
           performanceCertificateReceived: true,
+          performanceCertificateDocumentApplicable: true,
           taxInvoiceEvidenceConfirmed: false,
           finalSettlementReportConfirmed: false,
           usbEvidenceSubmitted: false,
@@ -1025,6 +1133,7 @@ describe('project information private drafts', () => {
           finalPaymentReceived: true,
           bankBalanceZero: true,
           performanceCertificateReceived: true,
+          performanceCertificateDocumentApplicable: true,
           taxInvoiceEvidenceConfirmed: false,
           finalSettlementReportConfirmed: false,
           usbEvidenceSubmitted: false,
@@ -1274,7 +1383,7 @@ describe('project information private drafts', () => {
     });
   });
 
-  it('replaces proposal with RFP evidence in the private edit draft and submitted request', async () => {
+  it('keeps proposal and RFP as independent private edit attachments', async () => {
     const storage = {
       uploadDraftAttachment: vi.fn(async (input) => ({
         path: `orgs/${input.tenantId}/project-registration-drafts/${input.draftId}/${input.attachmentId}-${input.fileName}`,
@@ -1309,12 +1418,10 @@ describe('project information private drafts', () => {
     });
 
     expect(rfp.body.draft.attachmentRefs.map((item) => item.documentKind))
-      .toEqual(['rfp_request_evidence']);
-    expect(storage.deleteDraftAttachment).toHaveBeenCalledWith({
-      tenantId: 'tenant-a',
-      draftId: expect.stringMatching(/^v1_/),
+      .toEqual(['proposal', 'rfp_request_evidence']);
+    expect(storage.deleteDraftAttachment).not.toHaveBeenCalledWith(expect.objectContaining({
       path: proposal.body.attachment.path,
-    });
+    }));
 
     await h.service.submit({
       ...h.base,
@@ -1324,10 +1431,10 @@ describe('project information private drafts', () => {
     });
 
     expect(h.db.documents.get('outbox/outbox-a').payload.attachmentRefs.map((item) => item.documentKind))
-      .toEqual(['rfp_request_evidence']);
+      .toEqual(['proposal', 'rfp_request_evidence']);
     expect(h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot)
       .toMatchObject({
-        proposalDocument: null,
+        proposalDocument: { documentKind: 'proposal', name: 'proposal.pdf' },
         rfpRequestEvidenceDocument: { documentKind: 'rfp_request_evidence', name: 'rfp.pdf' },
       });
   });
@@ -1347,7 +1454,7 @@ describe('project information private drafts', () => {
       replacementField: 'proposalDocument',
       replacementKind: 'proposal',
     },
-  ])('submits $label without resurrecting the replaced canonical alternative', async ({
+  ])('submits $label while preserving the independent canonical document', async ({
     canonicalField,
     canonicalKind,
     replacementField,
@@ -1396,7 +1503,7 @@ describe('project information private drafts', () => {
     });
 
     const proposed = h.db.documents.get('orgs/tenant-a/project_requests/change-project-a').proposedSnapshot;
-    expect(proposed[canonicalField]).toBeNull();
+    expect(proposed[canonicalField]).toMatchObject({ path: expect.stringContaining(`/${canonicalKind}.pdf`) });
     expect(proposed[replacementField]).toMatchObject({ documentKind: replacementKind });
   });
 

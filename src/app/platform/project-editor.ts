@@ -193,6 +193,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
     finalPaymentReceived: false,
     bankBalanceZero: false,
     performanceCertificateReceived: false,
+    performanceCertificateDocumentApplicable: false,
     taxInvoiceEvidenceConfirmed: false,
     finalSettlementReportConfirmed: false,
     usbEvidenceSubmitted: false,
@@ -342,7 +343,7 @@ function registrationOptionalDocumentNotes(value: unknown): ProjectRegistrationO
   };
 }
 
-function projectCheckout(value: unknown): ProjectCheckout {
+function projectCheckout(value: unknown, settlementApplicable = true): ProjectCheckout {
   const source = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<ProjectCheckout>
     : {};
@@ -350,10 +351,11 @@ function projectCheckout(value: unknown): ProjectCheckout {
     finalPaymentReceived: source.finalPaymentReceived === true,
     bankBalanceZero: source.bankBalanceZero === true,
     performanceCertificateReceived: source.performanceCertificateReceived === true,
+    performanceCertificateDocumentApplicable: source.performanceCertificateDocumentApplicable === true,
     taxInvoiceEvidenceConfirmed: source.taxInvoiceEvidenceConfirmed === true,
-    finalSettlementReportConfirmed: source.finalSettlementReportConfirmed === true,
-    usbEvidenceSubmitted: source.usbEvidenceSubmitted === true,
-    evidenceDeletedAfterUsb: source.evidenceDeletedAfterUsb === true,
+    finalSettlementReportConfirmed: settlementApplicable && source.finalSettlementReportConfirmed === true,
+    usbEvidenceSubmitted: settlementApplicable && source.usbEvidenceSubmitted === true,
+    evidenceDeletedAfterUsb: settlementApplicable && source.evidenceDeletedAfterUsb === true,
   };
 }
 
@@ -548,7 +550,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     ),
     registrationConfirmations: registrationConfirmations(overrides.registrationConfirmations),
     registrationOptionalDocumentNotes: registrationOptionalDocumentNotes(overrides.registrationOptionalDocumentNotes),
-    checkout: projectCheckout(overrides.checkout),
+    checkout: projectCheckout(overrides.checkout, settlementDetailsEnabled),
   };
   return normalizeProjectRevenueFields(draft, 'totalRevenueAmount');
 }

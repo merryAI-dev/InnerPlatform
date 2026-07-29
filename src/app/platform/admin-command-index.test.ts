@@ -86,11 +86,13 @@ describe('admin command index', () => {
     expect(labels).not.toContain('기능 검색');
     expect(items.filter((item) => item.category === '관리자').length).toBeGreaterThan(0);
     expect(items.filter((item) => item.category === 'PM').length).toBeGreaterThan(0);
-    expect(searchAdminCommandItems(items, '예산 편집')[0]).toMatchObject({
-      label: 'PM 예산 편집',
+    expect(searchAdminCommandItems(items, '예산총괄')[0]).toMatchObject({
+      label: 'PM 예산총괄',
       to: '/portal/budget',
       category: 'PM',
     });
+    expect(searchAdminCommandItems(items, '예산 편집').map((item) => item.label))
+      .not.toContain('PM 예산 편집');
     expect(items.some((item) => item.to === '/portal/weekly-expenses')).toBe(false);
     expect(items.some((item) => item.to === '/portal/payroll')).toBe(false);
     expect(searchAdminCommandItems(items, '사업비 관리')[0]).toMatchObject({

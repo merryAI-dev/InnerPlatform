@@ -17,6 +17,8 @@ describe('WorkspaceSelectPage shell contract', () => {
     expect(source).not.toContain('backdrop-blur-2xl');
     expect(source).toContain('관리자 공간으로 계속');
     expect(source).toContain('실무자 포털로 계속');
+    expect(source).toContain("'예산총괄'");
+    expect(source).not.toContain('예산 편집');
     expect(source).not.toContain('PM 포털');
     expect(source).not.toContain('CardContent');
   });

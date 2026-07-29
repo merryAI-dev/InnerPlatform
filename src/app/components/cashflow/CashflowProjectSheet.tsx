@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   AlertDialog,
@@ -20,6 +21,8 @@ import {
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import {
   CASHFLOW_SHEET_LINE_LABELS,
+  type OrgMember,
+  type Project,
   type CashflowSheetLineId,
   type UserRole,
 } from '../../data/types';
@@ -34,6 +37,7 @@ import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-tran
 import {
   fetchCashflowActivityViaBff,
   requestCashflowMonthCloseViaBff,
+  saveCashflowMonthCloseApproverViaBff,
   completeCashflowWeeklyUpdateViaBff,
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
@@ -226,10 +230,22 @@ function bffErrorCode(error: unknown): string {
 export function CashflowProjectSheet({
   projectId,
   projectName,
+  project,
+  members,
+  onExecutiveApproverSaved,
   roleOverride,
 }: {
   projectId: string;
   projectName?: string;
+  project?: Project | null;
+  members?: OrgMember[];
+  onExecutiveApproverSaved?: (result: {
+    executiveApproverId: string;
+    executiveApproverName: string;
+    executiveApproverEmail: string;
+    version: number;
+    updatedAt: string;
+  }) => void;
   roleOverride?: UserRole | string;
   initialViewMode?: 'projection' | 'actual' | 'compare';
   onUpdateWeeklySubmissionStatus?: (input: {
@@ -311,6 +327,9 @@ export function CashflowProjectSheet({
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
   const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
   const [monthCloseBusy, setMonthCloseBusy] = useState(false);
+  const [selectedExecutiveApproverId, setSelectedExecutiveApproverId] = useState(project?.executiveApproverId || '');
+  const [savedExecutiveApproverId, setSavedExecutiveApproverId] = useState(project?.executiveApproverId || '');
+  const [executiveApproverBusy, setExecutiveApproverBusy] = useState(false);
   const [qaClockOpen, setQaClockOpen] = useState(false);
   const [qaClockBusy, setQaClockBusy] = useState(false);
   const [qaClockInput, setQaClockInput] = useState('');
@@ -338,6 +357,22 @@ export function CashflowProjectSheet({
     closedMonthChangeReason: string;
   } | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
+  const executiveApproverOptions = useMemo(() => (members || [])
+    .filter((member) => (
+      Boolean(String(member.uid || '').trim())
+      && String(member.status || '').trim().toUpperCase() === 'ACTIVE'
+      && member.uid !== user?.uid
+      && member.uid !== project?.registeredById
+      && member.uid !== project?.managerId
+    ))
+    .sort((left, right) => String(left.name || left.email).localeCompare(String(right.name || right.email), 'ko-KR')),
+  [members, project?.managerId, project?.registeredById, user?.uid]);
+
+  useEffect(() => {
+    const approverId = project?.executiveApproverId || '';
+    setSelectedExecutiveApproverId(approverId);
+    setSavedExecutiveApproverId(approverId);
+  }, [project?.executiveApproverId, projectId]);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
@@ -864,6 +899,37 @@ export function CashflowProjectSheet({
     };
   }, [cashflowSheetConfig?.value, monthCloseCellsState.error, monthCloseError, monthCloseLoading, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.status, monthClosePinnedSource?.targetRevisionAtFetch, monthClosePinnedSource?.yearMonths, monthCloseResult, yearMonth]);
 
+  const handleSaveExecutiveApprover = useCallback(async (): Promise<void> => {
+    const approver = executiveApproverOptions.find((member) => member.uid === selectedExecutiveApproverId);
+    if (!project || !approver) {
+      toast.error('조직장을 선택해 주세요.');
+      return;
+    }
+    setExecutiveApproverBusy(true);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const result = await saveCashflowMonthCloseApproverViaBff({
+        tenantId: orgId,
+        actor,
+        projectId,
+        payload: {
+          approverUid: approver.uid,
+          yearMonth,
+          expectedVersion: project.version,
+        },
+        idempotencyKey: `cashflow-month-close-approver:${projectId}:${yearMonth}:${approver.uid}:${project.version ?? 0}`,
+      });
+      setSavedExecutiveApproverId(result.executiveApproverId);
+      onExecutiveApproverSaved?.(result);
+      toast.success(`${result.executiveApproverName || approver.name}님을 월 결산 조직장으로 지정했습니다.`);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, '조직장을 저장하지 못했습니다.'));
+    } finally {
+      setExecutiveApproverBusy(false);
+    }
+  }, [executiveApproverOptions, onExecutiveApproverSaved, orgId, project, projectId, resolveBffActor, selectedExecutiveApproverId, yearMonth]);
+
   const handleOpenMonthCloseReview = useCallback((): void => {
     const summary = {
       status: monthClosePreparation.status,
@@ -885,6 +951,10 @@ export function CashflowProjectSheet({
       toast.error('프로젝트 접근 권한이 있는 활성 사용자만 월 결산할 수 있습니다.');
       return;
     }
+    if (project && !savedExecutiveApproverId) {
+      toast.error('월 결산을 요청할 조직장을 먼저 선택하고 확정해 주세요.');
+      return;
+    }
     setMonthCloseReviewOpen(true);
     if (monthClosePreparation.status !== 'READY' && monthClosePreparation.status !== 'STATUS_LOADING') {
       logCashflowSettlement({
@@ -895,7 +965,7 @@ export function CashflowProjectSheet({
         summary,
       });
     }
-  }, [canFinalizeMonth, cashflowSheetConfig?.value, cashflowSheetMirror?.status, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.yearMonths, monthClosePreparation.status, monthCloseResult?.closeEligible, monthCloseResult?.status, projectId, yearMonth]);
+  }, [canFinalizeMonth, cashflowSheetConfig?.value, cashflowSheetMirror?.status, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.yearMonths, monthClosePreparation.status, monthCloseResult?.closeEligible, monthCloseResult?.status, project, projectId, savedExecutiveApproverId, yearMonth]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
     if (!canFinalizeMonth || monthCloseResult?.status !== 'OPEN') {
@@ -985,6 +1055,8 @@ export function CashflowProjectSheet({
         payload: {
           yearMonth,
           expectedRevision: prepared.revision,
+          expectedApproverUid: savedExecutiveApproverId,
+          expectedProjectVersion: project?.version ?? 0,
           expectedOpeningBalances: reviewedOpeningBalances,
           closeInput: monthCloseInput,
         },
@@ -1037,6 +1109,8 @@ export function CashflowProjectSheet({
     monthCloseRequest?.revision,
     orgId,
     projectId,
+    project?.version,
+    savedExecutiveApproverId,
     resolveBffActor,
     yearMonth,
   ]);
@@ -2410,7 +2484,7 @@ export function CashflowProjectSheet({
                         type="button"
                         size="sm"
                         className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] font-semibold text-white shadow-none hover:bg-slate-800"
-                        disabled={monthCloseBusy || monthCloseLoading}
+                        disabled={monthCloseBusy || monthCloseLoading || Boolean(project && !savedExecutiveApproverId)}
                         onClick={handleOpenMonthCloseReview}
                       >
                         <CheckCircle2 className="mr-1 h-3 w-3" />
@@ -2430,6 +2504,50 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                 </div>
+                {project && members ? (
+                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                      <div className="min-w-0 flex-1">
+                        <label className="mb-1 block text-[12px] font-semibold text-slate-800">조직장 선택</label>
+                        <Select
+                          value={selectedExecutiveApproverId}
+                          onValueChange={setSelectedExecutiveApproverId}
+                          disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                        >
+                          <SelectTrigger className="h-8 border-slate-300 bg-white text-[12px]">
+                            <SelectValue placeholder="월 결산 승인 조직장을 선택하세요" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {executiveApproverOptions.map((member) => (
+                              <SelectItem key={member.uid} value={member.uid}>
+                                {member.name || member.email}{member.email ? ` · ${member.email}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0 border-slate-300 bg-white px-3 text-[12px] font-semibold text-[#17324D]"
+                        disabled={
+                          executiveApproverBusy
+                          || !selectedExecutiveApproverId
+                          || selectedExecutiveApproverId === savedExecutiveApproverId
+                          || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')
+                        }
+                        onClick={() => void handleSaveExecutiveApprover()}
+                      >
+                        {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                        조직장 확정
+                      </Button>
+                    </div>
+                    <p className="mt-1.5 text-[12px] leading-4 text-slate-500">
+                      확정한 조직장에게 월 결산 요청이 배정되고 관리자 등록/승인 화면에서 승인·반려할 수 있습니다.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
                   <span>{monthCloseResult?.dashboard?.summary?.closeDeadline ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
                   {isStageHost && canReviewReopen ? (

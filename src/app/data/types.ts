@@ -443,22 +443,34 @@ export interface ProjectLaborTransferPlan {
 }
 
 export const SETTLEMENT_SYSTEM_LABELS: Record<SettlementSystemCode, string> = {
-  E_NARA_DOUM: 'e나라도움 (국고보조금통합관리)',
-  IRIS: 'IRIS (범부처통합연구지원)',
-  RCMS: 'RCMS (실시간연구비)',
+  E_NARA_DOUM: 'e나라도움 (국고보조금통합관리시스템)',
+  IRIS: 'IRIS(범부처통합연구지원시스템)',
+  RCMS: 'RCMS (실시간연구비관리시스템)',
   EZBARO: '통합이지바로 (통합 Ez-plus)',
   E_HIJO: 'e호조 (지방재정)',
   EDUFINE: '에듀파인 (교육재정)',
   HAPPYEUM: '행복이음 (사회보장)',
   AGRIX: '아그릭스 (농림사업)',
-  BOTAEM_E: '보탬e (지방보조금관리)',
-  SMTECH: 'SMTECH (중소기업기술개발)',
-  KOCCA_PMS: 'KOCCA PMS (한국콘텐츠진흥원)',
-  NIPA: 'NIPA (정보통신산업진흥원)',
+  BOTAEM_E: '보탬e(지방보조금관리시스템)',
+  SMTECH: 'SMTECH (중소기업기술개발사업종합관리시스템)',
+  KOCCA_PMS: 'KOCCA PMS',
+  NIPA: 'NIPA 사업관리시스템',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간사업',
   NONE: '정산없음',
 };
+
+export const PROJECT_SETTLEMENT_SYSTEM_CODES: SettlementSystemCode[] = [
+  'NONE',
+  'E_NARA_DOUM',
+  'BOTAEM_E',
+  'RCMS',
+  'EZBARO',
+  'SMTECH',
+  'KOCCA_PMS',
+  'NIPA',
+  'IRIS',
+];
 
 export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
   E_NARA_DOUM: 'e나라도움',
@@ -601,6 +613,7 @@ export interface ProjectCheckout {
   finalPaymentReceived: boolean;
   bankBalanceZero: boolean;
   performanceCertificateReceived: boolean;
+  performanceCertificateDocumentApplicable?: boolean;
   taxInvoiceEvidenceConfirmed: boolean;
   finalSettlementReportConfirmed: boolean;
   usbEvidenceSubmitted: boolean;

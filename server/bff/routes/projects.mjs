@@ -10,6 +10,7 @@ import { normalizeProjectRevenueFields } from '../project-financials.mjs';
 import {
   PROJECT_INFO_DOCUMENT_KINDS,
   PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS,
+  missingProjectRegistrationRequiredDocumentKind,
 } from '../project-document-validation.mjs';
 import {
   asyncHandler, createMutatingRoute, assertActorRoleAllowed,
@@ -1050,16 +1051,17 @@ function normalizeRegistrationOptionalDocumentNotes(value) {
   };
 }
 
-function normalizeProjectCheckout(value) {
+function normalizeProjectCheckout(value, settlementApplicable = true) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
     finalPaymentReceived: source.finalPaymentReceived === true,
     bankBalanceZero: source.bankBalanceZero === true,
     performanceCertificateReceived: source.performanceCertificateReceived === true,
+    performanceCertificateDocumentApplicable: source.performanceCertificateDocumentApplicable === true,
     taxInvoiceEvidenceConfirmed: source.taxInvoiceEvidenceConfirmed === true,
-    finalSettlementReportConfirmed: source.finalSettlementReportConfirmed === true,
-    usbEvidenceSubmitted: source.usbEvidenceSubmitted === true,
-    evidenceDeletedAfterUsb: source.evidenceDeletedAfterUsb === true,
+    finalSettlementReportConfirmed: settlementApplicable && source.finalSettlementReportConfirmed === true,
+    usbEvidenceSubmitted: settlementApplicable && source.usbEvidenceSubmitted === true,
+    evidenceDeletedAfterUsb: settlementApplicable && source.evidenceDeletedAfterUsb === true,
   };
 }
 
@@ -1085,25 +1087,35 @@ function assertProjectCheckoutPayload(payload, attachmentRefs, currentProject) {
   for (const field of fields) {
     if (typeof checkout[field] !== 'boolean') invalidRegistration(`Completed project checkout.${field} must be boolean`);
   }
-  if (checkout.evidenceDeletedAfterUsb && !checkout.usbEvidenceSubmitted) {
+  if (
+    Object.hasOwn(checkout, 'performanceCertificateDocumentApplicable')
+    && typeof checkout.performanceCertificateDocumentApplicable !== 'boolean'
+  ) invalidRegistration('Completed project checkout.performanceCertificateDocumentApplicable must be boolean');
+  const registrationVersion = registrationRequirementsVersion(
+    payload?.registrationRequirementsVersion ?? currentProject?.registrationRequirementsVersion,
+  );
+  const settlementApplicable = registrationVersion === 2
+    ? normalizeBasis(readOptionalText(payload?.basis ?? currentProject?.basis)) !== 'NONE'
+    : normalizeSettlementType(readOptionalText(payload?.settlementType ?? currentProject?.settlementType)) !== 'NONE';
+  if (settlementApplicable && checkout.evidenceDeletedAfterUsb && !checkout.usbEvidenceSubmitted) {
     invalidRegistration('Completed project evidence cannot be marked deleted before USB submission');
   }
   const attachedKinds = new Set((Array.isArray(attachmentRefs) ? attachmentRefs : [])
     .map((attachment) => readOptionalText(attachment?.documentKind))
     .filter(Boolean));
   const hasDocument = (field, kind) => Boolean(currentProject?.[field]?.path) || attachedKinds.has(kind);
-  if (checkout.performanceCertificateReceived && !hasDocument('performanceCertificateDocument', 'performance_certificate')) {
-    invalidRegistration('Completed project performance certificate PDF is required when confirmed');
+  if (checkout.performanceCertificateDocumentApplicable && !hasDocument('performanceCertificateDocument', 'performance_certificate')) {
+    invalidRegistration('Completed project performance certificate PDF is required when applicable');
   }
   if (checkout.taxInvoiceEvidenceConfirmed && !hasDocument('taxInvoiceDocument', 'tax_invoice')) {
     invalidRegistration('Completed project tax invoice PDF is required when confirmed');
   }
-  if (checkout.finalSettlementReportConfirmed && !hasDocument('finalSettlementReportDocument', 'final_settlement_report')) {
+  if (settlementApplicable && checkout.finalSettlementReportConfirmed && !hasDocument('finalSettlementReportDocument', 'final_settlement_report')) {
     invalidRegistration('Completed project final settlement report PDF is required when confirmed');
   }
 }
 
-function assertRegistrationV2Requirements(payload, attachmentRefs) {
+function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttachments = true) {
   if (registrationRequirementsVersion(payload.registrationRequirementsVersion) !== 2) return;
   for (const field of ['officialContractName', 'clientOrg', 'projectPurpose', 'description']) {
     if (!readOptionalText(payload[field])) {
@@ -1136,29 +1148,10 @@ function assertRegistrationV2Requirements(payload, attachmentRefs) {
   }
   assertRegistrationV2PaymentPlan(payload);
 
-  const attachedKinds = new Set((Array.isArray(attachmentRefs) ? attachmentRefs : [])
-    .map((attachment) => readOptionalText(attachment?.documentKind))
-    .filter(Boolean));
-  const missingDocumentKind = REGISTRATION_REQUIRED_DOCUMENT_KINDS.find((kind) => !attachedKinds.has(kind));
-  if (missingDocumentKind) {
-    invalidRegistration(`Project registration required attachment is missing: ${missingDocumentKind}`);
-  }
-  const hasProposal = attachedKinds.has('proposal');
-  const hasRfpRequestEvidence = attachedKinds.has('rfp_request_evidence');
-  if (!hasProposal && !hasRfpRequestEvidence) {
-    invalidRegistration('Project registration requires proposal or RFP evidence');
-  }
-  if (hasProposal && hasRfpRequestEvidence) {
-    invalidRegistration('Project registration requires exactly one of proposal or RFP evidence');
-  }
-  const optionalNotes = normalizeRegistrationOptionalDocumentNotes(payload.registrationOptionalDocumentNotes);
-  for (const [documentKind, noteField] of [
-    ['proposal_word_original', 'proposalWordOriginal'],
-    ['proposal_ppt_original', 'proposalPptOriginal'],
-    ['presentation_ppt_original', 'presentationPptOriginal'],
-  ]) {
-    if (!attachedKinds.has(documentKind) && !optionalNotes[noteField]) {
-      invalidRegistration(`Project registration optional attachment note is missing: ${documentKind}`);
+  if (validateAttachments) {
+    const missingDocumentKind = missingProjectRegistrationRequiredDocumentKind(attachmentRefs);
+    if (missingDocumentKind) {
+      invalidRegistration(`Project registration required attachment is missing: ${missingDocumentKind}`);
     }
   }
 
@@ -1280,8 +1273,6 @@ function trustedRegistrationRequirementAttachments(
       const path = readOptionalText(attachment?.path);
       return documentKind && path ? [[documentKind, { documentKind, path }]] : [];
     }));
-  const privateAlternativeAttached = privateAttachments.has('proposal')
-    || privateAttachments.has('rfp_request_evidence');
   const payloadDocument = (field) => {
     if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, field)) return undefined;
     const path = readOptionalText(payload[field]?.path);
@@ -1297,7 +1288,6 @@ function trustedRegistrationRequirementAttachments(
   return Object.entries(canonicalFields).flatMap(([documentKind, field]) => {
     const privateAttachment = privateAttachments.get(documentKind);
     if (privateAttachment) return [privateAttachment];
-    if (privateAlternativeAttached && ['proposal', 'rfp_request_evidence'].includes(documentKind)) return [];
     const proposedDocument = payloadDocument(field);
     if (proposedDocument !== undefined) {
       return proposedDocument ? [{ documentKind, path: proposedDocument.path }] : [];
@@ -1314,15 +1304,11 @@ function assertTrustedProjectInfoDocumentReferences(
   trustedStoredDocuments = {},
 ) {
   const privateDocuments = registrationPrivateDocuments(attachmentRefs);
-  const privateAlternativeAttached = Boolean(
-    privateDocuments.proposalDocument || privateDocuments.rfpRequestEvidenceDocument,
-  );
   for (const field of PROJECT_INFO_DOCUMENT_FIELDS) {
     if (!payload || typeof payload !== 'object' || !Object.hasOwn(payload, field)) continue;
     const candidate = payload[field];
     if (candidate === null || candidate === undefined) continue;
     if (privateDocuments[field]) continue;
-    if (privateAlternativeAttached && ['proposalDocument', 'rfpRequestEvidenceDocument'].includes(field)) continue;
     const candidatePath = readOptionalText(candidate?.path);
     const canonicalPath = readOptionalText(currentProject?.[field]?.path);
     const storedPath = readOptionalText(trustedStoredDocuments?.[field]?.path);
@@ -1430,7 +1416,7 @@ export function buildProjectRegistrationCanonicalDocuments({
     registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
       payload.registrationOptionalDocumentNotes,
     ),
-    checkout: normalizeProjectCheckout(payload.checkout),
+    checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
@@ -1726,7 +1712,7 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
       payload.registrationOptionalDocumentNotes,
     ),
-    checkout: normalizeProjectCheckout(payload.checkout),
+    checkout: normalizeProjectCheckout(payload.checkout, settlementDetailsEnabled),
     contractStart: readOptionalText(payload.contractStart),
     contractEnd: readOptionalText(payload.contractEnd),
     contractType: normalizeProjectContractType(payload.contractType),
@@ -1867,12 +1853,8 @@ function projectInfoChanges(beforeSnapshot, proposedSnapshot) {
 
 function projectInfoPayloadWithDocuments(payload, project, attachmentRefs, trustedStoredDocuments = {}) {
   const privateDocuments = registrationPrivateDocuments(attachmentRefs);
-  const privateAlternativeAttached = Boolean(
-    privateDocuments.proposalDocument || privateDocuments.rfpRequestEvidenceDocument,
-  );
   const effectiveDocument = (field) => {
     if (privateDocuments[field]) return privateDocuments[field];
-    if (privateAlternativeAttached && ['proposalDocument', 'rfpRequestEvidenceDocument'].includes(field)) return null;
     if (Object.hasOwn(payload, field)) {
       const payloadPath = readOptionalText(payload[field]?.path);
       const canonicalPath = readOptionalText(project[field]?.path);
@@ -1965,6 +1947,7 @@ export function buildProjectInfoChangeSubmission({
   assertRegistrationV2Requirements(
     payload,
     trustedRegistrationRequirementAttachments(project, payload, attachmentRefs, trustedStoredDocuments),
+    false,
   );
   const beforeSnapshot = projectInfoPayloadWithDocuments(
     buildProjectRequestPayloadFromProject(project, previousRequest?.payload),
@@ -2120,7 +2103,12 @@ function hasCanonicalRegistrationV2Documents(request, payload, tenantId) {
     !readOptionalText(payload?.[field]?.path) || isCanonicalDocument(field)
   ));
   if (!allExistingDocumentsAreCanonical) return false;
-  if (!REGISTRATION_REQUIRED_DOCUMENT_KINDS.every((kind) => (
+  if (REGISTRATION_REQUIRED_DOCUMENT_KINDS.every((kind) => (
+    isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[kind])
+  ))) return true;
+
+  // Preserve approval of registrations already submitted under the former alternative-document contract.
+  if (!['contract', 'customer_business_registration', 'quote'].every((kind) => (
     isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[kind])
   ))) return false;
   const hasProposal = isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS.proposal);

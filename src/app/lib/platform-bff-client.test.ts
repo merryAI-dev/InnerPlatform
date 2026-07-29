@@ -37,6 +37,7 @@ import {
   upsertCashflowWeekAmountsViaBff,
   saveCashflowProjectionBatchViaBff,
   fetchCashflowMonthCloseViaBff,
+  saveCashflowMonthCloseApproverViaBff,
   fetchCashflowMonthCloseQaDateTimeViaBff,
   setCashflowMonthCloseQaDateTimeViaBff,
   completeCashflowWeeklyUpdateViaBff,
@@ -153,6 +154,8 @@ describe('platform-bff-client', () => {
       payload: {
         yearMonth: '2026-06',
         expectedRevision: 2,
+        expectedApproverUid: 'head-1',
+        expectedProjectVersion: 4,
         expectedOpeningBalances: {
           selectedYear: 2026,
           projection: { amount: 0, lineAmounts: {}, sources: [], includedYears: [], excludedWeeklyYears: [] },
@@ -236,6 +239,39 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
+  });
+
+  it('persists the designated month-close approver through the cashflow BFF', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          projectId: 'p001',
+          executiveApproverId: 'head-a',
+          executiveApproverName: '조직장 A',
+          executiveApproverEmail: 'head-a@example.com',
+          version: 3,
+          updatedAt: '2026-07-29T00:00:00.000Z',
+        },
+      })),
+      get: vi.fn(),
+      request: vi.fn(),
+    });
+
+    const result = await saveCashflowMonthCloseApproverViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'pm-a', role: 'pm', idToken: 'token-abc' },
+      projectId: 'p001',
+      payload: { approverUid: 'head-a', yearMonth: '2026-07', expectedVersion: 2 },
+      idempotencyKey: 'approver-p001-2026-07-head-a',
+      client,
+    });
+
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/p001/month-close/approver', expect.objectContaining({
+      tenantId: 'mysc',
+      body: expect.objectContaining({ approverUid: 'head-a', yearMonth: '2026-07', expectedVersion: 2 }),
+      idempotencyKey: 'approver-p001-2026-07-head-a',
+    }));
+    expect(result).toMatchObject({ executiveApproverId: 'head-a', version: 3 });
   });
 
   it('coalesces concurrent month-close reads per actor and releases the key after completion', async () => {

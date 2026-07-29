@@ -11,12 +11,16 @@ export function PortalCashflowPage() {
   const location = useLocation();
   const {
     activeProjectId,
+    members,
     portalUser,
     myProject,
+    projects,
+    patchProjectSnapshot,
     upsertWeeklySubmissionStatus,
   } = usePortalStore();
 
   const projectId = resolvePortalProjectResourceId(routeProjectId, activeProjectId, myProject?.id);
+  const project = projects.find((candidate) => candidate.id === projectId) || myProject;
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   if (!projectId) {
@@ -35,7 +39,13 @@ export function PortalCashflowPage() {
     <CashflowProjectSheet
       key={projectId}
       projectId={projectId}
-      projectName={myProject?.name}
+      projectName={project?.name}
+      project={project}
+      members={members}
+      onExecutiveApproverSaved={(result) => {
+        if (!project) return;
+        patchProjectSnapshot({ ...project, ...result });
+      }}
       roleOverride={portalUser?.role}
       onUpdateWeeklySubmissionStatus={upsertWeeklySubmissionStatus}
     />

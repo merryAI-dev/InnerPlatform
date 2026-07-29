@@ -10,6 +10,7 @@ import {
 } from './project-registration-drafts.mjs';
 
 const VALID_PDF = Buffer.from('%PDF-1.4\n');
+const VALID_ZIP = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 const VALID_V2_PROJECT_NAME = 'Private';
 
 function clone(value) {
@@ -296,11 +297,19 @@ function validRegistrationV2Payload(overrides = {}) {
   return payload;
 }
 
-function addRequiredRegistrationAttachments(db, draftId, existing = [], fourthDocumentKind = 'proposal') {
+function addRequiredRegistrationAttachments(db, draftId, existing = []) {
   const path = `orgs/tenant-a/projectRequestDrafts/${draftId}`;
   const draft = db.documents.get(path);
   const existingKinds = new Set(existing.map((attachment) => attachment.documentKind));
-  const missing = ['contract', 'customer_business_registration', 'quote', fourthDocumentKind]
+  const missing = [
+    'contract',
+    'customer_business_registration',
+    'quote',
+    'proposal_word_original',
+    'proposal_ppt_original',
+    'presentation_ppt_original',
+    'rfp_request_evidence',
+  ]
     .filter((documentKind) => !existingKinds.has(documentKind))
     .map((documentKind) => ({
       attachmentId: `required-${documentKind}`,
@@ -610,6 +619,36 @@ describe('project registration draft service', () => {
     );
   });
 
+  it.each([
+    'contract',
+    'customer_business_registration',
+    'quote',
+    'proposal_word_original',
+    'proposal_ppt_original',
+    'presentation_ppt_original',
+    'rfp_request_evidence',
+  ])('rejects a v2 save when the %s attachment is missing', async (missingKind) => {
+    const { db, service, base } = createHarness();
+    const created = await service.create({ ...base, idempotencyKey: `idem-save-${missingKind}-create` });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    const path = `orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`;
+    const draft = db.documents.get(path);
+    db.documents.set(path, {
+      ...draft,
+      attachmentRefs: draft.attachmentRefs.filter((attachment) => attachment.documentKind !== missingKind),
+    });
+
+    await expectHttpError(service.update({
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      idempotencyKey: `idem-save-${missingKind}`,
+      expectedDraftRevision: 0,
+      payload: validRegistrationV2Payload(),
+    }), 422, 'project_registration_invalid');
+  });
+
   it('atomically submits only the stored private draft and replays after releasing the lease', async () => {
     const memberPath = 'orgs/tenant-a/members/actor-a';
     const { db, service, base, auditChainService } = createHarness({
@@ -868,7 +907,7 @@ describe('project registration draft service', () => {
     expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(2);
   });
 
-  it('accepts the PPT registration v2 document set with proposal as the fourth document', async () => {
+  it('accepts the seven PPT page 29 registration documents end to end', async () => {
     const storageService = {
       uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
         path: `orgs/${tenantId}/project-registration-drafts/${draftId}/${attachmentId}-${fileName}`,
@@ -885,8 +924,16 @@ describe('project registration draft service', () => {
       idempotencyKey: 'idem-v2-create',
       payload: validRegistrationV2Payload(),
     });
-    const kinds = ['contract', 'customer_business_registration', 'quote', 'proposal'];
-    for (const [revision, documentKind] of kinds.entries()) {
+    const documents = [
+      ['contract', 'contract.pdf', 'application/pdf', VALID_PDF],
+      ['customer_business_registration', 'customer.pdf', 'application/pdf', VALID_PDF],
+      ['quote', 'quote.pdf', 'application/pdf', VALID_PDF],
+      ['proposal_word_original', 'proposal.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', VALID_ZIP],
+      ['proposal_ppt_original', 'proposal.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', VALID_ZIP],
+      ['presentation_ppt_original', 'presentation.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', VALID_ZIP],
+      ['rfp_request_evidence', 'rfp.pdf', 'application/pdf', VALID_PDF],
+    ];
+    for (const [revision, [documentKind, fileName, mimeType, buffer]] of documents.entries()) {
       await service.addAttachment({
         ...base,
         idempotencyKey: `idem-v2-${documentKind}`,
@@ -895,10 +942,10 @@ describe('project registration draft service', () => {
         fence: created.body.lease.fence,
         expectedDraftRevision: revision,
         documentKind,
-        fileName: `${documentKind}.pdf`,
-        mimeType: 'application/pdf',
-        fileSize: VALID_PDF.byteLength,
-        buffer: VALID_PDF,
+        fileName,
+        mimeType,
+        fileSize: buffer.byteLength,
+        buffer,
       });
     }
 
@@ -908,7 +955,7 @@ describe('project registration draft service', () => {
       draftId: created.body.draft.draftId,
       leaseId: created.body.lease.leaseId,
       fence: created.body.lease.fence,
-      expectedDraftRevision: 4,
+      expectedDraftRevision: 7,
     });
 
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload).toMatchObject({
@@ -917,10 +964,11 @@ describe('project registration draft service', () => {
     });
     expect(db.documents.get('orgs/tenant-a/project_requests/project-request-1').payload)
       .not.toHaveProperty('groupwareName');
-    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind)).toEqual(kinds);
+    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind))
+      .toEqual(documents.map(([documentKind]) => documentKind));
   });
 
-  it('accepts RFP or request evidence instead of proposal for registration v2', async () => {
+  it('requires RFP even when a legacy proposal exists', async () => {
     const { db, service, base } = createHarness();
     const created = await service.create({
       ...base,
@@ -928,28 +976,31 @@ describe('project registration draft service', () => {
       payload: validRegistrationV2Payload(),
     });
     addRequiredRegistrationAttachments(db, created.body.draft.draftId, [{
-      attachmentId: 'rfp',
-      documentKind: 'rfp_request_evidence',
-      path: `orgs/tenant-a/project-registration-drafts/${created.body.draft.draftId}/rfp.pdf`,
-      name: 'rfp.pdf',
+      attachmentId: 'proposal',
+      documentKind: 'proposal',
+      path: `orgs/tenant-a/project-registration-drafts/${created.body.draft.draftId}/proposal.pdf`,
+      name: 'proposal.pdf',
       size: VALID_PDF.byteLength,
       contentType: 'application/pdf',
-    }], 'rfp_request_evidence');
+    }]);
+    const path = `orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`;
+    const draft = db.documents.get(path);
+    db.documents.set(path, {
+      ...draft,
+      attachmentRefs: draft.attachmentRefs.filter((attachment) => attachment.documentKind !== 'rfp_request_evidence'),
+    });
 
-    await service.submit({
+    await expectHttpError(service.submit({
       ...base,
       idempotencyKey: 'idem-v2-rfp-submit',
       draftId: created.body.draft.draftId,
       leaseId: created.body.lease.leaseId,
       fence: created.body.lease.fence,
       expectedDraftRevision: 0,
-    });
-
-    expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind))
-      .toEqual(['rfp_request_evidence', 'contract', 'customer_business_registration', 'quote']);
+    }), 422, 'project_registration_invalid');
   });
 
-  it('replaces proposal with RFP evidence in the private draft and final submission', async () => {
+  it('keeps a stored legacy proposal when the required RFP is uploaded', async () => {
     const storageService = {
       uploadDraftAttachment: vi.fn(async ({ tenantId, draftId, attachmentId, fileName, buffer, mimeType }) => ({
         path: `orgs/${tenantId}/project-registration-drafts/${draftId}/${attachmentId}-${fileName}`,
@@ -989,24 +1040,17 @@ describe('project registration draft service', () => {
       documentKind: 'rfp_request_evidence',
       fileName: 'rfp.pdf',
     });
-    for (const [offset, documentKind] of ['contract', 'customer_business_registration', 'quote'].entries()) {
-      await service.addAttachment({
-        ...common,
-        idempotencyKey: `idem-v2-alternative-${documentKind}`,
-        expectedDraftRevision: offset + 2,
-        documentKind,
-        fileName: `${documentKind}.pdf`,
-      });
-    }
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId, db.documents.get(
+      `orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`,
+    ).attachmentRefs);
 
     const storedDraft = db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`);
     expect(storedDraft.attachmentRefs.map((item) => item.documentKind))
-      .toEqual(['rfp_request_evidence', 'contract', 'customer_business_registration', 'quote']);
-    expect(storageService.deleteDraftAttachment).toHaveBeenCalledWith({
-      tenantId: 'tenant-a',
-      draftId: created.body.draft.draftId,
+    expect(storedDraft.attachmentRefs.map((item) => item.documentKind)).toContain('proposal');
+    expect(storedDraft.attachmentRefs.map((item) => item.documentKind)).toContain('rfp_request_evidence');
+    expect(storageService.deleteDraftAttachment).not.toHaveBeenCalledWith(expect.objectContaining({
       path: proposal.body.attachment.path,
-    });
+    }));
 
     await service.submit({
       ...base,
@@ -1014,11 +1058,11 @@ describe('project registration draft service', () => {
       draftId: created.body.draft.draftId,
       leaseId: created.body.lease.leaseId,
       fence: created.body.lease.fence,
-      expectedDraftRevision: 5,
+      expectedDraftRevision: 2,
     });
 
     expect(db.documents.get('outbox/outbox-1').payload.attachmentRefs.map((item) => item.documentKind))
-      .toEqual(['rfp_request_evidence', 'contract', 'customer_business_registration', 'quote']);
+      .toEqual(expect.arrayContaining(['proposal', 'rfp_request_evidence']));
   });
 
   it('samples lease time again when Firestore retries final submit', async () => {
@@ -1230,7 +1274,10 @@ describe('project registration draft service', () => {
       expect.objectContaining({ documentKind: 'contract', name: 'latest-contract.pdf' }),
       expect.objectContaining({ documentKind: 'customer_business_registration' }),
       expect.objectContaining({ documentKind: 'quote' }),
-      expect.objectContaining({ documentKind: 'proposal' }),
+      expect.objectContaining({ documentKind: 'proposal_word_original' }),
+      expect.objectContaining({ documentKind: 'proposal_ppt_original' }),
+      expect.objectContaining({ documentKind: 'presentation_ppt_original' }),
+      expect.objectContaining({ documentKind: 'rfp_request_evidence' }),
     ]));
   });
 
@@ -1460,6 +1507,11 @@ describe('project registration draft service', () => {
       expectedDraftRevision: 0,
       fileName: 'contract-a.pdf',
     });
+    addRequiredRegistrationAttachments(
+      db,
+      created.body.draft.draftId,
+      db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`).attachmentRefs,
+    );
     await service.update({
       ...base,
       draftId: created.body.draft.draftId,

@@ -13,7 +13,18 @@ export const PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS = Object.freeze([
   'contract',
   'customer_business_registration',
   'quote',
+  'proposal_word_original',
+  'proposal_ppt_original',
+  'presentation_ppt_original',
+  'rfp_request_evidence',
 ]);
+
+export function missingProjectRegistrationRequiredDocumentKind(attachmentRefs) {
+  const attachedKinds = new Set((Array.isArray(attachmentRefs) ? attachmentRefs : [])
+    .map((attachment) => String(attachment?.documentKind || '').trim())
+    .filter(Boolean));
+  return PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS.find((kind) => !attachedKinds.has(kind)) || '';
+}
 
 export const PROJECT_INFO_DOCUMENT_KINDS = Object.freeze([
   ...PROJECT_REGISTRATION_DOCUMENT_KINDS,

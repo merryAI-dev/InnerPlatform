@@ -1894,6 +1894,8 @@ describe('JVM weekly API BFF proxy', () => {
       .send({
         yearMonth: '2026-06',
         expectedRevision: 0,
+        expectedApproverUid: 'finance-1',
+        expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput,
       })
@@ -2082,6 +2084,8 @@ describe('JVM weekly API BFF proxy', () => {
       yearMonth: '2026-06',
       approverUid: 'finance-1',
       expectedRevision: 0,
+      expectedApproverUid: 'finance-1',
+      expectedProjectVersion: 0,
       expectedOpeningBalances: read.body.dashboard.openingBalances,
       closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
     };
@@ -2127,6 +2131,8 @@ describe('JVM weekly API BFF proxy', () => {
         approverUid: 'attacker-selected-approver',
         yearMonth: '2026-06',
         expectedRevision: 0,
+        expectedApproverUid: 'finance-1',
+        expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2140,6 +2146,74 @@ describe('JVM weekly API BFF proxy', () => {
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06')).toMatchObject({
       status: 'PENDING', approverUid: 'finance-1', createIdempotencyKey: 'month-close-request-1',
     });
+  });
+
+  it('persists an active designated approver and blocks changes once approval is pending', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.get('orgs/tenant-a/projects/project-a').version = 2;
+    const { app } = createApp(vi.fn(), createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: stageEnv, db: source.db, now: () => new Date('2026-07-29T00:00:00.000Z') });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .set('idempotency-key', 'set-approver-finance-2')
+      .send({ approverUid: 'finance-2', yearMonth: '2026-07', expectedVersion: 2 })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        projectId: 'project-a', executiveApproverId: 'finance-2', executiveApproverName: '', version: 3,
+      }));
+
+    expect(source.documents.get('orgs/tenant-a/projects/project-a')).toMatchObject({
+      executiveApproverId: 'finance-2', version: 3, updatedBy: 'pm-1',
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .set('idempotency-key', 'set-approver-finance-2')
+      .send({ approverUid: 'finance-2', yearMonth: '2026-07', expectedVersion: 2 })
+      .expect(200)
+      .expect((response) => expect(response.body.version).toBe(3));
+    expect(source.documents.get('orgs/tenant-a/projects/project-a').version).toBe(3);
+
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06', {
+      requestId: 'project-a-2026-06', projectId: 'project-a', yearMonth: '2026-06', status: 'PENDING',
+    });
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .set('idempotency-key', 'replace-pending-approver')
+      .send({ approverUid: 'finance-1', yearMonth: '2026-07', expectedVersion: 3 })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_locked'));
+  });
+
+  it('rejects inactive, self, and unassigned month-close approver changes', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.get('orgs/tenant-a/projects/project-a').version = 2;
+    source.documents.get('orgs/tenant-a/members/finance-2').status = 'INACTIVE';
+    const requester = createApp(vi.fn(), createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: stageEnv, db: source.db }).app;
+
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .send({ approverUid: 'finance-2', yearMonth: '2026-07', expectedVersion: 2 })
+      .expect(403)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_member_inactive'));
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .send({ approverUid: 'pm-1', yearMonth: '2026-07', expectedVersion: 2 })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_self_approval_forbidden'));
+
+    const outsider = createApp(vi.fn(), createIdempotencyService(), {
+      actorId: 'viewer-2', actorRole: 'viewer',
+    }, { env: stageEnv, db: source.db }).app;
+    await request(outsider)
+      .post('/api/v1/cashflow/project-a/month-close/approver')
+      .send({ approverUid: 'finance-1', yearMonth: '2026-07', expectedVersion: 2 })
+      .expect(403)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_project_forbidden'));
   });
 
   it('derives the approver from the project, blocks self approval, and exposes permission-filtered reads', async () => {
@@ -2166,6 +2240,7 @@ describe('JVM weekly API BFF proxy', () => {
       .send({
         approverUid: 'viewer-2',
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2191,11 +2266,35 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200)
       .expect((response) => expect(response.body).toEqual({ items: [], count: 0 }));
     await request(outsider)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'outsider-request')
+      .send({
+        yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(403)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_project_forbidden'));
+    await request(outsider)
       .get('/api/v1/cashflow/project-a/month-close/requests/current?yearMonth=2026-06')
       .expect(200)
       .expect((response) => expect(response.body.request).toMatchObject({ requestId: 'project-a-2026-06' }));
 
     source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06');
+    source.documents.get('orgs/tenant-a/projects/project-a').executiveApproverId = 'finance-2';
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'stale-selected-approver-request')
+      .send({
+        yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
+        expectedOpeningBalances: read.body.dashboard.openingBalances,
+        closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
+      })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_stale'));
+    source.documents.get('orgs/tenant-a/projects/project-a').executiveApproverId = 'finance-1';
     const selfRequester = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'finance-1', actorRole: 'viewer',
     }, { env: stageEnv, db: source.db }).app;
@@ -2204,6 +2303,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'self-approval-request')
       .send({
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2217,6 +2317,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'inactive-approver-request')
       .send({
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-2', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2230,6 +2331,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'inactive-requester-request')
       .send({
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2257,6 +2359,7 @@ describe('JVM weekly API BFF proxy', () => {
     const read = await request(requester).get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06').expect(200);
     const payload = {
       approverUid: 'finance-1', yearMonth: '2026-06', expectedRevision: 0,
+      expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
       expectedOpeningBalances: read.body.dashboard.openingBalances,
       closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
     };
@@ -2338,6 +2441,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'crash-window-request')
       .send({
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2407,6 +2511,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'month-close-request-reject')
       .send({
         approverUid: 'finance-1', yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2434,6 +2539,7 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'month-close-request-resubmitted')
       .send({
         yearMonth: '2026-06', expectedRevision: 0,
+        expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2476,6 +2582,7 @@ describe('JVM weekly API BFF proxy', () => {
         .set('idempotency-key', `month-close-request-stale-${staleKind}`)
         .send({
           approverUid: 'finance-1', yearMonth: '2026-06', expectedRevision: 0,
+          expectedApproverUid: 'finance-1', expectedProjectVersion: 0,
           expectedOpeningBalances: read.body.dashboard.openingBalances,
           closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
         })
@@ -2519,6 +2626,8 @@ describe('JVM weekly API BFF proxy', () => {
       .send({
         yearMonth: '2026-06',
         expectedRevision: 0,
+        expectedApproverUid: 'finance-1',
+        expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
@@ -2710,6 +2819,8 @@ describe('JVM weekly API BFF proxy', () => {
         approverUid: 'finance-1',
         yearMonth: '2026-06',
         expectedRevision: 0,
+        expectedApproverUid: 'finance-1',
+        expectedProjectVersion: 0,
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })

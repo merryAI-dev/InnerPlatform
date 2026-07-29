@@ -30,6 +30,7 @@ import {
   normalizeProjectContractType,
   PROJECT_CURRENCY_LABELS,
   PROJECT_PHASE_LABELS,
+  PROJECT_SETTLEMENT_SYSTEM_CODES,
   REGISTRATION_V2_BASIS_LABELS,
   PROJECT_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
@@ -152,6 +153,7 @@ interface ProjectEditorWizardProps {
   requesterId?: string;
   departmentOptions?: string[];
   topSlot?: ReactNode;
+  showCheckoutEntry?: boolean;
   actions: ProjectEditorAction[];
   busyActionId?: string | null;
   readOnly?: boolean;
@@ -191,7 +193,6 @@ const REGISTRATION_DOCUMENT_KINDS: ProjectRequestDocumentKind[] = [
   'contract',
   'customer_business_registration',
   'quote',
-  'proposal',
   'proposal_word_original',
   'proposal_ppt_original',
   'presentation_ppt_original',
@@ -246,23 +247,6 @@ const OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD = {
   proposal_ppt_original: 'proposalPptOriginal',
   presentation_ppt_original: 'presentationPptOriginal',
 } as const;
-const OPTIONAL_REGISTRATION_DOCUMENT_REQUIREMENTS = [
-  {
-    kind: 'proposal_word_original',
-    noteField: 'proposalWordOriginal',
-    issueLabel: '제안서 Word 원본 파일 또는 미첨부 사유',
-  },
-  {
-    kind: 'proposal_ppt_original',
-    noteField: 'proposalPptOriginal',
-    issueLabel: '제안서 PPT 원본 파일 또는 미첨부 사유',
-  },
-  {
-    kind: 'presentation_ppt_original',
-    noteField: 'presentationPptOriginal',
-    issueLabel: '발표자료 PPT 원본 파일 또는 미첨부 사유',
-  },
-] as const;
 type RegistrationDocumentSlot = {
   number: number;
   label: string;
@@ -272,45 +256,45 @@ type RegistrationDocumentSlot = {
 const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
   {
     number: 1,
-    label: '계약서 PDF *',
-    description: '등록하려는 계약서 원문을 제출해 주세요.',
+    label: '계약서 *',
+    description: '아직 날인 전이라면 날인 후 업로드 필수',
     kinds: ['contract'],
   },
   {
     number: 2,
-    label: '고객사 사업자등록증 PDF *',
-    description: '계약 대상 고객사의 사업자등록증을 제출해 주세요.',
+    label: '고객사 사업자등록증 *',
+    description: '',
     kinds: ['customer_business_registration'],
   },
   {
     number: 3,
-    label: '견적서 PDF *',
-    description: '계약 금액과 범위를 확인할 수 있는 견적서를 제출해 주세요.',
+    label: '견적서 *',
+    description: '',
     kinds: ['quote'],
   },
   {
     number: 4,
-    label: '제안서 PDF 또는 RFP/요청 메일 증빙 *',
-    description: '4번은 제안서 PDF 또는 RFP/요청 메일 증빙 중 하나만 제출하면 됩니다.',
-    kinds: ['proposal', 'rfp_request_evidence'],
-  },
-  {
-    number: 5,
-    label: '제안서 Word 원본',
-    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    label: '제안서(워드) *',
+    description: '있을 시',
     kinds: ['proposal_word_original'],
   },
   {
-    number: 6,
-    label: '제안서 PPT 원본',
-    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    number: 5,
+    label: '제안서(PPT 원본) *',
+    description: '있을 시',
     kinds: ['proposal_ppt_original'],
   },
   {
-    number: 7,
-    label: '발표자료 PPT 원본',
-    description: '원본 파일 또는 미첨부 사유를 입력해 주세요.',
+    number: 6,
+    label: '발표자료(PPT 원본) *',
+    description: '있을 시',
     kinds: ['presentation_ppt_original'],
+  },
+  {
+    number: 7,
+    label: 'RFP *',
+    description: '없으면 사업요청사항을 확인할 수 있는 메일 본문 등 첨부',
+    kinds: ['rfp_request_evidence'],
   },
 ];
 type AutosaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -618,6 +602,7 @@ export function ProjectEditorWizard({
   requesterId,
   departmentOptions,
   topSlot,
+  showCheckoutEntry = false,
   actions,
   busyActionId,
   readOnly = false,
@@ -709,6 +694,9 @@ export function ProjectEditorWizard({
   const registrationDocumentKinds = onProjectDocumentFileUpload
     ? REGISTRATION_DOCUMENT_KINDS
     : REGISTRATION_DOCUMENT_KINDS.filter((kind) => kind === 'contract');
+  const hasRequiredRegistrationDocuments = REGISTRATION_DOCUMENT_KINDS.every((kind) => (
+    Boolean(draft[PROJECT_DOCUMENT_FIELD[kind]])
+  ));
   const checkoutDocumentKinds = onProjectDocumentFileUpload ? CHECKOUT_DOCUMENT_KINDS : [];
   const documentUploadMaxBytes = mode === 'admin'
     ? PROJECT_REQUEST_DOCUMENT_UPLOAD_MAX_SIZE_BYTES
@@ -789,6 +777,7 @@ export function ProjectEditorWizard({
   ) => {
     if (uploadInProgress || hasPendingRetryFile) return false;
     if (readOnly || !autosave?.key || autosave.disabled) return false;
+    if (mode === 'portal-register' && !hasRequiredRegistrationDocuments) return false;
     const now = new Date().toISOString();
     const storedDraft: StoredProjectEditorDraft = {
       schemaVersion: PROJECT_EDITOR_AUTOSAVE_SCHEMA_VERSION,
@@ -811,7 +800,7 @@ export function ProjectEditorWizard({
       setAutosaveState('error');
       return false;
     }
-  }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, hasPendingRetryFile, readOnly, uploadInProgress]);
+  }, [autosave?.disabled, autosave?.key, autosave?.onSave, draftKey, hasPendingRetryFile, hasRequiredRegistrationDocuments, mode, readOnly, uploadInProgress]);
 
   const saveDraftAndRelease = useCallback(async () => {
     if (uploadInProgress || hasPendingRetryFile) {
@@ -1183,8 +1172,6 @@ export function ProjectEditorWizard({
         return createProjectEditorWizardDraft({
           ...prev,
           [PROJECT_DOCUMENT_FIELD[kind]]: processed.document,
-          rfpRequestEvidenceDocument: kind === 'proposal' ? null : prev.rfpRequestEvidenceDocument,
-          proposalDocument: kind === 'rfp_request_evidence' ? null : prev.proposalDocument,
           ...(noteField ? {
             registrationOptionalDocumentNotes: {
               ...prev.registrationOptionalDocumentNotes,
@@ -1272,17 +1259,10 @@ export function ProjectEditorWizard({
       if (onProjectDocumentFileUpload) {
         if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '고객사 사업자등록증 PDF' });
         if (!draft.quoteDocument) issues.push({ step: 'financial', label: '견적서 PDF' });
-        if (!draft.proposalDocument && !draft.rfpRequestEvidenceDocument) {
-          issues.push({ step: 'financial', label: '제안서 또는 RFP/요청 메일 증빙' });
-        }
-        if (draft.proposalDocument && draft.rfpRequestEvidenceDocument) {
-          issues.push({ step: 'financial', label: '제안서와 RFP/요청 메일 중 하나만 남겨주세요.' });
-        }
-        OPTIONAL_REGISTRATION_DOCUMENT_REQUIREMENTS.forEach(({ kind, noteField, issueLabel }) => {
-          if (!draft[PROJECT_DOCUMENT_FIELD[kind]] && !draft.registrationOptionalDocumentNotes[noteField].trim()) {
-            issues.push({ step: 'financial', label: issueLabel });
-          }
-        });
+        if (!draft.proposalWordOriginalDocument) issues.push({ step: 'financial', label: '제안서(워드)' });
+        if (!draft.proposalPptOriginalDocument) issues.push({ step: 'financial', label: '제안서(PPT 원본)' });
+        if (!draft.presentationPptOriginalDocument) issues.push({ step: 'financial', label: '발표자료(PPT 원본)' });
+        if (!draft.rfpRequestEvidenceDocument) issues.push({ step: 'financial', label: 'RFP' });
       }
       if (
         draft.contractStart.trim()
@@ -1331,16 +1311,16 @@ export function ProjectEditorWizard({
       }
     }
     if (showProjectCheckout) {
-      if (draft.checkout.performanceCertificateReceived && !draft.performanceCertificateDocument) {
+      if (draft.checkout.performanceCertificateDocumentApplicable && !draft.performanceCertificateDocument) {
         issues.push({ step: 'payment', label: '수행확인서 PDF' });
       }
       if (draft.checkout.taxInvoiceEvidenceConfirmed && !draft.taxInvoiceDocument) {
         issues.push({ step: 'payment', label: '세금계산서 PDF' });
       }
-      if (draft.checkout.finalSettlementReportConfirmed && !draft.finalSettlementReportDocument) {
+      if (requiresSettlementConfirmations && draft.checkout.finalSettlementReportConfirmed && !draft.finalSettlementReportDocument) {
         issues.push({ step: 'payment', label: '최종 정산보고서 PDF' });
       }
-      if (draft.checkout.evidenceDeletedAfterUsb && !draft.checkout.usbEvidenceSubmitted) {
+      if (requiresSettlementConfirmations && draft.checkout.evidenceDeletedAfterUsb && !draft.checkout.usbEvidenceSubmitted) {
         issues.push({ step: 'payment', label: 'USB 제출 확인' });
       }
     }
@@ -1456,20 +1436,28 @@ export function ProjectEditorWizard({
 
       <div>
         <Label className="text-xs">프로젝트 목적{usesRegistrationV2 ? ' *' : ''}</Label>
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력
+          <span className="block">예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성</span>
+        </p>
         <Textarea
           value={draft.projectPurpose}
           onChange={(event) => update('projectPurpose', event.target.value)}
-          placeholder="어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력&#10;예: CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성"
           className="mt-1 min-h-[88px] text-sm"
         />
-        <p className="mt-1 text-[10px] text-muted-foreground">계약 목적을 한두 문장으로 요약합니다.</p>
       </div>
       <div>
         <Label className="text-xs">프로젝트 주요 내용{usesRegistrationV2 ? ' *' : ''}</Label>
+        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약
+          <span className="block">예:</span>
+          <span className="block">1. 사업제안서 작성 교육</span>
+          <span className="block">2. 사업제안서 작성 - 25개팀 이상 1:1 코칭</span>
+          <span className="block">3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅</span>
+        </p>
         <Textarea
           value={draft.description}
           onChange={(event) => update('description', event.target.value)}
-          placeholder="프로젝트 주요 수행 내용, 범위, 산출물 등 프로그램 핵심 내용 요약&#10;예: 1. 사업제안서 작성 교육&#10;2. 사업제안서 작성 - 25개팀 이상 1:1 코칭&#10;3. 선정된 10개 팀 사업제안 구체화 1:1 컨설팅"
           className="mt-1 min-h-[110px] text-sm"
         />
       </div>
@@ -1514,10 +1502,7 @@ export function ProjectEditorWizard({
       : Boolean(document));
     const removeLabel = kind === 'contract' ? contractDocumentEditPolicy.removeButtonLabel : '첨부 제거';
     const remove = () => { void removeProjectDocument(kind); };
-    const optionalNoteField = OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD[
-      kind as keyof typeof OPTIONAL_REGISTRATION_DOCUMENT_NOTE_FIELD
-    ];
-    const description = options.description || (kind === 'contract'
+    const description = options.description ?? (kind === 'contract'
       ? (contractAnalysisMergeMode === 'none'
           ? 'PDF를 올리면 계약서 원문과 검토용 첨부를 저장합니다. 입력값은 자동으로 바꾸지 않습니다.'
           : 'PDF를 올리면 계약명, 계약기간, 계약금액, 계약 대상 후보를 읽어와 빈 항목만 채웁니다.')
@@ -1589,20 +1574,6 @@ export function ProjectEditorWizard({
                 ) : null}
               </div>
             ) : null}
-            {optionalNoteField && !document ? (
-              <div className="mt-3">
-                <Label className="text-[11px]">미첨부 사유 / 해당 없음 *</Label>
-                <Input
-                  value={draft.registrationOptionalDocumentNotes[optionalNoteField]}
-                  onChange={(event) => update('registrationOptionalDocumentNotes', {
-                    ...draft.registrationOptionalDocumentNotes,
-                    [optionalNoteField]: event.target.value,
-                  })}
-                  placeholder="예: 해당 없음 / 고객사에서 원본을 제공하지 않음"
-                  className="mt-1 h-9 bg-white text-sm"
-                />
-              </div>
-            ) : null}
             {kind === 'contract' && contractDocumentEditPolicy.isExistingContractDocumentLocked ? (
               <p className="mt-2 text-[11px] text-muted-foreground">
                 기존 계약서는 관리자 화면에서만 제거할 수 있습니다.
@@ -1656,43 +1627,11 @@ export function ProjectEditorWizard({
   };
 
   const renderRegistrationDocumentSlot = (slot: RegistrationDocumentSlot) => {
-    if (slot.kinds.length === 1) {
-      return renderProjectDocumentUpload(slot.kinds[0], {
-        slotNumber: slot.number,
-        label: slot.label,
-        description: slot.description,
-      });
-    }
-
-    return (
-      <div key={slot.number} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-        <div className="flex items-start gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
-            {slot.number}
-          </span>
-          <div>
-            <Label className="text-xs font-semibold">{slot.label}</Label>
-            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{slot.description}</p>
-          </div>
-        </div>
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          {slot.kinds.map((kind) => {
-            const alternativeDocumentAttached = kind === 'proposal'
-              ? Boolean(draft.rfpRequestEvidenceDocument)
-              : kind === 'rfp_request_evidence'
-                ? Boolean(draft.proposalDocument)
-                : false;
-            return renderProjectDocumentUpload(kind, {
-              embedded: true,
-              label: PROJECT_DOCUMENT_LABELS[kind],
-              description: alternativeDocumentAttached
-                ? '업로드하면 기존 대체서류를 교체합니다.'
-                : undefined,
-            });
-          })}
-        </div>
-      </div>
-    );
+    return renderProjectDocumentUpload(slot.kinds[0], {
+      slotNumber: slot.number,
+      label: slot.label,
+      description: slot.description,
+    });
   };
 
   const renderRegistrationConfirmations = () => usesRegistrationV2 ? (
@@ -1717,7 +1656,7 @@ export function ProjectEditorWizard({
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                 <p className="text-sm font-semibold text-[#001e46]">등록 제출서류 7종</p>
                 <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                  1~3번은 필수이며, 4번은 두 문서 중 하나를 제출합니다. 5~7번은 원본 파일 또는 미첨부 사유를 남겨주세요.
+                  프로젝트 유형과 관계없이 7개 서류를 모두 첨부해야 저장할 수 있습니다.
                 </p>
               </div>
               {REGISTRATION_DOCUMENT_SLOTS.map(renderRegistrationDocumentSlot)}
@@ -2001,8 +1940,11 @@ export function ProjectEditorWizard({
             <Select value={draft.settlementSystem} onValueChange={(value) => update('settlementSystem', value as SettlementSystemCode)}>
               <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {(Object.entries(SETTLEMENT_SYSTEM_LABELS) as [SettlementSystemCode, string][]).map(([key, value]) => (
-                  <SelectItem key={key} value={key}>{value}</SelectItem>
+                {[
+                  ...PROJECT_SETTLEMENT_SYSTEM_CODES,
+                  ...(PROJECT_SETTLEMENT_SYSTEM_CODES.includes(draft.settlementSystem) ? [] : [draft.settlementSystem]),
+                ].map((key) => (
+                  <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -2418,10 +2360,12 @@ export function ProjectEditorWizard({
           </div>
           {([
             ['finalPaymentReceived', '최종 잔금 입금을 확인했습니다.'],
-            ['bankBalanceZero', '사업 전용계좌 잔액이 0원입니다.'],
-            ['performanceCertificateReceived', '수행확인서 원본을 수령했습니다.'],
-            ['taxInvoiceEvidenceConfirmed', '세금계산서 발행 내역을 확인했습니다.'],
-            ['finalSettlementReportConfirmed', '최종 정산보고서를 확인했습니다.'],
+            ['bankBalanceZero', '프로젝트 계좌 잔액을 0원으로 정리했습니다.'],
+            ['performanceCertificateReceived', '실적증명 원본 5부 이상을 제출했거나 전자 플랫폼 업로드를 완료했습니다.'],
+            ['taxInvoiceEvidenceConfirmed', '발행된 세금계산서가 있어 전체 PDF를 첨부해야 합니다.'],
+            ...(requiresSettlementConfirmations
+              ? [['finalSettlementReportConfirmed', '회계사 최종 정산보고서가 있어 PDF를 첨부해야 합니다.'] as const]
+              : []),
           ] as const).map(([field, label]) => (
             <label key={field} className="flex items-center gap-2 text-[12px] text-slate-700">
               <Checkbox
@@ -2431,74 +2375,72 @@ export function ProjectEditorWizard({
               {label}
             </label>
           ))}
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox
+              checked={draft.checkout.performanceCertificateDocumentApplicable === true}
+              onCheckedChange={(checked) => update('checkout', {
+                ...draft.checkout,
+                performanceCertificateDocumentApplicable: checked === true,
+              })}
+            />
+            고객사가 발급한 실적증명 PDF가 있어 첨부해야 합니다.
+          </label>
           {onProjectDocumentFileUpload ? (
             <div className="space-y-3 pt-1">
               {checkoutDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
             </div>
           ) : null}
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox
-              checked={draft.checkout.usbEvidenceSubmitted}
-              onCheckedChange={(checked) => update('checkout', {
-                ...draft.checkout,
-                usbEvidenceSubmitted: checked === true,
-                evidenceDeletedAfterUsb: checked === true ? draft.checkout.evidenceDeletedAfterUsb : false,
-              })}
-            />
-            정산 USB를 제출했습니다.
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox
-              checked={draft.checkout.evidenceDeletedAfterUsb}
-              disabled={!draft.checkout.usbEvidenceSubmitted}
-              onCheckedChange={(checked) => update('checkout', {
-                ...draft.checkout,
-                evidenceDeletedAfterUsb: checked === true,
-              })}
-            />
-            USB 제출 후 로컬·임시 증빙 파일을 삭제했습니다.
-          </label>
+          {requiresSettlementConfirmations ? (
+            <>
+              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.checkout.usbEvidenceSubmitted}
+                  onCheckedChange={(checked) => update('checkout', {
+                    ...draft.checkout,
+                    usbEvidenceSubmitted: checked === true,
+                    evidenceDeletedAfterUsb: checked === true ? draft.checkout.evidenceDeletedAfterUsb : false,
+                  })}
+                />
+                정산 종료 후 모든 정산 자료를 USB에 저장해 재무팀에 제출했습니다.
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                <Checkbox
+                  checked={draft.checkout.evidenceDeletedAfterUsb}
+                  disabled={!draft.checkout.usbEvidenceSubmitted}
+                  onCheckedChange={(checked) => update('checkout', {
+                    ...draft.checkout,
+                    evidenceDeletedAfterUsb: checked === true,
+                  })}
+                />
+                사용 내역은 유지하고 증빙 파일을 삭제했습니다.
+              </label>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 
   const registrationDocumentReviewItems = [
-    { number: 1, label: '계약서 PDF', value: draft.contractDocument?.name || '미첨부' },
-    { number: 2, label: '고객사 사업자등록증 PDF', value: draft.customerBusinessRegistrationDocument?.name || '미첨부' },
-    { number: 3, label: '견적서 PDF', value: draft.quoteDocument?.name || '미첨부' },
+    { number: 1, label: '계약서', value: draft.contractDocument?.name || '미첨부' },
+    { number: 2, label: '고객사 사업자등록증', value: draft.customerBusinessRegistrationDocument?.name || '미첨부' },
+    { number: 3, label: '견적서', value: draft.quoteDocument?.name || '미첨부' },
     {
       number: 4,
-      label: '제안서 PDF 또는 RFP/요청 메일 증빙',
-      value: [
-        draft.proposalDocument ? `제안서: ${draft.proposalDocument.name}` : '',
-        draft.rfpRequestEvidenceDocument ? `RFP/요청 메일: ${draft.rfpRequestEvidenceDocument.name}` : '',
-      ].filter(Boolean).join(' · ') || '미첨부',
+      label: '제안서(워드)',
+      value: draft.proposalWordOriginalDocument?.name || '미첨부',
     },
     {
       number: 5,
-      label: '제안서 Word 원본',
-      value: draft.proposalWordOriginalDocument?.name
-        || (draft.registrationOptionalDocumentNotes.proposalWordOriginal
-          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.proposalWordOriginal}`
-          : '미첨부'),
+      label: '제안서(PPT 원본)',
+      value: draft.proposalPptOriginalDocument?.name || '미첨부',
     },
     {
       number: 6,
-      label: '제안서 PPT 원본',
-      value: draft.proposalPptOriginalDocument?.name
-        || (draft.registrationOptionalDocumentNotes.proposalPptOriginal
-          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.proposalPptOriginal}`
-          : '미첨부'),
+      label: '발표자료(PPT 원본)',
+      value: draft.presentationPptOriginalDocument?.name || '미첨부',
     },
-    {
-      number: 7,
-      label: '발표자료 PPT 원본',
-      value: draft.presentationPptOriginalDocument?.name
-        || (draft.registrationOptionalDocumentNotes.presentationPptOriginal
-          ? `미첨부 사유: ${draft.registrationOptionalDocumentNotes.presentationPptOriginal}`
-          : '미첨부'),
-    },
+    { number: 7, label: 'RFP', value: draft.rfpRequestEvidenceDocument?.name || '미첨부' },
   ];
 
   const ReviewRow = ({ label, value, stacked = false }: { label: string; value: ReactNode; stacked?: boolean }) => (
@@ -2654,7 +2596,15 @@ export function ProjectEditorWizard({
             {showProjectCheckout ? (
               <ReviewRow
                 label="종료사업 체크아웃"
-                value={`${Object.values(draft.checkout).filter(Boolean).length}/7 확인`}
+                value={`${[
+                  draft.checkout.finalPaymentReceived,
+                  draft.checkout.bankBalanceZero,
+                  draft.checkout.performanceCertificateReceived,
+                  draft.checkout.taxInvoiceEvidenceConfirmed,
+                  draft.checkout.finalSettlementReportConfirmed,
+                  draft.checkout.usbEvidenceSubmitted,
+                  draft.checkout.evidenceDeletedAfterUsb,
+                ].filter(Boolean).length}/7 확인`}
               />
             ) : null}
           </CardContent>
@@ -2829,6 +2779,19 @@ export function ProjectEditorWizard({
 
       {topSlot}
 
+      {showCheckoutEntry && showProjectCheckout ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-between border-[#001e46] text-[#001e46]"
+          data-testid="project-checkout-entry"
+          onClick={() => setStepIndex(STEPS.findIndex((item) => item.id === 'payment'))}
+        >
+          <span>Project Check out</span>
+          <span className="text-xs text-slate-500">체크리스트와 증빙 업로드 열기</span>
+        </Button>
+      ) : null}
+
       {preloadWarningVisible ? (
         <div className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2946,7 +2909,7 @@ export function ProjectEditorWizard({
                 type="button"
                 variant="outline"
                 onClick={() => void handleManualAutosave()}
-                disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile}
+                disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || (mode === 'portal-register' && !hasRequiredRegistrationDocuments)}
                 className="gap-2"
               >
                 {autosaveState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

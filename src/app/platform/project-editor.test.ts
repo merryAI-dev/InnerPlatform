@@ -7,6 +7,7 @@ import {
   normalizeAccountType,
   normalizeProjectContractType,
   PROJECT_CONTRACT_TYPE_OPTIONS,
+  PROJECT_SETTLEMENT_SYSTEM_CODES,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_SYSTEM_LABELS,
 } from '../data/types';
@@ -237,6 +238,21 @@ describe('project editor draft mapping', () => {
       FIXED_AMOUNT: '정액정산',
       NONE: '정산없음',
     });
+  });
+
+  it('exposes the exact PPT page 30 settlement-system options while retaining legacy codes', () => {
+    expect(PROJECT_SETTLEMENT_SYSTEM_CODES.map((code) => [code, SETTLEMENT_SYSTEM_LABELS[code]])).toEqual([
+      ['NONE', '정산없음'],
+      ['E_NARA_DOUM', 'e나라도움 (국고보조금통합관리시스템)'],
+      ['BOTAEM_E', '보탬e(지방보조금관리시스템)'],
+      ['RCMS', 'RCMS (실시간연구비관리시스템)'],
+      ['EZBARO', '통합이지바로 (통합 Ez-plus)'],
+      ['SMTECH', 'SMTECH (중소기업기술개발사업종합관리시스템)'],
+      ['KOCCA_PMS', 'KOCCA PMS'],
+      ['NIPA', 'NIPA 사업관리시스템'],
+      ['IRIS', 'IRIS(범부처통합연구지원시스템)'],
+    ]);
+    expect(SETTLEMENT_SYSTEM_LABELS.ACCOUNTANT).toBe('회계사정산');
   });
 
   it('uses selected registeredBy member as the project owner source of truth', () => {

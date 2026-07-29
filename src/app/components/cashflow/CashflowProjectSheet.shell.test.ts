@@ -143,6 +143,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("surface: 'border-border bg-accent'");
     expect(source).toContain('text-card-foreground">주간 정산');
     expect(source).toContain('text-card-foreground">월 결산');
+    expect(source).toContain('조직장 선택');
+    expect(source).toContain('조직장 확정');
+    expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
     expect(source).toContain('text-secondary-foreground">{check.title}');
     expect(source).toContain('text-muted-foreground">프로젝트 전체 기간 · BFF/JVM 서버 판정');
     expect(source).toContain('bg-accent px-2.5 py-1 font-semibold text-accent-foreground');
