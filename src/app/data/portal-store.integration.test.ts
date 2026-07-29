@@ -88,13 +88,63 @@ describeIfEmulator('portal-store persistence integration (Firestore emulator)', 
   beforeEach(async () => {
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`);
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_intake`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_summary`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_code_book`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_tree_v2`);
     await clearCollection(`orgs/${tenantId}/weeklySubmissionStatus`);
   });
 
   afterAll(async () => {
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_sheets`);
     await clearCollection(`orgs/${tenantId}/projects/${projectId}/expense_intake`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_summary`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_code_book`);
+    await clearCollection(`orgs/${tenantId}/projects/${projectId}/budget_tree_v2`);
     await clearCollection(`orgs/${tenantId}/weeklySubmissionStatus`);
+  });
+
+  it('round-trips manual budget edits and structure replacement', async () => {
+    const projectPath = `orgs/${tenantId}/projects/${projectId}`;
+    const summaryRef = db.doc(`${projectPath}/budget_summary/default`);
+    const codeBookRef = db.doc(`${projectPath}/budget_code_book/default`);
+    const treeRef = db.doc(`${projectPath}/budget_tree_v2/default`);
+    const updatedAt = '2026-07-29T08:00:00.000Z';
+
+    await summaryRef.set({
+      tenantId,
+      projectId,
+      rows: [{ budgetCode: '운영비', subCode: '회의비', initialBudget: 100000, revisedBudget: 120000 }],
+      updatedAt,
+      updatedBy: 'PM 보람',
+    }, { merge: true });
+    await codeBookRef.set({
+      tenantId,
+      projectId,
+      codes: [{ code: '운영비', subCodes: ['회의비', '교통비'] }],
+      updatedAt,
+      updatedBy: 'PM 보람',
+    }, { merge: true });
+    await treeRef.set({
+      tenantId,
+      version: 2,
+      projectId,
+      codes: [{ code: '운영비', subItems: [{ subCode: '회의비', leafItems: [{ subSubCode: '다과' }] }] }],
+      updatedAt,
+      updatedBy: 'PM 보람',
+    }, { merge: true });
+
+    expect((await summaryRef.get()).data()?.rows).toEqual([
+      expect.objectContaining({ revisedBudget: 120000 }),
+    ]);
+    expect((await codeBookRef.get()).data()?.codes).toEqual([
+      { code: '운영비', subCodes: ['회의비', '교통비'] },
+    ]);
+    expect((await treeRef.get()).data()?.codes).toEqual([
+      { code: '운영비', subItems: [{ subCode: '회의비', leafItems: [{ subSubCode: '다과' }] }] },
+    ]);
+
+    await codeBookRef.set({ codes: [{ code: '운영비', subCodes: ['회의비'] }] }, { merge: true });
+    expect((await codeBookRef.get()).data()?.codes).toEqual([{ code: '운영비', subCodes: ['회의비'] }]);
   });
 
   it('persists expense sheet rows with the exact settlement document shape', async () => {

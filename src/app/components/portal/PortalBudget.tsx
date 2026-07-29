@@ -1033,6 +1033,21 @@ export function PortalBudget() {
     setDropTarget(null);
   }, []);
 
+  const startEdit = useCallback(() => {
+    setDraftRows(buildDraftRowsFromTree(activeTreeCodes));
+    setEditMode(true);
+  }, [activeTreeCodes]);
+
+  const startCodeBookEdit = useCallback(() => {
+    setDraftTreeCodes(cloneBudgetTreeCodes(activeTreeCodes));
+    setOpenedLeafEditors(new Set());
+    setCodeBookEditorTab('manual');
+    setCodeBookImportText('');
+    setCodeBookImportFileName('');
+    setCodeBookReplaceMode(false);
+    setCodeBookMode(true);
+  }, [activeTreeCodes]);
+
   const cancelEdit = useCallback(() => {
     setEditMode(false);
     setCodeBookMode(false);
@@ -1383,10 +1398,34 @@ export function PortalBudget() {
         <PageHeader
           icon={Calculator}
           iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
-          title="예산총괄"
+          title="예산 편집"
           description={myProject ? myProject.name : '예산 현황'}
           badge={`${meta.year}년`}
           headingVisible={false}
+          actions={(
+            <div className="flex items-center gap-2">
+              {editMode ? (
+                <>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px]" onClick={cancelEdit}>
+                    취소
+                  </Button>
+                  <Button size="sm" className="h-8 text-[12px]" onClick={saveSettings} disabled={settingsSaving}>
+                    {settingsSaving ? '저장 중...' : '저장'}
+                  </Button>
+                </>
+              ) : !codeBookMode ? (
+                <>
+                  <Button variant="default" size="sm" className="h-8 text-[12px] shadow-sm" onClick={startEdit}>
+                    예산 편집
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-8 text-[12px] gap-1" onClick={startCodeBookEdit}>
+                    <Settings className="w-3.5 h-3.5" />
+                    구조 관리
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          )}
         />
         <Dialog open={budgetImportOpen} onOpenChange={(open) => !open && closeBudgetImport()}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
@@ -1715,14 +1754,12 @@ export function PortalBudget() {
               <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
                 <p className="text-[11px] font-medium text-foreground">현재 예산 표에 쓰이는 비목/세목 구조를 관리합니다.</p>
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  숫자 편집과 별개 흐름입니다. 붙여넣기 또는 CSV 가져오기는 현재 구조 초안을 교체하고, 저장 전까지는 실제 예산에 반영되지 않습니다.
+                  비목·세목·세세목을 직접 추가하거나 수정한 뒤 저장해 주세요.
                 </p>
               </div>
               <Tabs value={codeBookEditorTab} onValueChange={(value) => setCodeBookEditorTab(value as 'manual' | 'paste' | 'csv')} className="min-h-0 flex flex-1 flex-col overflow-hidden">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-1">
                   <TabsTrigger value="manual" className="text-[11px]">직접 수정</TabsTrigger>
-                  <TabsTrigger value="paste" className="text-[11px]">엑셀 붙여넣기</TabsTrigger>
-                  <TabsTrigger value="csv" className="text-[11px]">CSV 가져오기</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="manual" className="mt-3 min-h-0 flex flex-1 flex-col space-y-3 overflow-hidden">

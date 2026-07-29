@@ -350,7 +350,7 @@ export function BudgetSummaryPage() {
           <Clock className="w-3 h-3" />
           <span>마지막 수정: {meta.lastUpdated} ({meta.updatedBy})</span>
           <span className="text-muted-foreground/50">·</span>
-          <span>예산 배정·소진·잔액 조회</span>
+          <span>예산 편집 / 비목·세목 수정</span>
         </div>
 
         {/* ── 하단 보조 테이블 + 타임라인 ── */}
