@@ -36,6 +36,25 @@ function cashflowMonthCloseTimeoutError() {
   );
 }
 
+function assertCashflowMonthCloseMutationResult(result, projectId, yearMonth, expectedRevision) {
+  if (
+    result?.ok !== true
+    || readOptionalText(result.projectId) !== projectId
+    || readOptionalText(result.yearMonth) !== yearMonth
+    || readOptionalText(result.status) !== 'CLOSED'
+    || !Number.isSafeInteger(result.revision)
+    || result.revision !== expectedRevision + 1
+    || !readOptionalText(result.auditId)
+  ) {
+    throw createHttpError(
+      502,
+      'JVM 캐시플로 저장 결과를 확인할 수 없습니다.',
+      'cashflow_jvm_invalid_response',
+    );
+  }
+  return result;
+}
+
 async function withCashflowMonthCloseDeadline(task, timeoutMs) {
   let timeoutId;
   try {
@@ -590,7 +609,7 @@ function profitVatAfterDepositCheck(weeks, deposits, asOfKey) {
       : Number.POSITIVE_INFINITY;
     const target = candidate && calendarGapMs <= 8 * 86_400_000 ? candidate : null;
     if (!target) {
-      due.push(`${readOptionalText(deposit.yearMonth)} ${Number(deposit.weekNo)}주차 입금의 다음 주차 원장 없음`);
+      due.push(`${readOptionalText(deposit.yearMonth)} ${Number(deposit.weekNo)}주차 입금의 다음 주차 시트 없음`);
       continue;
     }
     const targetKey = cashflowRangeSortKey(target);
@@ -1228,7 +1247,7 @@ function assertCashflowSheetPublicationReady(state) {
   if (!state.blocked) return;
   throw createHttpError(
     409,
-    '시트 값을 원장에 반영 중입니다. 반영이 끝난 뒤 다시 확인해 주세요.',
+    '시트 값을 MYSCube 시트에 반영 중입니다. 반영이 끝난 뒤 다시 확인해 주세요.',
     'cashflow_sheet_apply_in_progress',
   );
 }
@@ -1685,7 +1704,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     else if ((mirror.projectId && mirror.projectId !== projectId) || !mirror.yearMonths?.includes(yearMonth)) {
       blockers.push({ code: 'SHEET_SOURCE_SCOPE_MISMATCH', message: '고정한 시트값의 프로젝트 또는 월이 다릅니다.' });
     } else if (readOptionalText(mirror.appliedSourceRevision) !== readOptionalText(mirror.sourceRevision)) {
-      blockers.push({ code: 'SHEET_SOURCE_NOT_APPLIED', message: '불러온 시트값을 원장에 반영해 주세요.' });
+      blockers.push({ code: 'SHEET_SOURCE_NOT_APPLIED', message: '불러온 값을 MYSCube 시트에 반영해 주세요.' });
     }
     blockers.push(...sheetControlBlockers(sheetFacts));
     blockers.push(...monthSheetCalculationBlockers(sheetFacts, yearMonth));
@@ -1747,7 +1766,7 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
   if (legacyEvidenceOnly) {
     warnings.push({
       code: 'LEGACY_CLOSE_EVIDENCE_LIMITED',
-      message: '이 결산은 이전 형식으로 저장되어 항목별 전년도 이월 근거와 전체 동결 원장을 확인할 수 없습니다. 재오픈 후 시트값을 다시 반영하고 재결산해 주세요.',
+      message: '이 결산은 이전 형식으로 저장되어 항목별 전년도 이월 근거와 전체 동결 시트를 확인할 수 없습니다. 재오픈 후 시트값을 다시 반영하고 재결산해 주세요.',
       details: { missingEvidence: snapshotCompatibility.missingEvidence || [] },
     });
   }
@@ -2488,7 +2507,12 @@ export function mountJvmWeeklyApiRoutes(app, {
       prepared.closeBody,
       { cashflowWrite: true, deadlineAtMs: prepared.routeDeadlineAtMs },
     );
-    return result;
+    return assertCashflowMonthCloseMutationResult(
+      result,
+      prepared.rawProjectId,
+      prepared.closeBody.yearMonth,
+      prepared.closeBody.expectedRevision,
+    );
   }
 
   app.get('/api/v1/cashflow/month-close/requests/pending', asyncHandler(async (req, res) => {

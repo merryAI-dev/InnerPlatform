@@ -789,7 +789,7 @@ export interface CashflowMonthCloseCell {
   mode: 'projection' | 'actual';
   weekNo: number;
   cashflowLine: string;
-  cellState: 'VALUE' | 'EMPTY';
+  cellState: 'VALUE' | 'ZERO' | 'EMPTY';
   amount?: number | null;
   sourceCell?: string | null;
   sourceLabel?: string | null;

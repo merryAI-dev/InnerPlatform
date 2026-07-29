@@ -88,7 +88,7 @@ export function cashflowMonthCloseConfirmationKey(input: {
 export function requiredCashflowMonthCloseDecision(
   cell: Pick<CashflowMonthCloseCell, 'cellState'>,
 ): CashflowMonthCloseDecision {
-  return cell.cellState === 'VALUE' ? 'CONFIRMED' : 'NOT_APPLICABLE';
+  return cell.cellState === 'VALUE' || cell.cellState === 'ZERO' ? 'CONFIRMED' : 'NOT_APPLICABLE';
 }
 
 export function createEmptyCashflowMonthCloseDepositRows(): CashflowMonthCloseDepositReviewRow[] {
@@ -116,7 +116,7 @@ function assertPinnedMirror(
     throw new Error('시트값 불러오기를 실행해 최신 고정본을 준비해 주세요.');
   }
   if (!mirror.sourceRevision || !mirror.targetRevisionAtFetch) {
-    throw new Error('시트 고정본의 원본/원장 버전을 확인할 수 없습니다.');
+    throw new Error('시트 고정본의 원본/MYSCube 시트 버전을 확인할 수 없습니다.');
   }
   if (!mirror.yearMonths?.includes(yearMonth)) {
     throw new Error(`${yearMonth} 시트 고정본이 없습니다.`);
@@ -147,8 +147,9 @@ export function normalizeCashflowMonthCloseCells(
       cashflowLine: source.lineId,
     });
     if (cellsByKey.has(key)) throw new Error(`중복된 시트 셀이 있습니다: ${key}`);
-    const amount = source.state === 'VALUE' ? Number(source.amount) : null;
-    if (source.state === 'VALUE' && !Number.isFinite(amount)) {
+    const hasValue = source.state === 'VALUE' || source.state === 'ZERO';
+    const amount = hasValue ? Number(source.amount) : null;
+    if (hasValue && !Number.isFinite(amount)) {
       throw new Error(`${source.sourceCell || source.sourceLabel || key} 금액을 확인해 주세요.`);
     }
     cellsByKey.set(key, {

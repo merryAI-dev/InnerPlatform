@@ -971,7 +971,6 @@ async function reserveCashflowSheetStageRun({ db, runRef, requestHash, reservati
       ...reservation,
       requestHash,
       status: 'STAGING',
-      reservationExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     }), { merge: true });
     return null;
   });
@@ -2714,6 +2713,7 @@ async function stagePinnedCashflowSheetLab({
     yearMonths: pinnedMonths,
   });
   const now = new Date().toISOString();
+  const reservationExpiresAt = new Date(Date.now() + 60_000).toISOString();
   const weekly = buildPinnedSheetChangeCandidates({
     tenantId,
     projectId,
@@ -2782,7 +2782,7 @@ async function stagePinnedCashflowSheetLab({
     replaceAllActualSources: Boolean(parsed.replaceAllActualSources),
     activeWeekRange: mirror.activeWeekRange,
     runId,
-    status: blockedMonths.length > 0 ? 'BLOCKED' : 'READY',
+    status: blockedMonths.length > 0 ? 'BLOCKED' : candidates.length === 0 ? 'NO_CHANGES' : 'READY',
     stagedLineCount: candidates.length,
     projectionLineCount,
     actualLineCount,
@@ -2808,6 +2808,7 @@ async function stagePinnedCashflowSheetLab({
     projectId,
     idempotencyKey: parsed.idempotencyKey,
     requestHash,
+    reservationExpiresAt,
     configRevision,
     sourceRevision: mirror.sourceRevision,
     targetRevisionAtFetch: mirror.targetRevisionAtFetch,
@@ -2833,26 +2834,73 @@ async function stagePinnedCashflowSheetLab({
   });
   if (replay) return replay;
   try {
-    await saveCashflowChangeCandidates({ db, tenantId, candidates });
-    await Promise.all(stagedMonthDocuments.map((month) => db
-      .doc(cashflowSheetStageMonthDocPath(tenantId, runId, month.yearMonth))
-      .set(month)));
-    await Promise.all(annual.documents.map((yearDocument) => db
-      .doc(cashflowSheetStageYearDocPath(tenantId, runId, yearDocument.year))
-      .set(yearDocument)));
-    await runRef.set(stripUndefinedDeep({
-      ...runDocument,
-      status: response.status,
-      reservationExpiresAt: null,
-      response,
-    }), { merge: true });
+    if (response.status === 'NO_CHANGES') {
+      const mirrorRef = db.doc(cashflowSheetMirrorDocPath(tenantId, projectId));
+      const cashflowQuery = db.collection(`orgs/${tenantId}/${CASHFLOW_WEEKS_COLLECTION_ID}`)
+        .where('projectId', '==', projectId);
+      await db.runTransaction(async (transaction) => {
+        const currentRunSnap = await transaction.get(runRef);
+        const currentMirrorSnap = await transaction.get(mirrorRef);
+        const currentCashflowSnap = await transaction.get(cashflowQuery);
+        const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+        const currentMirror = currentMirrorSnap.exists ? (currentMirrorSnap.data() || {}) : {};
+        assertFreshCashflowSheetMirror(currentMirror);
+        if (
+          readOptionalText(currentRun.status) !== 'STAGING'
+          || readOptionalText(currentRun.requestHash) !== requestHash
+          || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
+          || readOptionalText(currentMirror.configRevision) !== configRevision
+          || readOptionalText(currentMirror.sourceRevision) !== readOptionalText(mirror.sourceRevision)
+          || readOptionalText(currentMirror.targetRevisionAtFetch) !== readOptionalText(mirror.targetRevisionAtFetch)
+          || computeCashflowTargetRevision({
+            weeks: currentCashflowSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+          }) !== readOptionalText(mirror.targetRevisionAtFetch)
+        ) {
+          throw createHttpError(409, '시트 검토 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_stage_completion_conflict');
+        }
+        transaction.set(runRef, stripUndefinedDeep({
+          ...runDocument,
+          status: 'APPLIED',
+          reservationExpiresAt: null,
+          appliedAt: now,
+          response,
+        }), { merge: true });
+        transaction.set(mirrorRef, {
+          appliedSourceRevision: mirror.sourceRevision,
+          lastAppliedAt: now,
+          lastAppliedBy: response.lastStagedBy,
+        }, { merge: true });
+      });
+    } else {
+      await saveCashflowChangeCandidates({ db, tenantId, candidates });
+      await Promise.all(stagedMonthDocuments.map((month) => db
+        .doc(cashflowSheetStageMonthDocPath(tenantId, runId, month.yearMonth))
+        .set(month)));
+      await Promise.all(annual.documents.map((yearDocument) => db
+        .doc(cashflowSheetStageYearDocPath(tenantId, runId, yearDocument.year))
+        .set(yearDocument)));
+      await runRef.set(stripUndefinedDeep({
+        ...runDocument,
+        status: response.status,
+        reservationExpiresAt: null,
+        response,
+      }), { merge: true });
+    }
   } catch (error) {
-    await runRef.set(stripUndefinedDeep({
-      status: 'STAGING_FAILED',
-      reservationExpiresAt: null,
-      failedAt: new Date().toISOString(),
-      failure: routeErrorDetails(error),
-    }), { merge: true }).catch(() => null);
+    await db.runTransaction(async (transaction) => {
+      const currentRunSnap = await transaction.get(runRef);
+      const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+      if (
+        readOptionalText(currentRun.status) !== 'STAGING'
+        || readOptionalText(currentRun.reservationExpiresAt) !== reservationExpiresAt
+      ) return;
+      transaction.set(runRef, stripUndefinedDeep({
+        status: 'STAGING_FAILED',
+        reservationExpiresAt: null,
+        failedAt: new Date().toISOString(),
+        failure: routeErrorDetails(error),
+      }), { merge: true });
+    }).catch(() => null);
     throw error;
   }
   logger('ok', {

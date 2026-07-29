@@ -124,6 +124,14 @@ describe('cashflow month close contract', () => {
     expect(cells[80]).toMatchObject({ mode: 'actual', weekNo: 1, cashflowLine: CASHFLOW_ALL_LINES[0] });
   });
 
+  it('preserves an explicit weekly zero as a confirmed value', () => {
+    const source = mirror();
+    source.cells![0] = { ...source.cells![0], state: 'ZERO', amount: 0 };
+    const [cell] = normalizeCashflowMonthCloseCells(source, '2026-07');
+    expect(cell).toMatchObject({ cellState: 'ZERO', amount: 0 });
+    expect(requiredCashflowMonthCloseDecision(cell)).toBe('CONFIRMED');
+  });
+
   it('requires a human decision for every value and empty cell', () => {
     expect(() => buildCashflowMonthCloseDraftInput({
       mirror: mirror(),

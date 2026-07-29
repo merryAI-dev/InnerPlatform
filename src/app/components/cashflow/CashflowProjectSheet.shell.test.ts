@@ -237,7 +237,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트값 불러오기');
     expect(source).toContain('시트 값 불러오기');
     expect(source).toContain('fetchCashflowActivityViaBff');
-    expect(source).toContain('원장 덮어쓰기');
+    expect(source).toContain('MYSCube 시트 덮어쓰기');
     expect(source).toContain('replaceAllActualSources');
     expect(source).not.toContain('시트 연동하기');
     expect(source).not.toContain('최신값 다시 가져오기');
@@ -281,8 +281,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('캐시플로우 시트 연동 시작하기');
     expect(source).toContain('나중에 하기');
     expect(source).toContain('설정 후에도 자동으로 값을 가져오지 않습니다.');
-    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months || []');
-    expect(source).toContain('comparisonWeek?.lines?.find');
+    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.range?.[mode]');
+    expect(source).toContain('getServerReadCell({ targetYearMonth: week.yearMonth');
   });
 
   it('keeps legacy closed snapshots as evidence-only without rendering annual-year views', () => {
@@ -404,7 +404,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('decodeURIComponent(text)');
     expect(source).toContain('`${actorName}님이`');
     expect(source).toContain('`${actorEmail} 계정으로`');
-    expect(source).toContain('시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.');
+    expect(source).toContain('시트의 최신 값을 불러와 MYSCube 시트 반영 전 검증본으로 보관했습니다.');
     expect(source).toContain('latestCashflowEventSummary');
     expect(source).toContain('시트의 최신 값을 불러왔습니다.');
   });
@@ -422,6 +422,22 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain("'값 없음'");
     expect(source).toContain('>미입력</');
     expect(source).toContain("cell.difference === null ? '미입력'");
+  });
+
+  it('aligns the Projection - Actual table to the same annual, weekly, and Total contract as the cashflow board', () => {
+    expect(source).toContain('const mirroredAnnualTotals = useMemo');
+    expect(source).toContain('const annualTotalFor = (year: number');
+    expect(source).toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
+    expect(source).toContain("const totalActual = projectLineTotalFor('actual', lineId)");
+    expect(source).toContain('{previousAnnualYears.map((year) => (');
+    expect(source).toContain('{followingAnnualYears.map((year) => (');
+    expect(source).toContain('row.annualCells.filter((cell) => cell.year < selectedYear)');
+    expect(source).toContain('row.annualCells.filter((cell) => cell.year > selectedYear)');
+    expect(source).toContain('row.totalCell.difference');
+    expect(source).toContain('difference: hasValue ? projection - actual : null');
+    expect(source).toContain("pinned.state === 'VALUE' || pinned.state === 'ZERO'");
+    expect(source).toContain("cell?.cellState === 'VALUE' || cell?.cellState === 'ZERO'");
+    expect(source).toContain('const columnCount = annualYears.length + annualWeeks.length + 1');
   });
 
   it('keeps the last good month result during a same-month retry and lists every management finding', () => {

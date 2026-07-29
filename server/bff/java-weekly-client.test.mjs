@@ -170,14 +170,19 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      text: async () => JSON.stringify({
+        ok: true,
+        projectId: 'project-a',
+        annualCheckCount: 1,
+        weeklyCheckCount: 1,
+      }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
     const annualCells = [{ year: 2024, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'ZERO', amount: 0 }];
-    const annualDerivedCells = [{
-      year: 2024, periodKind: 'ANNUAL', mode: 'projection', field: 'balance', amount: 0, sourceCell: 'C33',
-    }];
-    const months = [{ yearMonth: '2026-01', cells: monthlyContract.cells, calculationChecks: [] }];
+    const annualDerivedCells = ['depositTotal', 'withdrawalTotal', 'balance'].map((field) => ({
+      year: 2024, periodKind: 'ANNUAL', mode: 'projection', field, amount: 0, sourceCell: 'C33',
+    }));
+    const months = [{ yearMonth: '2026-01', cells: monthlyContract.cells, calculationChecks: [{}] }];
 
     await client.validateCashflowSheetFormulas({
       context,
@@ -198,6 +203,35 @@ describe('Java weekly cashflow client', () => {
       months,
       acceptFormulaMismatches: true,
     });
+  });
+
+  it.each([
+    ['ok is not true', { ok: false, projectId: 'project-a', annualCheckCount: 1, weeklyCheckCount: 1 }, 'jvm_weekly_response_invalid'],
+    ['projectId differs', { ok: true, projectId: 'project-b', annualCheckCount: 1, weeklyCheckCount: 1 }, 'jvm_weekly_project_mismatch'],
+    ['annual count is negative', { ok: true, projectId: 'project-a', annualCheckCount: -1, weeklyCheckCount: 1 }, 'jvm_weekly_response_invalid'],
+    ['annual count is not an integer', { ok: true, projectId: 'project-a', annualCheckCount: 1.5, weeklyCheckCount: 1 }, 'jvm_weekly_response_invalid'],
+    ['weekly count is unsafe', { ok: true, projectId: 'project-a', annualCheckCount: 1, weeklyCheckCount: Number.MAX_SAFE_INTEGER + 1 }, 'jvm_weekly_response_invalid'],
+    ['evidence counts differ', { ok: true, projectId: 'project-a', annualCheckCount: 2, weeklyCheckCount: 0 }, 'jvm_weekly_response_invalid'],
+  ])('rejects a formula preflight response when %s', async (_case, response, code) => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(response),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.validateCashflowSheetFormulas({
+      context,
+      projectId: 'project-a',
+      sourceYear: 2026,
+      annualCells: [],
+      annualDerivedCells: [
+        { year: 2026, mode: 'actual', field: 'depositTotal' },
+        { year: 2026, mode: 'actual', field: 'withdrawalTotal' },
+        { year: 2026, mode: 'actual', field: 'balance' },
+      ],
+      months: [{ yearMonth: '2026-01', cells: [], calculationChecks: [{}] }],
+    })).rejects.toMatchObject({ statusCode: 502, code });
   });
 
   it('waits once for a slow batch conflict instead of retrying and masking it as unreachable', async () => {

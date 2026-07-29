@@ -21,7 +21,7 @@ describe('cashflow action chrome', () => {
     expect(cashflowProjectSheetSource).not.toContain('actual - projection');
     expect(cashflowProjectSheetSource).toContain('diffColorExplanation');
     expect(cashflowProjectSheetSource).toContain('차이 항목만');
-    expect(cashflowProjectSheetSource).toContain('BFF 기준일');
+    expect(cashflowProjectSheetSource).toContain('현금흐름 관리시트 기준');
     expect(cashflowProjectSheetSource).not.toContain('엑셀 다운로드');
     expect(cashflowProjectSheetSource).not.toContain('Actual 불러오기');
     expect(cashflowProjectSheetSource).not.toContain('Actual 저장');

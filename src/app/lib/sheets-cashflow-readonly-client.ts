@@ -254,7 +254,7 @@ export interface CashflowSheetLabMirrorCell {
   direction: 'IN' | 'OUT';
   sourceCell: string;
   sourceLabel: string;
-  state: 'VALUE' | 'EMPTY' | 'INVALID';
+  state: 'VALUE' | 'ZERO' | 'EMPTY' | 'INVALID';
   amount?: number;
   rawValue?: string;
 }
@@ -504,7 +504,7 @@ export interface CashflowSheetLabStageResult {
   targetRevisionAtFetch?: string;
   replaceAllActualSources?: boolean;
   runId: string;
-  status?: 'READY' | 'BLOCKED';
+  status?: 'READY' | 'BLOCKED' | 'NO_CHANGES';
   stagedLineCount: number;
   projectionLineCount: number;
   actualLineCount: number;

@@ -411,6 +411,36 @@ describe('sheets cashflow readonly client', () => {
     expect(client.post.mock.calls[0]?.[1]?.headers).toBeUndefined();
   });
 
+  it('preserves a durable no-op stage acknowledgement', async () => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({
+        data: {
+          ok: true,
+          commandName: 'cashflowSheetLab.stage.firebase',
+          projectId: 'p001',
+          runId: 'stage-run-noop',
+          status: 'NO_CHANGES',
+          stagedLineCount: 0,
+          projectionLineCount: 0,
+          actualLineCount: 0,
+          riskLineCount: 0,
+        },
+      })),
+    });
+
+    const result = await stageCashflowSheetLabViaBff({
+      tenantId: 'mysc',
+      actor: { uid: 'user-1', role: 'workspace_user', email: 'user@mysc.co.kr' },
+      projectId: 'p001',
+      expectedMirrorRevision: 'sha256:source-001',
+      idempotencyKey: 'stage-noop-001',
+      client,
+    });
+
+    expect(clientSource).toContain("status?: 'READY' | 'BLOCKED' | 'NO_CHANGES'");
+    expect(result.status).toBe('NO_CHANGES');
+  });
+
   it('loads the service account share target manually through same-origin BFF', async () => {
     const client = asMockClient({
       get: vi.fn(async () => ({

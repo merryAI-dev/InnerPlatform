@@ -796,7 +796,7 @@ export function CashflowProjectSheet({
         sourceCell: cell.sourceCell || '',
         sourceLabel: cell.sourceLabel || '',
         state: cell.cellState,
-        ...(cell.cellState === 'VALUE' ? { amount: Number(cell.amount || 0) } : {}),
+        ...(['VALUE', 'ZERO'].includes(cell.cellState) ? { amount: Number(cell.amount || 0) } : {}),
       })),
     };
   }, [cashflowSheetMirror, monthCloseResult?.dashboard, projectId, yearMonth]);
@@ -1214,7 +1214,7 @@ export function CashflowProjectSheet({
         handingOffToAutoStage = true;
         setPendingAutoStageRevision(mirror.sourceRevision);
         void loadCashflowEvents();
-        toast.success('시트값을 불러왔습니다. 원장 반영 전 금액을 확인합니다.');
+        toast.success('시트값을 불러왔습니다. MYSCube 시트 반영 전 금액을 확인합니다.');
       } else if (mirror.status === 'STALE') {
         toast.warning('최신 시트 조회에 실패해 마지막 정상 고정값을 유지했습니다.');
       } else {
@@ -1368,7 +1368,7 @@ export function CashflowProjectSheet({
       setLateSheetChangeReason('');
       setLateSheetFormulaAccepted(false);
       setFormulaMismatchPrompt(null);
-      toast.success(`시트 최신값 ${result.appliedLineCount.toLocaleString()}건을 원장에 반영했습니다.`);
+      toast.success(`시트 최신값 ${result.appliedLineCount.toLocaleString()}건을 MYSCube 시트에 반영했습니다.`);
     };
 
     setSheetStageApplyLoading(true);
@@ -1427,7 +1427,7 @@ export function CashflowProjectSheet({
       setLateSheetApply(stage);
       setLateSheetFormulaAccepted(acceptFormulaMismatches);
       setSheetApplyResumeRequired(true);
-      toast.error(resolveApiErrorMessage(finalError, '시트 값을 원장에 반영하지 못했습니다.'));
+      toast.error(resolveApiErrorMessage(finalError, '시트 값을 MYSCube 시트에 반영하지 못했습니다.'));
     } finally {
       setSheetStageApplyLoading(false);
     }
@@ -1480,7 +1480,7 @@ export function CashflowProjectSheet({
         return;
       }
       if (result.stagedLineCount <= 0) {
-        toast.info('원장과 다른 시트 값이 없습니다.');
+        toast.info('MYSCube 시트와 다른 값이 없습니다.');
         return;
       }
       await handleApplyStagedSheetValues(result);
@@ -1544,48 +1544,121 @@ export function CashflowProjectSheet({
       || `w${weekNo}`;
   }
 
-  const projectionActualComparison = useMemo(() => {
-    const comparisonMonths = (monthCloseResult?.dashboard?.canonical?.months || [])
-      .map((month) => month.comparison)
-      .filter((month): month is NonNullable<typeof month> => Boolean(month));
-    if (comparisonMonths.length === 0 && !monthCloseResult?.dashboard?.comparison) return { rows: [], changedRows: [] };
-    const comparisonByMonth = new Map(comparisonMonths.map((month) => [month.yearMonth, month]));
-    if (monthCloseResult?.dashboard?.comparison) {
-      comparisonByMonth.set(yearMonth, monthCloseResult.dashboard.comparison);
+  const mirroredAnnualTotals = useMemo(() => new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
+    .filter((row) => Number.isSafeInteger(row.year))
+    .map((row) => [row.year, row])), [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals]);
+  const annualYears = useMemo(() => {
+    const openingBalanceYears = [
+      ...(monthCloseResult?.dashboard?.openingBalances?.projection?.sources || []).map((source) => source.year),
+      ...(monthCloseResult?.dashboard?.openingBalances?.actual?.sources || []).map((source) => source.year),
+    ];
+    return [...new Set([...openingBalanceYears, ...mirroredAnnualTotals.keys()])]
+      .filter((year) => year !== selectedYear)
+      .sort((left, right) => left - right);
+  }, [mirroredAnnualTotals, monthCloseResult?.dashboard?.openingBalances, selectedYear]);
+  const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
+  const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
+  const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
+    const pinned = monthCloseResult?.status === 'OPEN'
+      ? mirroredAnnualTotals.get(year)?.[mode] || null
+      : null;
+    if (pinned) return pinned;
+    const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
+      ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
+      : null;
+    if (jvmSource) {
+      const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
+      const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
+      return {
+        lineAmounts: jvmSource.lineAmounts,
+        lineStates: jvmSource.lineStates,
+        totalIn,
+        totalOut,
+        net: totalIn - totalOut,
+      };
     }
+    return mirroredAnnualTotals.get(year)?.[mode] || null;
+  };
+  const sheetGrandTotalFor = (mode: 'projection' | 'actual') => cashflowSheetMirror?.sheetFacts?.cashflowGrandTotalsBySourceYear
+    ?.find((total) => total.sourceYear === selectedYear)?.[mode] || null;
+  const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
+    const sheetGrandTotal = sheetGrandTotalFor(mode);
+    if (Object.prototype.hasOwnProperty.call(sheetGrandTotal?.lineAmounts || {}, lineId)) {
+      return Number(sheetGrandTotal?.lineAmounts[lineId] || 0);
+    }
+    const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
+      rowTotals?: Record<CashflowSheetLineId, number>;
+      lineAmounts?: Record<CashflowSheetLineId, number>;
+    } | null | undefined;
+    const selectedYearTotal = rangeTotals?.rowTotals?.[lineId] ?? rangeTotals?.lineAmounts?.[lineId] ?? 0;
+    return annualYears.reduce(
+      (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
+      Number(selectedYearTotal),
+    );
+  };
+
+  const projectionActualComparison = useMemo(() => {
     const lineDefs = [
       ...CASHFLOW_IN_LINES.map((lineId) => ({ section: '입금' as const, lineId })),
       ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
     ];
     const rows = lineDefs.map(({ section, lineId }) => {
       const cells = annualWeeks.map((week) => {
-        const comparisonWeek = comparisonByMonth.get(week.yearMonth)?.weeks?.find((candidate) => candidate.weekNo === week.weekNo);
-        const comparisonLine = comparisonWeek?.lines?.find((candidate) => candidate.lineId === lineId);
+        const projectionCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
+        const actualCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
+        const hasValue = projectionCell.hasValue || actualCell.hasValue;
         return {
           yearMonth: week.yearMonth,
           weekNo: week.weekNo,
           weekLabel: week.label,
           weekRange: week.weekStart && week.weekEnd ? `${week.weekStart} ~ ${week.weekEnd}` : '',
-          projection: comparisonLine?.projection ?? 0,
-          actual: comparisonLine?.actual ?? 0,
-          difference: comparisonWeek ? (comparisonWeek.amounts[lineId] ?? 0) : null,
+          projection: projectionCell.amount,
+          actual: actualCell.amount,
+          difference: hasValue ? projectionCell.amount - actualCell.amount : null,
         };
       });
+      const annualCells = annualYears.map((year) => {
+        const projectionTotal = annualTotalFor(year, 'projection');
+        const actualTotal = annualTotalFor(year, 'actual');
+        const projectionState = projectionTotal?.lineStates?.[lineId]
+          || (Object.prototype.hasOwnProperty.call(projectionTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
+        const actualState = actualTotal?.lineStates?.[lineId]
+          || (Object.prototype.hasOwnProperty.call(actualTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
+        const hasValue = ['VALUE', 'ZERO'].includes(projectionState) || ['VALUE', 'ZERO'].includes(actualState);
+        const projection = Number(projectionTotal?.lineAmounts?.[lineId] || 0);
+        const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
+        return { year, projection, actual, difference: hasValue ? projection - actual : null };
+      });
+      const totalProjection = projectLineTotalFor('projection', lineId);
+      const totalActual = projectLineTotalFor('actual', lineId);
+      const totalProjectionState = sheetGrandTotalFor('projection')?.lineStates?.[lineId];
+      const totalActualState = sheetGrandTotalFor('actual')?.lineStates?.[lineId];
+      const totalHasValue = ['VALUE', 'ZERO'].includes(totalProjectionState || '')
+        || ['VALUE', 'ZERO'].includes(totalActualState || '')
+        || cells.some((cell) => cell.difference !== null)
+        || annualCells.some((cell) => cell.difference !== null);
       return {
         section,
         lineId,
         label: getCashflowModeLineLabel(lineId, 'projection'),
         cells,
-        changed: cells.some((cell) => cell.difference !== null && cell.difference !== 0),
+        annualCells,
+        totalCell: {
+          projection: totalProjection,
+          actual: totalActual,
+          difference: totalHasValue ? totalProjection - totalActual : null,
+        },
+        changed: [...cells, ...annualCells, { difference: totalHasValue ? totalProjection - totalActual : null }]
+          .some((cell) => cell.difference !== null && cell.difference !== 0),
       };
     });
     return {
       rows,
       changedRows: rows.filter((row) => row.changed),
     };
-  }, [annualWeeks, monthCloseResult?.dashboard?.canonical?.months, monthCloseResult?.dashboard?.comparison, yearMonth]);
+  }, [annualWeeks, annualYears, cashflowSheetMirror, mirroredAnnualTotals, monthCloseResult, selectedYear, yearMonth]);
 
-  const cashflowTotalPeriodLabel = `${selectedYear}년`;
+  const cashflowTotalPeriodLabel = `${previousAnnualYears[0] || selectedYear}년 ~ ${followingAnnualYears.at(-1) || selectedYear}년`;
   const sheetRangeLabel = cashflowSheetConfig
     ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
     : '연결된 Google Sheet가 없습니다.';
@@ -1659,9 +1732,10 @@ export function CashflowProjectSheet({
       ))
       : null;
     if (pinned) {
+      const hasValue = pinned.state === 'VALUE' || pinned.state === 'ZERO';
       return {
-        amount: pinned.state === 'VALUE' ? Number(pinned.amount || 0) : 0,
-        hasValue: pinned.state === 'VALUE',
+        amount: hasValue ? Number(pinned.amount || 0) : 0,
+        hasValue,
         mismatch: false,
       };
     }
@@ -1674,9 +1748,10 @@ export function CashflowProjectSheet({
       const comparisonLine = monthCloseResult.dashboard.comparison?.weeks
         ?.find((candidate) => candidate.weekNo === params.weekNo)
         ?.lines?.find((candidate) => candidate.lineId === params.lineId);
+      const hasValue = cell?.cellState === 'VALUE' || cell?.cellState === 'ZERO';
       return {
-        amount: cell?.cellState === 'VALUE' ? Number(cell.amount || 0) : 0,
-        hasValue: cell?.cellState === 'VALUE',
+        amount: hasValue ? Number(cell?.amount || 0) : 0,
+        hasValue,
         mismatch: comparisonLine?.mismatch === true,
       };
     }
@@ -1831,26 +1906,11 @@ export function CashflowProjectSheet({
     if (monthCloseLoading && !monthCloseResult?.dashboard?.canonical) {
       return (
         <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">
-          서버 확정 원장과 기간 합계를 불러오는 중입니다.
+          서버 확정 시트와 기간 합계를 불러오는 중입니다.
         </div>
       );
     }
     const visibleWeeks = annualWeeks;
-    const mirroredAnnualTotals = new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
-      .filter((row) => Number.isSafeInteger(row.year))
-      .map((row) => [row.year, row]));
-    const openingBalanceYears = [
-      ...(monthCloseResult?.dashboard?.openingBalances?.projection?.sources || []).map((source) => source.year),
-      ...(monthCloseResult?.dashboard?.openingBalances?.actual?.sources || []).map((source) => source.year),
-    ];
-    const annualYears = [...new Set([
-      ...openingBalanceYears,
-      ...mirroredAnnualTotals.keys(),
-    ])]
-      .filter((year) => year !== selectedYear)
-      .sort((left, right) => left - right);
-    const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
-    const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
     const monthCloseStatusByMonth = new Map(
       (monthCloseResult?.dashboard?.monthCloseStatuses || []).map((month) => [month.yearMonth, month.status]),
     );
@@ -1870,27 +1930,6 @@ export function CashflowProjectSheet({
       else group.weeks.push(week);
       return groups;
     }, []);
-    const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
-      const pinned = monthCloseResult?.status === 'OPEN'
-        ? mirroredAnnualTotals.get(year)?.[mode] || null
-        : null;
-      if (pinned) return pinned;
-      const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
-        ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
-        : null;
-      if (jvmSource) {
-        const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-        const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-        return {
-          lineAmounts: jvmSource.lineAmounts,
-          lineStates: jvmSource.lineStates,
-          totalIn,
-          totalOut,
-          net: totalIn - totalOut,
-        };
-      }
-      return mirroredAnnualTotals.get(year)?.[mode] || null;
-    };
     const boardColumnCount = previousAnnualYears.length + visibleWeeks.length + followingAnnualYears.length + 2;
     const canonicalReadModel = monthCloseResult?.dashboard?.canonical;
     const readServerSummary = (mode: 'projection' | 'actual') => {
@@ -1940,18 +1979,6 @@ export function CashflowProjectSheet({
     const derived = {
       projection: readServerSummary('projection'),
       actual: readServerSummary('actual'),
-    };
-    const sheetGrandTotalFor = (mode: 'projection' | 'actual') => cashflowSheetMirror?.sheetFacts?.cashflowGrandTotalsBySourceYear
-      ?.find((total) => total.sourceYear === selectedYear)?.[mode] || null;
-    const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
-      const sheetGrandTotal = sheetGrandTotalFor(mode);
-      if (Object.prototype.hasOwnProperty.call(sheetGrandTotal?.lineAmounts || {}, lineId)) {
-        return Number(sheetGrandTotal?.lineAmounts[lineId] || 0);
-      }
-      return annualYears.reduce(
-        (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
-        Number(derived[mode].rowTotals[lineId] || 0),
-      );
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
       const sheetGrandTotal = sheetGrandTotalFor(mode);
@@ -2213,6 +2240,7 @@ export function CashflowProjectSheet({
 
   function renderProjectionActualDiffTable() {
     const rows = projectionActualComparison.changedRows;
+    const columnCount = annualYears.length + annualWeeks.length + 1;
     if (monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY') {
       return (
         <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-5 text-[12px] leading-5 text-[#17324D]">
@@ -2226,7 +2254,7 @@ export function CashflowProjectSheet({
     if (monthCloseError || !monthCloseResult?.dashboard?.canonical?.range) {
       return (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-6 text-center text-[12px] text-red-700">
-          {monthCloseError || '서버 확정 원장과 기간 합계를 불러오지 못했습니다.'}
+          {monthCloseError || '서버 확정 시트와 기간 합계를 불러오지 못했습니다.'}
         </div>
       );
     }
@@ -2236,32 +2264,39 @@ export function CashflowProjectSheet({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-[12px] font-semibold text-slate-950">
-                <HoverExplain message="BFF가 확정 원장의 Projection에서 Actual을 뺀 값을 반환합니다. 프론트는 계산하지 않고 표시만 합니다.">
+                <HoverExplain message="아래 현금흐름 관리시트와 동일한 반영값으로 Projection에서 Actual을 뺍니다.">
                   Projection - Actual 차이
                 </HoverExplain>
               </div>
               <div className="text-[12px] text-slate-500">
-                BFF 기준일 {monthCloseResult?.dashboard?.summary?.comparisonAsOfDate || '-'} · 차이 = Projection - Actual
+                현금흐름 관리시트 기준 · 차이 = Projection - Actual
               </div>
             </div>
             <Badge className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-2.5 py-1 text-[12px] text-[#17324D]">차이 항목만</Badge>
           </div>
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2">
-            <table className="border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${220 + annualWeeks.length * 96}px` }}>
+            <table className="border-separate border-spacing-0 text-[12px]" style={{ minWidth: `${220 + columnCount * 96}px` }}>
               <thead className="bg-white text-slate-500">
                 <tr>
                   <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
+                  {previousAnnualYears.map((year) => (
+                    <th key={`comparison-${year}-before`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
+                  ))}
                   {annualWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
                     </th>
                   ))}
+                  {followingAnnualYears.map((year) => (
+                    <th key={`comparison-${year}-after`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
+                  ))}
+                  <th className="sticky right-0 z-20 min-w-[96px] border-l-[6px] border-l-white bg-white px-2 py-2 text-right font-medium shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={annualWeeks.length + 1} className="px-3 py-8 text-center text-[12px] text-slate-500">
+                    <td colSpan={columnCount + 1} className="px-3 py-8 text-center text-[12px] text-slate-500">
                       Projection과 Actual 차이가 없습니다.
                     </td>
                   </tr>
@@ -2270,6 +2305,17 @@ export function CashflowProjectSheet({
                     <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                       <div className={`truncate ${row.section === '입금' ? 'text-emerald-700' : 'text-red-700'}`}>{row.label}</div>
                     </td>
+                    {row.annualCells.filter((cell) => cell.year < selectedYear).map((cell) => {
+                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
+                      const differenceClass = cell.difference === null || cell.difference === 0
+                        ? `${rowSurface} text-slate-300`
+                        : 'bg-[#EAF0F5] text-sky-700';
+                      return (
+                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
+                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
+                        </td>
+                      );
+                    })}
                     {row.cells.map((cell) => {
                       const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
@@ -2285,6 +2331,20 @@ export function CashflowProjectSheet({
                         </td>
                       );
                     })}
+                    {row.annualCells.filter((cell) => cell.year > selectedYear).map((cell) => {
+                      const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
+                      const differenceClass = cell.difference === null || cell.difference === 0
+                        ? `${rowSurface} text-slate-300`
+                        : 'bg-[#EAF0F5] text-sky-700';
+                      return (
+                        <td key={`${row.lineId}-${cell.year}`} className={`min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums ${differenceClass}`} title={cell.difference === null ? `${cell.year}년\n미입력` : `${cell.year}년\nProjection ${fmt(cell.projection)} / Actual ${fmt(cell.actual)} / 차이 ${fmtSigned(cell.difference)}`}>
+                          {cell.difference === null ? '미입력' : fmtSigned(cell.difference)}
+                        </td>
+                      );
+                    })}
+                    <td className={`sticky right-0 z-10 min-w-[96px] border-l-[6px] border-l-white px-2 py-2 text-right font-semibold tabular-nums shadow-[-12px_0_24px_rgba(15,23,42,0.08)] ${row.totalCell.difference === null || row.totalCell.difference === 0 ? (rowIndex % 2 === 0 ? 'bg-white text-slate-300' : 'bg-slate-50 text-slate-300') : 'bg-[#EAF0F5] text-sky-700'}`} title={row.totalCell.difference === null ? 'Total\n미입력' : `Total\nProjection ${fmt(row.totalCell.projection)} / Actual ${fmt(row.totalCell.actual)} / 차이 ${fmtSigned(row.totalCell.difference)}`}>
+                      {row.totalCell.difference === null ? '미입력' : fmtSigned(row.totalCell.difference)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2725,13 +2785,13 @@ export function CashflowProjectSheet({
       const actor = actorName
         ? `${actorName}님이`
         : actorEmail ? `${actorEmail} 계정으로` : '담당자가';
-      const action = `${actor} 시트의 최신 값을 불러와 원장 반영 전 검증본으로 보관했습니다.`;
+      const action = `${actor} 시트의 최신 값을 불러와 MYSCube 시트 반영 전 검증본으로 보관했습니다.`;
       return [event.sheetName, action].filter(Boolean).join(' · ');
     }
     if (event.type === 'sheet_apply') {
       const actor = actorName || actorEmail || '담당자';
       const period = event.scope === 'annual' && event.year ? `${event.year}년 합계` : event.yearMonth || '';
-      return `${actor} · ${period} 원장 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
+      return `${actor} · ${period} 시트 반영 ${event.appliedLineCount || 0}건 · Projection ${event.projectionLineCount || 0}건 · Actual ${event.actualLineCount || 0}건`;
     }
     if (event.type === 'month_close') return [`${event.yearMonth || ''} 월`, event.status || '결산 완료', actorName || actorEmail || '사용자'].filter(Boolean).join(' · ');
     if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
@@ -2750,7 +2810,7 @@ export function CashflowProjectSheet({
     if (!event) return '시트 반영과 월 결산 기록이 여기에 남습니다.';
     const actor = decodeActivityActor(event.actorName) || decodeActivityActor(event.actorEmail) || '최근 사용자';
     if (event.type === 'sheet_refresh') return `${actor}님이 시트의 최신 값을 불러왔습니다.`;
-    if (event.type === 'sheet_apply') return `${actor}님이 시트 값을 원장에 반영했습니다.`;
+    if (event.type === 'sheet_apply') return `${actor}님이 시트 값을 MYSCube 시트에 반영했습니다.`;
     if (event.type === 'month_close') return `${actor}님이 ${event.yearMonth || ''} 월 결산을 확정했습니다.`;
     return `${actor}님의 최근 변경 기록입니다.`;
   }
@@ -2886,7 +2946,7 @@ export function CashflowProjectSheet({
     <div className="space-y-5 bg-background p-4" inert={sheetRefreshLoading || undefined} aria-busy={sheetRefreshLoading}>
       {legacyCloseEvidence ? (
         <div role="status" className="rounded-md border border-slate-300 bg-slate-50 px-4 py-3 text-[12px] leading-5 text-[#17324D]">
-          <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 원장은 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
+          <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 시트는 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
         </div>
       ) : null}
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -3087,7 +3147,7 @@ export function CashflowProjectSheet({
             <AlertDialogTitle>{cashflowSheetConfig ? '시트 업데이트 반영' : '캐시플로우 시트 연동 시작하기'}</AlertDialogTitle>
             <AlertDialogDescription>
               {cashflowSheetConfig
-                ? '고정해 둔 시트 값을 원장과 비교합니다. 저장 버튼을 누르기 전까지 원장은 바뀌지 않습니다.'
+                ? '고정해 둔 시트 값을 MYSCube 시트와 비교합니다. 저장 버튼을 누르기 전까지 MYSCube 시트는 바뀌지 않습니다.'
                 : '시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 기존 시트 값을 가져오려면 아래 순서로 연결해 주세요.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -3101,7 +3161,7 @@ export function CashflowProjectSheet({
                 </div>
                 <div className="mt-1 text-[12px] leading-5 text-slate-600">
                   {cashflowSheetConfig
-                    ? '마지막으로 고정한 Projection/Actual 값을 MYSCube 원장에 반영합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
+                    ? '마지막으로 고정한 Projection/Actual 값을 MYSCube 시트에 반영합니다. 이 단계에서는 Google Sheet를 다시 읽지 않습니다.'
                   : '설정 후에도 자동으로 값을 가져오지 않습니다. 시트 설정에서 직접 시트값을 가져올 때만 고정합니다.'}
                 </div>
               </div>
@@ -3113,14 +3173,14 @@ export function CashflowProjectSheet({
               <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-[#17324D]" />
               <div>
                 {cashflowSheetConfig
-                  ? `현재 선택: ${sheetMirrorCapturedAt || '최근'} 고정본을 원장에 반영합니다.`
-                  : 'Google Sheet는 조회 전용으로 연결되며, 시트 값 반영 버튼을 누를 때만 MYSCube 원장이 바뀝니다.'}
+                  ? `현재 선택: ${sheetMirrorCapturedAt || '최근'} 고정본을 MYSCube 시트에 반영합니다.`
+                  : 'Google Sheet는 조회 전용으로 연결되며, 시트 값 반영 버튼을 누를 때만 MYSCube 시트가 바뀝니다.'}
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               {(cashflowSheetConfig ? [
                 ['1', '고정본 선택', '명시적으로 연동한 시트 고정본을 사용합니다.'],
-                ['2', '시트값 반영', '시트에서 사람이 확인한 최신값을 원장에 바로 반영합니다.'],
+                ['2', '시트값 반영', '시트에서 사람이 확인한 최신값을 MYSCube 시트에 바로 반영합니다.'],
                 ['3', '변경 이력', '결산 후 변경은 시점과 사유, 경고 횟수를 기록합니다.'],
               ] : [
                 ['1', '공유 권한 확인', '연동할 Google Sheet에 조회 권한이 있는지 확인합니다.'],
@@ -3157,7 +3217,7 @@ export function CashflowProjectSheet({
                 </Button>
                 <AlertDialogAction onClick={() => void handleStartSheetChangeReview(true)} disabled={sheetRefreshLoading || sheetMirrorStatus !== 'FRESH'} className="bg-[#17324D] hover:bg-slate-800">
                   {sheetRefreshLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-                  {yearMonth} 원장 덮어쓰기
+                  {yearMonth} MYSCube 시트 덮어쓰기
                 </AlertDialogAction>
               </>
             )}

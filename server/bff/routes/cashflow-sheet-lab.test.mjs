@@ -2304,7 +2304,7 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(1);
   });
 
-  it('does not warn when a closed month still matches the pinned sheet', async () => {
+  it('acknowledges a fresh matching mirror without JVM mutation and replays the stage request', async () => {
     const amounts = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 999]));
     const db = createDb({
       project: {
@@ -2335,6 +2335,7 @@ describe('cashflow sheet lab route', () => {
         },
       },
     });
+    const javaWeeklyClient = { applyCashflowSheetLab: vi.fn(), applyCashflowSheetBatch: vi.fn() };
     const app = createApp({
       db,
       googleSheetsService: {
@@ -2345,23 +2346,135 @@ describe('cashflow sheet lab route', () => {
           matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
         })),
       },
+      routeOptions: { javaWeeklyClient },
     });
     const mirror = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'refresh-closed-month-same-values' })
       .expect(200);
+    expect(mirror.body.status).toBe('FRESH');
+    const canonicalBefore = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/');
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-closed-month-same-values',
+    };
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-closed-month-same-values' })
+      .send(payload)
+      .expect(200);
+    const replay = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send(payload)
       .expect(200);
 
     expect(stage.body).toMatchObject({
-      status: 'READY',
+      status: 'NO_CHANGES',
       blockedMonths: [],
       closedMonthDifferences: [],
       stagedLineCount: 0,
       riskLineCount: 0,
     });
+    expect(replay.body).toEqual(stage.body);
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({
+      sourceRevision: mirror.body.sourceRevision,
+      targetRevisionAtFetch: mirror.body.targetRevisionAtFetch,
+      appliedSourceRevision: mirror.body.sourceRevision,
+    });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).not.toHaveProperty('appliedTargetRevision');
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`)).toMatchObject({
+      status: 'APPLIED',
+      response: stage.body,
+    });
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/')).toEqual(canonicalBefore);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
+  });
+
+  it('does not let an expired no-change reservation overwrite the newer acknowledgement', async () => {
+    const amounts = Object.fromEntries(CASHFLOW_LINE_IDS.map((lineId) => [lineId, 999]));
+    let stageRunGetCount = 0;
+    let blockStageCompletion = false;
+    let releaseStaleCompletion;
+    let staleCompletionReached;
+    const staleCompletionBlocked = new Promise((resolve) => { releaseStaleCompletion = resolve; });
+    const staleCompletionReady = new Promise((resolve) => { staleCompletionReached = resolve; });
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      weeks: Array.from({ length: 5 }, (_unused, index) => ({
+        id: `project-a-2026-01-w${index + 1}`,
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: index + 1,
+        projection: { ...amounts },
+        actual: { ...amounts },
+      })),
+      onGet: async (path) => {
+        if (!blockStageCompletion || !path.includes('/cashflow_sheet_stage_runs/')) return;
+        stageRunGetCount += 1;
+        if (stageRunGetCount === 3) {
+          staleCompletionReached();
+          await staleCompletionBlocked;
+        }
+      },
+    });
+    const googleSheetsService = {
+      previewSpreadsheet: vi.fn(async () => ({
+        spreadsheetId: 'spreadsheet-a',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+        matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+      })),
+    };
+    const staleApp = createApp({ context: { actorId: 'stale-worker' }, db, googleSheetsService });
+    const currentApp = createApp({ context: { actorId: 'current-worker' }, db, googleSheetsService });
+    const mirror = await request(currentApp)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-expired-no-changes' })
+      .expect(200);
+    const payload = {
+      expectedMirrorRevision: mirror.body.sourceRevision,
+      idempotencyKey: 'stage-expired-no-changes',
+    };
+    let now = Date.now();
+    const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    blockStageCompletion = true;
+
+    try {
+      const staleStage = request(staleApp)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+        .send(payload)
+        .then((response) => response);
+      await staleCompletionReady;
+      now += 60_001;
+      const currentStage = await request(currentApp)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+        .send(payload)
+        .expect(200);
+      releaseStaleCompletion();
+      expect((await staleStage).status).toBe(409);
+
+      expect(currentStage.body.status).toBe('NO_CHANGES');
+      expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${currentStage.body.runId}`)).toMatchObject({
+        status: 'APPLIED',
+        response: currentStage.body,
+      });
+      expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a')).toMatchObject({
+        appliedSourceRevision: mirror.body.sourceRevision,
+        lastAppliedBy: { uid: 'current-worker' },
+      });
+    } finally {
+      releaseStaleCompletion();
+      dateNow.mockRestore();
+    }
   });
 
   it('rejects stage when canonical cashflow changed after the explicit refresh', async () => {

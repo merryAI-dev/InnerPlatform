@@ -360,7 +360,7 @@ export function createJavaWeeklyClient({
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
-    return requestJson({
+    const result = await requestJson({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/formulas/preflight`,
@@ -373,6 +373,26 @@ export function createJavaWeeklyClient({
         ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
+    if (readOptionalText(result?.projectId) !== readOptionalText(projectId)) {
+      throw createHttpError(502, '다른 프로젝트의 자료가 도착했습니다. 화면을 새로고침해 주세요.', 'jvm_weekly_project_mismatch');
+    }
+    const annualCheckCount = annualDerivedCells.length / 3;
+    const weeklyCheckCount = months.reduce(
+      (count, month) => count + (Array.isArray(month?.calculationChecks) ? month.calculationChecks.length : 0),
+      0,
+    );
+    if (
+      result?.ok !== true
+      || !Number.isSafeInteger(result?.annualCheckCount)
+      || result.annualCheckCount < 0
+      || result.annualCheckCount !== annualCheckCount
+      || !Number.isSafeInteger(result?.weeklyCheckCount)
+      || result.weeklyCheckCount < 0
+      || result.weeklyCheckCount !== weeklyCheckCount
+    ) {
+      throw createHttpError(502, 'JVM 수식 검증 결과가 불완전해 반영을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
+    }
+    return result;
   }
 
   async function applyCashflowSheetAnnualTotal({

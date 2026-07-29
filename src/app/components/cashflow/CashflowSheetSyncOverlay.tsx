@@ -20,12 +20,12 @@ const copy: Record<CashflowSheetSyncOperation, { title: string; detail: string; 
   },
   applying: {
     title: '시트 값을 MYSCube에 반영하고 있습니다',
-    detail: '원장 반영이 끝날 때까지 페이지를 닫거나 새로고침하지 마세요.',
+    detail: 'MYSCube 시트 반영이 끝날 때까지 페이지를 닫거나 새로고침하지 마세요.',
     activeStep: 2,
   },
 };
 
-const steps = ['시트 읽기', '변경 확인', '원장 반영'];
+const steps = ['시트 읽기', '변경 확인', '시트 반영'];
 
 export function CashflowSheetSyncOverlay({ operation }: { operation: CashflowSheetSyncOperation }) {
   const current = copy[operation];
