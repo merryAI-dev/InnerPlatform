@@ -47,6 +47,8 @@ const protectedCollections = [
   'cashflow_sheet_stage_months',
   'cashflow_sheet_stage_years',
   'cashflow_change_candidates',
+  'cashflow_month_close_requests',
+  'cashflow_month_close_request_audits',
   'monthly_close_versions',
 ] as const;
 const canonicalRootCollections = [

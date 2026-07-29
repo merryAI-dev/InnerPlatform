@@ -39,6 +39,16 @@ function formatWeekLabel(yearMonth, weekNo) {
   return `${String(parsed.year % 100).padStart(2, '0')}-${parsed.month}-${weekNo}`;
 }
 
+function formatMonthTotalLabel(yearMonth) {
+  const parsed = parseYearMonth(yearMonth);
+  if (!parsed) return `${yearMonth}-Total`;
+  return `${String(parsed.year % 100).padStart(2, '0')}-${parsed.month}-Total`;
+}
+
+function sum(values) {
+  return values.reduce((total, value) => total + (Number(value) || 0), 0);
+}
+
 function getMonthWeeks(yearMonth) {
   return getMonthFinanceWeeks(yearMonth);
 }
@@ -134,20 +144,23 @@ function buildModeSectionRows({ yearMonth, mode, slots, weeksByWeekNo }) {
   const slotAmounts = slots.map((slot) => getWeekAmounts(weeksByWeekNo.get(slot.weekNo), mode));
   const weekTotals = slotAmounts.map((amounts) => computeCashflowTotals(amounts));
   const rows = [];
-  rows.push(['항목', ...slots.map((slot) => slot.label)]);
-  rows.push([`입금 (${modeLabel})`, ...Array(slots.length).fill('')]);
+  rows.push(['항목', ...slots.map((slot) => slot.label), formatMonthTotalLabel(yearMonth)]);
+  rows.push([`입금 (${modeLabel})`, ...Array(slots.length + 1).fill('')]);
   for (const lineId of CASHFLOW_IN_LINES) {
     const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([getCashflowLineLabel(lineId), ...values]);
+    rows.push([getCashflowLineLabel(lineId), ...values, sum(values)]);
   }
-  rows.push(['입금 합계', ...weekTotals.map((week) => week.totalIn)]);
-  rows.push([`출금 (${modeLabel})`, ...Array(slots.length).fill('')]);
+  const inTotals = weekTotals.map((week) => week.totalIn);
+  rows.push(['입금 합계', ...inTotals, sum(inTotals)]);
+  rows.push([`출금 (${modeLabel})`, ...Array(slots.length + 1).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
     const values = slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
-    rows.push([getCashflowLineLabel(lineId), ...values]);
+    rows.push([getCashflowLineLabel(lineId), ...values, sum(values)]);
   }
-  rows.push(['출금 합계', ...weekTotals.map((week) => week.totalOut)]);
-  rows.push(['잔액', ...weekTotals.map((week) => week.net)]);
+  const outTotals = weekTotals.map((week) => week.totalOut);
+  const netTotals = weekTotals.map((week) => week.net);
+  rows.push(['출금 합계', ...outTotals, sum(outTotals)]);
+  rows.push(['잔액', ...netTotals, sum(netTotals)]);
   return rows;
 }
 
@@ -171,6 +184,7 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
     for (const slot of month.slots) {
       headerRow.push(slot.label);
     }
+    headerRow.push(formatMonthTotalLabel(month.yearMonth));
   }
 
   const rows = [];
@@ -179,31 +193,36 @@ function buildWideModeSectionRows({ yearMonths, mode, weekIndex }) {
   for (const lineId of CASHFLOW_IN_LINES) {
     const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
-      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      const values = month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
+      row.push(...values, sum(values));
     }
     rows.push(row);
   }
   const inTotalRow = ['입금 합계'];
   for (const month of monthColumns) {
-    inTotalRow.push(...month.weekTotals.map((week) => week.totalIn));
+    const values = month.weekTotals.map((week) => week.totalIn);
+    inTotalRow.push(...values, sum(values));
   }
   rows.push(inTotalRow);
   rows.push([`출금 (${modeLabel})`, ...Array(headerRow.length - 1).fill('')]);
   for (const lineId of CASHFLOW_OUT_LINES) {
     const row = [getCashflowLineLabel(lineId)];
     for (const month of monthColumns) {
-      row.push(...month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0));
+      const values = month.slotAmounts.map((amounts) => Number(amounts[lineId]) || 0);
+      row.push(...values, sum(values));
     }
     rows.push(row);
   }
   const outTotalRow = ['출금 합계'];
   for (const month of monthColumns) {
-    outTotalRow.push(...month.weekTotals.map((week) => week.totalOut));
+    const values = month.weekTotals.map((week) => week.totalOut);
+    outTotalRow.push(...values, sum(values));
   }
   rows.push(outTotalRow);
   const netRow = ['잔액'];
   for (const month of monthColumns) {
-    netRow.push(...month.weekTotals.map((week) => week.net));
+    const values = month.weekTotals.map((week) => week.net);
+    netRow.push(...values, sum(values));
   }
   rows.push(netRow);
   return rows;
@@ -317,13 +336,55 @@ export function buildCashflowExportFileName({ scope, projectName, yearMonths, va
   return `캐시플로_추출_${suffix}_${period || '기간미지정'}.xlsx`;
 }
 
+function applyCashflowWorksheetFormat(worksheet) {
+  worksheet.views = [{ state: 'frozen', xSplit: 1, ySplit: 2 }];
+  worksheet.properties.defaultRowHeight = 20;
+  worksheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  worksheet.getColumn(1).width = 24;
+  for (let columnIndex = 2; columnIndex <= worksheet.columnCount; columnIndex += 1) {
+    worksheet.getColumn(columnIndex).width = 14;
+  }
+
+  worksheet.eachRow((row, rowNumber) => {
+    const label = normalizeSpace(row.getCell(1).value);
+    const isMetadata = rowNumber === 1 || label === '표시명';
+    const isHeader = label === '항목';
+    const isSection = label.startsWith('입금 (') || label.startsWith('출금 (');
+    const isSummary = ['입금 합계', '출금 합계', '잔액'].includes(label);
+
+    row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      cell.alignment = { vertical: 'middle', horizontal: columnNumber === 1 ? 'left' : 'right' };
+      cell.border = {
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFF1F5F9' } },
+      };
+      if (columnNumber > 1 && typeof cell.value === 'number') {
+        cell.numFmt = '#,##0;[Red]-#,##0;–';
+      }
+      if (isMetadata) {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF001E46' } };
+      } else if (isHeader) {
+        cell.font = { bold: true, color: { argb: 'FF17324D' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF0F5' } };
+      } else if (isSection) {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: label.startsWith('입금') ? 'FF0F766E' : 'FF475569' } };
+      } else if (isSummary) {
+        cell.font = { bold: true, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: label === '잔액' ? 'FFFDE68A' : 'FFF8FAFC' } };
+      }
+    });
+  });
+}
+
 export async function buildCashflowExportWorkbookBuffer({ projects, yearMonths, variant }) {
   const workbookSpec = buildWorkbookSpec({ projects, yearMonths, variant });
   const workbook = new ExcelJS.Workbook();
   for (const sheet of workbookSpec.sheets) {
     const worksheet = workbook.addWorksheet(sheet.name);
     sheet.rows.forEach((row) => worksheet.addRow(row));
-    worksheet.views = [{ state: 'frozen', ySplit: 2 }];
+    applyCashflowWorksheetFormat(worksheet);
   }
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);

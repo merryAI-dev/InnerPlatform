@@ -42,7 +42,10 @@ import {
   completeCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyUpdateViaBff,
   reopenCashflowWeeklyUpdateViaBff,
-  closeCashflowMonthViaBff,
+  requestCashflowMonthCloseViaBff,
+  fetchCurrentCashflowMonthCloseRequestViaBff,
+  fetchPendingCashflowMonthCloseRequestsViaBff,
+  reviewCashflowMonthCloseRequestViaBff,
   requestCashflowMonthReopenViaBff,
   decideCashflowMonthReopenViaBff,
   readWeeklyExpenseSheetViaBff,
@@ -124,7 +127,7 @@ describe('platform-bff-client', () => {
     }));
   });
 
-  it('uses the single JVM month-close contract for read, close, reopen request, and decision', async () => {
+  it('uses the approval-backed month-close contract for request, review, and reopen', async () => {
     const client = asMockClient({
       get: vi.fn(async () => ({ data: {
         ok: true,
@@ -145,7 +148,7 @@ describe('platform-bff-client', () => {
     await fetchCashflowMonthCloseViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
     });
-    await closeCashflowMonthViaBff({
+    await requestCashflowMonthCloseViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'month-close-1',
       payload: {
         yearMonth: '2026-06',
@@ -158,6 +161,17 @@ describe('platform-bff-client', () => {
         closeInput: { yearMonth: '2026-06' } as never,
       },
       client,
+    });
+    await fetchCurrentCashflowMonthCloseRequestViaBff({
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
+    });
+    await fetchPendingCashflowMonthCloseRequestsViaBff({
+      tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, client,
+    });
+    await reviewCashflowMonthCloseRequestViaBff({
+      tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, projectId: 'p001',
+      requestId: 'p001-2026-06', idempotencyKey: 'month-close-review-1',
+      payload: { decision: 'APPROVE', expectedRevision: 0, reason: '확인 완료' }, client,
     });
     await requestCashflowMonthReopenViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'reopen-request-1',
@@ -175,7 +189,7 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close?yearMonth=2026-06',
       expect.objectContaining({ retries: 0 }),
     );
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close', expect.objectContaining({
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests', expect.objectContaining({
       idempotencyKey: 'month-close-1',
       timeoutMs: 27_000,
       body: expect.objectContaining({
@@ -186,11 +200,18 @@ describe('platform-bff-client', () => {
     }));
     expect(client.post).toHaveBeenNthCalledWith(
       1,
-      '/api/v1/cashflow/p001/month-close',
+      '/api/v1/cashflow/p001/month-close/requests',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
+    expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/current?yearMonth=2026-06', expect.objectContaining({ retries: 0 }));
+    expect(client.get).toHaveBeenNthCalledWith(3, '/api/v1/cashflow/month-close/requests/pending', expect.objectContaining({ retries: 0 }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/review', expect.objectContaining({
+      idempotencyKey: 'month-close-review-1',
+      body: { decision: 'APPROVE', expectedRevision: 0, reason: '확인 완료' },
+      timeoutMs: 27_000,
+    }));
     expect(client.post).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/v1/cashflow/p001/month-close/reopen-request',
       expect.objectContaining({
         idempotencyKey: 'reopen-request-1',
@@ -198,12 +219,12 @@ describe('platform-bff-client', () => {
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/v1/cashflow/p001/month-close/reopen-request',
       expect.not.objectContaining({ headers: expect.anything() }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      3,
+      4,
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.objectContaining({
         idempotencyKey: 'reopen-decision-1',
@@ -211,7 +232,7 @@ describe('platform-bff-client', () => {
       }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
-      3,
+      4,
       '/api/v1/cashflow/p001/month-close/reopen-decision',
       expect.not.objectContaining({ headers: expect.anything() }),
     );

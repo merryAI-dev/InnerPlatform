@@ -18,7 +18,9 @@ import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { ProjectMigrationAuditPage } from '../projects/ProjectMigrationAuditPage';
+import { MonthlySettlementApprovalSection } from './MonthlySettlementApprovalSection';
 import { useAppStore } from '../../data/store';
+import { useAuth } from '../../data/auth-store';
 import {
   EXPENSE_SETS,
   EXPENSE_STATUS_COLORS,
@@ -86,11 +88,14 @@ function SectionEmptyState({
 
 export function AdminApprovalPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { projects } = useAppStore();
   const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
   const [actionDialog, setActionDialog] = useState<ApprovalActionDialog>(null);
   const [actionComment, setActionComment] = useState('');
+  const [pendingMonthlySettlements, setPendingMonthlySettlements] = useState(0);
+  const canReviewAdministrativeApprovals = user?.role === 'admin' || user?.role === 'finance';
 
   const projectMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -112,7 +117,9 @@ export function AdminApprovalPage() {
     )),
     [projects],
   );
-  const totalPending = pendingProjectReviews.length + pendingExpenses.length + pendingChanges.length;
+  const totalPending = pendingProjectReviews.length
+    + pendingMonthlySettlements
+    + (canReviewAdministrativeApprovals ? pendingExpenses.length + pendingChanges.length : 0);
 
   const handleAction = () => {
     if (!actionDialog) return;
@@ -170,7 +177,7 @@ export function AdminApprovalPage() {
         icon={CheckCircle2}
         iconGradient="linear-gradient(135deg, #0f766e, #14b8a6)"
         title="승인 대기열"
-        description="프로젝트 등록 요청부터 먼저 정리한 뒤 사업비 세트와 인력변경 요청을 처리합니다"
+        description="프로젝트 등록과 월 결산 요청을 지정 결재자가 확인하고 승인하거나 반려합니다"
         badge={`대기 ${totalPending}건`}
       />
 
@@ -193,7 +200,7 @@ export function AdminApprovalPage() {
               처리 이력과 보조 KPI는 1차 surface에서 제외하고, 지금 승인해야 하는 항목만 먼저 노출합니다.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-5">
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">전체 대기</p>
               <p className="text-[18px] font-bold text-slate-900">{totalPending}</p>
@@ -203,12 +210,20 @@ export function AdminApprovalPage() {
               <p className="text-[18px] font-bold text-slate-600">{pendingProjectReviews.length}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+              <p className="text-[10px] text-slate-500">월 결산</p>
+              <p className="text-[18px] font-bold text-[#001e46]">{pendingMonthlySettlements}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">사업비</p>
-              <p className="text-[18px] font-bold text-cyan-700">{pendingExpenses.length}</p>
+              <p className="text-[18px] font-bold text-cyan-700">
+                {canReviewAdministrativeApprovals ? pendingExpenses.length : '—'}
+              </p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">인력변경</p>
-              <p className="text-[18px] font-bold text-slate-600">{pendingChanges.length}</p>
+              <p className="text-[18px] font-bold text-slate-600">
+                {canReviewAdministrativeApprovals ? pendingChanges.length : '—'}
+              </p>
             </div>
           </div>
         </CardContent>
@@ -223,7 +238,8 @@ export function AdminApprovalPage() {
             <div className="space-y-1">
               <p className="text-[12px] font-semibold text-slate-900">이번에 처리할 승인 항목이 남아 있습니다</p>
               <p className="text-[11px] leading-6 text-slate-600">
-              프로젝트 등록 요청 {pendingProjectReviews.length}건, 사업비 세트 {pendingExpenses.length}건, 인력변경 요청 {pendingChanges.length}건을 같은 화면에서 바로 검토할 수 있습니다.
+              프로젝트 등록 요청 {pendingProjectReviews.length}건과 월 결산 {pendingMonthlySettlements}건을 확인할 수 있습니다.
+              {canReviewAdministrativeApprovals ? ` 사업비 세트 ${pendingExpenses.length}건, 인력변경 요청 ${pendingChanges.length}건도 함께 검토합니다.` : ''}
               </p>
             </div>
           </CardContent>
@@ -232,7 +248,9 @@ export function AdminApprovalPage() {
 
       <ProjectMigrationAuditPage embedded reviewScope="pending" />
 
-      <section className="space-y-3">
+      <MonthlySettlementApprovalSection onPendingCountChange={setPendingMonthlySettlements} />
+
+      {canReviewAdministrativeApprovals ? <section className="space-y-3">
         <div className="flex items-center gap-2">
           <Wallet className="h-4 w-4 text-cyan-600" />
           <div>
@@ -319,9 +337,9 @@ export function AdminApprovalPage() {
             ))}
           </div>
         )}
-      </section>
+      </section> : null}
 
-      <section className="space-y-3">
+      {canReviewAdministrativeApprovals ? <section className="space-y-3">
         <div className="flex items-center gap-2">
           <ArrowRightLeft className="h-4 w-4 text-[#001e46]" />
           <div>
@@ -418,7 +436,7 @@ export function AdminApprovalPage() {
             ))}
           </div>
         )}
-      </section>
+      </section> : null}
 
       <Dialog open={!!actionDialog} onOpenChange={(open) => !open && setActionDialog(null)}>
         <DialogContent className="max-w-sm">

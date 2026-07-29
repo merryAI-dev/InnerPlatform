@@ -268,6 +268,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     for (const [uid, role] of [
       ['actor-a', 'pm'],
       ['actor-b', 'pm'],
+      ['executive-a', 'pm'],
       ['actor-finance', 'finance'],
       ['actor-admin', 'admin'],
     ]) {

@@ -28,6 +28,7 @@
       "/business-cards",
       "/evidence",
       "/expense-management",
+      "/approvals",
       "/claude-sdk-help",
       "/portal"
     ],
@@ -37,6 +38,7 @@
       "/projects",
       "/board",
       "/business-cards",
+      "/approvals",
       "/claude-sdk-help",
       "/portal"
     ]

@@ -123,6 +123,8 @@ service cloud.firestore {
         || collection in ['cashflow_sheet_stage_months']
         || collection in ['cashflow_sheet_stage_years']
         || collection in ['cashflow_change_candidates']
+        || collection in ['cashflow_month_close_requests']
+        || collection in ['cashflow_month_close_request_audits']
         || collection in ['monthly_closes']
         || collection in ['monthly_close_versions']
         || collection in ['weekly_api_idempotency']
@@ -298,6 +300,15 @@ service cloud.firestore {
     }
 
     match /orgs/{orgId}/cashflow_change_candidates/{candidateId} {
+      allow read, write: if false;
+    }
+
+    // ── 월 결산 승인 요청: BFF API로만 접근 ──
+    match /orgs/{orgId}/cashflow_month_close_requests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_month_close_request_audits/{auditId} {
       allow read, write: if false;
     }
 

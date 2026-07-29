@@ -170,8 +170,8 @@ describe('resolvePostLoginPath', () => {
     expect(resolvePostLoginPath('finance', undefined, '/settings')).toBe('/');
   });
 
-  it('pm falls back to portal for admin-only paths', () => {
-    expect(resolvePostLoginPath('pm', undefined, '/approvals')).toBe('/portal/project-select');
+  it('pm keeps the approval path but falls back for other admin-only paths', () => {
+    expect(resolvePostLoginPath('pm', undefined, '/approvals')).toBe('/approvals');
     expect(resolvePostLoginPath('pm', undefined, '/settings')).toBe('/portal/project-select');
     expect(resolvePostLoginPath('pm', undefined, '/users')).toBe('/portal/project-select');
   });

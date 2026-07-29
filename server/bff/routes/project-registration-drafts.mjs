@@ -96,6 +96,27 @@ function ownerId(draft = {}) {
   return readOptionalText(draft.ownerUid) || readOptionalText(draft.ownerId);
 }
 
+async function assertActiveRegistrationMembersInTransaction({ tx, db, tenantId, payload, actorId }) {
+  const registeredById = documentId(
+    readOptionalText(payload?.registeredById) || readOptionalText(payload?.managerId) || actorId,
+    'registeredById',
+  );
+  const executiveApproverId = documentId(payload?.executiveApproverId, 'executiveApproverId');
+  const selectedMembers = [registeredById, executiveApproverId];
+  const memberSnaps = await Promise.all(selectedMembers.map((uid) => (
+    tx.get(db.doc(`orgs/${tenantId}/members/${uid}`))
+  )));
+  const everyMemberIsActive = memberSnaps.every((snap, index) => {
+    const member = snap.exists ? (snap.data() || {}) : {};
+    return snap.exists
+      && readOptionalText(member.uid) === selectedMembers[index]
+      && readOptionalText(member.status).toUpperCase() === 'ACTIVE';
+  });
+  if (!everyMemberIsActive) {
+    throw createHttpError(403, '같은 조직의 활성 구성원만 사업 담당자와 지정 결재자로 선택할 수 있습니다.', 'forbidden');
+  }
+}
+
 function attachmentRefs(draft = {}) {
   return Array.isArray(draft.attachmentRefs) ? draft.attachmentRefs : [];
 }
@@ -815,6 +836,13 @@ export function createProjectRegistrationDraftService({
           actorName: current.actorDisplayName,
           actorEmail: current.actorEmail,
           timestamp,
+        });
+        await assertActiveRegistrationMembersInTransaction({
+          tx,
+          db,
+          tenantId: current.tenantId,
+          payload: draft.payload,
+          actorId: current.actorId,
         });
         const [projectSnap, projectRequestSnap] = await Promise.all([
           tx.get(projectRef),

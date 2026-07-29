@@ -48,7 +48,7 @@ describe('cashflow action chrome', () => {
 
   it('keeps final month close compact while preserving server validation', () => {
     expect(cashflowProjectSheetSource).toContain('buildCashflowMonthCloseDraftInput');
-    expect(cashflowProjectSheetSource).toContain('월 결산 확정');
+    expect(cashflowProjectSheetSource).toContain('월 결산 승인 요청');
     expect(cashflowProjectSheetSource).toContain('dashboard?.validation?.blockers');
     expect(cashflowProjectSheetSource).not.toContain('캐시플로 항목 사람 확인');
     expect(cashflowProjectSheetSource).not.toContain('prepareAuditedWeekAmounts');

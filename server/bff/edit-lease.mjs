@@ -150,7 +150,7 @@ export async function assertEditLeaseActorAccessInTransaction({
   const actorRole = normalizeRole(member.role);
   if (
     !memberSnap.exists
-    || (memberStatus && memberStatus !== 'ACTIVE')
+    || memberStatus !== 'ACTIVE'
     || (memberUid && memberUid !== normalizedActorId)
     || !actorHasPermission(rbacPolicy, { actorRole, permission: 'project:write' })
   ) {

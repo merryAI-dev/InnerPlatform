@@ -996,7 +996,10 @@ export function ProjectEditorWizard({
   ) as Record<string, ProjectTeamMemberOption>, [teamMemberOptions]);
   const ownerOptions = useMemo(
     () => [...members]
-      .filter((member) => String(member.uid || '').trim())
+      .filter((member) => (
+        String(member.uid || '').trim()
+        && String(member.status || '').trim().toUpperCase() === 'ACTIVE'
+      ))
       .sort((left, right) => String(left.name || left.email || left.uid).localeCompare(String(right.name || right.email || right.uid), 'ko')),
     [members],
   );

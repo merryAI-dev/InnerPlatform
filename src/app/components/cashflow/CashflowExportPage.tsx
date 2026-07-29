@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
-import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import {
   BarChart3,
   CalendarRange,
-  CheckCircle2,
   Download,
-  ExternalLink,
   FileSpreadsheet,
   FolderSearch,
   Layers3,
@@ -20,44 +16,20 @@ import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
-import { getOrgCollectionPath } from '../../lib/firebase';
 import { triggerDownload } from '../../platform/csv-utils';
 import { filterCashflowExportTargetProjects } from '../../platform/cashflow-export-filters';
-import { loadExcelJs } from '../../platform/lazy-heavy-modules';
 import { exportCashflowWorkbookViaBff, isPlatformApiEnabled } from '../../lib/platform-bff-client';
 import {
-  buildCashflowExportWorkbookSpec,
   expandCashflowYearMonthRange,
   summarizeCashflowYearMonths,
-  type CashflowExportProjectInput,
   type CashflowExportWorkbookVariant,
 } from '../../platform/cashflow-export';
-import { buildCashflowExportProjectRows } from '../../platform/cashflow-export-surface';
-import { getSeoulTodayIso } from '../../platform/business-days';
 import { hasPermission } from '../../platform/rbac';
-import { ACCOUNT_TYPE_LABELS, type AccountType, type WeeklySubmissionStatus } from '../../data/types';
-
-function formatDateTime(value?: string): string {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function sanitizeFilePart(value: string): string {
-  return value.replace(/[\\/:*?"<>|]/g, '-').trim();
-}
+import { ACCOUNT_TYPE_LABELS, type AccountType } from '../../data/types';
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
@@ -88,11 +60,10 @@ function SelectionField(props: {
 }
 
 export function CashflowExportPage() {
-  const navigate = useNavigate();
-  const { projects, transactions } = useAppStore();
-  const { weeks, yearMonth } = useCashflowWeeks();
+  const { projects } = useAppStore();
+  const { yearMonth } = useCashflowWeeks();
   const { user } = useAuth();
-  const { db, orgId } = useFirebase();
+  const { orgId } = useFirebase();
   const [scope, setScope] = useState<'all' | 'single'>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [accountTypeFilter, setAccountTypeFilter] = useState<'ALL' | AccountType>('ALL');
@@ -102,7 +73,6 @@ export function CashflowExportPage() {
   const [endYearMonth, setEndYearMonth] = useState<string>(`${yearMonth.slice(0, 4)}-12`);
   const [multiProjectVariant, setMultiProjectVariant] = useState<'combined' | 'multi-sheet'>('multi-sheet');
   const [downloadPreparing, setDownloadPreparing] = useState(false);
-  const [weeklySubmissionStatuses, setWeeklySubmissionStatuses] = useState<WeeklySubmissionStatus[]>([]);
 
   const canExport = hasPermission((user?.role || 'viewer') as any, 'cashflow:export');
   const bffEnabled = isPlatformApiEnabled();
@@ -137,29 +107,6 @@ export function CashflowExportPage() {
     });
   }, [accountTypeFilter, scope, selectedProjectId, sortedProjects]);
 
-  const targetYearMonths = useMemo(() => new Set(yearMonths), [yearMonths]);
-  const todayIso = getSeoulTodayIso();
-
-  const projectInputs = useMemo<CashflowExportProjectInput[]>(() => {
-    return targetProjects.map((project) => ({
-      projectId: project.id,
-      projectName: project.name,
-      projectShortName: project.shortName,
-      weeks: weeks.filter((week) => week.projectId === project.id && targetYearMonths.has(week.yearMonth)),
-      transactions: transactions.filter((tx) => tx.projectId === project.id && targetYearMonths.has(tx.dateTime.slice(0, 7))),
-    }));
-  }, [targetProjects, targetYearMonths, transactions, weeks]);
-
-  const projectRows = useMemo(() => buildCashflowExportProjectRows({
-    projects: targetProjects,
-    weeks,
-    weeklySubmissionStatuses,
-    targetYearMonths: yearMonths,
-    todayIso,
-  }), [targetProjects, todayIso, weeklySubmissionStatuses, weeks, yearMonths]);
-
-  const updatedCount = projectRows.filter((row) => row.updated).length;
-  const missingCount = projectRows.length - updatedCount;
   const workbookVariant: CashflowExportWorkbookVariant = scope === 'single' ? 'single-project' : multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
   const accountTypeFilterLabel = accountTypeFilter === 'ALL' ? '전체 통장 유형' : ACCOUNT_TYPE_LABELS[accountTypeFilter];
@@ -179,56 +126,23 @@ export function CashflowExportPage() {
     }
   }, [scope, selectedProjectId, sortedProjects]);
 
-  useEffect(() => {
-    if (!db) {
-      setWeeklySubmissionStatuses([]);
-      return;
-    }
-
-    const currentYearMonth = todayIso.slice(0, 7);
-    const rangedYearMonths = [...yearMonths, currentYearMonth].filter((value) => /^\d{4}-\d{2}$/.test(value)).sort();
-    const startYearMonth = rangedYearMonths[0];
-    const endYearMonth = rangedYearMonths[rangedYearMonths.length - 1];
-    if (!startYearMonth || !endYearMonth) {
-      setWeeklySubmissionStatuses([]);
-      return;
-    }
-
-    const base = collection(db, getOrgCollectionPath(orgId, 'weeklySubmissionStatus'));
-    const q = query(
-      base,
-      where('yearMonth', '>=', startYearMonth),
-      where('yearMonth', '<=', endYearMonth),
-      limit(2500),
-    );
-
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const list = snap.docs.map((docItem) => {
-        const data = docItem.data() as WeeklySubmissionStatus;
-        return { ...data, id: data.id || docItem.id };
-      });
-      setWeeklySubmissionStatuses(list);
-    }, () => {
-      setWeeklySubmissionStatuses([]);
-    });
-
-    return () => unsubscribe();
-  }, [db, orgId, todayIso, yearMonths]);
-
   async function handleDownload() {
     if (!canExport) {
       toast.error('경영기획실 페이지 접근 권한이 없습니다.');
       return;
     }
-    if (projectInputs.length === 0 || yearMonths.length === 0) {
+    if (!bffEnabled || !user) {
+      toast.error('내보내기 서버에 연결되지 않았습니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+    if (targetProjects.length === 0 || yearMonths.length === 0) {
       toast.error('다운로드할 사업 또는 기간을 먼저 선택해 주세요.');
       return;
     }
 
     setDownloadPreparing(true);
     try {
-      if (bffEnabled && user) {
-        const response = await exportCashflowWorkbookViaBff({
+      const response = await exportCashflowWorkbookViaBff({
           tenantId: orgId,
           actor: {
             uid: user.uid,
@@ -239,39 +153,14 @@ export function CashflowExportPage() {
           },
           body: {
             scope,
-            projectId: scope === 'single' ? projectInputs[0]?.projectId : undefined,
+            projectId: scope === 'single' ? targetProjects[0]?.id : undefined,
             accountType: accountTypeFilter === 'ALL' ? undefined : accountTypeFilter,
             startYearMonth: yearMonths[0],
             endYearMonth: yearMonths[yearMonths.length - 1],
             variant: workbookVariant,
           },
-        });
-        triggerDownload(response.blob, response.fileName);
-      } else {
-        const workbookSpec = buildCashflowExportWorkbookSpec({
-          variant: workbookVariant,
-          projects: projectInputs,
-          yearMonths,
-        });
-        const ExcelJS = await loadExcelJs();
-        const workbook = new ExcelJS.Workbook();
-
-        for (const sheet of workbookSpec.sheets) {
-          const worksheet = workbook.addWorksheet(sheet.name);
-          sheet.rows.forEach((row) => worksheet.addRow(row));
-          worksheet.views = [{ state: 'frozen', ySplit: 2 }];
-        }
-
-        const buffer = await workbook.xlsx.writeBuffer();
-        const blob = new Blob(
-          [buffer],
-          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-        );
-        const fileScope = scope === 'single'
-          ? sanitizeFilePart(projectInputs[0]?.projectName || '단일사업')
-          : (workbookVariant === 'combined' ? '전체사업_통합시트' : '전체사업_개별시트');
-        triggerDownload(blob, `캐시플로_추출_${fileScope}_${sanitizeFilePart(periodSummary || selectedYear)}.xlsx`);
-      }
+      });
+      triggerDownload(response.blob, response.fileName);
       toast.success('캐시플로 엑셀을 준비했습니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : '캐시플로 다운로드에 실패했습니다.';
@@ -298,15 +187,15 @@ export function CashflowExportPage() {
       <PageHeader
         icon={BarChart3}
         iconGradient="linear-gradient(135deg, #fafaf9 0%, #f5f5f4 100%)"
-        title="경영기획실 페이지"
-        description="주간 캐시플로 상태를 정리하고 필요한 범위만 엑셀로 다운로드합니다."
+        title="현금흐름 내보내기"
+        description="프로젝트와 기간을 선택해 서버 기준 현금흐름 엑셀을 다운로드합니다."
         badge={scope === 'single' ? '사업별 추출' : '전체 추출'}
         badgeVariant="outline"
         actions={(
           <Button
             data-testid="cashflow-export-download"
             onClick={handleDownload}
-            disabled={downloadPreparing || projectInputs.length === 0 || yearMonths.length === 0}
+            disabled={downloadPreparing || !bffEnabled || targetProjects.length === 0 || yearMonths.length === 0}
             className="h-8 gap-1.5 rounded-lg border border-stone-900 bg-stone-900 text-[12px] text-white hover:bg-stone-800"
           >
             {downloadPreparing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -554,130 +443,21 @@ export function CashflowExportPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <Card className="border-stone-200 bg-stone-50 shadow-none">
-          <CardContent className="p-4 space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
-                <Layers3 className="h-4 w-4 text-stone-600" />
-              </div>
-              <p className="text-[11px] text-stone-600">대상 사업</p>
-            </div>
-            <p className="text-[22px] font-semibold text-zinc-950">{projectRows.length}</p>
-            <p className="text-[11px] text-stone-600">{scope === 'single' ? '선택한 사업 1건 기준' : '전체 사업 기준'}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-stone-200 bg-stone-50 shadow-none">
-          <CardContent className="p-4 space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
-                <CheckCircle2 className="h-4 w-4 text-stone-600" />
-              </div>
-              <p className="text-[11px] text-stone-600">업데이트된 사업</p>
-            </div>
-            <p className="text-[22px] font-semibold text-zinc-950">{updatedCount}</p>
-            <p className="text-[11px] text-stone-600">선택 기간 내 캐시플로 시트 존재</p>
-          </CardContent>
-        </Card>
-        <Card className="border-stone-200 bg-stone-50 shadow-none">
-          <CardContent className="p-4 space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white">
-                <CalendarRange className="h-4 w-4 text-stone-600" />
-              </div>
-              <p className="text-[11px] text-stone-600">미업데이트 사업</p>
-            </div>
-            <p className="text-[22px] font-semibold text-zinc-950">{missingCount}</p>
-            <p className="text-[11px] text-stone-600">{periodSummary || '기간을 선택해 주세요'}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-stone-200 bg-white shadow-none">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-[14px] font-semibold text-zinc-950">추출 대상 사업</CardTitle>
-              <p className="mt-1 text-[12px] text-stone-600">
-                {periodSummary || '기간 미선택'} · 월당 5주 고정 슬롯으로 다운로드됩니다.
-              </p>
-            </div>
-            <Badge variant="outline" className="rounded-md border-stone-200 bg-stone-100 text-[11px] text-stone-700">
-              {scope === 'single' ? '사업별' : workbookVariant === 'combined' ? '통합 시트' : '개별 시트'}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-[11px] font-medium text-stone-500">사업명</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">담당자</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">상태</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">이번주 작성</TableHead>
-                <TableHead className="text-[11px] font-medium text-stone-500">최근 업데이트(Projection)</TableHead>
-                <TableHead className="text-right text-[11px] font-medium text-stone-500">이동</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projectRows.map((row) => (
-                <TableRow key={row.id} data-testid={`cashflow-export-row-${row.id}`}>
-                  <TableCell className="font-medium text-zinc-950">{row.name}</TableCell>
-                  <TableCell className="text-stone-600">{row.managerName}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={row.updated ? 'rounded-md border-stone-300 bg-stone-200 text-stone-800' : 'rounded-md border-stone-200 bg-white text-stone-600'}
-                    >
-                      {row.updated ? '업데이트됨' : '미업데이트'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={row.currentWeekUpdated ? 'rounded-md border-stone-300 bg-stone-200 text-stone-800' : 'rounded-md border-stone-200 bg-white text-stone-600'}
-                    >
-                      {row.currentWeekLabel} · {row.currentWeekUpdated ? '작성됨' : '미작성'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-stone-600">{formatDateTime(row.latestProjectionUpdatedAt)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 gap-1.5 rounded-lg border border-stone-200 bg-white text-[11px] text-zinc-900 hover:bg-stone-50"
-                      onClick={() => navigate(`/cashflow/projects/${row.id}`)}
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      사업 보기
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {projectRows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-[12px] text-muted-foreground py-8">
-                    선택한 조건에 맞는 사업이 없습니다.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       <Card className="border-stone-200 bg-stone-50 shadow-none">
-        <CardContent className="p-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <CardContent className="grid gap-3 p-4 text-[12px] text-stone-600 sm:grid-cols-3">
           <div>
-            <p className="text-[12px] font-semibold text-zinc-950">기존 주간 시트와 모니터링 흐름은 그대로 유지됩니다.</p>
-            <p className="text-[12px] text-stone-600">
-              사업 상세에서는 월 단위 입력과 검토를 계속하고, 이 화면에서는 필요한 범위의 내보내기만 처리합니다.
-            </p>
+            <p className="text-[11px] text-stone-500">대상 사업</p>
+            <p className="mt-1 font-semibold text-zinc-950">{targetProjects.length}건</p>
           </div>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg border-stone-200 bg-white text-[12px] text-zinc-900 hover:bg-stone-100" onClick={() => navigate('/projects')}>
-            프로젝트로 이동
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Button>
+          <div>
+            <p className="text-[11px] text-stone-500">기간</p>
+            <p className="mt-1 font-semibold text-zinc-950">{periodSummary || '기간 미선택'}</p>
+          </div>
+          <div>
+            <p className="text-[11px] text-stone-500">생성 기준</p>
+            <p className="mt-1 font-semibold text-zinc-950">BFF 서버의 최신 현금흐름 데이터</p>
+          </div>
+          {!bffEnabled ? <p className="sm:col-span-3 text-red-700">내보내기 서버 연결을 확인해 주세요.</p> : null}
         </CardContent>
       </Card>
     </div>

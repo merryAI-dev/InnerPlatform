@@ -1418,7 +1418,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
     expect(salesRow).toBeTruthy();
     expect(salesRow).toEqual([
       '매출액(입금)',
-      1250, 0, 0, 0, 0,
+      1250, 0, 0, 0, 0, 1250,
     ]);
   });
 
@@ -1494,7 +1494,7 @@ describeIfEmulator('BFF integration (Firestore emulator)', () => {
 
     expect(salesRow).toEqual([
       '매출액(입금)',
-      700, 0, 0, 0, 0,
+      700, 0, 0, 0, 0, 700,
     ]);
   });
 

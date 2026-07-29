@@ -1012,6 +1012,28 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
+export type CashflowMonthCloseRequestStatus = 'PENDING' | 'APPROVING' | 'APPROVED' | 'REJECTED';
+
+export interface CashflowMonthCloseRequest {
+  requestId: string;
+  projectId: string;
+  yearMonth: string;
+  status: CashflowMonthCloseRequestStatus;
+  revision: number;
+  approverUid: string;
+  requestedByUid: string;
+  requestedAt: string;
+  reviewedByUid: string | null;
+  reviewedAt: string | null;
+  decisionReason: string | null;
+}
+
+export interface ReviewCashflowMonthCloseRequestPayload {
+  decision: 'APPROVE' | 'REJECT';
+  expectedRevision: number;
+  reason?: string;
+}
+
 export interface RequestCashflowMonthReopenPayload {
   yearMonth: string;
   expectedRevision: number;
@@ -2672,16 +2694,78 @@ export async function fetchCashflowActivityViaBff(params: {
   return response.data;
 }
 
-export async function closeCashflowMonthViaBff(params: {
+export async function requestCashflowMonthCloseViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
   payload: CloseCashflowMonthPayload;
   idempotencyKey: string;
   client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseResult> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseResult>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close`,
+}): Promise<CashflowMonthCloseRequest> {
+  const response = await resolveClient(params.client).post<CashflowMonthCloseRequest>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: params.payload,
+      idempotencyKey: params.idempotencyKey,
+      retries: 0,
+      timeoutMs: 27_000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCurrentCashflowMonthCloseRequestViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseRequest | null> {
+  const response = await resolveClient(params.client).get<{ request: CashflowMonthCloseRequest | null }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/current?yearMonth=${encodeURIComponent(params.yearMonth)}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data.request;
+}
+
+export async function fetchPendingCashflowMonthCloseRequestsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseRequest[]> {
+  const response = await resolveClient(params.client).get<{ items: CashflowMonthCloseRequest[] }>(
+    '/api/v1/cashflow/month-close/requests/pending',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return Array.isArray(response.data.items) ? response.data.items : [];
+}
+
+export async function reviewCashflowMonthCloseRequestViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  requestId: string;
+  payload: ReviewCashflowMonthCloseRequestPayload;
+  idempotencyKey: string;
+  client?: PlatformApiClientLike;
+}): Promise<{ request: CashflowMonthCloseRequest; monthClose?: CashflowMonthCloseResult }> {
+  const response = await resolveClient(params.client).post<{
+    request: CashflowMonthCloseRequest;
+    monthClose?: CashflowMonthCloseResult;
+  }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/review`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

@@ -59,6 +59,17 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('사업 담당자와 지정 결재자는 달라야 합니다.');
   });
 
+  it('offers only active members as project owners and designated executive approvers', () => {
+    const ownerOptionsBlock = source.slice(
+      source.indexOf('const ownerOptions = useMemo'),
+      source.indexOf('const selectedOwner = useMemo'),
+    );
+
+    expect(ownerOptionsBlock).toContain("String(member.status || '').trim().toUpperCase() === 'ACTIVE'");
+    expect(source).toContain('const executiveApproverOptions = useMemo');
+    expect(source).toContain('requesterId, ownerOptions');
+  });
+
   it('uses a searchable team member picker for registration and edit flows', () => {
     expect(source).toContain('function TeamMemberSearchCombobox');
     expect(source).toContain('<CommandInput placeholder="이름/닉네임으로 검색" />');

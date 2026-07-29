@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8');
 
 describe('CashflowProjectSheet monthly close shell', () => {
-  it('uses the single BFF/JVM month-close contract and removes weekly close actions', () => {
+  it('uses the approval-backed BFF/JVM month-close contract and removes weekly close actions', () => {
     expect(source).toContain('fetchCashflowMonthCloseViaBff');
-    expect(source).toContain('closeCashflowMonthViaBff');
+    expect(source).toContain('requestCashflowMonthCloseViaBff');
+    expect(source).toContain('fetchCurrentCashflowMonthCloseRequestViaBff');
+    expect(source).not.toContain('closeCashflowMonthViaBff');
     expect(source).toContain('requestCashflowMonthReopenViaBff');
     expect(source).toContain('decideCashflowMonthReopenViaBff');
     expect(source).not.toContain('handleCloseWeek');
@@ -17,9 +19,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('settleWeek');
   });
 
-  it('makes final save mean direct atomic month close after server validation', () => {
-    expect(source).toContain('최종저장 · 월 결산');
-    expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*closeCashflowMonthViaBff/);
+  it('makes final save create an approval request after server validation', () => {
+    expect(source).toContain('최종저장 · 월 결산 요청');
+    expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*requestCashflowMonthCloseViaBff/);
     expect(source).toContain('expectedRevision: prepared.revision');
     expect(source).toContain('expectedOpeningBalances: reviewedOpeningBalances');
     expect(source).toContain('closeInput: monthCloseInput');
@@ -32,8 +34,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('requires an explicit human review before the compact month close is enabled', () => {
-    expect(source).toContain('결산 기준을 먼저 점검한 뒤, 준비된 경우에만 이 달의 수정을 잠급니다.');
-    expect(source).toContain('월 결산 확정');
+    expect(source).toContain('결산 기준을 먼저 점검한 뒤 지정 조직장에게 승인을 요청합니다.');
+    expect(source).toContain('월 결산 승인 요청');
     expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
     expect(source).not.toContain('세금계산서·입금 일정</h3>');

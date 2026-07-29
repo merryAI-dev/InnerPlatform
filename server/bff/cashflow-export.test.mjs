@@ -171,7 +171,9 @@ describe('cashflow export bff helper', () => {
     expect(headerRow).toEqual([
       '항목',
       '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5',
+      '26-1-Total',
       '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5',
+      '26-2-Total',
     ]);
     expect(rows.some((row) => row[0] === '기간')).toBe(false);
     expect(rows.some((row) => row[0] === 'Projection')).toBe(false);
@@ -179,7 +181,38 @@ describe('cashflow export bff helper', () => {
     expect(salesRow).toEqual([
       '매출액(입금)',
       100, 0, 0, 0, 0,
+      100,
       200, 0, 0, 0, 0,
+      200,
     ]);
+  });
+
+  it('applies the MYSCube cashflow worksheet format and monthly Total column', async () => {
+    const buffer = await buildCashflowExportWorkbookBuffer({
+      variant: 'single-project',
+      yearMonths: ['2026-01'],
+      projects: [{
+        id: 'proj-format',
+        name: '서식 프로젝트',
+        weeks: [{
+          id: 'proj-format-2026-01-w1', projectId: 'proj-format', yearMonth: '2026-01', weekNo: 1,
+          projection: { SALES_IN: 1000, DIRECT_COST_OUT: 250 }, actual: {},
+        }],
+      }],
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const worksheet = workbook.getWorksheet('Projection');
+    const header = worksheet.getRow(2);
+    const sales = worksheet.getRow(
+      worksheet.getSheetValues().findIndex((row) => Array.isArray(row) && row[1] === '매출액(입금)'),
+    );
+
+    expect(header.values.slice(1)).toEqual(['항목', '26-1-1', '26-1-2', '26-1-3', '26-1-4', '26-1-5', '26-1-Total']);
+    expect(sales.values.slice(1)).toEqual(['매출액(입금)', 1000, 0, 0, 0, 0, 1000]);
+    expect(worksheet.views[0]).toMatchObject({ state: 'frozen', xSplit: 1, ySplit: 2 });
+    expect(worksheet.getColumn(1).width).toBeGreaterThanOrEqual(22);
+    expect(header.getCell(1).font.bold).toBe(true);
+    expect(sales.getCell(2).numFmt).toContain('#,##0');
   });
 });

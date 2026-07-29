@@ -37,8 +37,8 @@ describe('admin nav access control', () => {
   it('keeps approval queue scoped to admin and finance', () => {
     expect(canAccessAdminPath('admin', '/approvals')).toBe(true);
     expect(canAccessAdminPath('finance', '/approvals')).toBe(true);
-    expect(canAccessAdminPath('pm', '/approvals')).toBe(false);
-    expect(canAccessAdminPath('viewer', '/approvals')).toBe(false);
+    expect(canAccessAdminPath('pm', '/approvals')).toBe(true);
+    expect(canAccessAdminPath('viewer', '/approvals')).toBe(true);
   });
 
   it('allows only admin and finance into management-planning project code issuance', () => {

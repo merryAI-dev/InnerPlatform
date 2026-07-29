@@ -282,6 +282,23 @@ describe('edit lease service', () => {
     expect([...db.__documents.keys()].some((path) => path.includes('/idempotency_keys/'))).toBe(false);
   });
 
+  it('fails closed when the persisted member status is missing', async () => {
+    const { db, service, base } = createHarness();
+    db.__set('orgs/tenant-a/members/actor-a', {
+      uid: 'actor-a', role: 'pm', projectIds: ['project-a'],
+    });
+
+    await expectHttpError(
+      service.acquire({ ...base, idempotencyKey: 'idem-missing-member-status' }),
+      403,
+      'forbidden',
+    );
+
+    expect([...db.__documents.keys()].some((path) => path.includes('/editLeases/'))).toBe(false);
+    expect([...db.__documents.keys()].some((path) => path.includes('/audit_logs/'))).toBe(false);
+    expect([...db.__documents.keys()].some((path) => path.includes('/idempotency_keys/'))).toBe(false);
+  });
+
   it('retries when draft ownership changes and preserves private not-found semantics', async () => {
     const { db, service, base } = createHarness();
     const draftPath = 'orgs/tenant-a/projectRequestDrafts/draft-a';

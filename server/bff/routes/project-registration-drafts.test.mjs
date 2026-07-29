@@ -109,6 +109,12 @@ function createHarness({
       status: 'ACTIVE',
       projectIds: [],
     },
+    'orgs/tenant-a/members/head-a': {
+      uid: 'head-a',
+      role: 'admin',
+      status: 'ACTIVE',
+      projectIds: [],
+    },
     ...seed,
   });
   let currentNowMs = nowMs;
@@ -718,6 +724,109 @@ describe('project registration draft service', () => {
     expect(auditChainService.appendManyInTransaction).toHaveBeenCalledTimes(2);
     expect(auditChainService.appendManyInTransaction.mock.calls[1][1].map((entry) => entry.action))
       .toEqual(['PROJECT_REGISTRATION_SUBMIT', 'EDIT_LEASE_RELEASE']);
+  });
+
+  it.each([
+    [
+      'same-tenant owner document is missing',
+      { registeredById: 'foreign-owner', managerId: 'foreign-owner' },
+      { 'orgs/tenant-b/members/foreign-owner': { uid: 'foreign-owner', role: 'pm', status: 'ACTIVE' } },
+    ],
+    [
+      'owner status is missing',
+      { registeredById: 'actor-b', managerId: 'actor-b' },
+      { 'orgs/tenant-a/members/actor-b': { uid: 'actor-b', role: 'pm' } },
+    ],
+    [
+      'executive approver is inactive',
+      {},
+      { 'orgs/tenant-a/members/head-a': { uid: 'head-a', role: 'admin', status: 'INACTIVE' } },
+    ],
+    [
+      'executive approver UID does not match its member document',
+      {},
+      { 'orgs/tenant-a/members/head-a': { uid: 'different-head', role: 'admin', status: 'ACTIVE' } },
+    ],
+  ])('rejects final submit when the selected %s', async (_label, payloadOverrides, seed) => {
+    const { db, service, base } = createHarness({ seed });
+    const created = await service.create({
+      ...base,
+      idempotencyKey: `idem-active-member-create-${_label}`,
+      payload: validRegistrationV2Payload(payloadOverrides),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+
+    await expectHttpError(service.submit({
+      ...base,
+      actorEmail: 'actor-a@example.com',
+      idempotencyKey: `idem-active-member-submit-${_label}`,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    }), 403, 'forbidden');
+
+    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
+    expect(db.documents.has('orgs/tenant-a/project_requests/project-request-1')).toBe(false);
+    expect(db.documents.has('outbox/outbox-1')).toBe(false);
+    expect(db.documents.get(`orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`))
+      .toMatchObject({ status: 'ACTIVE', draftRevision: 0 });
+  });
+
+  it('rechecks selected member activity when Firestore retries final submit', async () => {
+    const { db, service, base } = createHarness();
+    const created = await service.create({
+      ...base,
+      idempotencyKey: 'idem-member-retry-create',
+      payload: validRegistrationV2Payload(),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    db.retryNextTransaction(() => {
+      db.documents.set('orgs/tenant-a/members/head-a', {
+        uid: 'head-a', role: 'admin', status: 'INACTIVE', projectIds: [],
+      });
+    });
+
+    await expectHttpError(service.submit({
+      ...base,
+      actorEmail: 'actor-a@example.com',
+      idempotencyKey: 'idem-member-retry-submit',
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    }), 403, 'forbidden');
+
+    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
+    expect(db.documents.has('orgs/tenant-a/project_requests/project-request-1')).toBe(false);
+    expect(db.documents.has('outbox/outbox-1')).toBe(false);
+  });
+
+  it.each([
+    ['requester', { registeredById: 'actor-b', managerId: 'actor-b', executiveApproverId: 'actor-a' }],
+    ['project owner', { registeredById: 'actor-b', managerId: 'actor-b', executiveApproverId: 'actor-b' }],
+  ])('rejects final submit when the designated executive approver is the %s', async (_label, payloadOverrides) => {
+    const { db, service, base } = createHarness();
+    const created = await service.create({
+      ...base,
+      idempotencyKey: `idem-self-approval-create-${_label}`,
+      payload: validRegistrationV2Payload(payloadOverrides),
+    });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+
+    await expectHttpError(service.submit({
+      ...base,
+      actorEmail: 'actor-a@example.com',
+      idempotencyKey: `idem-self-approval-submit-${_label}`,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      expectedDraftRevision: 0,
+    }), 422, 'project_registration_invalid');
+
+    expect(db.documents.has('orgs/tenant-a/projects/project-1')).toBe(false);
+    expect(db.documents.has('orgs/tenant-a/project_requests/project-request-1')).toBe(false);
+    expect(db.documents.has('outbox/outbox-1')).toBe(false);
   });
 
   it('replays a committed final submit when Firestore reports an invalid-or-closed transaction', async () => {
