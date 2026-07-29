@@ -180,23 +180,6 @@ async function readCanonicalCashflowApprover({ db, tenantId, projectId, requeste
   return approverUid;
 }
 
-function memberProjectIds(member = {}) {
-  const profile = objectValue(member.portalProfile) || {};
-  return new Set([
-    member.projectId,
-    ...(Array.isArray(member.projectIds) ? member.projectIds : []),
-    profile.projectId,
-    ...(Array.isArray(profile.projectIds) ? profile.projectIds : []),
-  ].map(readOptionalText).filter(Boolean));
-}
-
-function canManageCashflowApprover({ member, project, projectId, actorId }) {
-  return memberProjectIds(member).has(projectId)
-    || [project?.registeredById, project?.managerId, project?.createdBy]
-      .map(readOptionalText)
-      .includes(actorId);
-}
-
 function commandBody(req) {
   const body = {
     ...(req.body && typeof req.body === 'object' ? req.body : {}),
@@ -2581,9 +2564,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(403, '활성 구성원만 프로젝트 조직장을 지정할 수 있습니다.', 'cashflow_month_close_member_inactive');
       }
-      if (!canManageCashflowApprover({ member: actor, project, projectId, actorId })) {
-        throw createHttpError(403, '이 프로젝트의 조직장을 지정할 권한이 없습니다.', 'cashflow_month_close_project_forbidden');
-      }
       if (
         !approver
         || readOptionalText(approver.uid) !== approverUid
@@ -2738,12 +2718,6 @@ export function mountJvmWeeklyApiRoutes(app, {
       if (
         readOptionalText(currentRequester.uid) !== readOptionalText(req.context.actorId)
         || readOptionalText(currentRequester.status).toUpperCase() !== 'ACTIVE'
-        || !canManageCashflowApprover({
-          member: currentRequester,
-          project: currentProject,
-          projectId: prepared.rawProjectId,
-          actorId: readOptionalText(req.context.actorId),
-        })
       ) {
         throw createHttpError(403, '이 프로젝트의 월 결산을 요청할 권한이 없습니다.', 'cashflow_month_close_project_forbidden');
       }

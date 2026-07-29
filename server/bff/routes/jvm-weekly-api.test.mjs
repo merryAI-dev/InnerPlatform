@@ -2187,7 +2187,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_locked'));
   });
 
-  it('rejects inactive, self, and unassigned month-close approver changes', async () => {
+  it('rejects inactive and self approvers but lets any active member designate one', async () => {
     const source = fullMonthCloseSource();
     source.documents.get('orgs/tenant-a/projects/project-a').version = 2;
     source.documents.get('orgs/tenant-a/members/finance-2').status = 'INACTIVE';
@@ -2212,8 +2212,8 @@ describe('JVM weekly API BFF proxy', () => {
     await request(outsider)
       .post('/api/v1/cashflow/project-a/month-close/approver')
       .send({ approverUid: 'finance-1', yearMonth: '2026-07', expectedVersion: 2 })
-      .expect(403)
-      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_project_forbidden'));
+      .expect(200)
+      .expect((response) => expect(response.body.executiveApproverId).toBe('finance-1'));
   });
 
   it('derives the approver from the project, blocks self approval, and exposes permission-filtered reads', async () => {
@@ -2265,6 +2265,7 @@ describe('JVM weekly API BFF proxy', () => {
       .get('/api/v1/cashflow/month-close/requests/pending')
       .expect(200)
       .expect((response) => expect(response.body).toEqual({ items: [], count: 0 }));
+    source.documents.delete('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06');
     await request(outsider)
       .post('/api/v1/cashflow/project-a/month-close/requests')
       .set('idempotency-key', 'outsider-request')
@@ -2274,8 +2275,10 @@ describe('JVM weekly API BFF proxy', () => {
         expectedOpeningBalances: read.body.dashboard.openingBalances,
         closeInput: { ...source.closeInput, managementChecks: read.body.dashboard.managementChecks },
       })
-      .expect(403)
-      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_project_forbidden'));
+      .expect(202)
+      .expect((response) => expect(response.body).toMatchObject({
+        status: 'PENDING', requestedByUid: 'viewer-2', approverUid: 'finance-1',
+      }));
     await request(outsider)
       .get('/api/v1/cashflow/project-a/month-close/requests/current?yearMonth=2026-06')
       .expect(200)
