@@ -728,7 +728,7 @@ export async function applyCashflowSheetLabViaBff(params: {
           ...(params.finalize ? { 'x-edit-finalize': 'true' } : {}),
         },
       } : {}),
-      timeoutMs: 30000,
+      timeoutMs: 300000,
       retries: 0,
     },
   );

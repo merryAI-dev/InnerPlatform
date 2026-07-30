@@ -142,6 +142,7 @@ describe('sheets cashflow readonly client', () => {
           idempotencyKey: 'apply-001',
         },
         idempotencyKey: 'apply-001',
+        timeoutMs: 300000,
         headers: {
           'x-edit-session-id': 'session-a',
           'x-edit-lease-id': 'lease-a',
