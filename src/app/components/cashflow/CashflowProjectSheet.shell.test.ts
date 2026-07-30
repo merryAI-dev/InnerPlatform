@@ -21,7 +21,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('makes final save create an approval request after server validation', () => {
     expect(source).toContain('최종저장 · 월 결산 요청');
-    expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*validation\?\.canClose[\s\S]*requestCashflowMonthCloseViaBff/);
+    expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*requestCashflowMonthCloseViaBff/);
+    expect(source).not.toContain('prepared.dashboard?.validation?.canClose');
     expect(source).toContain('expectedRevision: prepared.revision');
     expect(source).toContain('expectedOpeningBalances: reviewedOpeningBalances');
     expect(source).toContain('closeInput: monthCloseInput');
@@ -36,13 +37,28 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('requires an explicit human review before the compact month close is enabled', () => {
     expect(source).toContain('결산 기준을 먼저 점검한 뒤 지정 조직장에게 승인을 요청합니다.');
     expect(source).toContain('월 결산 승인 요청');
-    expect(source).toContain('monthCloseResult?.dashboard?.managementChecks');
+    expect(source).not.toContain('managementDecisions');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
     expect(source).not.toContain('세금계산서·입금 일정</h3>');
     expect(source).toContain('monthCloseHumanReviewed');
     expect(source).toContain('humanReviewed: monthCloseHumanReviewed');
-    expect(source).toContain('직접 확인했습니다');
+    expect(source).toContain('시트의 값과 일치하는지 직접 확인했습니다.');
+    expect(source).toContain('조직장이 최종 수정하기 전까지는 더 이상 수정할 수 없습니다.');
+    expect(source).not.toContain('<span>주요 관리 항목</span>');
+    expect(source).not.toMatch(/>확인<\/Button>/);
+    expect(source).not.toMatch(/>해당 없음<\/Button>/);
     expect(source).not.toContain('!monthCloseProgress.complete');
+  });
+
+  it('locks the pending month immediately and ignores stale request reads', () => {
+    expect(source).toContain('isCashflowMonthCloseRequestLocked(monthCloseRequest?.status)');
+    expect(source).toContain('monthCloseStatusByMonth.set(yearMonth, monthCloseRequest.status)');
+    expect(source).toContain("if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';");
+    expect(source).toContain('disabled={monthCloseRequestLocked}');
+    expect(source).toContain('monthCloseCurrentRequestGenerationRef');
+    expect(source).toContain('shouldApplyCashflowMonthCloseRequestResult({');
+    expect(source).toContain('selectedYearMonth: selectedYearMonthRef.current');
+    expect(source).toContain('monthCloseCurrentRequestGenerationRef.current += 1;');
   });
 
   it('initializes the pinned source before effects read its revision', () => {
@@ -59,7 +75,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('taxInvoiceIssuedDate: row.taxInvoiceIssuedDate');
     expect(source).toContain('expectedDepositDate: row.expectedDepositDate');
     expect(source).toContain('expectedDepositAmount: row.expectedDepositAmount');
-    expect(source).toContain("decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE'");
+    expect(source).not.toContain('hasDepositValue');
   });
 
   it('keeps all cashflow labels at a readable 12px minimum', () => {
@@ -168,7 +184,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('colSpan={month.weeks.length}');
     expect(source).toContain("month.yearMonth.replace('-', '년 ')}월");
     expect(source).toContain('LockKeyhole');
-    expect(source).toContain("if (monthCloseStatus === 'CLOSED') return 'bg-slate-200';");
+    expect(source).toContain("if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';");
     expect(source).toContain('cashflowWeekSurface(input.monthCloseStatus, input.weeklyStatus, input.closeOverdue)');
     // 지난 달은 월 결산 상태가, 이번 달은 주간 정산 상태가 앞선다.
     expect(source).toContain("if (closeOverdue) return 'bg-red-100';");
@@ -468,7 +484,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("const canCompleteWeekly = canFinalizeMonth || role === 'tenant_admin'");
     expect(source).toContain('const canRequestMonthReopen = canFinalizeMonth');
     expect(source).toContain("role === 'finance' || role === 'admin'");
-    expect(source).toContain("monthCloseResult?.status !== 'OPEN'");
+    expect(source).not.toContain("monthCloseResult?.status !== 'OPEN'");
     expect(source).not.toContain('PM만 재오픈을 요청할 수 있습니다.');
     expect(source).toContain('Finance 또는 Admin만 재오픈 요청을 처리할 수 있습니다.');
   });

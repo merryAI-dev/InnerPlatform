@@ -72,13 +72,12 @@ import {
 import {
   buildCashflowMonthCloseDraftInput,
   carryForwardCashflowRunningBalances,
-  cashflowMonthCloseConfirmationKey,
   createEmptyCashflowMonthCloseDepositRows,
+  isCashflowMonthCloseRequestLocked,
   normalizeCashflowMonthCloseCells,
   resolveCashflowEvidenceScope,
-  requiredCashflowMonthCloseDecision,
+  shouldApplyCashflowMonthCloseRequestResult,
   type CashflowMonthCloseDepositReviewRow,
-  type CashflowManagementDecisionMap,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
@@ -129,7 +128,7 @@ function weeklySettlementSurface(status?: string): string {
 // 지난 달은 "닫혔나"가, 이번 달은 "이번 주 뭘 해야 하나"가 유일하게 중요한 질문이다.
 // 현재 달은 아직 결산할 수 없으므로(대상월이 끝나야 결산 가능) 주간 정산 상태를 그대로 보여준다.
 function cashflowWeekSurface(monthCloseStatus?: string, weeklyStatus?: string, closeOverdue?: boolean): string {
-  if (monthCloseStatus === 'CLOSED') return 'bg-slate-200';
+  if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';
   if (closeOverdue) return 'bg-red-100';
   return weeklySettlementSurface(weeklyStatus);
 }
@@ -337,7 +336,6 @@ export function CashflowProjectSheet({
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
   const [monthCloseHumanReviewed, setMonthCloseHumanReviewed] = useState(false);
-  const [managementDecisions, setManagementDecisions] = useState<CashflowManagementDecisionMap>({});
   const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
     () => createEmptyCashflowMonthCloseDepositRows(),
   );
@@ -377,6 +375,10 @@ export function CashflowProjectSheet({
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
   const monthCloseRequestGenerationRef = useRef(0);
+  const monthCloseCurrentRequestGenerationRef = useRef(0);
+  const selectedYearMonthRef = useRef(yearMonth);
+  selectedYearMonthRef.current = yearMonth;
+  const monthCloseRequestLocked = isCashflowMonthCloseRequestLocked(monthCloseRequest?.status);
 
   const monthWeeks = useMemo(() => getMonthMondayWeeks(yearMonth), [yearMonth]);
   const selectedYear = useMemo(() => {
@@ -416,7 +418,6 @@ export function CashflowProjectSheet({
 
   useEffect(() => {
     setMonthCloseResult(null);
-    setManagementDecisions({});
     setMonthCloseDepositRows(createEmptyCashflowMonthCloseDepositRows());
     setMonthCloseHumanReviewed(false);
     setMonthCloseReviewDirty(false);
@@ -593,20 +594,30 @@ export function CashflowProjectSheet({
   }, [loadCashflowMonthClose]);
 
   const loadMonthCloseRequest = useCallback(async (): Promise<void> => {
+    const requestGeneration = ++monthCloseCurrentRequestGenerationRef.current;
+    const requestedYearMonth = yearMonth;
+    const isCurrentRequest = () => shouldApplyCashflowMonthCloseRequestResult({
+      requestGeneration,
+      currentGeneration: monthCloseCurrentRequestGenerationRef.current,
+      requestedYearMonth,
+      selectedYearMonth: selectedYearMonthRef.current,
+    });
     if (!projectId || !orgId || !user?.uid) {
-      setMonthCloseRequest(null);
+      if (isCurrentRequest()) setMonthCloseRequest(null);
       return;
     }
     try {
       const actor = await resolveBffActor();
       if (!actor?.idToken) return;
-      setMonthCloseRequest(await fetchCurrentCashflowMonthCloseRequestViaBff({
+      const request = await fetchCurrentCashflowMonthCloseRequestViaBff({
         tenantId: orgId,
         actor,
         projectId,
         yearMonth,
-      }));
+      });
+      if (isCurrentRequest()) setMonthCloseRequest(request);
     } catch (error) {
+      if (!isCurrentRequest()) return;
       logCashflowSettlement({
         phase: 'error',
         operation: 'cashflow.month_close.request.load',
@@ -968,39 +979,24 @@ export function CashflowProjectSheet({
   }, [canFinalizeMonth, cashflowSheetConfig?.value, cashflowSheetMirror?.status, monthClosePinnedSource?.sourceRevision, monthClosePinnedSource?.yearMonths, monthClosePreparation.status, monthCloseResult?.closeEligible, monthCloseResult?.status, project, projectId, savedExecutiveApproverId, yearMonth]);
 
   const handleFinalizeMonthClose = useCallback(async (): Promise<void> => {
-    if (!canFinalizeMonth || monthCloseResult?.status !== 'OPEN') {
+    if (!canFinalizeMonth) {
       toast.error('프로젝트 접근 권한이 있는 활성 사용자만 월 결산할 수 있습니다.');
+      return;
+    }
+    if (!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed) {
+      toast.error('결산 대상 월과 조직장을 선택하고 시트값 확인에 동의해 주세요.');
       return;
     }
     let monthCloseInput: CashflowMonthCloseDraftInput;
     try {
       if (monthCloseCellsState.error) throw new Error(monthCloseCellsState.error);
-      const decisions = Object.fromEntries(monthCloseCellsState.cells.map((cell) => [
-        cashflowMonthCloseConfirmationKey(cell),
-        requiredCashflowMonthCloseDecision(cell),
-      ]));
-      const depositScheduleRows = monthCloseDepositRows.map((row) => {
-        const hasDepositValue = Boolean(
-          row.taxInvoiceIssuedDate
-          || row.expectedDepositDate
-          || row.expectedDepositAmount != null
-          || row.actualDepositDate
-          || row.actualDepositAmount != null,
-        );
-        return {
-          ...row,
-          decision: hasDepositValue ? 'CONFIRMED' : 'NOT_APPLICABLE',
-        } satisfies CashflowMonthCloseDepositReviewRow;
-      });
       const managementChecks = monthCloseResult?.dashboard?.managementChecks || [];
       monthCloseInput = buildCashflowMonthCloseDraftInput({
         mirror: monthClosePinnedSource,
         yearMonth,
         humanReviewed: monthCloseHumanReviewed,
-        decisions,
-        depositScheduleRows,
+        depositScheduleRows: monthCloseDepositRows,
         managementChecks,
-        managementDecisions,
         deadlineSummary: monthCloseResult?.dashboard?.deadlineSummary || {
           trackingStartedAt: null,
           missedCount: 0,
@@ -1045,9 +1041,6 @@ export function CashflowProjectSheet({
         yearMonth,
       });
       setMonthCloseResult(prepared);
-      if (!prepared.dashboard?.validation?.canClose) {
-        throw new Error(prepared.dashboard?.validation?.blockers?.[0]?.message || '서버 월 결산 검증을 통과하지 못했습니다.');
-      }
       const request = await requestCashflowMonthCloseViaBff({
         tenantId: orgId,
         actor,
@@ -1062,9 +1055,9 @@ export function CashflowProjectSheet({
         },
         idempotencyKey: `cashflow-month-close-request:${projectId}:${yearMonth}:${prepared.revision}:r${monthCloseRequest?.revision ?? -1}`,
       });
+      monthCloseCurrentRequestGenerationRef.current += 1;
       setMonthCloseRequest(request);
       setMonthCloseReviewOpen(false);
-      setManagementDecisions({});
       setMonthCloseReviewDirty(false);
       await Promise.all([
         loadCashflowMonthClose(),
@@ -1104,7 +1097,6 @@ export function CashflowProjectSheet({
     monthCloseCellsState,
     monthCloseDepositRows,
     monthCloseHumanReviewed,
-    managementDecisions,
     monthCloseResult,
     monthCloseRequest?.revision,
     orgId,
@@ -1917,6 +1909,9 @@ export function CashflowProjectSheet({
     if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
       monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
     }
+    if (monthCloseRequestLocked && monthCloseRequest?.yearMonth === yearMonth) {
+      monthCloseStatusByMonth.set(yearMonth, monthCloseRequest.status);
+    }
     const monthCloseOverdueByMonth = new Map(
       (monthCloseResult?.dashboard?.monthCloseStatuses || []).map((month) => [month.yearMonth, Boolean(month.closeOverdue)]),
     );
@@ -2117,9 +2112,10 @@ export function CashflowProjectSheet({
               </th>
             ))}
             {monthGroups.map((month) => {
-              const closed = monthCloseStatusByMonth.get(month.yearMonth) === 'CLOSED';
-              const overdue = !closed && Boolean(monthCloseOverdueByMonth.get(month.yearMonth));
-              const monthHeadClass = closed
+              const monthStatus = monthCloseStatusByMonth.get(month.yearMonth);
+              const locked = monthStatus === 'CLOSED' || isCashflowMonthCloseRequestLocked(monthStatus);
+              const overdue = !locked && Boolean(monthCloseOverdueByMonth.get(month.yearMonth));
+              const monthHeadClass = locked
                 ? 'border-b-slate-500 bg-slate-300 text-slate-800'
                 : overdue
                   ? 'border-b-red-400 bg-red-200 text-red-900'
@@ -2128,7 +2124,7 @@ export function CashflowProjectSheet({
                 <th colSpan={month.weeks.length} key={`${mode}-${month.yearMonth}-month`} className={`border-b-2 border-l-[6px] border-l-white px-2 py-1.5 text-left align-middle ${monthHeadClass}`}>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px] font-bold">
                     {month.yearMonth.replace('-', '년 ')}월
-                    {closed ? <LockKeyhole className="h-3.5 w-3.5" aria-label="월 결산 완료" /> : null}
+                    {locked ? <LockKeyhole className="h-3.5 w-3.5" aria-label="월 결산 수정 잠김" /> : null}
                     {overdue ? (
                       <span className="rounded bg-red-700 px-1.5 py-0.5 text-[12px] font-bold text-white">월 결산 기한 초과</span>
                     ) : null}
@@ -2199,7 +2195,8 @@ export function CashflowProjectSheet({
                 <Input
                   type="month"
                   value={yearMonth}
-                  className="h-8 w-[138px] rounded-full border-0 bg-white px-3 text-[12px] shadow-sm"
+                  disabled={monthCloseRequestLocked}
+                  className="h-8 w-[138px] rounded-full border-0 bg-white px-3 text-[12px] shadow-sm disabled:bg-slate-200 disabled:text-slate-500"
                   onChange={(event) => setYearMonth(event.target.value)}
                 />
               </label>
@@ -2667,49 +2664,20 @@ export function CashflowProjectSheet({
               </div>
               <div className="space-y-2">
                 {(monthCloseResult?.dashboard?.managementChecks || []).map((check) => {
-                  const decision = managementDecisions[check.id];
                   const tone: CashflowOpsTone = check.status === 'OK' ? 'success' : check.status === 'WARNING' ? 'warning' : 'neutral';
                   return (
                     <div key={check.id} className="rounded-md border border-border bg-secondary px-3 py-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
-                            <span className="text-[12px] font-bold text-secondary-foreground">{check.title}</span>
-                          </div>
-                          {check.findings?.length ? (
-                            <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
-                              {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
-                            </ul>
-                          ) : (
-                            <div className="mt-1 text-[12px] leading-4 text-muted-foreground">{check.detail}</div>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={decision === 'CONFIRMED' ? 'default' : 'outline'}
-                            className="h-6 rounded-md px-2 text-[12px]"
-                            disabled={!canFinalizeMonth}
-                            onClick={() => {
-                              setManagementDecisions((current) => ({ ...current, [check.id]: 'CONFIRMED' }));
-                              setMonthCloseReviewDirty(true);
-                            }}
-                          >확인</Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={decision === 'NOT_APPLICABLE' ? 'default' : 'outline'}
-                            className="h-6 rounded-md px-2 text-[12px]"
-                            disabled={!canFinalizeMonth}
-                            onClick={() => {
-                              setManagementDecisions((current) => ({ ...current, [check.id]: 'NOT_APPLICABLE' }));
-                              setMonthCloseReviewDirty(true);
-                            }}
-                          >해당 없음</Button>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${opsDotClass(tone)}`} />
+                        <span className="text-[12px] font-bold text-secondary-foreground">{check.title}</span>
                       </div>
+                      {check.findings?.length ? (
+                        <ul className="mt-1 space-y-0.5 text-[12px] leading-4 text-muted-foreground">
+                          {check.findings.map((finding) => <li key={finding}>· {finding}</li>)}
+                        </ul>
+                      ) : (
+                        <div className="mt-1 text-[12px] leading-4 text-muted-foreground">{check.detail}</div>
+                      )}
                     </div>
                   );
                 })}
@@ -3027,10 +2995,6 @@ export function CashflowProjectSheet({
               <span>시트 데이터</span>
               <strong className="text-[#17324D]">{monthCloseCellsState.error ? '확인 필요' : '준비됨'}</strong>
             </div>
-            <div className="flex items-center justify-between gap-4">
-              <span>주요 관리 항목</span>
-              <strong className="text-slate-950">{monthCloseResult?.dashboard?.managementChecks?.length || 0}건</strong>
-            </div>
           </div>
 
           <div className={`rounded-md border px-3 py-3 text-[13px] leading-5 ${monthClosePreparation.status === 'READY' ? 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]' : monthClosePreparation.status === 'STATUS_RETRY_REQUIRED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
@@ -3039,21 +3003,18 @@ export function CashflowProjectSheet({
           </div>
 
           <div className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-3 py-3 text-[13px] leading-5 text-[#17324D]">
-            조직장이 승인하면 재오픈 승인을 받기 전까지 이 월을 수정할 수 없습니다.
+            조직장이 최종 수정하기 전까지는 더 이상 수정할 수 없습니다.
           </div>
 
           <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-3 text-[13px] leading-5 text-slate-800">
             <input
               type="checkbox"
               checked={monthCloseHumanReviewed}
-              disabled={monthCloseBusy || monthClosePreparation.status !== 'READY'}
+              disabled={monthCloseBusy || monthCloseRequestLocked}
               onChange={(event) => setMonthCloseHumanReviewed(event.target.checked)}
               className="mt-1 h-4 w-4 rounded border-slate-300 text-[#17324D]"
             />
-            <span>
-              시트 고정본의 현금흐름·입금 일정과 주요 관리 항목을 직접 확인했습니다.
-              이 확인은 결산 스냅샷에 제 이름과 서버 시각으로 기록됩니다.
-            </span>
+            <span>시트의 값과 일치하는지 직접 확인했습니다.</span>
           </label>
 
           <AlertDialogFooter>
@@ -3070,7 +3031,7 @@ export function CashflowProjectSheet({
               </Button>
             ) : null}
             <AlertDialogAction
-              disabled={!canFinalizeMonth || !monthCloseHumanReviewed || monthCloseBusy || monthClosePreparation.status !== 'READY' || monthCloseResult?.status !== 'OPEN' || ['PENDING', 'APPROVING', 'APPROVED'].includes(monthCloseRequest?.status || '')}
+              disabled={!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed || monthCloseBusy || monthCloseRequestLocked}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();

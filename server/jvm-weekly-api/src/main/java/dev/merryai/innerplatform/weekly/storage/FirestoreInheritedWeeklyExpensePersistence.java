@@ -942,7 +942,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (!targetMonth.isBefore(YearMonth.from(today))) {
             throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
         }
-        requireMonthCloseApproval(actor, projectId, request.yearMonth());
+        Map<String, Object> approval = requireMonthCloseApproval(actor, projectId, request.yearMonth());
 
         List<CashflowSheetLabApplyRequest.Cell> cells = CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
         CloseCashflowMonthRequest.requireHumanReviewed(request.humanReviewed());
@@ -954,7 +954,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
         CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
         requireConfirmationStatesMatchCells(cells, confirmations);
-        ValidatedCloseSource source = requirePinnedCloseSource(actor, projectId, request);
+        ValidatedCloseSource source = readPinnedCloseSource(actor, projectId, request, approval);
         CashflowOpeningBalance openingBalance = findCashflowOpeningBalance(
             actor.tenantId(),
             projectId,
@@ -2298,39 +2298,84 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
     }
 
-    private ValidatedCloseSource requirePinnedCloseSource(
+    private ValidatedCloseSource readPinnedCloseSource(
         TrustedActorContext actor,
         String projectId,
-        CloseCashflowMonthRequest request
+        CloseCashflowMonthRequest request,
+        Map<String, Object> approval
     ) {
         DocumentSnapshot mirrorSnapshot = get(db.document(
             "orgs/" + actor.tenantId() + "/cashflow_sheet_mirrors/" + projectId
         ));
+        List<Map<String, Object>> warnings = reviewWarnings(approval.get("reviewWarnings"));
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("mirrorExists", mirrorSnapshot.exists());
         if (!mirrorSnapshot.exists()) {
-            throw new WeeklyExpenseConflictException("A fresh pinned cashflow sheet snapshot is required before closing.");
+            warnings.add(closeReviewWarning(
+                "PINNED_MIRROR_MISSING",
+                "A fresh pinned cashflow sheet snapshot was not available at approved close time."
+            ));
+            return new ValidatedCloseSource("", Map.of(), evidence, warnings, nestedMap(approval.get("monthSnapshot")));
         }
         Map<String, Object> mirror = data(mirrorSnapshot);
+        for (String field : List.of(
+            "projectId", "status", "sourceRevision", "appliedSourceRevision", "targetRevisionAtFetch",
+            "yearMonths", "capturedAt"
+        )) {
+            if (mirror.containsKey(field)) evidence.put(field, mirror.get(field));
+        }
         if (!"FRESH".equals(text(mirror.get("status"), ""))
             || (!text(mirror.get("projectId"), "").isBlank()
                 && !projectId.equals(text(mirror.get("projectId"), "")))
             || !request.sourceRevision().equals(text(mirror.get("sourceRevision"), ""))
             || !request.targetRevision().equals(text(mirror.get("targetRevisionAtFetch"), ""))
             || !containsText(mirror.get("yearMonths"), request.yearMonth())) {
-            throw new WeeklyExpenseConflictException(
-                "The pinned cashflow sheet snapshot changed or does not contain this month. Refresh it before closing."
-            );
+            warnings.add(closeReviewWarning(
+                "PINNED_MIRROR_SCOPE_OR_REVISION_DRIFT",
+                "The pinned cashflow sheet snapshot changed or did not contain the approved month."
+            ));
         }
         if (!text(mirror.get("sourceRevision"), "").equals(text(mirror.get("appliedSourceRevision"), ""))) {
-            throw new WeeklyExpenseConflictException("Apply the pinned cashflow sheet before closing the month.");
+            warnings.add(closeReviewWarning(
+                "PINNED_SOURCE_NOT_APPLIED",
+                "The pinned cashflow sheet source revision was not applied at approved close time."
+            ));
         }
         String capturedAt = text(mirror.get("capturedAt"), "");
         if (capturedAt.isBlank()) {
-            throw new WeeklyExpenseConflictException("Pinned cashflow source time is missing. Refresh it before closing.");
+            warnings.add(closeReviewWarning(
+                "PINNED_SOURCE_TIME_MISSING",
+                "The pinned cashflow source capture time was missing at approved close time."
+            ));
         }
-        requireMatchingPinnedCells(mirror.get("cells"), request);
+        try {
+            requireMatchingPinnedCells(mirror.get("cells"), request);
+        } catch (WeeklyExpenseConflictException error) {
+            warnings.add(closeReviewWarning("PINNED_CELLS_MISMATCH", error.getMessage()));
+        }
         Map<String, Object> sheetFacts = nestedMap(mirror.get("sheetFacts"));
-        requireCloseablePinnedSheetFacts(sheetFacts, request);
-        return new ValidatedCloseSource(capturedAt, sheetFacts);
+        appendPinnedSheetWarnings(sheetFacts, request, warnings);
+        return new ValidatedCloseSource(
+            capturedAt,
+            sheetFacts,
+            evidence,
+            warnings,
+            nestedMap(approval.get("monthSnapshot"))
+        );
+    }
+
+    private List<Map<String, Object>> reviewWarnings(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!(value instanceof Iterable<?> warnings)) return result;
+        for (Object warning : warnings) {
+            Map<String, Object> item = nestedMap(warning);
+            if (!item.isEmpty()) result.add(item);
+        }
+        return result;
+    }
+
+    private Map<String, Object> closeReviewWarning(String code, String message) {
+        return Map.of("code", code, "message", message);
     }
 
     private void requireMatchingPinnedCells(Object value, CloseCashflowMonthRequest request) {
@@ -2374,30 +2419,47 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
     }
 
-    private void requireCloseablePinnedSheetFacts(
+    private void appendPinnedSheetWarnings(
         Map<String, Object> sheetFacts,
-        CloseCashflowMonthRequest request
+        CloseCashflowMonthRequest request,
+        List<Map<String, Object>> warnings
     ) {
         if (sheetFacts.isEmpty()) {
-            throw new WeeklyExpenseConflictException(
-                "Pinned cashflow sheet validation is missing. Refresh the sheet before closing."
-            );
+            warnings.add(closeReviewWarning(
+                "PINNED_SHEET_FACTS_MISSING",
+                "Pinned cashflow sheet validation was missing at approved close time."
+            ));
+            return;
         }
         Object issues = sheetFacts.get("issues");
         if (issues instanceof Iterable<?> values && values.iterator().hasNext()) {
-            throw new WeeklyExpenseConflictException(
-                "Pinned cashflow sheet contains invalid date or amount values."
-            );
+            warnings.add(closeReviewWarning(
+                "PINNED_SHEET_VALUE_ISSUES",
+                "Pinned cashflow sheet contained invalid date or amount values at approved close time."
+            ));
         }
         Map<String, Object> controls = nestedMap(sheetFacts.get("controlTotals"));
         if (!(nestedMap(controls.get("deposit")).get("matches") instanceof Boolean)) {
-            throw new WeeklyExpenseConflictException(
-                "Pinned cashflow sheet deposit control total is incomplete. Refresh the sheet before closing."
-            );
+            warnings.add(closeReviewWarning(
+                "PINNED_DEPOSIT_CONTROL_INCOMPLETE",
+                "Pinned cashflow sheet deposit control total was incomplete at approved close time."
+            ));
         }
-        requireCompleteControlRows(controls.get("projection"), "Projection");
-        requireCompleteControlRows(controls.get("actual"), "Actual");
-        requireMatchingDepositSource(sheetFacts.get("depositScheduleRows"), request);
+        try {
+            requireCompleteControlRows(controls.get("projection"), "Projection");
+        } catch (WeeklyExpenseConflictException error) {
+            warnings.add(closeReviewWarning("PINNED_PROJECTION_CONTROLS_INCOMPLETE", error.getMessage()));
+        }
+        try {
+            requireCompleteControlRows(controls.get("actual"), "Actual");
+        } catch (WeeklyExpenseConflictException error) {
+            warnings.add(closeReviewWarning("PINNED_ACTUAL_CONTROLS_INCOMPLETE", error.getMessage()));
+        }
+        try {
+            requireMatchingDepositSource(sheetFacts.get("depositScheduleRows"), request);
+        } catch (WeeklyExpenseConflictException error) {
+            warnings.add(closeReviewWarning("PINNED_DEPOSIT_SCHEDULE_MISMATCH", error.getMessage()));
+        }
     }
 
     private void requireCompleteControlRows(Object value, String mode) {
@@ -2415,7 +2477,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
     }
 
-    private void requireMonthCloseApproval(TrustedActorContext actor, String projectId, String yearMonth) {
+    private Map<String, Object> requireMonthCloseApproval(TrustedActorContext actor, String projectId, String yearMonth) {
         Map<String, Object> approval = data(get(db.document(
             "orgs/" + actor.tenantId() + "/cashflow_month_close_requests/" + projectId + "-" + yearMonth
         )));
@@ -2426,6 +2488,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !actor.id().equals(text(approval.get("reviewedByUid"), ""))) {
             throw new WeeklyExpenseConflictException("Cashflow month close requires designated approver approval.");
         }
+        return approval;
     }
 
     private void requireMatchingDepositSource(Object value, CloseCashflowMonthRequest request) {
@@ -2817,6 +2880,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         ));
         snapshot.put("project", project);
         snapshot.put("sheetFacts", source.sheetFacts());
+        snapshot.put("sourceEvidence", source.sourceEvidence());
+        snapshot.put("reviewWarnings", source.reviewWarnings());
+        snapshot.put("approvedMonthSnapshot", source.approvedMonthSnapshot());
         snapshot.put("depositScheduleRows", depositSnapshot);
         snapshot.put("confirmations", confirmationSnapshot);
         snapshot.put("managementChecks", JSON.convertValue(request.managementChecks(), List.class));
@@ -4160,10 +4226,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private record ValidatedCloseSource(
         String sourceReadAt,
-        Map<String, Object> sheetFacts
+        Map<String, Object> sheetFacts,
+        Map<String, Object> sourceEvidence,
+        List<Map<String, Object>> reviewWarnings,
+        Map<String, Object> approvedMonthSnapshot
     ) {
         private ValidatedCloseSource {
             sheetFacts = sheetFacts == null ? Map.of() : Map.copyOf(sheetFacts);
+            sourceEvidence = sourceEvidence == null ? Map.of() : Map.copyOf(sourceEvidence);
+            reviewWarnings = reviewWarnings == null ? List.of() : List.copyOf(reviewWarnings);
+            approvedMonthSnapshot = approvedMonthSnapshot == null ? Map.of() : Map.copyOf(approvedMonthSnapshot);
         }
     }
 

@@ -2200,7 +2200,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void monthCloseRejectsValuesChangedAfterThePinnedSheetWasRead() {
+    void monthCloseClosesWithPinnedCellMismatchWarningAfterDesignatedApproval() {
         CloseCashflowMonthRequest pinned = monthCloseRequest("month-close-pinned-values", 0, 3);
         List<CashflowSheetLabApplyRequest.Cell> changedCells = new ArrayList<>(pinned.cells());
         CashflowSheetLabApplyRequest.Cell first = changedCells.getFirst();
@@ -2230,16 +2230,111 @@ class FirestoreCashflowLeaseGuardTest {
             pinned.deadlineSummary()
         );
         Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, changed));
         fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", pinnedMirror(pinned));
 
-        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
-        ).closeCashflowMonth(ACTOR, "project-a", SESSION, changed)))
-            .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("do not match the pinned sheet");
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, changed));
 
-        assertThat(fixture.documents).doesNotContainKey(monthClosePath("project-a", pinned.yearMonth()));
-        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
+        assertThat(response.status()).isEqualTo("CLOSED");
+        assertThat(monthCloseWarningCodes(fixture, pinned.yearMonth()))
+            .contains("PINNED_CELLS_MISMATCH");
+    }
+
+    @Test
+    void monthCloseClosesWithoutMirrorAndRetainsApprovedRequestEvidence() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-missing-mirror", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
+        String approvalPath = "orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06";
+        Map<String, Object> approval = new LinkedHashMap<>(fixture.documents.get(approvalPath));
+        approval.put("reviewWarnings", List.of(Map.of(
+            "code", "SOURCE_MIRROR_MISSING",
+            "message", "요청 시점에 mirror가 없었습니다."
+        )));
+        approval.put("monthSnapshot", Map.of(
+            "schemaVersion", 1,
+            "projectId", "project-a",
+            "yearMonth", "2026-06"
+        ));
+        fixture.documents.put(approvalPath, approval);
+
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.status()).isEqualTo("CLOSED");
+        Map<String, Object> snapshot = monthCloseVersionSnapshot(fixture, request.yearMonth());
+        assertThat(monthCloseWarningCodes(fixture, request.yearMonth()))
+            .contains("SOURCE_MIRROR_MISSING", "PINNED_MIRROR_MISSING");
+        assertThat((Map<String, Object>) snapshot.get("sourceEvidence"))
+            .containsEntry("mirrorExists", false);
+        assertThat((Map<String, Object>) snapshot.get("approvedMonthSnapshot"))
+            .containsEntry("projectId", "project-a")
+            .containsEntry("yearMonth", "2026-06");
+    }
+
+    @Test
+    void monthCloseClosesWithPinnedRevisionScopeAndApplyWarnings() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-source-drift", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
+        Map<String, Object> mirror = pinnedMirror(request);
+        mirror.put("status", "STALE");
+        mirror.put("projectId", "other-project");
+        mirror.put("sourceRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        mirror.put("appliedSourceRevision", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        mirror.put("targetRevisionAtFetch", "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        mirror.put("yearMonths", List.of("2026-05"));
+        mirror.remove("capturedAt");
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", mirror);
+
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.status()).isEqualTo("CLOSED");
+        assertThat(monthCloseWarningCodes(fixture, request.yearMonth())).contains(
+            "PINNED_MIRROR_SCOPE_OR_REVISION_DRIFT",
+            "PINNED_SOURCE_NOT_APPLIED",
+            "PINNED_SOURCE_TIME_MISSING"
+        );
+    }
+
+    @Test
+    void monthCloseClosesWithSheetIssueControlAndDepositWarnings() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-sheet-warnings", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
+        Map<String, Object> mirror = pinnedMirror(request);
+        mirror.put("cells", List.of());
+        Map<String, Object> facts = new LinkedHashMap<>((Map<String, Object>) mirror.get("sheetFacts"));
+        facts.put("issues", List.of(Map.of("code", "INVALID_DATE", "sourceCell", "B2")));
+        facts.put("depositScheduleRows", List.of());
+        Map<String, Object> controls = new LinkedHashMap<>((Map<String, Object>) facts.get("controlTotals"));
+        controls.remove("deposit");
+        controls.put("projection", List.of());
+        controls.put("actual", List.of(Map.of("sourceCell", "BO37")));
+        facts.put("controlTotals", controls);
+        mirror.put("sheetFacts", facts);
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", mirror);
+
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.status()).isEqualTo("CLOSED");
+        assertThat(monthCloseWarningCodes(fixture, request.yearMonth())).contains(
+            "PINNED_CELLS_MISMATCH",
+            "PINNED_SHEET_VALUE_ISSUES",
+            "PINNED_DEPOSIT_CONTROL_INCOMPLETE",
+            "PINNED_PROJECTION_CONTROLS_INCOMPLETE",
+            "PINNED_ACTUAL_CONTROLS_INCOMPLETE",
+            "PINNED_DEPOSIT_SCHEDULE_MISMATCH"
+        );
+        assertThat((Map<String, Object>) monthCloseVersionSnapshot(fixture, request.yearMonth()).get("sheetFacts"))
+            .containsEntry("issues", facts.get("issues"));
     }
 
     @Test
@@ -2316,6 +2411,61 @@ class FirestoreCashflowLeaseGuardTest {
 
         assertThat(response.status()).isEqualTo("CLOSED");
         assertThat(fixture.documents).containsKey(monthClosePath("project-a", "2026-06"));
+    }
+
+    @Test
+    void monthClosePersistsApprovedWarningsWithoutManagementConfirmations() {
+        CloseCashflowMonthRequest base = monthCloseRequest("month-close-approved-warnings", 0, 3);
+        List<CloseCashflowMonthRequest.ManagementCheck> managementChecks = List.of(
+            new CloseCashflowMonthRequest.ManagementCheck(
+                "labor-transfer", "WARNING", "MYSC 인건비 이관", "승인자가 확인한 경고", List.of("미이관 1건")
+            ),
+            new CloseCashflowMonthRequest.ManagementCheck("profit-vat-after-deposit", "OK", "수익·부가세 이관", "확인"),
+            new CloseCashflowMonthRequest.ManagementCheck("negative-projection-balance", "OK", "Projection 잔액", "확인"),
+            new CloseCashflowMonthRequest.ManagementCheck("future-prepay-over-million", "OK", "선입금 요청", "확인")
+        );
+        CloseCashflowMonthRequest request = new CloseCashflowMonthRequest(
+            base.idempotencyKey(),
+            base.sourceRevision(),
+            base.targetRevision(),
+            base.yearMonth(),
+            base.expectedRevision(),
+            base.expectedDraftRevision(),
+            base.humanReviewed(),
+            base.depositScheduleRows(),
+            base.cells(),
+            base.confirmations(),
+            managementChecks,
+            List.of(),
+            base.openingBalances(),
+            base.deadlineSummary()
+        );
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
+        Map<String, Object> mirror = pinnedMirror(request);
+        Map<String, Object> facts = new LinkedHashMap<>((Map<String, Object>) mirror.get("sheetFacts"));
+        Map<String, Object> controls = new LinkedHashMap<>((Map<String, Object>) facts.get("controlTotals"));
+        controls.put("deposit", Map.of("sourceCell", "BO9", "value", 1_000_000L, "computed", 999_999L, "matches", false));
+        facts.put("controlTotals", controls);
+        mirror.put("sheetFacts", facts);
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", mirror);
+
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.status()).isEqualTo("CLOSED");
+        Map<String, Object> snapshot = (Map<String, Object>) fixture.documents
+            .get(monthCloseVersionPath("project-a", "2026-06", 1))
+            .get("snapshot");
+        assertThat((List<?>) snapshot.get("managementConfirmations")).isEmpty();
+        assertThat((List<Map<String, Object>>) snapshot.get("managementChecks"))
+            .anySatisfy(check -> assertThat(check)
+                .containsEntry("id", "labor-transfer")
+                .containsEntry("status", "WARNING"));
+        assertThat((Map<String, Object>) ((Map<String, Object>) snapshot.get("sheetFacts")).get("controlTotals"))
+            .hasEntrySatisfying("deposit", value -> assertThat((Map<String, Object>) value)
+                .containsEntry("matches", false));
     }
 
     @Test
@@ -3587,6 +3737,21 @@ class FirestoreCashflowLeaseGuardTest {
 
     private static String monthCloseVersionPath(String projectId, String yearMonth, long revision) {
         return "orgs/tenant-a/monthly_close_versions/" + projectId + "-" + yearMonth + "-r" + revision;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> monthCloseVersionSnapshot(Fixture fixture, String yearMonth) {
+        return (Map<String, Object>) fixture.documents
+            .get(monthCloseVersionPath("project-a", yearMonth, 1))
+            .get("snapshot");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> monthCloseWarningCodes(Fixture fixture, String yearMonth) {
+        return ((List<Map<String, Object>>) monthCloseVersionSnapshot(fixture, yearMonth).get("reviewWarnings"))
+            .stream()
+            .map(warning -> String.valueOf(warning.get("code")))
+            .toList();
     }
 
     private static Map<String, Object> closedMonth(String yearMonth, long revision, long reopenCount) {

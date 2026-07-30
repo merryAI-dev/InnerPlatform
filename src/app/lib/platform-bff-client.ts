@@ -888,7 +888,7 @@ export interface CashflowMonthCloseDashboard {
     status: string;
     sourceRevision: string;
     targetRevision: string;
-    capturedAt: string;
+    capturedAt: string | null;
   };
   project: Record<string, unknown>;
   projectMetadata: { businessType: string; accountType: string; settlementStatus: string };
@@ -1016,6 +1016,46 @@ export interface CloseCashflowMonthPayload {
 
 export type CashflowMonthCloseRequestStatus = 'PENDING' | 'APPROVING' | 'APPROVED' | 'REJECTED';
 
+export interface CashflowMonthCloseMonthSnapshotCell {
+  cashflowLine: string;
+  cellState: 'VALUE' | 'ZERO' | 'EMPTY';
+  amount: number | null;
+}
+
+export interface CashflowMonthCloseMonthSnapshot {
+  schemaVersion: 1;
+  projectId: string;
+  yearMonth: string;
+  source: {
+    sourceRevision: string;
+    targetRevision: string;
+    capturedAt: string;
+  };
+  projection: {
+    totalIn: number;
+    totalOut: number;
+    balance: number;
+    rowTotals: Record<string, number>;
+    weeks: Array<CashflowModeReadModel['weeks'][number] & {
+      cells: CashflowMonthCloseMonthSnapshotCell[];
+    }>;
+  };
+  actual: {
+    totalIn: number;
+    totalOut: number;
+    balance: number;
+    rowTotals: Record<string, number>;
+    weeks: Array<CashflowModeReadModel['weeks'][number] & {
+      cells: CashflowMonthCloseMonthSnapshotCell[];
+    }>;
+  };
+  difference: {
+    totalIn: number;
+    totalOut: number;
+    balance: number;
+  };
+}
+
 export interface CashflowMonthCloseRequest {
   requestId: string;
   projectId: string;
@@ -1029,6 +1069,7 @@ export interface CashflowMonthCloseRequest {
   reviewedAt: string | null;
   decisionReason: string | null;
   reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
+  monthSnapshot: CashflowMonthCloseMonthSnapshot | null;
 }
 
 export interface ReviewCashflowMonthCloseRequestPayload {

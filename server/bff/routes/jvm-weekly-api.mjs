@@ -27,6 +27,7 @@ const CASHFLOW_MANAGEMENT_CHECK_IDS = [
 ];
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
+const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
 
 function cashflowMonthCloseTimeoutError() {
   return createHttpError(
@@ -166,7 +167,17 @@ function cashflowMonthCloseRequestView(record) {
     reviewedAt: record.reviewedAt || null,
     decisionReason: record.decisionReason || null,
     reviewWarnings: Array.isArray(record.reviewWarnings) ? record.reviewWarnings : [],
+    monthSnapshot: objectValue(record.monthSnapshot),
   };
+}
+
+function assertCashflowMonthCloseRequestSize(record) {
+  if (Buffer.byteLength(JSON.stringify(record), 'utf8') <= CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES) return;
+  throw createHttpError(
+    413,
+    '월 결산 요청 자료가 너무 큽니다. 시트 범위를 확인해 주세요.',
+    'cashflow_month_close_request_too_large',
+  );
 }
 
 async function readActiveCashflowMember({ db, tenantId, actorId }) {
@@ -720,10 +731,6 @@ function validManagementConfirmations(confirmations) {
   return byId;
 }
 
-function completeManagementConfirmations(confirmations) {
-  return validManagementConfirmations(confirmations).size === CASHFLOW_MANAGEMENT_CHECK_IDS.length;
-}
-
 function matchingManagementChecks(expected, actual) {
   const select = (items) => (Array.isArray(items) ? items : [])
     .map((item) => ({
@@ -1045,6 +1052,37 @@ function dashboardTotals(mode) {
     balance: mode?.monthTotals?.net || 0,
     rowTotals: mode?.rowTotals || {},
     weeks: mode?.weeks || [],
+  };
+}
+
+function buildCashflowMonthCloseMonthSnapshot({ projectId, yearMonth, cells, sourceRevision, targetRevision, capturedAt }) {
+  const modeSnapshot = (mode) => {
+    const totals = dashboardTotals(buildMonthModeReadModel(cells, mode));
+    return {
+      ...totals,
+      weeks: totals.weeks.map((week) => ({
+        ...week,
+        cells: CASHFLOW_ALL_LINES.map((cashflowLine) => {
+          const cell = cells.find((candidate) => (
+            candidate.mode === mode
+            && candidate.weekNo === week.weekNo
+            && candidate.cashflowLine === cashflowLine
+          ));
+          return { cashflowLine, cellState: cell.cellState, amount: cell.amount };
+        }),
+      })),
+    };
+  };
+  const projection = modeSnapshot('projection');
+  const actual = modeSnapshot('actual');
+  return {
+    schemaVersion: 1,
+    projectId,
+    yearMonth,
+    source: { sourceRevision, targetRevision, capturedAt },
+    projection,
+    actual,
+    difference: differenceTotals(projection, actual),
   };
 }
 
@@ -1503,21 +1541,6 @@ function matchingDepositSchedule(sourceRows, draftRows) {
   });
 }
 
-function assertCloseableSheetFacts(mirror, yearMonth, closeInput) {
-  const facts = objectValue(mirror?.sheetFacts);
-  const blockers = [...sheetControlBlockers(facts), ...monthSheetCalculationBlockers(facts, yearMonth)];
-  if (blockers.length > 0) {
-    throw createHttpError(409, blockers[0].message, blockers[0].code.toLowerCase());
-  }
-  if (!matchingDepositSchedule(sourceDepositRows(facts, yearMonth), closeInput?.depositScheduleRows)) {
-    throw createHttpError(
-      409,
-      '시트 입금 일정과 임시저장 값이 다릅니다. 시트값을 다시 불러와 주세요.',
-      'cashflow_month_close_deposit_source_conflict',
-    );
-  }
-}
-
 async function readDocument(db, path) {
   if (!db?.doc) return null;
   const snapshot = await db.doc(path).get();
@@ -1896,30 +1919,56 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     db.doc(`orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`).get(),
     db.doc(`orgs/${tenantId}/projects/${projectId}`).get(),
   ]);
-  if (!mirrorSnap.exists) {
-    throw createHttpError(409, 'Refresh and pin the cashflow sheet before closing the month.', 'cashflow_month_close_source_required');
-  }
-  const mirror = mirrorSnap.data() || {};
-  if (
-    mirror.status !== 'FRESH'
-    || (mirror.projectId && mirror.projectId !== projectId)
-    || mirror.sourceRevision !== closeInput.sourceRevision
-    || mirror.targetRevisionAtFetch !== closeInput.targetRevision
-    || !Array.isArray(mirror.yearMonths)
-    || !mirror.yearMonths.includes(yearMonth)
-    || !readOptionalText(mirror.capturedAt)
-  ) {
-    throw createHttpError(409, 'The pinned cashflow source changed. Refresh it before closing.', 'cashflow_month_close_source_conflict');
-  }
-  if (readOptionalText(mirror.appliedSourceRevision) !== readOptionalText(mirror.sourceRevision)) {
-    throw createHttpError(409, '불러온 값을 MYSCube 시트에 반영해 주세요.', 'cashflow_month_close_source_not_applied');
-  }
-  assertCloseableSheetFacts(mirror, yearMonth, closeInput);
+  const mirror = mirrorSnap.exists ? mirrorSnap.data() || {} : null;
   const project = projectSnap.exists ? projectSnap.data() || {} : {};
   const normalizedCells = normalizeMonthCloseCells(closeInput.cells, yearMonth);
   if (!completeMonthCloseCells(normalizedCells)) {
     throw createHttpError(409, '월 결산 대상 160개 캐시플로우 값을 다시 확인해 주세요.', 'cashflow_month_close_cells_incomplete');
   }
+  const sourceWarnings = [];
+  if (!mirror) {
+    sourceWarnings.push({ code: 'SHEET_SOURCE_REQUIRED', message: '먼저 시트값을 불러와 주세요.' });
+  } else {
+    if (mirror.status !== 'FRESH') {
+      sourceWarnings.push({ code: 'SHEET_SOURCE_STALE', message: '시트값을 다시 불러와 주세요.' });
+    }
+    if ((mirror.projectId && mirror.projectId !== projectId) || !mirror.yearMonths?.includes(yearMonth)) {
+      sourceWarnings.push({ code: 'SHEET_SOURCE_SCOPE_MISMATCH', message: '고정한 시트값의 프로젝트 또는 월이 다릅니다.' });
+    }
+    if (
+      readOptionalText(mirror.sourceRevision) !== readOptionalText(closeInput.sourceRevision)
+      || readOptionalText(mirror.targetRevisionAtFetch) !== readOptionalText(closeInput.targetRevision)
+    ) {
+      sourceWarnings.push({
+        code: 'SHEET_SOURCE_REVISION_MISMATCH',
+        message: '요청에서 확인한 시트 버전과 현재 고정된 시트 버전이 다릅니다.',
+        details: {
+          requestedSourceRevision: readOptionalText(closeInput.sourceRevision),
+          requestedTargetRevision: readOptionalText(closeInput.targetRevision),
+          currentSourceRevision: readOptionalText(mirror.sourceRevision),
+          currentTargetRevision: readOptionalText(mirror.targetRevisionAtFetch),
+        },
+      });
+    }
+    if (readOptionalText(mirror.appliedSourceRevision) !== readOptionalText(mirror.sourceRevision)) {
+      sourceWarnings.push({ code: 'SHEET_SOURCE_NOT_APPLIED', message: '불러온 값을 MYSCube 시트에 반영해 주세요.' });
+    }
+  }
+  const sheetBlockers = mirror ? [
+    ...sheetControlBlockers(mirror.sheetFacts),
+    ...monthSheetCalculationBlockers(mirror.sheetFacts, yearMonth),
+  ] : [];
+  const depositWarnings = mirror?.sheetFacts
+    && !matchingDepositSchedule(sourceDepositRows(mirror.sheetFacts, yearMonth), closeInput.depositScheduleRows)
+    ? [{
+      code: 'SHEET_DEPOSIT_SCHEDULE_MISMATCH',
+      message: '시트 입금 일정과 요청에서 확인한 입금 일정이 다릅니다.',
+      details: {
+        sourceRows: sourceDepositRows(mirror.sheetFacts, yearMonth),
+        requestedRows: Array.isArray(closeInput.depositScheduleRows) ? closeInput.depositScheduleRows : [],
+      },
+    }]
+    : [];
   const managementChecks = buildCashflowManagementChecks({
     project,
     cashflow,
@@ -1927,20 +1976,28 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     yearMonth,
     depositScheduleRows: closeInput.depositScheduleRows,
     comparisonBoundary,
-    pinnedSheetCells: mirror.cells,
+    pinnedSheetCells: mirror?.cells,
     projectionOpeningBalance: safeAmount(openingBalances?.projection?.amount),
   });
-  if (!matchingManagementChecks(managementChecks, closeInput.managementChecks)) {
-    throw createHttpError(409, '주요 관리 항목 판정이 변경되었습니다. 다시 확인해 주세요.', 'cashflow_management_checks_stale');
-  }
-  if (!completeManagementConfirmations(closeInput.managementConfirmations)) {
-    throw createHttpError(409, '주요 관리 항목 4개를 모두 확인해 주세요.', 'cashflow_management_confirmations_incomplete');
-  }
+  const managementWarnings = matchingManagementChecks(managementChecks, closeInput.managementChecks) ? [] : [{
+    code: 'MANAGEMENT_CHECKS_STALE',
+    message: '요청에서 확인한 주요 관리 항목 판정과 현재 판정이 다릅니다.',
+    details: { requested: closeInput.managementChecks || [], authoritative: managementChecks },
+  }];
   if (!completeMonthCloseConfirmations(closeInput.confirmations)) {
     throw createHttpError(409, '월 결산 대상 160개 항목을 모두 확인해 주세요.', 'cashflow_month_close_confirmations_incomplete');
   }
   const deadlineSummary = await readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
 
+  const reviewWarnings = [
+    ...sourceWarnings,
+    ...sheetBlockers,
+    ...depositWarnings,
+    ...managementWarnings,
+    ...sheetControlWarnings(mirror?.sheetFacts),
+    ...monthSheetCalculationWarnings(mirror?.sheetFacts, yearMonth),
+    ...managementReviewWarnings(managementChecks),
+  ];
   return {
     closeBody: {
       idempotencyKey: requested.idempotencyKey,
@@ -1962,12 +2019,17 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
         completedCount: deadlineSummary.completedCount,
         current: deadlineSummary.current,
       },
+      reviewWarnings,
     },
-    reviewWarnings: [
-      ...sheetControlWarnings(mirror.sheetFacts),
-      ...monthSheetCalculationWarnings(mirror.sheetFacts, yearMonth),
-      ...managementReviewWarnings(managementChecks),
-    ],
+    reviewWarnings,
+    monthSnapshot: buildCashflowMonthCloseMonthSnapshot({
+      projectId,
+      yearMonth,
+      cells: normalizedCells,
+      sourceRevision: closeInput.sourceRevision,
+      targetRevision: closeInput.targetRevision,
+      capturedAt: readOptionalText(mirror?.capturedAt) || null,
+    }),
   };
 }
 
@@ -2517,7 +2579,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
-      const { closeBody, reviewWarnings } = await composeCashflowMonthCloseBody({
+      const { closeBody, reviewWarnings, monthSnapshot } = await composeCashflowMonthCloseBody({
         db,
         req: closeReq,
         projectId: rawProjectId,
@@ -2543,6 +2605,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         rawProjectId,
         closeBody,
         reviewWarnings,
+        monthSnapshot,
         publicationFingerprint: publicationAfter.fingerprint,
         routeDeadlineAtMs,
       };
@@ -2577,6 +2640,104 @@ export function mountJvmWeeklyApiRoutes(app, {
       prepared.closeBody.yearMonth,
       prepared.closeBody.expectedRevision,
     );
+  }
+
+  async function prepareStoredCashflowMonthCloseApproval(req, record, idempotencyKey) {
+    const routeDeadlineAtMs = Date.now() + monthCloseRouteTimeoutMs;
+    const mutationBudgetMs = Math.min(
+      CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS,
+      Math.max(1, Math.floor(monthCloseRouteTimeoutMs / 2)),
+    );
+    const rawProjectId = readOptionalText(record.projectId);
+    const projectId = encodeURIComponent(rawProjectId);
+    const requestPayload = objectValue(record.requestPayload);
+    const closeInput = objectValue(requestPayload?.closeInput);
+    const monthSnapshot = objectValue(record.monthSnapshot);
+    const yearMonth = readOptionalText(record.yearMonth);
+    const expectedRevision = Number(requestPayload?.expectedRevision);
+    if (
+      !closeInput
+      || !monthSnapshot
+      || readOptionalText(monthSnapshot.projectId) !== rawProjectId
+      || readOptionalText(monthSnapshot.yearMonth) !== yearMonth
+      || !Number.isSafeInteger(expectedRevision)
+    ) {
+      throw createHttpError(409, '저장된 월 결산 요청 근거를 확인할 수 없습니다.', 'cashflow_month_close_request_evidence_invalid');
+    }
+    const cells = ['projection', 'actual'].flatMap((mode) => (
+      (Array.isArray(monthSnapshot?.[mode]?.weeks) ? monthSnapshot[mode].weeks : []).flatMap((week) => (
+        (Array.isArray(week?.cells) ? week.cells : []).map((cell) => ({
+          mode,
+          yearMonth,
+          weekNo: Number(week.weekNo),
+          cashflowLine: cell?.cashflowLine,
+          cellState: cell?.cellState,
+          amount: cell?.amount,
+        }))
+      ))
+    ));
+    const normalizedCells = normalizeMonthCloseCells(cells, yearMonth);
+    if (!completeMonthCloseCells(normalizedCells)) {
+      throw createHttpError(409, '저장된 월 결산 160셀 근거를 확인할 수 없습니다.', 'cashflow_month_close_request_evidence_invalid');
+    }
+    const publicationBefore = await readCashflowSheetPublicationState({
+      db,
+      tenantId: req.context.tenantId,
+      projectId: rawProjectId,
+    });
+    assertCashflowSheetPublicationReady(publicationBefore);
+    const source = await proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+      deadlineAtMs: routeDeadlineAtMs - mutationBudgetMs,
+    });
+    const sourceClose = objectValue(source?.monthClose);
+    if (
+      readOptionalText(sourceClose?.projectId) !== rawProjectId
+      || readOptionalText(sourceClose?.yearMonth) !== yearMonth
+    ) {
+      throw createHttpError(502, '월 결산 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
+    }
+    if (Number(sourceClose.revision) !== expectedRevision) {
+      throw createHttpError(409, '월 결산 상태가 변경되었습니다. 최신 자료를 다시 확인해 주세요.', 'cashflow_month_close_revision_stale');
+    }
+    const publicationAfter = await readCashflowSheetPublicationState({
+      db,
+      tenantId: req.context.tenantId,
+      projectId: rawProjectId,
+    });
+    assertCashflowSheetPublicationReady(publicationAfter);
+    if (publicationBefore.fingerprint !== publicationAfter.fingerprint) {
+      throw createHttpError(409, '월 결산 검토 중 시트 반영 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_publication_changed');
+    }
+    return {
+      projectId,
+      rawProjectId,
+      publicationFingerprint: publicationAfter.fingerprint,
+      routeDeadlineAtMs,
+      closeBody: {
+        idempotencyKey,
+        yearMonth,
+        expectedRevision,
+        expectedDraftRevision: 0,
+        humanReviewed: true,
+        sourceRevision: readOptionalText(monthSnapshot.source?.sourceRevision),
+        targetRevision: readOptionalText(monthSnapshot.source?.targetRevision),
+        depositScheduleRows: Array.isArray(closeInput.depositScheduleRows) ? closeInput.depositScheduleRows : [],
+        cells: normalizedCells,
+        confirmations: Array.isArray(closeInput.confirmations) ? closeInput.confirmations : [],
+        managementChecks: Array.isArray(record.requestManagementChecks)
+          ? record.requestManagementChecks
+          : Array.isArray(closeInput.managementChecks) ? closeInput.managementChecks : [],
+        managementConfirmations: [...validManagementConfirmations(closeInput.managementConfirmations).values()],
+        openingBalances: requestPayload.expectedOpeningBalances,
+        deadlineSummary: objectValue(record.requestDeadlineSummary) || {
+          trackingStartedAt: null, missedCount: 0, completedCount: 0, current: null,
+        },
+        reviewWarnings: Array.isArray(record.reviewWarnings) ? record.reviewWarnings : [],
+      },
+    };
   }
 
   app.get('/api/v1/cashflow/month-close/requests/pending', asyncHandler(async (req, res) => {
@@ -2831,11 +2992,15 @@ export function mountJvmWeeklyApiRoutes(app, {
             payloadFingerprint,
             requestPayload,
             reviewWarnings: prepared.reviewWarnings,
+            monthSnapshot: prepared.monthSnapshot,
+            requestManagementChecks: prepared.closeBody.managementChecks,
+            requestDeadlineSummary: prepared.closeBody.deadlineSummary,
             reviewedByUid: null,
             reviewedAt: null,
             decisionReason: null,
             reviewIdempotencyKey: null,
           };
+          assertCashflowMonthCloseRequestSize(storedRecord);
           transaction.set(requestRef, storedRecord);
           transaction.set(
             db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, revision, 'resubmitted')),
@@ -2868,7 +3033,11 @@ export function mountJvmWeeklyApiRoutes(app, {
         payloadFingerprint,
         requestPayload,
         reviewWarnings: prepared.reviewWarnings,
+        monthSnapshot: prepared.monthSnapshot,
+        requestManagementChecks: prepared.closeBody.managementChecks,
+        requestDeadlineSummary: prepared.closeBody.deadlineSummary,
       };
+      assertCashflowMonthCloseRequestSize(storedRecord);
       transaction.set(requestRef, storedRecord);
       transaction.set(
         db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, 0, 'requested')),
@@ -3010,7 +3179,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         throw createHttpError(409, '이미 검토 중이거나 끝난 월 결산 요청입니다.', 'cashflow_month_close_request_already_reviewed');
       }
       const stableApprovalKey = `cashflow-month-close-approval:${requestId}:r${reviewRevision}`;
-      prepared = await prepareCashflowMonthClose(req, initialRecord.requestPayload, stableApprovalKey);
+      prepared = await prepareStoredCashflowMonthCloseApproval(req, initialRecord, stableApprovalKey);
       await db.runTransaction(async (transaction) => {
         const [projectSnapshot, reviewerSnapshot, snapshot] = await Promise.all([
           transaction.get(projectRef),

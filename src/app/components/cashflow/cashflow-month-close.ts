@@ -22,6 +22,20 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
+export function isCashflowMonthCloseRequestLocked(status?: string): boolean {
+  return status === 'PENDING' || status === 'APPROVING';
+}
+
+export function shouldApplyCashflowMonthCloseRequestResult(input: {
+  requestGeneration: number;
+  currentGeneration: number;
+  requestedYearMonth: string;
+  selectedYearMonth: string;
+}): boolean {
+  return input.requestGeneration === input.currentGeneration
+    && input.requestedYearMonth === input.selectedYearMonth;
+}
+
 export type CashflowSheetDashboardMetadata = NonNullable<
   NonNullable<CashflowSheetLabMirrorResult['sheetFacts']>['metadata']
 >;
@@ -210,28 +224,15 @@ function normalizeDepositRows(
   return CASHFLOW_MONTH_CLOSE_WEEK_NOS.map((weekNo) => {
     const row = byWeek.get(weekNo);
     if (!row) throw new Error(`${weekNo}주차 입금 일정이 없습니다.`);
-    if (row.decision !== 'CONFIRMED' && row.decision !== 'NOT_APPLICABLE') {
-      throw new Error(`${weekNo}주차 입금 일정을 확인 또는 해당 없음 처리해 주세요.`);
-    }
-    if (row.decision === 'NOT_APPLICABLE') {
-      if (
-        row.taxInvoiceIssuedDate
-        || row.expectedDepositDate
-        || row.expectedDepositAmount != null
-        || row.actualDepositDate
-        || row.actualDepositAmount != null
-        || row.actualSource !== 'NOT_APPLICABLE'
-      ) {
-        throw new Error(`${weekNo}주차를 해당 없음으로 처리하려면 입력값을 비워 주세요.`);
+    const hasExpected = Boolean(row.taxInvoiceIssuedDate || row.expectedDepositDate || row.expectedDepositAmount != null);
+    const hasActual = Boolean(row.actualDepositDate || row.actualDepositAmount != null);
+    if (!hasExpected && !hasActual) {
+      if (row.actualSource !== 'NOT_APPLICABLE') {
+        throw new Error(`${weekNo}주차 실제 입금값이 없으면 출처도 해당 없음이어야 합니다.`);
       }
       return { ...row, decision: 'NOT_APPLICABLE' };
     }
 
-    const hasExpected = Boolean(row.taxInvoiceIssuedDate || row.expectedDepositDate || row.expectedDepositAmount != null);
-    const hasActual = Boolean(row.actualDepositDate || row.actualDepositAmount != null);
-    if (!hasExpected && !hasActual) {
-      throw new Error(`${weekNo}주차 입금 일정은 값을 입력하거나 해당 없음을 선택해 주세요.`);
-    }
     if (hasActual && row.actualSource === 'NOT_APPLICABLE') {
       throw new Error(`${weekNo}주차 실제 입금값의 출처를 선택해 주세요.`);
     }
@@ -246,45 +247,28 @@ export function buildCashflowMonthCloseDraftInput(input: {
   mirror: CashflowSheetLabMirrorResult | null;
   yearMonth: string;
   humanReviewed: boolean;
-  decisions: CashflowMonthCloseDecisionMap;
   depositScheduleRows: CashflowMonthCloseDepositReviewRow[];
   projectionDrafts?: Record<string, string>;
   managementChecks: CashflowManagementCheck[];
-  managementDecisions: CashflowManagementDecisionMap;
   deadlineSummary: CashflowDeadlineSummary;
 }): CashflowMonthCloseDraftInput {
   if (!input.humanReviewed) {
-    throw new Error('시트값과 결산 항목을 직접 확인한 뒤 결산 확인을 선택해 주세요.');
+    throw new Error('시트의 값과 일치하는지 직접 확인해 주세요.');
   }
   const cells = applyCashflowMonthCloseProjectionDrafts(
     normalizeCashflowMonthCloseCells(input.mirror, input.yearMonth),
     input.projectionDrafts || {},
     input.yearMonth,
   );
-  const confirmations = cells.map<CashflowMonthCloseConfirmation>((cell) => {
-    const key = cashflowMonthCloseConfirmationKey(cell);
-    const requiredDecision = requiredCashflowMonthCloseDecision(cell);
-    const decision = input.decisions[key];
-    if (decision !== requiredDecision) {
-      throw new Error(`${cell.sourceLabel || cell.sourceCell || key} 항목을 ${requiredDecision === 'CONFIRMED' ? '확인' : '해당 없음'} 처리해 주세요.`);
-    }
-    return {
+  const confirmations = cells.map<CashflowMonthCloseConfirmation>((cell) => ({
       mode: cell.mode,
       weekNo: cell.weekNo,
       cashflowLine: cell.cashflowLine,
-      decision,
-    };
-  });
+      decision: requiredCashflowMonthCloseDecision(cell),
+    }));
 
   assertPinnedMirror(input.mirror, input.yearMonth);
-  if (input.managementChecks.length !== 4) throw new Error('주요 관리 항목 4개를 불러온 뒤 다시 시도해 주세요.');
-  const managementConfirmations = input.managementChecks.map<CashflowManagementConfirmation>((check) => {
-    const decision = input.managementDecisions[check.id];
-    if (decision !== 'CONFIRMED' && decision !== 'NOT_APPLICABLE') {
-      throw new Error(`${check.title}을 확인 또는 해당 없음 처리해 주세요.`);
-    }
-    return { checkId: check.id, decision };
-  });
+  const managementConfirmations: CashflowManagementConfirmation[] = [];
   return {
     sourceRevision: input.mirror.sourceRevision,
     targetRevision: input.mirror.targetRevisionAtFetch,

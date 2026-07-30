@@ -36,7 +36,7 @@ public record CloseCashflowMonthRequest(
     @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
     List<Confirmation> confirmations,
     @Valid @NotNull @Size(min = 4, max = 4) List<ManagementCheck> managementChecks,
-    @Valid @NotNull @Size(min = 4, max = 4) List<ManagementConfirmation> managementConfirmations,
+    @Valid @NotNull @Size(max = 4) List<ManagementConfirmation> managementConfirmations,
     @Valid @NotNull CashflowOpeningBalancesResponse openingBalances,
     @Valid @NotNull DeadlineSummary deadlineSummary
 ) {
@@ -360,7 +360,8 @@ public record CloseCashflowMonthRequest(
     }
 
     public static List<ManagementConfirmation> requireCompleteManagementConfirmations(List<ManagementConfirmation> confirmations) {
-        if (confirmations == null || confirmations.size() != MANAGEMENT_CHECK_IDS.size()) {
+        if (confirmations == null || confirmations.isEmpty()) return List.of();
+        if (confirmations.size() != MANAGEMENT_CHECK_IDS.size()) {
             throw new IllegalArgumentException("Cashflow month close requires a decision for all four management checks.");
         }
         Map<String, ManagementConfirmation> byId = new LinkedHashMap<>();

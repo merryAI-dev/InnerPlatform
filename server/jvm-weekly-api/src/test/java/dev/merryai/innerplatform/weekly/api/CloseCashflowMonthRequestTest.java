@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CloseCashflowMonthRequestTest {
@@ -16,6 +17,11 @@ class CloseCashflowMonthRequestTest {
         assertThatThrownBy(() -> CloseCashflowMonthRequest.requireHumanReviewed(false))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("explicit human review");
+    }
+
+    @Test
+    void managementConfirmationsMayBeEmptyAfterDesignatedApproval() {
+        assertThat(CloseCashflowMonthRequest.requireCompleteManagementConfirmations(List.of())).isEmpty();
     }
 
     @Test

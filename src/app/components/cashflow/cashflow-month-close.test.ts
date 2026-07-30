@@ -3,15 +3,14 @@ import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
 import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-readonly-client';
 import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
 import {
-  applyCashflowMonthCloseProjectionDrafts,
   buildCashflowMonthCloseDraftInput,
   carryForwardCashflowRunningBalances,
-  cashflowMonthCloseConfirmationKey,
   createEmptyCashflowMonthCloseDepositRows,
-  cashflowMonthCloseReviewProgress,
+  isCashflowMonthCloseRequestLocked,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
   resolveCashflowEvidenceScope,
+  shouldApplyCashflowMonthCloseRequestResult,
 } from './cashflow-month-close';
 
 function mirror(): CashflowSheetLabMirrorResult {
@@ -43,7 +42,6 @@ const managementChecks: CashflowManagementCheck[] = [
   { id: 'negative-projection-balance', status: 'OK', title: '잔액', detail: '확인' },
   { id: 'future-prepay-over-million', status: 'OK', title: '선입금', detail: '확인' },
 ];
-const managementDecisions = Object.fromEntries(managementChecks.map((check) => [check.id, 'CONFIRMED' as const]));
 const deadlineSummary: CashflowDeadlineSummary = {
   trackingStartedAt: null,
   missedCount: 0,
@@ -52,6 +50,33 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
+  it('locks pending approval states and unlocks a rejected request', () => {
+    expect(isCashflowMonthCloseRequestLocked('PENDING')).toBe(true);
+    expect(isCashflowMonthCloseRequestLocked('APPROVING')).toBe(true);
+    expect(isCashflowMonthCloseRequestLocked('REJECTED')).toBe(false);
+  });
+
+  it('rejects stale request reads by generation and selected month', () => {
+    expect(shouldApplyCashflowMonthCloseRequestResult({
+      requestGeneration: 3,
+      currentGeneration: 3,
+      requestedYearMonth: '2026-07',
+      selectedYearMonth: '2026-07',
+    })).toBe(true);
+    expect(shouldApplyCashflowMonthCloseRequestResult({
+      requestGeneration: 2,
+      currentGeneration: 3,
+      requestedYearMonth: '2026-07',
+      selectedYearMonth: '2026-07',
+    })).toBe(false);
+    expect(shouldApplyCashflowMonthCloseRequestResult({
+      requestGeneration: 3,
+      currentGeneration: 3,
+      requestedYearMonth: '2026-06',
+      selectedYearMonth: '2026-07',
+    })).toBe(false);
+  });
+
   it('does not expose live annual rows or mirror metadata to a legacy closed view', () => {
     const scope = resolveCashflowEvidenceScope({
       projectId: 'project-1',
@@ -132,75 +157,54 @@ describe('cashflow month close contract', () => {
     expect(requiredCashflowMonthCloseDecision(cell)).toBe('CONFIRMED');
   });
 
-  it('requires a human decision for every value and empty cell', () => {
-    expect(() => buildCashflowMonthCloseDraftInput({
+  it('derives confirmations from the pinned sheet after the single human review', () => {
+    const result = buildCashflowMonthCloseDraftInput({
       mirror: mirror(),
       yearMonth: '2026-07',
       humanReviewed: true,
-      decisions: {},
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
       managementChecks,
-      managementDecisions: {},
       deadlineSummary,
-    })).toThrow('확인');
+    });
+    expect(result.confirmations).toHaveLength(160);
+    expect(result.confirmations[0]?.decision).toBe('CONFIRMED');
+    expect(result.confirmations[1]?.decision).toBe('NOT_APPLICABLE');
   });
 
-  it('does not turn a server-derived cell state into a confirmation without an explicit review', () => {
-    const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
-    const decisions = Object.fromEntries(cells.map((cell) => [
-      cashflowMonthCloseConfirmationKey(cell),
-      requiredCashflowMonthCloseDecision(cell),
-    ]));
+  it('still requires the single human review checkbox', () => {
     expect(() => buildCashflowMonthCloseDraftInput({
       mirror: mirror(),
       yearMonth: '2026-07',
       humanReviewed: false,
-      decisions,
-      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({ ...row, decision: 'NOT_APPLICABLE' as const })),
+      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
       managementChecks,
-      managementDecisions,
       deadlineSummary,
     })).toThrow('직접 확인');
   });
 
-  it('keeps untouched deposit rows incomplete until a human chooses an action', () => {
-    const cells = normalizeCashflowMonthCloseCells(mirror(), '2026-07');
-    const decisions = Object.fromEntries(cells.map((cell) => [
-      cashflowMonthCloseConfirmationKey(cell),
-      requiredCashflowMonthCloseDecision(cell),
-    ]));
-    const progress = cashflowMonthCloseReviewProgress({
-      cells,
-      decisions,
+  it('derives empty deposit rows as not applicable without extra controls', () => {
+    const result = buildCashflowMonthCloseDraftInput({
+      mirror: mirror(),
+      yearMonth: '2026-07',
+      humanReviewed: true,
       depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
+      managementChecks,
+      deadlineSummary,
     });
-    expect(progress.confirmedDepositRows).toBe(0);
-    expect(progress.complete).toBe(false);
+    expect(result.depositScheduleRows.every((row) => row.decision === 'NOT_APPLICABLE')).toBe(true);
   });
 
   it('uses selected-month Projection edits in the final close cells', () => {
     const source = mirror();
-    const original = normalizeCashflowMonthCloseCells(source, '2026-07');
     const lineId = CASHFLOW_ALL_LINES[1];
     const key = `2026-07:projection:1:${lineId}`;
-    const cells = applyCashflowMonthCloseProjectionDrafts(original, { [key]: '12,345' }, '2026-07');
-    const decisions = Object.fromEntries(cells.map((cell) => [
-      cashflowMonthCloseConfirmationKey(cell),
-      requiredCashflowMonthCloseDecision(cell),
-    ]));
-
     const result = buildCashflowMonthCloseDraftInput({
       mirror: source,
       yearMonth: '2026-07',
       humanReviewed: true,
-      decisions,
       projectionDrafts: { [key]: '12,345' },
-      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
-        ...row,
-        decision: 'NOT_APPLICABLE' as const,
-      })),
+      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
       managementChecks,
-      managementDecisions,
       deadlineSummary,
     });
 
@@ -208,24 +212,14 @@ describe('cashflow month close contract', () => {
       .toMatchObject({ cellState: 'VALUE', amount: 12_345 });
   });
 
-  it('builds the server draft only after all 160 cells and five rows are explicit', () => {
+  it('builds the compatible server draft from the one review confirmation', () => {
     const source = mirror();
-    const cells = normalizeCashflowMonthCloseCells(source, '2026-07');
-    const decisions = Object.fromEntries(cells.map((cell) => [
-      cashflowMonthCloseConfirmationKey(cell),
-      requiredCashflowMonthCloseDecision(cell),
-    ]));
     const result = buildCashflowMonthCloseDraftInput({
       mirror: source,
       yearMonth: '2026-07',
       humanReviewed: true,
-      decisions,
-      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
-        ...row,
-        decision: 'NOT_APPLICABLE' as const,
-      })),
+      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows(),
       managementChecks,
-      managementDecisions,
       deadlineSummary,
     });
     expect(result.sourceRevision).toBe('sheet-r1');
@@ -233,29 +227,7 @@ describe('cashflow month close contract', () => {
     expect(result.cells).toHaveLength(160);
     expect(result.confirmations).toHaveLength(160);
     expect(result.depositScheduleRows).toHaveLength(5);
-    expect(result.managementConfirmations).toHaveLength(4);
-  });
-
-  it('does not turn an unreviewed management check into an automatic confirmation', () => {
-    const source = mirror();
-    const cells = normalizeCashflowMonthCloseCells(source, '2026-07');
-    const decisions = Object.fromEntries(cells.map((cell) => [
-      cashflowMonthCloseConfirmationKey(cell),
-      requiredCashflowMonthCloseDecision(cell),
-    ]));
-    expect(() => buildCashflowMonthCloseDraftInput({
-      mirror: source,
-      yearMonth: '2026-07',
-      humanReviewed: true,
-      decisions,
-      depositScheduleRows: createEmptyCashflowMonthCloseDepositRows().map((row) => ({
-        ...row,
-        decision: 'NOT_APPLICABLE' as const,
-      })),
-      managementChecks,
-      managementDecisions: { ...managementDecisions, 'labor-transfer': undefined },
-      deadlineSummary,
-    })).toThrow('확인 또는 해당 없음');
+    expect(result.managementConfirmations).toEqual([]);
   });
 
   it('rejects an invalid or incomplete pinned mirror', () => {
