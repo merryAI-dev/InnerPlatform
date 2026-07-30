@@ -34,6 +34,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('applyCashflowMonthCloseProjectionDrafts');
   });
 
+  it('shows submission success only after the BFF persists a pending request', () => {
+    const pendingGuard = source.indexOf("if (request.status !== 'PENDING')");
+    const successToast = source.indexOf("toast.success('월결산 결재 요청을 제출했습니다.');");
+
+    expect(pendingGuard).toBeGreaterThan(-1);
+    expect(successToast).toBeGreaterThan(pendingGuard);
+    expect(source).not.toContain('월 결산 승인을 요청했습니다.');
+  });
+
   it('requires an explicit human review before the compact month close is enabled', () => {
     expect(source).toContain('결산 기준과 서버가 고정한 누적 범위를 점검');
     expect(source).toContain('월 결산 승인 요청');

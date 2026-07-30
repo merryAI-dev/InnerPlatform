@@ -246,9 +246,9 @@ export function AdminApprovalPage() {
         </Card>
       )}
 
-      <ProjectMigrationAuditPage embedded reviewScope="pending" />
-
       <MonthlySettlementApprovalSection onPendingCountChange={setPendingMonthlySettlements} />
+
+      <ProjectMigrationAuditPage embedded reviewScope="pending" />
 
       {canReviewAdministrativeApprovals ? <section className="space-y-3">
         <div className="flex items-center gap-2">

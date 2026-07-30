@@ -1185,10 +1185,12 @@ export function CashflowProjectSheet({
         },
         idempotencyKey: `cashflow-month-close-request:${projectId}:${yearMonth}:${prepared.revision}:r${monthCloseRequest?.revision ?? -1}`,
       });
+      if (request.status !== 'PENDING') throw new Error('월결산 결재 요청 상태를 확인하지 못했습니다.');
       monthCloseCurrentRequestGenerationRef.current += 1;
       setMonthCloseRequest(request);
       setMonthCloseReviewOpen(false);
       setMonthCloseReviewDirty(false);
+      toast.success('월결산 결재 요청을 제출했습니다.');
       await Promise.all([
         loadCashflowMonthClose(),
         loadMonthCloseRequest(),
@@ -1202,7 +1204,6 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         summary: { status: request.status, revision: request.revision },
       });
-      toast.success(`${yearMonth} 월 결산 승인을 요청했습니다.`);
     } catch (error) {
       logCashflowSettlement({
         phase: 'error',

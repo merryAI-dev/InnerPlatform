@@ -7,9 +7,12 @@ const monthlySource = readFileSync(resolve(import.meta.dirname, 'MonthlySettleme
 const appliedHistorySource = readFileSync(resolve(import.meta.dirname, '../cashflow/AppliedCellHistory.tsx'), 'utf8');
 
 describe('AdminApprovalPage shell contract', () => {
-  it('leads with project registration review as a decision-ready approval surface', () => {
+  it('shows monthly settlement requests before the project registration queue', () => {
     expect(source).toContain('ProjectMigrationAuditPage');
     expect(source).toContain('<ProjectMigrationAuditPage embedded reviewScope="pending" />');
+    expect(source.indexOf('<MonthlySettlementApprovalSection')).toBeLessThan(
+      source.indexOf('<ProjectMigrationAuditPage embedded reviewScope="pending" />'),
+    );
     expect(source).toContain('pendingProjectReviews');
     expect(source).toContain('project.executiveReviewStatus');
     expect(source).toContain('프로젝트 등록 검토');
