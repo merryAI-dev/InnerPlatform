@@ -1476,6 +1476,22 @@ async function readCashflowSheetStageYear({ db, tenantId, projectId, runId, year
 
 async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, yearMonths }) {
   const closedMonths = new Set();
+  const headSnap = await db.doc(`orgs/${tenantId}/cashflow_cumulative_close_heads/${projectId}`).get();
+  const head = headSnap.exists ? headSnap.data() || {} : {};
+  const closedThrough = readOptionalText(head.closedThrough);
+  if (headSnap.exists && (
+    readOptionalText(head.contractVersion) !== 'cashflow-cumulative-close-v2'
+    || readOptionalText(head.tenantId) !== tenantId
+    || readOptionalText(head.projectId) !== projectId
+    || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(closedThrough)
+    || !readOptionalText(head.rootHash).startsWith('sha256:')
+    || !Number.isSafeInteger(Number(head.revision))
+  )) {
+    throw createHttpError(409, '누적 월 결산 범위가 표준 계약과 다릅니다.', 'cashflow_month_close_contract_invalid');
+  }
+  for (const yearMonth of yearMonths || []) {
+    if (closedThrough && yearMonth <= closedThrough) closedMonths.add(yearMonth);
+  }
   await Promise.all((yearMonths || []).map(async (yearMonth) => {
     const snap = await db.doc(`orgs/${tenantId}/monthly_closes/${projectId}-${yearMonth}`).get();
     if (!snap.exists) return;
@@ -1497,10 +1513,6 @@ async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, year
   }));
   return closedMonths;
 }
-
-// 마감된 달의 변경분은 사람이 판단해야 하므로 항목별 before → after를 함께 내려보낸다.
-// 응답 크기를 묶기 위해 월별 상위 항목만 싣고 나머지는 건수로만 알린다.
-const CLOSED_MONTH_CHANGE_DETAIL_LIMIT = 20;
 
 function sortMonthDifferenceChanges(changes) {
   return [...changes].sort((left, right) => (
@@ -1570,8 +1582,8 @@ function buildPinnedSheetChangeCandidates({ tenantId, projectId, runId, mirror, 
       yearMonth: summary.yearMonth,
       differenceCount: summary.differenceCount,
       weeks: [...summary.weeks].filter(Number.isSafeInteger).sort((left, right) => left - right),
-      changes: sortMonthDifferenceChanges(summary.changes).slice(0, CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
-      truncatedChangeCount: Math.max(0, summary.changes.length - CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
+      changes: sortMonthDifferenceChanges(summary.changes),
+      truncatedChangeCount: 0,
     }))
     .sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
   const riskLineCount = closedDifferences.length;
@@ -1659,8 +1671,8 @@ function summarizeCandidateMonthDifferences(candidates, yearMonths = []) {
     yearMonth: summary.yearMonth,
     differenceCount: summary.differenceCount,
     weeks: [...summary.weeks].sort((left, right) => left - right),
-    changes: sortMonthDifferenceChanges(summary.changes).slice(0, CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
-    truncatedChangeCount: Math.max(0, summary.changes.length - CLOSED_MONTH_CHANGE_DETAIL_LIMIT),
+    changes: sortMonthDifferenceChanges(summary.changes),
+    truncatedChangeCount: 0,
   })).sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
 }
 
@@ -1907,6 +1919,8 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
     actualLineCount: Number(stageRunDocument.actualLineCount) || 0,
     riskLineCount: Number(stageRunDocument.riskLineCount) || 0,
     closedMonthDifferences: Array.isArray(stageRunDocument.closedMonthDifferences) ? stageRunDocument.closedMonthDifferences : [],
+    closedMonthDifferenceCount: Number(stageRunDocument.closedMonthDifferenceCount) || 0,
+    closedMonthDifferenceManifestHash: readOptionalText(stageRunDocument.closedMonthDifferenceManifestHash),
     stagedMonths: Array.isArray(stageRunDocument.stagedMonths) ? stageRunDocument.stagedMonths : [],
     stagedYears: Array.isArray(stageRunDocument.stagedYears) ? stageRunDocument.stagedYears : [],
   };
@@ -1921,6 +1935,8 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
     ) ? stageRunDocument.applyInput : {
       applyRiskCandidates: true,
       closedMonthChangeReason: '',
+      closedMonthDifferenceCount: 0,
+      closedMonthDifferenceManifestHash: '',
       acceptFormulaMismatches: false,
       replaceAllActualSources: stageRunDocument.replaceAllActualSources === true,
     },
@@ -1973,6 +1989,169 @@ function monthBatchApplyIdempotencyKey({ idempotencyKey, stagedRunId, yearMonths
 
 function yearApplyIdempotencyKey({ idempotencyKey, stagedRunId, year }) {
   return `cf-sheet-year-${stableHash({ idempotencyKey, stagedRunId, year }).slice(0, 48)}`;
+}
+
+async function checkpointCashflowSheetApplyOperation({
+  db,
+  runRef,
+  publicationRef,
+  stagedRunId,
+  idempotencyKey,
+  applyRequestHash,
+  operationKey,
+  checkpoint,
+}) {
+  await db.runTransaction(async (transaction) => {
+    const [runSnap, publicationSnap] = await Promise.all([
+      transaction.get(runRef),
+      transaction.get(publicationRef),
+    ]);
+    const run = runSnap.exists ? (runSnap.data() || {}) : {};
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
+    if (
+      readOptionalText(run.status) !== 'APPLYING'
+      || readOptionalText(run.appliedIdempotencyKey) !== idempotencyKey
+      || readOptionalText(run.applyRequestHash) !== applyRequestHash
+      || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
+      || readOptionalText(publication.stagedRunId) !== stagedRunId
+    ) {
+      throw createHttpError(409, '시트 반영 작업 상태가 변경되었습니다.', 'cashflow_sheet_apply_operation_conflict');
+    }
+    transaction.set(runRef, {
+      applyOperations: {
+        ...(run.applyOperations && typeof run.applyOperations === 'object' ? run.applyOperations : {}),
+        [operationKey]: checkpoint,
+      },
+    }, { merge: true });
+  });
+}
+
+function sameSortedValues(actual, expected) {
+  return JSON.stringify([...(Array.isArray(actual) ? actual : [])].sort())
+    === JSON.stringify([...(Array.isArray(expected) ? expected : [])].sort());
+}
+
+function assertCashflowSheetOperationStatus(status, expected) {
+  const observed = {
+    version: readOptionalText(status?.version),
+    projectId: readOptionalText(status?.projectId),
+    operationType: readOptionalText(status?.operationType),
+    idempotencyKeyHash: readOptionalText(status?.idempotencyKeyHash),
+    status: readOptionalText(status?.status),
+    sourceRevision: readOptionalText(status?.sourceRevision) || null,
+    expectedTargetRevision: readOptionalText(status?.expectedTargetRevision) || null,
+    resultingTargetRevision: readOptionalText(status?.resultingTargetRevision) || null,
+    appliedMonths: Array.isArray(status?.appliedMonths) ? status.appliedMonths : null,
+    appliedYears: Array.isArray(status?.appliedYears) ? status.appliedYears.map(Number) : null,
+    annualRevisions: Array.isArray(status?.annualRevisions) ? status.annualRevisions : null,
+  };
+  if (
+    observed.version !== '1'
+    || observed.projectId !== expected.projectId
+    || observed.operationType !== expected.operationType
+    || observed.idempotencyKeyHash !== expected.idempotencyKeyHash
+    || !['NOT_FOUND', 'APPLIED'].includes(observed.status)
+    || observed.appliedMonths === null
+    || observed.appliedYears === null
+    || observed.annualRevisions === null
+  ) {
+    throw Object.assign(new Error('작업 상태 응답이 요청과 일치하지 않습니다.'), { observed });
+  }
+  if (observed.status === 'NOT_FOUND') return { outcome: 'NOT_FOUND', observed };
+  const monthOperation = ['MONTH_APPLY', 'BATCH_APPLY'].includes(expected.operationType);
+  const validApplied = observed.sourceRevision === expected.sourceRevision
+    && sameSortedValues(observed.appliedMonths, expected.appliedMonths)
+    && sameSortedValues(observed.appliedYears, expected.appliedYears)
+    && (monthOperation
+      ? observed.expectedTargetRevision === expected.expectedTargetRevision
+        && /^sha256:[a-f0-9]{64}$/.test(observed.resultingTargetRevision || '')
+        && observed.annualRevisions.length === 0
+      : observed.expectedTargetRevision === null
+        && observed.resultingTargetRevision === null
+        && observed.annualRevisions.length === 1
+        && Number(observed.annualRevisions[0]?.year) === expected.appliedYears[0]
+        && Number(observed.annualRevisions[0]?.revision) === expected.annualRevision);
+  if (!validApplied) {
+    throw Object.assign(new Error('적용된 작업 범위나 revision이 요청과 일치하지 않습니다.'), { observed });
+  }
+  return { outcome: 'APPLIED', observed };
+}
+
+function cashflowSheetOperationUncertainError(operationKey, evidence) {
+  const error = createHttpError(
+    503,
+    '시트 반영 결과를 확정할 수 없습니다. 같은 요청으로 다시 시도해 주세요.',
+    'cashflow_sheet_operation_uncertain',
+  );
+  error.operationKey = operationKey;
+  error.operationEvidence = evidence;
+  return error;
+}
+
+async function executeCashflowSheetOperation({
+  javaWeeklyClient,
+  context,
+  projectId,
+  operationKey,
+  operationType,
+  idempotencyKey,
+  expected,
+  reconcileFirst,
+  mutate,
+  verifyMutation,
+  checkpointFromStatus,
+}) {
+  const readStatus = async (mutationError) => {
+    try {
+      const status = await javaWeeklyClient.getCashflowSheetOperationStatus({
+        context,
+        projectId,
+        operationType,
+        idempotencyKey,
+      });
+      try {
+        return assertCashflowSheetOperationStatus(status, expected);
+      } catch (error) {
+        return { outcome: 'MISMATCH', observed: error.observed || null };
+      }
+    } catch (error) {
+      return {
+        outcome: 'READ_FAILED',
+        readErrorCode: readOptionalText(error?.code) || null,
+        mutationErrorCode: readOptionalText(mutationError?.code) || null,
+      };
+    }
+  };
+  const reconcile = async (mutationError) => {
+    const evidence = await readStatus(mutationError);
+    if (evidence.outcome === 'APPLIED') return checkpointFromStatus(evidence.observed);
+    if (evidence.outcome === 'NOT_FOUND') return null;
+    throw cashflowSheetOperationUncertainError(operationKey, { ...evidence, expected });
+  };
+  if (reconcileFirst) {
+    const checkpoint = await reconcile();
+    if (checkpoint) return checkpoint;
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return verifyMutation(await mutate());
+    } catch (mutationError) {
+      const mutationStatus = Number(mutationError?.statusCode || mutationError?.status);
+      if (mutationStatus >= 400 && mutationStatus < 500 && mutationError?.mutationOutcome !== 'uncertain') {
+        throw mutationError;
+      }
+      const checkpoint = await reconcile(mutationError);
+      if (checkpoint) return checkpoint;
+      if (attempt === 1) {
+        throw cashflowSheetOperationUncertainError(operationKey, {
+          outcome: 'NOT_FOUND_AFTER_RETRY',
+          mutationErrorCode: readOptionalText(mutationError?.code) || null,
+          expected,
+        });
+      }
+    }
+  }
+  throw cashflowSheetOperationUncertainError(operationKey, { outcome: 'UNKNOWN', expected });
 }
 
 function assertResultingTargetRevision(result) {
@@ -2146,6 +2325,12 @@ async function applyStagedCashflowSheetLab({
   const closedMonthChangeReason = storedApplyInput
     ? readOptionalText(storedApplyInput.closedMonthChangeReason)
     : readOptionalText(parsed.closedMonthChangeReason);
+  const closedMonthDifferenceCount = storedApplyInput
+    ? Number(storedApplyInput.closedMonthDifferenceCount)
+    : Number(parsed.closedMonthDifferenceCount);
+  const closedMonthDifferenceManifestHash = storedApplyInput
+    ? readOptionalText(storedApplyInput.closedMonthDifferenceManifestHash)
+    : readOptionalText(parsed.closedMonthDifferenceManifestHash);
   const acceptFormulaMismatches = storedApplyInput
     ? storedApplyInput.acceptFormulaMismatches === true
     : parsed.acceptFormulaMismatches === true;
@@ -2154,6 +2339,8 @@ async function applyStagedCashflowSheetLab({
     applyRiskCandidates,
     ...(acceptFormulaMismatches ? { acceptFormulaMismatches: true } : {}),
     ...(closedMonthChangeReason ? { closedMonthChangeReason } : {}),
+    ...(Number.isSafeInteger(closedMonthDifferenceCount) ? { closedMonthDifferenceCount } : {}),
+    ...(closedMonthDifferenceManifestHash ? { closedMonthDifferenceManifestHash } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
   });
   if (replaying) {
@@ -2187,6 +2374,29 @@ async function applyStagedCashflowSheetLab({
     selectedMonthSet.has(readOptionalText(candidate.yearMonth))
     || (readOptionalText(candidate.scope) === 'annual' && selectedYearSet.has(Number(candidate.year)))
   ));
+  const closedMonthCandidates = selectedCandidates.filter((candidate) => (
+    Array.isArray(candidate?.riskFlags) && candidate.riskFlags.includes('closed_month_change')
+  ));
+  if (closedMonthCandidates.length > 0 && (
+    !closedMonthChangeReason
+    || closedMonthDifferenceCount !== Number(stageRun.closedMonthDifferenceCount)
+    || closedMonthDifferenceManifestHash !== readOptionalText(stageRun.closedMonthDifferenceManifestHash)
+  )) {
+    const error = createHttpError(
+      409,
+      '결산 완료 월 변경을 확인하고 변경 사유를 입력해 주세요.',
+      'cashflow_closed_month_reason_required',
+    );
+    error.details = {
+      closedMonths: [...new Set(closedMonthCandidates.map((candidate) => candidate.yearMonth))].sort(),
+      closedMonthDifferences: Array.isArray(stageRun.closedMonthDifferences) && stageRun.closedMonthDifferences.length > 0
+        ? stageRun.closedMonthDifferences
+        : summarizeCandidateMonthDifferences(closedMonthCandidates),
+      closedMonthDifferenceCount: Number(stageRun.closedMonthDifferenceCount) || closedMonthCandidates.length,
+      closedMonthDifferenceManifestHash: readOptionalText(stageRun.closedMonthDifferenceManifestHash),
+    };
+    throw error;
+  }
 
   if (!javaWeeklyClient) {
     throw createHttpError(503, '저장을 처리하는 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_jvm_authority_unavailable');
@@ -2292,6 +2502,8 @@ async function applyStagedCashflowSheetLab({
     applyInput: {
       applyRiskCandidates,
       closedMonthChangeReason,
+      closedMonthDifferenceCount,
+      closedMonthDifferenceManifestHash,
       acceptFormulaMismatches,
       replaceAllActualSources,
     },
@@ -2308,9 +2520,27 @@ async function applyStagedCashflowSheetLab({
 
   const javaResults = [];
   const javaAnnualResults = [];
+  const verifiedFormulaValidation = [];
   let verifiedLineCount = 0;
   let targetRevision = readOptionalText(stageRun.targetRevisionAtFetch);
   let completedOperationCount = 0;
+  const applyOperations = stageRun.applyOperations && typeof stageRun.applyOperations === 'object'
+    ? { ...stageRun.applyOperations }
+    : {};
+  const persistOperation = async (operationKey, checkpoint) => {
+    await checkpointCashflowSheetApplyOperation({
+      db,
+      runRef: reservation.runRef,
+      publicationRef: reservation.publicationRef,
+      stagedRunId,
+      idempotencyKey: effectiveIdempotencyKey,
+      applyRequestHash,
+      operationKey,
+      checkpoint,
+    });
+    applyOperations[operationKey] = checkpoint;
+  };
+  const operationHash = (idempotencyKey) => `sha256:${createHash('sha256').update(idempotencyKey).digest('hex')}`;
   try {
     const resolvedEditSession = typeof resolveEditSession === 'function'
       ? await resolveEditSession()
@@ -2320,114 +2550,223 @@ async function applyStagedCashflowSheetLab({
       const operationStartedAt = Date.now();
       const month = stagedMonths[0];
       const monthTargetRevision = targetRevision;
+      const operationKey = `MONTH_APPLY:${month.yearMonth}`;
+      const operationIdempotencyKey = monthApplyIdempotencyKey({
+        idempotencyKey: effectiveIdempotencyKey,
+        stagedRunId,
+        yearMonth: month.yearMonth,
+      });
       const isLastOperation = completedOperationCount === operationCount - 1;
       const monthEditSession = resolvedEditSession
         ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
         : null;
-      const javaResult = await javaWeeklyClient.applyCashflowSheetLab({
-        context,
-        projectId,
-        idempotencyKey: monthApplyIdempotencyKey({
-          idempotencyKey: effectiveIdempotencyKey,
-          stagedRunId,
-          yearMonth: month.yearMonth,
-        }),
-        editSession: monthEditSession,
-        sourceRevision: stageRun.sourceRevision,
-        targetRevision,
-        yearMonth: month.yearMonth,
-        cells: month.cells,
-        calculationChecks: month.calculationChecks,
-        openingBalanceCells,
-        replaceAllActualSources,
-        closedMonthChangeReason,
-        acceptFormulaMismatches,
-      });
-      targetRevision = assertResultingTargetRevision(javaResult);
-      verifiedLineCount += verifyJavaMonthAppliedCells(javaResult, month, {
-        projectId,
-        sourceRevision: readOptionalText(stageRun.sourceRevision),
-        targetRevision: monthTargetRevision,
-        commandName: CASHFLOW_SHEET_APPLY_COMMAND,
-      });
+      const checkpoint = readOptionalText(applyOperations[operationKey]?.status) === 'APPLIED'
+        ? applyOperations[operationKey]
+        : await executeCashflowSheetOperation({
+          javaWeeklyClient,
+          context,
+          projectId,
+          operationKey,
+          operationType: 'MONTH_APPLY',
+          idempotencyKey: operationIdempotencyKey,
+          expected: {
+            projectId,
+            operationType: 'MONTH_APPLY',
+            idempotencyKeyHash: operationHash(operationIdempotencyKey),
+            sourceRevision: readOptionalText(stageRun.sourceRevision),
+            expectedTargetRevision: monthTargetRevision,
+            appliedMonths: [month.yearMonth],
+            appliedYears: [],
+          },
+          reconcileFirst: Boolean(applyOperations[operationKey]),
+          mutate: () => javaWeeklyClient.applyCashflowSheetLab({
+            context,
+            projectId,
+            idempotencyKey: operationIdempotencyKey,
+            editSession: monthEditSession,
+            sourceRevision: stageRun.sourceRevision,
+            targetRevision,
+            yearMonth: month.yearMonth,
+            cells: month.cells,
+            calculationChecks: month.calculationChecks,
+            openingBalanceCells,
+            replaceAllActualSources,
+            closedMonthChangeReason,
+            acceptFormulaMismatches,
+          }),
+          verifyMutation: (javaResult) => {
+            const resultingTargetRevision = assertResultingTargetRevision(javaResult);
+            const operationVerifiedLineCount = verifyJavaMonthAppliedCells(javaResult, month, {
+              projectId,
+              sourceRevision: readOptionalText(stageRun.sourceRevision),
+              targetRevision: monthTargetRevision,
+              commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+            });
+            return {
+              status: 'APPLIED',
+              operationType: 'MONTH_APPLY',
+              idempotencyKey: operationIdempotencyKey,
+              resultingTargetRevision,
+              verifiedLineCount: operationVerifiedLineCount,
+              monthResults: [summarizeJavaMonthResult(javaResult)],
+              formulaValidation: Array.isArray(javaResult?.calculationChecks) ? javaResult.calculationChecks : [],
+              evidence: { outcome: 'MUTATION_RESPONSE' },
+              appliedAt: now,
+            };
+          },
+          checkpointFromStatus: (status) => ({
+            status: 'APPLIED',
+            operationType: 'MONTH_APPLY',
+            idempotencyKey: operationIdempotencyKey,
+            resultingTargetRevision: status.resultingTargetRevision,
+            verifiedLineCount: month.cells.filter((cell) => ['VALUE', 'ZERO'].includes(cell.cellState)).length,
+            monthResults: [summarizeJavaMonthResult({
+              ok: true,
+              projectId,
+              yearMonth: month.yearMonth,
+              sourceRevision: stageRun.sourceRevision,
+              targetRevision: monthTargetRevision,
+              resultingTargetRevision: status.resultingTargetRevision,
+              auditId: status.auditId,
+            })],
+            formulaValidation: [],
+            evidence: { outcome: 'AUTHORITATIVE_STATUS', status },
+            appliedAt: now,
+          }),
+        });
+      if (applyOperations[operationKey] !== checkpoint) await persistOperation(operationKey, checkpoint);
+      targetRevision = checkpoint.resultingTargetRevision;
+      verifiedLineCount += Number(checkpoint.verifiedLineCount) || 0;
+      javaResults.push(...(Array.isArray(checkpoint.monthResults) ? checkpoint.monthResults : []));
+      verifiedFormulaValidation.push(...(Array.isArray(checkpoint.formulaValidation) ? checkpoint.formulaValidation : []));
       logger('month.ok', { projectId, yearMonth: month.yearMonth, durationMs: Date.now() - operationStartedAt });
-      javaResults.push(javaResult);
       completedOperationCount += 1;
     } else if (stagedMonths.length > 1) {
       const operationStartedAt = Date.now();
       const batchTargetRevision = targetRevision;
+      const appliedMonths = stagedMonths.filter((month) => month.apply);
+      const appliedYearMonths = appliedMonths.map((month) => month.yearMonth);
+      const operationKey = `BATCH_APPLY:${appliedYearMonths.join(',')}`;
+      const operationIdempotencyKey = monthBatchApplyIdempotencyKey({
+        idempotencyKey: effectiveIdempotencyKey,
+        stagedRunId,
+        yearMonths: stagedMonths.map((month) => month.yearMonth),
+      });
       const isLastOperation = completedOperationCount === operationCount - 1;
       const monthEditSession = resolvedEditSession
         ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
         : null;
-      const batchResult = await javaWeeklyClient.applyCashflowSheetBatch({
-        context,
-        projectId,
-        idempotencyKey: monthBatchApplyIdempotencyKey({
-          idempotencyKey: effectiveIdempotencyKey,
-          stagedRunId,
-          yearMonths: stagedMonths.map((month) => month.yearMonth),
-        }),
-        editSession: monthEditSession,
-        sourceRevision: stageRun.sourceRevision,
-        targetRevision,
-        openingBalanceCells,
-        months: stagedMonths.map((month) => ({
-          yearMonth: month.yearMonth,
-          cells: month.cells,
-          calculationChecks: month.calculationChecks,
-          apply: month.apply,
-        })),
-        replaceAllActualSources,
-        closedMonthChangeReason,
-        acceptFormulaMismatches,
-      });
-      if (
-        batchResult?.ok !== true
-        || readOptionalText(batchResult?.commandName) !== CASHFLOW_SHEET_APPLY_COMMAND
-        || readOptionalText(batchResult?.projectId) !== projectId
-        || readOptionalText(batchResult?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
-        || readOptionalText(batchResult?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
-        || readOptionalText(batchResult?.targetRevision) !== batchTargetRevision
-      ) {
-        throw createHttpError(502, '저장 형식이 올바르지 않아 저장을 취소했습니다. 담당자에게 문의해 주세요.', 'cashflow_jvm_apply_verification_failed');
-      }
-      targetRevision = assertResultingTargetRevision(batchResult);
-      const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
-        .map((month) => [readOptionalText(month?.yearMonth), month]));
-      const appliedMonths = stagedMonths.filter((month) => month.apply);
-      if (returnedMonths.size !== appliedMonths.length) {
-        throw createHttpError(502, '저장된 항목 수가 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
-      }
-      for (const month of appliedMonths) {
-        const monthResult = returnedMonths.get(month.yearMonth);
-        if (!monthResult) {
-          throw createHttpError(502, '여러 달 저장의 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
-        }
-        const compatibleResult = {
-          ...monthResult,
-          ok: batchResult.ok,
-          commandName: batchResult.commandName,
-          projectId: batchResult.projectId,
-          sourceSheetKey: batchResult.sourceSheetKey,
-          sourceRevision: batchResult.sourceRevision,
-          targetRevision: batchResult.targetRevision,
-          resultingTargetRevision: batchResult.resultingTargetRevision,
-          auditId: batchResult.auditId,
-        };
-        verifiedLineCount += verifyJavaMonthAppliedCells(compatibleResult, month, {
+      const checkpoint = readOptionalText(applyOperations[operationKey]?.status) === 'APPLIED'
+        ? applyOperations[operationKey]
+        : await executeCashflowSheetOperation({
+          javaWeeklyClient,
+          context,
           projectId,
-          sourceRevision: readOptionalText(stageRun.sourceRevision),
-          targetRevision: batchTargetRevision,
-          commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+          operationKey,
+          operationType: 'BATCH_APPLY',
+          idempotencyKey: operationIdempotencyKey,
+          expected: {
+            projectId,
+            operationType: 'BATCH_APPLY',
+            idempotencyKeyHash: operationHash(operationIdempotencyKey),
+            sourceRevision: readOptionalText(stageRun.sourceRevision),
+            expectedTargetRevision: batchTargetRevision,
+            appliedMonths: appliedYearMonths,
+            appliedYears: [],
+          },
+          reconcileFirst: Boolean(applyOperations[operationKey]),
+          mutate: () => javaWeeklyClient.applyCashflowSheetBatch({
+            context,
+            projectId,
+            idempotencyKey: operationIdempotencyKey,
+            editSession: monthEditSession,
+            sourceRevision: stageRun.sourceRevision,
+            targetRevision,
+            openingBalanceCells,
+            months: stagedMonths.map((month) => ({
+              yearMonth: month.yearMonth,
+              cells: month.cells,
+              calculationChecks: month.calculationChecks,
+              apply: month.apply,
+            })),
+            replaceAllActualSources,
+            closedMonthChangeReason,
+            acceptFormulaMismatches,
+          }),
+          verifyMutation: (batchResult) => {
+            if (
+              batchResult?.ok !== true
+              || readOptionalText(batchResult?.commandName) !== CASHFLOW_SHEET_APPLY_COMMAND
+              || readOptionalText(batchResult?.projectId) !== projectId
+              || readOptionalText(batchResult?.sourceSheetKey) !== CASHFLOW_SHEET_SOURCE_KEY
+              || readOptionalText(batchResult?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+              || readOptionalText(batchResult?.targetRevision) !== batchTargetRevision
+            ) {
+              throw createHttpError(502, '저장 형식이 올바르지 않아 저장을 취소했습니다. 담당자에게 문의해 주세요.', 'cashflow_jvm_apply_verification_failed');
+            }
+            const resultingTargetRevision = assertResultingTargetRevision(batchResult);
+            const returnedMonths = new Map((Array.isArray(batchResult?.months) ? batchResult.months : [])
+              .map((month) => [readOptionalText(month?.yearMonth), month]));
+            if (returnedMonths.size !== appliedMonths.length) {
+              throw createHttpError(502, '저장된 항목 수가 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
+            }
+            let operationVerifiedLineCount = 0;
+            const monthResults = appliedMonths.map((month) => {
+              const monthResult = returnedMonths.get(month.yearMonth);
+              if (!monthResult) {
+                throw createHttpError(502, '여러 달 저장의 대상 기간이 요청과 달라 저장을 취소했습니다. 시트 값을 다시 불러온 뒤 시도해 주세요.', 'cashflow_jvm_apply_verification_failed');
+              }
+              const compatibleResult = {
+                ...monthResult,
+                ok: batchResult.ok,
+                commandName: batchResult.commandName,
+                projectId: batchResult.projectId,
+                sourceSheetKey: batchResult.sourceSheetKey,
+                sourceRevision: batchResult.sourceRevision,
+                targetRevision: batchResult.targetRevision,
+                resultingTargetRevision,
+                auditId: batchResult.auditId,
+              };
+              operationVerifiedLineCount += verifyJavaMonthAppliedCells(compatibleResult, month, {
+                projectId,
+                sourceRevision: readOptionalText(stageRun.sourceRevision),
+                targetRevision: batchTargetRevision,
+                commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+              });
+              return summarizeJavaMonthResult(compatibleResult);
+            });
+            return {
+              status: 'APPLIED', operationType: 'BATCH_APPLY', idempotencyKey: operationIdempotencyKey,
+              resultingTargetRevision, verifiedLineCount: operationVerifiedLineCount, monthResults,
+              formulaValidation: monthResults.flatMap((_result, index) => (
+                Array.isArray(appliedMonths[index]?.calculationChecks) ? appliedMonths[index].calculationChecks : []
+              )),
+              evidence: { outcome: 'MUTATION_RESPONSE' }, appliedAt: now,
+            };
+          },
+          checkpointFromStatus: (status) => ({
+            status: 'APPLIED', operationType: 'BATCH_APPLY', idempotencyKey: operationIdempotencyKey,
+            resultingTargetRevision: status.resultingTargetRevision,
+            verifiedLineCount: appliedMonths.flatMap((month) => month.cells)
+              .filter((cell) => ['VALUE', 'ZERO'].includes(cell.cellState)).length,
+            monthResults: appliedMonths.map((month) => summarizeJavaMonthResult({
+              ok: true, projectId, yearMonth: month.yearMonth, sourceRevision: stageRun.sourceRevision,
+              targetRevision: batchTargetRevision, resultingTargetRevision: status.resultingTargetRevision,
+              auditId: status.auditId,
+            })),
+            formulaValidation: [], evidence: { outcome: 'AUTHORITATIVE_STATUS', status }, appliedAt: now,
+          }),
         });
-        javaResults.push(compatibleResult);
-      }
+      if (applyOperations[operationKey] !== checkpoint) await persistOperation(operationKey, checkpoint);
+      targetRevision = checkpoint.resultingTargetRevision;
+      verifiedLineCount += Number(checkpoint.verifiedLineCount) || 0;
+      javaResults.push(...(Array.isArray(checkpoint.monthResults) ? checkpoint.monthResults : []));
+      verifiedFormulaValidation.push(...(Array.isArray(checkpoint.formulaValidation) ? checkpoint.formulaValidation : []));
       logger('months.ok', {
         projectId,
         monthCount: appliedMonths.length,
         durationMs: Date.now() - operationStartedAt,
-        jvmDurationMs: Number(batchResult?.durationMs) || 0,
+        jvmDurationMs: 0,
       });
       completedOperationCount += 1;
     }
@@ -2441,41 +2780,101 @@ async function applyStagedCashflowSheetLab({
         const yearEditSession = resolvedEditSession
           ? { ...resolvedEditSession, finalize: isLastOperation ? Boolean(resolvedEditSession.finalize) : false }
           : null;
-        const javaResult = await javaWeeklyClient.applyCashflowSheetAnnualTotal({
-          context,
-          projectId,
-          idempotencyKey: yearApplyIdempotencyKey({
-            idempotencyKey: effectiveIdempotencyKey,
-            stagedRunId,
-            year: stagedYear.year,
-          }),
-          editSession: yearEditSession,
-          sourceRevision: stageRun.sourceRevision,
+        const operationKey = `ANNUAL_APPLY:${stagedYear.year}`;
+        const operationIdempotencyKey = yearApplyIdempotencyKey({
+          idempotencyKey: effectiveIdempotencyKey,
+          stagedRunId,
           year: stagedYear.year,
-          expectedRevision: stagedYear.expectedRevision,
-          cells: stagedYear.cells,
         });
-        const result = {
-          javaResult,
-          verifiedLineCount: verifyJavaAnnualAppliedCells(javaResult, stagedYear, {
+        const checkpoint = readOptionalText(applyOperations[operationKey]?.status) === 'APPLIED'
+          ? applyOperations[operationKey]
+          : await executeCashflowSheetOperation({
+            javaWeeklyClient,
+            context,
             projectId,
-            sourceRevision: readOptionalText(stageRun.sourceRevision),
-          }),
-        };
+            operationKey,
+            operationType: 'ANNUAL_APPLY',
+            idempotencyKey: operationIdempotencyKey,
+            expected: {
+              projectId,
+              operationType: 'ANNUAL_APPLY',
+              idempotencyKeyHash: operationHash(operationIdempotencyKey),
+              sourceRevision: readOptionalText(stageRun.sourceRevision),
+              expectedTargetRevision: null,
+              appliedMonths: [],
+              appliedYears: [stagedYear.year],
+              annualRevision: stagedYear.expectedRevision + 1,
+            },
+            reconcileFirst: Boolean(applyOperations[operationKey]),
+            mutate: () => javaWeeklyClient.applyCashflowSheetAnnualTotal({
+              context,
+              projectId,
+              idempotencyKey: operationIdempotencyKey,
+              editSession: yearEditSession,
+              sourceRevision: stageRun.sourceRevision,
+              year: stagedYear.year,
+              expectedRevision: stagedYear.expectedRevision,
+              cells: stagedYear.cells,
+            }),
+            verifyMutation: (javaResult) => ({
+              status: 'APPLIED',
+              operationType: 'ANNUAL_APPLY',
+              idempotencyKey: operationIdempotencyKey,
+              verifiedLineCount: verifyJavaAnnualAppliedCells(javaResult, stagedYear, {
+                projectId,
+                sourceRevision: readOptionalText(stageRun.sourceRevision),
+              }),
+              annualResult: javaResult,
+              evidence: { outcome: 'MUTATION_RESPONSE' },
+              appliedAt: now,
+            }),
+            checkpointFromStatus: (status) => ({
+              status: 'APPLIED',
+              operationType: 'ANNUAL_APPLY',
+              idempotencyKey: operationIdempotencyKey,
+              verifiedLineCount: stagedYear.cells.length,
+              annualResult: {
+                ok: true,
+                commandName: CASHFLOW_SHEET_APPLY_COMMAND,
+                projectId,
+                year: stagedYear.year,
+                sourceRevision: stageRun.sourceRevision,
+                revision: stagedYear.expectedRevision + 1,
+                auditId: status.auditId,
+              },
+              evidence: { outcome: 'AUTHORITATIVE_STATUS', status },
+              appliedAt: now,
+            }),
+          });
         logger('annual.ok', { projectId, year: stagedYear.year, durationMs: Date.now() - operationStartedAt });
-        return result;
+        return { operationKey, checkpoint };
       }));
-      const rejected = settled.find((result) => result.status === 'rejected');
+      const rejected = settled.find((result) => (
+        result.status === 'rejected'
+        && readOptionalText(result.reason?.code) === 'cashflow_sheet_operation_uncertain'
+      )) || settled.find((result) => result.status === 'rejected');
       for (const result of settled) {
         if (result.status !== 'fulfilled') continue;
-        verifiedLineCount += result.value.verifiedLineCount;
-        javaAnnualResults.push(result.value.javaResult);
+        if (applyOperations[result.value.operationKey] !== result.value.checkpoint) {
+          await persistOperation(result.value.operationKey, result.value.checkpoint);
+        }
+        verifiedLineCount += Number(result.value.checkpoint.verifiedLineCount) || 0;
+        javaAnnualResults.push(result.value.checkpoint.annualResult);
         completedOperationCount += 1;
       }
       if (rejected) throw rejected.reason;
     }
   } catch (error) {
     const statusCode = Number(error?.statusCode || error?.status);
+    if (readOptionalText(error?.code) === 'cashflow_sheet_operation_uncertain' && error.operationKey) {
+      await persistOperation(error.operationKey, {
+        status: 'UNCERTAIN',
+        operationType: error.operationEvidence?.expected?.operationType,
+        idempotencyKeyHash: error.operationEvidence?.expected?.idempotencyKeyHash,
+        evidence: error.operationEvidence,
+        updatedAt: now,
+      });
+    }
     if (readOptionalText(error?.code) === 'cashflow_closed_month_reason_required') {
       const requiredMonths = Array.isArray(error?.details?.closedMonths)
         ? error.details.closedMonths
@@ -2530,9 +2929,7 @@ async function applyStagedCashflowSheetLab({
       role: readOptionalText(context?.actorRole) || 'workspace_user',
     },
     verifiedLineCount,
-    formulaValidation: javaResults.flatMap((result) => (
-      Array.isArray(result?.calculationChecks) ? result.calculationChecks : []
-    )),
+    formulaValidation: verifiedFormulaValidation,
     firebaseResult: {
       ok: true,
       commandName: CASHFLOW_SHEET_APPLY_COMMAND,
@@ -2668,13 +3065,12 @@ async function stagePinnedCashflowSheetLab({
     }
   }
 
-  const stageYear = parsed.yearMonth
-    ? Number(parsed.yearMonth.slice(0, 4))
-    : Number(mirror.sourceYear);
-  const calculationCells = (mirror.cells || [])
-    .filter((cell) => Number(readOptionalText(cell.yearMonth).slice(0, 4)) === stageYear);
+  const stageYear = parsed.yearMonth ? Number(parsed.yearMonth.slice(0, 4)) : Number(mirror.sourceYear);
+  const calculationCells = (mirror.cells || []).filter((cell) => parsed.yearMonth
+    ? readOptionalText(cell.yearMonth) >= '2023-01' && readOptionalText(cell.yearMonth) <= parsed.yearMonth
+    : Number(readOptionalText(cell.yearMonth).slice(0, 4)) === stageYear);
   const pinnedCells = parsed.yearMonth
-    ? calculationCells.filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth)
+    ? calculationCells
     : calculationCells;
   const pinnedMonths = [...groupPinnedCellsByMonth(pinnedCells).keys()].sort();
   const calculationSourceMonths = [...groupPinnedCellsByMonth(calculationCells).keys()].sort();
@@ -2712,13 +3108,17 @@ async function stagePinnedCashflowSheetLab({
     projectId,
     yearMonths: pinnedMonths,
   });
+  const candidatePinnedCells = parsed.yearMonth
+    ? pinnedCells.filter((cell) => readOptionalText(cell.yearMonth) === parsed.yearMonth
+      || closedMonths.has(readOptionalText(cell.yearMonth)))
+    : pinnedCells;
   const now = new Date().toISOString();
   const reservationExpiresAt = new Date(Date.now() + 60_000).toISOString();
   const weekly = buildPinnedSheetChangeCandidates({
     tenantId,
     projectId,
     runId,
-    mirror: { ...mirror, cells: pinnedCells },
+    mirror: { ...mirror, cells: candidatePinnedCells },
     cashflowSnapshot,
     closedMonths,
     context,
@@ -2769,6 +3169,8 @@ async function stagePinnedCashflowSheetLab({
     });
   });
   const responseCandidates = candidates.slice(0, 500);
+  const closedMonthDifferenceCount = weekly.closedMonthDifferences.reduce((sum, month) => sum + month.differenceCount, 0);
+  const closedMonthDifferenceManifestHash = `sha256:${stableHash(weekly.closedMonthDifferences)}`;
   const response = {
     ok: true,
     commandName: 'cashflowSheetLab.stage.firebase',
@@ -2789,6 +3191,8 @@ async function stagePinnedCashflowSheetLab({
     riskLineCount,
     blockedMonths,
     closedMonthDifferences: weekly.closedMonthDifferences,
+    closedMonthDifferenceCount,
+    closedMonthDifferenceManifestHash,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,
@@ -2817,6 +3221,8 @@ async function stagePinnedCashflowSheetLab({
     stagedLineCount: candidates.length,
     blockedMonths,
     closedMonthDifferences: weekly.closedMonthDifferences,
+    closedMonthDifferenceCount,
+    closedMonthDifferenceManifestHash,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,

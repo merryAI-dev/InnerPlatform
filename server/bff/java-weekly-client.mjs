@@ -87,14 +87,66 @@ function readJavaError(status, payload) {
   return error;
 }
 
-async function readJsonResponse(response) {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+function responseTooLargeError() {
+  return createHttpError(
+    502,
+    '현금흐름 저장 서버의 응답이 너무 커서 처리할 수 없습니다.',
+    'jvm_weekly_response_too_large',
+  );
+}
+
+async function readJsonResponse(response, maxResponseBytes) {
+  const declaredLength = Number.parseInt(response.headers?.get?.('content-length') || '', 10);
+  if (Number.isSafeInteger(declaredLength) && declaredLength > maxResponseBytes) {
+    throw responseTooLargeError();
   }
+  if (!response.body) return { empty: true, malformed: false, payload: null };
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      totalBytes += chunk.byteLength;
+      if (totalBytes > maxResponseBytes) {
+        await reader.cancel().catch(() => {});
+        throw responseTooLargeError();
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  if (totalBytes === 0) return { empty: true, malformed: false, payload: null };
+  const text = Buffer.concat(chunks, totalBytes).toString('utf8');
+  if (!text.trim()) return { empty: true, malformed: false, payload: null };
+  try {
+    return { empty: false, malformed: false, payload: JSON.parse(text) };
+  } catch {
+    return { empty: false, malformed: true, payload: null };
+  }
+}
+
+function safeEndpoint(baseUrl) {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return 'configured-jvm-weekly-api';
+  }
+}
+
+function attachTransportMetadata(error, metadata) {
+  Object.assign(error, metadata);
+  return error;
+}
+
+function markTransportFailure(error) {
+  Object.defineProperty(error, 'transportFailure', { value: true });
+  return error;
 }
 
 export function createJavaWeeklyClient({
@@ -109,6 +161,7 @@ export function createJavaWeeklyClient({
   jvmWeeklyWorkspaceEmailDomain,
   jvmWeeklyFirestoreProjectId,
   jvmWeeklyApiTimeoutMs,
+  jvmWeeklyApiMaxResponseBytes,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
@@ -126,42 +179,72 @@ export function createJavaWeeklyClient({
   const requestTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0
     ? Math.min(configuredTimeoutMs, 12_000)
     : 12_000;
+  const configuredMaxResponseBytes = Number.parseInt(
+    (Number.isFinite(jvmWeeklyApiMaxResponseBytes) ? String(jvmWeeklyApiMaxResponseBytes) : readOptionalText(jvmWeeklyApiMaxResponseBytes))
+      || readOptionalText(env.JVM_WEEKLY_API_MAX_RESPONSE_BYTES),
+    10,
+  );
+  const maxResponseBytes = Number.isSafeInteger(configuredMaxResponseBytes) && configuredMaxResponseBytes > 0
+    ? configuredMaxResponseBytes
+    : 1_048_576;
+
   async function requestJson({
     context,
     method = 'GET',
     path,
+    command,
     body,
     editSession,
     dataProjectId,
     deadlineAtMs,
     attemptTimeoutMs = requestTimeoutMs,
-    retry = true,
+    retry,
+    mutation = !['GET', 'HEAD'].includes(method),
   }) {
-    if (!baseUrl) {
-      throw createHttpError(503, '캐시플로 서버 주소가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_unconfigured');
-    }
     const requestStartedAt = Date.now();
+    const endpoint = safeEndpoint(baseUrl);
+    const commandName = readOptionalText(command) || method.toLowerCase();
+    const metadata = (attempt, upstreamStatus, retryable, mutationOutcome) => ({
+      endpoint,
+      command: commandName,
+      attempt,
+      elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+      upstreamStatus,
+      retryable,
+      mutationOutcome,
+    });
+    if (!baseUrl) {
+      throw attachTransportMetadata(
+        createHttpError(503, '캐시플로 서버 주소가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_unconfigured'),
+        metadata(0, undefined, false, mutation ? 'not_started' : 'failed'),
+      );
+    }
     const callerDeadlineAtMs = Number.isFinite(Number(deadlineAtMs))
       ? Number(deadlineAtMs)
       : Number.POSITIVE_INFINITY;
     const boundedAttemptTimeoutMs = Math.min(Math.max(1, attemptTimeoutMs), 24_000);
     const requestDeadlineAtMs = callerDeadlineAtMs;
     const callerDeadlineReached = () => Number.isFinite(callerDeadlineAtMs) && Date.now() >= callerDeadlineAtMs;
-    const callerDeadlineError = () => createHttpError(
-      504,
-      '월 결산 서버 처리 시간이 초과되었습니다. 서버 결과를 다시 조회해 주세요.',
-      'cashflow_month_close_route_timeout',
+    const callerDeadlineError = (attempt, mutationOutcome) => attachTransportMetadata(
+      createHttpError(
+        504,
+        '월 결산 서버 처리 시간이 초과되었습니다. 서버 결과를 다시 조회해 주세요.',
+        'cashflow_month_close_route_timeout',
+      ),
+      metadata(attempt, undefined, true, mutationOutcome),
     );
-    const send = async () => {
+    const send = async (attempt) => {
       const remainingMs = requestDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
-        if (callerDeadlineReached()) throw callerDeadlineError();
+        if (callerDeadlineReached()) throw callerDeadlineError(attempt, mutation ? 'not_started' : 'failed');
         const error = new Error('JVM weekly API total timeout exceeded');
         error.name = 'AbortError';
         throw error;
       }
       const controller = new AbortController();
       const timeoutMs = Math.min(boundedAttemptTimeoutMs, remainingMs);
+      let sent = false;
+      let upstreamStatus;
       let timeout;
       const timeoutPromise = new Promise((_resolve, reject) => {
         timeout = setTimeout(() => {
@@ -186,45 +269,69 @@ export function createJavaWeeklyClient({
           dataProjectId,
           signal: controller.signal,
         });
+        sent = true;
         const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
           method,
           headers,
           body: method === 'GET' ? undefined : JSON.stringify(body || {}),
           signal: controller.signal,
         });
-        const payload = await readJsonResponse(response);
-        if (!response.ok) throw readJavaError(response.status, payload);
-        return payload;
+        upstreamStatus = response.status;
+        const parsed = await readJsonResponse(response, maxResponseBytes);
+        if (!response.ok) {
+          throw attachTransportMetadata(
+            readJavaError(response.status, parsed.payload),
+            metadata(attempt, response.status, response.status >= 500, mutation && response.status >= 500 ? 'uncertain' : 'failed'),
+          );
+        }
+        if (parsed.empty || parsed.malformed) {
+          throw attachTransportMetadata(
+            createHttpError(502, '현금흐름 저장 서버의 응답을 확인할 수 없습니다.', 'jvm_weekly_response_invalid'),
+            metadata(attempt, response.status, false, mutation ? 'uncertain' : 'failed'),
+          );
+        }
+        return parsed.payload;
       })();
       try {
         return await Promise.race([attemptPromise, timeoutPromise]);
+      } catch (error) {
+        if (Number.isInteger(error?.statusCode)) {
+          if (!Number.isInteger(error.attempt)) {
+            attachTransportMetadata(
+              error,
+              metadata(attempt, upstreamStatus, false, mutation && sent ? 'uncertain' : (mutation ? 'not_started' : 'failed')),
+            );
+          }
+          throw error;
+        }
+        throw markTransportFailure(attachTransportMetadata(
+          createHttpError(
+            503,
+            '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            'jvm_weekly_api_unreachable',
+          ),
+          metadata(attempt, upstreamStatus, true, mutation && sent ? 'uncertain' : (mutation ? 'not_started' : 'failed')),
+        ));
       } finally {
         clearTimeout(timeout);
       }
     };
 
+    const retryAllowed = retry !== false
+      && (!mutation || Boolean(readOptionalText(body?.idempotencyKey)));
+
     try {
-      return await send();
+      return await send(1);
     } catch (error) {
-      if (Number.isInteger(error?.statusCode)) throw error;
-      if (callerDeadlineReached()) throw callerDeadlineError();
-      if (!retry) {
-        throw createHttpError(
-          503,
-          '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
-          'jvm_weekly_api_unreachable',
-        );
-      }
+      if (!error?.transportFailure) throw error;
+      if (callerDeadlineReached()) throw callerDeadlineError(1, error.mutationOutcome);
+      if (!retryAllowed) throw error;
       try {
-        return await send();
+        return await send(2);
       } catch (retryError) {
-        if (Number.isInteger(retryError?.statusCode)) throw retryError;
-        if (callerDeadlineReached()) throw callerDeadlineError();
-        throw createHttpError(
-          503,
-          '현금흐름 저장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.',
-          'jvm_weekly_api_unreachable',
-        );
+        if (!retryError?.transportFailure) throw retryError;
+        if (callerDeadlineReached()) throw callerDeadlineError(2, retryError.mutationOutcome);
+        throw retryError;
       }
     }
   }
@@ -238,6 +345,26 @@ export function createJavaWeeklyClient({
       context,
       method: 'GET',
       path: `/api/v1/cashflow/${normalizedProjectId}`,
+      command: 'get_cashflow_snapshot',
+    });
+  }
+
+  async function getCashflowSheetOperationStatus({ context, projectId, operationType, idempotencyKey }) {
+    const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
+    const normalizedOperationType = readOptionalText(operationType);
+    const normalizedIdempotencyKey = readOptionalText(idempotencyKey);
+    if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
+    if (!['MONTH_APPLY', 'BATCH_APPLY', 'ANNUAL_APPLY'].includes(normalizedOperationType)) {
+      throw createHttpError(400, 'operationType is invalid.', 'cashflow_sheet_operation_type_invalid');
+    }
+    if (!normalizedIdempotencyKey) {
+      throw createHttpError(400, 'idempotencyKey is required.', 'idempotency_key_required');
+    }
+    return requestJson({
+      context,
+      method: 'GET',
+      path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/operations?operationType=${encodeURIComponent(normalizedOperationType)}&idempotencyKey=${encodeURIComponent(normalizedIdempotencyKey)}`,
+      command: 'get_cashflow_sheet_operation_status',
     });
   }
 
@@ -274,6 +401,7 @@ export function createJavaWeeklyClient({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/apply`,
+      command: 'apply_cashflow_sheet',
       dataProjectId: bffDataProjectId,
       body: {
         idempotencyKey,
@@ -326,6 +454,7 @@ export function createJavaWeeklyClient({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/batch/apply`,
+      command: 'apply_cashflow_sheet_batch',
       dataProjectId: bffDataProjectId,
       attemptTimeoutMs: 24_000,
       retry: false,
@@ -364,6 +493,8 @@ export function createJavaWeeklyClient({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/formulas/preflight`,
+      command: 'validate_cashflow_sheet_formulas',
+      mutation: false,
       dataProjectId: bffDataProjectId,
       body: {
         sourceYear,
@@ -420,6 +551,7 @@ export function createJavaWeeklyClient({
       context,
       method: 'POST',
       path: `/api/v1/cashflow/${normalizedProjectId}/sheet-lab/annual/apply`,
+      command: 'apply_cashflow_annual_total',
       dataProjectId: bffDataProjectId,
       body: { idempotencyKey, sourceRevision, year, expectedRevision, cells },
     });
@@ -432,6 +564,7 @@ export function createJavaWeeklyClient({
   return {
     requestJson,
     getCashflowSnapshot,
+    getCashflowSheetOperationStatus,
     applyCashflowSheetLab,
     applyCashflowSheetBatch,
     validateCashflowSheetFormulas,

@@ -230,6 +230,11 @@
       "indexes": []
     },
     {
+      "collectionGroup": "cashflow_month_close_request_months",
+      "fieldPath": "cells",
+      "indexes": []
+    },
+    {
       "collectionGroup": "cashflow_sheet_snapshot_years",
       "fieldPath": "annualCells",
       "indexes": []

@@ -27,12 +27,30 @@ const monthlyContract = {
   cells: [{ mode: 'projection', weekNo: 1, cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 }],
 };
 
+function responseBody(payload) {
+  return new Response(JSON.stringify(payload)).body;
+}
+
+function chunkedResponse(chunks, { status = 200, headers = {} } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    body: new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    }),
+  };
+}
+
 describe('Java weekly cashflow client', () => {
   it('forwards an annual total to the dedicated JVM authority endpoint', async () => {
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', year: 2025 }),
+      body: responseBody({ ok: true, projectId: 'project-a', year: 2025 }),
       url,
       init,
     }));
@@ -62,7 +80,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async (_url, init) => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', sourceSheetKey: 'cashflow-sheet-lab' }),
+      body: responseBody({ ok: true, projectId: 'project-a', sourceSheetKey: 'cashflow-sheet-lab' }),
       init,
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
@@ -101,7 +119,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', months: [] }),
+      body: responseBody({ ok: true, projectId: 'project-a', months: [] }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
     const months = [
@@ -145,7 +163,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a', months: [] }),
+      body: responseBody({ ok: true, projectId: 'project-a', months: [] }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -170,7 +188,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({
+      body: responseBody({
         ok: true,
         projectId: 'project-a',
         annualCheckCount: 1,
@@ -216,7 +234,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(response),
+      body: responseBody(response),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -241,7 +259,7 @@ describe('Java weekly cashflow client', () => {
         setTimeout(() => resolve({
           ok: false,
           status: 409,
-          text: async () => JSON.stringify({ code: 'cashflow_revision_conflict', message: '원장 revision이 변경되었습니다.' }),
+          body: responseBody({ code: 'cashflow_revision_conflict', message: '원장 revision이 변경되었습니다.' }),
         }), 10);
       }));
       const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
@@ -287,7 +305,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -309,7 +327,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-b' }),
+      body: responseBody({ ok: true, projectId: 'project-b' }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -326,7 +344,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
     const env = stageEnv({
       FIREBASE_PROJECT_ID: undefined,
@@ -349,7 +367,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -369,7 +387,7 @@ describe('Java weekly cashflow client', () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+        body: responseBody({ ok: true, projectId: 'project-a' }),
       });
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -388,7 +406,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, projectId: 'project-a' }),
+      body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
     const serviceAccountJson = JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' });
     const resolveIdentityToken = vi.fn(async () => 'stage-id-token');
@@ -428,7 +446,14 @@ describe('Java weekly cashflow client', () => {
       projectId: 'project-a',
       idempotencyKey: 'apply-unreachable-1',
       ...monthlyContract,
-    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      attempt: 2,
+      retryable: true,
+      mutationOutcome: 'uncertain',
+      elapsedMs: expect.any(Number),
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -447,7 +472,13 @@ describe('Java weekly cashflow client', () => {
       projectId: 'project-a',
       idempotencyKey: 'apply-timeout-1',
       ...monthlyContract,
-    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      attempt: 2,
+      retryable: true,
+      mutationOutcome: 'uncertain',
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(fetchImpl.mock.calls.every(([, init]) => init.signal instanceof AbortSignal)).toBe(true);
   });
@@ -470,7 +501,13 @@ describe('Java weekly cashflow client', () => {
       projectId: 'project-a',
       idempotencyKey: 'apply-token-timeout-1',
       ...monthlyContract,
-    })).rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      attempt: 2,
+      retryable: true,
+      mutationOutcome: 'not_started',
+    });
     expect(resolveIdentityToken.mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(resolveIdentityToken.mock.calls.every(([input]) => input.signal instanceof AbortSignal)).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -564,7 +601,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: false,
       status: 422,
-      text: async () => JSON.stringify({
+      body: responseBody({
         code: 'atomic_write_limit_exceeded',
         message: 'Cashflow apply requires 501 writes.',
         expectedWriteCount: 501,
@@ -589,7 +626,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => ({
       ok: false,
       status: 500,
-      text: async () => JSON.stringify({ code: 'internal_error', error: 'Internal Server Error', message: 'unexpected failure' }),
+      body: responseBody({ code: 'internal_error', error: 'Internal Server Error', message: 'unexpected failure' }),
     }));
     const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
 
@@ -603,5 +640,239 @@ describe('Java weekly cashflow client', () => {
       code: 'jvm_weekly_api_internal_error',
       upstreamStatus: 500,
     });
+  });
+
+  it('reads a JSON response from bounded chunks when Content-Length is missing', async () => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      '{"ok":true,',
+      '"projectId":"project-a"}',
+    ]));
+    const client = createJavaWeeklyClient({
+      env: stageEnv(),
+      fetchImpl,
+      jvmWeeklyApiMaxResponseBytes: 64,
+    });
+
+    await expect(client.getCashflowSnapshot({ context, projectId: 'project-a' }))
+      .resolves.toEqual({ ok: true, projectId: 'project-a' });
+  });
+
+  it('reads authoritative sheet operation status with the stable type and raw key query', async () => {
+    const payload = {
+      version: '1', projectId: 'project-a', operationType: 'MONTH_APPLY',
+      idempotencyKeyHash: `sha256:${'a'.repeat(64)}`, status: 'NOT_FOUND',
+      appliedMonths: [], appliedYears: [], annualRevisions: [],
+    };
+    const fetchImpl = vi.fn(async () => chunkedResponse([JSON.stringify(payload)]));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.getCashflowSheetOperationStatus({
+      context,
+      projectId: 'project-a',
+      operationType: 'MONTH_APPLY',
+      idempotencyKey: 'month key/1',
+    })).resolves.toEqual(payload);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://stage-jvm.example/api/v1/cashflow/project-a/sheet-lab/operations?operationType=MONTH_APPLY&idempotencyKey=month%20key%2F1',
+    );
+    expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
+  });
+
+  it.each([
+    ['missing', null],
+    ['empty', chunkedResponse([''])],
+    ['malformed', chunkedResponse(['{"ok":'])],
+  ])('rejects a %s successful response with a stable boundary error', async (_case, response) => {
+    const fetchImpl = vi.fn(async () => response || {
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: null,
+    });
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.getCashflowSnapshot({ context, projectId: 'project-a' })).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'jvm_weekly_response_invalid',
+      endpoint: 'https://stage-jvm.example',
+      command: 'get_cashflow_snapshot',
+      attempt: 1,
+      upstreamStatus: 200,
+      retryable: false,
+      mutationOutcome: 'failed',
+      elapsedMs: expect.any(Number),
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [401, 'weekly_auth_required', 401, false, 'failed'],
+    [403, 'weekly_forbidden', 403, false, 'failed'],
+    [404, 'weekly_not_found', 404, false, 'failed'],
+    [409, 'weekly_conflict', 409, false, 'failed'],
+    [422, 'weekly_invalid', 422, false, 'failed'],
+    [500, 'internal_error', 503, true, 'uncertain'],
+  ])('preserves a structured upstream %i response', async (
+    upstreamStatus,
+    upstreamCode,
+    statusCode,
+    retryable,
+    mutationOutcome,
+  ) => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      JSON.stringify({ code: upstreamCode, message: 'safe upstream message' }),
+    ], { status: upstreamStatus }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    const expectedCode = upstreamStatus === 500 ? 'jvm_weekly_api_internal_error' : upstreamCode;
+    await expect(client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/weekly-expenses/project-a/command',
+      command: 'save_weekly_expense',
+      body: { idempotencyKey: 'stable-error-1' },
+    })).rejects.toMatchObject({
+      statusCode,
+      code: expectedCode,
+      upstreamStatus,
+      retryable,
+      mutationOutcome,
+      command: 'save_weekly_expense',
+      attempt: 1,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['empty 422', 422, '', 422, 'java_weekly_api_error', false, 'failed'],
+    ['malformed 422', 422, '{', 422, 'java_weekly_api_error', false, 'failed'],
+    ['empty 500', 500, '', 503, 'jvm_weekly_api_internal_error', true, 'uncertain'],
+    ['malformed 500', 500, '{', 503, 'jvm_weekly_api_internal_error', true, 'uncertain'],
+  ])('handles a %s error body without crashing', async (
+    _case,
+    upstreamStatus,
+    responseText,
+    statusCode,
+    code,
+    retryable,
+    mutationOutcome,
+  ) => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([responseText], { status: upstreamStatus }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/weekly-expenses/project-a/command',
+      body: {},
+      retry: true,
+    })).rejects.toMatchObject({
+      statusCode,
+      code,
+      upstreamStatus,
+      retryable,
+      mutationOutcome,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a declared oversized body before reading it', async () => {
+    const read = vi.fn();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': '65' }),
+      body: { getReader: () => ({ read, cancel: vi.fn(), releaseLock: vi.fn() }) },
+    }));
+    const client = createJavaWeeklyClient({
+      env: stageEnv(),
+      fetchImpl,
+      jvmWeeklyApiMaxResponseBytes: 64,
+    });
+
+    await expect(client.getCashflowSnapshot({ context, projectId: 'project-a' })).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'jvm_weekly_response_too_large',
+      upstreamStatus: 200,
+      retryable: false,
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('stops reading when an inaccurate Content-Length overflows mid-stream', async () => {
+    const fetchImpl = vi.fn(async () => chunkedResponse([
+      '{"value":"1234567890',
+      '1234567890"}',
+    ], { headers: { 'content-length': '2' } }));
+    const client = createJavaWeeklyClient({
+      env: stageEnv(),
+      fetchImpl,
+      jvmWeeklyApiMaxResponseBytes: 24,
+    });
+
+    await expect(client.getCashflowSnapshot({ context, projectId: 'project-a' })).rejects.toMatchObject({
+      statusCode: 502,
+      code: 'jvm_weekly_response_too_large',
+      upstreamStatus: 200,
+      retryable: false,
+    });
+  });
+
+  it('classifies a connection reset while reading a mutation response as uncertain', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":'));
+          controller.error(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }));
+        },
+      }),
+    }));
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    const error = await client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/weekly-expenses/sheet-secret/save-draft',
+      command: 'save_weekly_expense',
+      body: {},
+    }).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      endpoint: 'https://stage-jvm.example',
+      command: 'save_weekly_expense',
+      attempt: 1,
+      retryable: true,
+      mutationOutcome: 'uncertain',
+    });
+    expect(JSON.stringify(error)).not.toContain('sheet-secret');
+    expect(JSON.stringify(error)).not.toContain('service-token');
+    expect(JSON.stringify(error)).not.toContain(context.actorEmail);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('does not retry a mutation without an idempotency key', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+    });
+    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+
+    await expect(client.requestJson({
+      context,
+      method: 'POST',
+      path: '/api/v1/weekly-expenses/project-a/command',
+      body: {},
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      attempt: 1,
+      retryable: true,
+      mutationOutcome: 'uncertain',
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });

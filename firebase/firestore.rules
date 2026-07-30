@@ -124,7 +124,9 @@ service cloud.firestore {
         || collection in ['cashflow_sheet_stage_years']
         || collection in ['cashflow_change_candidates']
         || collection in ['cashflow_month_close_requests']
+        || collection in ['cashflow_month_close_request_months']
         || collection in ['cashflow_month_close_request_audits']
+        || collection in ['cashflow_cumulative_close_heads']
         || collection in ['monthly_closes']
         || collection in ['monthly_close_versions']
         || collection in ['weekly_api_idempotency']
@@ -309,7 +311,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /orgs/{orgId}/cashflow_month_close_request_months/{monthId} {
+      allow read, write: if false;
+    }
+
     match /orgs/{orgId}/cashflow_month_close_request_audits/{auditId} {
+      allow read, write: if false;
+    }
+
+    match /orgs/{orgId}/cashflow_cumulative_close_heads/{projectId} {
       allow read, write: if false;
     }
 
