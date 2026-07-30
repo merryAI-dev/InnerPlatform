@@ -4,9 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'AdminApprovalPage.tsx'), 'utf8');
 const monthlySource = readFileSync(resolve(import.meta.dirname, 'MonthlySettlementApprovalSection.tsx'), 'utf8');
+const routesSource = readFileSync(resolve(import.meta.dirname, '../../routes.tsx'), 'utf8');
 
 describe('AdminApprovalPage shell contract', () => {
   it('shows monthly settlement requests before the project registration queue', () => {
+    expect(routesSource).toContain("{ path: 'projects/migration-audit', element: <S C={AdminApprovalPage} /> }");
+    expect(routesSource).not.toContain("{ path: 'projects/migration-audit', element: <S C={ProjectMigrationAuditPage} /> }");
     expect(source).toContain('ProjectMigrationAuditPage');
     expect(source).toContain('<ProjectMigrationAuditPage embedded reviewScope="pending" />');
     expect(source.indexOf('<MonthlySettlementApprovalSection')).toBeLessThan(
