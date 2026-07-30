@@ -42,10 +42,14 @@ import {
   setCashflowMonthCloseQaDateTimeViaBff,
   completeCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyUpdateViaBff,
+  fetchCashflowWeeklyComplianceViaBff,
+  fetchCashflowAppliedCellChangesViaBff,
+  type CashflowCumulativeCloseScope,
   reopenCashflowWeeklyUpdateViaBff,
   requestCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
   fetchPendingCashflowMonthCloseRequestsViaBff,
+  fetchCashflowMonthCloseRequestMonthsViaBff,
   reviewCashflowMonthCloseRequestViaBff,
   requestCashflowMonthReopenViaBff,
   decideCashflowMonthReopenViaBff,
@@ -71,6 +75,39 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('preserves the server cumulative close scope without deriving counts', async () => {
+    const cumulativeCloseScope = {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      fromMonth: '2023-01',
+      throughMonth: '2026-08',
+      lockRange: { fromMonth: '2023-01', fromWeekNo: 1, throughMonth: '2026-08', throughWeekNo: 5 },
+      monthCount: 44,
+      weekCount: 220,
+      cellCount: 7040,
+      source: {
+        sourceRevision: 'source-1',
+        targetRevision: 'target-1',
+        capturedAt: '2026-07-01T00:00:00.000Z',
+        spreadsheetId: 'spreadsheet-a',
+        spreadsheetTitle: '2026 사업비 관리 시트',
+        selectedSheetName: 'cashflow(사용내역 연동)',
+        spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+      },
+    } satisfies CashflowCumulativeCloseScope;
+    const client = asMockClient({
+      get: vi.fn(async () => ({ data: { dashboard: { cumulativeCloseScope } } })),
+      post: vi.fn(), request: vi.fn(),
+    });
+
+    const result = await fetchCashflowMonthCloseViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectId: 'p001', yearMonth: '2026-08', client,
+    });
+
+    expect(result.dashboard?.cumulativeCloseScope).toEqual(cumulativeCloseScope);
+    expect(result.dashboard?.cumulativeCloseScope?.weekCount).toBe(220);
+    expect(result.dashboard?.cumulativeCloseScope?.cellCount).toBe(7040);
+  });
+
   it('sends cashflow metadata intents with the exact project lease and no client audit fields', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({ data: { ok: true } })), get: vi.fn(), request: vi.fn(),
@@ -152,6 +189,7 @@ describe('platform-bff-client', () => {
     await requestCashflowMonthCloseViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'month-close-1',
       payload: {
+        contractVersion: 'cashflow-cumulative-close-v2',
         yearMonth: '2026-06',
         expectedRevision: 2,
         expectedApproverUid: 'head-1',
@@ -171,10 +209,14 @@ describe('platform-bff-client', () => {
     await fetchPendingCashflowMonthCloseRequestsViaBff({
       tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, client,
     });
+    await fetchCashflowMonthCloseRequestMonthsViaBff({
+      tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, projectId: 'p001',
+      requestId: 'p001-2026-06', requestRevision: 1, cursor: '2023-12', limit: 12, client,
+    });
     await reviewCashflowMonthCloseRequestViaBff({
       tenantId: 'mysc', actor: { uid: 'head-1', role: 'viewer' }, projectId: 'p001',
       requestId: 'p001-2026-06', idempotencyKey: 'month-close-review-1',
-      payload: { decision: 'APPROVE', expectedRevision: 0, reason: '확인 완료' }, client,
+      payload: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' }, client,
     });
     await requestCashflowMonthReopenViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', idempotencyKey: 'reopen-request-1',
@@ -196,6 +238,7 @@ describe('platform-bff-client', () => {
       idempotencyKey: 'month-close-1',
       timeoutMs: 27_000,
       body: expect.objectContaining({
+        contractVersion: 'cashflow-cumulative-close-v2',
         yearMonth: '2026-06',
         expectedRevision: 2,
         closeInput: { yearMonth: '2026-06' },
@@ -208,9 +251,14 @@ describe('platform-bff-client', () => {
     );
     expect(client.get).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/current?yearMonth=2026-06', expect.objectContaining({ retries: 0 }));
     expect(client.get).toHaveBeenNthCalledWith(3, '/api/v1/cashflow/month-close/requests/pending', expect.objectContaining({ retries: 0 }));
+    expect(client.get).toHaveBeenNthCalledWith(
+      4,
+      '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/months?limit=12&cursor=2023-12',
+      expect.objectContaining({ retries: 0 }),
+    );
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/review', expect.objectContaining({
       idempotencyKey: 'month-close-review-1',
-      body: { decision: 'APPROVE', expectedRevision: 0, reason: '확인 완료' },
+      body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' },
       timeoutMs: 27_000,
     }));
     expect(client.post).toHaveBeenNthCalledWith(
@@ -324,7 +372,7 @@ describe('platform-bff-client', () => {
       tenantId: 'mysc', actor, projectId: 'p001', qaDateTime: '2026-07-16T23:59', client,
     });
     await completeCashflowWeeklyUpdateViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, updateResult: 'CHANGED', client,
     });
     await fetchCashflowWeeklyUpdateViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, client,
@@ -339,7 +387,7 @@ describe('platform-bff-client', () => {
       body: { qaDateTime: '2026-07-16T23:59' },
     }));
     expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
-      body: { yearMonth: '2026-06', weekNo: 2 },
+      body: { yearMonth: '2026-06', weekNo: 2, updateResult: 'CHANGED' },
     }));
     expect(client.get).toHaveBeenNthCalledWith(
       2,
@@ -360,22 +408,36 @@ describe('platform-bff-client', () => {
     const actor = { uid: 'finance-1', role: 'finance' };
 
     await completeCashflowWeeklyUpdateViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', client,
+      tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', updateResult: 'NO_CHANGES', client,
     });
     await completeCashflowWeeklyUpdateViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', weekNo: 0, client,
+      tenantId: 'mysc', actor, projectId: 'p001', weekNo: 0, updateResult: 'CHANGED', client,
     });
 
     expect(client.post).toHaveBeenNthCalledWith(
       1,
       '/api/v1/cashflow/p001/weekly-update-complete',
-      expect.objectContaining({ body: { yearMonth: '2026-06', weekNo: undefined } }),
+      expect.objectContaining({ body: { yearMonth: '2026-06', weekNo: undefined, updateResult: 'NO_CHANGES' } }),
     );
     expect(client.post).toHaveBeenNthCalledWith(
       2,
       '/api/v1/cashflow/p001/weekly-update-complete',
-      expect.objectContaining({ body: { yearMonth: undefined, weekNo: 0 } }),
+      expect.objectContaining({ body: { yearMonth: undefined, weekNo: 0, updateResult: 'CHANGED' } }),
     );
+  });
+
+  it('reads canonical weekly compliance with bounded cursor paging', async () => {
+    const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: { items: [], nextCursor: '', onTimeCount: 0, missedCount: 0 } })), request: vi.fn() });
+    await fetchCashflowWeeklyComplianceViaBff({ tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', limit: 50, cursor: 'opaque/cursor', client });
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/weekly-update-compliance?limit=50&cursor=opaque%2Fcursor', expect.objectContaining({ retries: 0 }));
+  });
+
+  it('reads paged applied cell changes without changing state or amounts', async () => {
+    const page = { items: [{ beforeState: 'EMPTY', beforeAmount: null, afterState: 'ZERO', afterAmount: 0 }], nextCursor: 'next/cursor' };
+    const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: page })), request: vi.fn() });
+    const result = await fetchCashflowAppliedCellChangesViaBff({ tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', limit: 50, cursor: 'opaque/cursor', client });
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/applied-cell-changes?limit=50&cursor=opaque%2Fcursor', expect.objectContaining({ retries: 0 }));
+    expect(result).toEqual(page);
   });
 
   it('routes projection through the fenced JVM-owned BFF endpoint', async () => {

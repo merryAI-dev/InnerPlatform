@@ -19,13 +19,20 @@ describe('CashflowWeeklyPage read-only status surface', () => {
     expect(source).toContain('sticky top-0');
     expect(source).toContain('sticky left-0');
     expect(source).toContain('>요약<');
-    expect(source).toContain('weeklySettlementCompletedKeys');
+    expect(source).toContain('fetchCashflowWeeklyComplianceViaBff');
+    expect(source).toContain("status === 'ON_TIME' || status === 'COMPLETED_LATE'");
+    expect(source).toContain("week.status === 'MISSED'");
+    expect(source).toContain("'완료 대기'");
     expect(source).toContain("settlementCompleted ? '완료' : '미완료'");
     expect(source).toContain("completedSettlementCount === monthWeeks.length ? '완료' : '미완료'");
     expect(source).not.toContain('결산 완료');
     expect(source).not.toContain('D-7');
     expect(source).not.toContain('최종 확정과 수정 잠금은 프로젝트별 월 결산 승인에서 처리합니다.');
     expect(source).toContain("toLocaleString('ko-KR')");
+    expect(source).toContain('limit: 50');
+    expect(source).toContain('이전 이력 더 불러오기');
+    expect(source).toContain('page.nextCursor === current.nextCursor');
+    expect(source).not.toContain('fetchCashflowMonthCloseViaBff');
   });
 
   it('is read-only and routes detailed work to the project cashflow screen', () => {

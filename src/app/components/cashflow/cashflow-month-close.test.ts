@@ -7,6 +7,7 @@ import {
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
+  isCashflowWeekLockedByRange,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
   resolveCashflowEvidenceScope,
@@ -53,7 +54,17 @@ describe('cashflow month close contract', () => {
   it('locks pending approval states and unlocks a rejected request', () => {
     expect(isCashflowMonthCloseRequestLocked('PENDING')).toBe(true);
     expect(isCashflowMonthCloseRequestLocked('APPROVING')).toBe(true);
+    expect(isCashflowMonthCloseRequestLocked('UNCERTAIN')).toBe(true);
     expect(isCashflowMonthCloseRequestLocked('REJECTED')).toBe(false);
+  });
+
+  it('locks every server-declared cumulative week and leaves later weeks open', () => {
+    const lockRange = { fromMonth: '2023-01', fromWeekNo: 1, throughMonth: '2026-08', throughWeekNo: 5 };
+    expect(isCashflowWeekLockedByRange(lockRange, '2023-01', 1)).toBe(true);
+    expect(isCashflowWeekLockedByRange(lockRange, '2025-04', 3)).toBe(true);
+    expect(isCashflowWeekLockedByRange(lockRange, '2026-08', 5)).toBe(true);
+    expect(isCashflowWeekLockedByRange(lockRange, '2022-12', 5)).toBe(false);
+    expect(isCashflowWeekLockedByRange(lockRange, '2026-09', 1)).toBe(false);
   });
 
   it('rejects stale request reads by generation and selected month', () => {

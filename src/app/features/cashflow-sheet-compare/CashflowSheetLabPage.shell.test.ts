@@ -106,9 +106,13 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('linkedSpreadsheetTitle');
     expect(pageSource).not.toContain('파일 이름 확인 전');
     expect(pageSource).not.toContain('savedConfig?.spreadsheetId || savedConfig?.value');
-    expect(pageSource).toContain('시트 접근 권한이 필요한가요?');
-    expect(pageSource).toContain('공유 계정 확인');
+    expect(pageSource).toContain('서비스 계정을 Google Sheet 편집자로 공유');
+    expect(pageSource).toContain('다시 불러오기');
     expect(pageSource).toContain('공유 계정 복사');
+    expect(pageSource).toContain('void handleLoadShareAccount({ forceHydrate: true });');
+    expect(pageSource).toContain('서비스 계정 이메일을 확인하지 못했습니다. 다시 불러오기를 눌러 주세요.');
+    expect(pageSource).not.toContain('공유 계정 확인을 다시 눌러 주세요.');
+    expect(pageSource).toContain('Google Sheet 공유 창에서 위 계정을 추가하고 권한을 <strong>편집자</strong>');
     expect(pageSource).not.toContain('연결된 시트');
     expect(pageSource).not.toContain('showSetupSteps');
     expect(pageSource).not.toContain('이미 연결된 시트 설정이 있습니다.');
@@ -146,10 +150,12 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain("staged.status === 'BLOCKED'");
     expect(pageSource).toContain('staged?.closedMonthDifferences');
     expect(pageSource).toContain('결산 후 값이 달라요');
-    expect(pageSource).toContain('외 ${hiddenWeekCount}개 주차');
+    expect(pageSource).toContain('closedMonthManifestComplete');
+    expect(pageSource).toContain('closedMonthDifferenceManifestHash');
+    expect(pageSource).toContain('closedMonthDifferenceCount');
     expect(pageSource).toContain('캐시플로우로 이동');
-    expect(pageSource).toContain('max-w-[360px]');
-    expect(pageSource).toContain('max-h-28');
+    expect(pageSource).toContain('max-w-[760px]');
+    expect(pageSource).toContain('aria-label="결산 후 변경 후보 전체 목록"');
     expect(pageSource).not.toContain('stageCandidates');
     expect(pageSource).not.toContain('readyCtaClass');
     expect(pageSource).not.toContain('primaryCta');
@@ -228,6 +234,22 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('totalDurationMs');
     expect(pageSource).toContain("logCashflowLab('overwrite.sheet_values.ok'");
     expect(pageSource).toContain("logCashflowLab('overwrite.sheet_values.error'");
+  });
+
+  it('shows exact closed-month changes and waits for explicit reason confirmation before apply', () => {
+    const stagedFlow = pageSource.slice(
+      pageSource.indexOf("if (staged.stagedLineCount === 0)"),
+      pageSource.indexOf("activeStep = 'apply'"),
+    );
+    expect(stagedFlow).toContain('staged.closedMonthDifferences?.length');
+    expect(stagedFlow).toContain('setClosedMonthStage(staged)');
+    expect(pageSource).toContain("change.mode === 'projection' ? 'Projection' : 'Actual'");
+    expect(pageSource).toContain('CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId');
+    expect(pageSource).toContain('change.beforeHadValue');
+    expect(pageSource).toContain('change.afterHadValue');
+    expect(pageSource).toContain('변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?');
+    expect(pageSource).toContain('!closedMonthChangeReason.trim()');
+    expect(pageSource).toContain('closedMonthStage,');
   });
 
   it('guides each project through the sheet workflow once per browser session', () => {

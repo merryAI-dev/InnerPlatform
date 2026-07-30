@@ -20,7 +20,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('makes final save create an approval request after server validation', () => {
-    expect(source).toContain('최종저장 · 월 결산 요청');
+    expect(source).toContain('누적 월결산 승인 요청');
     expect(source).toMatch(/fetchCashflowMonthCloseViaBff[\s\S]*requestCashflowMonthCloseViaBff/);
     expect(source).not.toContain('prepared.dashboard?.validation?.canClose');
     expect(source).toContain('expectedRevision: prepared.revision');
@@ -35,7 +35,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('requires an explicit human review before the compact month close is enabled', () => {
-    expect(source).toContain('결산 기준을 먼저 점검한 뒤 지정 조직장에게 승인을 요청합니다.');
+    expect(source).toContain('결산 기준과 서버가 고정한 누적 범위를 점검');
     expect(source).toContain('월 결산 승인 요청');
     expect(source).not.toContain('managementDecisions');
     expect(source).not.toContain('캐시플로 항목 사람 확인');
@@ -43,16 +43,28 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('monthCloseHumanReviewed');
     expect(source).toContain('humanReviewed: monthCloseHumanReviewed');
     expect(source).toContain('시트의 값과 일치하는지 직접 확인했습니다.');
-    expect(source).toContain('조직장이 최종 수정하기 전까지는 더 이상 수정할 수 없습니다.');
+    expect(source).toContain('위 누적 범위의 모든 주차가 수정 불가 상태로 잠깁니다.');
     expect(source).not.toContain('<span>주요 관리 항목</span>');
     expect(source).not.toMatch(/>확인<\/Button>/);
     expect(source).not.toMatch(/>해당 없음<\/Button>/);
     expect(source).not.toContain('!monthCloseProgress.complete');
+    expect(source).toContain('monthCloseResult?.dashboard?.cumulativeCloseScope');
+    expect(source).toContain('scope?.throughMonth === selectedMonth');
+    expect(source).toContain('prepared.dashboard?.cumulativeCloseScope');
+    expect(source).toContain('cumulativeRequestScope.fromMonth} ~ {cumulativeRequestScope.throughMonth');
+    expect(source).toContain('서버 고정 범위');
+    expect(source).toContain('cumulativeRequestScope.monthCount');
+    expect(source).toContain('cumulativeRequestScope.weekCount');
+    expect(source).toContain('cumulativeRequestScope.cellCount');
+    expect(source).not.toContain('cumulativeRequestMonthCount *');
+    expect(source).toContain('cumulativeRequestScope.source.spreadsheetUrl');
+    expect(source).toContain('저장 대상 시트 열기');
   });
 
   it('locks the pending month immediately and ignores stale request reads', () => {
     expect(source).toContain('isCashflowMonthCloseRequestLocked(monthCloseRequest?.status)');
-    expect(source).toContain('monthCloseStatusByMonth.set(yearMonth, monthCloseRequest.status)');
+    expect(source).toContain('isCashflowWeekLockedByRange(monthCloseRequest.lockRange');
+    expect(source).toContain("['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest.status)");
     expect(source).toContain("if (monthCloseStatus === 'CLOSED' || monthCloseStatus === 'PENDING' || monthCloseStatus === 'APPROVING') return 'bg-slate-200';");
     expect(source).toContain('disabled={monthCloseRequestLocked}');
     expect(source).toContain('monthCloseCurrentRequestGenerationRef');
@@ -90,7 +102,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('loadCashflowComparison');
     expect(source).not.toContain('cashflowSnapshot');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
-    expect(source).toContain('dashboard?.summary?.projectionProgressPercent');
+    expect(source).toContain('projectionSummary?.projectionSalesAndVatTotal');
+    expect(source).toContain('projectionSummary?.settlementMatches');
     expect(source).toContain('cashflowSheetMirror.sheetFacts?.metadata');
     expect(source).toContain("['사업 타입', sheetDashboardMetadata.businessType?.value]");
     expect(source).toContain("['전용 계좌사업', sheetDashboardMetadata.accountType?.value]");
@@ -238,10 +251,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('shows the registered contract amount and full Projection amount together', () => {
-    expect(source).toContain('프로젝트 등록 시 전체 계약 금액');
-    expect(source).toContain('현재 Projection 작성 전체 금액');
+    expect(source).toContain('프로젝트 등록 계약금액');
+    expect(source).toContain('전체 사업기간 Projection 매출액+매출부가세');
     expect(source).toContain('projectionContractAmount');
-    expect(source).toContain('projectionTotalIn');
+    expect(source).toContain('projectionSalesAndVatTotal');
+    expect(source).toContain('contractDifference');
+    expect(source).toContain('contractCoveragePercent');
+    expect(source).toContain('계약금액 0원');
     expect(source).not.toContain("? '총 계약금액 기준'");
   });
 
@@ -270,7 +286,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('handingOffToAutoStage');
   });
 
-  it('applies the pinned sheet directly and asks for a reason only when the JVM reports a late closed-month change', () => {
+  it('reuses the staged run when a closed-month change needs a reason', () => {
     expect(source).toContain("bffErrorCode(finalError) === 'cashflow_closed_month_reason_required'");
     expect(source).toContain('lateSheetChangeReason.trim(),');
     expect(source).toContain('lateSheetFormulaAccepted,');
@@ -301,6 +317,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('getServerReadCell({ targetYearMonth: week.yearMonth');
   });
 
+  it('shows the server service account immediately in project sheet setup', () => {
+    expect(source).toContain('setCashflowSystemAccountEmail(response.systemAccountEmail || response.accessPolicy?.serviceAccountEmail');
+    expect(source).toContain('먼저 서비스 계정을 Google Sheet 편집자로 공유해 주세요.');
+    expect(source).toContain('{cashflowSystemAccountEmail}');
+    expect(source).toContain('계정 복사');
+  });
+
   it('keeps legacy closed snapshots as evidence-only without rendering annual-year views', () => {
     expect(source).toContain("snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY'");
     expect(source).toContain('이전 형식의 월 결산입니다.');
@@ -325,7 +348,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
   it('shows month close only as a compact board action instead of a standalone panel', () => {
     expect(source).not.toContain('data-cashflow-block="month-close"');
     expect(source).toContain('type="month"');
-    expect(source).toContain('최종저장 · 월 결산');
+    expect(source).toContain('누적 월결산 승인 요청');
     expect(source).toContain('재오픈 요청');
   });
 
@@ -337,6 +360,21 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('주간 정산 완료');
     expect(source).toContain('completedBy');
     expect(source).toContain('기한 후 완료');
+    expect(source).toContain("updateResult: weeklyUpdateResult");
+    expect(source).toContain("['CHANGED', '변경사항 반영 완료'");
+    expect(source).toContain("['NO_CHANGES', '변경사항 없음'");
+    expect(source).toContain('향후 15개 재무주차');
+    expect(source).toContain('weeklyProjectionMissingCells(error)');
+    expect(source).toContain('fetchCashflowWeeklyComplianceViaBff');
+    expect(source).toContain("week.status === 'ON_TIME'");
+    expect(source).toContain("week.status === 'COMPLETED_LATE'");
+  });
+
+  it('keeps Projection and Actual on independent native horizontal scroll regions', () => {
+    expect(source).toContain('aria-label="Projection 현금흐름 가로 스크롤 표"');
+    expect(source).toContain('aria-label="Actual 현금흐름 가로 스크롤 표"');
+    expect(source).toContain('ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth"');
+    expect(source).not.toContain('onScroll=');
   });
 
   it('makes weekly and monthly settlement primary dashboard actions without a manual temporary-save button', () => {
@@ -387,6 +425,23 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('!sheetApplyResumeRequired && (');
   });
 
+  it('stops after staging closed-month differences until a reason is explicitly confirmed', () => {
+    const stageStart = source.indexOf('const applyStageResult = async');
+    const stageFlow = source.slice(
+      stageStart,
+      source.indexOf('setSheetRefreshLoading(true)', stageStart),
+    );
+    expect(stageFlow).toContain('result.closedMonthDifferences?.length');
+    expect(stageFlow).toContain('setLateSheetApply(result)');
+    expect(stageFlow.indexOf('setLateSheetApply(result)')).toBeLessThan(stageFlow.indexOf('handleApplyStagedSheetValues(result)'));
+    expect(source).toContain('이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?');
+    expect(source).not.toContain('결산 마감일이 지난 값');
+    expect(source).toContain('!lateSheetChangeReason.trim() || !lateSheetDiffComplete');
+    expect(source).toContain('closedMonthDifferenceManifestHash');
+    expect(source).toContain('closedMonthDifferenceCount');
+    expect(source).toContain('lateSheetChangeReason.trim(),');
+  });
+
   it('prioritizes local sheet preflight over a failed server refresh and never shows stale reopen actions', () => {
     const preparation = source.slice(source.indexOf('const monthClosePreparation'), source.indexOf('const handleOpenMonthCloseReview'));
     expect(preparation.indexOf('if (monthCloseCellsState.error)')).toBeLessThan(preparation.indexOf('if (monthCloseError)'));
@@ -423,6 +478,15 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트의 최신 값을 불러와 MYSCube 시트 반영 전 검증본으로 보관했습니다.');
     expect(source).toContain('latestCashflowEventSummary');
     expect(source).toContain('시트의 최신 값을 불러왔습니다.');
+  });
+
+  it('keeps applied history distinct from staged candidates and searchable', () => {
+    expect(source).toContain('AppliedCellHistory');
+    expect(source).toContain('일반 활동 기록');
+    expect(source).toContain('aria-label="일반 활동 기록 검색"');
+    expect(source).toContain('source {event.source ||');
+    expect(source).toContain('operation {event.operation || event.type}');
+    expect(source).toContain('aria-label="마감 후 변경 후보 전체 목록"');
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {

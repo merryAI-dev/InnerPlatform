@@ -43,6 +43,7 @@ import {
   fetchCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
   fetchCashflowMonthCloseQaDateTimeViaBff,
+  fetchCashflowWeeklyComplianceViaBff,
   requestCashflowMonthReopenViaBff,
   setCashflowMonthCloseQaDateTimeViaBff,
   type CashflowMonthCloseCell,
@@ -50,8 +51,10 @@ import {
   type CashflowMonthCloseResult,
   type CashflowMonthCloseRequest,
   type CashflowMonthCloseQaDateTimeSetting,
+  type CashflowCumulativeCloseScope,
   type CashflowDeadlineSummary,
   type CashflowActivityEvent,
+  type CashflowWeeklyComplianceItem,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
 import { getSnappedWeekScrollLeft } from './cashflow-board-scroll';
@@ -74,6 +77,7 @@ import {
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
+  isCashflowWeekLockedByRange,
   normalizeCashflowMonthCloseCells,
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
@@ -81,9 +85,18 @@ import {
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
+import { AppliedCellHistory } from './AppliedCellHistory';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
+}
+
+function isCumulativeCloseScopeReady(scope: CashflowCumulativeCloseScope | null | undefined, selectedMonth: string): scope is CashflowCumulativeCloseScope {
+  return scope?.throughMonth === selectedMonth
+    && scope.lockRange.throughMonth === selectedMonth
+    && scope.lockRange.fromMonth === scope.fromMonth
+    && scope.lockRange.fromWeekNo === 1
+    && scope.lockRange.throughWeekNo === 5;
 }
 
 function fmtSigned(n: number): string {
@@ -91,7 +104,7 @@ function fmtSigned(n: number): string {
   return `${n > 0 ? '+' : '-'}${Math.abs(n).toLocaleString('ko-KR')}`;
 }
 
-function formatSheetAppliedAt(value?: string): string {
+function formatSheetAppliedAt(value?: string | null): string {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -99,6 +112,20 @@ function formatSheetAppliedAt(value?: string): string {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date);
+}
+
+type WeeklyProjectionMissingCell = { yearMonth: string; weekNo: number; lineId: string };
+
+function weeklyProjectionMissingCells(error: unknown): WeeklyProjectionMissingCell[] {
+  const details = (error as { body?: { details?: { missingCells?: unknown } } })?.body?.details;
+  return Array.isArray(details?.missingCells)
+    ? details.missingCells.filter((cell): cell is WeeklyProjectionMissingCell => Boolean(
+      cell && typeof cell === 'object'
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(String((cell as WeeklyProjectionMissingCell).yearMonth))
+      && Number.isInteger(Number((cell as WeeklyProjectionMissingCell).weekNo))
+      && typeof (cell as WeeklyProjectionMissingCell).lineId === 'string',
+    ))
+    : [];
 }
 
 function decodeActivityActor(value?: string): string {
@@ -320,6 +347,8 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
+  const [cashflowSystemAccountEmail, setCashflowSystemAccountEmail] = useState('');
+  const [cashflowSystemAccountError, setCashflowSystemAccountError] = useState(false);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [monthCloseResult, setMonthCloseResult] = useState<CashflowMonthCloseResult | null>(null);
   const [monthCloseRequest, setMonthCloseRequest] = useState<CashflowMonthCloseRequest | null>(null);
@@ -334,6 +363,16 @@ export function CashflowProjectSheet({
   const [qaClockInput, setQaClockInput] = useState('');
   const [qaClockSetting, setQaClockSetting] = useState<CashflowMonthCloseQaDateTimeSetting | null>(null);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
+  const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
+  const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
+  const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
+  const [weeklyMissingCells, setWeeklyMissingCells] = useState<WeeklyProjectionMissingCell[]>([]);
+  const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
+  const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
+  const [weeklyComplianceHistoryLoading, setWeeklyComplianceHistoryLoading] = useState(false);
+  const [weeklyComplianceHistoryError, setWeeklyComplianceHistoryError] = useState('');
+  const [weeklyComplianceNextCursor, setWeeklyComplianceNextCursor] = useState('');
+  const [weeklyCompliancePageCount, setWeeklyCompliancePageCount] = useState(0);
   const [monthCloseReviewOpen, setMonthCloseReviewOpen] = useState(false);
   const [monthCloseHumanReviewed, setMonthCloseHumanReviewed] = useState(false);
   const [monthCloseDepositRows, setMonthCloseDepositRows] = useState<CashflowMonthCloseDepositReviewRow[]>(
@@ -349,12 +388,30 @@ export function CashflowProjectSheet({
   const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
   const [lateSheetChangeReason, setLateSheetChangeReason] = useState('');
   const [lateSheetFormulaAccepted, setLateSheetFormulaAccepted] = useState(false);
+  const [lateSheetDiffQuery, setLateSheetDiffQuery] = useState('');
+  const [lateSheetDiffMode, setLateSheetDiffMode] = useState('ALL');
+  const [lateSheetDiffMonth, setLateSheetDiffMonth] = useState('ALL');
+  const [lateSheetDiffWeek, setLateSheetDiffWeek] = useState('ALL');
   const [formulaMismatchPrompt, setFormulaMismatchPrompt] = useState<{
     stage: CashflowSheetLabStageResult;
     issues: CashflowFormulaMismatch[];
     closedMonthChangeReason: string;
   } | null>(null);
   const [sheetStageApplyLoading, setSheetStageApplyLoading] = useState(false);
+  const lateSheetDiffRows = useMemo(() => (lateSheetApply?.closedMonthDifferences || []).flatMap((month) =>
+    (month.changes || []).map((change) => ({ ...change, yearMonth: month.yearMonth }))), [lateSheetApply]);
+  const lateSheetDiffComplete = Boolean(lateSheetApply?.closedMonthDifferenceManifestHash)
+    && Number.isSafeInteger(lateSheetApply?.closedMonthDifferenceCount)
+    && lateSheetApply?.closedMonthDifferenceCount === lateSheetDiffRows.length
+    && (lateSheetApply?.closedMonthDifferences || []).every((month) => !month.truncatedChangeCount);
+  const filteredLateSheetDiffRows = lateSheetDiffRows.filter((change) => {
+    const label = CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId;
+    const query = lateSheetDiffQuery.trim().toLocaleLowerCase('ko-KR');
+    return (lateSheetDiffMode === 'ALL' || change.mode === lateSheetDiffMode)
+      && (lateSheetDiffMonth === 'ALL' || change.yearMonth === lateSheetDiffMonth)
+      && (lateSheetDiffWeek === 'ALL' || String(change.weekNo) === lateSheetDiffWeek)
+      && (!query || `${change.yearMonth} ${change.weekNo} ${change.mode} ${label} ${change.lineId}`.toLocaleLowerCase('ko-KR').includes(query));
+  });
   const executiveApproverOptions = useMemo(() => (members || [])
     .filter((member) => (
       Boolean(String(member.uid || '').trim())
@@ -373,6 +430,9 @@ export function CashflowProjectSheet({
   }, [project?.executiveApproverId, projectId]);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
   const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
+  const [cashflowEventQuery, setCashflowEventQuery] = useState('');
+  const [cashflowEventMode, setCashflowEventMode] = useState('ALL');
+  const [cashflowEventMonth, setCashflowEventMonth] = useState('ALL');
   const [revertingRunId, setRevertingRunId] = useState<string | null>(null);
   const monthCloseRequestGenerationRef = useRef(0);
   const monthCloseCurrentRequestGenerationRef = useRef(0);
@@ -399,7 +459,7 @@ export function CashflowProjectSheet({
     () => yearWeeks.map(hydrateWeekDates),
     [yearWeeks],
   );
-  const cashflowBoardScrollRef = useRef<HTMLDivElement | null>(null);
+  const cashflowBoardScrollRef = useRef<HTMLElement | null>(null);
   const [exitBusy, setExitBusy] = useState(false);
 
   const hasDirty = monthCloseReviewDirty;
@@ -440,6 +500,8 @@ export function CashflowProjectSheet({
     let cancelled = false;
     setCashflowSheetConfigLoaded(false);
     setCashflowSheetConfig(null);
+    setCashflowSystemAccountEmail('');
+    setCashflowSystemAccountError(false);
     if (!projectId || !orgId || !user?.uid) {
       setCashflowSheetConfigLoaded(true);
       return () => { cancelled = true; };
@@ -457,9 +519,16 @@ export function CashflowProjectSheet({
           if (!actor?.idToken) throw error;
           response = await getCashflowSheetLabShareAccountViaBff({ tenantId: orgId, actor, projectId, sourceYear: selectedYear });
         }
-        if (!cancelled) setCashflowSheetConfig(response.config?.value ? response.config : null);
+        if (!cancelled) {
+          setCashflowSheetConfig(response.config?.value ? response.config : null);
+          setCashflowSystemAccountEmail(response.systemAccountEmail || response.accessPolicy?.serviceAccountEmail || '');
+          setCashflowSystemAccountError(!(response.systemAccountEmail || response.accessPolicy?.serviceAccountEmail));
+        }
       } catch {
-        if (!cancelled) setCashflowSheetConfig(null);
+        if (!cancelled) {
+          setCashflowSheetConfig(null);
+          setCashflowSystemAccountError(true);
+        }
       } finally {
         if (!cancelled) setCashflowSheetConfigLoaded(true);
       }
@@ -691,7 +760,7 @@ export function CashflowProjectSheet({
   }, [canReviewReopen, isStageHost, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
 
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
-    if (!canCompleteWeekly) return;
+    if (!canCompleteWeekly || !weeklyUpdateResult) return;
     setWeeklyCompletionBusy(true);
     const startedAt = Date.now();
     const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
@@ -710,6 +779,9 @@ export function CashflowProjectSheet({
         tenantId: orgId,
         actor: targetActor,
         projectId,
+        yearMonth: currentDeadline?.yearMonth,
+        weekNo: currentDeadline?.weekNo,
+        updateResult: weeklyUpdateResult,
       });
       let result;
       try {
@@ -721,6 +793,10 @@ export function CashflowProjectSheet({
         result = await complete(actor);
       }
       await loadCashflowMonthClose();
+      setWeeklyCompletionOpen(false);
+      setWeeklyCompletionError('');
+      setWeeklyMissingCells([]);
+      setWeeklyUpdateResult('');
       logCashflowSettlement({
         phase: 'success',
         operation: 'cashflow.weekly_settlement.complete',
@@ -743,11 +819,57 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      toast.error(resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.'));
+      const message = resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.');
+      setWeeklyCompletionError(message);
+      setWeeklyMissingCells(weeklyProjectionMissingCells(error));
+      toast.error(message);
     } finally {
       setWeeklyCompletionBusy(false);
     }
-  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, yearMonth]);
+  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyUpdateResult, yearMonth]);
+
+  const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
+    setWeeklyComplianceHistoryLoading(true);
+    setWeeklyComplianceHistoryError('');
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const page = await fetchCashflowWeeklyComplianceViaBff({ tenantId: orgId, actor, projectId, limit: 50 });
+      setWeeklyComplianceHistory(page.items);
+      setWeeklyComplianceNextCursor(page.nextCursor);
+      setWeeklyCompliancePageCount(1);
+    } catch (error) {
+      setWeeklyComplianceHistoryError(resolveApiErrorMessage(error, '주간 정산 이력을 불러오지 못했습니다.'));
+    } finally {
+      setWeeklyComplianceHistoryLoading(false);
+    }
+  }, [orgId, projectId, resolveBffActor]);
+
+  const loadMoreWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
+    if (!weeklyComplianceNextCursor || weeklyComplianceHistoryLoading) return;
+    if (weeklyCompliancePageCount >= 100) {
+      setWeeklyComplianceHistoryError('안전을 위해 100페이지에서 추가 조회를 중단했습니다. 검색 범위를 조정해 주세요.');
+      return;
+    }
+    setWeeklyComplianceHistoryLoading(true);
+    try {
+      const actor = await resolveBffActor();
+      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
+      const page = await fetchCashflowWeeklyComplianceViaBff({ tenantId: orgId, actor, projectId, limit: 50, cursor: weeklyComplianceNextCursor });
+      if (page.nextCursor && page.nextCursor === weeklyComplianceNextCursor) throw new Error('이력 페이지가 반복되어 추가 조회를 중단했습니다.');
+      setWeeklyComplianceHistory((items) => [...items, ...page.items]);
+      setWeeklyComplianceNextCursor(page.nextCursor);
+      setWeeklyCompliancePageCount((count) => count + 1);
+    } catch (error) {
+      setWeeklyComplianceHistoryError(resolveApiErrorMessage(error, '추가 주간 정산 이력을 불러오지 못했습니다.'));
+    } finally {
+      setWeeklyComplianceHistoryLoading(false);
+    }
+  }, [orgId, projectId, resolveBffActor, weeklyComplianceHistoryLoading, weeklyComplianceNextCursor, weeklyCompliancePageCount]);
+
+  useEffect(() => {
+    if (weeklyHistoryOpen) void loadWeeklyComplianceHistory();
+  }, [loadWeeklyComplianceHistory, weeklyHistoryOpen]);
 
   const loadCashflowEvents = useCallback(async (): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
@@ -987,6 +1109,10 @@ export function CashflowProjectSheet({
       toast.error('결산 대상 월과 조직장을 선택하고 시트값 확인에 동의해 주세요.');
       return;
     }
+    if (!isCumulativeCloseScopeReady(monthCloseResult?.dashboard?.cumulativeCloseScope, yearMonth)) {
+      toast.error('서버의 누적 결산 고정 범위가 선택한 월과 일치하지 않습니다. 다시 불러와 주세요.');
+      return;
+    }
     let monthCloseInput: CashflowMonthCloseDraftInput;
     try {
       if (monthCloseCellsState.error) throw new Error(monthCloseCellsState.error);
@@ -1041,11 +1167,15 @@ export function CashflowProjectSheet({
         yearMonth,
       });
       setMonthCloseResult(prepared);
+      if (!isCumulativeCloseScopeReady(prepared.dashboard?.cumulativeCloseScope, yearMonth)) {
+        throw new Error('서버의 누적 결산 고정 범위가 선택한 월과 일치하지 않습니다.');
+      }
       const request = await requestCashflowMonthCloseViaBff({
         tenantId: orgId,
         actor,
         projectId,
         payload: {
+          contractVersion: 'cashflow-cumulative-close-v2',
           yearMonth,
           expectedRevision: prepared.revision,
           expectedApproverUid: savedExecutiveApproverId,
@@ -1338,6 +1468,8 @@ export function CashflowProjectSheet({
         stageRunId: stage.runId,
         applyRiskCandidates: true,
         closedMonthChangeReason,
+        closedMonthDifferenceCount: stage.closedMonthDifferenceCount,
+        closedMonthDifferenceManifestHash: stage.closedMonthDifferenceManifestHash,
         acceptFormulaMismatches,
         idempotencyKey: applyIdempotencyKey,
       });
@@ -1473,6 +1605,13 @@ export function CashflowProjectSheet({
       }
       if (result.stagedLineCount <= 0) {
         toast.info('MYSCube 시트와 다른 값이 없습니다.');
+        return;
+      }
+      if (result.closedMonthDifferences?.length) {
+        setLateSheetApply(result);
+        setLateSheetChangeReason('');
+        setLateSheetFormulaAccepted(false);
+        setSheetApplyResumeRequired(false);
         return;
       }
       await handleApplyStagedSheetValues(result);
@@ -1692,9 +1831,9 @@ export function CashflowProjectSheet({
             : `서버 확인 항목 ${issueCount.toLocaleString()}건이 있습니다.`,
       },
       rates: {
-        projection: rate(dashboard?.summary?.projectionProgressPercent || 0),
+        projection: rate(dashboard?.summary?.contractCoveragePercent || 0),
         actual: rate(dashboard?.summary?.actualProgressPercent || 0),
-        confirmation: rate(dashboard?.summary?.settlementProgressPercent || 0),
+        confirmation: rate(dashboard?.summary?.settlementMatches ? 100 : 0),
       },
     };
   }, [monthCloseLoading, monthCloseResult?.dashboard]);
@@ -1909,8 +2048,12 @@ export function CashflowProjectSheet({
     if (!monthCloseStatusByMonth.has(yearMonth) && monthCloseResult?.status) {
       monthCloseStatusByMonth.set(yearMonth, monthCloseResult.status);
     }
-    if (monthCloseRequestLocked && monthCloseRequest?.yearMonth === yearMonth) {
-      monthCloseStatusByMonth.set(yearMonth, monthCloseRequest.status);
+    if (monthCloseRequest?.lockRange && ['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest.status)) {
+      visibleWeeks.forEach((week) => {
+        if (isCashflowWeekLockedByRange(monthCloseRequest.lockRange, week.yearMonth, week.weekNo)) {
+          monthCloseStatusByMonth.set(week.yearMonth, monthCloseRequest.status === 'APPROVED' ? 'CLOSED' : monthCloseRequest.status);
+        }
+      });
     }
     const monthCloseOverdueByMonth = new Map(
       (monthCloseResult?.dashboard?.monthCloseStatuses || []).map((month) => [month.yearMonth, Boolean(month.closeOverdue)]),
@@ -2113,7 +2256,8 @@ export function CashflowProjectSheet({
             ))}
             {monthGroups.map((month) => {
               const monthStatus = monthCloseStatusByMonth.get(month.yearMonth);
-              const locked = monthStatus === 'CLOSED' || isCashflowMonthCloseRequestLocked(monthStatus);
+              const rangeLocked = month.weeks.some((week) => isCashflowWeekLockedByRange(monthCloseRequest?.lockRange, week.yearMonth, week.weekNo));
+              const locked = rangeLocked || monthStatus === 'CLOSED' || isCashflowMonthCloseRequestLocked(monthStatus);
               const overdue = !locked && Boolean(monthCloseOverdueByMonth.get(month.yearMonth));
               const monthHeadClass = locked
                 ? 'border-b-slate-500 bg-slate-300 text-slate-800'
@@ -2124,7 +2268,7 @@ export function CashflowProjectSheet({
                 <th colSpan={month.weeks.length} key={`${mode}-${month.yearMonth}-month`} className={`border-b-2 border-l-[6px] border-l-white px-2 py-1.5 text-left align-middle ${monthHeadClass}`}>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[12px] font-bold">
                     {month.yearMonth.replace('-', '년 ')}월
-                    {locked ? <LockKeyhole className="h-3.5 w-3.5" aria-label="월 결산 수정 잠김" /> : null}
+                    {locked ? <LockKeyhole className="h-3.5 w-3.5" aria-label={rangeLocked ? `누적 월결산 ${monthCloseRequest?.requestId || ''} 승인 범위 수정 잠김` : '월 결산 수정 잠김'} /> : null}
                     {overdue ? (
                       <span className="rounded bg-red-700 px-1.5 py-0.5 text-[12px] font-bold text-white">월 결산 기한 초과</span>
                     ) : null}
@@ -2146,14 +2290,15 @@ export function CashflowProjectSheet({
             {visibleWeeks.map((week) => {
               const monthlyStatus = monthCloseStatusByMonth.get(week.yearMonth);
               const status = weeklyStatusByWeek.get(`${week.yearMonth}:${week.weekNo}`);
+              const rangeLocked = isCashflowWeekLockedByRange(monthCloseRequest?.lockRange, week.yearMonth, week.weekNo);
               const label = status === 'COMPLETED' || status === 'COMPLETED_LATE'
                 ? '주간 정산 완료'
                 : status === 'MISSED' ? '미정산' : status === 'PENDING' ? '정산 대기' : '';
               return (
                 <th key={`${mode}-${week.yearMonth}-${week.weekNo}-weekly-close`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-center align-middle ${cashflowWeekSurface(monthlyStatus, status) || 'bg-white'}`}>
                   <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] font-semibold ${monthlyStatus === 'CLOSED' ? 'text-slate-600' : status === 'MISSED' ? 'text-red-700' : status ? 'text-slate-700' : 'text-slate-300'}`}>
-                    {monthlyStatus === 'CLOSED' ? <LockKeyhole className="h-3 w-3" /> : <CheckCircle2 className={`h-3 w-3 ${status === 'MISSED' ? 'text-red-600' : status ? 'text-[#17324D]' : 'text-slate-300'}`} />}
-                    {monthlyStatus === 'CLOSED' ? '월 결산 완료' : label}
+                    {rangeLocked || monthlyStatus === 'CLOSED' ? <LockKeyhole className="h-3 w-3" aria-hidden="true" /> : <CheckCircle2 className={`h-3 w-3 ${status === 'MISSED' ? 'text-red-600' : status ? 'text-[#17324D]' : 'text-slate-300'}`} />}
+                    {rangeLocked ? '누적 결산 잠김' : monthlyStatus === 'CLOSED' ? '월 결산 완료' : label}
                   </span>
                 </th>
               );
@@ -2217,12 +2362,12 @@ export function CashflowProjectSheet({
             <Button type="button" variant="outline" size="sm" className="absolute right-2 top-1/2 z-50 h-11 w-9 -translate-y-1/2 rounded-full border-0 bg-white/95 p-0 shadow-[0_10px_28px_rgba(15,23,42,0.16)]" onClick={() => scrollBoard(1)} aria-label="오른쪽 주차로 이동">
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <div ref={cashflowBoardScrollRef} className="space-y-5 overflow-x-auto scroll-smooth rounded-md border border-slate-200 bg-white p-3">
-              <section data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
+            <div className="space-y-5 rounded-md border border-slate-200 bg-white p-3">
+              <section ref={cashflowBoardScrollRef} className="overflow-x-auto scroll-smooth" data-cashflow-block="projection" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3} tabIndex={0} aria-label="Projection 현금흐름 가로 스크롤 표">
                 <h3 className="sticky left-0 z-30 w-fit border-l-4 border-[#17324D] bg-[#17324D] px-3 py-2 text-[14px] font-bold text-white">Projection</h3>
                 {renderModeTable('projection')}
               </section>
-              <section data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3}>
+              <section className="overflow-x-auto" data-cashflow-block="actual" data-cashflow-row-count={CASHFLOW_ALL_LINES.length + 3} tabIndex={0} aria-label="Actual 현금흐름 가로 스크롤 표">
                 <h3 className="sticky left-0 z-30 w-fit border-l-4 border-[#17324D] bg-[#17324D] px-3 py-2 text-[14px] font-bold text-white">ACTUAL</h3>
                 {renderModeTable('actual')}
               </section>
@@ -2389,13 +2534,36 @@ export function CashflowProjectSheet({
         ? { surface: 'border-border bg-card', value: 'text-foreground', bar: 'bg-sky-600' }
         : { surface: 'border-border bg-accent', value: 'text-primary', bar: 'bg-sky-600' };
     const projectionSummary = monthCloseResult?.dashboard?.summary;
+    const projectionMetricsReady = projectionSummary?.projectionContractAmount !== undefined
+      && projectionSummary.projectionSalesAndVatTotal !== undefined
+      && projectionSummary.contractDifference !== undefined
+      && projectionSummary.contractCoveragePercent !== undefined;
+    const zeroContract = projectionMetricsReady && projectionSummary.projectionContractAmount === 0;
+    const settlementMetricsReady = projectionSummary?.settlementMatches !== undefined
+      && projectionSummary.settlementDifferenceAmount !== undefined;
     const summaryDescription = label === 'Projection'
-      ? projectionSummary
-        ? `프로젝트 등록 시 전체 계약 금액: ${fmt(Number(projectionSummary.projectionContractAmount || 0))}원 · 현재 Projection 작성 전체 금액: ${fmt(Number(projectionSummary.projectionTotalIn || 0))}원`
-        : '프로젝트 등록 시 전체 계약 금액과 현재 Projection 작성 전체 금액을 불러오는 중입니다.'
+      ? projectionMetricsReady
+        ? `프로젝트 등록 계약금액 ${fmt(Number(projectionSummary?.projectionContractAmount || 0))}원 · 전체 사업기간 Projection 매출액+매출부가세 ${fmt(Number(projectionSummary?.projectionSalesAndVatTotal || 0))}원 · 차이 ${fmt(Number(projectionSummary?.contractDifference || 0))}원`
+        : '계약금액과 매출액+매출부가세 합계를 불러오는 중입니다.'
       : label === 'Actual'
         ? '이번 주차까지 입력 기준'
-        : '차이 0 또는 사람 확인 기준';
+        : settlementMetricsReady
+          ? projectionSummary?.settlementMatches
+            ? '이번 주차까지 모든 항목의 Projection과 Actual이 일치합니다.'
+            : `이번 주차까지 항목별 차이 합계 ${fmt(Number(projectionSummary?.settlementDifferenceAmount || 0))}원`
+          : '이번 주차까지 항목별 결산 차이를 불러오는 중입니다.';
+    const primaryValue = label === '결산'
+      ? settlementMetricsReady
+        ? projectionSummary?.settlementMatches ? '100%' : `차이 ${fmt(Number(projectionSummary?.settlementDifferenceAmount || 0))}원`
+        : '확인 중'
+      : label === 'Projection' && !projectionMetricsReady
+        ? '확인 중'
+        : label === 'Projection' && zeroContract
+          ? '계약금액 0원'
+        : `${rate.percent}%`;
+    const statusLabel = label === '결산'
+      ? settlementMetricsReady ? (projectionSummary?.settlementMatches ? '일치' : '불일치') : '로딩'
+      : label === 'Projection' && !projectionMetricsReady ? '로딩' : label === 'Projection' && zeroContract ? '계약금액 확인' : rateStatusLabel(rate.percent);
     return (
       <div className={`min-w-[158px] rounded-md border px-3.5 py-3 shadow-none ${tone.surface}`} title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
@@ -2404,9 +2572,9 @@ export function CashflowProjectSheet({
         </div>
         <div className="mt-1 flex items-end justify-between gap-2">
           <span className={`text-[22px] font-bold leading-6 tabular-nums ${tone.value}`}>
-            {rate.percent}%
+            {primaryValue}
           </span>
-          <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{rateStatusLabel(rate.percent)}</span>
+          <span className={`truncate text-right text-[12px] font-semibold leading-4 ${tone.value}`}>{statusLabel}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
           <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, Math.max(0, rate.percent))}%` }} />
@@ -2506,7 +2674,12 @@ export function CashflowProjectSheet({
                       variant="outline"
                       className="h-8 shrink-0 rounded-md border-slate-300 bg-white px-3 text-[12px] font-semibold text-[#17324D]"
                       disabled={weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
-                      onClick={() => void handleCompleteWeeklyUpdate()}
+                      onClick={() => {
+                        setWeeklyCompletionError('');
+                        setWeeklyMissingCells([]);
+                        setWeeklyUpdateResult('');
+                        setWeeklyCompletionOpen(true);
+                      }}
                     >
                       {weeklyCompletionBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ClipboardCheck className="mr-1 h-3 w-3" />}
                       {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? '주간 정산 완료됨' : '주간 정산 완료'}
@@ -2516,6 +2689,7 @@ export function CashflowProjectSheet({
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</strong></span>
                   <span>기한 내 완료 <strong className="ml-1 text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</strong></span>
+                  <button type="button" className="font-semibold text-[#17324D] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#17324D]" onClick={() => setWeeklyHistoryOpen(true)}>자세히</button>
                 </div>
               </div>
               <div className="bg-card px-4 py-3">
@@ -2526,8 +2700,8 @@ export function CashflowProjectSheet({
                       <Badge className={`h-6 rounded-md px-2 text-[12px] shadow-none ${monthCloseStatusClass}`}>{monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}</Badge>
                     </div>
                     <div className="mt-1 text-[12px] leading-4 text-muted-foreground">
-                      {monthCloseRequest?.status === 'PENDING' || monthCloseRequest?.status === 'APPROVING'
-                        ? '지정 조직장의 검토를 기다리고 있습니다.'
+                      {monthCloseRequest?.status === 'PENDING' || monthCloseRequest?.status === 'APPROVING' || monthCloseRequest?.status === 'UNCERTAIN'
+                        ? monthCloseRequest.status === 'UNCERTAIN' ? '서버 처리 결과를 다시 확인하고 있습니다.' : '지정 조직장의 검토를 기다리고 있습니다.'
                         : monthCloseRequest?.status === 'REJECTED'
                           ? `반려됨${monthCloseRequest.decisionReason ? ` · ${monthCloseRequest.decisionReason}` : ''}`
                       : monthClosePreparation.status === 'READY'
@@ -2536,7 +2710,7 @@ export function CashflowProjectSheet({
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {canFinalizeMonth && !['PENDING', 'APPROVING', 'APPROVED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
+                    {canFinalizeMonth && !['PENDING', 'APPROVING', 'UNCERTAIN', 'APPROVED'].includes(monthCloseRequest?.status || '') && (monthCloseError || (monthCloseResult?.status !== 'CLOSED' && monthCloseResult?.status !== 'REOPEN_REQUESTED')) ? (
                       <Button
                         type="button"
                         size="sm"
@@ -2798,13 +2972,20 @@ export function CashflowProjectSheet({
       { key: 'status', label: '월 결산', value: cashflowEvents.filter((event) => event.type === 'month_close').length },
     ].filter((item) => item.value > 0);
     const latestEvent = cashflowEvents[0];
+    const filteredEvents = cashflowEvents.filter((event) => {
+      const query = cashflowEventQuery.trim().toLocaleLowerCase('ko-KR');
+      const mode = event.mode || (event.type.startsWith('projection') ? 'projection' : event.type.startsWith('actual') ? 'actual' : '');
+      return (cashflowEventMode === 'ALL' || mode === cashflowEventMode)
+        && (cashflowEventMonth === 'ALL' || event.yearMonth === cashflowEventMonth)
+        && (!query || `${cashflowEventLabel(event)} ${cashflowEventDetail(event)} ${event.source || ''} ${event.runId}`.toLocaleLowerCase('ko-KR').includes(query));
+    });
 
     return (
       <Card className="h-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">변경 이력</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">일반 활동 기록</div>
               <div className="mt-0.5 text-[12px] leading-4 text-slate-600">{latestCashflowEventSummary(latestEvent)}</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
@@ -2818,6 +2999,11 @@ export function CashflowProjectSheet({
               ))}
             </div>
           </div>
+          <div className="mb-2 grid gap-2 sm:grid-cols-3">
+            <Input aria-label="일반 활동 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자·source 검색" />
+            <select aria-label="실제 반영 mode 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
+            <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
+          </div>
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-md border border-slate-200 bg-slate-50 px-2 py-2 pr-1">
             {cashflowEventsError ? (
               <div className="px-2 py-8 text-center text-[12px] leading-4 text-red-600">
@@ -2825,13 +3011,13 @@ export function CashflowProjectSheet({
                 <br />
                 {cashflowEventsError}
               </div>
-            ) : cashflowEvents.length === 0 ? (
+            ) : filteredEvents.length === 0 ? (
               <div className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
                 <br />
                 시트 값을 불러오거나 월 결산하면 담당자와 시간이 여기에 남습니다.
               </div>
-            ) : cashflowEvents.map((event, index) => {
+            ) : filteredEvents.map((event, index) => {
               const canRevert = event.type === 'sheet_apply'
                 && event.source === 'google_sheet_apply'
                 && !event.revertedAt
@@ -2842,7 +3028,7 @@ export function CashflowProjectSheet({
                 ));
               return (
               <div key={event.id || `${event.runId}:${index}`} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-3">
-                {index < cashflowEvents.length - 1 && (
+                {index < filteredEvents.length - 1 && (
                   <div className="absolute left-[6px] top-3 h-full w-px bg-slate-200/80" />
                 )}
                 <div className={`relative z-10 mt-1 h-3 w-3 rounded-full border-2 border-white ${opsDotClass(event.type === 'sheet_apply_reverted' ? 'warning' : 'info')}`} />
@@ -2859,6 +3045,7 @@ export function CashflowProjectSheet({
                     <div className="shrink-0 text-[12px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
                   </div>
                   <div className="mt-1 text-[12px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
+                  <div className="mt-1 text-[12px] leading-4 text-slate-400">source {event.source || '-'} · operation {event.operation || event.type} · 사유 {event.reason || '미기록'}</div>
                   {canRevert && (
                     <Button
                       type="button"
@@ -2891,6 +3078,8 @@ export function CashflowProjectSheet({
       ? '재오픈 승인 대기'
       : monthCloseRequest?.status === 'APPROVING'
         ? '승인 처리 중'
+        : monthCloseRequest?.status === 'UNCERTAIN'
+          ? '서버 결과 확인 필요'
         : monthCloseRequest?.status === 'PENDING'
           ? '조직장 승인 대기'
           : monthCloseRequest?.status === 'REJECTED'
@@ -2908,6 +3097,8 @@ export function CashflowProjectSheet({
   const sheetDashboardMetadata = cashflowEvidenceScope.sheetMetadata;
   const dashboardTitle = `${projectName?.trim() || '이 프로젝트'} 현금흐름 대시보드`;
   const legacyCloseEvidence = monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY';
+  const cumulativeRequestScope = monthCloseResult?.dashboard?.cumulativeCloseScope;
+  const cumulativeRequestScopeReady = isCumulativeCloseScopeReady(cumulativeRequestScope, yearMonth);
 
   return (
     <>
@@ -2921,6 +3112,8 @@ export function CashflowProjectSheet({
         {renderOperationsPanel()}
         {renderOpsTimeline()}
       </section>
+
+      {user ? <AppliedCellHistory tenantId={orgId} actor={user} projectId={projectId} /> : null}
 
       <section id="projection-actual-comparison" data-cashflow-block="comparison" className="scroll-mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
@@ -2936,6 +3129,64 @@ export function CashflowProjectSheet({
       </section>
 
       {renderUnifiedMonthlyBoard()}
+
+      <AlertDialog open={weeklyCompletionOpen} onOpenChange={(open) => { if (!weeklyCompletionBusy) setWeeklyCompletionOpen(open); }}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
+            <AlertDialogDescription>
+              대상 {monthCloseResult?.dashboard?.deadlineSummary?.current?.yearMonth || yearMonth} {monthCloseResult?.dashboard?.deadlineSummary?.current?.weekNo || '-'}주차부터 향후 15개 재무주차의 모든 Projection 항목이 작성되어 있어야 합니다. ZERO(0원)는 작성값이며 EMPTY(미입력)는 완료할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {weeklyCompletionError ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">{weeklyCompletionError}</div> : null}
+          {weeklyMissingCells.length > 0 ? (
+            <details open className="max-h-[260px] overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-[12px]">
+              <summary className="cursor-pointer font-bold text-red-950">서버가 확인한 EMPTY 항목 {weeklyMissingCells.length.toLocaleString()}건</summary>
+              <ul className="mt-2 space-y-1" aria-label="Projection 미입력 주차와 항목">
+                {weeklyMissingCells.map((cell) => <li key={`${cell.yearMonth}:${cell.weekNo}:${cell.lineId}`}>{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}</li>)}
+              </ul>
+            </details>
+          ) : null}
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-[13px] font-bold text-slate-900">이번 주차 처리 결과를 하나 선택해 주세요.</legend>
+            {([
+              ['CHANGED', '변경사항 반영 완료', '시트 변경사항을 MYSCube에 반영하고 확인했습니다.'],
+              ['NO_CHANGES', '변경사항 없음', '확인 결과 이번 주차에 반영할 변경사항이 없습니다.'],
+            ] as const).map(([value, label, description]) => (
+              <label key={value} className="flex cursor-pointer items-start gap-3 rounded-md border border-slate-300 p-3 text-[12px] focus-within:ring-2 focus-within:ring-[#17324D]">
+                <input type="radio" name="weekly-update-result" value={value} checked={weeklyUpdateResult === value} disabled={weeklyCompletionBusy} onChange={() => { setWeeklyUpdateResult(value); setWeeklyCompletionError(''); }} className="mt-0.5 h-4 w-4" />
+                <span><strong className="block text-slate-900">{label}</strong><span className="mt-1 block text-slate-600">{description}</span></span>
+              </label>
+            ))}
+          </fieldset>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={weeklyCompletionBusy}>취소</AlertDialogCancel>
+            <Button type="button" disabled={weeklyCompletionBusy || !weeklyUpdateResult} onClick={() => void handleCompleteWeeklyUpdate()}>
+              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}선택한 결과로 완료
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={weeklyHistoryOpen} onOpenChange={setWeeklyHistoryOpen}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[860px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>주간 정산 준수 이력</AlertDialogTitle>
+            <AlertDialogDescription>JVM 프로젝트 원장의 연월·주차별 전체 준수 이력입니다.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-[60dvh] overflow-auto rounded-md border border-slate-300" role="region" aria-label="주간 정산 준수 전체 이력" tabIndex={0}>
+            {weeklyComplianceHistory.length > 0 ? (
+              <table className="w-full min-w-[780px] border-collapse text-[12px]">
+                <caption className="sr-only">주간 정산 대상, 마감기한, 준수 상태, 완료시각과 완료자</caption>
+                <thead className="sticky top-0 bg-slate-100"><tr><th className="px-3 py-2 text-left">대상 주차</th><th className="px-3 py-2 text-left">마감기한</th><th className="px-3 py-2 text-left">준수 상태</th><th className="px-3 py-2 text-left">처리 결과</th><th className="px-3 py-2 text-left">완료시각</th><th className="px-3 py-2 text-left">완료자</th></tr></thead>
+                <tbody>{weeklyComplianceHistory.map((week) => <tr key={`${week.yearMonth}:${week.weekNo}:${week.operationId || week.status}`} className="border-t border-slate-200"><th className="px-3 py-2 text-left">{week.yearMonth} {week.weekNo}주차</th><td className="px-3 py-2">{formatSheetAppliedAt(week.deadline)}</td><td className="px-3 py-2 font-semibold">{week.status === 'ON_TIME' ? '기한 내 완료' : week.status === 'COMPLETED_LATE' ? '기한 후 완료·미준수' : week.status === 'MISSED' ? '기한 경과·미준수' : '완료 대기'}</td><td className="px-3 py-2">{week.updateResult === 'CHANGED' ? '변경사항 반영 완료' : week.updateResult === 'NO_CHANGES' ? '변경사항 없음' : '-'}</td><td className="px-3 py-2">{formatSheetAppliedAt(week.completedAt) || '-'}</td><td className="px-3 py-2 break-all">{week.completedBy || '-'}</td></tr>)}</tbody>
+              </table>
+            ) : weeklyComplianceHistoryLoading ? <p role="status" className="p-6 text-center text-[12px] text-slate-500">이력을 불러오는 중입니다.</p> : weeklyComplianceHistoryError ? <div role="alert" className="p-6 text-center text-[12px] text-red-700">{weeklyComplianceHistoryError}<Button type="button" size="sm" variant="outline" className="ml-2" onClick={() => void loadWeeklyComplianceHistory()}>다시 시도</Button></div> : <p className="p-6 text-center text-[12px] text-slate-500">저장된 주간 정산 이력이 없습니다.</p>}
+          </div>
+          {weeklyComplianceNextCursor ? <Button type="button" variant="outline" disabled={weeklyComplianceHistoryLoading} onClick={() => void loadMoreWeeklyComplianceHistory()}>{weeklyComplianceHistoryLoading ? '추가 이력 불러오는 중…' : '이전 이력 더 불러오기'}</Button> : null}
+          <AlertDialogFooter><AlertDialogCancel>닫기</AlertDialogCancel></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">
@@ -2980,9 +3231,9 @@ export function CashflowProjectSheet({
       >
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>{yearMonth} 최종저장 · 월 결산 요청</AlertDialogTitle>
+            <AlertDialogTitle>{yearMonth} 누적 월결산 승인 요청</AlertDialogTitle>
             <AlertDialogDescription>
-              결산 기준을 먼저 점검한 뒤 지정 조직장에게 승인을 요청합니다. 승인 완료 시 이 달의 수정이 잠깁니다.
+              결산 기준과 서버가 고정한 누적 범위를 점검한 뒤 지정 조직장에게 승인을 요청합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -2995,6 +3246,8 @@ export function CashflowProjectSheet({
               <span>시트 데이터</span>
               <strong className="text-[#17324D]">{monthCloseCellsState.error ? '확인 필요' : '준비됨'}</strong>
             </div>
+            {cumulativeRequestScopeReady ? <><div className="flex items-center justify-between gap-4"><span>누적 대상 월</span><strong className="text-right text-slate-950">{cumulativeRequestScope.fromMonth} ~ {cumulativeRequestScope.throughMonth}</strong></div><div className="flex items-center justify-between gap-4"><span>서버 고정 범위</span><strong className="text-right text-slate-950">{cumulativeRequestScope.lockRange.fromMonth} {cumulativeRequestScope.lockRange.fromWeekNo}주차 ~ {cumulativeRequestScope.lockRange.throughMonth} {cumulativeRequestScope.lockRange.throughWeekNo}주차</strong></div><div className="flex items-center justify-between gap-4"><span>포함 데이터</span><strong className="text-slate-950">{cumulativeRequestScope.monthCount}개월 · {cumulativeRequestScope.weekCount}주 · {cumulativeRequestScope.cellCount}셀</strong></div><div className="flex items-start justify-between gap-4"><span>저장 대상</span><strong className="text-right text-slate-950">{cumulativeRequestScope.source.spreadsheetTitle || '이름 없음'} · {cumulativeRequestScope.source.selectedSheetName || '탭 이름 없음'}</strong></div></> : <div role="alert" className="text-red-700">서버의 누적 결산 고정 범위와 건수를 확인하지 못했습니다. 다시 불러온 뒤 요청해 주세요.</div>}
+            {cumulativeRequestScopeReady && cumulativeRequestScope.source.spreadsheetUrl ? <a href={cumulativeRequestScope.source.spreadsheetUrl} target="_blank" rel="noreferrer" className="font-semibold text-[#17324D] underline">저장 대상 시트 열기</a> : <span className="text-slate-500">저장 대상 시트 링크 없음</span>}
           </div>
 
           <div className={`rounded-md border px-3 py-3 text-[13px] leading-5 ${monthClosePreparation.status === 'READY' ? 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]' : monthClosePreparation.status === 'STATUS_RETRY_REQUIRED' ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
@@ -3003,7 +3256,7 @@ export function CashflowProjectSheet({
           </div>
 
           <div className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] px-3 py-3 text-[13px] leading-5 text-[#17324D]">
-            조직장이 최종 수정하기 전까지는 더 이상 수정할 수 없습니다.
+            승인하면 위 누적 범위의 모든 주차가 수정 불가 상태로 잠깁니다. 요청 후 승인·반려 전에도 동일 범위는 변경할 수 없습니다.
           </div>
 
           <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-3 text-[13px] leading-5 text-slate-800">
@@ -3031,7 +3284,7 @@ export function CashflowProjectSheet({
               </Button>
             ) : null}
             <AlertDialogAction
-              disabled={!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed || monthCloseBusy || monthCloseRequestLocked}
+               disabled={!cumulativeRequestScopeReady || !yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed || monthCloseBusy || monthCloseRequestLocked}
               onClick={(event) => {
                 event.preventDefault();
                 void handleFinalizeMonthClose();
@@ -3112,6 +3365,16 @@ export function CashflowProjectSheet({
                 : '시트를 연결하지 않아도 캐시플로우는 조회할 수 있습니다. 기존 시트 값을 가져오려면 아래 순서로 연결해 주세요.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <div className="rounded-md border border-[#C7D3DF] bg-[#EAF0F5] p-3 text-[12px] text-[#17324D]" aria-label="Google Sheet 편집자 공유 안내">
+            <strong>먼저 서비스 계정을 Google Sheet 편집자로 공유해 주세요.</strong>
+            {cashflowSystemAccountEmail ? (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <code className="break-all rounded bg-white px-2 py-1.5">{cashflowSystemAccountEmail}</code>
+                <Button type="button" size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(cashflowSystemAccountEmail)}>계정 복사</Button>
+              </div>
+            ) : <p role={cashflowSystemAccountError ? 'alert' : 'status'} className="mt-2">{cashflowSystemAccountError ? '서비스 계정 이메일을 확인하지 못했습니다. 시트 설정에서 다시 불러와 주세요.' : '서비스 계정 이메일을 불러오는 중입니다.'}</p>}
+          </div>
 
           <div className="space-y-4 rounded-md border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -3203,51 +3466,30 @@ export function CashflowProjectSheet({
             <AlertDialogDescription>
               {sheetApplyResumeRequired
                 ? '이전 반영의 응답을 확인하지 못했습니다. 같은 검토본으로 안전하게 이어서 완료해 주세요.'
-                : '결산 마감일이 지난 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.'}
+                : '이미 결산이 완료된 월의 값이 시트에서 변경되었습니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {lateSheetApply && (
             <div className="space-y-3">
               {!sheetApplyResumeRequired && (
                 <>
-                  <div className="max-h-[260px] space-y-2 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                    {(lateSheetApply.closedMonthDifferences || []).map((difference) => (
-                      <div key={difference.yearMonth}>
-                        <div className="text-[12px] font-semibold leading-5 text-slate-800">
-                          {difference.yearMonth} · {difference.weeks.length}개 주차 · {difference.differenceCount.toLocaleString()}건 변경
-                        </div>
-                        {(difference.changes || []).length > 0 && (
-                          <table className="mt-1 w-full border-collapse text-[12px] leading-4 text-slate-700">
-                            <tbody>
-                              {(difference.changes || []).map((change) => (
-                                <tr key={`${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200">
-                                  <td className="py-1 pr-2 align-top whitespace-nowrap text-slate-500">
-                                    {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차
-                                  </td>
-                                  <td className="py-1 pr-2 align-top">
-                                    {CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}
-                                  </td>
-                                  <td className="py-1 align-top whitespace-nowrap text-right tabular-nums">
-                                    <span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>
-                                      {change.beforeHadValue ? `${fmt(Number(change.beforeAmount || 0))}원` : '미작성'}
-                                    </span>
-                                    <span className="px-1 text-slate-400">→</span>
-                                    <span className="font-semibold text-slate-900">
-                                      {change.afterHadValue ? `${fmt(Number(change.afterAmount || 0))}원` : '미작성'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                        {Number(difference.truncatedChangeCount) > 0 && (
-                          <div className="mt-1 text-[12px] leading-4 text-slate-500">
-                            외 {Number(difference.truncatedChangeCount).toLocaleString()}건은 반영 후 변경 이력에서 확인할 수 있습니다.
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                  <div className={`rounded-md border px-3 py-2 text-[12px] ${lateSheetDiffComplete ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'}`} role={lateSheetDiffComplete ? 'status' : 'alert'}>
+                    {lateSheetDiffComplete ? `검토본 manifest와 일치하는 전체 ${lateSheetDiffRows.length.toLocaleString()}건입니다.` : '변경 목록의 manifest 또는 건수가 일치하지 않아 반영할 수 없습니다. 다시 비교해 주세요.'}
+                    <span className="ml-2 break-all text-[12px]">{lateSheetApply.closedMonthDifferenceManifestHash || 'manifest 없음'}</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <Input aria-label="변경 이력 검색" placeholder="월·주·항목 검색" value={lateSheetDiffQuery} onChange={(event) => setLateSheetDiffQuery(event.target.value)} />
+                    <select aria-label="Projection Actual 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffMode} onChange={(event) => setLateSheetDiffMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
+                    <select aria-label="월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffMonth} onChange={(event) => setLateSheetDiffMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(lateSheetDiffRows.map((row) => row.yearMonth))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
+                    <select aria-label="주차 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={lateSheetDiffWeek} onChange={(event) => setLateSheetDiffWeek(event.target.value)}><option value="ALL">전체 주차</option>{[1, 2, 3, 4, 5].map((weekNo) => <option key={weekNo} value={weekNo}>{weekNo}주차</option>)}</select>
+                  </div>
+                  <div className="max-h-[300px] overflow-auto rounded-md border border-slate-200 bg-slate-50" role="region" aria-label="마감 후 변경 후보 전체 목록" tabIndex={0}>
+                    <table className="w-full min-w-[620px] border-collapse text-[12px] leading-4 text-slate-700">
+                      <caption className="sr-only">월, 주차, mode, 항목별 이전값과 변경값</caption>
+                      <thead className="sticky top-0 bg-slate-100"><tr><th className="px-2 py-2 text-left">월·주차</th><th className="px-2 py-2 text-left">mode</th><th className="px-2 py-2 text-left">항목</th><th className="px-2 py-2 text-right">이전값 → 변경값</th></tr></thead>
+                      <tbody>{filteredLateSheetDiffRows.map((change) => <tr key={`${change.yearMonth}:${change.mode}:${change.weekNo}:${change.lineId}`} className="border-t border-slate-200"><th className="px-2 py-1.5 text-left">{change.yearMonth} {change.weekNo}주차</th><td className="px-2 py-1.5">{change.mode === 'projection' ? 'Projection' : 'Actual'}</td><td className="px-2 py-1.5">{CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}</td><td className="px-2 py-1.5 text-right tabular-nums"><span className={change.beforeHadValue ? 'text-slate-500' : 'text-slate-400'}>{change.beforeHadValue ? `${fmt(Number(change.beforeAmount || 0))}원` : 'EMPTY'}</span><span className="px-1 text-slate-400">→</span><strong>{change.afterHadValue ? `${fmt(Number(change.afterAmount || 0))}원` : 'EMPTY'}</strong></td></tr>)}</tbody>
+                    </table>
+                    {filteredLateSheetDiffRows.length === 0 ? <p className="p-5 text-center text-[12px] text-slate-500">필터와 일치하는 변경 후보가 없습니다.</p> : null}
                   </div>
                   <label className="block text-[12px] font-semibold text-slate-800" htmlFor="late-sheet-change-reason">
                     변경 사유
@@ -3272,7 +3514,7 @@ export function CashflowProjectSheet({
             <Button
               type="button"
               className="bg-[#17324D] hover:bg-slate-800"
-              disabled={sheetStageApplyLoading || !lateSheetApply || (!sheetApplyResumeRequired && !lateSheetChangeReason.trim())}
+              disabled={sheetStageApplyLoading || !lateSheetApply || (!sheetApplyResumeRequired && (!lateSheetChangeReason.trim() || !lateSheetDiffComplete))}
               onClick={() => lateSheetApply && void handleApplyStagedSheetValues(
                 lateSheetApply,
                 lateSheetChangeReason.trim(),

@@ -781,8 +781,42 @@ export interface CashflowActivityEvent {
   actorName?: string;
   actorEmail?: string;
   status?: string;
+  operation?: string;
+  reason?: string;
   sheetName?: string;
   createdAt: string;
+}
+
+export interface CashflowAppliedCellChange {
+  eventId: string;
+  cellId: string;
+  projectId: string;
+  yearMonth: string;
+  weekNo: number;
+  mode: 'projection' | 'actual';
+  lineId: string;
+  beforeHadValue: boolean;
+  beforeState: 'EMPTY' | 'ZERO' | 'VALUE';
+  beforeAmount: number | null;
+  afterHadValue: boolean;
+  afterState: 'EMPTY' | 'ZERO' | 'VALUE';
+  afterAmount: number | null;
+  actorUid: string;
+  actorName: string;
+  actorEmail: string;
+  reason: string;
+  source: string;
+  operationType: string;
+  operationId: string;
+  auditId: string;
+  sourceRevision: string;
+  targetRevision: string;
+  createdAt: string;
+}
+
+export interface CashflowAppliedCellChangePage {
+  items: CashflowAppliedCellChange[];
+  nextCursor: string;
 }
 
 export interface CashflowMonthCloseCell {
@@ -871,6 +905,10 @@ export interface CashflowDeadlineSummary {
     yearMonth: string;
     weekNo: number;
     status: 'COMPLETED' | 'COMPLETED_LATE' | 'MISSED' | 'PENDING';
+    deadline?: string | null;
+    completedAt?: string | null;
+    completedBy?: string | null;
+    updateResult?: 'CHANGED' | 'NO_CHANGES' | null;
   }>;
   current: {
     yearMonth: string;
@@ -934,6 +972,7 @@ export interface CashflowMonthCloseDashboard {
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
   deadlineSummary: CashflowDeadlineSummary;
+  cumulativeCloseScope: CashflowCumulativeCloseScope | null;
   monthCloseStatuses?: Array<{
     yearMonth: string;
     status: 'OPEN' | 'CLOSED' | 'REOPEN_REQUESTED' | string;
@@ -977,9 +1016,16 @@ export interface CashflowMonthCloseDashboard {
   comparison: CashflowComparisonMonth | null;
   summary: {
     projectionProgressPercent: number;
+    projectionContractAmount?: number;
+    projectionTotalIn?: number;
+    projectionSalesAndVatTotal?: number;
+    contractDifference?: number;
+    contractCoveragePercent?: number;
     actualProgressPercent: number;
     confirmationProgressPercent: number;
     settlementProgressPercent: number;
+    settlementDifferenceAmount?: number;
+    settlementMatches?: boolean;
     settlementCompletedWeekCount: number;
     settlementTargetWeekCount: number;
     settlementIncompleteWeeks: Array<{
@@ -1006,6 +1052,7 @@ export interface CashflowMonthCloseDashboard {
 }
 
 export interface CloseCashflowMonthPayload {
+  contractVersion?: 'cashflow-cumulative-close-v2';
   yearMonth: string;
   expectedRevision: number;
   expectedApproverUid: string;
@@ -1014,7 +1061,46 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'PENDING' | 'APPROVING' | 'APPROVED' | 'REJECTED';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED';
+
+export interface CashflowMonthCloseStoredSource {
+  sourceRevision: string | null;
+  targetRevision: string | null;
+  capturedAt: string | null;
+  spreadsheetId: string | null;
+  spreadsheetTitle: string | null;
+  selectedSheetName: string | null;
+  spreadsheetUrl: string | null;
+}
+
+export interface CashflowMonthCloseCumulativeTotals {
+  projection: number;
+  actual: number;
+  difference: number;
+}
+
+export interface CashflowMonthCloseAnnualSummary extends CashflowMonthCloseCumulativeTotals {
+  year: number;
+  monthCount: number;
+}
+
+export interface CashflowMonthCloseLockRange {
+  fromMonth: string;
+  fromWeekNo: number;
+  throughMonth: string;
+  throughWeekNo: number;
+}
+
+export interface CashflowCumulativeCloseScope {
+  contractVersion: 'cashflow-cumulative-close-v2';
+  fromMonth: string;
+  throughMonth: string;
+  lockRange: CashflowMonthCloseLockRange;
+  monthCount: number;
+  weekCount: number;
+  cellCount: number;
+  source: CashflowMonthCloseStoredSource;
+}
 
 export interface CashflowMonthCloseMonthSnapshotCell {
   cashflowLine: string;
@@ -1029,7 +1115,11 @@ export interface CashflowMonthCloseMonthSnapshot {
   source: {
     sourceRevision: string;
     targetRevision: string;
-    capturedAt: string;
+    capturedAt: string | null;
+    spreadsheetId: string | null;
+    spreadsheetTitle: string | null;
+    selectedSheetName: string | null;
+    spreadsheetUrl: string | null;
   };
   projection: {
     totalIn: number;
@@ -1057,11 +1147,21 @@ export interface CashflowMonthCloseMonthSnapshot {
 }
 
 export interface CashflowMonthCloseRequest {
+  contractVersion?: 'cashflow-cumulative-close-v2';
   requestId: string;
   projectId: string;
   yearMonth: string;
   status: CashflowMonthCloseRequestStatus;
   revision: number;
+  fromMonth?: string;
+  manifestHash?: string;
+  monthCount?: number;
+  weekCount?: number;
+  cellCount?: number;
+  lockRange?: CashflowMonthCloseLockRange;
+  source?: CashflowMonthCloseStoredSource;
+  totals?: CashflowMonthCloseCumulativeTotals;
+  annualSummaries?: CashflowMonthCloseAnnualSummary[];
   approverUid: string;
   requestedByUid: string;
   requestedAt: string;
@@ -1075,7 +1175,30 @@ export interface CashflowMonthCloseRequest {
 export interface ReviewCashflowMonthCloseRequestPayload {
   decision: 'APPROVE' | 'REJECT';
   expectedRevision: number;
+  expectedManifestHash?: string;
   reason?: string;
+}
+
+export interface CashflowMonthCloseMonthShard {
+  contractVersion: 'cashflow-cumulative-close-v2';
+  requestId: string;
+  projectId: string;
+  yearMonth: string;
+  shardHash: string;
+  cells: Array<CashflowMonthCloseMonthSnapshotCell & {
+    mode: 'projection' | 'actual';
+    weekNo: number;
+  }>;
+  source: CashflowMonthCloseStoredSource;
+}
+
+export interface CashflowMonthCloseMonthShardPage {
+  requestId: string;
+  requestRevision: number;
+  manifestHash: string;
+  monthCount: number;
+  months: CashflowMonthCloseMonthShard[];
+  nextCursor: string | null;
 }
 
 export interface CashflowMonthCloseApproverResult {
@@ -1162,6 +1285,30 @@ export interface CashflowWeeklyUpdateCompletionResult {
   reopenedAt: string | null;
   reopenedBy: string | null;
   reopenReason: string | null;
+  deadline?: string | null;
+  complianceStatus?: string | null;
+  operationId?: string | null;
+  auditId?: string | null;
+  updateResult?: 'CHANGED' | 'NO_CHANGES' | null;
+}
+
+export interface CashflowWeeklyComplianceItem {
+  yearMonth: string;
+  weekNo: number;
+  deadline: string;
+  status: 'PENDING' | 'MISSED' | 'ON_TIME' | 'COMPLETED_LATE';
+  completedAt: string | null;
+  completedBy: string | null;
+  operationId: string | null;
+  auditId: string | null;
+  updateResult: 'CHANGED' | 'NO_CHANGES' | null;
+}
+
+export interface CashflowWeeklyCompliancePage {
+  items: CashflowWeeklyComplianceItem[];
+  nextCursor: string;
+  onTimeCount: number;
+  missedCount: number;
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -2659,6 +2806,7 @@ export async function completeCashflowWeeklyUpdateViaBff(params: {
   projectId: string;
   yearMonth?: string;
   weekNo?: number;
+  updateResult: 'CHANGED' | 'NO_CHANGES';
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeeklyUpdateCompletionResult> {
   const hasExplicitScope = params.yearMonth !== undefined || params.weekNo !== undefined;
@@ -2667,9 +2815,10 @@ export async function completeCashflowWeeklyUpdateViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: hasExplicitScope
-        ? { yearMonth: params.yearMonth, weekNo: params.weekNo }
-        : {},
+      body: {
+        ...(hasExplicitScope ? { yearMonth: params.yearMonth, weekNo: params.weekNo } : {}),
+        updateResult: params.updateResult,
+      },
       retries: 0,
       timeoutMs: 12000,
     },
@@ -2697,6 +2846,23 @@ export async function fetchCashflowWeeklyUpdateViaBff(params: {
       retries: 0,
       timeoutMs: 12000,
     },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowWeeklyComplianceViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  limit?: number;
+  cursor?: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowWeeklyCompliancePage> {
+  const query = new URLSearchParams({ limit: String(params.limit || 50) });
+  if (params.cursor) query.set('cursor', params.cursor);
+  const response = await resolveClient(params.client).get<CashflowWeeklyCompliancePage>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-compliance?${query.toString()}`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
   );
   return response.data;
 }
@@ -2743,6 +2909,23 @@ export async function fetchCashflowActivityViaBff(params: {
       retries: 0,
       timeoutMs: 12000,
     },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowAppliedCellChangesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  limit?: number;
+  cursor?: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowAppliedCellChangePage> {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 50) });
+  if (params.cursor) query.set('cursor', params.cursor);
+  const response = await resolveClient(params.client).get<CashflowAppliedCellChangePage>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/applied-cell-changes?${query.toString()}`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
   );
   return response.data;
 }
@@ -2825,6 +3008,30 @@ export async function fetchPendingCashflowMonthCloseRequestsViaBff(params: {
     },
   );
   return Array.isArray(response.data.items) ? response.data.items : [];
+}
+
+export async function fetchCashflowMonthCloseRequestMonthsViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  requestId: string;
+  requestRevision: number;
+  cursor?: string;
+  limit?: number;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseMonthShardPage> {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 12) });
+  if (params.cursor) query.set('cursor', params.cursor);
+  const response = await resolveClient(params.client).get<CashflowMonthCloseMonthShardPage>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/months?${query.toString()}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
 }
 
 export async function reviewCashflowMonthCloseRequestViaBff(params: {

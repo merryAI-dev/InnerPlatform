@@ -3,6 +3,7 @@ import { AlertCircle, BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Copy, H
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
+import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import {
@@ -230,12 +231,6 @@ function HelpMemo({ children }: { children: ReactNode }) {
   );
 }
 
-function formatClosedMonthDifference(summary: NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>[number]) {
-  const visibleWeeks = summary.weeks.slice(0, 2).map((week) => `${week}주차`).join(', ');
-  const hiddenWeekCount = Math.max(0, summary.weeks.length - 2);
-  return `${summary.yearMonth} · ${visibleWeeks}${hiddenWeekCount > 0 ? ` 외 ${hiddenWeekCount}개 주차` : ''}`;
-}
-
 export function CashflowSheetLabPage({
   projectIdOverride,
 }: {
@@ -303,6 +298,10 @@ export function CashflowSheetLabPage({
   const [statusMessage, setStatusMessage] = useState('');
   const [closedMonthWarning, setClosedMonthWarning] = useState<NonNullable<CashflowSheetLabStageResult['closedMonthDifferences']>>([]);
   const [closedMonthStage, setClosedMonthStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const closedMonthChangeRows = closedMonthWarning.flatMap((month) => month.changes || []);
+  const closedMonthManifestComplete = Boolean(closedMonthStage?.closedMonthDifferenceManifestHash)
+    && closedMonthStage?.closedMonthDifferenceCount === closedMonthChangeRows.length
+    && closedMonthWarning.every((month) => !month.truncatedChangeCount);
   const [applyResumeRequired, setApplyResumeRequired] = useState(false);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [closedMonthFormulaAccepted, setClosedMonthFormulaAccepted] = useState(false);
@@ -853,6 +852,13 @@ export function CashflowSheetLabPage({
         });
         return;
       }
+      if (!stagedOverride && staged.closedMonthDifferences?.length) {
+        setClosedMonthStage(staged);
+        setClosedMonthWarning(staged.closedMonthDifferences);
+        setApplyResumeRequired(false);
+        setClosedMonthFormulaAccepted(false);
+        return;
+      }
       activeStep = 'apply';
       setLoadingOperation('applying');
       const applyStartedAt = Date.now();
@@ -871,6 +877,8 @@ export function CashflowSheetLabPage({
           projectId,
           stageRunId: stagedRunId,
           closedMonthChangeReason: monthCloseChangeReason,
+          closedMonthDifferenceCount: staged.closedMonthDifferenceCount,
+          closedMonthDifferenceManifestHash: staged.closedMonthDifferenceManifestHash,
           acceptFormulaMismatches,
           idempotencyKey: applyIdempotencyKey,
         })
@@ -1090,22 +1098,20 @@ export function CashflowSheetLabPage({
                   {sourceYear}년 링크와 {String(sourceYear).slice(2)}-1-1 ~ {String(sourceYear).slice(2)}-12-5 범위를 입력하세요.
                 </div>
               </div>
-              <details className="pt-2 text-[12px] text-slate-600">
-                <summary className="cursor-pointer font-medium text-slate-700">시트 접근 권한이 필요한가요?</summary>
-                <div className="mt-3 space-y-2 border-l-2 border-blue-200 pl-3">
+              <div className="mt-2 space-y-2 border-l-2 border-blue-200 pl-3 text-[12px] text-slate-600" aria-label="Google Sheet 편집자 공유 안내">
+                  <strong className="block text-slate-800">먼저 아래 서비스 계정을 Google Sheet 편집자로 공유해 주세요.</strong>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!projectId || accountLoading} onClick={() => void handleLoadShareAccount()}>
                       {accountLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                      공유 계정 확인
+                      다시 불러오기
                     </Button>
                     <Button type="button" variant="outline" className="h-8 gap-1.5 rounded-none px-3 text-[12px]" disabled={!systemAccountEmail} onClick={handleCopyShareAccount}>
                       <Copy className="h-3.5 w-3.5" />공유 계정 복사
                     </Button>
                   </div>
-                  {systemAccountEmail && <div className="break-all bg-blue-50 px-3 py-2 font-mono text-blue-900">{systemAccountEmail}</div>}
-                  <p>시트에 위 계정을 보기 권한으로 추가하면 됩니다.</p>
-                </div>
-              </details>
+                  {systemAccountEmail ? <div className="break-all bg-blue-50 px-3 py-2 font-mono text-blue-900">{systemAccountEmail}</div> : <div role="status" className="bg-slate-50 px-3 py-2 text-slate-500">{accountLoading ? '서비스 계정 이메일을 불러오는 중입니다.' : '서비스 계정 이메일을 확인하지 못했습니다. 다시 불러오기를 눌러 주세요.'}</div>}
+                  <p>Google Sheet 공유 창에서 위 계정을 추가하고 권한을 <strong>편집자</strong>로 선택하세요.</p>
+              </div>
             </div>
           </li>
 
@@ -1217,24 +1223,45 @@ export function CashflowSheetLabPage({
       <Dialog
         open={Boolean(closedMonthStage)}
         onOpenChange={(open) => {
-          if (!open) closeClosedMonthDialog();
+          if (!open && !applyResumeRequired) closeClosedMonthDialog();
         }}
       >
-        <DialogContent className="max-w-[360px] gap-4 rounded-xl p-5 sm:max-w-[360px]">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[760px] gap-4 overflow-y-auto rounded-xl p-5">
           <DialogHeader className="space-y-1 text-left">
             <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 결과 다시 확인' : '결산 후 값이 달라요'}</DialogTitle>
             <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
               {applyResumeRequired
                 ? '시트 값을 MYSCube 현금흐름 관리시트에 반영하는 중 연결이 끊겼습니다. 시트 값을 새로 불러오거나 중복 저장하지 않고, 기존 검토본의 반영 결과를 다시 확인한 뒤 남은 저장만 이어갑니다.'
-                : '월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다.'}
+                : '월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?'}
             </DialogDescription>
           </DialogHeader>
           {!applyResumeRequired && closedMonthWarning.length > 0 && (
-            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-950">
-              {closedMonthWarning.slice(0, 3).map((summary) => (
-                <div key={summary.yearMonth}>{formatClosedMonthDifference(summary)}</div>
+            <div className="space-y-3">
+              <div role={closedMonthManifestComplete ? 'status' : 'alert'} className={`rounded-lg border px-3 py-2 text-[12px] ${closedMonthManifestComplete ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-red-300 bg-red-50 text-red-800'}`}>
+                {closedMonthManifestComplete ? `반영 전 변경 후보 전체 ${closedMonthChangeRows.length.toLocaleString()}건 · manifest 확인됨` : '변경 후보의 manifest 또는 전체 건수가 일치하지 않아 반영할 수 없습니다.'}
+              </div>
+              <div className="max-h-72 space-y-3 overflow-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-950" role="region" aria-label="결산 후 변경 후보 전체 목록" tabIndex={0}>
+              {closedMonthWarning.map((summary) => (
+                <div key={summary.yearMonth}>
+                  <div className="font-semibold">
+                    {summary.yearMonth} · {summary.weeks.length}개 주차 · {summary.differenceCount.toLocaleString()}건 변경
+                  </div>
+                  {(summary.changes || []).map((change) => (
+                    <div key={`${change.mode}:${change.weekNo}:${change.lineId}`} className="mt-1 grid grid-cols-[auto_1fr_auto] gap-2 border-t border-amber-200 pt-1">
+                      <span className="whitespace-nowrap text-amber-800">
+                        {change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차
+                      </span>
+                      <span>{CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}</span>
+                      <span className="whitespace-nowrap text-right tabular-nums">
+                        {change.beforeHadValue ? `${Number(change.beforeAmount || 0).toLocaleString()}원` : '미작성'}
+                        {' → '}
+                        <strong>{change.afterHadValue ? `${Number(change.afterAmount || 0).toLocaleString()}원` : '미작성'}</strong>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ))}
-              {closedMonthWarning.length > 3 && <div>외 {closedMonthWarning.length - 3}개 월</div>}
+              </div>
             </div>
           )}
           {!applyResumeRequired && (
@@ -1247,13 +1274,15 @@ export function CashflowSheetLabPage({
             />
           )}
           <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
-            <Button type="button" variant="outline" className="h-9" onClick={closeClosedMonthDialog}>
-              닫기
-            </Button>
+            {!applyResumeRequired && (
+              <Button type="button" variant="outline" className="h-9" onClick={closeClosedMonthDialog}>
+                닫기
+              </Button>
+            )}
             <Button
               type="button"
               className="h-9"
-              disabled={loading || !closedMonthStage || (!applyResumeRequired && !closedMonthChangeReason.trim())}
+              disabled={loading || !closedMonthStage || (!applyResumeRequired && (!closedMonthChangeReason.trim() || !closedMonthManifestComplete))}
               onClick={() => void handleOverwriteSheetValues(
                 closedMonthChangeReason.trim(),
                 closedMonthStage,
@@ -1345,7 +1374,7 @@ export function CashflowSheetLabPage({
                 </div>
                 <div className="mt-4 flex gap-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-[12px] leading-relaxed text-amber-950">
                   <span className="font-black">TIP</span>
-                  <span>`시트 접근 권한이 필요한가요?`를 열고 <strong>공유 계정 확인 → 공유 계정 복사</strong> 순서로 누르면 돼요.</span>
+                  <span>시트 연결 단계에 바로 표시된 서비스 계정을 복사해 Google Sheet에 <strong>편집자</strong>로 공유하면 돼요.</span>
                 </div>
               </>
             )}

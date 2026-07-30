@@ -527,6 +527,8 @@ export interface CashflowSheetLabStageResult {
     }>;
     truncatedChangeCount?: number;
   }>;
+  closedMonthDifferenceCount?: number;
+  closedMonthDifferenceManifestHash?: string;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;
@@ -657,6 +659,8 @@ export async function applyCashflowSheetLabViaBff(params: {
   applyRiskCandidates?: boolean;
   settledWeekChangeConfirmationId?: string;
   closedMonthChangeReason?: string;
+  closedMonthDifferenceCount?: number;
+  closedMonthDifferenceManifestHash?: string;
   acceptFormulaMismatches?: boolean;
   idempotencyKey: string;
   lease?: CashflowMutationLease;
@@ -680,6 +684,8 @@ export async function applyCashflowSheetLabViaBff(params: {
           ? { settledWeekChangeConfirmationId: params.settledWeekChangeConfirmationId }
           : {}),
         ...(params.closedMonthChangeReason?.trim() ? { closedMonthChangeReason: params.closedMonthChangeReason.trim() } : {}),
+        ...(Number.isSafeInteger(params.closedMonthDifferenceCount) ? { closedMonthDifferenceCount: params.closedMonthDifferenceCount } : {}),
+        ...(params.closedMonthDifferenceManifestHash ? { closedMonthDifferenceManifestHash: params.closedMonthDifferenceManifestHash } : {}),
         ...(params.acceptFormulaMismatches ? { acceptFormulaMismatches: true } : {}),
         idempotencyKey: params.idempotencyKey,
       },

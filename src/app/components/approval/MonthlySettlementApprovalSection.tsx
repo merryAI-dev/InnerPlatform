@@ -11,12 +11,14 @@ import {
   type CashflowMonthCloseRequest,
   type CashflowMonthCloseMonthSnapshot,
 } from '../../lib/platform-bff-client';
+import { CumulativeSettlementMonthDetails } from './CumulativeSettlementMonthDetails';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
+import { AppliedCellHistory } from '../cashflow/AppliedCellHistory';
 
 type ReviewAction = { request: CashflowMonthCloseRequest; decision: 'APPROVE' | 'REJECT' } | null;
 
@@ -38,8 +40,8 @@ const DETAIL_LABELS: Record<string, string> = {
   detail: '상세',
 };
 
-function formatMoney(value: number) {
-  return `${value.toLocaleString('ko-KR')}원`;
+export function formatMoney(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString('ko-KR')}원` : '—';
 }
 
 function formatSnapshotAmount(week: MonthSnapshotWeek, lineId: string) {
@@ -159,6 +161,8 @@ export function MonthlySettlementApprovalSection({
   const [action, setAction] = useState<ReviewAction>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [cumulativeEvidenceReady, setCumulativeEvidenceReady] = useState(false);
 
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -213,6 +217,7 @@ export function MonthlySettlementApprovalSection({
     setWarningsAcknowledged(false);
     setAction({ request, decision });
     setReason('');
+    setActionError('');
   }
 
   async function submitReview() {
@@ -228,7 +233,12 @@ export function MonthlySettlementApprovalSection({
         actor: user,
         projectId: action.request.projectId,
         requestId: action.request.requestId,
-        payload: { decision: action.decision, expectedRevision, reason: reason.trim() || undefined },
+        payload: {
+          decision: action.decision,
+          expectedRevision,
+          expectedManifestHash: action.request.manifestHash,
+          reason: reason.trim() || undefined,
+        },
         idempotencyKey: `cashflow-month-close-review:${action.request.requestId}:${expectedRevision}:${action.decision}`,
       });
       toast.success(action.decision === 'APPROVE' ? '월 결산을 승인했습니다.' : '월 결산을 반려했습니다.');
@@ -236,7 +246,9 @@ export function MonthlySettlementApprovalSection({
       setReason('');
       await load();
     } catch (reviewError) {
-      toast.error(resolveApiErrorMessage(reviewError, '월 결산 검토를 완료하지 못했습니다.'));
+      const message = resolveApiErrorMessage(reviewError, '월 결산 검토를 완료하지 못했습니다.');
+      setActionError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -244,7 +256,11 @@ export function MonthlySettlementApprovalSection({
 
   const snapshot = selectedRequest ? getMonthSnapshot(selectedRequest) : null;
   const warnings = selectedRequest?.reviewWarnings ?? [];
-  const approvalBlocked = !snapshot || (warnings.length > 0 && !warningsAcknowledged);
+  const cumulative = selectedRequest?.contractVersion === 'cashflow-cumulative-close-v2';
+  const selectedSource = selectedRequest?.source || snapshot?.source;
+  const approvalBlocked = cumulative
+    ? !selectedRequest?.manifestHash || !cumulativeEvidenceReady || (warnings.length > 0 && !warningsAcknowledged)
+    : !snapshot || (warnings.length > 0 && !warningsAcknowledged);
 
   return (
     <section className="space-y-3">
@@ -290,7 +306,7 @@ export function MonthlySettlementApprovalSection({
               <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="border border-slate-300 bg-white text-[#001e46]">{request.status === 'APPROVING' ? '승인 처리 재개 필요' : '승인 대기'}</Badge>
+                    <Badge className="border border-slate-300 bg-white text-[#001e46]">{request.status === 'UNCERTAIN' ? '서버 결과 확인 필요' : request.status === 'APPROVING' ? '승인 처리 재개 필요' : '승인 대기'}</Badge>
                     <span className="text-[14px] font-semibold text-slate-900">{projectNames.get(request.projectId) || request.projectId}</span>
                   </div>
                   <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600 sm:grid-cols-3">
@@ -298,9 +314,14 @@ export function MonthlySettlementApprovalSection({
                     <span>요청자 <strong className="text-slate-900">{request.requestedByUid}</strong></span>
                     <span>요청일 <strong className="text-slate-900">{new Date(request.requestedAt).toLocaleDateString('ko-KR')}</strong></span>
                   </div>
+                  {request.lockRange ? (
+                    <p className="text-[11px] font-semibold text-[#174a7c]">
+                      누적 범위 {request.lockRange.fromMonth} {request.lockRange.fromWeekNo}주차 ~ {request.lockRange.throughMonth} {request.lockRange.throughWeekNo}주차 · {request.monthCount?.toLocaleString()}개월 · {request.weekCount?.toLocaleString()}주 · {request.cellCount?.toLocaleString()}셀
+                    </p>
+                  ) : null}
                   {request.reviewWarnings.length > 0 ? <p className="text-[11px] font-medium text-amber-700">결재 전 확인사항 {request.reviewWarnings.length}건</p> : null}
                 </div>
-                <Button size="sm" className="shrink-0 gap-1 bg-[#001e46] hover:bg-[#001735]" onClick={() => { setSelectedRequest(request); setWarningsAcknowledged(false); }}>
+                <Button size="sm" className="shrink-0 gap-1 bg-[#001e46] hover:bg-[#001735]" onClick={() => { setSelectedRequest(request); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); }}>
                   <FileCheck2 className="h-3.5 w-3.5" /> 검토하기
                 </Button>
               </CardContent>
@@ -309,7 +330,7 @@ export function MonthlySettlementApprovalSection({
         </div>
       )}
 
-      <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => { if (!open) { setSelectedRequest(null); setWarningsAcknowledged(false); } }}>
+      <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => { if (!open) { setSelectedRequest(null); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); } }}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[1180px] overflow-y-auto rounded-none border border-slate-300 bg-slate-100 p-3 sm:p-6">
           <DialogHeader className="sr-only">
             <DialogTitle>월 결산 검토 및 승인서</DialogTitle>
@@ -317,18 +338,22 @@ export function MonthlySettlementApprovalSection({
           </DialogHeader>
           {selectedRequest ? (
             <article className="mx-auto w-full max-w-[1080px] border border-slate-300 bg-white p-5 shadow-sm sm:p-8">
-              <header className="border-b-2 border-[#001e46] pb-5">
-                <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">MYSCube Monthly Close</p>
-                    <h3 className="mt-2 text-[24px] font-bold tracking-tight text-[#001e46]">월 결산 검토 및 승인서</h3>
-                    <p className="mt-1 text-[11px] text-slate-500">요청 시점에 저장된 문서이며 현재 시트와 다시 계산하지 않습니다.</p>
+              <header className="border-b-2 border-slate-700 pb-5">
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="flex min-h-[138px] flex-col justify-center">
+                    <p className="text-[11px] font-semibold tracking-[0.12em] text-slate-500">MYSCube · MONTHLY CLOSE</p>
+                    <h3 className="mt-3 text-center text-[25px] font-bold tracking-[0.08em]">월 결산 검토 및 승인서</h3>
+                    <p className="mt-2 text-center text-[11px] text-slate-500">요청 시점에 저장된 문서이며 현재 시트와 다시 계산하지 않습니다.</p>
                   </div>
-                  <div className="grid min-w-[280px] grid-cols-2 border border-slate-400 text-center text-[11px]">
-                    <div className="border-r border-slate-300 bg-slate-100 px-3 py-2 font-semibold">요청자</div>
-                    <div className="bg-slate-100 px-3 py-2 font-semibold">지정 승인자</div>
-                    <div className="border-r border-t border-slate-300 px-3 py-4 break-all">{selectedRequest.requestedByUid}</div>
-                    <div className="border-t border-slate-300 px-3 py-4 break-all">{selectedRequest.approverUid}</div>
+                  <div className="border border-slate-400 text-center text-[11px]">
+                    <div className="grid grid-cols-[48px_repeat(2,minmax(0,1fr))]">
+                      <div className="flex items-center justify-center border-r border-b border-slate-400 bg-slate-50 font-semibold">결재</div>
+                      <div className="border-r border-b border-slate-400 px-2 py-2 font-semibold">기안</div>
+                      <div className="border-b border-slate-400 px-2 py-2 font-semibold">조직장 승인</div>
+                      <div className="flex items-center justify-center border-r border-slate-400 bg-slate-50 text-[10px] text-slate-600">인</div>
+                      <div className="flex min-h-[70px] items-center justify-center break-all border-r border-slate-400 px-2 py-3">{selectedRequest.requestedByUid}</div>
+                      <div className="flex min-h-[70px] items-center justify-center break-all px-2 py-3">{selectedRequest.approverUid}</div>
+                    </div>
                   </div>
                 </div>
               </header>
@@ -336,11 +361,11 @@ export function MonthlySettlementApprovalSection({
               <section className="mt-5 grid border-l border-t border-slate-300 text-[11px] sm:grid-cols-2">
                 {[
                   ['프로젝트', projectNames.get(selectedRequest.projectId) || snapshot?.projectId || selectedRequest.projectId],
-                  ['결산월', snapshot?.yearMonth || selectedRequest.yearMonth],
+                  ['결산월', selectedRequest.yearMonth],
                   ['요청 시각', formatDateTime(selectedRequest.requestedAt)],
-                  ['문서 저장 시각', snapshot ? formatDateTime(snapshot.source.capturedAt) : '-'],
-                  ['원본 revision', snapshot?.source.sourceRevision || '-'],
-                  ['결산 revision', snapshot?.source.targetRevision || '-'],
+                  ['문서 저장 시각', formatDateTime(selectedSource?.capturedAt || null)],
+                  ['원본 revision', selectedSource?.sourceRevision || '-'],
+                  ['결산 revision', selectedSource?.targetRevision || '-'],
                 ].map(([label, value]) => (
                   <div key={label} className="grid grid-cols-[110px_1fr] border-b border-r border-slate-300">
                     <strong className="bg-slate-100 px-3 py-2.5 text-slate-700">{label}</strong>
@@ -349,7 +374,66 @@ export function MonthlySettlementApprovalSection({
                 ))}
               </section>
 
-              {snapshot ? (
+              {selectedSource ? (
+                <section className="mt-6">
+                  <h4 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">저장 시트</h4>
+                  <div className="grid border border-t-0 border-slate-400 text-[11px] sm:grid-cols-[150px_minmax(0,1fr)_150px]">
+                    <strong className="bg-slate-100 px-3 py-3 text-slate-700">{selectedSource.spreadsheetTitle || '제목 없음'}</strong>
+                    <span className="break-all border-y border-slate-300 px-3 py-3 text-slate-700 sm:border-x sm:border-y-0">{selectedSource.selectedSheetName || '시트명 없음'}</span>
+                    {selectedSource.spreadsheetUrl ? (
+                      <a className="px-3 py-3 text-center font-semibold text-[#174a7c] underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#174a7c]" href={selectedSource.spreadsheetUrl} target="_blank" rel="noreferrer">저장 시트 열기</a>
+                    ) : <span className="px-3 py-3 text-center text-slate-500">저장 시트 링크 없음</span>}
+                  </div>
+                </section>
+              ) : null}
+
+              {cumulative && selectedRequest.lockRange && selectedRequest.totals ? (
+                <div className="mt-7 space-y-7">
+                  <section className="border-2 border-[#174a7c] bg-[#eef4f8] p-4" aria-label="누적 결산 고정 범위">
+                    <p className="text-[11px] font-semibold text-[#174a7c]">IMMUTABLE CUMULATIVE RANGE</p>
+                    <p className="mt-1 text-[18px] font-bold text-slate-950">
+                      {selectedRequest.lockRange.fromMonth} {selectedRequest.lockRange.fromWeekNo}주차 ~ {selectedRequest.lockRange.throughMonth} {selectedRequest.lockRange.throughWeekNo}주차
+                    </p>
+                    <p className="mt-2 text-[12px] text-slate-700">
+                      {selectedRequest.monthCount?.toLocaleString()}개월 · {selectedRequest.weekCount?.toLocaleString()}주 · Projection/Actual {selectedRequest.cellCount?.toLocaleString()}셀
+                    </p>
+                    <p className="mt-1 text-[12px] font-semibold text-slate-800">승인하면 이 범위의 모든 주차가 수정 불가 상태가 됩니다.</p>
+                    <p className="mt-2 break-all text-[10px] text-slate-500">manifest {selectedRequest.manifestHash}</p>
+                  </section>
+
+                  <section>
+                    <h4 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">전체 요약</h4>
+                    <div className="grid border-l border-t border-slate-300 sm:grid-cols-3">
+                      {(['projection', 'actual', 'difference'] as const).map((mode) => (
+                        <div key={mode} className="border-b border-r border-slate-300 p-3">
+                          <p className="text-[11px] font-bold text-[#001e46]">{mode === 'projection' ? 'Projection' : mode === 'actual' ? 'Actual' : '차이'}</p>
+                          <p className="mt-2 text-right text-[14px] font-semibold tabular-nums">{formatMoney(selectedRequest.totals?.[mode])}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">연도별 요약</h4>
+                    <div className="overflow-x-auto border border-t-0 border-slate-300" role="region" aria-label="누적 결산 연도별 요약" tabIndex={0}>
+                      <table className="w-full min-w-[1080px] border-collapse text-[11px]">
+                        <caption className="sr-only">연도별 Projection, Actual, 차이의 셀 금액 합계</caption>
+                        <thead className="bg-slate-100"><tr><th className="px-3 py-2 text-left">연도</th><th className="px-3 py-2 text-right">포함 월</th>{(['Projection 합계', 'Actual 합계', '차이'] as const).map((label) => <th key={label} className="px-3 py-2 text-right">{label}</th>)}</tr></thead>
+                        <tbody>{(selectedRequest.annualSummaries || []).map((annual) => (
+                          <tr key={annual.year} className="border-t border-slate-200"><th className="px-3 py-2 text-left">{annual.year}년</th><td className="px-3 py-2 text-right">{annual.monthCount}개월</td>{(['projection', 'actual', 'difference'] as const).map((mode) => <td key={mode} className="px-3 py-2 text-right tabular-nums">{formatMoney(annual[mode])}</td>)}</tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="mb-2 border-b-2 border-slate-700 pb-2 text-[14px] font-bold">월·주차·항목 상세</h4>
+                    <CumulativeSettlementMonthDetails tenantId={orgId} actor={user!} request={selectedRequest} onReadyChange={setCumulativeEvidenceReady} />
+                  </section>
+
+                  <AppliedCellHistory tenantId={orgId} actor={user!} projectId={selectedRequest.projectId} />
+                </div>
+              ) : snapshot ? (
                 <div className="mt-7 space-y-7">
                   <MonthModeTable title="Projection" mode={snapshot.projection} />
                   <MonthModeTable title="Actual" mode={snapshot.actual} />
@@ -404,7 +488,7 @@ export function MonthlySettlementApprovalSection({
                   </Button>
                 ) : null}
                 <Button size="sm" className="gap-1 bg-[#001e46] hover:bg-[#001735]" disabled={approvalBlocked} onClick={() => startReview(selectedRequest, 'APPROVE')}>
-                  <CheckCircle2 className="h-3.5 w-3.5" /> {selectedRequest.status === 'APPROVING' ? '처리 재개' : '승인'}
+                  <CheckCircle2 className="h-3.5 w-3.5" /> {selectedRequest.status === 'UNCERTAIN' ? '결과 확인 후 재개' : selectedRequest.status === 'APPROVING' ? '처리 재개' : '승인'}
                 </Button>
               </footer>
             </article>
@@ -418,7 +502,8 @@ export function MonthlySettlementApprovalSection({
             <DialogTitle className="text-[14px]">{action?.decision === 'APPROVE' ? '월 결산 승인' : '월 결산 반려'}</DialogTitle>
             <DialogDescription className="text-[11px]">검토한 저장 문서에 대한 처리 의견을 남깁니다.</DialogDescription>
           </DialogHeader>
-          <Textarea value={reason} onChange={(event) => setReason(event.target.value)} className="min-h-[88px] text-[12px]" placeholder={action?.decision === 'APPROVE' ? '승인 코멘트 (선택)' : '반려 사유 (필수)'} />
+          {actionError ? <div role="alert" className="border border-red-200 bg-red-50 p-3 text-[12px] text-red-800">{actionError}</div> : null}
+          <Textarea value={reason} onChange={(event) => { setReason(event.target.value); setActionError(''); }} maxLength={2000} aria-label={action?.decision === 'APPROVE' ? '승인 코멘트' : '반려 사유'} className="min-h-[88px] text-[12px]" placeholder={action?.decision === 'APPROVE' ? '승인 코멘트 (선택)' : '반려 사유 (필수)'} />
           <DialogFooter>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => setAction(null)}>취소</Button>
             <Button

@@ -4,6 +4,7 @@ import type {
   CashflowMonthCloseConfirmation,
   CashflowMonthCloseDepositScheduleRow,
   CashflowMonthCloseDraftInput,
+  CashflowMonthCloseLockRange,
   CashflowManagementCheck,
   CashflowManagementConfirmation,
   CashflowDeadlineSummary,
@@ -23,7 +24,19 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
 export function isCashflowMonthCloseRequestLocked(status?: string): boolean {
-  return status === 'PENDING' || status === 'APPROVING';
+  return status === 'PENDING' || status === 'APPROVING' || status === 'UNCERTAIN';
+}
+
+export function isCashflowWeekLockedByRange(
+  lockRange: CashflowMonthCloseLockRange | undefined,
+  yearMonth: string,
+  weekNo: number,
+): boolean {
+  if (!lockRange) return false;
+  const target = `${yearMonth}-w${String(weekNo).padStart(2, '0')}`;
+  const start = `${lockRange.fromMonth}-w${String(lockRange.fromWeekNo).padStart(2, '0')}`;
+  const end = `${lockRange.throughMonth}-w${String(lockRange.throughWeekNo).padStart(2, '0')}`;
+  return target >= start && target <= end;
 }
 
 export function shouldApplyCashflowMonthCloseRequestResult(input: {
