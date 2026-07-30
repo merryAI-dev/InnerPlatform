@@ -111,6 +111,7 @@ export function resolveCashflowEvidenceScope(input: {
     && input.monthClose.dashboard?.snapshotCompatibility?.status !== 'LEGACY_EVIDENCE_ONLY';
   const frozenMetadata = input.monthClose?.dashboard?.sheetMetadata;
   const hasFrozenMetadata = sameScope
+    && input.monthClose?.status !== 'OPEN'
     && frozenMetadata != null
     && Object.keys(frozenMetadata).length > 0;
   return {

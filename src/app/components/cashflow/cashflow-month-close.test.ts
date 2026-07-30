@@ -175,6 +175,25 @@ describe('cashflow month close contract', () => {
     expect(JSON.stringify(scope)).not.toContain('LIVE-SENTINEL');
   });
 
+  it('uses refreshed mirror metadata for an open view', () => {
+    const scope = resolveCashflowEvidenceScope({
+      projectId: 'project-1',
+      yearMonth: '2026-07',
+      monthClose: {
+        projectId: 'project-1',
+        yearMonth: '2026-07',
+        status: 'OPEN',
+        dashboard: {
+          sheetMetadata: { accountType: { sourceCell: 'B3', value: 'STALE' } },
+        },
+      },
+      liveYearView: null,
+      liveSheetMetadata: { accountType: { sourceCell: 'B3', value: 'REFRESHED' } },
+    });
+
+    expect(scope.sheetMetadata?.accountType?.value).toBe('REFRESHED');
+  });
+
   it('rejects an OPEN result from another project before resolving live evidence', () => {
     const scope = resolveCashflowEvidenceScope({
       projectId: 'project-2',
