@@ -6,6 +6,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { mountCashflowSheetLabRoutes } from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
+import { stableStringify } from '../utils.mjs';
 
 const PROJECTION_IN_LABELS = [
   'MYSC 선입금 - 직접사업비 등',
@@ -66,6 +67,102 @@ const CASHFLOW_LINE_IDS = [
   'INPUT_VAT_OUT', 'MYSC_LABOR_OUT', 'MYSC_PROFIT_OUT', 'SALES_VAT_OUT',
   'TEAM_SUPPORT_OUT', 'BANK_INTEREST_OUT',
 ];
+
+function closeHash(value) {
+  return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
+}
+
+function cumulativeMonths(throughMonth) {
+  const months = [];
+  for (let year = 2023, month = 1; `${year}-${String(month).padStart(2, '0')}` <= throughMonth;) {
+    months.push(`${year}-${String(month).padStart(2, '0')}`);
+    month += 1;
+    if (month === 13) {
+      year += 1;
+      month = 1;
+    }
+  }
+  return months;
+}
+
+function cumulativeCloseRequestDocuments({ status = 'PENDING', throughMonth = '2026-01' } = {}) {
+  const requestId = `project-a-${throughMonth}`;
+  const revision = 1;
+  const source = { kind: 'PINNED_MIRROR', sourceRevision: 'source-a', targetRevision: 'target-a' };
+  const shards = cumulativeMonths(throughMonth).map((yearMonth) => {
+    const base = {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      requestId,
+      requestRevision: revision,
+      projectId: 'project-a',
+      yearMonth,
+      cells: ['projection', 'actual'].flatMap((mode) => Array.from({ length: 5 }, (_unused, weekIndex) => (
+        CASHFLOW_LINE_IDS.map((cashflowLine) => ({
+          mode,
+          weekNo: weekIndex + 1,
+          cashflowLine,
+          cellState: yearMonth === throughMonth && mode === 'projection' && weekIndex === 0 && cashflowLine === CASHFLOW_LINE_IDS[0]
+            ? 'ZERO'
+            : 'EMPTY',
+          amount: yearMonth === throughMonth && mode === 'projection' && weekIndex === 0 && cashflowLine === CASHFLOW_LINE_IDS[0]
+            ? 0
+            : null,
+        }))
+      )).flat()),
+      source,
+    };
+    return { ...base, shardHash: closeHash(base) };
+  });
+  const manifest = {
+    contractVersion: 'cashflow-cumulative-close-v2',
+    requestId,
+    requestRevision: revision,
+    projectId: 'project-a',
+    fromMonth: '2023-01',
+    yearMonth: throughMonth,
+    months: shards.map((shard) => ({ yearMonth: shard.yearMonth, shardHash: shard.shardHash })),
+  };
+  return Object.fromEntries([
+    [`orgs/tenant-a/cashflow_month_close_requests/${requestId}`, {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      requestId,
+      tenantId: 'tenant-a',
+      projectId: 'project-a',
+      fromMonth: '2023-01',
+      yearMonth: throughMonth,
+      status,
+      revision,
+      manifestHash: closeHash(manifest),
+      monthCount: shards.length,
+      weekCount: shards.length * 5,
+      cellCount: shards.length * 160,
+    }],
+    ...shards.map((shard) => [
+      `orgs/tenant-a/cashflow_month_close_request_months/${requestId}-r${revision}-${shard.yearMonth}`,
+      shard,
+    ]),
+  ]);
+}
+
+function matchingCanonicalWeeks(cellCount, yearMonths = ['2026-01']) {
+  const weeks = new Map(yearMonths.flatMap((yearMonth) => Array.from({ length: 5 }, (_unused, index) => {
+    const weekNo = index + 1;
+    return [`${yearMonth}:${weekNo}`, {
+      id: `project-a-${yearMonth}-w${weekNo}`,
+      projectId: 'project-a',
+      yearMonth,
+      weekNo,
+      projection: {},
+      actual: {},
+    }];
+  })));
+  yearMonths.flatMap((yearMonth) => ['projection', 'actual'].flatMap((mode) => Array.from({ length: 5 }, (_unused, weekIndex) => (
+    CASHFLOW_LINE_IDS.map((lineId) => ({ yearMonth, mode, weekNo: weekIndex + 1, lineId }))
+  )).flat())).slice(0, cellCount).forEach((cell) => {
+    weeks.get(`${cell.yearMonth}:${cell.weekNo}`)[cell.mode][cell.lineId] = 999;
+  });
+  return [...weeks.values()];
+}
 
 function javaApplyResponse(request, resultingTargetRevision) {
   const lines = (request.cells || []).filter((cell) => ['VALUE', 'ZERO'].includes(cell.cellState));
@@ -2345,6 +2442,240 @@ describe('cashflow sheet lab route', () => {
       proposedHadValue: false,
       proposedAmount: null,
     }));
+  });
+
+  it('returns the full immutable PENDING-close shard differences and rejects forged acceptance evidence', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      initialDocuments: cumulativeCloseRequestDocuments(),
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'7'.repeat(64)}`)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-pending-close' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-close' })
+      .expect(200);
+
+    expect(stage.body.pendingApprovalDifferenceCount).toBe(160);
+    expect(stage.body.pendingApprovalDifferenceManifestHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(stage.body.pendingApprovalDifferences).toEqual([expect.objectContaining({
+      requestId: 'project-a-2026-01',
+      requestRevision: 1,
+      requestStatus: 'PENDING',
+      yearMonth: '2026-01',
+      differenceCount: 160,
+      weeks: [1, 2, 3, 4, 5],
+      truncatedChangeCount: 0,
+      changes: expect.any(Array),
+    })]);
+    expect(stage.body.pendingApprovalDifferences[0].changes).toHaveLength(160);
+    expect(stage.body.pendingApprovalDifferences[0].changes).toContainEqual(expect.objectContaining({
+      mode: 'projection', weekNo: 1, lineId: CASHFLOW_LINE_IDS[0],
+      beforeHadValue: true, beforeState: 'ZERO', beforeAmount: 0,
+      afterHadValue: true, afterState: 'VALUE', afterAmount: 999,
+    }));
+    expect(stage.body.pendingApprovalDifferences[0].changes).toContainEqual(expect.objectContaining({
+      beforeHadValue: false, beforeState: 'EMPTY', beforeAmount: null,
+      afterHadValue: true, afterState: 'VALUE', afterAmount: 999,
+    }));
+
+    for (const forged of [
+      { pendingApprovalDifferenceCount: 159, pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash },
+      { pendingApprovalDifferenceCount: 160, pendingApprovalDifferenceManifestHash: `sha256:${'0'.repeat(64)}` },
+    ]) {
+      const rejected = await request(app)
+        .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+        .send({
+          stageRunId: stage.body.runId,
+          acceptPendingApprovalDifferences: true,
+          ...forged,
+          idempotencyKey: `apply-pending-forged-${forged.pendingApprovalDifferenceCount}-${forged.pendingApprovalDifferenceManifestHash.slice(-1)}`,
+        })
+        .expect(409);
+      expect(rejected.body.code).toBe('cashflow_pending_approval_confirmation_required');
+    }
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({
+        stageRunId: stage.body.runId,
+        acceptPendingApprovalDifferences: true,
+        pendingApprovalDifferenceCount: stage.body.pendingApprovalDifferenceCount,
+        pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash,
+        idempotencyKey: 'apply-pending-confirmed',
+      })
+      .expect(200);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects apply when an active close request status changes after staging', async () => {
+    const requestDocuments = cumulativeCloseRequestDocuments();
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      initialDocuments: requestDocuments,
+    });
+    const javaWeeklyClient = { applyCashflowSheetLab: vi.fn() };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a',
+          selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-pending-race' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-race' })
+      .expect(200);
+    db.__getDocument('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-01').status = 'APPROVING';
+
+    const rejected = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({
+        stageRunId: stage.body.runId,
+        acceptPendingApprovalDifferences: true,
+        pendingApprovalDifferenceCount: stage.body.pendingApprovalDifferenceCount,
+        pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash,
+        idempotencyKey: 'apply-pending-race',
+      })
+      .expect(409);
+    expect(rejected.body.code).toBe('cashflow_pending_approval_evidence_stale');
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+  });
+
+  it('passes one pending-approval warning instruction for 100 changed cells in one month and replays idempotently', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)', startWeek: '26-1-1', endWeek: '26-1-5',
+        },
+      },
+      weeks: matchingCanonicalWeeks(60),
+      initialDocuments: cumulativeCloseRequestDocuments(),
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'8'.repeat(64)}`)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a', selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-pending-100' }).expect(200);
+    const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-100' }).expect(200);
+    expect(stage.body.pendingApprovalDifferenceCount).toBe(100);
+    const applyPayload = {
+      stageRunId: stage.body.runId,
+      acceptPendingApprovalDifferences: true,
+      pendingApprovalDifferenceCount: 100,
+      pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash,
+      idempotencyKey: 'apply-pending-100',
+    };
+    const applied = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(applyPayload).expect(200);
+    await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(applyPayload).expect(200).expect(applied.body);
+
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    const instruction = javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].pendingApprovalAffectedMonths;
+    expect(instruction).toEqual([expect.objectContaining({
+      yearMonth: '2026-01', warningCountIncrement: 1, differenceCount: 100,
+    })]);
+    expect(instruction[0].approvalDifferences.flatMap((difference) => difference.changes)).toHaveLength(100);
+  });
+
+  it('passes exactly one pending-approval warning instruction per affected month', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a', sheetName: 'cashflow(사용내역 연동)', startWeek: '26-1-1', endWeek: '26-2-5',
+        },
+      },
+      initialDocuments: cumulativeCloseRequestDocuments({ throughMonth: '2026-02' }),
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'9'.repeat(64)}`)),
+    };
+    const app = createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => ({
+          spreadsheetId: 'spreadsheet-a', selectedSheetName: 'cashflow(사용내역 연동)',
+          availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+          matrix: buildMatrixWithWeekLabels([...JANUARY_FINANCE_WEEKS, '26-2-1', '26-2-2', '26-2-3', '26-2-4', '26-2-5']),
+        })),
+      },
+      routeOptions: { javaWeeklyClient },
+    });
+    const mirror = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-pending-two-months' }).expect(200);
+    const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-two-months' }).expect(200);
+    await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply').send({
+      stageRunId: stage.body.runId,
+      acceptPendingApprovalDifferences: true,
+      pendingApprovalDifferenceCount: stage.body.pendingApprovalDifferenceCount,
+      pendingApprovalDifferenceManifestHash: stage.body.pendingApprovalDifferenceManifestHash,
+      idempotencyKey: 'apply-pending-two-months',
+    }).expect(200);
+
+    const instructions = javaWeeklyClient.applyCashflowSheetBatch.mock.calls[0][0].pendingApprovalAffectedMonths;
+    expect(instructions.map((instruction) => [instruction.yearMonth, instruction.warningCountIncrement]))
+      .toEqual([['2026-01', 1], ['2026-02', 1]]);
+    expect(instructions.map((instruction) => instruction.approvalDifferences.flatMap((difference) => difference.changes).length))
+      .toEqual([160, 160]);
   });
 
   it('requires explicit confirmation before applying staged closed-month differences', async () => {

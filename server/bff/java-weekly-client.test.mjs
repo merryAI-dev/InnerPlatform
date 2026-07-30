@@ -87,6 +87,10 @@ describe('Java weekly cashflow client', () => {
     const openingBalanceCells = [
       { year: 2025, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 },
     ];
+    const pendingApprovalAffectedMonths = [{
+      yearMonth: '2026-07', warningCountIncrement: 1, differenceCount: 1,
+      approvalDifferences: [{ requestId: 'request-a', changes: [{ lineId: 'DIRECT_COST_OUT' }] }],
+    }];
 
     await client.applyCashflowSheetLab({
       context,
@@ -98,6 +102,7 @@ describe('Java weekly cashflow client', () => {
       sourceSheetKey: 'caller-controlled',
       cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
       openingBalanceCells,
+      pendingApprovalAffectedMonths,
     });
 
     const [, init] = fetchImpl.mock.calls[0];
@@ -112,6 +117,7 @@ describe('Java weekly cashflow client', () => {
       yearMonth: '2026-07',
       cells: [{ mode: 'actual', weekNo: 1, cashflowLine: 'DIRECT_COST_OUT', cellState: 'VALUE', amount: 1000 }],
       openingBalanceCells,
+      pendingApprovalAffectedMonths,
     });
   });
 
@@ -126,6 +132,10 @@ describe('Java weekly cashflow client', () => {
       { yearMonth: '2026-07', cells: monthlyContract.cells },
       { yearMonth: '2026-08', cells: monthlyContract.cells },
     ];
+    const pendingApprovalAffectedMonths = [{
+      yearMonth: '2026-07', warningCountIncrement: 1, differenceCount: 100,
+      approvalDifferences: [{ requestId: 'request-a', changes: Array.from({ length: 100 }, (_, index) => ({ index })) }],
+    }];
 
     await client.applyCashflowSheetBatch({
       context,
@@ -140,6 +150,7 @@ describe('Java weekly cashflow client', () => {
         targetRevision: monthlyContract.targetRevision,
         weeks: [{ yearMonth: '2026-07', weekNo: 3, completionRevision: 1 }],
       },
+      pendingApprovalAffectedMonths,
     });
 
     const [url, init] = fetchImpl.mock.calls[0];
@@ -156,6 +167,7 @@ describe('Java weekly cashflow client', () => {
         targetRevision: monthlyContract.targetRevision,
         weeks: [{ yearMonth: '2026-07', weekNo: 3, completionRevision: 1 }],
       },
+      pendingApprovalAffectedMonths,
     });
   });
 

@@ -381,6 +381,7 @@ export function createJavaWeeklyClient({
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    pendingApprovalAffectedMonths = [],
     acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
@@ -414,6 +415,7 @@ export function createJavaWeeklyClient({
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(pendingApprovalAffectedMonths.length > 0 ? { pendingApprovalAffectedMonths } : {}),
         ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });
@@ -434,6 +436,7 @@ export function createJavaWeeklyClient({
     replaceAllActualSources = false,
     settledWeekChangeConfirmation = null,
     closedMonthChangeReason = '',
+    pendingApprovalAffectedMonths = [],
     acceptFormulaMismatches = false,
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
@@ -467,6 +470,7 @@ export function createJavaWeeklyClient({
         ...(replaceAllActualSources === true ? { replaceAllActualSources: true } : {}),
         ...(settledWeekChangeConfirmation ? { settledWeekChangeConfirmation } : {}),
         ...(readOptionalText(closedMonthChangeReason) ? { closedMonthChangeReason: readOptionalText(closedMonthChangeReason) } : {}),
+        ...(pendingApprovalAffectedMonths.length > 0 ? { pendingApprovalAffectedMonths } : {}),
         ...(acceptFormulaMismatches === true ? { acceptFormulaMismatches: true } : {}),
       },
     });

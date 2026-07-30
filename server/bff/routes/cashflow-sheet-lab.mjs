@@ -20,6 +20,7 @@ import {
   summarizeCashflowAnnualMode,
 } from '../cashflow-annual-total.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
+import { stableStringify } from '../utils.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import {
   cashflowSheetLabApplySchema,
@@ -46,6 +47,8 @@ const CASHFLOW_SHEET_STAGE_YEARS_COLLECTION_ID = 'cashflow_sheet_stage_years';
 const CASHFLOW_MODES = ['projection', 'actual'];
 const CASHFLOW_SHEET_SOURCE_KEY = 'cashflow-sheet-lab';
 const CASHFLOW_SHEET_APPLY_COMMAND = 'weeklyExpense.cashflowSheetLab.apply';
+const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
+const CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES = new Set(['PENDING', 'APPROVING', 'UNCERTAIN']);
 const CASHFLOW_LINE_ORDER = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const FINANCIAL_YEAR_FIELDS = [
   'contractAmount',
@@ -1772,6 +1775,178 @@ function stableHash(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function cashflowCloseHash(value) {
+  return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
+}
+
+function cumulativeCloseMonths(fromMonth, throughMonth) {
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(fromMonth) || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(throughMonth)) return [];
+  const months = [];
+  for (let year = Number(fromMonth.slice(0, 4)), month = Number(fromMonth.slice(5));;) {
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    if (yearMonth > throughMonth || months.length >= 1000) break;
+    months.push(yearMonth);
+    month += 1;
+    if (month === 13) {
+      year += 1;
+      month = 1;
+    }
+  }
+  return months;
+}
+
+function pendingApprovalEvidenceError(message = '결재 중인 누적 결산 근거가 변경되었거나 완전하지 않습니다.') {
+  return createHttpError(409, message, 'cashflow_pending_approval_evidence_stale');
+}
+
+function buildPendingApprovalAffectedMonths(differences = []) {
+  const byMonth = new Map();
+  for (const difference of differences) {
+    const yearMonth = readOptionalText(difference?.yearMonth);
+    if (!yearMonth) continue;
+    const month = byMonth.get(yearMonth) || { yearMonth, warningCountIncrement: 1, differenceCount: 0, approvalDifferences: [] };
+    month.differenceCount += Number(difference.differenceCount) || 0;
+    month.approvalDifferences.push(difference);
+    byMonth.set(yearMonth, month);
+  }
+  return [...byMonth.values()].sort((left, right) => left.yearMonth.localeCompare(right.yearMonth));
+}
+
+async function readPendingApprovalDifferences({ db, tenantId, projectId, candidates = [] }) {
+  const requestSnapshot = await db.collection(`orgs/${tenantId}/cashflow_month_close_requests`)
+    .where('projectId', '==', projectId)
+    .get();
+  const requests = requestSnapshot.docs
+    .map((doc) => doc.data() || {})
+    .filter((request) => CASHFLOW_ACTIVE_CLOSE_REQUEST_STATUSES.has(readOptionalText(request.status)))
+    .sort((left, right) => readOptionalText(left.requestId).localeCompare(readOptionalText(right.requestId)));
+  const evidence = [];
+  const differences = [];
+  for (const request of requests) {
+    const requestId = readOptionalText(request.requestId);
+    const revision = Number(request.revision);
+    const fromMonth = readOptionalText(request.fromMonth);
+    const throughMonth = readOptionalText(request.yearMonth);
+    const months = cumulativeCloseMonths(fromMonth, throughMonth);
+    if (
+      request.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+      || readOptionalText(request.projectId) !== projectId
+      || !requestId
+      || !Number.isSafeInteger(revision)
+      || revision < 1
+      || fromMonth !== '2023-01'
+      || throughMonth > '2099-12'
+      || months.length === 0
+      || Number(request.monthCount) !== months.length
+      || Number(request.weekCount) !== months.length * 5
+      || Number(request.cellCount) !== months.length * 160
+    ) {
+      throw pendingApprovalEvidenceError('결재 중인 누적 결산 요청 header가 완전하지 않습니다.');
+    }
+    const shards = await Promise.all(months.map(async (yearMonth) => {
+      const snapshot = await db.doc(
+        `orgs/${tenantId}/cashflow_month_close_request_months/${requestId}-r${revision}-${yearMonth}`,
+      ).get();
+      const shard = snapshot.exists ? snapshot.data() || {} : null;
+      const cells = Array.isArray(shard?.cells) ? shard.cells : [];
+      const expectedKeys = ['projection', 'actual'].flatMap((mode) => Array.from({ length: 5 }, (_unused, weekIndex) => (
+        CASHFLOW_ALL_LINES.map((lineId) => `${mode}|${weekIndex + 1}|${lineId}`)
+      )).flat());
+      const actualKeys = cells.map((cell) => `${readOptionalText(cell.mode)}|${Number(cell.weekNo)}|${readOptionalText(cell.cashflowLine)}`);
+      const validCells = cells.length === 160 && actualKeys.every((key, index) => key === expectedKeys[index])
+        && cells.every((cell) => (
+          ['EMPTY', 'ZERO', 'VALUE'].includes(readOptionalText(cell.cellState))
+          && (cell.cellState === 'EMPTY'
+            ? cell.amount === null
+            : Number.isSafeInteger(Number(cell.amount))
+              && (cell.cellState === 'ZERO' ? Number(cell.amount) === 0 : Number(cell.amount) !== 0))
+        ));
+      if (
+        !shard
+        || shard.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+        || readOptionalText(shard.requestId) !== requestId
+        || Number(shard.requestRevision) !== revision
+        || readOptionalText(shard.projectId) !== projectId
+        || readOptionalText(shard.yearMonth) !== yearMonth
+        || !validCells
+      ) throw pendingApprovalEvidenceError(`결재 중인 누적 결산 ${yearMonth} shard 구조가 완전하지 않습니다.`);
+      const { shardHash, ...base } = shard;
+      if (readOptionalText(shardHash) !== cashflowCloseHash(base)) {
+        throw pendingApprovalEvidenceError(`결재 중인 누적 결산 ${yearMonth} shard hash가 일치하지 않습니다.`);
+      }
+      return shard;
+    }));
+    const manifest = {
+      contractVersion: CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
+      requestId,
+      requestRevision: revision,
+      projectId,
+      fromMonth,
+      yearMonth: throughMonth,
+      months: shards.map((shard) => ({ yearMonth: shard.yearMonth, shardHash: shard.shardHash })),
+    };
+    const manifestHash = cashflowCloseHash(manifest);
+    if (manifestHash !== readOptionalText(request.manifestHash)) {
+      throw pendingApprovalEvidenceError('결재 중인 누적 결산 manifest hash가 일치하지 않습니다.');
+    }
+    evidence.push({
+      requestId,
+      status: request.status,
+      revision,
+      manifestHash,
+      fromMonth,
+      yearMonth: throughMonth,
+      monthCount: months.length,
+    });
+    const shardByMonth = new Map(shards.map((shard) => [shard.yearMonth, shard]));
+    for (const yearMonth of months) {
+      const candidateByKey = new Map(candidates
+        .filter((candidate) => readOptionalText(candidate.scope) !== 'annual' && readOptionalText(candidate.yearMonth) === yearMonth)
+        .map((candidate) => [`${candidate.mode}|${candidate.weekNo}|${candidate.lineId}`, candidate]));
+      const changes = shardByMonth.get(yearMonth).cells.flatMap((cell) => {
+        const candidate = candidateByKey.get(`${cell.mode}|${cell.weekNo}|${cell.cashflowLine}`);
+        if (!candidate) return [];
+        const beforeHadValue = cell.cellState !== 'EMPTY';
+        const afterState = readOptionalText(candidate.cellState);
+        const afterHadValue = ['VALUE', 'ZERO'].includes(afterState);
+        const beforeAmount = beforeHadValue ? Number(cell.amount) : null;
+        const afterAmount = afterHadValue ? Number(candidate.proposedAmount) : null;
+        if (cell.cellState === afterState && beforeAmount === afterAmount) return [];
+        return [{
+          mode: cell.mode,
+          weekNo: cell.weekNo,
+          lineId: cell.cashflowLine,
+          beforeHadValue,
+          beforeState: cell.cellState,
+          beforeAmount,
+          afterHadValue,
+          afterState,
+          afterAmount,
+        }];
+      });
+      if (changes.length > 0) {
+        differences.push({
+          requestId,
+          requestRevision: revision,
+          requestStatus: request.status,
+          requestManifestHash: manifestHash,
+          yearMonth,
+          differenceCount: changes.length,
+          weeks: [...new Set(changes.map((change) => change.weekNo))],
+          changes,
+          truncatedChangeCount: 0,
+        });
+      }
+    }
+  }
+  return {
+    evidence,
+    differences,
+    differenceCount: differences.reduce((sum, difference) => sum + difference.differenceCount, 0),
+    manifestHash: `sha256:${stableHash(differences)}`,
+  };
+}
+
 function assertApplyRequestMatches(stageRun, applyRequestHash) {
   if (readOptionalText(stageRun.applyRequestHash) !== readOptionalText(applyRequestHash)) {
     throw createHttpError(409, '다른 최종 반영 요청이 이미 이 검토본을 사용 중입니다.', 'cashflow_sheet_apply_in_progress');
@@ -1921,6 +2096,9 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
     closedMonthDifferences: Array.isArray(stageRunDocument.closedMonthDifferences) ? stageRunDocument.closedMonthDifferences : [],
     closedMonthDifferenceCount: Number(stageRunDocument.closedMonthDifferenceCount) || 0,
     closedMonthDifferenceManifestHash: readOptionalText(stageRunDocument.closedMonthDifferenceManifestHash),
+    pendingApprovalDifferences: Array.isArray(stageRunDocument.pendingApprovalDifferences) ? stageRunDocument.pendingApprovalDifferences : [],
+    pendingApprovalDifferenceCount: Number(stageRunDocument.pendingApprovalDifferenceCount) || 0,
+    pendingApprovalDifferenceManifestHash: readOptionalText(stageRunDocument.pendingApprovalDifferenceManifestHash),
     stagedMonths: Array.isArray(stageRunDocument.stagedMonths) ? stageRunDocument.stagedMonths : [],
     stagedYears: Array.isArray(stageRunDocument.stagedYears) ? stageRunDocument.stagedYears : [],
   };
@@ -1937,6 +2115,9 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
       closedMonthChangeReason: '',
       closedMonthDifferenceCount: 0,
       closedMonthDifferenceManifestHash: '',
+      acceptPendingApprovalDifferences: false,
+      pendingApprovalDifferenceCount: 0,
+      pendingApprovalDifferenceManifestHash: '',
       acceptFormulaMismatches: false,
       replaceAllActualSources: stageRunDocument.replaceAllActualSources === true,
     },
@@ -2331,6 +2512,18 @@ async function applyStagedCashflowSheetLab({
   const closedMonthDifferenceManifestHash = storedApplyInput
     ? readOptionalText(storedApplyInput.closedMonthDifferenceManifestHash)
     : readOptionalText(parsed.closedMonthDifferenceManifestHash);
+  const acceptPendingApprovalDifferences = storedApplyInput
+    ? storedApplyInput.acceptPendingApprovalDifferences === true
+    : parsed.acceptPendingApprovalDifferences === true;
+  const pendingApprovalDifferenceCount = storedApplyInput
+    ? Number(storedApplyInput.pendingApprovalDifferenceCount)
+    : Number(parsed.pendingApprovalDifferenceCount);
+  const pendingApprovalDifferenceManifestHash = storedApplyInput
+    ? readOptionalText(storedApplyInput.pendingApprovalDifferenceManifestHash)
+    : readOptionalText(parsed.pendingApprovalDifferenceManifestHash);
+  const pendingApprovalAffectedMonths = acceptPendingApprovalDifferences
+    ? buildPendingApprovalAffectedMonths(stageRun.pendingApprovalDifferences)
+    : [];
   const acceptFormulaMismatches = storedApplyInput
     ? storedApplyInput.acceptFormulaMismatches === true
     : parsed.acceptFormulaMismatches === true;
@@ -2341,6 +2534,9 @@ async function applyStagedCashflowSheetLab({
     ...(closedMonthChangeReason ? { closedMonthChangeReason } : {}),
     ...(Number.isSafeInteger(closedMonthDifferenceCount) ? { closedMonthDifferenceCount } : {}),
     ...(closedMonthDifferenceManifestHash ? { closedMonthDifferenceManifestHash } : {}),
+    ...(acceptPendingApprovalDifferences ? { acceptPendingApprovalDifferences: true } : {}),
+    ...(Number.isSafeInteger(pendingApprovalDifferenceCount) ? { pendingApprovalDifferenceCount } : {}),
+    ...(pendingApprovalDifferenceManifestHash ? { pendingApprovalDifferenceManifestHash } : {}),
     ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
   });
   if (replaying) {
@@ -2492,6 +2688,37 @@ async function applyStagedCashflowSheetLab({
     acceptFormulaMismatches,
   });
 
+  if (!resuming) {
+    const pendingApproval = await readPendingApprovalDifferences({ db, tenantId, projectId, candidates: selectedCandidates });
+    if (stableHash(pendingApproval.evidence) !== stableHash(stageRun.pendingApprovalEvidence || [])) {
+      throw pendingApprovalEvidenceError('검토 후 결재 중인 누적 결산 상태 또는 revision이 변경되었습니다. 다시 검토해 주세요.');
+    }
+    if (
+      pendingApproval.differenceCount !== Number(stageRun.pendingApprovalDifferenceCount)
+      || pendingApproval.manifestHash !== readOptionalText(stageRun.pendingApprovalDifferenceManifestHash)
+      || stableHash(pendingApproval.differences) !== stableHash(stageRun.pendingApprovalDifferences || [])
+    ) {
+      throw pendingApprovalEvidenceError('검토 후 결재 중인 누적 결산 월 근거가 변경되었습니다. 다시 검토해 주세요.');
+    }
+    if (pendingApproval.differenceCount > 0 && (
+      !acceptPendingApprovalDifferences
+      || pendingApprovalDifferenceCount !== pendingApproval.differenceCount
+      || pendingApprovalDifferenceManifestHash !== pendingApproval.manifestHash
+    )) {
+      const error = createHttpError(
+        409,
+        '결재 중인 누적 결산과 달라지는 전체 값을 확인한 뒤 반영해 주세요.',
+        'cashflow_pending_approval_confirmation_required',
+      );
+      error.details = {
+        pendingApprovalDifferences: pendingApproval.differences,
+        pendingApprovalDifferenceCount: pendingApproval.differenceCount,
+        pendingApprovalDifferenceManifestHash: pendingApproval.manifestHash,
+      };
+      throw error;
+    }
+  }
+
   const reservation = await reserveCashflowSheetApply({
     db,
     tenantId,
@@ -2504,6 +2731,9 @@ async function applyStagedCashflowSheetLab({
       closedMonthChangeReason,
       closedMonthDifferenceCount,
       closedMonthDifferenceManifestHash,
+      acceptPendingApprovalDifferences,
+      pendingApprovalDifferenceCount,
+      pendingApprovalDifferenceManifestHash,
       acceptFormulaMismatches,
       replaceAllActualSources,
     },
@@ -2592,6 +2822,7 @@ async function applyStagedCashflowSheetLab({
             openingBalanceCells,
             replaceAllActualSources,
             closedMonthChangeReason,
+            pendingApprovalAffectedMonths,
             acceptFormulaMismatches,
           }),
           verifyMutation: (javaResult) => {
@@ -2691,6 +2922,7 @@ async function applyStagedCashflowSheetLab({
             })),
             replaceAllActualSources,
             closedMonthChangeReason,
+            pendingApprovalAffectedMonths,
             acceptFormulaMismatches,
           }),
           verifyMutation: (batchResult) => {
@@ -3136,6 +3368,7 @@ async function stagePinnedCashflowSheetLab({
     forceFullReplacement: Boolean(parsed.replaceAllActualSources),
   });
   const candidates = [...weekly.candidates, ...annual.candidates];
+  const pendingApproval = await readPendingApprovalDifferences({ db, tenantId, projectId, candidates });
   const blockedMonths = weekly.blockedMonths;
   const riskLineCount = weekly.riskLineCount;
   const projectionLineCount = candidates.filter((candidate) => candidate.mode === 'projection').length;
@@ -3193,6 +3426,9 @@ async function stagePinnedCashflowSheetLab({
     closedMonthDifferences: weekly.closedMonthDifferences,
     closedMonthDifferenceCount,
     closedMonthDifferenceManifestHash,
+    pendingApprovalDifferences: pendingApproval.differences,
+    pendingApprovalDifferenceCount: pendingApproval.differenceCount,
+    pendingApprovalDifferenceManifestHash: pendingApproval.manifestHash,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,
@@ -3223,6 +3459,10 @@ async function stagePinnedCashflowSheetLab({
     closedMonthDifferences: weekly.closedMonthDifferences,
     closedMonthDifferenceCount,
     closedMonthDifferenceManifestHash,
+    pendingApprovalEvidence: pendingApproval.evidence,
+    pendingApprovalDifferences: pendingApproval.differences,
+    pendingApprovalDifferenceCount: pendingApproval.differenceCount,
+    pendingApprovalDifferenceManifestHash: pendingApproval.manifestHash,
     stagedMonths,
     calculationMonths,
     stagedYears: annual.stagedYears,

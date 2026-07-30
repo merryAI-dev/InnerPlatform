@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cashflowSheetLabApplySchema,
   projectExecutiveReviewSchema,
   projectManagementPlanningReviewSchema,
 } from './schemas.mjs';
+
+describe('cashflowSheetLabApplySchema', () => {
+  it('requires bounded typed pending-approval acceptance evidence', () => {
+    expect(cashflowSheetLabApplySchema.safeParse({
+      stageRunId: 'stage-1',
+      acceptPendingApprovalDifferences: true,
+      pendingApprovalDifferenceCount: 160,
+      pendingApprovalDifferenceManifestHash: `sha256:${'a'.repeat(64)}`,
+    }).success).toBe(true);
+    expect(cashflowSheetLabApplySchema.safeParse({
+      stageRunId: 'stage-1', pendingApprovalDifferenceCount: -1,
+    }).success).toBe(false);
+    expect(cashflowSheetLabApplySchema.safeParse({
+      stageRunId: 'stage-1', pendingApprovalDifferenceManifestHash: 'forged',
+    }).success).toBe(false);
+  });
+});
 
 describe('projectExecutiveReviewSchema', () => {
   it('accepts a project code as an approval payload field', () => {

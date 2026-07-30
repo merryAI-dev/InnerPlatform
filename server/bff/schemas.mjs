@@ -206,6 +206,9 @@ export const cashflowSheetLabApplySchema = z.object({
   closedMonthChangeReason: z.string().trim().max(1000).optional(),
   closedMonthDifferenceCount: z.number().int().min(0).optional(),
   closedMonthDifferenceManifestHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  acceptPendingApprovalDifferences: z.boolean().optional(),
+  pendingApprovalDifferenceCount: z.number().int().min(0).optional(),
+  pendingApprovalDifferenceManifestHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   acceptFormulaMismatches: z.boolean().optional(),
   idempotencyKey: NON_EMPTY_STRING.optional(),
 }).strict();
