@@ -920,16 +920,20 @@ export function CashflowProjectSheet({
     }
   }, [orgId, projectId, resolveBffActor, user?.uid]);
 
-  useEffect(() => {
+  const loadCashflowEvents = useCallback(async (): Promise<void> => {
     const generation = cashflowActivityGenerationRef.current + 1;
     cashflowActivityGenerationRef.current = generation;
-    setCashflowEvents([]);
     setCashflowEventErrors([]);
     setCashflowEventLoadingSources([]);
-    void loadCashflowActivitySourcesSequentially(async (source) => {
+    await loadCashflowActivitySourcesSequentially(async (source) => {
       await loadCashflowEventSource(source, generation);
     });
   }, [loadCashflowEventSource]);
+
+  useEffect(() => {
+    setCashflowEvents([]);
+    void loadCashflowEvents();
+  }, [loadCashflowEvents]);
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;

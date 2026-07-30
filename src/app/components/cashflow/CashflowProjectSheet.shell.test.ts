@@ -531,6 +531,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('CASHFLOW_ACTIVITY_SOURCES.forEach((source) => void loadCashflowEventSource(source, generation))');
   });
 
+  it('defines the shared activity reload used after sheet and month-close mutations', () => {
+    expect(source).toContain('const loadCashflowEvents = useCallback(async (): Promise<void> => {');
+    expect(source).toContain('void loadCashflowEvents();');
+  });
+
   it('uses the server KST comparison week and totals only the visible comparison scope', () => {
     expect(source).toContain('monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek');
     expect(source).toContain('resolveCashflowComparisonScope({');
