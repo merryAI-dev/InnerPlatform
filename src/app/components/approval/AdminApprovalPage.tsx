@@ -1,175 +1,22 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
-import {
-  AlertTriangle,
-  ArrowRightLeft,
-  CheckCircle2,
-  Clock,
-  Eye,
-  Users,
-  Wallet,
-  XCircle,
-} from 'lucide-react';
-import { toast } from 'sonner';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
-import { Textarea } from '../ui/textarea';
 import { ProjectMigrationAuditPage } from '../projects/ProjectMigrationAuditPage';
 import { MonthlySettlementApprovalSection } from './MonthlySettlementApprovalSection';
 import { useAppStore } from '../../data/store';
-import { useAuth } from '../../data/auth-store';
-import {
-  EXPENSE_SETS,
-  EXPENSE_STATUS_COLORS,
-  EXPENSE_STATUS_LABELS,
-  fmtKRW,
-  type ExpenseSet,
-  type ExpenseSetStatus,
-} from '../../data/budget-data';
-import {
-  CHANGE_REQUESTS,
-  STATE_LABELS,
-  type ChangeRequest,
-  type ChangeRequestState,
-} from '../../data/personnel-change-data';
-
-const priorityLabels: Record<string, string> = {
-  HIGH: '긴급',
-  MEDIUM: '보통',
-  LOW: '낮음',
-};
-
-const priorityColors: Record<string, string> = {
-  HIGH: 'border border-slate-300 bg-white text-red-700',
-  MEDIUM: 'border border-slate-300 bg-white text-red-700',
-  LOW: 'border border-slate-300 bg-white text-slate-700',
-};
-
-const stateColors: Record<ChangeRequestState, string> = {
-  DRAFT: 'border border-slate-300 bg-white text-slate-600',
-  SUBMITTED: 'border border-slate-300 bg-white text-red-700',
-  APPROVED: 'border border-slate-300 bg-white text-slate-700',
-  REJECTED: 'border border-slate-300 bg-white text-red-700',
-  REVISION_REQUESTED: 'border border-slate-300 bg-white text-red-700',
-};
-
-type ApprovalActionDialog =
-  | {
-      type: 'expense' | 'change';
-      id: string;
-      action: 'APPROVED' | 'REJECTED';
-    }
-  | null;
-
-function SectionEmptyState({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: typeof Wallet;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Card className="border-dashed border-slate-200/80 bg-slate-50/70">
-      <CardContent className="flex min-h-[180px] flex-col items-center justify-center gap-2 p-6 text-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm">
-          <Icon className="h-5 w-5 text-slate-400" />
-        </div>
-        <p className="text-[14px] font-semibold text-slate-900">{title}</p>
-        <p className="max-w-md text-[12px] leading-6 text-slate-600">{description}</p>
-      </CardContent>
-    </Card>
-  );
-}
 
 export function AdminApprovalPage() {
-  const navigate = useNavigate();
-  const { user } = useAuth();
   const { projects } = useAppStore();
-  const [expenseSets, setExpenseSets] = useState<ExpenseSet[]>(EXPENSE_SETS);
-  const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>(CHANGE_REQUESTS);
-  const [actionDialog, setActionDialog] = useState<ApprovalActionDialog>(null);
-  const [actionComment, setActionComment] = useState('');
   const [pendingMonthlySettlements, setPendingMonthlySettlements] = useState(0);
-  const canReviewAdministrativeApprovals = user?.role === 'admin' || user?.role === 'finance';
-
-  const projectMap = useMemo(() => {
-    const map = new Map<string, string>();
-    projects.forEach((project) => map.set(project.id, project.name));
-    return map;
-  }, [projects]);
-
-  const pendingExpenses = useMemo(
-    () => expenseSets.filter((item) => item.status === 'SUBMITTED'),
-    [expenseSets],
-  );
-  const pendingChanges = useMemo(
-    () => changeReqs.filter((item) => item.state === 'SUBMITTED'),
-    [changeReqs],
-  );
   const pendingProjectReviews = useMemo(
     () => projects.filter((project) => (
       (project.executiveReviewStatus || (project.registrationSource === 'pm_portal' ? 'PENDING' : 'APPROVED')) === 'PENDING'
     )),
     [projects],
   );
-  const totalPending = pendingProjectReviews.length
-    + pendingMonthlySettlements
-    + (canReviewAdministrativeApprovals ? pendingExpenses.length + pendingChanges.length : 0);
-
-  const handleAction = () => {
-    if (!actionDialog) return;
-
-    const { action, id, type } = actionDialog;
-    if (type === 'expense') {
-      setExpenseSets((prev) =>
-        prev.map((item) => {
-          if (item.id !== id) return item;
-          return {
-            ...item,
-            status: action as ExpenseSetStatus,
-            updatedAt: new Date().toISOString(),
-            ...(action === 'APPROVED'
-              ? { approvedBy: 'admin', approvedAt: new Date().toISOString() }
-              : { rejectedReason: actionComment }),
-          };
-        }),
-      );
-      toast.success(action === 'APPROVED' ? '사업비 세트가 승인되었습니다' : '사업비 세트가 반려되었습니다');
-    } else {
-      setChangeReqs((prev) =>
-        prev.map((item) => {
-          if (item.id !== id) return item;
-          return {
-            ...item,
-            state: action as ChangeRequestState,
-            reviewedBy: '관리자',
-            reviewedAt: new Date().toISOString(),
-            reviewComment: actionComment || undefined,
-            timeline: [
-              ...item.timeline,
-              {
-                id: `tl-${Date.now()}`,
-                action: action === 'APPROVED' ? '승인' : '반려',
-                actor: '관리자',
-                timestamp: new Date().toISOString(),
-                comment: actionComment || undefined,
-                type: action === 'APPROVED' ? 'APPROVE' : 'REJECT',
-              },
-            ],
-          };
-        }),
-      );
-      toast.success(action === 'APPROVED' ? '인력변경 요청이 승인되었습니다' : '인력변경 요청이 반려되었습니다');
-    }
-
-    setActionDialog(null);
-    setActionComment('');
-  };
+  const totalPending = pendingProjectReviews.length + pendingMonthlySettlements;
 
   return (
     <div className="space-y-5">
@@ -196,11 +43,9 @@ export function AdminApprovalPage() {
         <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
             <p className="text-[12px] font-semibold text-slate-900">승인 대기 항목</p>
-            <p className="text-[12px] leading-6 text-slate-600">
-              처리 이력과 보조 KPI는 1차 surface에서 제외하고, 지금 승인해야 하는 항목만 먼저 노출합니다.
-            </p>
+            <p className="text-[12px] leading-6 text-slate-600">실제 제출된 프로젝트 등록과 월 결산 문서만 표시합니다.</p>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-5">
+          <div className="grid grid-cols-3 gap-2 text-center">
             <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] text-slate-500">전체 대기</p>
               <p className="text-[18px] font-bold text-slate-900">{totalPending}</p>
@@ -213,23 +58,11 @@ export function AdminApprovalPage() {
               <p className="text-[10px] text-slate-500">월 결산</p>
               <p className="text-[18px] font-bold text-[#001e46]">{pendingMonthlySettlements}</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] text-slate-500">사업비</p>
-              <p className="text-[18px] font-bold text-cyan-700">
-                {canReviewAdministrativeApprovals ? pendingExpenses.length : '—'}
-              </p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] text-slate-500">인력변경</p>
-              <p className="text-[18px] font-bold text-slate-600">
-                {canReviewAdministrativeApprovals ? pendingChanges.length : '—'}
-              </p>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      {totalPending > 0 && (
+      {totalPending > 0 ? (
         <Card className="border-slate-200 bg-white">
           <CardContent className="flex items-start gap-3 p-4">
             <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-white">
@@ -238,260 +71,15 @@ export function AdminApprovalPage() {
             <div className="space-y-1">
               <p className="text-[12px] font-semibold text-slate-900">이번에 처리할 승인 항목이 남아 있습니다</p>
               <p className="text-[11px] leading-6 text-slate-600">
-              프로젝트 등록 요청 {pendingProjectReviews.length}건과 월 결산 {pendingMonthlySettlements}건을 확인할 수 있습니다.
-              {canReviewAdministrativeApprovals ? ` 사업비 세트 ${pendingExpenses.length}건, 인력변경 요청 ${pendingChanges.length}건도 함께 검토합니다.` : ''}
+                프로젝트 등록 요청 {pendingProjectReviews.length}건과 월 결산 {pendingMonthlySettlements}건을 확인할 수 있습니다.
               </p>
             </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       <MonthlySettlementApprovalSection onPendingCountChange={setPendingMonthlySettlements} />
-
       <ProjectMigrationAuditPage embedded reviewScope="pending" />
-
-      {canReviewAdministrativeApprovals ? <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Wallet className="h-4 w-4 text-cyan-600" />
-          <div>
-            <h2 className="text-[15px] font-semibold text-slate-900">사업비 승인 대기</h2>
-            <p className="text-[11px] text-slate-500">제출된 사업비 세트만 노출합니다</p>
-          </div>
-        </div>
-
-        {pendingExpenses.length === 0 ? (
-          <SectionEmptyState
-            icon={Wallet}
-            title="사업비 승인 대기 항목이 없습니다"
-            description="새로 제출된 사업비 세트가 생기면 이 영역에 바로 표시됩니다."
-          />
-        ) : (
-          <div className="space-y-3">
-            {pendingExpenses.map((item) => (
-              <Card key={item.id} className="border-slate-200/80 shadow-sm">
-                <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={`text-[10px] ${EXPENSE_STATUS_COLORS[item.status]}`}>
-                        {EXPENSE_STATUS_LABELS[item.status]}
-                      </Badge>
-                      <span className="text-[14px] font-semibold text-slate-900">{item.title}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                      <span>프로젝트: {projectMap.get(item.projectId) || item.projectId}</span>
-                      <span>작성자: {item.createdByName}</span>
-                      <span>기간: {item.period}</span>
-                      <span>합계: {fmtKRW(item.totalGross)}원</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {item.items.slice(0, 3).map((expense) => (
-                        <div key={expense.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px]">
-                          <span className="text-slate-500">{expense.date}</span>
-                          <span className="font-medium text-slate-900">{expense.vendor}</span>
-                          <span className="min-w-0 flex-1 truncate text-slate-500">{expense.description}</span>
-                          <span className="font-medium text-slate-900">{fmtKRW(expense.amountGross)}원</span>
-                        </div>
-                      ))}
-                      {item.items.length > 3 && (
-                        <p className="text-[10px] text-slate-500">외 {item.items.length - 3}건이 더 있습니다.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-col gap-2 lg:w-[132px]">
-                    <Button
-                      size="sm"
-                      className="gap-1 bg-[#001e46] hover:bg-[#001735]"
-                      onClick={() => {
-                        setActionDialog({ type: 'expense', id: item.id, action: 'APPROVED' });
-                        setActionComment('');
-                      }}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      승인
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1 border-slate-300 text-red-700 hover:bg-slate-50"
-                      onClick={() => {
-                        setActionDialog({ type: 'expense', id: item.id, action: 'REJECTED' });
-                        setActionComment('');
-                      }}
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                      반려
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="gap-1"
-                      onClick={() => navigate(item.projectId ? `/projects/${item.projectId}` : '/projects')}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      원본 보기
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section> : null}
-
-      {canReviewAdministrativeApprovals ? <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <ArrowRightLeft className="h-4 w-4 text-[#001e46]" />
-          <div>
-            <h2 className="text-[15px] font-semibold text-slate-900">인력변경 승인 대기</h2>
-            <p className="text-[11px] text-slate-500">제출 상태의 요청만 빠르게 검토합니다</p>
-          </div>
-        </div>
-
-        {pendingChanges.length === 0 ? (
-          <SectionEmptyState
-            icon={ArrowRightLeft}
-            title="인력변경 승인 대기 항목이 없습니다"
-            description="신규 인력변경 요청이 들어오면 이 영역에 바로 표시됩니다."
-          />
-        ) : (
-          <div className="space-y-3">
-            {pendingChanges.map((item) => (
-              <Card key={item.id} className="border-slate-200/80 shadow-sm">
-                <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={`text-[10px] ${stateColors[item.state]}`}>{STATE_LABELS[item.state]}</Badge>
-                      <Badge className={`text-[10px] ${priorityColors[item.priority]}`}>
-                        {priorityLabels[item.priority]}
-                      </Badge>
-                      <span className="text-[14px] font-semibold text-slate-900">{item.title}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                      <span>프로젝트: {item.projectName}</span>
-                      <span>요청자: {item.requestedBy}</span>
-                      <span>요청일: {new Date(item.requestedAt).toLocaleDateString('ko-KR')}</span>
-                      <span>변경: {item.changes.length}건</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {item.changes.map((change, index) => (
-                        <div key={`${item.id}-${index}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px]">
-                          <Users className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <span className="font-medium text-slate-900">{change.staffName}</span>
-                          <Badge variant="outline" className="h-5 px-1.5 text-[9px]">
-                            {change.changeType === 'ADD'
-                              ? '투입'
-                              : change.changeType === 'REMOVE'
-                                ? '해제'
-                                : change.changeType === 'RATE_CHANGE'
-                                  ? '투입율'
-                                  : change.changeType}
-                          </Badge>
-                          {change.before?.rate !== undefined && change.after?.rate !== undefined && (
-                            <span className="text-slate-500">
-                              {change.before.rate}% → {change.after.rate}%
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-col gap-2 lg:w-[132px]">
-                    <Button
-                      size="sm"
-                      className="gap-1 bg-[#001e46] hover:bg-[#001735]"
-                      onClick={() => {
-                        setActionDialog({ type: 'change', id: item.id, action: 'APPROVED' });
-                        setActionComment('');
-                      }}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      승인
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1 border-slate-300 text-red-700 hover:bg-slate-50"
-                      onClick={() => {
-                        setActionDialog({ type: 'change', id: item.id, action: 'REJECTED' });
-                        setActionComment('');
-                      }}
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                      반려
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="gap-1"
-                      onClick={() => navigate(item.projectId ? `/projects/${item.projectId}` : '/personnel-changes')}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      원본 보기
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section> : null}
-
-      <Dialog open={!!actionDialog} onOpenChange={(open) => !open && setActionDialog(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-[14px]">
-              {actionDialog?.action === 'APPROVED' ? '승인 확인' : '반려'}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            <div
-              className={`rounded-lg border px-3 py-3 text-[11px] ${
-                actionDialog?.action === 'APPROVED'
-                  ? 'border-slate-200 bg-white text-slate-700'
-                  : 'border-slate-200 bg-white text-red-700'
-              }`}
-            >
-              <div className="flex items-center gap-1.5">
-                {actionDialog?.action === 'APPROVED' ? (
-                  <>
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>이 항목을 승인하시겠습니까?</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    <span>반려 사유를 입력해 주세요.</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <Textarea
-              value={actionComment}
-              onChange={(event) => setActionComment(event.target.value)}
-              className="min-h-[88px] text-[12px]"
-              placeholder={actionDialog?.action === 'APPROVED' ? '승인 코멘트 (선택)' : '반려 사유 (필수)'}
-            />
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setActionDialog(null)}>
-              취소
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleAction}
-              disabled={actionDialog?.action === 'REJECTED' && !actionComment.trim()}
-              className={actionDialog?.action === 'APPROVED' ? 'bg-[#001e46] hover:bg-[#001735]' : 'bg-red-700 hover:bg-red-800'}
-            >
-              {actionDialog?.action === 'APPROVED' ? '승인' : '반려'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

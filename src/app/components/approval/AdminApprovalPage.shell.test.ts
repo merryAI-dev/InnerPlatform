@@ -21,6 +21,11 @@ describe('AdminApprovalPage shell contract', () => {
     expect(source).toContain('대표 검토');
     expect(source).toContain('프로젝트 등록 요청부터 먼저 정리합니다');
     expect(source).not.toContain('ProjectRequestApprovalSection');
+    expect(source).not.toContain('EXPENSE_SETS');
+    expect(source).not.toContain('CHANGE_REQUESTS');
+    expect(source).not.toContain('사업비 승인 대기');
+    expect(source).not.toContain('인력변경 승인 대기');
+    expect(source).not.toContain('actionDialog');
   });
 
   it('includes designated-head monthly settlement approval with BFF persistence', () => {
