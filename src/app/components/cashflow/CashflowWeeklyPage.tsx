@@ -12,10 +12,7 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { fetchCashflowWeeklyComplianceViaBff, type CashflowWeeklyCompliancePage } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
-import { formatKoreanWonCompact } from '../../platform/korean-money';
 import type { CashflowWeekTotals } from '../../data/types';
-import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
-import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
 
 function emptyTotals(): CashflowWeekTotals {
   return { totalIn: 0, totalOut: 0, net: 0 };
@@ -33,8 +30,6 @@ export function CashflowWeeklyPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailProjectId, setDetailProjectId] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
-  const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
-  const canonicalSummaries = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds });
 
   useEffect(() => {
     if (!user?.idToken || projects.length === 0) {
@@ -161,20 +156,6 @@ export function CashflowWeeklyPage() {
                           </Badge>
                         </div>
                         {projectHistory ? <div className="flex items-center justify-between gap-2 text-[10px]"><span className="text-muted-foreground">누적 준수</span><span>기한 내 {projectHistory.onTimeCount.toLocaleString('ko-KR')} · 미준수 {projectHistory.missedCount.toLocaleString('ko-KR')}</span></div> : null}
-                        <div>
-                          <span className="text-muted-foreground">누적 Projection-Actual 정산</span>
-                          <CashflowCanonicalSummary
-                            summary={canonicalSummaries.summaries[project.id]}
-                            loading={canonicalSummaries.loading[project.id]}
-                            error={canonicalSummaries.errors[project.id]}
-                            onRetry={() => void canonicalSummaries.retry(project.id)}
-                          />
-                        </div>
-                        {canonicalSummaries.summaries[project.id]?.settlementMatches === false ? (
-                          <button type="button" className="text-[10px] font-semibold text-teal-700 underline underline-offset-2" onClick={() => openProject(project.id)}>
-                            프로젝션 보기
-                          </button>
-                        ) : null}
                         <button type="button" className="text-[10px] font-semibold text-teal-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700" onClick={() => setDetailProjectId(project.id)}>주간 정산 자세히</button>
                       </div>
                     </td>
@@ -191,10 +172,11 @@ export function CashflowWeeklyPage() {
                             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                               {!projectHistory ? historyLoading ? '확인 중' : '조회 오류' : settlementCompleted ? '완료' : '미완료'}
                             </Badge>
-                            <div className="text-[10px] font-medium text-muted-foreground">{yearMonth} {week.weekNo}주차 상세</div>
-                            <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
-                              <span>Projection-Actual 차이</span>
-                              <span className={difference < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-700'}>{formatKoreanWonCompact(difference)}</span>
+                            <div className="border-t border-border/40 pt-2">
+                              <div className="text-[12px] font-semibold text-muted-foreground">Projection-Actual 차이</div>
+                              <div className={`mt-1 text-[16px] font-bold tabular-nums ${difference < 0 ? 'text-red-700' : 'text-slate-800'}`}>
+                                {difference.toLocaleString('ko-KR')}원
+                              </div>
                             </div>
                           </div>
                         </td>

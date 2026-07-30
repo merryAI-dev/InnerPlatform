@@ -5,15 +5,19 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
 describe('CashflowWeeklyPage read-only status surface', () => {
-  it('shows the JVM cumulative summary separately from selected-month weekly details', () => {
+  it('shows only the selected-month weekly difference in exact won', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
     expect(source).toContain('projectionTotals: week.projectionTotals || emptyTotals()');
     expect(source).toContain('actualTotals: week.actualTotals || emptyTotals()');
     expect(source).toContain('const difference = projection.net - actual.net');
     expect(source).toContain('Projection·Actual·차이');
-    expect(source).toContain('CashflowCanonicalSummary');
-    expect(source).toContain('누적 Projection-Actual 정산');
+    expect(source).not.toContain('CashflowCanonicalSummary');
+    expect(source).not.toContain('누적 Projection-Actual 정산');
+    expect(source).not.toContain('주차 상세');
     expect(source).toContain('Projection-Actual 차이');
+    expect(source).toContain("difference.toLocaleString('ko-KR')");
+    expect(source).toContain('text-[16px] font-bold');
+    expect(source).not.toContain('formatKoreanWonCompact');
     expect(source).not.toContain('>Projection 순액<');
     expect(source).not.toContain('>Actual 순액<');
     expect(source).not.toContain('monthlyDifference');
