@@ -38,6 +38,8 @@ import {
 import { hasPermission } from '../../platform/rbac';
 import { getSeoulTodayIso } from '../../platform/business-days';
 import { ACCOUNT_TYPE_LABELS, type AccountType } from '../../data/types';
+import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
+import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
 
 const strongFieldBaseClass = 'h-10 rounded-lg border-2 bg-white text-[12px] font-medium text-zinc-950 shadow-none transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:!opacity-100 [&_svg]:text-stone-500';
 const activeDisabledFieldClass = 'border-stone-200 bg-stone-100 text-stone-500 shadow-none [&_svg]:text-stone-400';
@@ -137,6 +139,8 @@ export function CashflowExportPage() {
       accountTypeFilter,
     });
   }, [accountTypeFilter, departmentFilter, scope, selectedProjectIds, sortedProjects]);
+  const targetProjectIds = useMemo(() => targetProjects.map((project) => project.id), [targetProjects]);
+  const canonicalSummaries = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds: targetProjectIds });
 
   const workbookVariant: CashflowExportWorkbookVariant = multiProjectVariant;
   const periodSummary = summarizeCashflowYearMonths(yearMonths);
@@ -539,7 +543,7 @@ export function CashflowExportPage() {
                   <th className="px-4 py-2 text-left font-semibold">사업명</th>
                   <th className="px-3 py-2 text-left font-semibold">담당자</th>
                   <th className="px-3 py-2 text-center font-semibold">상태</th>
-                  <th className="px-3 py-2 text-center font-semibold">Projection-Actual</th>
+                  <th className="px-3 py-2 text-center font-semibold">누적 Projection-Actual / 현재 주차 상세</th>
                   <th className="px-3 py-2 text-left font-semibold">최근 업데이트</th>
                   <th className="px-4 py-2 text-right font-semibold">이동</th>
                 </tr>
@@ -565,6 +569,13 @@ export function CashflowExportPage() {
                       </Badge>
                     </td>
                     <td className="px-3 py-3 text-center">
+                      <CashflowCanonicalSummary
+                        summary={canonicalSummaries.summaries[row.id]}
+                        loading={canonicalSummaries.loading[row.id]}
+                        error={canonicalSummaries.errors[row.id]}
+                        onRetry={() => void canonicalSummaries.retry(row.id)}
+                      />
+                      <div className="mt-2 border-t border-stone-200 pt-2 text-[10px] text-stone-500">현재 주차 상세</div>
                       {typeof row.projectionActualMatches !== 'boolean' ? (
                         <span className="text-stone-500">
                           {row.currentWeekLabel} · {row.comparisonMissing === 'actual' ? 'Actual 미작성' : 'Projection 미작성'}

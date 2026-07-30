@@ -5,14 +5,16 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
 describe('CashflowWeeklyPage read-only status surface', () => {
-  it('shows persisted Projection, Actual, and their difference', () => {
+  it('shows the JVM cumulative summary separately from selected-month weekly details', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
     expect(source).toContain('projectionTotals: week.projectionTotals || emptyTotals()');
     expect(source).toContain('actualTotals: week.actualTotals || emptyTotals()');
     expect(source).toContain('const difference = projection.net - actual.net');
     expect(source).toContain('Projection·Actual·차이');
-    expect(source).toContain('Projection-Actual 일치 여부');
-    expect(source).toContain('Projection-Actual 차액');
+    expect(source).toContain('CashflowCanonicalSummary');
+    expect(source).toContain('누적 Projection-Actual 정산');
+    expect(source).toContain('주차 순액 차이');
+    expect(source).not.toContain('monthlyDifference');
   });
 
   it('keeps the project summary visible and uses weekly settlement completion states', () => {

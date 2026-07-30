@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileCheck2, Loader2, RefreshCw, WalletCards, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
+import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId, type OrgMember } from '../../data/types';
 import { useAppStore } from '../../data/store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
@@ -18,7 +18,6 @@ import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
-import { AppliedCellHistory } from '../cashflow/AppliedCellHistory';
 
 type ReviewAction = { request: CashflowMonthCloseRequest; decision: 'APPROVE' | 'REJECT' } | null;
 
@@ -40,6 +39,15 @@ const DETAIL_LABELS: Record<string, string> = {
   detail: '상세',
 };
 
+const REQUEST_STATUS_LABELS: Record<CashflowMonthCloseRequest['status'], string> = {
+  BUILDING: '문서 저장 중',
+  PENDING: '승인 대기',
+  APPROVING: '승인 처리 중',
+  UNCERTAIN: '서버 결과 확인 필요',
+  APPROVED: '승인',
+  REJECTED: '반려',
+};
+
 export function formatMoney(value: number | null | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString('ko-KR')}원` : '—';
 }
@@ -53,10 +61,54 @@ function formatSnapshotAmount(week: MonthSnapshotWeek, lineId: string) {
   return amount === undefined ? '—' : formatMoney(amount);
 }
 
-function formatDateTime(value: string | null) {
+export function formatDateTime(value: string | null) {
   if (!value) return '-';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ko-KR');
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
+export function resolveRequestPartyName(explicitName: string | null | undefined, members: OrgMember[], uid: string) {
+  if (explicitName?.trim()) return explicitName.trim();
+  const member = members.find((item) => item.uid === uid) as (OrgMember & {
+    memberName?: string;
+    memberNickname?: string;
+  }) | undefined;
+  if (!member) return '구성원 이름 확인 불가';
+  if (member.name?.trim()) return member.name.trim();
+  const name = member.memberName?.trim() || '';
+  const nickname = member.memberNickname?.trim() || '';
+  return name && nickname ? `${name}(${nickname})` : name || nickname || '구성원 이름 확인 불가';
+}
+
+export function buildMonthCloseHistoryEntries(request: CashflowMonthCloseRequest, members: OrgMember[]) {
+  const summary = `${request.yearMonth} 월 결산 승인 요청 · ${request.lockRange ? `${request.lockRange.fromMonth} ${request.lockRange.fromWeekNo}주차 ~ ${request.lockRange.throughMonth} ${request.lockRange.throughWeekNo}주차 · ${request.monthCount?.toLocaleString()}개월` : '제출 시점 저장본'}`;
+  const entries: Array<{ kind: 'REQUESTED' | 'REVIEWED' | 'RECOVERY'; actorName: string; at: string; detail: string }> = [{
+    kind: 'REQUESTED',
+    actorName: resolveRequestPartyName(request.requestedByName, members, request.requestedByUid),
+    at: request.requestedAt,
+    detail: summary,
+  }];
+  if (request.reviewedAt || request.decisionReason) entries.push({
+    kind: 'REVIEWED' as const,
+    actorName: resolveRequestPartyName(request.reviewedByName || request.approverName, members, request.reviewedByUid || request.approverUid),
+    at: request.reviewedAt || request.requestedAt,
+    detail: request.decisionReason || REQUEST_STATUS_LABELS[request.status],
+  });
+  if (['APPROVING', 'UNCERTAIN'].includes(request.status)) entries.push({
+    kind: 'RECOVERY' as const,
+    actorName: resolveRequestPartyName(request.approverName, members, request.approverUid),
+    at: request.reviewedAt || request.requestedAt,
+    detail: request.status === 'UNCERTAIN' ? '서버 결과를 조회해 중복 마감 없이 복구합니다.' : '저장된 승인 작업을 동일한 요청으로 재개합니다.',
+  });
+  return entries;
 }
 
 function getMonthSnapshot(request: CashflowMonthCloseRequest): CashflowMonthCloseMonthSnapshot | null {
@@ -150,7 +202,7 @@ export function MonthlySettlementApprovalSection({
 }: {
   onPendingCountChange?: (count: number) => void;
 }) {
-  const { projects } = useAppStore();
+  const { projects, members } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const [requests, setRequests] = useState<CashflowMonthCloseRequest[]>([]);
@@ -168,6 +220,10 @@ export function MonthlySettlementApprovalSection({
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects],
   );
+  const projectCics = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.cic || project.department || '-'])),
+    [projects],
+  );
 
   const load = useCallback(async () => {
     if (!user?.uid || !user.idToken) {
@@ -179,8 +235,9 @@ export function MonthlySettlementApprovalSection({
     setError('');
     try {
       const items = await fetchPendingCashflowMonthCloseRequestsViaBff({ tenantId: orgId, actor: user });
-      setRequests(items);
-      onPendingCountChange?.(items.length);
+      const monthlyCloseItems = items.filter((request) => request.documentType === 'MONTHLY_CLOSE');
+      setRequests(monthlyCloseItems);
+      onPendingCountChange?.(monthlyCloseItems.length);
     } catch (loadError) {
       setError(resolveApiErrorMessage(loadError, '월 결산 승인 요청을 불러오지 못했습니다.'));
       setRequests([]);
@@ -225,7 +282,7 @@ export function MonthlySettlementApprovalSection({
     if (action.decision === 'REJECT' && !reason.trim()) return;
     setBusy(true);
     try {
-      const expectedRevision = action.request.status === 'APPROVING'
+      const expectedRevision = action.request.contractVersion !== 'cashflow-cumulative-close-v2' && action.request.status === 'APPROVING'
         ? Math.max(0, action.request.revision - 1)
         : action.request.revision;
       await reviewCashflowMonthCloseRequestViaBff({
@@ -300,40 +357,52 @@ export function MonthlySettlementApprovalSection({
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {requests.map((request) => (
-            <Card key={request.requestId} className="border-slate-200 bg-white shadow-sm">
-              <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 flex-1 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge className="border border-slate-300 bg-white text-[#001e46]">{request.status === 'UNCERTAIN' ? '서버 결과 확인 필요' : request.status === 'APPROVING' ? '승인 처리 재개 필요' : '승인 대기'}</Badge>
-                    <span className="text-[14px] font-semibold text-slate-900">{projectNames.get(request.projectId) || request.projectId}</span>
-                  </div>
-                  <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-600 sm:grid-cols-3">
-                    <span>결산월 <strong className="text-slate-900">{request.yearMonth}</strong></span>
-                    <span>요청자 <strong className="text-slate-900">{request.requestedByUid}</strong></span>
-                    <span>요청일 <strong className="text-slate-900">{new Date(request.requestedAt).toLocaleDateString('ko-KR')}</strong></span>
-                  </div>
-                  {request.lockRange ? (
-                    <p className="text-[11px] font-semibold text-[#174a7c]">
-                      누적 범위 {request.lockRange.fromMonth} {request.lockRange.fromWeekNo}주차 ~ {request.lockRange.throughMonth} {request.lockRange.throughWeekNo}주차 · {request.monthCount?.toLocaleString()}개월 · {request.weekCount?.toLocaleString()}주 · {request.cellCount?.toLocaleString()}셀
-                    </p>
-                  ) : null}
-                  {request.reviewWarnings.length > 0 ? <p className="text-[11px] font-medium text-amber-700">결재 전 확인사항 {request.reviewWarnings.length}건</p> : null}
-                </div>
-                <Button size="sm" className="shrink-0 gap-1 bg-[#001e46] hover:bg-[#001735]" onClick={() => { setSelectedRequest(request); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); }}>
-                  <FileCheck2 className="h-3.5 w-3.5" /> 검토하기
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card className="overflow-hidden border-slate-300 bg-white shadow-sm">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto" role="region" aria-label="월 결산 승인 대기 문서" tabIndex={0}>
+              <table className="w-full min-w-[1040px] border-collapse text-left">
+                <thead className="border-b border-slate-300 bg-slate-50 text-[11px] font-semibold text-slate-600">
+                  <tr>
+                    <th className="px-4 py-3">문서 유형</th>
+                    <th className="px-4 py-3">상태</th>
+                    <th className="px-4 py-3">담당조직(CIC)</th>
+                    <th className="px-4 py-3">프로젝트명</th>
+                    <th className="px-4 py-3">결산월</th>
+                    <th className="px-4 py-3">요청자</th>
+                    <th className="px-4 py-3">요청 시각</th>
+                    <th className="px-4 py-3">승인자</th>
+                    <th className="px-4 py-3 text-right">문서</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {requests.map((request) => (
+                    <tr key={request.requestId} className="hover:bg-slate-50">
+                      <td className="px-4 py-3"><Badge className="border border-slate-300 bg-white text-[#001e46]">{request.documentType === 'MONTHLY_CLOSE' ? '월 결산' : request.documentType}</Badge></td>
+                      <td className="px-4 py-3"><Badge className="border border-amber-300 bg-white text-amber-800">{REQUEST_STATUS_LABELS[request.status]}</Badge></td>
+                      <td className="px-4 py-3 text-[12px] text-slate-700">{projectCics.get(request.projectId) || '-'}</td>
+                      <td className="max-w-[300px] px-4 py-3"><p className="truncate text-[13px] font-semibold text-slate-950">{projectNames.get(request.projectId) || request.projectId}</p></td>
+                      <td className="px-4 py-3 text-[12px] font-medium text-slate-800">{request.yearMonth}</td>
+                      <td className="px-4 py-3 text-[12px] text-slate-700">{resolveRequestPartyName(request.requestedByName, members, request.requestedByUid)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-[12px] text-slate-600">{formatDateTime(request.requestedAt)}</td>
+                      <td className="px-4 py-3 text-[12px] text-slate-700">{resolveRequestPartyName(request.approverName, members, request.approverUid)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <Button type="button" variant="outline" size="sm" className="h-8 rounded-none border-slate-400 text-[11px]" onClick={() => { setSelectedRequest(request); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); }}>
+                          <FileCheck2 className="mr-1 h-3.5 w-3.5" />문서 열기
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => { if (!open) { setSelectedRequest(null); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); } }}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[1180px] overflow-y-auto rounded-none border border-slate-300 bg-slate-100 p-3 sm:p-6">
           <DialogHeader className="sr-only">
-            <DialogTitle>월 결산 검토 및 승인서</DialogTitle>
+            <DialogTitle>월 결산 승인서</DialogTitle>
             <DialogDescription>제출 당시 저장된 월 결산 자료를 검토하고 승인 또는 반려합니다.</DialogDescription>
           </DialogHeader>
           {selectedRequest ? (
@@ -342,7 +411,7 @@ export function MonthlySettlementApprovalSection({
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
                   <div className="flex min-h-[138px] flex-col justify-center">
                     <p className="text-[11px] font-semibold tracking-[0.12em] text-slate-500">MYSCube · MONTHLY CLOSE</p>
-                    <h3 className="mt-3 text-center text-[25px] font-bold tracking-[0.08em]">월 결산 검토 및 승인서</h3>
+                    <h3 className="mt-3 text-center text-[25px] font-bold tracking-[0.08em]">월 결산 승인서</h3>
                     <p className="mt-2 text-center text-[11px] text-slate-500">요청 시점에 저장된 문서이며 현재 시트와 다시 계산하지 않습니다.</p>
                   </div>
                   <div className="border border-slate-400 text-center text-[11px]">
@@ -350,16 +419,35 @@ export function MonthlySettlementApprovalSection({
                       <div className="flex items-center justify-center border-r border-b border-slate-400 bg-slate-50 font-semibold">결재</div>
                       <div className="border-r border-b border-slate-400 px-2 py-2 font-semibold">기안</div>
                       <div className="border-b border-slate-400 px-2 py-2 font-semibold">조직장 승인</div>
-                      <div className="flex items-center justify-center border-r border-slate-400 bg-slate-50 text-[10px] text-slate-600">인</div>
-                      <div className="flex min-h-[70px] items-center justify-center break-all border-r border-slate-400 px-2 py-3">{selectedRequest.requestedByUid}</div>
-                      <div className="flex min-h-[70px] items-center justify-center break-all px-2 py-3">{selectedRequest.approverUid}</div>
+                      <div className="flex items-center justify-center border-r border-b border-slate-400 bg-slate-50 text-[10px] text-slate-600">인</div>
+                      <div className="flex min-h-[70px] items-center justify-center break-all border-r border-b border-slate-400 px-2 py-3">{resolveRequestPartyName(selectedRequest.requestedByName, members, selectedRequest.requestedByUid)}</div>
+                      <div className="flex min-h-[70px] items-center justify-center break-all border-b border-slate-400 px-2 py-3">{resolveRequestPartyName(selectedRequest.approverName, members, selectedRequest.approverUid)}</div>
+                      <div className="flex items-center justify-center border-r border-slate-400 bg-slate-50 text-[10px] text-slate-600">일자</div>
+                      <div className="border-r border-slate-400 px-2 py-2">{formatDateTime(selectedRequest.requestedAt)}</div>
+                      <div className="px-2 py-2">{selectedRequest.reviewedAt ? formatDateTime(selectedRequest.reviewedAt) : '검토 대기'}</div>
                     </div>
                   </div>
                 </div>
               </header>
 
-              <section className="mt-5 grid border-l border-t border-slate-300 text-[11px] sm:grid-cols-2">
+              <section className="mt-5">
+                <h4 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">의견 및 처리 이력</h4>
+                <div className="border border-t-0 border-slate-400 text-[12px]">
+                  {buildMonthCloseHistoryEntries(selectedRequest, members).map((entry) => (
+                    <div key={`${entry.kind}:${entry.at}`} className="grid gap-1 border-t border-slate-300 px-3 py-3 first:border-t-0 sm:grid-cols-[120px_1fr]">
+                      <strong>{entry.kind === 'REQUESTED' ? '요청' : entry.kind === 'REVIEWED' ? '검토' : '복구 상태'}</strong>
+                      <span><span className="font-semibold">{entry.actorName}</span> · {formatDateTime(entry.at)}<br />{entry.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="mt-6 grid border-l border-t border-slate-300 text-[11px] sm:grid-cols-2">
                 {[
+                  ['문서 번호', selectedRequest.requestId],
+                  ['문서 유형', '월 결산'],
+                  ['기안자', resolveRequestPartyName(selectedRequest.requestedByName, members, selectedRequest.requestedByUid)],
+                  ['결재 상태', REQUEST_STATUS_LABELS[selectedRequest.status]],
                   ['프로젝트', projectNames.get(selectedRequest.projectId) || snapshot?.projectId || selectedRequest.projectId],
                   ['결산월', selectedRequest.yearMonth],
                   ['요청 시각', formatDateTime(selectedRequest.requestedAt)],
@@ -431,7 +519,6 @@ export function MonthlySettlementApprovalSection({
                     <CumulativeSettlementMonthDetails tenantId={orgId} actor={user!} request={selectedRequest} onReadyChange={setCumulativeEvidenceReady} />
                   </section>
 
-                  <AppliedCellHistory tenantId={orgId} actor={user!} projectId={selectedRequest.projectId} />
                 </div>
               ) : snapshot ? (
                 <div className="mt-7 space-y-7">

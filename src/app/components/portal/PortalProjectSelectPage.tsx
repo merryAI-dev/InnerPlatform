@@ -18,6 +18,10 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import { Input } from '../ui/input';
+import { useFirebase } from '../../lib/firebase-context';
+import { CashflowCanonicalSummary } from '../cashflow/CashflowCanonicalSummary';
+import { useCashflowProjectionActualSummaries } from '../cashflow/useCashflowProjectionActualSummaries';
+import type { CashflowProjectionActualSummary } from '../../lib/platform-bff-client';
 
 function normalizeSearchValue(value: string): string {
   return value.trim().toLowerCase();
@@ -28,6 +32,10 @@ function ProjectStartCard(props: {
   activeProjectId: string;
   pendingProjectId: string;
   onStart: (projectId: string) => void;
+  canonicalSummary?: CashflowProjectionActualSummary;
+  canonicalSummaryLoading?: boolean;
+  canonicalSummaryError?: boolean;
+  onRetryCanonicalSummary: () => void;
 }) {
   const { project, activeProjectId, pendingProjectId, onStart } = props;
   const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status;
@@ -56,6 +64,15 @@ function ProjectStartCard(props: {
             PM {project.managerName || '미지정'} · {project.department || '담당조직 미지정'}
           </p>
         </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px]">
+          <div className="mb-1 text-slate-500">누적 Projection-Actual 정산</div>
+          <CashflowCanonicalSummary
+            summary={props.canonicalSummary}
+            loading={props.canonicalSummaryLoading}
+            error={props.canonicalSummaryError}
+            onRetry={props.onRetryCanonicalSummary}
+          />
+        </div>
         <Button
           type="button"
           data-testid={`portal-project-start-${project.id}`}
@@ -75,6 +92,7 @@ export function PortalProjectSelectPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading, user: authUser } = useAuth();
+  const { orgId } = useFirebase();
   const {
     isLoading: portalLoading,
     portalUser,
@@ -106,6 +124,15 @@ export function PortalProjectSelectPage() {
     assignedProjectIds,
     projects,
   }), [assignedProjectIds, authUser?.role, authUser?.uid, projects]);
+  const candidateProjectIds = useMemo(
+    () => candidateProjects.searchProjects.map((project) => project.id),
+    [candidateProjects.searchProjects],
+  );
+  const canonicalSummaries = useCashflowProjectionActualSummaries({
+    tenantId: orgId,
+    actor: authUser,
+    projectIds: candidateProjectIds,
+  });
   const normalizedQuery = normalizeSearchValue(search);
   const filteredSearchProjects = useMemo(() => (
     candidateProjects.searchProjects.filter((project) => matchesProjectSearch(project, normalizedQuery))
@@ -223,6 +250,10 @@ export function PortalProjectSelectPage() {
                   activeProjectId={activeProjectId}
                   pendingProjectId={pendingProjectId}
                   onStart={handleStart}
+                  canonicalSummary={canonicalSummaries.summaries[project.id]}
+                  canonicalSummaryLoading={canonicalSummaries.loading[project.id]}
+                  canonicalSummaryError={canonicalSummaries.errors[project.id]}
+                  onRetryCanonicalSummary={() => void canonicalSummaries.retry(project.id)}
                 />
               ))}
             </div>
@@ -252,6 +283,10 @@ export function PortalProjectSelectPage() {
                   activeProjectId={activeProjectId}
                   pendingProjectId={pendingProjectId}
                   onStart={handleStart}
+                  canonicalSummary={canonicalSummaries.summaries[project.id]}
+                  canonicalSummaryLoading={canonicalSummaries.loading[project.id]}
+                  canonicalSummaryError={canonicalSummaries.errors[project.id]}
+                  onRetryCanonicalSummary={() => void canonicalSummaries.retry(project.id)}
                 />
               ))}
             </div>

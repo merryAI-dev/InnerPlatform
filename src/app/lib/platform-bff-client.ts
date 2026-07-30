@@ -773,6 +773,8 @@ export interface CashflowActivityEvent {
   afterAmount?: number;
   beforeHadValue?: boolean;
   afterHadValue?: boolean;
+  beforeState?: 'EMPTY' | 'ZERO' | 'VALUE';
+  afterState?: 'EMPTY' | 'ZERO' | 'VALUE';
   appliedLineCount?: number;
   projectionLineCount?: number;
   actualLineCount?: number;
@@ -782,10 +784,17 @@ export interface CashflowActivityEvent {
   actorEmail?: string;
   status?: string;
   operation?: string;
+  operationId?: string;
+  auditId?: string;
+  sourceDetail?: string;
+  sourceRevision?: string;
+  targetRevision?: string;
   reason?: string;
   sheetName?: string;
   createdAt: string;
 }
+
+export type CashflowActivitySource = 'legacy' | 'sheet_refresh' | 'audit';
 
 export interface CashflowAppliedCellChange {
   eventId: string;
@@ -972,6 +981,7 @@ export interface CashflowMonthCloseDashboard {
     missingEvidence: Array<'OPENING_BALANCES' | 'LEDGER_WEEKS'>;
   };
   deadlineSummary: CashflowDeadlineSummary;
+  projectionActualSummary: CashflowProjectionActualSummary;
   cumulativeCloseScope: CashflowCumulativeCloseScope | null;
   monthCloseStatuses?: Array<{
     yearMonth: string;
@@ -1147,6 +1157,7 @@ export interface CashflowMonthCloseMonthSnapshot {
 }
 
 export interface CashflowMonthCloseRequest {
+  documentType: 'MONTHLY_CLOSE';
   contractVersion?: 'cashflow-cumulative-close-v2';
   requestId: string;
   projectId: string;
@@ -1163,9 +1174,12 @@ export interface CashflowMonthCloseRequest {
   totals?: CashflowMonthCloseCumulativeTotals;
   annualSummaries?: CashflowMonthCloseAnnualSummary[];
   approverUid: string;
+  approverName?: string;
   requestedByUid: string;
+  requestedByName?: string;
   requestedAt: string;
   reviewedByUid: string | null;
+  reviewedByName?: string | null;
   reviewedAt: string | null;
   decisionReason: string | null;
   reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
@@ -1309,6 +1323,23 @@ export interface CashflowWeeklyCompliancePage {
   nextCursor: string;
   onTimeCount: number;
   missedCount: number;
+}
+
+export interface CashflowProjectionActualSummary {
+  projectId: string;
+  fromMonth: string;
+  comparisonAsOfWeek: { yearMonth: string; weekNo: number };
+  settlementDifferenceAmount: number;
+  settlementMatches: boolean;
+}
+
+export interface CashflowProjectionActualSummaryBatch {
+  version: string;
+  items: CashflowProjectionActualSummary[];
+  errors: Array<{
+    projectId: string;
+    code: 'SUMMARY_UNAVAILABLE';
+  }>;
 }
 
 export interface ProjectCashflowActualSyncResult {
@@ -2867,6 +2898,41 @@ export async function fetchCashflowWeeklyComplianceViaBff(params: {
   return response.data;
 }
 
+export async function fetchCashflowProjectionActualSummariesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+  client?: PlatformApiClientLike;
+}): Promise<CashflowProjectionActualSummaryBatch> {
+  const response = await resolveClient(params.client).post<CashflowProjectionActualSummaryBatch>(
+    '/api/v1/cashflow/projection-actual-summary/batch',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { projectIds: params.projectIds },
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  const result = response.data;
+  const requestedIds = new Set(params.projectIds);
+  const itemIds = Array.isArray(result?.items) ? result.items.map((item) => item?.projectId) : [];
+  const errorIds = Array.isArray(result?.errors) ? result.errors.map((error) => error?.projectId) : [];
+  if (typeof result?.version !== 'string'
+    || !Array.isArray(result?.items)
+    || result.items.length > params.projectIds.length
+    || itemIds.some((projectId) => !requestedIds.has(projectId))
+    || new Set(itemIds).size !== itemIds.length
+    || !Array.isArray(result?.errors)
+    || result.errors.length > params.projectIds.length
+    || result.errors.some((error) => error?.code !== 'SUMMARY_UNAVAILABLE' || !requestedIds.has(error?.projectId))
+    || new Set(errorIds).size !== errorIds.length
+    || errorIds.some((projectId) => itemIds.includes(projectId))) {
+    throw new Error('JVM 누적 Projection-Actual 요약 응답이 올바르지 않습니다.');
+  }
+  return result;
+}
+
 export async function reopenCashflowWeeklyUpdateViaBff(params: {
   tenantId: string;
   actor: ActorLike;
@@ -2899,10 +2965,11 @@ export async function fetchCashflowActivityViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectId: string;
+  source?: CashflowActivitySource;
   client?: PlatformApiClientLike;
-}): Promise<{ projectId: string; events: CashflowActivityEvent[] }> {
-  const response = await resolveClient(params.client).get<{ projectId: string; events: CashflowActivityEvent[] }>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/activity`,
+}): Promise<{ projectId: string; source?: CashflowActivitySource; events: CashflowActivityEvent[] }> {
+  const response = await resolveClient(params.client).get<{ projectId: string; source?: CashflowActivitySource; events: CashflowActivityEvent[] }>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/activity${params.source ? `?source=${params.source}` : ''}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

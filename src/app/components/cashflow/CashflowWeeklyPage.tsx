@@ -13,6 +13,8 @@ import { useFirebase } from '../../lib/firebase-context';
 import { fetchCashflowWeeklyComplianceViaBff, type CashflowWeeklyCompliancePage } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import type { CashflowWeekTotals } from '../../data/types';
+import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
+import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
 
 function fmtShort(value: number): string {
   const absolute = Math.abs(value);
@@ -37,6 +39,8 @@ export function CashflowWeeklyPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailProjectId, setDetailProjectId] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
+  const projectIds = useMemo(() => projects.map((project) => project.id), [projects]);
+  const canonicalSummaries = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds });
 
   useEffect(() => {
     if (!user?.idToken || projects.length === 0) {
@@ -85,13 +89,11 @@ export function CashflowWeeklyPage() {
 
   const byProjectWeek = useMemo(() => {
     const map = new Map<string, {
-      projectionUpdated: boolean;
       projectionTotals: CashflowWeekTotals;
       actualTotals: CashflowWeekTotals;
     }>();
     for (const week of weeks.filter((item) => item.yearMonth === yearMonth)) {
       map.set(`${week.projectId}:${week.weekNo}`, {
-        projectionUpdated: Boolean(week.projectionUpdated),
         projectionTotals: week.projectionTotals || emptyTotals(),
         actualTotals: week.actualTotals || emptyTotals(),
       });
@@ -143,28 +145,12 @@ export function CashflowWeeklyPage() {
               <tbody>
                 {projects.map((project) => {
                   const projectWeeks = monthWeeks.map((week) => byProjectWeek.get(`${project.id}:${week.weekNo}`));
-                  const projectionCompletedCount = projectWeeks.filter((status) => status?.projectionUpdated).length;
                   const projectHistory = canonicalHistory[project.id];
                   const projectStatuses = projectHistory?.items || [];
                   const completedSettlementCount = monthWeeks.filter((week) => {
                     const status = projectStatuses.find((item) => item.yearMonth === yearMonth && item.weekNo === week.weekNo)?.status;
                     return status === 'ON_TIME' || status === 'COMPLETED_LATE';
                   }).length;
-                  const monthlyProjection = projectWeeks.reduce((totals, status) => ({
-                    totalIn: totals.totalIn + (status?.projectionTotals.totalIn || 0),
-                    totalOut: totals.totalOut + (status?.projectionTotals.totalOut || 0),
-                    net: totals.net + (status?.projectionTotals.net || 0),
-                  }), emptyTotals());
-                  const monthlyActual = projectWeeks.reduce((totals, status) => ({
-                    totalIn: totals.totalIn + (status?.actualTotals.totalIn || 0),
-                    totalOut: totals.totalOut + (status?.actualTotals.totalOut || 0),
-                    net: totals.net + (status?.actualTotals.net || 0),
-                  }), emptyTotals());
-                  const monthlyDifference = monthlyProjection.net - monthlyActual.net;
-                  const monthlyMatches = monthlyProjection.totalIn === monthlyActual.totalIn
-                    && monthlyProjection.totalOut === monthlyActual.totalOut
-                    && monthlyProjection.net === monthlyActual.net;
-                  const hasProjection = projectionCompletedCount === monthWeeks.length;
                   return (
                   <tr key={project.id} className="border-t border-border/30 transition-colors hover:bg-muted/20">
                     <td className="sticky left-0 z-20 bg-white px-4 py-3">
@@ -181,17 +167,16 @@ export function CashflowWeeklyPage() {
                           </Badge>
                         </div>
                         {projectHistory ? <div className="flex items-center justify-between gap-2 text-[10px]"><span className="text-muted-foreground">누적 준수</span><span>기한 내 {projectHistory.onTimeCount.toLocaleString('ko-KR')} · 미준수 {projectHistory.missedCount.toLocaleString('ko-KR')}</span></div> : null}
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">Projection-Actual 일치 여부</span>
-                          <span className={`font-semibold ${hasProjection && !monthlyMatches ? 'text-red-700' : 'text-slate-700'}`}>
-                            {!hasProjection ? '미작성' : monthlyMatches ? '일치' : '불일치'}
-                          </span>
+                        <div>
+                          <span className="text-muted-foreground">누적 Projection-Actual 정산</span>
+                          <CashflowCanonicalSummary
+                            summary={canonicalSummaries.summaries[project.id]}
+                            loading={canonicalSummaries.loading[project.id]}
+                            error={canonicalSummaries.errors[project.id]}
+                            onRetry={() => void canonicalSummaries.retry(project.id)}
+                          />
                         </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">Projection-Actual 차액</span>
-                          <span className="font-semibold tabular-nums">{hasProjection ? fmtShort(monthlyDifference) : '-'}</span>
-                        </div>
-                        {hasProjection && !monthlyMatches ? (
+                        {canonicalSummaries.summaries[project.id]?.settlementMatches === false ? (
                           <button type="button" className="text-[10px] font-semibold text-teal-700 underline underline-offset-2" onClick={() => openProject(project.id)}>
                             프로젝션 보기
                           </button>
@@ -212,16 +197,17 @@ export function CashflowWeeklyPage() {
                             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                               {!projectHistory ? historyLoading ? '확인 중' : '조회 오류' : settlementCompleted ? '완료' : '미완료'}
                             </Badge>
+                            <div className="text-[10px] font-medium text-muted-foreground">{yearMonth} {week.weekNo}주차 상세</div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-muted-foreground">Projection</span>
+                              <span className="text-[10px] text-muted-foreground">Projection 순액</span>
                               <span className="font-semibold tabular-nums">{fmtShort(projection.net)}</span>
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-muted-foreground">Actual</span>
+                              <span className="text-[10px] text-muted-foreground">Actual 순액</span>
                               <span className="font-semibold tabular-nums">{fmtShort(actual.net)}</span>
                             </div>
                             <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
-                              <span>차이</span>
+                              <span>주차 순액 차이</span>
                               <span className={difference < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-700'}>{fmtShort(difference)}</span>
                             </div>
                           </div>

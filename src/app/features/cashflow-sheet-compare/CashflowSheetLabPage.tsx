@@ -305,10 +305,18 @@ export function CashflowSheetLabPage({
   const [applyResumeRequired, setApplyResumeRequired] = useState(false);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [closedMonthFormulaAccepted, setClosedMonthFormulaAccepted] = useState(false);
+  const [closedMonthPendingApprovalAccepted, setClosedMonthPendingApprovalAccepted] = useState(false);
+  const [pendingApprovalStage, setPendingApprovalStage] = useState<CashflowSheetLabStageResult | null>(null);
+  const pendingApprovalDifferences = pendingApprovalStage?.pendingApprovalDifferences || [];
+  const pendingApprovalChangeRows = pendingApprovalDifferences.flatMap((month) => month.changes || []);
+  const pendingApprovalManifestComplete = Boolean(pendingApprovalStage?.pendingApprovalDifferenceManifestHash)
+    && pendingApprovalStage?.pendingApprovalDifferenceCount === pendingApprovalChangeRows.length
+    && pendingApprovalDifferences.every((month) => !month.truncatedChangeCount);
   const [formulaMismatchPrompt, setFormulaMismatchPrompt] = useState<{
     stage: CashflowSheetLabStageResult;
     issues: CashflowFormulaMismatch[];
     closedMonthChangeReason: string;
+    acceptPendingApprovalDifferences: boolean;
   } | null>(null);
   const [loadingOperation, setLoadingOperation] = useState<CashflowSheetSyncOperation | null>(null);
   const loading = loadingOperation !== null;
@@ -507,6 +515,7 @@ export function CashflowSheetLabPage({
         setClosedMonthWarning(result.stagedRun.closedMonthDifferences || []);
         setClosedMonthChangeReason(result.applyInput?.closedMonthChangeReason || '');
         setClosedMonthFormulaAccepted(result.applyInput?.acceptFormulaMismatches === true);
+        setClosedMonthPendingApprovalAccepted(result.applyInput?.acceptPendingApprovalDifferences === true);
         setApplyResumeRequired(true);
         setErrorMessage('이전에 완료 응답을 받지 못한 시트 반영이 있습니다. 같은 검토본으로 이어서 완료해 주세요.');
       } catch {
@@ -765,6 +774,7 @@ export function CashflowSheetLabPage({
     monthCloseChangeReason = '',
     stagedOverride: CashflowSheetLabStageResult | null = null,
     acceptFormulaMismatches = false,
+    acceptPendingApprovalDifferences = false,
   ) {
     if (
       !projectId
@@ -786,6 +796,8 @@ export function CashflowSheetLabPage({
       setClosedMonthWarning([]);
       setClosedMonthStage(null);
       setClosedMonthChangeReason('');
+      setClosedMonthPendingApprovalAccepted(false);
+      setPendingApprovalStage(null);
     }
     setReflectResult(null);
     logCashflowLab('overwrite.sheet_values.start', {
@@ -852,6 +864,10 @@ export function CashflowSheetLabPage({
         });
         return;
       }
+      if (!acceptPendingApprovalDifferences && staged.pendingApprovalDifferences?.length) {
+        setPendingApprovalStage(staged);
+        return;
+      }
       if (!stagedOverride && staged.closedMonthDifferences?.length) {
         setClosedMonthStage(staged);
         setClosedMonthWarning(staged.closedMonthDifferences);
@@ -863,6 +879,7 @@ export function CashflowSheetLabPage({
       setLoadingOperation('applying');
       const applyStartedAt = Date.now();
       const stagedRunId = staged.runId;
+      const stagedEvidence = staged;
       logCashflowLab('apply.sheet_values.start', {
         projectId,
         spreadsheetId,
@@ -877,8 +894,11 @@ export function CashflowSheetLabPage({
           projectId,
           stageRunId: stagedRunId,
           closedMonthChangeReason: monthCloseChangeReason,
-          closedMonthDifferenceCount: staged.closedMonthDifferenceCount,
-          closedMonthDifferenceManifestHash: staged.closedMonthDifferenceManifestHash,
+          closedMonthDifferenceCount: stagedEvidence.closedMonthDifferenceCount,
+          closedMonthDifferenceManifestHash: stagedEvidence.closedMonthDifferenceManifestHash,
+          acceptPendingApprovalDifferences,
+          pendingApprovalDifferenceCount: stagedEvidence.pendingApprovalDifferenceCount,
+          pendingApprovalDifferenceManifestHash: stagedEvidence.pendingApprovalDifferenceManifestHash,
           acceptFormulaMismatches,
           idempotencyKey: applyIdempotencyKey,
         })
@@ -907,6 +927,8 @@ export function CashflowSheetLabPage({
       setClosedMonthWarning([]);
       setClosedMonthChangeReason('');
       setClosedMonthFormulaAccepted(false);
+      setClosedMonthPendingApprovalAccepted(false);
+      setPendingApprovalStage(null);
       setFormulaMismatchPrompt(null);
       setStatusMessage(`시트 값 ${result.appliedLineCount.toLocaleString()}건으로 MYSCube를 덮어썼습니다.`);
       logCashflowLab('apply.sheet_values.ok', {
@@ -945,6 +967,7 @@ export function CashflowSheetLabPage({
             stage: staged,
             issues,
             closedMonthChangeReason: monthCloseChangeReason,
+            acceptPendingApprovalDifferences,
           });
           return;
         }
@@ -959,10 +982,12 @@ export function CashflowSheetLabPage({
         );
         setApplyResumeRequired(false);
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
+        setClosedMonthPendingApprovalAccepted(acceptPendingApprovalDifferences);
       } else if (activeStep === 'apply' && staged && isApplyResultUncertain(error)) {
         setClosedMonthStage(staged);
         setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
+        setClosedMonthPendingApprovalAccepted(acceptPendingApprovalDifferences);
         setApplyResumeRequired(true);
         setErrorMessage(`${formatError(error)} 같은 검토본으로 이어서 완료할 수 있습니다.`);
       } else {
@@ -1007,6 +1032,7 @@ export function CashflowSheetLabPage({
     setClosedMonthWarning([]);
     setClosedMonthChangeReason('');
     setClosedMonthFormulaAccepted(false);
+    setClosedMonthPendingApprovalAccepted(false);
   }
 
   return (
@@ -1216,9 +1242,61 @@ export function CashflowSheetLabPage({
           if (!formulaMismatchPrompt) return;
           const pending = formulaMismatchPrompt;
           setFormulaMismatchPrompt(null);
-          void handleOverwriteSheetValues(pending.closedMonthChangeReason, pending.stage, true);
+          void handleOverwriteSheetValues(
+            pending.closedMonthChangeReason,
+            pending.stage,
+            true,
+            pending.acceptPendingApprovalDifferences,
+          );
         }}
       />
+
+      <Dialog open={Boolean(pendingApprovalStage)} onOpenChange={(open) => { if (!open) setPendingApprovalStage(null); }}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[760px] gap-4 overflow-y-auto rounded-xl p-5">
+          <DialogHeader className="space-y-1 text-left">
+            <DialogTitle className="text-[17px]">결재 중인 누적 결산과 값이 달라요</DialogTitle>
+            <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
+              그대로 반영하시면 경고 1회가 추가됩니다. 그래도 진행하시겠습니까?
+            </DialogDescription>
+          </DialogHeader>
+          <div role={pendingApprovalManifestComplete ? 'status' : 'alert'} className={`rounded-lg border px-3 py-2 text-[12px] ${pendingApprovalManifestComplete ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-red-300 bg-red-50 text-red-800'}`}>
+            {pendingApprovalManifestComplete ? `결재 중 변경 후보 전체 ${pendingApprovalChangeRows.length.toLocaleString()}건 · manifest 확인됨` : '변경 후보의 manifest 또는 전체 건수가 일치하지 않아 반영할 수 없습니다.'}
+          </div>
+          <div className="max-h-72 space-y-3 overflow-auto rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-950" role="region" aria-label="결재 중 누적 결산 변경 후보 전체 목록" tabIndex={0}>
+            {pendingApprovalDifferences.map((summary) => (
+              <div key={`${summary.requestId}:${summary.yearMonth}`}>
+                <div className="font-semibold">
+                  {summary.yearMonth} · {summary.requestStatus} · {summary.differenceCount.toLocaleString()}건 변경
+                </div>
+                {summary.changes.map((change) => (
+                  <div key={`${change.mode}:${change.weekNo}:${change.lineId}`} className="mt-1 grid grid-cols-[auto_1fr_auto] gap-2 border-t border-amber-200 pt-1">
+                    <span className="whitespace-nowrap text-amber-800">{change.mode === 'projection' ? 'Projection' : 'Actual'} {change.weekNo}주차</span>
+                    <span>{CASHFLOW_SHEET_LINE_LABELS[change.lineId as CashflowSheetLineId] || change.lineId}</span>
+                    <span className="whitespace-nowrap text-right tabular-nums">
+                      {change.beforeState} {change.beforeHadValue ? `${Number(change.beforeAmount).toLocaleString()}원` : '미작성'}
+                      {' → '}
+                      <strong>{change.afterState} {change.afterHadValue ? `${Number(change.afterAmount).toLocaleString()}원` : '미작성'}</strong>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" className="h-9" onClick={() => setPendingApprovalStage(null)}>닫기</Button>
+            <Button
+              type="button"
+              className="h-9"
+              disabled={loading || !pendingApprovalStage || !pendingApprovalManifestComplete}
+              onClick={() => {
+                const staged = pendingApprovalStage;
+                setPendingApprovalStage(null);
+                if (staged) void handleOverwriteSheetValues('', staged, false, true);
+              }}
+            >반영</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(closedMonthStage)}
@@ -1287,6 +1365,7 @@ export function CashflowSheetLabPage({
                 closedMonthChangeReason.trim(),
                 closedMonthStage,
                 closedMonthFormulaAccepted,
+                closedMonthPendingApprovalAccepted,
               )}
             >
               {applyResumeRequired ? '반영 상태 확인 및 이어서 완료' : '사유와 함께 반영'}

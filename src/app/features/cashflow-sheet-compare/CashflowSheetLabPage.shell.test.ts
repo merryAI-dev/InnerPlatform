@@ -55,7 +55,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('cashflow_closed_month_reason_required');
     expect(pageSource).toContain('cashflow_formula_mismatch_confirmation_required');
     expect(pageSource).toContain('cashflowFormulaMismatchesFromError');
-    expect(pageSource).toContain('handleOverwriteSheetValues(pending.closedMonthChangeReason, pending.stage, true)');
+    expect(pageSource).toContain('pending.acceptPendingApprovalDifferences');
     expect(pageSource).toContain('stageRunId: staged.runId');
     expect(pageSource).toContain('closedMonthFormulaAccepted,');
     expect(pageSource).toContain('getCashflowSheetLabShareAccountViaBff');
@@ -250,6 +250,16 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?');
     expect(pageSource).toContain('!closedMonthChangeReason.trim()');
     expect(pageSource).toContain('closedMonthStage,');
+  });
+
+  it('shows every pending-approval difference and requires an explicit manifest-bound apply', () => {
+    expect(pageSource).toContain('pendingApprovalDifferences');
+    expect(pageSource).toContain('pendingApprovalDifferenceCount');
+    expect(pageSource).toContain('pendingApprovalDifferenceManifestHash');
+    expect(pageSource).toContain('acceptPendingApprovalDifferences');
+    expect(pageSource).toContain('그대로 반영하시면 경고 1회가 추가됩니다. 그래도 진행하시겠습니까?');
+    expect(pageSource).toContain('pendingApprovalManifestComplete');
+    expect(pageSource).toContain('>반영<');
   });
 
   it('guides each project through the sheet workflow once per browser session', () => {

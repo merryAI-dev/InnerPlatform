@@ -7,9 +7,11 @@ import {
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
+  isCashflowComparisonWeekVisible,
   isCashflowWeekLockedByRange,
   normalizeCashflowMonthCloseCells,
   requiredCashflowMonthCloseDecision,
+  resolveCashflowComparisonScope,
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
 } from './cashflow-month-close';
@@ -51,6 +53,47 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
+  it('limits Projection-Actual comparison to the server KST finance week', () => {
+    const asOfWeek = { yearMonth: '2026-08', weekNo: 3 };
+
+    expect(isCashflowComparisonWeekVisible({ yearMonth: '2025-12', weekNo: 5 }, asOfWeek)).toBe(true);
+    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 3 }, asOfWeek)).toBe(true);
+    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 4 }, asOfWeek)).toBe(false);
+    expect(isCashflowComparisonWeekVisible({ yearMonth: '2027-01', weekNo: 1 }, asOfWeek)).toBe(false);
+    expect(isCashflowComparisonWeekVisible({ yearMonth: '2026-08', weekNo: 1 }, undefined)).toBe(false);
+  });
+
+  it('limits Projection-Actual cells and Total to the server KST comparison week', () => {
+    expect(resolveCashflowComparisonScope({
+      selectedYear: 2026,
+      annualYears: [2024, 2025, 2026, 2027, 2032],
+      weeks: [
+        { yearMonth: '2026-07', weekNo: 5 },
+        { yearMonth: '2026-08', weekNo: 1 },
+        { yearMonth: '2026-08', weekNo: 2 },
+        { yearMonth: '2026-08', weekNo: 3 },
+        { yearMonth: '2026-08', weekNo: 4 },
+      ],
+      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 3 },
+    })).toEqual({
+      annualYears: [2024, 2025],
+      weeks: [
+        { yearMonth: '2026-07', weekNo: 5 },
+        { yearMonth: '2026-08', weekNo: 1 },
+        { yearMonth: '2026-08', weekNo: 2 },
+        { yearMonth: '2026-08', weekNo: 3 },
+      ],
+      periodLabel: '2024년 ~ 2026-08 3주차',
+    });
+
+    expect(resolveCashflowComparisonScope({
+      selectedYear: 2026,
+      annualYears: [],
+      weeks: [{ yearMonth: '2026-01', weekNo: 1 }, { yearMonth: '2026-08', weekNo: 3 }],
+      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 3 },
+    }).periodLabel).toBe('2026-01 1주차 ~ 2026-08 3주차');
+  });
+
   it('locks pending approval states and unlocks a rejected request', () => {
     expect(isCashflowMonthCloseRequestLocked('PENDING')).toBe(true);
     expect(isCashflowMonthCloseRequestLocked('APPROVING')).toBe(true);

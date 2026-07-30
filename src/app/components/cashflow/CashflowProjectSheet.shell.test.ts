@@ -112,7 +112,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('cashflowSnapshot');
     expect(source).toContain('monthCloseResult.dashboard.comparison');
     expect(source).toContain('projectionSummary?.projectionSalesAndVatTotal');
-    expect(source).toContain('projectionSummary?.settlementMatches');
+    expect(source).toContain('dashboard?.projectionActualSummary');
+    expect(source).toContain('CashflowCanonicalSummary');
+    expect(source).toContain('summary={dashboard?.projectionActualSummary}');
+    expect(source).toContain('loading={monthCloseLoading}');
+    expect(source).toContain('error={Boolean(monthCloseError)}');
+    expect(source).not.toContain('projectionSummary?.settlementMatches');
     expect(source).toContain('cashflowSheetMirror.sheetFacts?.metadata');
     expect(source).toContain("['사업 타입', sheetDashboardMetadata.businessType?.value]");
     expect(source).toContain("['전용 계좌사업', sheetDashboardMetadata.accountType?.value]");
@@ -489,13 +494,55 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('시트의 최신 값을 불러왔습니다.');
   });
 
-  it('keeps applied history distinct from staged candidates and searchable', () => {
-    expect(source).toContain('AppliedCellHistory');
+  it('keeps exact applied history in General Activity and searchable', () => {
+    expect(source).not.toContain('AppliedCellHistory');
     expect(source).toContain('일반 활동 기록');
     expect(source).toContain('aria-label="일반 활동 기록 검색"');
-    expect(source).toContain('source {event.source ||');
+    expect(source).toContain("event.beforeState === 'EMPTY'");
+    expect(source).toContain("event.beforeState === 'ZERO'");
+    expect(source).toContain("event.afterState === 'EMPTY'");
+    expect(source).toContain('event.operationId');
+    expect(source).toContain('event.auditId');
+    expect(source).toContain('source {event.sourceDetail || event.source ||');
     expect(source).toContain('operation {event.operation || event.type}');
     expect(source).toContain('aria-label="마감 후 변경 후보 전체 목록"');
+  });
+
+  it('does not globally truncate exact General Activity rows', () => {
+    const mergeSource = source.slice(source.indexOf('function mergeCashflowEvents'), source.indexOf('function diffColorExplanation'));
+    expect(mergeSource).not.toContain('.slice(');
+  });
+
+  it('loads and retries general activity sources independently without hiding loaded events', () => {
+    expect(source).toContain("from './cashflow-activity-loader'");
+    expect(source).toContain('fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source })');
+    expect(source).toContain('setCashflowEvents((current) => mergeCashflowEvents(current, response.events))');
+    expect(source).toContain('cashflowEventErrors.map');
+    expect(source).toContain('onClick={() => void loadCashflowEventSource(failure.source)}');
+    expect(source).toContain('일반 활동 기록을 불러오는 중입니다.');
+    expect(source).toContain('아직 표시할 변경 기록이 없습니다.');
+    expect(source).toContain('role="alert"');
+    expect(source).not.toContain("setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'))");
+  });
+
+  it('awaits activity sources sequentially instead of starting them in parallel', () => {
+    expect(source).toContain('loadCashflowActivitySourcesSequentially(');
+    expect(source).toContain('await loadCashflowEventSource(source, generation)');
+    expect(source).not.toContain('CASHFLOW_ACTIVITY_SOURCES.forEach((source) => void loadCashflowEventSource(source, generation))');
+  });
+
+  it('uses the server KST comparison week and totals only the visible comparison scope', () => {
+    expect(source).toContain('monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek');
+    expect(source).toContain('resolveCashflowComparisonScope({');
+    expect(source).toContain('comparisonWeeks.reduce');
+    expect(source).toContain('comparisonAnnualYears.reduce');
+    expect(source).toContain('const cashflowTotalPeriodLabel = comparisonScope.periodLabel');
+    expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
+    expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
+  });
+
+  it('spells out every JVM 15-week missing Projection cell', () => {
+    expect(source).toContain("{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}이 미작성입니다.");
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
@@ -514,19 +561,25 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('aligns the Projection - Actual table to the same annual, weekly, and Total contract as the cashflow board', () => {
+    expect(source).toContain('resolveCashflowComparisonScope');
+    expect(source).toContain('monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek');
+    expect(source).toContain('visibleComparisonWeeks');
+    expect(source).toContain('visibleComparisonAnnualYears');
+    expect(source).toContain('comparisonWeeks.reduce');
+    expect(source).not.toContain('const cashflowTotalPeriodLabel = `${previousAnnualYears[0] || selectedYear}년 ~ ${followingAnnualYears.at(-1) || selectedYear}년`');
     expect(source).toContain('const mirroredAnnualTotals = useMemo');
     expect(source).toContain('const annualTotalFor = (year: number');
-    expect(source).toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
-    expect(source).toContain("const totalActual = projectLineTotalFor('actual', lineId)");
-    expect(source).toContain('{previousAnnualYears.map((year) => (');
-    expect(source).toContain('{followingAnnualYears.map((year) => (');
-    expect(source).toContain('row.annualCells.filter((cell) => cell.year < selectedYear)');
-    expect(source).toContain('row.annualCells.filter((cell) => cell.year > selectedYear)');
+    expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
+    expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
+    expect(source).toContain('{previousComparisonAnnualYears.map((year) => (');
+    expect(source).toContain('{followingComparisonAnnualYears.map((year) => (');
+    expect(source).toContain('previousComparisonAnnualYears.includes(cell.year)');
+    expect(source).toContain('followingComparisonAnnualYears.includes(cell.year)');
     expect(source).toContain('row.totalCell.difference');
     expect(source).toContain('difference: hasValue ? projection - actual : null');
     expect(source).toContain("pinned.state === 'VALUE' || pinned.state === 'ZERO'");
     expect(source).toContain("cell?.cellState === 'VALUE' || cell?.cellState === 'ZERO'");
-    expect(source).toContain('const columnCount = annualYears.length + annualWeeks.length + 1');
+    expect(source).toContain('const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1');
   });
 
   it('keeps the last good month result during a same-month retry and lists every management finding', () => {

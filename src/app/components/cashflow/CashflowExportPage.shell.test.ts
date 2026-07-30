@@ -32,6 +32,9 @@ describe('CashflowExportPage authoritative export surface', () => {
     expect(source).toContain('projectionActualOutDifference');
     expect(source).toContain('최근 업데이트');
     expect(source).toContain('사업 보기');
+    expect(source).toContain('CashflowCanonicalSummary');
+    expect(source).toContain('누적 Projection-Actual / 현재 주차 상세');
+    expect(source).toContain('onRetry={() => void canonicalSummaries.retry(row.id)}');
   });
 
   it('does not infer export readiness from the legacy weekly status collection', () => {

@@ -23,6 +23,38 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
 
+export function isCashflowComparisonWeekVisible(
+  week: { yearMonth: string; weekNo: number },
+  comparisonAsOfWeek?: { yearMonth: string; weekNo: number },
+): boolean {
+  if (!comparisonAsOfWeek) return false;
+  return `${week.yearMonth}:${String(week.weekNo).padStart(2, '0')}`
+    <= `${comparisonAsOfWeek.yearMonth}:${String(comparisonAsOfWeek.weekNo).padStart(2, '0')}`;
+}
+
+export function resolveCashflowComparisonScope<T extends { yearMonth: string; weekNo: number }>(input: {
+  selectedYear: number;
+  annualYears: number[];
+  weeks: T[];
+  comparisonAsOfWeek?: { yearMonth: string; weekNo: number };
+}): { annualYears: number[]; weeks: T[]; periodLabel: string } {
+  const asOf = input.comparisonAsOfWeek;
+  if (!asOf) return { annualYears: [], weeks: [], periodLabel: '서버 기준 주차 확인 중' };
+  const asOfYear = Number.parseInt(asOf.yearMonth.slice(0, 4), 10);
+  const annualYears = input.annualYears.filter((year) => year !== input.selectedYear && year < asOfYear);
+  const weeks = input.weeks.filter((week) => isCashflowComparisonWeekVisible(week, asOf));
+  const periodStart = annualYears.length > 0
+    ? `${annualYears[0]}년`
+    : weeks.length > 0
+      ? `${weeks[0].yearMonth} ${weeks[0].weekNo}주차`
+      : `${asOf.yearMonth} ${asOf.weekNo}주차`;
+  return {
+    annualYears,
+    weeks,
+    periodLabel: `${periodStart} ~ ${asOf.yearMonth} ${asOf.weekNo}주차`,
+  };
+}
+
 export function isCashflowMonthCloseRequestLocked(status?: string): boolean {
   return status === 'PENDING' || status === 'APPROVING' || status === 'UNCERTAIN';
 }

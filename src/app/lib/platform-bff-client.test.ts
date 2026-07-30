@@ -43,6 +43,8 @@ import {
   completeCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyComplianceViaBff,
+  fetchCashflowProjectionActualSummariesViaBff,
+  fetchCashflowActivityViaBff,
   fetchCashflowAppliedCellChangesViaBff,
   type CashflowCumulativeCloseScope,
   reopenCashflowWeeklyUpdateViaBff,
@@ -75,6 +77,45 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('posts project IDs to the canonical JVM projection-actual summary adapter unchanged', async () => {
+    const data = {
+      version: '1',
+      items: Array.from({ length: 9 }, (_, index) => ({
+        projectId: `p00${index + 1}`, fromMonth: '2023-01',
+        comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+        settlementDifferenceAmount: 18_371_453 + index, settlementMatches: false,
+      })),
+      errors: [{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' as const }],
+    };
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn(),
+    });
+
+    const result = await fetchCashflowProjectionActualSummariesViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`), client,
+    });
+
+    expect(result).toBe(data);
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/projection-actual-summary/batch', expect.objectContaining({
+      body: { projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`) }, retries: 0, timeoutMs: 12000,
+    }));
+    expect(result.items).toHaveLength(9);
+    expect(result.errors).toEqual([{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' }]);
+  });
+
+  it.each([
+    { errors: [{ projectId: 'foreign', code: 'SUMMARY_UNAVAILABLE' }] },
+    { errors: [{ projectId: 'p001', code: 'OTHER_ERROR' }] },
+    { errors: 'malformed' },
+  ])('fails closed for malformed or foreign canonical summary errors: %j', async (invalid) => {
+    const client = asMockClient({
+      post: vi.fn(async () => ({ data: { version: '1', items: [], ...invalid } })), get: vi.fn(), request: vi.fn(),
+    });
+    await expect(fetchCashflowProjectionActualSummariesViaBff({
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectIds: ['p001'], client,
+    })).rejects.toThrow('JVM 누적 Projection-Actual 요약 응답이 올바르지 않습니다.');
+  });
+
   it('preserves the server cumulative close scope without deriving counts', async () => {
     const cumulativeCloseScope = {
       contractVersion: 'cashflow-cumulative-close-v2',
@@ -94,8 +135,13 @@ describe('platform-bff-client', () => {
         spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
       },
     } satisfies CashflowCumulativeCloseScope;
+    const projectionActualSummary = {
+      projectId: 'p001', fromMonth: '2023-01',
+      comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+      settlementDifferenceAmount: 18_371_453, settlementMatches: false,
+    };
     const client = asMockClient({
-      get: vi.fn(async () => ({ data: { dashboard: { cumulativeCloseScope } } })),
+      get: vi.fn(async () => ({ data: { dashboard: { cumulativeCloseScope, projectionActualSummary } } })),
       post: vi.fn(), request: vi.fn(),
     });
 
@@ -106,6 +152,8 @@ describe('platform-bff-client', () => {
     expect(result.dashboard?.cumulativeCloseScope).toEqual(cumulativeCloseScope);
     expect(result.dashboard?.cumulativeCloseScope?.weekCount).toBe(220);
     expect(result.dashboard?.cumulativeCloseScope?.cellCount).toBe(7040);
+    expect(result.dashboard?.projectionActualSummary).toBe(projectionActualSummary);
+    expect(result.dashboard?.projectionActualSummary.settlementDifferenceAmount).toBe(18_371_453);
   });
 
   it('sends cashflow metadata intents with the exact project lease and no client audit fields', async () => {
@@ -438,6 +486,20 @@ describe('platform-bff-client', () => {
     const result = await fetchCashflowAppliedCellChangesViaBff({ tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', limit: 50, cursor: 'opaque/cursor', client });
     expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/applied-cell-changes?limit=50&cursor=opaque%2Fcursor', expect.objectContaining({ retries: 0 }));
     expect(result).toEqual(page);
+  });
+
+  it('reads each general activity source through an isolated bounded request', async () => {
+    const events = Array.from({ length: 101 }, (_, index) => ({ id: `event-${index}` }));
+    const page = { projectId: 'p001', source: 'audit' as const, events };
+    const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: page })), request: vi.fn() });
+
+    const result = await fetchCashflowActivityViaBff({
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', source: 'audit', client,
+    });
+
+    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/activity?source=audit', expect.objectContaining({ retries: 0, timeoutMs: 12000 }));
+    expect(result).toBe(page);
+    expect(result.events).toHaveLength(101);
   });
 
   it('routes projection through the fenced JVM-owned BFF endpoint', async () => {

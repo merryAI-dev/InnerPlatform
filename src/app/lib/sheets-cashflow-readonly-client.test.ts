@@ -164,6 +164,9 @@ describe('sheets cashflow readonly client', () => {
       stageRunId: 'stage-001',
       settledWeekChangeConfirmationId: 'confirmation-001',
       acceptFormulaMismatches: true,
+      acceptPendingApprovalDifferences: true,
+      pendingApprovalDifferenceCount: 160,
+      pendingApprovalDifferenceManifestHash: `sha256:${'a'.repeat(64)}`,
       idempotencyKey: 'apply-without-ui-lease',
       client,
     });
@@ -173,6 +176,9 @@ describe('sheets cashflow readonly client', () => {
       stageRunId: 'stage-001',
       settledWeekChangeConfirmationId: 'confirmation-001',
       acceptFormulaMismatches: true,
+      acceptPendingApprovalDifferences: true,
+      pendingApprovalDifferenceCount: 160,
+      pendingApprovalDifferenceManifestHash: `sha256:${'a'.repeat(64)}`,
       idempotencyKey: 'apply-without-ui-lease',
     });
   });

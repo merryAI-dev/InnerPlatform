@@ -54,6 +54,7 @@ import {
   type CashflowCumulativeCloseScope,
   type CashflowDeadlineSummary,
   type CashflowActivityEvent,
+  type CashflowActivitySource,
   type CashflowWeeklyComplianceItem,
 } from '../../lib/platform-bff-client';
 import { getCashflowModeLineLabel } from '../../platform/policies/cashflow-policy';
@@ -79,13 +80,15 @@ import {
   isCashflowMonthCloseRequestLocked,
   isCashflowWeekLockedByRange,
   normalizeCashflowMonthCloseCells,
+  resolveCashflowComparisonScope,
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
-import { AppliedCellHistory } from './AppliedCellHistory';
+import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
+import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -185,6 +188,18 @@ function logCashflowSettlement(input: {
 }
 
 type CashflowEvent = CashflowActivityEvent & { revertedAt?: string };
+const CASHFLOW_ACTIVITY_SOURCE_LABELS: Record<CashflowActivitySource, string> = {
+  legacy: '일반 변경',
+  sheet_refresh: '시트 불러오기',
+  audit: '시트 반영·월 결산',
+};
+
+function mergeCashflowEvents(current: CashflowEvent[], incoming: CashflowActivityEvent[]): CashflowEvent[] {
+  const events = new Map(current.map((event) => [event.id, event]));
+  incoming.forEach((event) => events.set(event.id, event));
+  return [...events.values()]
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+}
 
 function diffColorExplanation(section: '입금' | '출금', diff: number): string {
   if (diff === 0) return '차이가 없습니다.';
@@ -429,7 +444,9 @@ export function CashflowProjectSheet({
     setSavedExecutiveApproverId(approverId);
   }, [project?.executiveApproverId, projectId]);
   const [cashflowEvents, setCashflowEvents] = useState<CashflowEvent[]>([]);
-  const [cashflowEventsError, setCashflowEventsError] = useState<string | null>(null);
+  const [cashflowEventErrors, setCashflowEventErrors] = useState<Array<{ source: CashflowActivitySource; message: string }>>([]);
+  const [cashflowEventLoadingSources, setCashflowEventLoadingSources] = useState<CashflowActivitySource[]>([]);
+  const cashflowActivityGenerationRef = useRef(0);
   const [cashflowEventQuery, setCashflowEventQuery] = useState('');
   const [cashflowEventMode, setCashflowEventMode] = useState('ALL');
   const [cashflowEventMonth, setCashflowEventMonth] = useState('ALL');
@@ -871,44 +888,48 @@ export function CashflowProjectSheet({
     if (weeklyHistoryOpen) void loadWeeklyComplianceHistory();
   }, [loadWeeklyComplianceHistory, weeklyHistoryOpen]);
 
-  const loadCashflowEvents = useCallback(async (): Promise<void> => {
+  const loadCashflowEventSource = useCallback(async (source: CashflowActivitySource, generation = cashflowActivityGenerationRef.current): Promise<void> => {
     if (!projectId || !orgId || !user?.uid) {
-      setCashflowEvents([]);
-      setCashflowEventsError(null);
       return;
     }
+    setCashflowEventLoadingSources((current) => current.includes(source) ? current : [...current, source]);
     try {
       let actor = await resolveBffActor();
       if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
       try {
-        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId });
-        setCashflowEvents(response.events);
+        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source });
+        if (cashflowActivityGenerationRef.current !== generation) return;
+        setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
       } catch (error) {
         if (!isBffAuthRejection(error)) throw error;
         actor = await resolveBffActor({ forceRefresh: true });
         if (!actor?.idToken) throw error;
-        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId });
-        setCashflowEvents(response.events);
+        const response = await fetchCashflowActivityViaBff({ tenantId: orgId, actor, projectId, source });
+        if (cashflowActivityGenerationRef.current !== generation) return;
+        setCashflowEvents((current) => mergeCashflowEvents(current, response.events));
       }
-      setCashflowEventsError(null);
+      setCashflowEventErrors((current) => current.filter((failure) => failure.source !== source));
     } catch (error) {
-      setCashflowEvents([]);
-      setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
+      if (cashflowActivityGenerationRef.current !== generation) return;
+      const message = resolveApiErrorMessage(error, `${CASHFLOW_ACTIVITY_SOURCE_LABELS[source]} 기록을 불러오지 못했습니다.`);
+      setCashflowEventErrors((current) => [...current.filter((failure) => failure.source !== source), { source, message }]);
+    } finally {
+      if (cashflowActivityGenerationRef.current === generation) {
+        setCashflowEventLoadingSources((current) => current.filter((candidate) => candidate !== source));
+      }
     }
   }, [orgId, projectId, resolveBffActor, user?.uid]);
 
   useEffect(() => {
-    let cancelled = false;
-    loadCashflowEvents().catch((error) => {
-      if (!cancelled) {
-        setCashflowEvents([]);
-        setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'));
-      }
+    const generation = cashflowActivityGenerationRef.current + 1;
+    cashflowActivityGenerationRef.current = generation;
+    setCashflowEvents([]);
+    setCashflowEventErrors([]);
+    setCashflowEventLoadingSources([]);
+    void loadCashflowActivitySourcesSequentially(async (source) => {
+      await loadCashflowEventSource(source, generation);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadCashflowEvents]);
+  }, [loadCashflowEventSource]);
 
   const monthClosePinnedSource = useMemo<CashflowSheetLabMirrorResult | null>(() => {
     const dashboard = monthCloseResult?.dashboard;
@@ -1690,6 +1711,17 @@ export function CashflowProjectSheet({
   }, [mirroredAnnualTotals, monthCloseResult?.dashboard?.openingBalances, selectedYear]);
   const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
   const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
+  const comparisonAsOfWeek = monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek;
+  const comparisonScope = useMemo(() => resolveCashflowComparisonScope({
+    selectedYear,
+    annualYears,
+    weeks: annualWeeks,
+    comparisonAsOfWeek,
+  }), [annualWeeks, annualYears, comparisonAsOfWeek, selectedYear]);
+  const visibleComparisonWeeks = comparisonScope.weeks;
+  const visibleComparisonAnnualYears = comparisonScope.annualYears;
+  const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < selectedYear);
+  const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > selectedYear);
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
     const pinned = monthCloseResult?.status === 'OPEN'
       ? mirroredAnnualTotals.get(year)?.[mode] || null
@@ -1735,7 +1767,7 @@ export function CashflowProjectSheet({
       ...CASHFLOW_OUT_LINES.map((lineId) => ({ section: '출금' as const, lineId })),
     ];
     const rows = lineDefs.map(({ section, lineId }) => {
-      const cells = annualWeeks.map((week) => {
+      const comparisonWeeks = visibleComparisonWeeks.map((week) => {
         const projectionCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'projection', weekNo: week.weekNo, lineId });
         const actualCell = getServerReadCell({ targetYearMonth: week.yearMonth, mode: 'actual', weekNo: week.weekNo, lineId });
         const hasValue = projectionCell.hasValue || actualCell.hasValue;
@@ -1749,7 +1781,7 @@ export function CashflowProjectSheet({
           difference: hasValue ? projectionCell.amount - actualCell.amount : null,
         };
       });
-      const annualCells = annualYears.map((year) => {
+      const comparisonAnnualYears = visibleComparisonAnnualYears.map((year) => {
         const projectionTotal = annualTotalFor(year, 'projection');
         const actualTotal = annualTotalFor(year, 'actual');
         const projectionState = projectionTotal?.lineStates?.[lineId]
@@ -1761,26 +1793,23 @@ export function CashflowProjectSheet({
         const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
         return { year, projection, actual, difference: hasValue ? projection - actual : null };
       });
-      const totalProjection = projectLineTotalFor('projection', lineId);
-      const totalActual = projectLineTotalFor('actual', lineId);
-      const totalProjectionState = sheetGrandTotalFor('projection')?.lineStates?.[lineId];
-      const totalActualState = sheetGrandTotalFor('actual')?.lineStates?.[lineId];
-      const totalHasValue = ['VALUE', 'ZERO'].includes(totalProjectionState || '')
-        || ['VALUE', 'ZERO'].includes(totalActualState || '')
-        || cells.some((cell) => cell.difference !== null)
-        || annualCells.some((cell) => cell.difference !== null);
+      const totalProjection = comparisonWeeks.reduce((sum, cell) => sum + cell.projection, 0)
+        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.projection, 0);
+      const totalActual = comparisonWeeks.reduce((sum, cell) => sum + cell.actual, 0)
+        + comparisonAnnualYears.reduce((sum, cell) => sum + cell.actual, 0);
+      const totalHasValue = [...comparisonAnnualYears, ...comparisonWeeks].some((cell) => cell.difference !== null);
       return {
         section,
         lineId,
         label: getCashflowModeLineLabel(lineId, 'projection'),
-        cells,
-        annualCells,
+        cells: comparisonWeeks,
+        annualCells: comparisonAnnualYears,
         totalCell: {
           projection: totalProjection,
           actual: totalActual,
           difference: totalHasValue ? totalProjection - totalActual : null,
         },
-        changed: [...cells, ...annualCells, { difference: totalHasValue ? totalProjection - totalActual : null }]
+        changed: [...comparisonWeeks, ...comparisonAnnualYears, { difference: totalHasValue ? totalProjection - totalActual : null }]
           .some((cell) => cell.difference !== null && cell.difference !== 0),
       };
     });
@@ -1788,9 +1817,9 @@ export function CashflowProjectSheet({
       rows,
       changedRows: rows.filter((row) => row.changed),
     };
-  }, [annualWeeks, annualYears, cashflowSheetMirror, mirroredAnnualTotals, monthCloseResult, selectedYear, yearMonth]);
+  }, [cashflowSheetMirror, mirroredAnnualTotals, monthCloseResult, selectedYear, visibleComparisonAnnualYears, visibleComparisonWeeks, yearMonth]);
 
-  const cashflowTotalPeriodLabel = `${previousAnnualYears[0] || selectedYear}년 ~ ${followingAnnualYears.at(-1) || selectedYear}년`;
+  const cashflowTotalPeriodLabel = comparisonScope.periodLabel;
   const sheetRangeLabel = cashflowSheetConfig
     ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
     : '연결된 Google Sheet가 없습니다.';
@@ -1834,7 +1863,7 @@ export function CashflowProjectSheet({
       rates: {
         projection: rate(dashboard?.summary?.contractCoveragePercent || 0),
         actual: rate(dashboard?.summary?.actualProgressPercent || 0),
-        confirmation: rate(dashboard?.summary?.settlementMatches ? 100 : 0),
+        confirmation: rate(dashboard?.projectionActualSummary?.settlementMatches ? 100 : 0),
       },
     };
   }, [monthCloseLoading, monthCloseResult?.dashboard]);
@@ -2383,7 +2412,7 @@ export function CashflowProjectSheet({
 
   function renderProjectionActualDiffTable() {
     const rows = projectionActualComparison.changedRows;
-    const columnCount = annualYears.length + annualWeeks.length + 1;
+    const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1;
     if (monthCloseResult?.dashboard?.snapshotCompatibility?.status === 'LEGACY_EVIDENCE_ONLY') {
       return (
         <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-5 text-[12px] leading-5 text-[#17324D]">
@@ -2422,15 +2451,15 @@ export function CashflowProjectSheet({
               <thead className="bg-white text-slate-500">
                 <tr>
                   <th className="sticky left-0 z-20 w-[220px] min-w-[220px] border-r-[6px] border-r-white bg-white px-3 py-2 text-left font-medium">항목</th>
-                  {previousAnnualYears.map((year) => (
+                  {previousComparisonAnnualYears.map((year) => (
                     <th key={`comparison-${year}-before`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
                   ))}
-                  {annualWeeks.map((week) => (
+                  {visibleComparisonWeeks.map((week) => (
                     <th key={`${week.yearMonth}-${week.weekNo}`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-50/80 px-2 py-2 text-right font-medium">
                       <div>{week.label}</div>
                     </th>
                   ))}
-                  {followingAnnualYears.map((year) => (
+                  {followingComparisonAnnualYears.map((year) => (
                     <th key={`comparison-${year}-after`} className="min-w-[96px] border-l-[6px] border-l-white bg-slate-100 px-2 py-2 text-right font-medium">{year}년</th>
                   ))}
                   <th className="sticky right-0 z-20 min-w-[96px] border-l-[6px] border-l-white bg-white px-2 py-2 text-right font-medium shadow-[-12px_0_24px_rgba(15,23,42,0.08)]">Total</th>
@@ -2448,7 +2477,7 @@ export function CashflowProjectSheet({
                     <td className={`sticky left-0 z-10 w-[220px] min-w-[220px] border-r-[6px] border-r-white px-3 py-2 ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                       <div className={`truncate ${row.section === '입금' ? 'text-emerald-700' : 'text-red-700'}`}>{row.label}</div>
                     </td>
-                    {row.annualCells.filter((cell) => cell.year < selectedYear).map((cell) => {
+                    {row.annualCells.filter((cell) => previousComparisonAnnualYears.includes(cell.year)).map((cell) => {
                       const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
                         ? `${rowSurface} text-slate-300`
@@ -2474,7 +2503,7 @@ export function CashflowProjectSheet({
                         </td>
                       );
                     })}
-                    {row.annualCells.filter((cell) => cell.year > selectedYear).map((cell) => {
+                    {row.annualCells.filter((cell) => followingComparisonAnnualYears.includes(cell.year)).map((cell) => {
                       const rowSurface = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50';
                       const differenceClass = cell.difference === null || cell.difference === 0
                         ? `${rowSurface} text-slate-300`
@@ -2534,37 +2563,37 @@ export function CashflowProjectSheet({
       : label === 'Actual'
         ? { surface: 'border-border bg-card', value: 'text-foreground', bar: 'bg-sky-600' }
         : { surface: 'border-border bg-accent', value: 'text-primary', bar: 'bg-sky-600' };
-    const projectionSummary = monthCloseResult?.dashboard?.summary;
+    const dashboard = monthCloseResult?.dashboard;
+    if (label === '결산') {
+      return (
+        <div className={`min-w-[158px] rounded-md border px-3.5 py-3 shadow-none ${tone.surface}`} title="JVM 누적 Projection-Actual 요약값">
+          <div className="mb-1 text-[12px] font-semibold leading-4 text-muted-foreground">결산</div>
+          <CashflowCanonicalSummary
+            summary={dashboard?.projectionActualSummary}
+            loading={monthCloseLoading}
+            error={Boolean(monthCloseError)}
+            onRetry={() => void loadCashflowMonthClose()}
+          />
+        </div>
+      );
+    }
+    const projectionSummary = dashboard?.summary;
     const projectionMetricsReady = projectionSummary?.projectionContractAmount !== undefined
       && projectionSummary.projectionSalesAndVatTotal !== undefined
       && projectionSummary.contractDifference !== undefined
       && projectionSummary.contractCoveragePercent !== undefined;
     const zeroContract = projectionMetricsReady && projectionSummary.projectionContractAmount === 0;
-    const settlementMetricsReady = projectionSummary?.settlementMatches !== undefined
-      && projectionSummary.settlementDifferenceAmount !== undefined;
     const summaryDescription = label === 'Projection'
       ? projectionMetricsReady
         ? `프로젝트 등록 계약금액 ${fmt(Number(projectionSummary?.projectionContractAmount || 0))}원 · 전체 사업기간 Projection 매출액+매출부가세 ${fmt(Number(projectionSummary?.projectionSalesAndVatTotal || 0))}원 · 차이 ${fmt(Number(projectionSummary?.contractDifference || 0))}원`
         : '계약금액과 매출액+매출부가세 합계를 불러오는 중입니다.'
-      : label === 'Actual'
-        ? '이번 주차까지 입력 기준'
-        : settlementMetricsReady
-          ? projectionSummary?.settlementMatches
-            ? '이번 주차까지 모든 항목의 Projection과 Actual이 일치합니다.'
-            : `이번 주차까지 항목별 차이 합계 ${fmt(Number(projectionSummary?.settlementDifferenceAmount || 0))}원`
-          : '이번 주차까지 항목별 결산 차이를 불러오는 중입니다.';
-    const primaryValue = label === '결산'
-      ? settlementMetricsReady
-        ? projectionSummary?.settlementMatches ? '100%' : `차이 ${fmt(Number(projectionSummary?.settlementDifferenceAmount || 0))}원`
-        : '확인 중'
-      : label === 'Projection' && !projectionMetricsReady
+      : '이번 주차까지 입력 기준';
+    const primaryValue = label === 'Projection' && !projectionMetricsReady
         ? '확인 중'
         : label === 'Projection' && zeroContract
           ? '계약금액 0원'
         : `${rate.percent}%`;
-    const statusLabel = label === '결산'
-      ? settlementMetricsReady ? (projectionSummary?.settlementMatches ? '일치' : '불일치') : '로딩'
-      : label === 'Projection' && !projectionMetricsReady ? '로딩' : label === 'Projection' && zeroContract ? '계약금액 확인' : rateStatusLabel(rate.percent);
+    const statusLabel = label === 'Projection' && !projectionMetricsReady ? '로딩' : label === 'Projection' && zeroContract ? '계약금액 확인' : rateStatusLabel(rate.percent);
     return (
       <div className={`min-w-[158px] rounded-md border px-3.5 py-3 shadow-none ${tone.surface}`} title="BFF/JVM 서버 요약값">
         <div className="flex items-center justify-between gap-2">
@@ -2940,9 +2969,9 @@ export function CashflowProjectSheet({
     if (event.type === 'projection_amount_change' || event.type === 'actual_amount_change') {
       const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
       const lineLabel = event.lineId ? CASHFLOW_SHEET_LINE_LABELS[event.lineId as CashflowSheetLineId] || event.lineId : '';
-      const before = event.beforeHadValue ? `${fmt(Number(event.beforeAmount || 0))}원` : '미작성';
-      const after = `${fmt(Number(event.afterAmount || 0))}원`;
-      return `${weekLabel} ${lineLabel} ${before} → ${after}`;
+      const before = event.beforeState === 'EMPTY' ? '미작성 (EMPTY)' : event.beforeState === 'ZERO' ? '0원 (ZERO)' : `${fmt(Number(event.beforeAmount || 0))}원 (VALUE)`;
+      const after = event.afterState === 'EMPTY' ? '미작성 (EMPTY)' : event.afterState === 'ZERO' ? '0원 (ZERO)' : `${fmt(Number(event.afterAmount || 0))}원 (VALUE)`;
+      return `${weekLabel} ${lineLabel} ${before} → ${after} · ${actorName || actorEmail || '사용자'}`;
     }
     if (event.type === 'sheet_apply_reverted') return '선택한 시트 반영 run의 금액 변경을 이전 값으로 되돌렸습니다.';
     const weekLabel = event.weekNo ? getWeekLabel(event.weekNo, event.yearMonth) : '';
@@ -2978,7 +3007,7 @@ export function CashflowProjectSheet({
       const mode = event.mode || (event.type.startsWith('projection') ? 'projection' : event.type.startsWith('actual') ? 'actual' : '');
       return (cashflowEventMode === 'ALL' || mode === cashflowEventMode)
         && (cashflowEventMonth === 'ALL' || event.yearMonth === cashflowEventMonth)
-        && (!query || `${cashflowEventLabel(event)} ${cashflowEventDetail(event)} ${event.source || ''} ${event.runId}`.toLocaleLowerCase('ko-KR').includes(query));
+        && (!query || `${cashflowEventLabel(event)} ${cashflowEventDetail(event)} ${event.sourceDetail || event.source || ''} ${event.operation || ''} ${event.operationId || ''} ${event.auditId || ''} ${event.runId} ${event.reason || ''} ${event.sourceRevision || ''} ${event.targetRevision || ''}`.toLocaleLowerCase('ko-KR').includes(query));
     });
 
     return (
@@ -3005,13 +3034,15 @@ export function CashflowProjectSheet({
             <select aria-label="실제 반영 mode 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
             <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
           </div>
+          {cashflowEventErrors.map((failure) => (
+            <div key={failure.source} role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+              <span>{CASHFLOW_ACTIVITY_SOURCE_LABELS[failure.source]}: {failure.message}</span>
+              <Button type="button" size="sm" variant="outline" disabled={cashflowEventLoadingSources.includes(failure.source)} onClick={() => void loadCashflowEventSource(failure.source)}>다시 시도</Button>
+            </div>
+          ))}
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-md border border-slate-200 bg-slate-50 px-2 py-2 pr-1">
-            {cashflowEventsError ? (
-              <div className="px-2 py-8 text-center text-[12px] leading-4 text-red-600">
-                변경 이력을 불러오지 못했습니다.
-                <br />
-                {cashflowEventsError}
-              </div>
+            {cashflowEventLoadingSources.length > 0 && filteredEvents.length === 0 ? (
+              <div role="status" className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">일반 활동 기록을 불러오는 중입니다.</div>
             ) : filteredEvents.length === 0 ? (
               <div className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
@@ -3046,7 +3077,7 @@ export function CashflowProjectSheet({
                     <div className="shrink-0 text-[12px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
                   </div>
                   <div className="mt-1 text-[12px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
-                  <div className="mt-1 text-[12px] leading-4 text-slate-400">source {event.source || '-'} · operation {event.operation || event.type} · 사유 {event.reason || '미기록'}</div>
+                  <div className="mt-1 break-all text-[12px] leading-4 text-slate-400">source {event.sourceDetail || event.source || '-'} · operation {event.operation || event.type} · operation ID {event.operationId || '-'} · run {event.runId || '-'} · audit {event.auditId || '-'} · 사유 {event.reason || '미기록'}</div>
                   {canRevert && (
                     <Button
                       type="button"
@@ -3114,8 +3145,6 @@ export function CashflowProjectSheet({
         {renderOpsTimeline()}
       </section>
 
-      {user ? <AppliedCellHistory tenantId={orgId} actor={user} projectId={projectId} /> : null}
-
       <section id="projection-actual-comparison" data-cashflow-block="comparison" className="scroll-mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#EAF0F5]">
@@ -3144,7 +3173,7 @@ export function CashflowProjectSheet({
             <details open className="max-h-[260px] overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-[12px]">
               <summary className="cursor-pointer font-bold text-red-950">서버가 확인한 EMPTY 항목 {weeklyMissingCells.length.toLocaleString()}건</summary>
               <ul className="mt-2 space-y-1" aria-label="Projection 미입력 주차와 항목">
-                {weeklyMissingCells.map((cell) => <li key={`${cell.yearMonth}:${cell.weekNo}:${cell.lineId}`}>{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}</li>)}
+                {weeklyMissingCells.map((cell) => <li key={`${cell.yearMonth}:${cell.weekNo}:${cell.lineId}`}>{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}이 미작성입니다.</li>)}
               </ul>
             </details>
           ) : null}

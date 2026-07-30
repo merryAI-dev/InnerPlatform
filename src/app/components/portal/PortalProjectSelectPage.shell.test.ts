@@ -18,6 +18,9 @@ describe('PortalProjectSelectPage shell', () => {
     expect(source).not.toContain("navigate('/', { replace: true })");
     expect(source).not.toContain('주사업으로 지정');
     expect(source).not.toContain('증빙 드라이브 연결');
+    expect(source).toContain('CashflowCanonicalSummary');
+    expect(source).toContain('누적 Projection-Actual 정산');
+    expect(source).toContain('canonicalSummaries.retry(project.id)');
   });
 
   it('searches the full PPT-defined project identity fields', () => {

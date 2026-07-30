@@ -529,6 +529,29 @@ export interface CashflowSheetLabStageResult {
   }>;
   closedMonthDifferenceCount?: number;
   closedMonthDifferenceManifestHash?: string;
+  pendingApprovalDifferences?: Array<{
+    requestId: string;
+    requestRevision: number;
+    requestStatus: 'PENDING' | 'APPROVING' | 'UNCERTAIN';
+    requestManifestHash: string;
+    yearMonth: string;
+    differenceCount: number;
+    weeks: number[];
+    changes: Array<{
+      mode: string;
+      weekNo: number;
+      lineId: string;
+      beforeHadValue: boolean;
+      beforeState: 'EMPTY' | 'ZERO' | 'VALUE';
+      beforeAmount: number | null;
+      afterHadValue: boolean;
+      afterState: 'EMPTY' | 'ZERO' | 'VALUE';
+      afterAmount: number | null;
+    }>;
+    truncatedChangeCount: number;
+  }>;
+  pendingApprovalDifferenceCount?: number;
+  pendingApprovalDifferenceManifestHash?: string;
   stagedMonths?: string[];
   stagedYears?: number[];
   annualLineCount?: number;
@@ -565,6 +588,9 @@ export interface CashflowSheetLabApplyStatusResult {
   applyInput: {
     applyRiskCandidates?: boolean;
     closedMonthChangeReason?: string;
+    acceptPendingApprovalDifferences?: boolean;
+    pendingApprovalDifferenceCount?: number;
+    pendingApprovalDifferenceManifestHash?: string;
     acceptFormulaMismatches?: boolean;
     replaceAllActualSources?: boolean;
   } | null;
@@ -661,6 +687,9 @@ export async function applyCashflowSheetLabViaBff(params: {
   closedMonthChangeReason?: string;
   closedMonthDifferenceCount?: number;
   closedMonthDifferenceManifestHash?: string;
+  acceptPendingApprovalDifferences?: boolean;
+  pendingApprovalDifferenceCount?: number;
+  pendingApprovalDifferenceManifestHash?: string;
   acceptFormulaMismatches?: boolean;
   idempotencyKey: string;
   lease?: CashflowMutationLease;
@@ -686,6 +715,9 @@ export async function applyCashflowSheetLabViaBff(params: {
         ...(params.closedMonthChangeReason?.trim() ? { closedMonthChangeReason: params.closedMonthChangeReason.trim() } : {}),
         ...(Number.isSafeInteger(params.closedMonthDifferenceCount) ? { closedMonthDifferenceCount: params.closedMonthDifferenceCount } : {}),
         ...(params.closedMonthDifferenceManifestHash ? { closedMonthDifferenceManifestHash: params.closedMonthDifferenceManifestHash } : {}),
+        ...(params.acceptPendingApprovalDifferences ? { acceptPendingApprovalDifferences: true } : {}),
+        ...(Number.isSafeInteger(params.pendingApprovalDifferenceCount) ? { pendingApprovalDifferenceCount: params.pendingApprovalDifferenceCount } : {}),
+        ...(params.pendingApprovalDifferenceManifestHash ? { pendingApprovalDifferenceManifestHash: params.pendingApprovalDifferenceManifestHash } : {}),
         ...(params.acceptFormulaMismatches ? { acceptFormulaMismatches: true } : {}),
         idempotencyKey: params.idempotencyKey,
       },

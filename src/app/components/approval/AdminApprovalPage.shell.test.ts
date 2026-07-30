@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(import.meta.dirname, 'AdminApprovalPage.tsx'), 'utf8');
 const monthlySource = readFileSync(resolve(import.meta.dirname, 'MonthlySettlementApprovalSection.tsx'), 'utf8');
-const appliedHistorySource = readFileSync(resolve(import.meta.dirname, '../cashflow/AppliedCellHistory.tsx'), 'utf8');
 
 describe('AdminApprovalPage shell contract', () => {
   it('shows monthly settlement requests before the project registration queue', () => {
@@ -30,11 +29,27 @@ describe('AdminApprovalPage shell contract', () => {
     expect(monthlySource).toContain('반려 사유 (필수)');
     expect(monthlySource).toContain('월 결산 승인 대기 항목이 없습니다');
     expect(monthlySource).toContain('결재 전 확인사항');
-    expect(monthlySource).toContain('검토하기');
-    expect(monthlySource).toContain('월 결산 검토 및 승인서');
+    expect(monthlySource).toContain('문서 유형');
+    expect(monthlySource).toContain('<table className="w-full min-w-[1040px]');
+    expect(monthlySource).toContain('<th className="px-4 py-3">담당조직(CIC)</th>');
+    expect(monthlySource).toContain('<th className="px-4 py-3">프로젝트명</th>');
+    expect(monthlySource).toContain('<th className="px-4 py-3 text-right">문서</th>');
+    expect(monthlySource).toContain("request.documentType === 'MONTHLY_CLOSE'");
+    expect(monthlySource).toContain('문서 열기');
+    expect(monthlySource).toContain('월 결산 승인서');
+    expect(monthlySource).not.toContain('월 결산 검토 및 승인서');
     expect(monthlySource).toContain('MYSCube · MONTHLY CLOSE');
     expect(monthlySource).toContain('기안');
     expect(monthlySource).toContain('조직장 승인');
+    expect(monthlySource).toContain('의견 및 처리 이력');
+    expect(monthlySource).toContain("entry.kind === 'REQUESTED' ? '요청'");
+    expect(monthlySource).toContain("['문서 번호', selectedRequest.requestId]");
+    expect(monthlySource).toContain("['문서 유형', '월 결산']");
+    expect(monthlySource).toContain('resolveRequestPartyName(request.requestedByName, members, request.requestedByUid)');
+    expect(monthlySource).toContain('구성원 이름 확인 불가');
+    expect(monthlySource).toContain('buildMonthCloseHistoryEntries(selectedRequest, members)');
+    expect(monthlySource).toContain('formatDateTime(request.requestedAt)');
+    expect(monthlySource).toContain("timeZone: 'Asia/Seoul'");
     expect(monthlySource).not.toContain('경영기획실 합의');
     expect(monthlySource).toContain('return request.monthSnapshot');
     expect(monthlySource).not.toContain('cashflowSnapshot');
@@ -60,9 +75,8 @@ describe('AdminApprovalPage shell contract', () => {
     expect(monthlySource).toContain('CumulativeSettlementMonthDetails');
     expect(monthlySource).toContain('expectedManifestHash: action.request.manifestHash');
     expect(monthlySource).toContain('승인하면 이 범위의 모든 주차가 수정 불가 상태가 됩니다.');
-    expect(monthlySource).toContain('AppliedCellHistory');
+    expect(monthlySource).not.toContain('AppliedCellHistory');
     expect(monthlySource).not.toContain('fetchCashflowActivityViaBff');
-    expect(appliedHistorySource).toContain('이전 상태와 금액, 변경 상태와 금액, 변경자, 시간, 사유, source, operation과 audit ID');
     expect(monthlySource).toContain("cell?.cellState === 'EMPTY'");
     expect(monthlySource).toContain("cell?.cellState === 'ZERO'");
     expect(monthlySource).toContain("return '미입력'");
