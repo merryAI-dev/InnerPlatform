@@ -378,6 +378,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("['CHANGED', '변경사항 반영 완료'");
     expect(source).toContain("['NO_CHANGES', '변경사항 없음'");
     expect(source).toContain('향후 15개 재무주차');
+    expect(source).not.toContain('ZERO(0원)는 작성값이며 EMPTY(미입력)는 완료할 수 없습니다.');
+    expect(source).toContain('이미 완료한 주차의 값이 시트 반영으로 변경되었습니다. 해당 주차를 재오픈한 뒤 변경 내용을 확인하고 다시 완료해 주세요.');
     expect(source).toContain('weeklyProjectionMissingCells(error)');
     expect(source).toContain('fetchCashflowWeeklyComplianceViaBff');
     expect(source).toContain("week.status === 'ON_TIME'");
