@@ -13,7 +13,9 @@ describe('CashflowWeeklyPage read-only status surface', () => {
     expect(source).toContain('Projection·Actual·차이');
     expect(source).toContain('CashflowCanonicalSummary');
     expect(source).toContain('누적 Projection-Actual 정산');
-    expect(source).toContain('주차 순액 차이');
+    expect(source).toContain('Projection-Actual 차이');
+    expect(source).not.toContain('>Projection 순액<');
+    expect(source).not.toContain('>Actual 순액<');
     expect(source).not.toContain('monthlyDifference');
   });
 

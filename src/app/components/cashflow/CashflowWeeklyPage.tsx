@@ -12,16 +12,10 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { fetchCashflowWeeklyComplianceViaBff, type CashflowWeeklyCompliancePage } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { formatKoreanWonCompact } from '../../platform/korean-money';
 import type { CashflowWeekTotals } from '../../data/types';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
 import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
-
-function fmtShort(value: number): string {
-  const absolute = Math.abs(value);
-  if (absolute >= 1e8) return `${(value / 1e8).toFixed(1)}억`;
-  if (absolute >= 1e4) return `${Math.round(value / 1e4).toLocaleString('ko-KR')}만`;
-  return value.toLocaleString('ko-KR');
-}
 
 function emptyTotals(): CashflowWeekTotals {
   return { totalIn: 0, totalOut: 0, net: 0 };
@@ -198,17 +192,9 @@ export function CashflowWeeklyPage() {
                               {!projectHistory ? historyLoading ? '확인 중' : '조회 오류' : settlementCompleted ? '완료' : '미완료'}
                             </Badge>
                             <div className="text-[10px] font-medium text-muted-foreground">{yearMonth} {week.weekNo}주차 상세</div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-muted-foreground">Projection 순액</span>
-                              <span className="font-semibold tabular-nums">{fmtShort(projection.net)}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-muted-foreground">Actual 순액</span>
-                              <span className="font-semibold tabular-nums">{fmtShort(actual.net)}</span>
-                            </div>
                             <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
-                              <span>주차 순액 차이</span>
-                              <span className={difference < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-700'}>{fmtShort(difference)}</span>
+                              <span>Projection-Actual 차이</span>
+                              <span className={difference < 0 ? 'font-semibold text-red-700' : 'font-semibold text-slate-700'}>{formatKoreanWonCompact(difference)}</span>
                             </div>
                           </div>
                         </td>
