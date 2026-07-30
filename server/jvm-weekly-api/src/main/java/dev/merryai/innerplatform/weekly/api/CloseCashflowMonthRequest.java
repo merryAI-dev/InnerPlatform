@@ -20,8 +20,8 @@ import java.util.Map;
 
 public record CloseCashflowMonthRequest(
     @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH) String idempotencyKey,
-    @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String sourceRevision,
-    @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String targetRevision,
+    @Pattern(regexp = "|sha256:[a-f0-9]{64}") String sourceRevision,
+    @Pattern(regexp = "|sha256:[a-f0-9]{64}") String targetRevision,
     @NotBlank
     @Size(min = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH, max = WeeklyExpenseRequestLimits.MAX_YEAR_MONTH_LENGTH)
     @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])")
@@ -29,16 +29,19 @@ public record CloseCashflowMonthRequest(
     @PositiveOrZero long expectedRevision,
     @PositiveOrZero long expectedDraftRevision,
     boolean humanReviewed,
-    @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT, max = CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
+    @Valid @NotNull @Size(max = CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT)
     List<DepositScheduleRow> depositScheduleRows,
-    @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
+    @Valid @NotNull @Size(max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
     List<CashflowSheetLabApplyRequest.Cell> cells,
-    @Valid @NotNull @Size(min = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT, max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
+    @Valid @NotNull @Size(max = CashflowSheetLabApplyRequest.EXPECTED_CELL_COUNT)
     List<Confirmation> confirmations,
-    @Valid @NotNull @Size(min = 4, max = 4) List<ManagementCheck> managementChecks,
+    @Valid @NotNull @Size(max = 4) List<ManagementCheck> managementChecks,
     @Valid @NotNull @Size(max = 4) List<ManagementConfirmation> managementConfirmations,
     @Valid @NotNull CashflowOpeningBalancesResponse openingBalances,
-    @Valid @NotNull DeadlineSummary deadlineSummary
+    @Valid DeadlineSummary deadlineSummary,
+    @Size(max = 160) String requestId,
+    @PositiveOrZero long requestRevision,
+    @Pattern(regexp = "|sha256:[a-f0-9]{64}") String manifestHash
 ) {
     private static final List<String> MANAGEMENT_CHECK_IDS = List.of(
         "labor-transfer",
@@ -122,12 +125,43 @@ public record CloseCashflowMonthRequest(
     }
 
     public CloseCashflowMonthRequest {
+        sourceRevision = sourceRevision == null ? "" : sourceRevision.trim();
+        targetRevision = targetRevision == null ? "" : targetRevision.trim();
+        requestId = requestId == null ? "" : requestId.trim();
+        manifestHash = manifestHash == null ? "" : manifestHash.trim();
         depositScheduleRows = depositScheduleRows == null ? List.of() : List.copyOf(depositScheduleRows);
         cells = cells == null ? List.of() : List.copyOf(cells);
         confirmations = confirmations == null ? List.of() : List.copyOf(confirmations);
         managementChecks = managementChecks == null ? List.of() : List.copyOf(managementChecks);
         managementConfirmations = managementConfirmations == null ? List.of() : List.copyOf(managementConfirmations);
         deadlineSummary = deadlineSummary == null ? new DeadlineSummary("", 0, 0, null) : deadlineSummary;
+    }
+
+    public CloseCashflowMonthRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        String targetRevision,
+        String yearMonth,
+        long expectedRevision,
+        long expectedDraftRevision,
+        boolean humanReviewed,
+        List<DepositScheduleRow> depositScheduleRows,
+        List<CashflowSheetLabApplyRequest.Cell> cells,
+        List<Confirmation> confirmations,
+        List<ManagementCheck> managementChecks,
+        List<ManagementConfirmation> managementConfirmations,
+        CashflowOpeningBalancesResponse openingBalances,
+        DeadlineSummary deadlineSummary
+    ) {
+        this(
+            idempotencyKey, sourceRevision, targetRevision, yearMonth, expectedRevision, expectedDraftRevision,
+            humanReviewed, depositScheduleRows, cells, confirmations, managementChecks, managementConfirmations,
+            openingBalances, deadlineSummary, "", 0, ""
+        );
+    }
+
+    public boolean cumulativeV2() {
+        return !requestId.isBlank() || !manifestHash.isBlank();
     }
 
     public static CashflowOpeningBalancesResponse requireOpeningBalances(

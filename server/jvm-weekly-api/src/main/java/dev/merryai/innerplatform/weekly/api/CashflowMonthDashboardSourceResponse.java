@@ -6,8 +6,25 @@ public record CashflowMonthDashboardSourceResponse(
     CashflowMonthCloseResponse monthClose,
     CashflowSnapshotResponse cashflow,
     CashflowOpeningBalancesResponse openingBalances,
-    SnapshotCompatibility snapshotCompatibility
+    SnapshotCompatibility snapshotCompatibility,
+    CumulativeClose cumulativeClose
 ) {
+    public CashflowMonthDashboardSourceResponse(
+        CashflowMonthCloseResponse monthClose,
+        CashflowSnapshotResponse cashflow,
+        CashflowOpeningBalancesResponse openingBalances,
+        SnapshotCompatibility snapshotCompatibility
+    ) {
+        this(monthClose, cashflow, openingBalances, snapshotCompatibility, new CumulativeClose("OPEN", "2023-01", "", "", 0));
+    }
+
+    public record CumulativeClose(
+        String status,
+        String fromMonth,
+        String closedThrough,
+        String rootHash,
+        long headRevision
+    ) {}
     public record SnapshotCompatibility(
         String status,
         List<String> missingEvidence

@@ -38,7 +38,12 @@ public record CashflowMonthCloseResponse(
     String reopenDecisionReason,
     String reopenDecidedAt,
     String reopenDecidedByUid,
-    String auditId
+    String auditId,
+    String requestId,
+    long requestRevision,
+    String manifestHash,
+    String rootHash,
+    long headRevision
 ) {
     public CashflowMonthCloseResponse {
         snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
@@ -64,6 +69,31 @@ public record CashflowMonthCloseResponse(
         reopenDecidedAt = nullableText(reopenDecidedAt);
         reopenDecidedByUid = nullableText(reopenDecidedByUid);
         auditId = nullableText(auditId);
+        requestId = nullableText(requestId);
+        manifestHash = nullableText(manifestHash);
+        rootHash = nullableText(rootHash);
+    }
+
+    public CashflowMonthCloseResponse(
+        boolean ok, String commandName, String projectId, String yearMonth, String status, long revision,
+        long reopenCount, long projectWarningCount, long amendmentCount, long postDeadlineAmendmentWarningCount,
+        String lastAmendmentAt, String lastAmendmentByUid, String lastAmendmentByName, String lastAmendmentReason,
+        String lastAmendmentDeadline, boolean lastAmendmentPostDeadline, Map<String, Object> lastAmendmentEvidence,
+        String snapshotHash, String previousSnapshotHash, Map<String, Object> snapshot,
+        Map<String, Object> previousSnapshot, boolean closeEligible, String evaluatedBusinessDate,
+        String closeDeadline, boolean late, String closedAt, String closedByUid, String closedByName,
+        String reopenReason, String reopenRequestedAt, String reopenRequestedByUid, String reopenDecision,
+        String reopenDecisionReason, String reopenDecidedAt, String reopenDecidedByUid, String auditId
+    ) {
+        this(
+            ok, commandName, projectId, yearMonth, status, revision, reopenCount, projectWarningCount,
+            amendmentCount, postDeadlineAmendmentWarningCount, lastAmendmentAt, lastAmendmentByUid,
+            lastAmendmentByName, lastAmendmentReason, lastAmendmentDeadline, lastAmendmentPostDeadline,
+            lastAmendmentEvidence, snapshotHash, previousSnapshotHash, snapshot, previousSnapshot, closeEligible,
+            evaluatedBusinessDate, closeDeadline, late, closedAt, closedByUid, closedByName, reopenReason,
+            reopenRequestedAt, reopenRequestedByUid, reopenDecision, reopenDecisionReason, reopenDecidedAt,
+            reopenDecidedByUid, auditId, "", 0, "", "", 0
+        );
     }
 
     private static String nullableText(String value) {

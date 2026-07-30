@@ -57,7 +57,8 @@ class CashflowWeeklyUpdateControllerContractTest {
                       "idempotencyKey": "weekly-complete-http",
                       "yearMonth": "2026-06",
                       "weekNo": 2,
-                      "completedAt": "2026-07-09T15:00:00Z"
+                      "completedAt": "2026-07-09T15:00:00Z",
+                      "updateResult": "CHANGED"
                     }
                     """))
             .andExpect(status().isOk())
@@ -98,7 +99,8 @@ class CashflowWeeklyUpdateControllerContractTest {
                       "idempotencyKey": "weekly-invalid-http",
                       "yearMonth": "2026-13",
                       "weekNo": 6,
-                      "completedAt": ""
+                      "completedAt": "",
+                      "updateResult": "NO_CHANGES"
                     }
                     """))
             .andExpect(status().isBadRequest())
@@ -131,7 +133,8 @@ class CashflowWeeklyUpdateControllerContractTest {
                       "idempotencyKey": "weekly-conflict-http",
                       "yearMonth": "2026-06",
                       "weekNo": 2,
-                      "completedAt": "2026-07-09T15:00:00Z"
+                      "completedAt": "2026-07-09T15:00:00Z",
+                      "updateResult": "CHANGED"
                     }
                     """))
             .andExpect(status().isConflict())

@@ -453,11 +453,20 @@ public class WeeklyExpenseController {
             }
             monthClose = verified;
         }
+        WeeklyExpensePersistence.CashflowCumulativeCloseHead cumulative = persistence
+            .findCashflowCumulativeCloseHead(tenantId, projectId);
+        if (cumulative == null) {
+            cumulative = new WeeklyExpensePersistence.CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
+        }
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             cashflow,
             openingBalances,
-            snapshotCompatibility
+            snapshotCompatibility,
+            new CashflowMonthDashboardSourceResponse.CumulativeClose(
+                cumulative.status(), cumulative.fromMonth(), cumulative.closedThrough(), cumulative.rootHash(),
+                cumulative.headRevision()
+            )
         );
     }
 
@@ -553,6 +562,36 @@ public class WeeklyExpenseController {
         );
     }
 
+    @GetMapping("/cashflow/{projectId}/weekly-update-compliance")
+    public CashflowWeeklyComplianceHistoryResponse readCashflowWeeklyComplianceHistory(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestParam(defaultValue = "50") int limit,
+        @RequestParam(defaultValue = "") String cursor
+    ) {
+        return commandService.readCashflowWeeklyComplianceHistory(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, limit, cursor
+        );
+    }
+
+    @GetMapping("/cashflow/{projectId}/applied-cell-changes")
+    public CashflowAppliedCellChangesResponse readCashflowAppliedCellChanges(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestParam(defaultValue = "50") int limit,
+        @RequestParam(defaultValue = "") String cursor
+    ) {
+        return commandService.readCashflowAppliedCellChanges(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, limit, cursor
+        );
+    }
+
     @PostMapping("/cashflow/{projectId}/weekly-update-complete/reopen")
     public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(
         @PathVariable String projectId,
@@ -620,6 +659,24 @@ public class WeeklyExpenseController {
             projectId,
             editSession(httpRequest),
             request
+        );
+    }
+
+    @GetMapping("/cashflow/{projectId}/sheet-lab/operations")
+    public CashflowSheetOperationStatusResponse readCashflowSheetOperationStatus(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @RequestParam String operationType,
+        @RequestParam String idempotencyKey
+    ) {
+        return commandService.readCashflowSheetOperationStatus(
+            actorContext(tenantId, actorId, actorRole, actorEmail),
+            projectId,
+            operationType,
+            idempotencyKey
         );
     }
 

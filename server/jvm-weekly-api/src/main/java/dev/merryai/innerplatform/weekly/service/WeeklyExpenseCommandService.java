@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CellCommandResponse;
 import dev.merryai.innerplatform.weekly.api.CellPatchCommandRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
+import dev.merryai.innerplatform.weekly.api.CashflowAppliedCellChangesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyResponse;
@@ -13,6 +14,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSheetOperationStatusResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
@@ -23,6 +25,7 @@ import dev.merryai.innerplatform.weekly.api.CloseWeekResponse;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowWeeklyUpdateCompletionResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowWeeklyComplianceHistoryResponse;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsRequest;
 import dev.merryai.innerplatform.weekly.api.ApplyBankStatementItemsResponse;
@@ -85,9 +88,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -185,6 +190,64 @@ public class WeeklyExpenseCommandService {
             .map(sheet -> toSheetResponse(projectId, sheet, List.of()))
             .toList();
         return new WeeklyExpenseSheetsResponse(true, projectId, sheets, recentAuditEvents(actor.tenantId(), projectId));
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowSheetOperationStatusResponse readCashflowSheetOperationStatus(
+        TrustedActorContext actor,
+        String projectId,
+        String operationType,
+        String idempotencyKey
+    ) {
+        CashflowSheetOperation operation = CashflowSheetOperation.parse(operationType);
+        requireOperationLookupKey(idempotencyKey);
+        authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
+        String keyHash = "sha256:" + sha256(idempotencyKey);
+        Optional<WeeklyExpenseIdempotencyEntity> found = persistence.findIdempotency(
+            actor.tenantId(),
+            projectId,
+            CASHFLOW_SHEET_LAB_APPLY_COMMAND,
+            idempotencyKey
+        );
+        if (found.isEmpty() || !matchesOperationIdentity(found.get(), actor, projectId, idempotencyKey)) {
+            return missingOperation(projectId, operation, keyHash);
+        }
+
+        JsonNode result = readJsonNode(found.get().getResponseJson());
+        if (!projectId.equals(result.path("projectId").asText()) || operation != CashflowSheetOperation.detect(result)) {
+            return missingOperation(projectId, operation, keyHash);
+        }
+        String sourceRevision = requiredResultText(result, "sourceRevision");
+        String auditId = requiredResultText(result, "auditId");
+        return switch (operation) {
+            case MONTH_APPLY -> new CashflowSheetOperationStatusResponse(
+                "1", projectId, operation.name(), keyHash, "APPLIED", sourceRevision,
+                requiredResultText(result, "expectedTargetRevision", "targetRevision"),
+                requiredResultText(result, "resultingTargetRevision"),
+                List.of(requiredYearMonth(result.path("yearMonth").asText())),
+                List.of(), List.of(), auditId, found.get().getCreatedAt()
+            );
+            case BATCH_APPLY -> new CashflowSheetOperationStatusResponse(
+                "1", projectId, operation.name(), keyHash, "APPLIED", sourceRevision,
+                requiredResultText(result, "expectedTargetRevision", "targetRevision"),
+                requiredResultText(result, "resultingTargetRevision"),
+                appliedMonths(result.path("months")),
+                List.of(), List.of(), auditId, found.get().getCreatedAt()
+            );
+            case ANNUAL_APPLY -> {
+                int year = result.path("year").asInt();
+                long revision = result.path("revision").asLong();
+                if (year < 2000 || year > 2099 || revision < 0) {
+                    throw new IllegalStateException("Stored annual cashflow operation evidence is invalid.");
+                }
+                yield new CashflowSheetOperationStatusResponse(
+                    "1", projectId, operation.name(), keyHash, "APPLIED", sourceRevision,
+                    null, null, List.of(), List.of(year),
+                    List.of(new CashflowSheetOperationStatusResponse.AnnualRevisionEvidence(year, revision)),
+                    auditId, found.get().getCreatedAt()
+                );
+            }
+        };
     }
 
     private WeeklyExpenseSheetResponse toSheetResponse(
@@ -795,7 +858,9 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
-        CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
+        if (!request.cumulativeV2()) {
+            CloseCashflowMonthRequest.requireOpeningBalances(request.openingBalances(), request.yearMonth());
+        }
         String requestHash = hashJson(request);
         Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -807,11 +872,13 @@ public class WeeklyExpenseCommandService {
         );
         if (replay.isPresent()) return replay.get();
 
-        CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
-        CloseCashflowMonthRequest.requireCompleteDepositSchedule(request.depositScheduleRows());
-        CloseCashflowMonthRequest.requireCompleteConfirmations(request.confirmations());
-        CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
-        CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
+        if (!request.cumulativeV2()) {
+            CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
+            CloseCashflowMonthRequest.requireCompleteDepositSchedule(request.depositScheduleRows());
+            CloseCashflowMonthRequest.requireCompleteConfirmations(request.confirmations());
+            CloseCashflowMonthRequest.requireCompleteManagementChecks(request.managementChecks());
+            CloseCashflowMonthRequest.requireCompleteManagementConfirmations(request.managementConfirmations());
+        }
         assertAtomicWriteBudget(
             CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT,
             5,
@@ -855,7 +922,8 @@ public class WeeklyExpenseCommandService {
         );
         String requestHash = hashJson(Map.of(
             "yearMonth", request.yearMonth(),
-            "weekNo", request.weekNo()
+            "weekNo", request.weekNo(),
+            "updateResult", request.updateResult()
         ));
         Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -873,7 +941,7 @@ public class WeeklyExpenseCommandService {
             request
         );
         if (!saved.alreadyCompleted()) {
-            persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
+            WeeklyExpenseAuditEventEntity event = new WeeklyExpenseAuditEventEntity(
                 writer.tenantId(),
                 projectId,
                 projectId + "-" + saved.yearMonth() + "-w" + saved.weekNo(),
@@ -881,17 +949,24 @@ public class WeeklyExpenseCommandService {
                 writer.id(),
                 normalizeRole(writer.role()),
                 request.idempotencyKey(),
-                writeJson(Map.of(
-                    "yearMonth", saved.yearMonth(),
-                    "weekNo", saved.weekNo(),
-                    "completedAt", saved.completedAt(),
-                    "completedBy", saved.completedBy(),
-                    "snapshotHash", saved.snapshotHash(),
-                    "sourceRevision", saved.sourceRevision(),
-                    "targetRevision", saved.targetRevision(),
-                    "revision", saved.revision()
+                writeJson(Map.ofEntries(
+                    Map.entry("yearMonth", saved.yearMonth()),
+                    Map.entry("weekNo", saved.weekNo()),
+                    Map.entry("completedAt", saved.completedAt()),
+                    Map.entry("completedBy", saved.completedBy()),
+                    Map.entry("deadline", saved.deadline()),
+                    Map.entry("status", saved.complianceStatus()),
+                    Map.entry("operationId", saved.operationId()),
+                    Map.entry("auditId", saved.auditId()),
+                    Map.entry("updateResult", saved.updateResult()),
+                    Map.entry("snapshotHash", saved.snapshotHash()),
+                    Map.entry("sourceRevision", saved.sourceRevision()),
+                    Map.entry("targetRevision", saved.targetRevision()),
+                    Map.entry("revision", saved.revision())
                 ))
-            ));
+            );
+            event.restorePersistenceState(saved.auditId(), event.getCreatedAt());
+            persistence.saveAuditEvent(event);
         }
         CashflowWeeklyUpdateCompletionResponse response = weeklyCompletionResponse(
             COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND,
@@ -919,6 +994,211 @@ public class WeeklyExpenseCommandService {
         WeeklyExpensePersistence.CashflowWeeklyUpdateCompletionRecord record = persistence
             .findCashflowWeeklyUpdateCompletion(actor.tenantId(), projectId, yearMonth, weekNo);
         return weeklyCompletionResponse(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, record);
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowWeeklyComplianceHistoryResponse readCashflowWeeklyComplianceHistory(
+        TrustedActorContext actor,
+        String projectId,
+        int limit,
+        String cursor
+    ) {
+        authorizationService.requireProjectAllowed(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId);
+        WeeklyExpensePersistence.CashflowWeeklyCompliancePage page = persistence.findCashflowWeeklyComplianceHistory(
+            actor.tenantId(), projectId, limit, cursor
+        );
+        return new CashflowWeeklyComplianceHistoryResponse(
+            page.items().stream().map(item -> new CashflowWeeklyComplianceHistoryResponse.Item(
+                item.yearMonth(), item.weekNo(), item.deadline(), item.status(), item.completedAt(),
+                item.completedBy(), item.operationId(), item.auditId(), item.updateResult()
+            )).toList(),
+            page.nextCursor(),
+            page.onTimeCount(),
+            page.missedCount()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowAppliedCellChangesResponse readCashflowAppliedCellChanges(
+        TrustedActorContext actor,
+        String projectId,
+        int limit,
+        String cursor
+    ) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("limit must be between 1 and 100.");
+        }
+        authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
+        List<AppliedCellChangeCandidate> all = new ArrayList<>();
+        for (WeeklyExpensePersistence.AppliedCellChangeAuditSource source
+            : persistence.findAppliedCellChangeAuditSources(actor.tenantId(), projectId)) {
+            if (!projectId.equals(source.projectId())) {
+                throw new WeeklyExpenseConflictException("Stored applied cell change project scope is invalid.");
+            }
+            JsonNode metadata = readAppliedCellChangeMetadata(source.metadataJson());
+            JsonNode changes = metadata.path("appliedCellChanges");
+            if (!changes.isArray()) continue;
+            for (int index = 0; index < changes.size(); index++) {
+                all.add(new AppliedCellChangeCandidate(
+                    appliedCellChangeItem(projectId, source, metadata, changes.get(index), index), index
+                ));
+            }
+        }
+        all.sort(Comparator
+            .comparing((AppliedCellChangeCandidate candidate) -> candidate.item().createdAt()).reversed()
+            .thenComparing(candidate -> candidate.item().eventId(), Comparator.reverseOrder())
+            .thenComparingInt(AppliedCellChangeCandidate::ordinal));
+
+        int start = appliedCellChangeCursorStart(all, cursor);
+        int end = Math.min(start + limit, all.size());
+        List<CashflowAppliedCellChangesResponse.Item> items = all.subList(start, end).stream()
+            .map(AppliedCellChangeCandidate::item)
+            .toList();
+        String nextCursor = end < all.size()
+            ? Base64.getUrlEncoder().withoutPadding().encodeToString(
+                items.getLast().cellId().getBytes(StandardCharsets.UTF_8)
+            )
+            : "";
+        return new CashflowAppliedCellChangesResponse(items, nextCursor);
+    }
+
+    private CashflowAppliedCellChangesResponse.Item appliedCellChangeItem(
+        String projectId,
+        WeeklyExpensePersistence.AppliedCellChangeAuditSource source,
+        JsonNode metadata,
+        JsonNode change,
+        int ordinal
+    ) {
+        if (change == null || !change.isObject() || source.eventId() == null || source.eventId().isBlank()) {
+            throw new WeeklyExpenseConflictException("Stored applied cell change evidence is invalid.");
+        }
+        String yearMonth = metadataText(change, "yearMonth");
+        int weekNo = change.path("weekNo").asInt(0);
+        String mode = metadataText(change, "mode").toLowerCase(Locale.ROOT);
+        String lineId = metadataText(change, "lineId", "cashflowLine");
+        boolean monthly = yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])") && weekNo >= 1 && weekNo <= 5;
+        boolean annual = yearMonth.matches("20\\d{2}-ANNUAL") && weekNo == 0;
+        if (!(monthly || annual) || !("projection".equals(mode) || "actual".equals(mode)) || lineId.isBlank()) {
+            throw new WeeklyExpenseConflictException("Stored applied cell change coordinates are invalid.");
+        }
+        JsonNode before = change.path("before");
+        JsonNode after = change.path("after");
+        String beforeState = appliedCellState(before);
+        String afterState = appliedCellState(after);
+        BigDecimal beforeAmount = appliedCellAmount(before, beforeState);
+        BigDecimal afterAmount = appliedCellAmount(after, afterState);
+        String eventId = source.eventId().trim();
+        return new CashflowAppliedCellChangesResponse.Item(
+            eventId,
+            eventId + ":" + ordinal,
+            projectId,
+            yearMonth,
+            weekNo,
+            mode,
+            lineId,
+            !"EMPTY".equals(beforeState),
+            beforeState,
+            beforeAmount,
+            !"EMPTY".equals(afterState),
+            afterState,
+            afterAmount,
+            firstText(metadataText(change, "actorId", "actorUid"), source.actorId()),
+            firstText(metadataText(change, "actorName"), metadataText(metadata, "actorName", "actorDisplayName")),
+            firstText(metadataText(change, "actorEmail"), metadataText(metadata, "actorEmail")),
+            firstText(metadataText(change, "reason"), metadataText(metadata, "reason", "amendmentReason")),
+            firstText(
+                metadataText(change, "source"),
+                metadataText(metadata, "source", "sourceSheetKey"),
+                source.sheetKey()
+            ),
+            firstText(
+                metadataText(change, "operationType", "operation", "type"),
+                metadataText(metadata, "operationType", "operation", "type"),
+                source.commandName()
+            ),
+            firstText(metadataText(change, "operationId"), metadataText(metadata, "operationId"), source.idempotencyKey()),
+            firstText(metadataText(change, "auditId"), eventId),
+            firstText(metadataText(change, "sourceRevision"), metadataText(metadata, "sourceRevision")),
+            firstText(metadataText(change, "targetRevision"), metadataText(metadata, "targetRevision")),
+            appliedCellChangeInstant(metadataText(change, "changedAt"), source.createdAt())
+        );
+    }
+
+    private String appliedCellState(JsonNode value) {
+        String state = metadataText(value, "cellState").toUpperCase(Locale.ROOT);
+        if (!Set.of("EMPTY", "ZERO", "VALUE").contains(state)) {
+            throw new WeeklyExpenseConflictException("Stored applied cell state is invalid.");
+        }
+        return state;
+    }
+
+    private BigDecimal appliedCellAmount(JsonNode value, String state) {
+        JsonNode amount = value.get("amount");
+        if ("EMPTY".equals(state)) {
+            if (amount != null && !amount.isNull()) {
+                throw new WeeklyExpenseConflictException("Stored EMPTY cell amount must be null.");
+            }
+            return null;
+        }
+        try {
+            BigDecimal parsed = amount != null && amount.isNumber()
+                ? amount.decimalValue()
+                : new BigDecimal(amount == null ? "" : amount.asText());
+            if ("ZERO".equals(state) && parsed.compareTo(BigDecimal.ZERO) != 0) {
+                throw new WeeklyExpenseConflictException("Stored ZERO cell amount must be zero.");
+            }
+            return parsed;
+        } catch (NumberFormatException error) {
+            throw new WeeklyExpenseConflictException("Stored applied cell amount is invalid.");
+        }
+    }
+
+    private Instant appliedCellChangeInstant(String changedAt, Instant fallback) {
+        if (changedAt == null || changedAt.isBlank()) {
+            if (fallback == null) throw new WeeklyExpenseConflictException("Stored applied cell change time is invalid.");
+            return fallback;
+        }
+        try {
+            return Instant.parse(changedAt);
+        } catch (RuntimeException error) {
+            throw new WeeklyExpenseConflictException("Stored applied cell change time is invalid.");
+        }
+    }
+
+    private JsonNode readAppliedCellChangeMetadata(String metadataJson) {
+        try {
+            JsonNode metadata = objectMapper.readTree(metadataJson == null ? "" : metadataJson);
+            if (metadata == null || !metadata.isObject()) {
+                throw new WeeklyExpenseConflictException("Stored applied cell change metadata is invalid.");
+            }
+            return metadata;
+        } catch (JsonProcessingException error) {
+            throw new WeeklyExpenseConflictException("Stored applied cell change metadata is invalid.");
+        }
+    }
+
+    private int appliedCellChangeCursorStart(List<AppliedCellChangeCandidate> all, String cursor) {
+        if (cursor == null || cursor.isBlank()) return 0;
+        String cellId;
+        try {
+            cellId = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("cursor is invalid.", error);
+        }
+        for (int index = 0; index < all.size(); index++) {
+            if (all.get(index).item().cellId().equals(cellId)) return index + 1;
+        }
+        throw new IllegalArgumentException("cursor is invalid.");
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.trim();
+        }
+        return "";
+    }
+
+    private record AppliedCellChangeCandidate(CashflowAppliedCellChangesResponse.Item item, int ordinal) {
     }
 
     @Transactional
@@ -1639,8 +1919,31 @@ public class WeeklyExpenseCommandService {
         CashflowSheetAnnualApplyRequest.requireCompleteYear(request.cells());
         assertAtomicWriteBudget(1, 2, "Cashflow annual total apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
+        List<String> annualMonths = java.util.stream.IntStream.rangeClosed(1, 12)
+            .mapToObj(month -> "%04d-%02d".formatted(request.year(), month))
+            .toList();
+        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
+            .authorizeCashflowSheetMonthAmendments(
+                writer,
+                projectId,
+                annualMonths,
+                request.sourceRevision(),
+                request.amendmentReason(),
+                request.idempotencyKey()
+            );
         WeeklyExpensePersistence.CashflowSheetAnnualReplacement replacement = persistence
             .replaceCashflowSheetYearTotal(writer.tenantId(), projectId, sourceSheetKey, request);
+        persistence.recordCashflowSheetMonthAmendments(
+            writer,
+            projectId,
+            amendments,
+            request.sourceRevision(),
+            String.valueOf(request.expectedRevision()),
+            String.valueOf(replacement.revision()),
+            Map.of(),
+            request.amendmentReason(),
+            request.idempotencyKey()
+        );
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSheetKey", sourceSheetKey);
@@ -1650,6 +1953,8 @@ public class WeeklyExpenseCommandService {
         metadata.put("revision", replacement.revision());
         metadata.put("projectionLineCount", replacement.projection().size());
         metadata.put("actualLineCount", replacement.actual().size());
+        metadata.put("amendmentReason", request.amendmentReason());
+        metadata.put("closedMonthAmendmentCount", amendments.size());
         putActorMetadata(metadata, writer);
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -3290,6 +3595,11 @@ public class WeeklyExpenseCommandService {
         metadata.put("reopenReason", close.reopenReason());
         metadata.put("reopenDecision", close.reopenDecision());
         metadata.put("reopenDecisionReason", close.reopenDecisionReason());
+        metadata.put("requestId", close.snapshot().getOrDefault("requestId", ""));
+        metadata.put("requestRevision", close.snapshot().getOrDefault("requestRevision", 0));
+        metadata.put("manifestHash", close.snapshot().getOrDefault("manifestHash", ""));
+        metadata.put("approvalId", close.snapshot().getOrDefault("approvalId", ""));
+        metadata.put("operationId", close.snapshot().getOrDefault("operationId", ""));
         putActorMetadata(metadata, actor);
         return persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             actor.tenantId(),
@@ -3344,8 +3654,17 @@ public class WeeklyExpenseCommandService {
             close.reopenDecisionReason(),
             close.reopenDecidedAt(),
             close.reopenDecidedByUid(),
-            auditId
+            auditId,
+            String.valueOf(close.snapshot().getOrDefault("requestId", "")),
+            longMetadata(close.snapshot().get("requestRevision")),
+            String.valueOf(close.snapshot().getOrDefault("manifestHash", "")),
+            String.valueOf(close.snapshot().getOrDefault("rootHash", "")),
+            longMetadata(close.snapshot().get("headRevision"))
         );
+    }
+
+    private long longMetadata(Object value) {
+        return value instanceof Number number ? number.longValue() : 0;
     }
 
     private CashflowWeeklyUpdateCompletionResponse weeklyCompletionResponse(
@@ -3369,7 +3688,12 @@ public class WeeklyExpenseCommandService {
             saved.targetRevision(),
             saved.reopenedAt(),
             saved.reopenedBy(),
-            saved.reopenReason()
+            saved.reopenReason(),
+            saved.deadline(),
+            saved.complianceStatus(),
+            saved.operationId(),
+            saved.auditId(),
+            saved.updateResult()
         );
     }
 
@@ -3490,6 +3814,101 @@ public class WeeklyExpenseCommandService {
             throw new WeeklyExpenseConflictException("Idempotency key already exists with a different request body.");
         }
         return Optional.of(readJson(idempotency.getResponseJson(), responseType));
+    }
+
+    private boolean matchesOperationIdentity(
+        WeeklyExpenseIdempotencyEntity entity,
+        TrustedActorContext actor,
+        String projectId,
+        String idempotencyKey
+    ) {
+        return actor.tenantId().equals(entity.getTenantId())
+            && projectId.equals(entity.getProjectId())
+            && CASHFLOW_SHEET_LAB_APPLY_COMMAND.equals(entity.getCommandName())
+            && idempotencyKey.equals(entity.getIdempotencyKey());
+    }
+
+    private CashflowSheetOperationStatusResponse missingOperation(
+        String projectId,
+        CashflowSheetOperation operation,
+        String keyHash
+    ) {
+        return new CashflowSheetOperationStatusResponse(
+            "1", projectId, operation.name(), keyHash, "NOT_FOUND", null, null, null,
+            List.of(), List.of(), List.of(), null, null
+        );
+    }
+
+    private void requireOperationLookupKey(String idempotencyKey) {
+        if (idempotencyKey == null
+            || idempotencyKey.isBlank()
+            || idempotencyKey.length() > WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH
+            || idempotencyKey.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("idempotencyKey must contain 1 to 160 non-control characters.");
+        }
+    }
+
+    private String requiredResultText(JsonNode result, String... fields) {
+        for (String field : fields) {
+            String value = result.path(field).asText("");
+            if (!value.isBlank()) return value;
+        }
+        throw new IllegalStateException("Stored cashflow operation result is missing " + fields[0] + ".");
+    }
+
+    private String requiredYearMonth(String value) {
+        if (value == null || !value.matches("20\\d{2}-(0[1-9]|1[0-2])")) {
+            throw new IllegalStateException("Stored cashflow operation month is invalid.");
+        }
+        return value;
+    }
+
+    private List<String> appliedMonths(JsonNode months) {
+        if (!months.isArray() || months.isEmpty() || months.size() > CashflowSheetBatchApplyRequest.MAX_MONTH_COUNT) {
+            throw new IllegalStateException("Stored cashflow batch operation months are invalid.");
+        }
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        months.forEach(month -> result.add(requiredYearMonth(month.path("yearMonth").asText())));
+        if (result.size() != months.size()) {
+            throw new IllegalStateException("Stored cashflow batch operation months contain duplicates.");
+        }
+        return List.copyOf(result);
+    }
+
+    private JsonNode readJsonNode(String json) {
+        try {
+            JsonNode result = objectMapper.readTree(json);
+            if (result == null || !result.isObject()) {
+                throw new IllegalStateException("Stored idempotent response must be a JSON object.");
+            }
+            return result;
+        } catch (JsonProcessingException error) {
+            throw new IllegalStateException("Stored idempotent response is invalid JSON", error);
+        }
+    }
+
+    private enum CashflowSheetOperation {
+        MONTH_APPLY,
+        BATCH_APPLY,
+        ANNUAL_APPLY;
+
+        private static CashflowSheetOperation parse(String value) {
+            try {
+                return valueOf(value == null ? "" : value);
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException(
+                    "operationType must be MONTH_APPLY, BATCH_APPLY, or ANNUAL_APPLY."
+                );
+            }
+        }
+
+        private static CashflowSheetOperation detect(JsonNode result) {
+            if (result.path("months").isArray()) return BATCH_APPLY;
+            if (result.path("year").isIntegralNumber() && result.path("revision").isIntegralNumber()) {
+                return ANNUAL_APPLY;
+            }
+            return result.path("yearMonth").isTextual() ? MONTH_APPLY : null;
+        }
     }
 
     private String sha256(String value) {

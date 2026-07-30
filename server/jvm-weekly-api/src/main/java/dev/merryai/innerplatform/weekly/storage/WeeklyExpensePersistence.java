@@ -24,6 +24,7 @@ import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseSheetEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseWeeklyStatusEntity;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,18 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 public interface WeeklyExpensePersistence {
+    record AppliedCellChangeAuditSource(
+        String eventId,
+        String projectId,
+        String sheetKey,
+        String commandName,
+        String actorId,
+        String idempotencyKey,
+        String metadataJson,
+        Instant createdAt
+    ) {
+    }
+
     record CashflowMonthWeekSnapshot(
         int weekNo,
         Map<String, Object> projection,
@@ -113,7 +126,8 @@ public interface WeeklyExpensePersistence {
         String deadline,
         boolean postDeadline,
         long amendmentCount,
-        long warningCount
+        long warningCount,
+        boolean monthlyCloseExists
     ) {
     }
 
@@ -271,9 +285,51 @@ public interface WeeklyExpensePersistence {
         String targetRevision,
         String reopenedAt,
         String reopenedBy,
-        String reopenReason
+        String reopenReason,
+        String deadline,
+        String complianceStatus,
+        String operationId,
+        String auditId,
+        String updateResult
     ) {
+        public CashflowWeeklyUpdateCompletionRecord(
+            String projectId, String yearMonth, int weekNo, String completedAt, String completedBy,
+            boolean alreadyCompleted, String status, long revision, long reopenCount, String snapshotHash,
+            String sourceRevision, String targetRevision, String reopenedAt, String reopenedBy, String reopenReason
+        ) {
+            this(projectId, yearMonth, weekNo, completedAt, completedBy, alreadyCompleted, status, revision,
+                reopenCount, snapshotHash, sourceRevision, targetRevision, reopenedAt, reopenedBy, reopenReason,
+                "", "", "", "", "");
+        }
     }
+
+    record CashflowWeeklyComplianceRecord(
+        String id,
+        String yearMonth,
+        int weekNo,
+        String deadline,
+        String status,
+        String completedAt,
+        String completedBy,
+        String operationId,
+        String auditId,
+        String updateResult
+    ) {}
+
+    record CashflowWeeklyCompliancePage(
+        List<CashflowWeeklyComplianceRecord> items,
+        String nextCursor,
+        long onTimeCount,
+        long missedCount
+    ) {}
+
+    record CashflowCumulativeCloseHead(
+        String status,
+        String fromMonth,
+        String closedThrough,
+        String rootHash,
+        long headRevision
+    ) {}
 
     record CashflowWeekScope(String yearMonth, int weekNo) {
     }
@@ -408,6 +464,19 @@ public interface WeeklyExpensePersistence {
             "cashflow_weekly_update_backend_unavailable",
             "Cashflow weekly update reads require the Firestore transaction backend."
         );
+    }
+
+    default CashflowWeeklyCompliancePage findCashflowWeeklyComplianceHistory(
+        String tenantId,
+        String projectId,
+        int limit,
+        String cursor
+    ) {
+        return new CashflowWeeklyCompliancePage(List.of(), "", 0, 0);
+    }
+
+    default CashflowCumulativeCloseHead findCashflowCumulativeCloseHead(String tenantId, String projectId) {
+        return new CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
     }
 
     default CashflowWeeklyUpdateCompletionRecord reopenCashflowWeeklyUpdate(
@@ -722,6 +791,18 @@ public interface WeeklyExpensePersistence {
     WeeklyExpenseAuditEventEntity saveAuditEvent(WeeklyExpenseAuditEventEntity auditEvent);
 
     List<WeeklyExpenseAuditEventEntity> findAuditEventsForAudit(String tenantId, String projectId);
+
+    default List<AppliedCellChangeAuditSource> findAppliedCellChangeAuditSources(
+        String tenantId,
+        String projectId
+    ) {
+        return findAuditEventsForAudit(tenantId, projectId).stream()
+            .map(event -> new AppliedCellChangeAuditSource(
+                event.getId(), event.getProjectId(), event.getSheetKey(), event.getCommandName(),
+                event.getActorId(), event.getIdempotencyKey(), event.getMetadataJson(), event.getCreatedAt()
+            ))
+            .toList();
+    }
 
     List<WeeklyExpenseAuditEventEntity> findRecentAuditEvents(String tenantId, String projectId, int limit);
 

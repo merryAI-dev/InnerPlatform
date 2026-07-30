@@ -20,8 +20,22 @@ public record CashflowSheetAnnualApplyRequest(
     @NotBlank @Pattern(regexp = "sha256:[a-f0-9]{64}") String sourceRevision,
     @Min(2000) @Max(2099) int year,
     @Min(0) long expectedRevision,
-    @Valid @NotNull @Size(min = 32, max = 32) List<Cell> cells
+    @Valid @NotNull @Size(min = 32, max = 32) List<Cell> cells,
+    @Size(max = 1000) String amendmentReason
 ) {
+    public CashflowSheetAnnualApplyRequest {
+        amendmentReason = amendmentReason == null ? "" : amendmentReason.trim();
+    }
+
+    public CashflowSheetAnnualApplyRequest(
+        String idempotencyKey,
+        String sourceRevision,
+        int year,
+        long expectedRevision,
+        List<Cell> cells
+    ) {
+        this(idempotencyKey, sourceRevision, year, expectedRevision, cells, "");
+    }
     public record Cell(
         @NotBlank @Pattern(regexp = "projection|actual") String mode,
         @NotBlank @Size(max = WeeklyExpenseRequestLimits.MAX_CASHFLOW_LINE_LENGTH) String cashflowLine,
