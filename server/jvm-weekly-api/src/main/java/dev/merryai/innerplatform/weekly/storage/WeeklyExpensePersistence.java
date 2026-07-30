@@ -11,6 +11,7 @@ import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
@@ -108,6 +109,14 @@ public interface WeeklyExpensePersistence {
         List<CashflowLedgerWeekSnapshot> ledgerWeeks,
         String resultingTargetRevision,
         List<CashflowSettledWeekChange> settledWeekChanges
+    ) {
+    }
+
+    record CashflowPendingApprovalWarningEvidence(
+        String warningId,
+        String yearMonth,
+        int warningCountIncrement,
+        int differenceCount
     ) {
     }
 
@@ -596,6 +605,24 @@ public interface WeeklyExpensePersistence {
         );
     }
 
+    default List<CashflowPendingApprovalWarningEvidence> recordCashflowPendingApprovalWarnings(
+        TrustedActorContext actor,
+        String projectId,
+        String commandName,
+        String sourceRevision,
+        String targetRevision,
+        String resultingTargetRevision,
+        String idempotencyKey,
+        List<CashflowPendingApprovalAffectedMonth> instructions
+    ) {
+        if (instructions == null || instructions.isEmpty()) return List.of();
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_pending_approval_warning_backend_unavailable",
+            "Pending approval warning evidence requires the Firestore transaction backend."
+        );
+    }
+
     default CashflowSheetMonthReplacement replaceCashflowSheetMonth(
         String tenantId,
         String projectId,
@@ -655,6 +682,22 @@ public interface WeeklyExpensePersistence {
             .sorted()
             .toList();
         return new CashflowLedgerSource(projection, actual, weeklyYears);
+    }
+
+    default CashflowLedgerSource findCashflowLedgerSource(
+        String tenantId,
+        String projectId,
+        String fromMonth,
+        String throughMonth
+    ) {
+        CashflowLedgerSource source = findCashflowLedgerSource(tenantId, projectId);
+        List<WeeklyExpenseProjectionEntity> projection = source.projection().stream()
+            .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
+            .toList();
+        List<WeeklyExpenseActualEntity> actual = source.actual().stream()
+            .filter(line -> line.getYearMonth().compareTo(fromMonth) >= 0 && line.getYearMonth().compareTo(throughMonth) <= 0)
+            .toList();
+        return new CashflowLedgerSource(projection, actual, source.weeklyYears(), source.targetRevision());
     }
 
     /**

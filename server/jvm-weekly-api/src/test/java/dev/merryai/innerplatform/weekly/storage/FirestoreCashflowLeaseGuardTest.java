@@ -12,6 +12,7 @@ import com.google.cloud.firestore.Transaction;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.merryai.innerplatform.weekly.api.CashflowEditSession;
 import dev.merryai.innerplatform.weekly.api.CashflowMonthCloseResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalancesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowOpeningBalanceCell;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
@@ -806,6 +807,103 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void pendingApprovalWarningsPersistOncePerMonthWithEveryCellAndReplayWithoutDuplicates() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest base = monthlyRequest("pending-100", targetRevision, "2026-07", "");
+        CashflowPendingApprovalAffectedMonth instruction = pendingApprovalInstruction("2026-07", "request-a", 100);
+        CashflowSheetLabApplyRequest request = new CashflowSheetLabApplyRequest(
+            base.idempotencyKey(), base.sourceRevision(), base.targetRevision(), base.yearMonth(),
+            base.replaceAllActualSources(), base.settledWeekChangeConfirmation(), base.closedMonthChangeReason(),
+            base.openingBalanceCells(), base.calculationChecks(), base.cells(), List.of(instruction),
+            base.acceptFormulaMismatches()
+        );
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+
+        CashflowSheetLabApplyResponse first = fixture.persistence.runCommandTransaction(() ->
+            service.applyCashflowSheetLab(ACTOR, "project-a", SESSION, request)
+        );
+        CashflowSheetLabApplyResponse replay = fixture.persistence.runCommandTransaction(() ->
+            service.applyCashflowSheetLab(ACTOR, "project-a", SESSION, request)
+        );
+
+        assertThat(replay).isEqualTo(first);
+        List<Map<String, Object>> warnings = fixture.documents.entrySet().stream()
+            .filter(entry -> entry.getKey().contains("/cashflow_pending_approval_change_warnings/"))
+            .map(Map.Entry::getValue)
+            .toList();
+        assertThat(warnings).singleElement().satisfies(warning -> {
+            assertThat(warning).containsEntry("yearMonth", "2026-07")
+                .containsEntry("warningCountIncrement", 1)
+                .containsEntry("differenceCount", 100)
+                .containsEntry("idempotencyKey", "pending-100");
+            List<Map<String, Object>> differences = (List<Map<String, Object>>) warning.get("approvalDifferences");
+            assertThat((List<?>) differences.getFirst().get("changes")).hasSize(100);
+        });
+        Map<String, Object> audit = fixture.documents.entrySet().stream()
+            .filter(entry -> entry.getKey().contains("/weekly_api_audit_events/"))
+            .map(Map.Entry::getValue).findFirst().orElseThrow();
+        assertThat(String.valueOf(audit.get("metadataJson")))
+            .contains("pendingApprovalAffectedMonths").contains("\"differenceCount\":100");
+        verify(fixture.transaction).create(argThat(ref -> ref.getPath().matches(
+            "orgs/tenant-a/cashflow_pending_approval_change_warnings/[a-f0-9]{64}"
+        )), any());
+    }
+
+    @Test
+    void batchPendingApprovalWarningsPersistOneDocumentForEachAffectedMonth() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest july = monthlyRequest("pending-july", targetRevision, "2026-07", "");
+        CashflowSheetLabApplyRequest august = monthlyRequest("pending-august", targetRevision, "2026-08", "");
+        CashflowSheetBatchApplyRequest request = new CashflowSheetBatchApplyRequest(
+            "pending-two-months", SOURCE_REVISION, targetRevision, false, null, null, List.of(),
+            List.of(
+                new CashflowSheetBatchApplyRequest.Month("2026-07", july.calculationChecks(), july.cells()),
+                new CashflowSheetBatchApplyRequest.Month("2026-08", august.calculationChecks(), august.cells())
+            ),
+            List.of(
+                pendingApprovalInstruction("2026-07", "request-a", 160),
+                pendingApprovalInstruction("2026-08", "request-a", 160)
+            ),
+            true
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .applyCashflowSheetBatch(ACTOR, "project-a", SESSION, request));
+
+        assertThat(fixture.documents.entrySet().stream()
+            .filter(entry -> entry.getKey().contains("/cashflow_pending_approval_change_warnings/"))
+            .map(entry -> entry.getValue().get("yearMonth")))
+            .containsExactlyInAnyOrder("2026-07", "2026-08");
+    }
+
+    @Test
+    void pendingApprovalWarningRollsBackWithCanonicalAuditAndIdempotencyOnLateFailure() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+        CashflowSheetLabApplyRequest base = monthlyRequest("pending-rollback", targetRevision, "2026-07", "");
+        CashflowSheetLabApplyRequest request = new CashflowSheetLabApplyRequest(
+            base.idempotencyKey(), base.sourceRevision(), base.targetRevision(), base.yearMonth(),
+            base.replaceAllActualSources(), base.settledWeekChangeConfirmation(), base.closedMonthChangeReason(),
+            base.openingBalanceCells(), base.calculationChecks(), base.cells(),
+            List.of(pendingApprovalInstruction("2026-07", "request-a", 1)), true
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> {
+            commandService(fixture.persistence).applyCashflowSheetLab(ACTOR, "project-a", SESSION, request);
+            throw new IllegalStateException("simulated response-path failure");
+        })).isInstanceOf(IllegalStateException.class).hasMessageContaining("simulated");
+
+        assertThat(fixture.documents.keySet()).noneMatch(path ->
+            path.contains("/cashflow_weeks/")
+                || path.contains("/cashflow_pending_approval_change_warnings/")
+                || path.contains("/weekly_api_audit_events/")
+                || path.contains("/weekly_api_idempotency/")
+        );
+    }
+
+    @Test
     void multiMonthApplyRequiresReasonAndAmendsAClosedMonthBeforeItsDeadlineWithoutAWarning() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put("orgs/tenant-a/monthly_closes/project-a-2026-08", Map.of(
@@ -1534,6 +1632,31 @@ class FirestoreCashflowLeaseGuardTest {
         );
         verify(fixture.collections.get("orgs/tenant-a/cashflow_weeks"), times(1))
             .whereEqualTo("projectId", "project-a");
+    }
+
+    @Test
+    void projectionActualSummaryLedgerReadIsBoundedAndFiltersTheRequestedHorizon() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_weeks/project-a-2022-12-w5", new LinkedHashMap<>(Map.of(
+            "tenantId", "tenant-a", "projectId", "project-a", "yearMonth", "2022-12", "weekNo", 5,
+            "projection", Map.of("SALES_IN", 99L)
+        )));
+        fixture.documents.put("orgs/tenant-a/cashflow_weeks/project-a-2026-07-w5", new LinkedHashMap<>(Map.of(
+            "tenantId", "tenant-a", "projectId", "project-a", "yearMonth", "2026-07", "weekNo", 5,
+            "projection", Map.of("SALES_IN", 10L)
+        )));
+        fixture.documents.put("orgs/tenant-a/cashflow_weeks/project-a-2026-08-w1", new LinkedHashMap<>(Map.of(
+            "tenantId", "tenant-a", "projectId", "project-a", "yearMonth", "2026-08", "weekNo", 1,
+            "projection", Map.of("SALES_IN", 88L)
+        )));
+
+        WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
+            .findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-07");
+
+        assertThat(source.projection()).singleElement().satisfies(line -> {
+            assertThat(line.getYearMonth()).isEqualTo("2026-07");
+            assertThat(line.getAmount()).isEqualByComparingTo("10");
+        });
     }
 
     @Test
@@ -3770,6 +3893,33 @@ class FirestoreCashflowLeaseGuardTest {
         );
     }
 
+    private static CashflowPendingApprovalAffectedMonth pendingApprovalInstruction(
+        String yearMonth,
+        String requestId,
+        int count
+    ) {
+        List<CashflowPendingApprovalAffectedMonth.Change> changes = new ArrayList<>();
+        outer:
+        for (String mode : List.of("projection", "actual")) {
+            for (int weekNo = 1; weekNo <= 5; weekNo += 1) {
+                for (String lineId : CashflowLineCatalog.ALL_LINES) {
+                    changes.add(new CashflowPendingApprovalAffectedMonth.Change(
+                        mode, weekNo, lineId, false, "EMPTY", null, true, "VALUE", BigDecimal.valueOf(100)
+                    ));
+                    if (changes.size() == count) break outer;
+                }
+            }
+        }
+        List<Integer> weeks = changes.stream().map(CashflowPendingApprovalAffectedMonth.Change::weekNo)
+            .distinct().toList();
+        CashflowPendingApprovalAffectedMonth.ApprovalDifference difference =
+            new CashflowPendingApprovalAffectedMonth.ApprovalDifference(
+                requestId, 1, "APPROVING", "sha256:" + "f".repeat(64), yearMonth,
+                count, weeks, changes, 0
+            );
+        return new CashflowPendingApprovalAffectedMonth(yearMonth, 1, count, List.of(difference));
+    }
+
     private static List<CashflowOpeningBalanceCell> openingBalanceCells() {
         List<CashflowOpeningBalanceCell> cells = new ArrayList<>();
         for (int year : List.of(2024, 2025)) {
@@ -3947,6 +4097,14 @@ class FirestoreCashflowLeaseGuardTest {
             ));
             return transaction;
         });
+        when(transaction.create(any(DocumentReference.class), any())).thenAnswer(invocation -> {
+            pendingWrites.add(new PendingWrite(
+                invocation.getArgument(0),
+                new LinkedHashMap<>((Map<String, Object>) invocation.getArgument(1)),
+                false
+            ));
+            return transaction;
+        });
         when(db.runTransaction(any())).thenAnswer(invocation -> {
             Transaction.Function<?> function = invocation.getArgument(0);
             pendingWrites.clear();
@@ -4000,6 +4158,9 @@ class FirestoreCashflowLeaseGuardTest {
                 Query query = mock(Query.class);
                 QueryScope scope = new QueryScope(key, invocation.getArgument(0), invocation.getArgument(1));
                 queryScopes.put(query, scope);
+                when(query.whereGreaterThanOrEqualTo(anyString(), any())).thenReturn(query);
+                when(query.whereLessThanOrEqualTo(anyString(), any())).thenReturn(query);
+                when(query.limit(org.mockito.ArgumentMatchers.anyInt())).thenReturn(query);
                 org.mockito.Mockito.doAnswer(ignored -> {
                     List<QueryDocumentSnapshot> snapshots = docs.entrySet().stream()
                         .filter(entry -> entry.getKey().startsWith(scope.collectionPath() + "/"))

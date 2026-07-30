@@ -7,7 +7,8 @@ public record CashflowMonthDashboardSourceResponse(
     CashflowSnapshotResponse cashflow,
     CashflowOpeningBalancesResponse openingBalances,
     SnapshotCompatibility snapshotCompatibility,
-    CumulativeClose cumulativeClose
+    CumulativeClose cumulativeClose,
+    CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary
 ) {
     public CashflowMonthDashboardSourceResponse(
         CashflowMonthCloseResponse monthClose,
@@ -15,7 +16,7 @@ public record CashflowMonthDashboardSourceResponse(
         CashflowOpeningBalancesResponse openingBalances,
         SnapshotCompatibility snapshotCompatibility
     ) {
-        this(monthClose, cashflow, openingBalances, snapshotCompatibility, new CumulativeClose("OPEN", "2023-01", "", "", 0));
+        this(monthClose, cashflow, openingBalances, snapshotCompatibility, new CumulativeClose("OPEN", "2023-01", "", "", 0), null);
     }
 
     public record CumulativeClose(

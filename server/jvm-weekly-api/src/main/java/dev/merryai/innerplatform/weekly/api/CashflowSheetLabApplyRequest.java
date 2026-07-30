@@ -30,6 +30,7 @@ public record CashflowSheetLabApplyRequest(
     @Valid @NotNull @Size(max = 288) List<CashflowOpeningBalanceCell> openingBalanceCells,
     @NotNull @Size(min = 10, max = 10) List<Map<String, Object>> calculationChecks,
     @Valid @NotNull @Size(min = 160, max = 160) List<Cell> cells,
+    @Valid @NotNull @Size(max = 1) List<CashflowPendingApprovalAffectedMonth> pendingApprovalAffectedMonths,
     boolean acceptFormulaMismatches
 ) {
     public static final int FINANCE_WEEK_COUNT = 5;
@@ -43,7 +44,7 @@ public record CashflowSheetLabApplyRequest(
         boolean replaceAllActualSources,
         List<Cell> cells
     ) {
-        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells, true);
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources, null, null, List.of(), List.of(), cells, List.of(), true);
     }
 
     public CashflowSheetLabApplyRequest(
@@ -92,6 +93,7 @@ public record CashflowSheetLabApplyRequest(
             List.of(),
             calculationChecks,
             cells,
+            List.of(),
             true
         );
     }
@@ -119,13 +121,26 @@ public record CashflowSheetLabApplyRequest(
             openingBalanceCells,
             calculationChecks,
             cells,
+            List.of(),
             true
         );
+    }
+
+    public CashflowSheetLabApplyRequest(
+        String idempotencyKey, String sourceRevision, String targetRevision, String yearMonth,
+        boolean replaceAllActualSources, CashflowSettledWeekChangeConfirmation settledWeekChangeConfirmation,
+        String closedMonthChangeReason, List<CashflowOpeningBalanceCell> openingBalanceCells,
+        List<Map<String, Object>> calculationChecks, List<Cell> cells, boolean acceptFormulaMismatches
+    ) {
+        this(idempotencyKey, sourceRevision, targetRevision, yearMonth, replaceAllActualSources,
+            settledWeekChangeConfirmation, closedMonthChangeReason, openingBalanceCells, calculationChecks,
+            cells, List.of(), acceptFormulaMismatches);
     }
 
     public CashflowSheetLabApplyRequest {
         openingBalanceCells = openingBalanceCells == null ? List.of() : List.copyOf(openingBalanceCells);
         calculationChecks = calculationChecks == null ? List.of() : List.copyOf(calculationChecks);
+        pendingApprovalAffectedMonths = pendingApprovalAffectedMonths == null ? List.of() : List.copyOf(pendingApprovalAffectedMonths);
     }
 
     public Map<String, BigDecimal> calculatedOpeningBalances() {

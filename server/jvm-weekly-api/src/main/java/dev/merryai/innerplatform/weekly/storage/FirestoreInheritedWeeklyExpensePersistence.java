@@ -19,6 +19,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetLabApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
 import dev.merryai.innerplatform.weekly.api.CloseCashflowMonthRequest;
 import dev.merryai.innerplatform.weekly.api.CompleteCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.DecideCashflowMonthReopenRequest;
@@ -544,6 +545,57 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             amendmentDocument.put("createdAt", now.toString());
             set(db.document("orgs/" + actor.tenantId() + "/cashflow_month_amendments/" + amendmentId), amendmentDocument);
         }
+    }
+
+    @Override
+    public List<CashflowPendingApprovalWarningEvidence> recordCashflowPendingApprovalWarnings(
+        TrustedActorContext actor,
+        String projectId,
+        String commandName,
+        String sourceRevision,
+        String targetRevision,
+        String resultingTargetRevision,
+        String idempotencyKey,
+        List<CashflowPendingApprovalAffectedMonth> instructions
+    ) {
+        if (instructions == null || instructions.isEmpty()) return List.of();
+        Instant now = clock.instant();
+        String actorName = text(actor.name(), text(actor.email(), actor.id()));
+        List<CashflowPendingApprovalWarningEvidence> evidence = new ArrayList<>();
+        for (CashflowPendingApprovalAffectedMonth instruction : instructions) {
+            String warningId = hashCanonicalJson(Map.of(
+                "projectId", projectId,
+                "yearMonth", instruction.yearMonth(),
+                "idempotencyKey", idempotencyKey
+            )).substring("sha256:".length());
+            Map<String, Object> document = new LinkedHashMap<>();
+            document.put("id", warningId);
+            document.put("tenantId", actor.tenantId());
+            document.put("projectId", projectId);
+            document.put("yearMonth", instruction.yearMonth());
+            document.put("warningCountIncrement", instruction.warningCountIncrement());
+            document.put("differenceCount", instruction.differenceCount());
+            document.put("approvalDifferences", JSON.convertValue(instruction.approvalDifferences(), List.class));
+            document.put("commandName", commandName);
+            document.put("sourceRevision", sourceRevision);
+            document.put("targetRevision", targetRevision);
+            document.put("resultingTargetRevision", resultingTargetRevision);
+            document.put("idempotencyKey", idempotencyKey);
+            document.put("actorUid", actor.id());
+            document.put("actorName", actorName);
+            document.put("actorEmail", text(actor.email(), ""));
+            document.put("createdAt", now.toString());
+            create(db.document(
+                "orgs/" + actor.tenantId() + "/cashflow_pending_approval_change_warnings/" + warningId
+            ), document);
+            evidence.add(new CashflowPendingApprovalWarningEvidence(
+                warningId,
+                instruction.yearMonth(),
+                instruction.warningCountIncrement(),
+                instruction.differenceCount()
+            ));
+        }
+        return List.copyOf(evidence);
     }
 
     private long optionalMonthCounter(Map<String, Object> close, String field) {
@@ -2261,6 +2313,35 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     @Override
     public CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
         QuerySnapshot snapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
+        return cashflowLedgerSource(tenantId, projectId, snapshot, null, null);
+    }
+
+    @Override
+    public CashflowLedgerSource findCashflowLedgerSource(
+        String tenantId,
+        String projectId,
+        String fromMonth,
+        String throughMonth
+    ) {
+        int maximumCanonicalWeeks = (2099 - 2023 + 1) * 12 * CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT;
+        QuerySnapshot snapshot = query(cashflowWeeks(tenantId)
+            .whereEqualTo("projectId", projectId)
+            .whereGreaterThanOrEqualTo("yearMonth", fromMonth)
+            .whereLessThanOrEqualTo("yearMonth", throughMonth)
+            .limit(maximumCanonicalWeeks + 1));
+        if (snapshot.size() > maximumCanonicalWeeks) {
+            throw new WeeklyExpenseConflictException("Canonical cashflow ledger exceeds the bounded read limit.");
+        }
+        return cashflowLedgerSource(tenantId, projectId, snapshot, fromMonth, throughMonth);
+    }
+
+    private CashflowLedgerSource cashflowLedgerSource(
+        String tenantId,
+        String projectId,
+        QuerySnapshot snapshot,
+        String fromMonth,
+        String throughMonth
+    ) {
         List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
         List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
         Set<Integer> weeklyYears = new java.util.TreeSet<>();
@@ -2270,6 +2351,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             documents.add(document);
             String yearMonth = text(document.get("yearMonth"), "");
             int weekNo = intValue(document.get("weekNo"), 0);
+            if (fromMonth != null && (yearMonth.compareTo(fromMonth) < 0 || yearMonth.compareTo(throughMonth) > 0)) {
+                continue;
+            }
             if (yearMonth.matches("20\\d{2}-(0[1-9]|1[0-2])")) {
                 weeklyYears.add(Integer.parseInt(yearMonth.substring(0, 4)));
             }
@@ -4404,6 +4488,22 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw error;
         } catch (Exception error) {
             throw new IllegalStateException("Could not write Firestore document: " + ref.getPath(), error);
+        }
+    }
+
+    private void create(DocumentReference ref, Map<String, Object> data) {
+        try {
+            Transaction tx = currentTransaction.get();
+            if (tx == null) {
+                ref.create(data).get();
+            } else {
+                tx.create(ref, data);
+            }
+            mergeCachedDocument(ref, data);
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not create immutable Firestore evidence.", error);
         }
     }
 

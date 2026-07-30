@@ -287,6 +287,19 @@ public class WeeklyExpenseController {
         return buildCashflowSnapshot(projectId, source);
     }
 
+    @PostMapping("/cashflow/projection-actual-summary/batch")
+    public CashflowProjectionActualSummaryBatchResponse readCashflowProjectionActualSummaries(
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody CashflowProjectionActualSummaryBatchRequest request
+    ) {
+        return commandService.readCashflowProjectionActualSummaries(
+            actorContext(tenantId, actorId, actorRole, actorEmail), request
+        );
+    }
+
     private WeeklyExpensePersistence.CashflowLedgerSource readCashflowSource(String tenantId, String projectId) {
         return persistence.findCashflowLedgerSource(tenantId, projectId);
     }
@@ -458,6 +471,15 @@ public class WeeklyExpenseController {
         if (cumulative == null) {
             cumulative = new WeeklyExpensePersistence.CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
         }
+        CashflowProjectionActualSummaryBatchResponse summaryResponse = commandService
+            .readCashflowProjectionActualSummaries(
+                actor, new CashflowProjectionActualSummaryBatchRequest(List.of(projectId))
+            );
+        if (summaryResponse == null || summaryResponse.items().size() != 1
+            || !projectId.equals(summaryResponse.items().getFirst().projectId())) {
+            throw new WeeklyExpenseConflictException("Canonical projection-actual summary is unavailable.");
+        }
+        CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary = summaryResponse.items().getFirst();
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             cashflow,
@@ -466,7 +488,8 @@ public class WeeklyExpenseController {
             new CashflowMonthDashboardSourceResponse.CumulativeClose(
                 cumulative.status(), cumulative.fromMonth(), cumulative.closedThrough(), cumulative.rootHash(),
                 cumulative.headRevision()
-            )
+            ),
+            projectionActualSummary
         );
     }
 

@@ -471,6 +471,34 @@ class WeeklyExpenseControllerTest {
     }
 
     @Test
+    void projectionActualSummaryBatchSerializesTheStrictThinBffContract() throws Exception {
+        dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator.currentFinanceWeek(
+                java.time.Clock.systemUTC()
+            );
+        mockMvc.perform(asActor(post("/api/v1/cashflow/projection-actual-summary/batch"),
+                "tenant-summary", "viewer-summary", "viewer")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"projectIds\":[\"project-b\",\"project-a\"]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.version").value("1"))
+            .andExpect(jsonPath("$.items[0].projectId").value("project-a"))
+            .andExpect(jsonPath("$.items[0].fromMonth").value("2023-01"))
+            .andExpect(jsonPath("$.items[0].comparisonAsOfWeek.yearMonth").value(boundary.yearMonth()))
+            .andExpect(jsonPath("$.items[0].comparisonAsOfWeek.weekNo").value(boundary.weekNo()))
+            .andExpect(jsonPath("$.items[0].settlementDifferenceAmount").value(0))
+            .andExpect(jsonPath("$.items[0].settlementMatches").value(true))
+            .andExpect(jsonPath("$.items[1].projectId").value("project-b"))
+            .andExpect(jsonPath("$.errors").isEmpty());
+
+        mockMvc.perform(asActor(post("/api/v1/cashflow/projection-actual-summary/batch"),
+                "tenant-summary", "viewer-summary", "viewer")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"projectIds\":[\"project-a\",\"project-a\"]}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void saveDraftDoesNotUseNewClientTempIdAsJpaRowPrimaryKey() throws Exception {
         String body = """
             {
@@ -856,18 +884,58 @@ class WeeklyExpenseControllerTest {
                 ));
             }
         }
-        String body = objectMapper.writeValueAsString(Map.of(
-            "idempotencyKey", "sheet-lab-apply-001",
-            "sourceRevision", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "targetRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "yearMonth", "2026-06",
-            "calculationChecks", calculationChecks,
-            "cells", cells
+        Map<String, Object> pendingChange = new LinkedHashMap<>();
+        pendingChange.put("mode", "projection");
+        pendingChange.put("weekNo", 1);
+        pendingChange.put("lineId", "SALES_IN");
+        pendingChange.put("beforeHadValue", false);
+        pendingChange.put("beforeState", "EMPTY");
+        pendingChange.put("beforeAmount", null);
+        pendingChange.put("afterHadValue", true);
+        pendingChange.put("afterState", "VALUE");
+        pendingChange.put("afterAmount", 1000);
+        Map<String, Object> pendingDifference = Map.ofEntries(
+            Map.entry("requestId", "request-a"), Map.entry("requestRevision", 1),
+            Map.entry("requestStatus", "PENDING"),
+            Map.entry("requestManifestHash", "sha256:" + "c".repeat(64)),
+            Map.entry("yearMonth", "2026-06"), Map.entry("differenceCount", 1),
+            Map.entry("weeks", List.of(1)), Map.entry("changes", List.of(pendingChange)),
+            Map.entry("truncatedChangeCount", 0)
+        );
+        String body = objectMapper.writeValueAsString(Map.ofEntries(
+            Map.entry("idempotencyKey", "sheet-lab-apply-001"),
+            Map.entry("sourceRevision", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Map.entry("targetRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            Map.entry("yearMonth", "2026-06"),
+            Map.entry("calculationChecks", calculationChecks),
+            Map.entry("cells", cells),
+            Map.entry("pendingApprovalAffectedMonths", List.of(Map.of(
+                "yearMonth", "2026-06", "warningCountIncrement", 1, "differenceCount", 1,
+                "approvalDifferences", List.of(pendingDifference)
+            )))
         ));
 
         mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("cashflow_month_amendment_backend_unavailable"));
+
+        String batchBody = objectMapper.writeValueAsString(Map.ofEntries(
+            Map.entry("idempotencyKey", "sheet-lab-batch-001"),
+            Map.entry("sourceRevision", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Map.entry("targetRevision", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            Map.entry("months", List.of(Map.of(
+                "yearMonth", "2026-06", "calculationChecks", calculationChecks, "cells", cells
+            ))),
+            Map.entry("pendingApprovalAffectedMonths", List.of(Map.of(
+                "yearMonth", "2026-06", "warningCountIncrement", 1, "differenceCount", 1,
+                "approvalDifferences", List.of(pendingDifference)
+            )))
+        ));
+        mockMvc.perform(asActor(post("/api/v1/cashflow/project-sheet-lab/sheet-lab/batch/apply"), "tenant-sheet-lab", "pm-sheet-lab", "pm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batchBody))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.code").value("cashflow_month_amendment_backend_unavailable"));
 
@@ -1476,6 +1544,15 @@ class WeeklyExpenseControllerTest {
         ));
         when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard"))
             .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of(2024)));
+        when(dashboardCommandService.readCashflowProjectionActualSummaries(
+            any(), any(CashflowProjectionActualSummaryBatchRequest.class)
+        )).thenReturn(new CashflowProjectionActualSummaryBatchResponse("1", List.of(
+            new CashflowProjectionActualSummaryBatchResponse.Item(
+                "project-month-dashboard", "2023-01",
+                new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
+                new java.math.BigDecimal("18371453"), false
+            )
+        )));
         Map<String, String> completeAnnualStates = new LinkedHashMap<>();
         CashflowLineCatalog.ALL_LINES.forEach(line -> completeAnnualStates.put(line, "EMPTY"));
         completeAnnualStates.put("SALES_IN", "VALUE");
@@ -1536,12 +1613,15 @@ class WeeklyExpenseControllerTest {
             assertThat(source.year()).isEqualTo(2025);
             assertThat(source.lineStates()).containsEntry("SALES_IN", "VALUE");
         });
+        assertThat(response.projectionActualSummary().settlementDifferenceAmount())
+            .isEqualByComparingTo("18371453");
     }
 
     @Test
     void closedCashflowDashboardUsesFrozenOpeningRowsWithoutReadingLiveLedger() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        stubProjectionActualSummary(dashboardCommandService, "project-frozen");
         Map<String, Object> emptyMode = Map.of(
             "amount", 0,
             "lineAmounts", Map.of(),
@@ -1591,6 +1671,7 @@ class WeeklyExpenseControllerTest {
     void amendedClosedCashflowDashboardUsesCurrentLedgerWithoutReplacingFrozenSnapshot() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        stubProjectionActualSummary(dashboardCommandService, "project-amended");
         String snapshotHash = "sha256:" + "a".repeat(64);
         String targetRevision = "sha256:" + "c".repeat(64);
         Map<String, Object> emptyMode = Map.of(
@@ -1684,6 +1765,7 @@ class WeeklyExpenseControllerTest {
     void amendedClosedCashflowDashboardFailsAfterTwoEvidenceDrifts() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        stubProjectionActualSummary(dashboardCommandService, "project-drift");
         String snapshotHash = "sha256:" + "a".repeat(64);
         String targetRevision = "sha256:" + "c".repeat(64);
         Map<String, Object> openingBalances = Map.of(
@@ -1760,6 +1842,7 @@ class WeeklyExpenseControllerTest {
     void legacyClosedCashflowDashboardReturnsAvailableEvidenceWithoutReadingLiveLedger() {
         WeeklyExpenseCommandService dashboardCommandService = mock(WeeklyExpenseCommandService.class);
         WeeklyExpensePersistence dashboardPersistence = mock(WeeklyExpensePersistence.class);
+        stubProjectionActualSummary(dashboardCommandService, "project-legacy-frozen");
         when(dashboardCommandService.readCashflowMonthClose(any(), eq("project-legacy-frozen"), eq("2026-06")))
             .thenReturn(new CashflowMonthCloseResponse(
                 true, "cashflowMonth.read", "project-legacy-frozen", "2026-06", "CLOSED",
@@ -2687,5 +2770,20 @@ class WeeklyExpenseControllerTest {
             }
         }
         return "";
+    }
+
+    private static void stubProjectionActualSummary(
+        WeeklyExpenseCommandService service,
+        String projectId
+    ) {
+        when(service.readCashflowProjectionActualSummaries(
+            any(), any(CashflowProjectionActualSummaryBatchRequest.class)
+        )).thenReturn(new CashflowProjectionActualSummaryBatchResponse("1", List.of(
+            new CashflowProjectionActualSummaryBatchResponse.Item(
+                projectId, "2023-01",
+                new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 5),
+                java.math.BigDecimal.ZERO, true
+            )
+        )));
     }
 }

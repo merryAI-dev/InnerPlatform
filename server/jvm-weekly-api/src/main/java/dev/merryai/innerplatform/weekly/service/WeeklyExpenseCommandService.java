@@ -15,6 +15,9 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetBatchApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetAnnualApplyResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetOperationStatusResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowPendingApprovalAffectedMonth;
+import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatchResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
@@ -60,6 +63,7 @@ import dev.merryai.innerplatform.weekly.domain.CellValidationIssue;
 import dev.merryai.innerplatform.weekly.domain.CellAddress;
 import dev.merryai.innerplatform.weekly.domain.CellValidationStatus;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
+import dev.merryai.innerplatform.weekly.domain.CashflowProjectionActualSummaryCalculator;
 import dev.merryai.innerplatform.weekly.domain.CashflowFormulaValidator;
 import dev.merryai.innerplatform.weekly.domain.ClipboardCell;
 import dev.merryai.innerplatform.weekly.domain.ClipboardPayload;
@@ -89,6 +93,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Clock;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -171,6 +176,52 @@ public class WeeklyExpenseCommandService {
 
     public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
         authorizationService.requireProjectAllowed(commandName, actor, projectId);
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowProjectionActualSummaryBatchResponse readCashflowProjectionActualSummaries(
+        TrustedActorContext actor,
+        CashflowProjectionActualSummaryBatchRequest request
+    ) {
+        List<String> projectIds = request.requireUniqueProjectIds();
+        boolean forbidden = false;
+        for (String projectId : projectIds) {
+            try {
+                authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
+            } catch (WeeklyExpenseForbiddenException denied) {
+                forbidden = true;
+            }
+        }
+        if (forbidden) {
+            throw new WeeklyExpenseForbiddenException("One or more projects are not accessible.");
+        }
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        List<CashflowProjectionActualSummaryBatchResponse.Item> items = new ArrayList<>();
+        List<CashflowProjectionActualSummaryBatchResponse.ErrorItem> errors = new ArrayList<>();
+        for (String projectId : projectIds) {
+            try {
+                WeeklyExpensePersistence.CashflowLedgerSource source = persistence.findCashflowLedgerSource(
+                    actor.tenantId(), projectId, CashflowProjectionActualSummaryCalculator.FROM_MONTH, boundary.yearMonth()
+                );
+                CashflowProjectionActualSummaryCalculator.Summary summary =
+                    CashflowProjectionActualSummaryCalculator.calculate(projectId, source.projection(), source.actual(), boundary);
+                items.add(new CashflowProjectionActualSummaryBatchResponse.Item(
+                    summary.projectId(), summary.fromMonth(),
+                    new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek(
+                        summary.comparisonAsOfWeek().yearMonth(), summary.comparisonAsOfWeek().weekNo()
+                    ),
+                    summary.settlementDifferenceAmount(), summary.settlementMatches()
+                ));
+            } catch (WeeklyExpenseForbiddenException denied) {
+                throw denied;
+            } catch (RuntimeException unavailable) {
+                errors.add(new CashflowProjectionActualSummaryBatchResponse.ErrorItem(
+                    projectId, CashflowProjectionActualSummaryBatchResponse.SUMMARY_UNAVAILABLE
+                ));
+            }
+        }
+        return new CashflowProjectionActualSummaryBatchResponse("1", items, errors);
     }
 
     @Transactional(readOnly = true)
@@ -1399,6 +1450,10 @@ public class WeeklyExpenseCommandService {
         if (replay.isPresent()) return replay.get();
 
         List<CashflowSheetLabApplyRequest.Cell> cells = requireCompleteCashflowSheetMonth(request);
+        List<CashflowPendingApprovalAffectedMonth> pendingApprovalWarnings =
+            CashflowPendingApprovalAffectedMonth.requireValid(
+                request.pendingApprovalAffectedMonths(), List.of(request.yearMonth())
+            );
         List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
             .authorizeCashflowSheetMonthAmendments(
                 writer,
@@ -1418,7 +1473,7 @@ public class WeeklyExpenseCommandService {
             Map.of(request.yearMonth(), calculationChecks),
             request.acceptFormulaMismatches()
         );
-        assertAtomicWriteBudget(cells.size(), 3, "Cashflow sheet apply");
+        assertAtomicWriteBudget(cells.size(), 3 + pendingApprovalWarnings.size(), "Cashflow sheet apply");
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
         WeeklyExpensePersistence.CashflowSheetMonthReplacement replacement = persistence.replaceCashflowSheetMonth(
             writer.tenantId(),
@@ -1443,6 +1498,17 @@ public class WeeklyExpenseCommandService {
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
+        List<WeeklyExpensePersistence.CashflowPendingApprovalWarningEvidence> pendingApprovalEvidence =
+            pendingApprovalWarnings.isEmpty() ? List.of() : persistence.recordCashflowPendingApprovalWarnings(
+                writer,
+                projectId,
+                "MONTH_APPLY",
+                request.sourceRevision(),
+                request.targetRevision(),
+                replacement.resultingTargetRevision(),
+                request.idempotencyKey(),
+                pendingApprovalWarnings
+            );
         List<CashflowSnapshotResponse.ActualLine> actual = replacement.actual().stream()
             .map(line -> new CashflowSnapshotResponse.ActualLine(
                 line.getSheetKey(),
@@ -1479,7 +1545,8 @@ public class WeeklyExpenseCommandService {
                 projection.size(),
                 actual.size(),
                 request.replaceAllActualSources(),
-                amendments
+                amendments,
+                pendingApprovalEvidence
             )
         ));
 
@@ -1545,6 +1612,10 @@ public class WeeklyExpenseCommandService {
         var cellsByMonth = CashflowSheetBatchApplyRequest
             .requireCompleteMonths(request.months());
         var appliedCellsByMonth = request.requireAppliedMonths();
+        List<CashflowPendingApprovalAffectedMonth> pendingApprovalWarnings =
+            CashflowPendingApprovalAffectedMonth.requireValid(
+                request.pendingApprovalAffectedMonths(), appliedCellsByMonth.keySet()
+            );
         List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments = persistence
             .authorizeCashflowSheetMonthAmendments(
                 writer,
@@ -1575,7 +1646,7 @@ public class WeeklyExpenseCommandService {
         requireFormulaMismatchConfirmation(calculationChecksByMonth, request.acceptFormulaMismatches());
         assertAtomicWriteBudget(
             Math.multiplyExact(appliedCellsByMonth.size(), CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT),
-            3,
+            3 + pendingApprovalWarnings.size(),
             "Cashflow sheet batch apply"
         );
         String sourceSheetKey = CASHFLOW_SHEET_LAB_ACTUAL_SOURCE;
@@ -1597,6 +1668,17 @@ public class WeeklyExpenseCommandService {
             request.closedMonthChangeReason(),
             request.idempotencyKey()
         );
+        List<WeeklyExpensePersistence.CashflowPendingApprovalWarningEvidence> pendingApprovalEvidence =
+            pendingApprovalWarnings.isEmpty() ? List.of() : persistence.recordCashflowPendingApprovalWarnings(
+                writer,
+                projectId,
+                "BATCH_APPLY",
+                request.sourceRevision(),
+                request.targetRevision(),
+                replacement.resultingTargetRevision(),
+                request.idempotencyKey(),
+                pendingApprovalWarnings
+            );
         List<String> requestedMonths = List.copyOf(appliedCellsByMonth.keySet());
         List<String> replacedMonths = replacement.months().stream()
             .map(WeeklyExpensePersistence.CashflowSheetBatchMonthReplacement::yearMonth)
@@ -1643,6 +1725,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("durationMs", durationMs);
         metadata.put("closedMonthAmendments", amendments);
         metadata.put("settledWeekChanges", replacement.settledWeekChanges());
+        metadata.put("pendingApprovalAffectedMonths", pendingApprovalEvidence);
         putActorMetadata(metadata, writer);
         WeeklyExpenseAuditEventEntity auditEvent = persistence.saveAuditEvent(new WeeklyExpenseAuditEventEntity(
             writer.tenantId(),
@@ -3355,7 +3438,8 @@ public class WeeklyExpenseCommandService {
         int projectionLineCount,
         int actualLineCount,
         boolean replaceAllActualSources,
-        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments
+        List<WeeklyExpensePersistence.CashflowClosedMonthAmendment> amendments,
+        List<WeeklyExpensePersistence.CashflowPendingApprovalWarningEvidence> pendingApprovalEvidence
     ) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("sourceSheetKey", sourceSheetKey);
@@ -3367,6 +3451,7 @@ public class WeeklyExpenseCommandService {
         metadata.put("actualLineCount", actualLineCount);
         metadata.put("replaceAllActualSources", replaceAllActualSources);
         metadata.put("closedMonthAmendments", amendments);
+        metadata.put("pendingApprovalAffectedMonths", pendingApprovalEvidence);
         putActorMetadata(metadata, actor);
         return writeJson(metadata);
     }
