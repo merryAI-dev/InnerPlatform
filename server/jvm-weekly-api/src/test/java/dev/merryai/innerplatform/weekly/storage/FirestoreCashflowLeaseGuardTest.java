@@ -2298,7 +2298,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void monthCloseRejectsPinnedSheetControlMismatchWithoutPartialWrites() {
+    void monthCloseAllowsPinnedSheetControlMismatchAfterDesignatedApproval() {
         CloseCashflowMonthRequest request = monthCloseRequest("month-close-control-mismatch", 0, 3);
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
@@ -2310,15 +2310,28 @@ class FirestoreCashflowLeaseGuardTest {
         mirror.put("sheetFacts", facts);
         fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", mirror);
 
+        CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(response.status()).isEqualTo("CLOSED");
+        assertThat(fixture.documents).containsKey(monthClosePath("project-a", "2026-06"));
+    }
+
+    @Test
+    void monthCloseRequiresTheDesignatedApproverRequestInsideTheJVM() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-without-approval", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.remove("orgs/tenant-a/cashflow_month_close_requests/project-a-2026-06");
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", pinnedMirror(request));
+
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).closeCashflowMonth(ACTOR, "project-a", SESSION, request)))
             .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("control total");
+            .hasMessageContaining("designated approver");
 
         assertThat(fixture.documents).doesNotContainKey(monthClosePath("project-a", "2026-06"));
-        assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("cashflow_weeks"));
-        assertThat(fixture.documents.get(leasePath("project-a"))).containsEntry("state", "ACTIVE");
     }
 
     @Test
@@ -3197,6 +3210,16 @@ class FirestoreCashflowLeaseGuardTest {
         List<Integer> getAllSizes = new ArrayList<>();
         docs.put("orgs/tenant-a/members/pm-1", member);
         docs.put(leasePath("project-a"), lease);
+        for (String yearMonth : List.of("2026-06", "2026-07")) {
+            docs.put("orgs/tenant-a/cashflow_month_close_requests/project-a-" + yearMonth, Map.of(
+                "requestId", "project-a-" + yearMonth,
+                "projectId", "project-a",
+                "yearMonth", yearMonth,
+                "status", "APPROVING",
+                "approverUid", "pm-1",
+                "reviewedByUid", "pm-1"
+            ));
+        }
         if (projectExists) {
             docs.put("orgs/tenant-a/projects/project-a", Map.of(
                 "id", "project-a",
@@ -3549,6 +3572,7 @@ class FirestoreCashflowLeaseGuardTest {
         mirror.put("projectId", "project-a");
         mirror.put("status", "FRESH");
         mirror.put("sourceRevision", request.sourceRevision());
+        mirror.put("appliedSourceRevision", request.sourceRevision());
         mirror.put("targetRevisionAtFetch", request.targetRevision());
         mirror.put("yearMonths", List.of(request.yearMonth()));
         mirror.put("capturedAt", NOW.minusSeconds(120).toString());

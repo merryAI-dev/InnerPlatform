@@ -1028,6 +1028,7 @@ export interface CashflowMonthCloseRequest {
   reviewedByUid: string | null;
   reviewedAt: string | null;
   decisionReason: string | null;
+  reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
 }
 
 export interface ReviewCashflowMonthCloseRequestPayload {

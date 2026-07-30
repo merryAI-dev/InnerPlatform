@@ -155,6 +155,16 @@ export function MonthlySettlementApprovalSection({
                     <span>요청자 <strong className="text-slate-900">{request.requestedByUid}</strong></span>
                     <span>요청일 <strong className="text-slate-900">{new Date(request.requestedAt).toLocaleDateString('ko-KR')}</strong></span>
                   </div>
+                  {request.reviewWarnings.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-[12px] font-semibold text-amber-900">결재 전 확인사항 {request.reviewWarnings.length}건</p>
+                      <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-4 text-amber-800">
+                        {request.reviewWarnings.map((warning) => (
+                          <li key={warning.code}>{warning.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   <p className="text-[12px] leading-5 text-slate-600">승인하면 JVM의 최신 revision·시트 고정본 검증을 다시 통과한 뒤 월이 잠깁니다.</p>
                 </div>
                 <div className="flex shrink-0 flex-col gap-2 lg:w-[132px]">

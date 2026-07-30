@@ -942,6 +942,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (!targetMonth.isBefore(YearMonth.from(today))) {
             throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
         }
+        requireMonthCloseApproval(actor, projectId, request.yearMonth());
 
         List<CashflowSheetLabApplyRequest.Cell> cells = CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells());
         CloseCashflowMonthRequest.requireHumanReviewed(request.humanReviewed());
@@ -2319,6 +2320,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "The pinned cashflow sheet snapshot changed or does not contain this month. Refresh it before closing."
             );
         }
+        if (!text(mirror.get("sourceRevision"), "").equals(text(mirror.get("appliedSourceRevision"), ""))) {
+            throw new WeeklyExpenseConflictException("Apply the pinned cashflow sheet before closing the month.");
+        }
         String capturedAt = text(mirror.get("capturedAt"), "");
         if (capturedAt.isBlank()) {
             throw new WeeklyExpenseConflictException("Pinned cashflow source time is missing. Refresh it before closing.");
@@ -2386,28 +2390,41 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             );
         }
         Map<String, Object> controls = nestedMap(sheetFacts.get("controlTotals"));
-        if (!bool(nestedMap(controls.get("deposit")).get("matches"))) {
+        if (!(nestedMap(controls.get("deposit")).get("matches") instanceof Boolean)) {
             throw new WeeklyExpenseConflictException(
-                "Pinned cashflow sheet deposit control total does not match the 60-week sum."
+                "Pinned cashflow sheet deposit control total is incomplete. Refresh the sheet before closing."
             );
         }
-        requireMatchingControlRows(controls.get("projection"), "Projection");
-        requireMatchingControlRows(controls.get("actual"), "Actual");
+        requireCompleteControlRows(controls.get("projection"), "Projection");
+        requireCompleteControlRows(controls.get("actual"), "Actual");
         requireMatchingDepositSource(sheetFacts.get("depositScheduleRows"), request);
     }
 
-    private void requireMatchingControlRows(Object value, String mode) {
+    private void requireCompleteControlRows(Object value, String mode) {
         if (!(value instanceof List<?> rows) || rows.size() != 19) {
             throw new WeeklyExpenseConflictException(
                 "Pinned cashflow sheet " + mode + " control totals are incomplete. Refresh the sheet before closing."
             );
         }
         for (Object row : rows) {
-            if (!bool(nestedMap(row).get("matches"))) {
+            if (!(nestedMap(row).get("matches") instanceof Boolean)) {
                 throw new WeeklyExpenseConflictException(
-                    "Pinned cashflow sheet " + mode + " control total does not match the 60-week sum."
+                    "Pinned cashflow sheet " + mode + " control totals are incomplete. Refresh the sheet before closing."
                 );
             }
+        }
+    }
+
+    private void requireMonthCloseApproval(TrustedActorContext actor, String projectId, String yearMonth) {
+        Map<String, Object> approval = data(get(db.document(
+            "orgs/" + actor.tenantId() + "/cashflow_month_close_requests/" + projectId + "-" + yearMonth
+        )));
+        if (!"APPROVING".equals(text(approval.get("status"), ""))
+            || !projectId.equals(text(approval.get("projectId"), ""))
+            || !yearMonth.equals(text(approval.get("yearMonth"), ""))
+            || !actor.id().equals(text(approval.get("approverUid"), ""))
+            || !actor.id().equals(text(approval.get("reviewedByUid"), ""))) {
+            throw new WeeklyExpenseConflictException("Cashflow month close requires designated approver approval.");
         }
     }
 

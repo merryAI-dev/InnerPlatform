@@ -25,5 +25,6 @@ describe('AdminApprovalPage shell contract', () => {
     expect(monthlySource).toContain("decision: action.decision");
     expect(monthlySource).toContain('반려 사유 (필수)');
     expect(monthlySource).toContain('월 결산 승인 대기 항목이 없습니다');
+    expect(monthlySource).toContain('결재 전 확인사항');
   });
 });

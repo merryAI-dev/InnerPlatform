@@ -165,6 +165,7 @@ function cashflowMonthCloseRequestView(record) {
     reviewedByUid: record.reviewedByUid || null,
     reviewedAt: record.reviewedAt || null,
     decisionReason: record.decisionReason || null,
+    reviewWarnings: Array.isArray(record.reviewWarnings) ? record.reviewWarnings : [],
   };
 }
 
@@ -1404,25 +1405,40 @@ function sheetControlBlockers(sheetFacts) {
       code: 'SHEET_CONTROL_TOTAL_INCOMPLETE',
       message: 'Projection/Actual BO control total이 불완전합니다. 시트값을 다시 불러와 주세요.',
     });
+  } else if (
+    typeof controls?.deposit?.matches !== 'boolean'
+    || rows.some((row) => typeof row?.matches !== 'boolean')
+  ) {
+    blockers.push({
+      code: 'SHEET_CONTROL_TOTAL_INVALID',
+      message: 'Projection/Actual BO control total 검산값이 올바르지 않습니다. 시트값을 다시 불러와 주세요.',
+    });
   }
+  return blockers;
+}
+
+function sheetControlWarnings(sheetFacts) {
+  const controls = objectValue(sheetFacts?.controlTotals);
+  const rows = [
+    ...(Array.isArray(controls?.projection) ? controls.projection : []),
+    ...(Array.isArray(controls?.actual) ? controls.actual : []),
+  ];
   const comparableRows = rows.filter((row) => typeof row?.matches === 'boolean');
   const depositComparable = typeof controls?.deposit?.matches === 'boolean';
-  if ((depositComparable && controls.deposit.matches !== true) || comparableRows.some((row) => row.matches !== true)) {
-    blockers.push({
+  return (depositComparable && controls.deposit.matches !== true) || comparableRows.some((row) => row.matches !== true)
+    ? [{
       code: 'SHEET_CONTROL_TOTAL_MISMATCH',
       message: '전체 주차 합계와 시트 BO control total이 다릅니다.',
       details: {
         deposit: controls?.deposit || null,
         rows: rows.filter((row) => row?.matches !== true),
       },
-    });
-  }
-  return blockers;
+    }]
+    : [];
 }
 
 function monthSheetCalculationBlockers(sheetFacts, yearMonth) {
-  if (!Array.isArray(sheetFacts?.weeklyCalculationChecks)) return [];
-  const checks = sheetFacts.weeklyCalculationChecks
+  const checks = (Array.isArray(sheetFacts?.weeklyCalculationChecks) ? sheetFacts.weeklyCalculationChecks : [])
     .filter((check) => readOptionalText(check?.yearMonth) === yearMonth);
   if (checks.length !== 10) {
     return [{
@@ -1438,12 +1454,33 @@ function monthSheetCalculationBlockers(sheetFacts, yearMonth) {
       details: invalid.map((check) => ({ mode: check.mode, weekNo: check.weekNo, sourceCells: check.sourceCells })),
     }];
   }
+  return [];
+}
+
+function monthSheetCalculationWarnings(sheetFacts, yearMonth) {
+  const checks = Array.isArray(sheetFacts?.weeklyCalculationChecks)
+    ? sheetFacts.weeklyCalculationChecks.filter((check) => readOptionalText(check?.yearMonth) === yearMonth)
+    : [];
   const mismatches = checks.filter((check) => Object.values(check?.matches || {}).some((match) => match === false));
   return mismatches.length === 0 ? [] : [{
     code: 'SHEET_CALCULATION_MISMATCH',
     message: '월 결산 대상의 시트 합계 또는 잔액이 항목 합계와 다릅니다.',
     details: mismatches.map((check) => ({ mode: check.mode, weekNo: check.weekNo, matches: check.matches, sourceCells: check.sourceCells })),
   }];
+}
+
+function managementReviewWarnings(checks) {
+  return (Array.isArray(checks) ? checks : [])
+    .filter((check) => readOptionalText(check?.status).toUpperCase() !== 'OK')
+    .map((check) => ({
+      code: `MANAGEMENT_CHECK_${readOptionalText(check.id).replaceAll('-', '_').toUpperCase()}`,
+      message: readOptionalText(check.title),
+      details: {
+        status: readOptionalText(check.status),
+        detail: readOptionalText(check.detail),
+        findings: Array.isArray(check.findings) ? check.findings : [],
+      },
+    }));
 }
 
 function sourceDepositRows(sheetFacts, yearMonth) {
@@ -1468,7 +1505,7 @@ function matchingDepositSchedule(sourceRows, draftRows) {
 
 function assertCloseableSheetFacts(mirror, yearMonth, closeInput) {
   const facts = objectValue(mirror?.sheetFacts);
-  const blockers = sheetControlBlockers(facts);
+  const blockers = [...sheetControlBlockers(facts), ...monthSheetCalculationBlockers(facts, yearMonth)];
   if (blockers.length > 0) {
     throw createHttpError(409, blockers[0].message, blockers[0].code.toLowerCase());
   }
@@ -1762,7 +1799,12 @@ async function composeCashflowMonthDashboard({ db, req, projectId, yearMonth, cl
     appliedTargetRevision: readOptionalText(mirror?.appliedTargetRevision),
     capturedAt: readOptionalText(mirror?.capturedAt),
   };
-  const warnings = closedSnapshot ? [] : projectSheetWarnings(project, sheetFacts?.metadata);
+  const warnings = closedSnapshot ? [] : [
+    ...projectSheetWarnings(project, sheetFacts?.metadata),
+    ...sheetControlWarnings(sheetFacts),
+    ...monthSheetCalculationWarnings(sheetFacts, yearMonth),
+    ...managementReviewWarnings(managementChecks),
+  ];
   if (legacyEvidenceOnly) {
     warnings.push({
       code: 'LEGACY_CLOSE_EVIDENCE_LIMITED',
@@ -1869,9 +1911,15 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   ) {
     throw createHttpError(409, 'The pinned cashflow source changed. Refresh it before closing.', 'cashflow_month_close_source_conflict');
   }
+  if (readOptionalText(mirror.appliedSourceRevision) !== readOptionalText(mirror.sourceRevision)) {
+    throw createHttpError(409, '불러온 값을 MYSCube 시트에 반영해 주세요.', 'cashflow_month_close_source_not_applied');
+  }
   assertCloseableSheetFacts(mirror, yearMonth, closeInput);
   const project = projectSnap.exists ? projectSnap.data() || {} : {};
   const normalizedCells = normalizeMonthCloseCells(closeInput.cells, yearMonth);
+  if (!completeMonthCloseCells(normalizedCells)) {
+    throw createHttpError(409, '월 결산 대상 160개 캐시플로우 값을 다시 확인해 주세요.', 'cashflow_month_close_cells_incomplete');
+  }
   const managementChecks = buildCashflowManagementChecks({
     project,
     cashflow,
@@ -1888,23 +1936,38 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   if (!completeManagementConfirmations(closeInput.managementConfirmations)) {
     throw createHttpError(409, '주요 관리 항목 4개를 모두 확인해 주세요.', 'cashflow_management_confirmations_incomplete');
   }
+  if (!completeMonthCloseConfirmations(closeInput.confirmations)) {
+    throw createHttpError(409, '월 결산 대상 160개 항목을 모두 확인해 주세요.', 'cashflow_month_close_confirmations_incomplete');
+  }
   const deadlineSummary = await readCashflowDeadlineSummary({ db, tenantId, projectId, comparisonBoundary });
 
   return {
-    idempotencyKey: requested.idempotencyKey,
-    yearMonth,
-    expectedRevision,
-    expectedDraftRevision: 0,
-    humanReviewed: true,
-    sourceRevision: closeInput.sourceRevision,
-    targetRevision: closeInput.targetRevision,
-    depositScheduleRows: closeInput.depositScheduleRows,
-    cells: closeInput.cells,
-    confirmations: closeInput.confirmations,
-    managementChecks,
-    managementConfirmations: [...validManagementConfirmations(closeInput.managementConfirmations).values()],
-    openingBalances,
-    deadlineSummary,
+    closeBody: {
+      idempotencyKey: requested.idempotencyKey,
+      yearMonth,
+      expectedRevision,
+      expectedDraftRevision: 0,
+      humanReviewed: true,
+      sourceRevision: closeInput.sourceRevision,
+      targetRevision: closeInput.targetRevision,
+      depositScheduleRows: closeInput.depositScheduleRows,
+      cells: normalizedCells,
+      confirmations: closeInput.confirmations,
+      managementChecks,
+      managementConfirmations: [...validManagementConfirmations(closeInput.managementConfirmations).values()],
+      openingBalances,
+      deadlineSummary: {
+        trackingStartedAt: deadlineSummary.trackingStartedAt,
+        missedCount: deadlineSummary.missedCount,
+        completedCount: deadlineSummary.completedCount,
+        current: deadlineSummary.current,
+      },
+    },
+    reviewWarnings: [
+      ...sheetControlWarnings(mirror.sheetFacts),
+      ...monthSheetCalculationWarnings(mirror.sheetFacts, yearMonth),
+      ...managementReviewWarnings(managementChecks),
+    ],
   };
 }
 
@@ -2454,7 +2517,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(502, '월 결산 자료 일부가 도착하지 않았습니다. 잠시 후 다시 시도해 주세요.', 'jvm_weekly_response_invalid');
       }
-      const closeBody = await composeCashflowMonthCloseBody({
+      const { closeBody, reviewWarnings } = await composeCashflowMonthCloseBody({
         db,
         req: closeReq,
         projectId: rawProjectId,
@@ -2479,6 +2542,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         projectId,
         rawProjectId,
         closeBody,
+        reviewWarnings,
         publicationFingerprint: publicationAfter.fingerprint,
         routeDeadlineAtMs,
       };
@@ -2766,6 +2830,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             createIdempotencyKey: req.context.idempotencyKey,
             payloadFingerprint,
             requestPayload,
+            reviewWarnings: prepared.reviewWarnings,
             reviewedByUid: null,
             reviewedAt: null,
             decisionReason: null,
@@ -2802,6 +2867,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         createIdempotencyKey: req.context.idempotencyKey,
         payloadFingerprint,
         requestPayload,
+        reviewWarnings: prepared.reviewWarnings,
       };
       transaction.set(requestRef, storedRecord);
       transaction.set(
