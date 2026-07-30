@@ -594,6 +594,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('combines explicit sheet refresh and JVM month-close audit records for the activity timeline', async () => {
+    const activityQueries = [];
     const eventsByCollection = {
       cashflow_sheet_refresh_runs: [{
         id: 'refresh-1', projectId: 'project-a', idempotencyKey: 'refresh-key', status: 'COMPLETED',
@@ -628,11 +629,22 @@ describe('JVM weekly API BFF proxy', () => {
     };
     const db = {
       collection: (path) => ({
-        where: () => ({
-          limit: () => ({
-            get: async () => ({ docs: (eventsByCollection[path.split('/').at(-1)] || []).map((data) => ({ id: data.id, data: () => data })) }),
-          }),
-        }),
+        where: () => {
+          const query = { collectionId: path.split('/').at(-1), orderBy: null, limit: null };
+          activityQueries.push(query);
+          const chain = {
+            orderBy: (field, direction) => {
+              query.orderBy = [field, direction];
+              return chain;
+            },
+            limit: (limit) => {
+              query.limit = limit;
+              return chain;
+            },
+            get: async () => ({ docs: (eventsByCollection[query.collectionId] || []).map((data) => ({ id: data.id, data: () => data })) }),
+          };
+          return chain;
+        },
       }),
     };
     const { app } = createApp(vi.fn(), createIdempotencyService(), {}, { env: stageEnv, db });
@@ -651,6 +663,10 @@ describe('JVM weekly API BFF proxy', () => {
           { type: 'sheet_refresh', sheetName: 'cashflow(사용내역 연동)', actorName: '변민욱(보람)', actorEmail: 'pm@example.com' },
         ]);
       });
+    expect(activityQueries.find((query) => query.collectionId === 'weekly_api_audit_events')).toMatchObject({
+      orderBy: ['createdAt', 'desc'],
+      limit: 50,
+    });
   });
 
   it('composes the open-month dashboard from the pinned sheet, project, and JVM state without a private draft', async () => {

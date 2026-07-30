@@ -325,10 +325,12 @@ function parseAuditMetadata(value) {
 
 async function readCashflowActivityDocuments(db, tenantId, collectionId, projectId) {
   if (!db?.collection) return [];
-  const snap = await db.collection(`orgs/${tenantId}/${collectionId}`)
-    .where('projectId', '==', projectId)
-    .limit(200)
-    .get();
+  let query = db.collection(`orgs/${tenantId}/${collectionId}`)
+    .where('projectId', '==', projectId);
+  query = collectionId === 'weekly_api_audit_events'
+    ? query.orderBy('createdAt', 'desc').limit(50)
+    : query.limit(200);
+  const snap = await query.get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
 }
 
