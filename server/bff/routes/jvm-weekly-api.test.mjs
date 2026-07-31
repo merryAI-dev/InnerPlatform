@@ -41,7 +41,7 @@ const managementConfirmations = [
 
 const emptyManagementChecks = [
   { id: 'labor-transfer', status: 'WARNING', title: 'MYSC 인건비 이관', detail: '2026-06 3주차 인건비 미입력' },
-  { id: 'profit-vat-after-deposit', status: 'REVIEW_REQUIRED', title: '입금 후 MYSC 수익·매출부가세 이관', detail: '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.' },
+  { id: 'profit-vat-after-deposit', status: 'REVIEW_REQUIRED', title: '입금 후 MYSC 수익·매출부가세 이관(해당 주, 차주)', detail: '실제 입금 확인 건이 없습니다. 해당 없음 여부를 사람이 확인해 주세요.' },
   { id: 'negative-projection-balance', status: 'OK', title: 'Projection 잔액 마이너스', detail: 'Projection 누적 잔액이 0원 이상입니다.' },
   { id: 'future-prepay-over-million', status: 'OK', title: '금주 이후 선입금 요청 100만원 초과', detail: '금주 이후 100만원 초과 요청이 없습니다.' },
 ];
@@ -106,10 +106,24 @@ function matchingControlRows(startRow, matches = true) {
 }
 
 function memoryTransaction(documents) {
-  return async (callback) => callback({
-    get: async (ref) => ref.get(),
-    set: async (ref, value, options) => ref.set(value, options),
-  });
+  return async (callback) => {
+    const staged = new Map();
+    const result = await callback({
+      get: async (ref) => {
+        if (!ref.path) return ref.get();
+        const value = staged.has(ref.path) ? staged.get(ref.path) : documents.get(ref.path);
+        return { exists: value !== undefined, data: () => value };
+      },
+      set: (ref, value, options) => {
+        ref.beforeTransactionSet?.();
+        staged.set(ref.path, options?.merge
+          ? { ...(staged.get(ref.path) || documents.get(ref.path) || {}), ...value }
+          : value);
+      },
+    });
+    for (const [path, value] of staged) documents.set(path, value);
+    return result;
+  };
 }
 
 function memoryDoc(documents, path) {
@@ -1426,7 +1440,7 @@ describe('JVM weekly API BFF proxy', () => {
       }));
   });
 
-  it('passes updateResult and JVM 15-week missing-cell evidence without recalculating it', async () => {
+  it('passes updateResult and JVM 16-week missing-cell evidence without recalculating it', async () => {
     const fetchImpl = vi.fn(async (_url, init) => {
       const body = JSON.parse(init.body);
       expect(body.updateResult).toBe('NO_CHANGES');
@@ -1437,8 +1451,8 @@ describe('JVM weekly API BFF proxy', () => {
           code: 'cashflow_projection_window_incomplete',
           message: 'Projection window is incomplete.',
           details: {
-            requiredWeekCount: 15,
-            requiredCellCount: 240,
+            requiredWeekCount: 16,
+            requiredCellCount: 256,
             missingCells: [{ yearMonth: '2026-05', weekNo: 1, lineId: 'SALES_IN' }],
           },
         }),
@@ -1455,7 +1469,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body).toMatchObject({
         code: 'cashflow_projection_window_incomplete',
         details: {
-          requiredWeekCount: 15, requiredCellCount: 240,
+          requiredWeekCount: 16, requiredCellCount: 256,
           missingCells: [{ yearMonth: '2026-05', weekNo: 1, lineId: 'SALES_IN' }],
         },
       }));
@@ -1710,6 +1724,35 @@ describe('JVM weekly API BFF proxy', () => {
       '2026-07 1주차에 매출입금이 있으나 [MYSC 수익·매출부가세] 계획이 Projection에 없습니다.',
       '2026-07 3주차에 매출입금이 있으나 [매출부가세] 계획이 Projection에 없습니다.',
     ]);
+  });
+
+  it('does not warn when profit and sales VAT are planned in either the deposit week or the next week', () => {
+    const checks = buildCashflowManagementChecks({
+      cashflow: {
+        readModel: {
+          months: [{
+            yearMonth: '2026-07',
+            projection: { weeks: [
+              { weekNo: 1, amounts: { SALES_IN: 1_000, MYSC_PROFIT_OUT: 100, SALES_VAT_OUT: 10 } },
+              { weekNo: 2, amounts: { SALES_IN: 2_000 } },
+              { weekNo: 3, amounts: { MYSC_PROFIT_OUT: 200, SALES_VAT_OUT: 20 } },
+            ] },
+            actual: { weeks: [] },
+          }],
+        },
+      },
+      cells: [],
+      yearMonth: '2026-07',
+      depositScheduleRows: [],
+      comparisonBoundary: { asOfWeek: { yearMonth: '2026-07', weekNo: 3 } },
+    });
+
+    const transferCheck = checks.find((check) => check.id === 'profit-vat-after-deposit');
+    expect(transferCheck).toMatchObject({
+      status: 'OK',
+      title: '입금 후 MYSC 수익·매출부가세 이관(해당 주, 차주)',
+    });
+    expect(transferCheck).not.toHaveProperty('findings');
   });
 
   it('monitors labor and post-deposit transfers across the full pinned project period', () => {
@@ -3931,8 +3974,15 @@ describe('JVM weekly API BFF proxy', () => {
     expect(closeBody.cells).toEqual(snapshotCells);
   });
 
-  it('persists and approves a verified 44-month cumulative v2 manifest without embedding shards in the header', async () => {
+  it('rejects, resubmits, and replays a verified 44-month cumulative v2 request without live evidence', async () => {
     const source = fullMonthCloseSource();
+    const runTransaction = source.db.runTransaction;
+    let transactionTail = Promise.resolve();
+    source.db.runTransaction = (callback) => {
+      const result = transactionTail.then(() => runTransaction(callback));
+      transactionTail = result.then(() => undefined, () => undefined);
+      return result;
+    };
     source.closeInput.yearMonth = '2026-08';
     const mirror = source.documents.get('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
     mirror.yearMonths = ['2026-08'];
@@ -3945,8 +3995,10 @@ describe('JVM weekly API BFF proxy', () => {
     }
     const cashflow = { projectId: 'project-a', projection: [], actual: [], readModel: { months } };
     let closedMonthClose = null;
+    let dashboardSourceUnavailable = false;
     const fetchImpl = vi.fn(async (url, init) => {
       if (url.includes('/dashboard-source')) {
+        if (dashboardSourceUnavailable) throw new Error('live dashboard source drifted after persistence');
         return {
           ok: true,
           status: 200,
@@ -3957,10 +4009,11 @@ describe('JVM weekly API BFF proxy', () => {
         };
       }
       if (init.method === 'POST') {
+        const closeBody = JSON.parse(init.body);
         closedMonthClose = {
-          ok: true, projectId: 'project-a', requestId: 'project-a-2026-08', requestRevision: 1,
-          manifestHash: JSON.parse(init.body).manifestHash, yearMonth: '2026-08', status: 'CLOSED',
-          revision: 1, rootHash: JSON.parse(init.body).manifestHash, headRevision: 44, auditId: 'audit-cumulative-1',
+          ok: true, projectId: 'project-a', requestId: 'project-a-2026-08', requestRevision: closeBody.requestRevision,
+          manifestHash: closeBody.manifestHash, yearMonth: '2026-08', status: 'CLOSED',
+          revision: 1, rootHash: closeBody.manifestHash, headRevision: 44, auditId: `audit-cumulative-${closeBody.requestRevision}`,
         };
         return { ok: true, status: 200, text: async () => JSON.stringify(closedMonthClose) };
       }
@@ -3973,12 +4026,11 @@ describe('JVM weekly API BFF proxy', () => {
       if (!path.includes('/cashflow_month_close_request_months/') || !path.endsWith('-2024-01')) return ref;
       return {
         ...ref,
-        set: async (...args) => {
+        beforeTransactionSet: () => {
           if (failShardOnce) {
             failShardOnce = false;
             throw new Error('injected shard write failure');
           }
-          return ref.set(...args);
         },
       };
     };
@@ -3998,11 +4050,29 @@ describe('JVM weekly API BFF proxy', () => {
       .set('idempotency-key', 'cumulative-v2-create')
       .send(createPayload)
       .expect(500);
-    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08').status).toBe('BUILDING');
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08')).toBeUndefined();
+    expect([...source.documents.keys()].filter((path) => path.includes('/cashflow_month_close_request_months/'))).toHaveLength(0);
     await request(requester)
       .get('/api/v1/cashflow/project-a/month-close/requests/current?yearMonth=2026-08')
       .expect(200)
       .expect((response) => expect(response.body.request).toBeNull());
+    const serializedRunTransaction = source.db.runTransaction;
+    const retryConflict = new Error('simulated Firestore transaction retry');
+    let retryOnce = true;
+    source.db.runTransaction = async (callback) => {
+      if (retryOnce) {
+        retryOnce = false;
+        try {
+          await serializedRunTransaction(async (transaction) => {
+            await callback(transaction);
+            throw retryConflict;
+          });
+        } catch (error) {
+          if (error !== retryConflict) throw error;
+        }
+      }
+      return serializedRunTransaction(callback);
+    };
     const created = await request(requester)
       .post('/api/v1/cashflow/project-a/month-close/requests')
       .set('idempotency-key', 'cumulative-v2-create')
@@ -4026,6 +4096,9 @@ describe('JVM weekly API BFF proxy', () => {
     expect(shardDocs).toHaveLength(44);
     expect(shardDocs.every(([, shard]) => shard.cells.length === 160)).toBe(true);
     expect(shardDocs.reduce((count, [, shard]) => count + shard.cells.length, 0)).toBe(7040);
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r1-requested')).toMatchObject({
+      action: 'REQUESTED', revision: 1, actorUid: 'pm-1', manifestHash: created.body.manifestHash,
+    });
 
     const firstShard = shardDocs[0][1];
     firstShard.cells[0].amount = 1;
@@ -4051,25 +4124,131 @@ describe('JVM weekly API BFF proxy', () => {
     const approver = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'finance-1', actorRole: 'finance',
     }, { env: stageEnv, db: source.db, now: () => new Date('2026-09-10T00:00:00.000Z') }).app;
-    await request(approver)
+    const r1Shards = new Map(shardDocs.map(([path, shard]) => [path, JSON.stringify(shard)]));
+    const rejectedResponse = await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
-      .set('idempotency-key', 'cumulative-v2-approve')
-      .send({ decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
+      .set('idempotency-key', 'cumulative-v2-reject')
+      .send({ decision: 'REJECT', reason: '누적 근거를 다시 확인해 주세요.', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
       .expect(200)
       .expect((response) => expect(response.body.request).toMatchObject({
-        status: 'APPROVED', revision: 1, manifestHash: created.body.manifestHash,
+        status: 'REJECTED', revision: 1, manifestHash: created.body.manifestHash,
+        decisionReason: '누적 근거를 다시 확인해 주세요.',
       }));
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r1-rejected')).toMatchObject({
+      action: 'REJECTED', revision: 1, actorUid: 'finance-1', reason: '누적 근거를 다시 확인해 주세요.',
+    });
+    const rejectedReplayBody = {
+      decision: 'REJECT', reason: '누적 근거를 다시 확인해 주세요.',
+      expectedRevision: 1, expectedManifestHash: created.body.manifestHash,
+    };
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-reject')
+      .send(rejectedReplayBody)
+      .expect(200)
+      .expect((response) => expect(response.body).toEqual(rejectedResponse.body));
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-reject-duplicate')
+      .send(rejectedReplayBody)
+      .expect(409);
+    await request(requester)
+      .get('/api/v1/cashflow/project-a/month-close/requests/current?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => expect(response.body.request).toMatchObject({
+        status: 'REJECTED', revision: 1, decisionReason: '누적 근거를 다시 확인해 주세요.',
+      }));
+
+    const resubmitAttempts = await Promise.all(['cumulative-v2-resubmit-a', 'cumulative-v2-resubmit-b'].map((key) => (
+      request(requester)
+        .post('/api/v1/cashflow/project-a/month-close/requests')
+        .set('idempotency-key', key)
+        .send(createPayload)
+    )));
+    expect(resubmitAttempts.map(({ status }) => status).sort()).toEqual([202, 409]);
+    expect(resubmitAttempts.find(({ status }) => status === 409)?.body.code).toBe('cashflow_month_close_request_conflict');
+    const resubmitted = resubmitAttempts.find(({ status }) => status === 202);
+    const winningResubmitKey = resubmitAttempts[0].status === 202 ? 'cumulative-v2-resubmit-a' : 'cumulative-v2-resubmit-b';
+    expect(resubmitted.body).toMatchObject({ status: 'PENDING', revision: 2, monthCount: 44 });
+    expect(resubmitted.body.manifestHash).not.toBe(created.body.manifestHash);
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-resubmitted')).toMatchObject({
+      action: 'RESUBMITTED', revision: 2, actorUid: 'pm-1', manifestHash: resubmitted.body.manifestHash,
+    });
+    expect([...r1Shards].every(([path, json]) => JSON.stringify(source.documents.get(path)) === json)).toBe(true);
+    expect([...source.documents.keys()].filter((path) => path.includes('/cashflow_month_close_request_months/project-a-2026-08-r2-'))).toHaveLength(44);
+    const dashboardSourceCallCount = fetchImpl.mock.calls.filter(([url]) => url.includes('/dashboard-source')).length;
+    dashboardSourceUnavailable = true;
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', winningResubmitKey)
+      .send(createPayload)
+      .expect(202)
+      .expect((response) => expect(response.body).toMatchObject({ status: 'PENDING', revision: 2, manifestHash: resubmitted.body.manifestHash }));
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/dashboard-source'))).toHaveLength(dashboardSourceCallCount);
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', winningResubmitKey)
+      .send({ ...createPayload, closeInput: undefined })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_conflict'));
+    await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', winningResubmitKey)
+      .send({ ...createPayload, expectedOpeningBalances: { ...createPayload.expectedOpeningBalances, projection: { amount: 1 } } })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_conflict'));
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/dashboard-source'))).toHaveLength(dashboardSourceCallCount);
+    dashboardSourceUnavailable = false;
+    await request(approver)
+      .get('/api/v1/cashflow/month-close/requests/pending')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.count).toBe(1);
+        expect(response.body.items).toHaveLength(1);
+        expect(response.body.items[0]).toMatchObject({ requestId: created.body.requestId, revision: 2 });
+      });
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-stale-approve')
+      .send({ decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_manifest_invalid'));
+    expect(fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST')).toHaveLength(0);
+
+    const approvedResponse = await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-approve')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(200)
+      .expect((response) => expect(response.body.request).toMatchObject({
+        status: 'APPROVED', revision: 2, manifestHash: resubmitted.body.manifestHash,
+      }));
+    expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-approved')).toMatchObject({
+      action: 'APPROVED', revision: 2, actorUid: 'finance-1', manifestHash: resubmitted.body.manifestHash,
+    });
     const approvalBody = JSON.parse(fetchImpl.mock.calls.find(
       ([url, init]) => url.endsWith('/month-close') && init.method === 'POST',
     )[1].body);
     expect(approvalBody).toEqual({
-      idempotencyKey: 'cashflow-month-close-approval:project-a-2026-08:r1',
-      requestId: 'project-a-2026-08', requestRevision: 1, manifestHash: created.body.manifestHash,
+      idempotencyKey: 'cashflow-month-close-approval:project-a-2026-08:r2',
+      requestId: 'project-a-2026-08', requestRevision: 2, manifestHash: resubmitted.body.manifestHash,
       yearMonth: '2026-08', expectedRevision: 0,
     });
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     const closePostCount = () => fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST').length;
     expect(closePostCount()).toBe(1);
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-approve')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(200)
+      .expect((response) => expect(response.body).toEqual(approvedResponse.body));
+    expect(closePostCount()).toBe(1);
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'cumulative-v2-approve-duplicate')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(409);
     for (const status of ['APPROVING', 'UNCERTAIN']) {
       source.documents.set(requestPath, {
         ...source.documents.get(requestPath),
@@ -4077,22 +4256,22 @@ describe('JVM weekly API BFF proxy', () => {
         reviewedByUid: 'finance-1',
         reviewedAt: '2026-09-10T00:00:00.000Z',
         reviewIdempotencyKey: `prior-${status.toLowerCase()}`,
-        approvalId: 'cashflow-month-close:project-a-2026-08:r1',
-        operationId: 'cashflow-month-close:project-a-2026-08:r1',
+        approvalId: 'cashflow-month-close:project-a-2026-08:r2',
+        operationId: 'cashflow-month-close:project-a-2026-08:r2',
       });
       await request(approver)
         .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
         .set('idempotency-key', `resume-${status.toLowerCase()}`)
-        .send({ decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
+        .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
         .expect(200)
-        .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 1 }));
+        .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 }));
       expect(closePostCount()).toBe(1);
     }
     source.documents.set(requestPath, { ...source.documents.get(requestPath), status: 'UNCERTAIN' });
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
       .set('idempotency-key', 'unsafe-reject-after-approval-start')
-      .send({ decision: 'REJECT', reason: '취소', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
+      .send({ decision: 'REJECT', reason: '취소', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(409);
   });
 

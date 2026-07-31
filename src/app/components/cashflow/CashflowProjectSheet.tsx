@@ -836,10 +836,7 @@ export function CashflowProjectSheet({
         durationMs: Date.now() - startedAt,
         error,
       });
-      const serverMessage = resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.');
-      const message = serverMessage.includes('Cashflow weekly lock no longer matches')
-        ? '이미 완료한 주차의 값이 시트 반영으로 변경되었습니다. 해당 주차를 재오픈한 뒤 변경 내용을 확인하고 다시 완료해 주세요.'
-        : serverMessage;
+      const message = resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.');
       setWeeklyCompletionError(message);
       setWeeklyMissingCells(weeklyProjectionMissingCells(error));
       toast.error(message);
@@ -3172,7 +3169,7 @@ export function CashflowProjectSheet({
           <AlertDialogHeader>
             <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
             <AlertDialogDescription>
-              대상 {monthCloseResult?.dashboard?.deadlineSummary?.current?.yearMonth || yearMonth} {monthCloseResult?.dashboard?.deadlineSummary?.current?.weekNo || '-'}주차부터 향후 15개 재무주차의 모든 Projection 항목이 작성되어 있어야 합니다.
+              대상 {monthCloseResult?.dashboard?.deadlineSummary?.current?.yearMonth || yearMonth} {monthCloseResult?.dashboard?.deadlineSummary?.current?.weekNo || '-'}주차와 그 이후 15개 재무주차(총 16주·256칸)의 모든 Projection 항목이 작성되어 있어야 합니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {weeklyCompletionError ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">{weeklyCompletionError}</div> : null}

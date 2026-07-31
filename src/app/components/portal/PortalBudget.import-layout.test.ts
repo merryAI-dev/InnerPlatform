@@ -22,6 +22,15 @@ describe('PortalBudget manual editing surface contract', () => {
     expect(codeBookSurface).not.toContain('<TabsTrigger value="csv"');
     expect(portalLayoutSource).toContain("{ to: '/portal/budget', icon: BarChart3, label: '예산총괄' }");
     expect(routesSource).toContain("{ path: 'budget', element: <S C={PortalBudget} /> }");
+    expect(portalBudgetSource).toContain('최종 수정예산');
+    expect(portalBudgetSource).not.toContain('>수정 예산<');
+    expect(portalBudgetSource).toContain('formatBudgetContractPeriod(myProject.contractStart, myProject.contractEnd)');
+    expect(portalBudgetSource).toContain("return '계약기간 미등록'");
+    expect(portalBudgetSource).not.toContain('badge={`${meta.year}년`}');
+    expect(portalBudgetSource).not.toContain('fmtPercent(r.ratio)');
+    expect(portalBudgetSource).not.toContain('fmtPercent(group.burnRate)');
+    expect(portalBudgetSource).not.toContain('fmtPercent(subItem.burnRate)');
+    expect(portalBudgetSource).not.toContain('fmtPercent(leaf.burnRate)');
   });
 
   it('keeps the adjacent admin summary editing description', () => {
