@@ -7,6 +7,11 @@ on:
         description: Deployment note for the release summary
         required: false
         type: string
+      promote_alias:
+        description: Promote the candidate to the canonical production alias
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
   group: inner-platform-production
@@ -41,6 +46,10 @@ jobs:
       BFF_MAINTENANCE_READ_ONLY: 'true'
       BFF_ALLOWED_ORIGINS: https://myscube.myscguard.app
       JVM_WEEKLY_AUTH_MODE: strict
+      JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_LIVE }}
+      JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
+      JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+      JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}
       GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: '{}'
       # Use a production-scoped secret name so a stale repository-level
       # VERCEL_TOKEN cannot be confused with the Production environment token.
@@ -111,6 +120,10 @@ jobs:
           test -n "${VERCEL_ORG_ID}" || { echo "Missing secret: VERCEL_ORG_ID" >&2; exit 1; }
           test -n "${VERCEL_PROJECT_ID}" || { echo "Missing secret: VERCEL_PROJECT_ID" >&2; exit 1; }
           test -n "${VERCEL_AUTOMATION_BYPASS_SECRET}" || { echo "Missing secret: VERCEL_AUTOMATION_BYPASS_SECRET" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_API_BASE_URL}" || { echo "Missing Production variable: JVM_WEEKLY_API_BASE_URL_LIVE" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" || { echo "Missing Production variable: JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_INTERNAL_API_TOKEN}" || { echo "Missing Production secret: JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE" >&2; exit 1; }
+          test -n "${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" || { echo "Missing Production secret: JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE" >&2; exit 1; }
           npx --yes "${VERCEL_CLI_PACKAGE}" whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects >/dev/null
 
       - name: Deploy to Vercel production
@@ -135,6 +148,10 @@ jobs:
             --env BFF_LIVE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE}" \
+            --env JVM_WEEKLY_API_BASE_URL="${JVM_WEEKLY_API_BASE_URL}" \
+            --env JVM_WEEKLY_API_ID_TOKEN_AUDIENCE="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}" \
+            --env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            --env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}" \
             --env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}" \
             --env SLACK_ALERT_WEBHOOK_URL= \
             --env SLACK_ALERT_BOT_TOKEN= \
@@ -201,6 +218,7 @@ jobs:
           NODE
 
       - name: Promote canonical production alias
+        if: inputs.promote_alias
         env:
           DEPLOYMENT_HOST: ${{ steps.vercel_deploy.outputs.deployment_host }}
         run: |
@@ -212,6 +230,7 @@ jobs:
             --scope merryai-devs-projects
 
       - name: Verify canonical production alias
+        if: inputs.promote_alias
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
         run: node deploy-prod-align.mjs --verify-only "${DEPLOYMENT_URL}"
