@@ -12,6 +12,9 @@ describe('JVM production deploy workflow', () => {
     expect(workflow.indexOf('/month-close/dashboard-source')).toBeGreaterThan(workflow.indexOf('--no-traffic'));
     expect(workflow.indexOf('update-traffic')).toBeGreaterThan(workflow.indexOf('/month-close/dashboard-source'));
     expect(workflow).toContain('workload_identity_provider');
+    expect(workflow).toContain('token_format: id_token');
+    expect(workflow).toContain('ID_TOKEN: ${{ steps.auth.outputs.id_token }}');
+    expect(workflow).not.toContain('gcloud auth print-identity-token');
     expect(workflow).toContain('actions: read');
     expect(workflow).toContain("java-version: '21'");
     expect(workflow).not.toContain('service_account_key');
