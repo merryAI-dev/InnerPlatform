@@ -58,6 +58,9 @@ describe('production deployment workflow safety', () => {
   });
 
   it('promotes the canonical production alias before verifying it', () => {
+    expect(workflowText).toContain('promote_alias:');
+    expect(workflowText).toContain('default: true');
+    expect(workflowText.match(/if: inputs\.promote_alias/g)).toHaveLength(2);
     expect(workflowText).toContain('deployment_host="${deployment_url#https://}"');
     expect(workflowText).toContain('echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"');
     expect(workflowText).toContain('Promote canonical production alias');
@@ -84,6 +87,14 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('--env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
+    expect(workflowText).toContain('JVM_WEEKLY_API_BASE_URL: ${{ vars.JVM_WEEKLY_API_BASE_URL_LIVE }}');
+    expect(workflowText).toContain('JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}');
+    expect(workflowText).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}');
+    expect(workflowText).toContain('JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: ${{ secrets.JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON_LIVE }}');
+    expect(workflowText).toContain('--env JVM_WEEKLY_API_BASE_URL="${JVM_WEEKLY_API_BASE_URL}"');
+    expect(workflowText).toContain('--env JVM_WEEKLY_API_ID_TOKEN_AUDIENCE="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}"');
+    expect(workflowText).toContain('--env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}"');
+    expect(workflowText).toContain('--env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}"');
     expect(workflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
     expect(workflowText).toContain('--env SLACK_ALERT_WEBHOOK_URL=');
     expect(workflowText).toContain('--build-env VITE_FIRESTORE_CORE_ENABLED=false');
