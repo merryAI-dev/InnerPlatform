@@ -1889,6 +1889,12 @@ class FirestoreCashflowLeaseGuardTest {
             .anyMatch(path -> path.startsWith(
                 "orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1"
             ));
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weekly_update_completions/")))
+            .containsExactly("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3");
+        assertThat(fixture.documents.keySet().stream()
+            .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
+            .containsExactly("orgs/tenant-a/cashflow_weekly_update_completion_versions/project-a-2026-07-w3-r1");
     }
 
     @Test
@@ -1933,7 +1939,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void weeklyLockReadRejectsCanonicalLedgerDrift() {
+    void weeklyLockReadAndReplayAllowCanonicalLedgerDriftWithoutReopen() {
         Fixture fixture = fixture(activeMember(), Map.of());
         String path = "orgs/tenant-a/cashflow_weeks/project-a-2026-07-w3";
         fixture.documents.put(path, new LinkedHashMap<>(Map.of(
@@ -1955,14 +1961,79 @@ class FirestoreCashflowLeaseGuardTest {
             )
         ));
         Map<String, Object> drifted = new LinkedHashMap<>(fixture.documents.get(path));
-        drifted.put("projection", Map.of("SALES_IN", 999L));
+        Map<String, Object> driftedProjection = new LinkedHashMap<>((Map<String, Object>) drifted.get("projection"));
+        driftedProjection.put("SALES_IN", 999L);
+        drifted.put("projection", driftedProjection);
         fixture.documents.put(path, drifted);
+
+        CashflowWeeklyUpdateCompletionResponse read = fixture.persistence.runCommandTransaction(() ->
+            service.readCashflowWeeklyUpdate(READ_ACTOR, "project-a", "2026-07", 3)
+        );
+        CashflowWeeklyUpdateCompletionResponse replay = fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-drift-replay", "2026-07", 3, "2026-07-16T10:00:00Z"
+                )
+            )
+        );
+
+        assertThat(read.status()).isEqualTo("LOCKED");
+        assertThat(replay.alreadyCompleted()).isTrue();
+        assertThat(replay.revision()).isEqualTo(1L);
+
+        String completionPath = "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3";
+        Map<String, Object> tamperedCompletion = new LinkedHashMap<>(fixture.documents.get(completionPath));
+        Map<String, Object> tamperedSnapshot = new LinkedHashMap<>((Map<String, Object>) tamperedCompletion.get("snapshot"));
+        tamperedSnapshot.put("projection", Map.of("SALES_IN", 777L));
+        tamperedCompletion.put("snapshot", tamperedSnapshot);
+        fixture.documents.put(completionPath, tamperedCompletion);
 
         assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
             service.readCashflowWeeklyUpdate(READ_ACTOR, "project-a", "2026-07", 3)
         ))
             .isInstanceOf(WeeklyExpenseConflictException.class)
-            .hasMessageContaining("canonical ledger");
+            .hasMessageContaining("snapshot integrity");
+    }
+
+    @Test
+    void lockedWeeklyReplayStillRejectsOneMissingCellInTheSixteenthFinanceWeek() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-07", 3);
+        WeeklyExpenseCommandService service = commandService(fixture.persistence);
+        fixture.persistence.runCommandTransaction(() -> service.completeCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new CompleteCashflowWeeklyUpdateRequest(
+                "weekly-window-lock", "2026-07", 3, "2026-07-16T09:00:00Z"
+            )
+        ));
+        String sixteenthWeekPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-10-w3";
+        Map<String, Object> sixteenthWeek = new LinkedHashMap<>(fixture.documents.get(sixteenthWeekPath));
+        Map<String, Object> projection = new LinkedHashMap<>((Map<String, Object>) sixteenthWeek.get("projection"));
+        projection.remove("SALES_IN");
+        sixteenthWeek.put("projection", projection);
+        fixture.documents.put(sixteenthWeekPath, sixteenthWeek);
+
+        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() ->
+            service.completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "weekly-window-replay", "2026-07", 3, "2026-07-16T10:00:00Z"
+                )
+            )
+        ));
+
+        assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
+        WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
+        assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
+        assertThat(incomplete.details())
+            .containsEntry("requiredWeekCount", 16)
+            .containsEntry("requiredCellCount", 256);
+        assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
+            .containsExactly(Map.of("yearMonth", "2026-10", "weekNo", 3, "lineId", "SALES_IN"));
     }
 
     @Test
@@ -2397,7 +2468,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void weeklyCompletionChecksFifteenWeeksAcrossYearBoundaryAndTreatsNullAsEmptyButZeroAsWritten() {
+    void weeklyCompletionChecksSixteenWeeksAcrossYearBoundaryAndTreatsNullAsEmptyButZeroAsWritten() {
         Fixture fixture = fixture(activeMember(), Map.of());
         putCompleteProjectionWindow(fixture, "2026-12", 4);
         String nullPath = "orgs/tenant-a/cashflow_weeks/project-a-2027-01-w2";
@@ -2416,6 +2487,9 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
         WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
         assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
+        assertThat(incomplete.details())
+            .containsEntry("requiredWeekCount", 16)
+            .containsEntry("requiredCellCount", 256);
         assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
             .contains(Map.of("yearMonth", "2027-01", "weekNo", 2, "lineId", "SALES_IN"));
 
@@ -3790,7 +3864,7 @@ class FirestoreCashflowLeaseGuardTest {
     private static void putCompleteProjectionWindow(Fixture fixture, String yearMonth, int weekNo) {
         java.time.YearMonth month = java.time.YearMonth.parse(yearMonth);
         int week = weekNo;
-        for (int index = 0; index < 15; index++) {
+        for (int index = 0; index < 16; index++) {
             String path = "orgs/tenant-a/cashflow_weeks/project-a-" + month + "-w" + week;
             Map<String, Object> document = new LinkedHashMap<>(fixture.documents.getOrDefault(path, Map.of()));
             Map<String, Object> projection = new LinkedHashMap<>((Map<String, Object>) document.getOrDefault("projection", Map.of()));

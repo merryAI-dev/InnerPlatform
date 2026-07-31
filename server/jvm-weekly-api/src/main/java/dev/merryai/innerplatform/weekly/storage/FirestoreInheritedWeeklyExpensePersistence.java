@@ -1198,10 +1198,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || weekNo != intValue(document.get("weekNo"), 0)) {
             throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
         }
-        DocumentSnapshot monthClose = get(db.document(monthlyClosePath(tenantId, projectId, yearMonth)));
-        boolean monthClosed = monthClose.exists()
-            && "CLOSED".equals(canonicalMonthStatus(data(monthClose), tenantId, projectId, yearMonth));
-        requireWeeklyCompletionIntegrity(tenantId, projectId, yearMonth, weekNo, document, !monthClosed);
+        requireWeeklyCompletionIntegrity(document);
         return toWeeklyCompletionRecord(projectId, yearMonth, weekNo, document, false);
     }
 
@@ -1382,6 +1379,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             "orgs/" + actor.tenantId() + "/cashflow_weekly_compliance_heads/" + projectId
         );
         DocumentSnapshot complianceHeadSnapshot = get(complianceHeadRef);
+        Map<String, Object> lockedCompletion = null;
         if (snapshot.exists()) {
             Map<String, Object> existing = data(snapshot);
             if (!projectId.equals(text(existing.get("projectId"), ""))
@@ -1390,15 +1388,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
             }
             if ("LOCKED".equals(text(existing.get("status"), ""))) {
-                requireWeeklyCompletionIntegrity(
-                    actor.tenantId(),
-                    projectId,
-                    request.yearMonth(),
-                    request.weekNo(),
-                    existing,
-                    true
-                );
-                return toWeeklyCompletionRecord(projectId, request.yearMonth(), request.weekNo(), existing, true);
+                requireWeeklyCompletionIntegrity(existing);
+                lockedCompletion = existing;
             }
         }
 
@@ -1410,7 +1401,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectWeeks.put(weekSnapshot.getId(), week);
         }
         List<Map<String, Object>> missingCells = new ArrayList<>();
-        for (CashflowWeekScope scope : consecutiveFinanceWeeks(request.yearMonth(), request.weekNo(), 15)) {
+        for (CashflowWeekScope scope : consecutiveFinanceWeeks(request.yearMonth(), request.weekNo(), 16)) {
             Map<String, Object> candidate = projectWeeks.getOrDefault(
                 cashflowWeekId(projectId, scope.yearMonth(), scope.weekNo()),
                 Map.of()
@@ -1429,12 +1420,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseEditLeaseException(
                 409,
                 "cashflow_projection_window_incomplete",
-                "대상 주차부터 15개 재무주차의 Projection 값을 모두 입력해 주세요.",
+                "대상 주차와 그 이후 15개 재무주차의 Projection 값을 모두 입력해 주세요.",
                 Map.of(
-                    "requiredWeekCount", 15,
-                    "requiredCellCount", 240,
+                    "requiredWeekCount", 16,
+                    "requiredCellCount", 256,
                     "missingCells", List.copyOf(missingCells)
                 )
+            );
+        }
+        if (lockedCompletion != null) {
+            return toWeeklyCompletionRecord(
+                projectId, request.yearMonth(), request.weekNo(), lockedCompletion, true
             );
         }
         for (Map.Entry<String, Map<String, Object>> entry : projectWeeks.entrySet()) {
@@ -3559,37 +3555,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
     }
 
-    private void requireWeeklyCompletionIntegrity(
-        String tenantId,
-        String projectId,
-        String yearMonth,
-        int weekNo,
-        Map<String, Object> completion,
-        boolean compareCurrentLedger
-    ) {
+    private void requireWeeklyCompletionIntegrity(Map<String, Object> completion) {
         if (!"LOCKED".equals(text(completion.get("status"), ""))) return;
         Map<String, Object> lockedSnapshot = nestedMap(completion.get("snapshot"));
         String snapshotHash = text(completion.get("snapshotHash"), "");
         if (lockedSnapshot.isEmpty() || snapshotHash.isBlank() || !snapshotHash.equals(hashCanonicalJson(lockedSnapshot))) {
             throw new WeeklyExpenseConflictException("Cashflow weekly lock snapshot integrity check failed.");
-        }
-        if (!compareCurrentLedger) return;
-        String weekId = cashflowWeekId(projectId, yearMonth, weekNo);
-        DocumentSnapshot currentSnapshot = get(cashflowWeekRef(tenantId, weekId));
-        Map<String, Object> current = currentSnapshot.exists()
-            ? data(currentSnapshot)
-            : baseCashflowWeekDoc(tenantId, projectId, weekId);
-        boolean matches = revisionAmounts(current.get("projection"))
-            .equals(revisionAmounts(lockedSnapshot.get("projection")))
-            && revisionAmounts(current.get("actual"))
-                .equals(revisionAmounts(lockedSnapshot.get("actual")))
-            && revisionAmountSources(current.get("weeklyExpenseActualBySheet"))
-                .equals(revisionAmountSources(lockedSnapshot.get("weeklyExpenseActualBySheet")))
-            && revisionBoolean(current.get("adminClosed")) == revisionBoolean(lockedSnapshot.get("adminClosed"));
-        if (!matches) {
-            throw new WeeklyExpenseConflictException(
-                "Cashflow weekly lock no longer matches the canonical ledger. Do not continue settlement."
-            );
         }
     }
 

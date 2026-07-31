@@ -71,6 +71,13 @@ function groupIdForEntry(name: string): string {
   return normalizeBudgetLabel(name) || '기타';
 }
 
+function formatBudgetContractPeriod(start: string, end: string): string {
+  const startYear = /^\d{4}/.exec(start)?.[0] || '';
+  const endYear = /^\d{4}/.exec(end)?.[0] || '';
+  if (!startYear && !endYear) return '계약기간 미등록';
+  return startYear && endYear && startYear !== endYear ? `${startYear}–${endYear}` : `${startYear || endYear}년`;
+}
+
 // 소진율 색상
 function burnColor(rate: number): string {
   if (rate >= 0.8) return '#e11d48';
@@ -597,7 +604,6 @@ export function PortalBudget() {
   const meta = myProject ? {
     projectId: myProject.id,
     projectName: myProject.name,
-    year: new Date(myProject.contractStart).getFullYear(),
     funder: myProject.clientOrg,
     basis: BASIS_LABELS[myProject.basis] || myProject.basis,
     totalBudget: myProject.contractAmount,
@@ -1357,16 +1363,14 @@ export function PortalBudget() {
   }, [budgetCodeViews]);
 
   const auxRows = useMemo(() => {
-    const effectiveTotal = total.effectiveBudget || 0;
     return budgetCodeViews.map((group) => {
       const effective = group.effectiveBudget;
       return {
         label: group.budgetCode || '기타',
         amount: effective,
-        ratio: effectiveTotal > 0 ? effective / effectiveTotal : 0,
       };
     });
-  }, [budgetCodeViews, total.effectiveBudget]);
+  }, [budgetCodeViews]);
 
   const updateDraftLeafField = useCallback((
     rowKey: string,
@@ -1400,7 +1404,7 @@ export function PortalBudget() {
           iconGradient="linear-gradient(135deg, #0d9488 0%, #059669 100%)"
           title="예산 편집"
           description={myProject ? myProject.name : '예산 현황'}
-          badge={`${meta.year}년`}
+          badge={formatBudgetContractPeriod(myProject.contractStart, myProject.contractEnd)}
           headingVisible={false}
           actions={(
             <div className="flex items-center gap-2">
@@ -2084,7 +2088,6 @@ export function PortalBudget() {
                   <span>{r.label}</span>
                   <div className="flex items-center gap-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     <span style={{ fontWeight: 500 }}>{fmtKRW(r.amount)}원</span>
-                    <span className="text-muted-foreground w-[50px] text-right">{fmtPercent(r.ratio)}</span>
                   </div>
                 </div>
               ))}
@@ -2141,19 +2144,8 @@ export function PortalBudget() {
                   <div className="flex items-center gap-3 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     <span className="text-muted-foreground">예산 <strong className="text-foreground">{fmtShort(group.effectiveBudget)}</strong></span>
                     <span className="text-muted-foreground">집행 <strong style={{ color: group.spent > 0 ? '#e11d48' : undefined }}>{fmtShort(group.spent)}</strong></span>
-                    <span style={{ fontWeight: 600, color: burnColor(group.burnRate) }}>{fmtPercent(group.burnRate)}</span>
                   </div>
                 </button>
-
-                {/* 그룹 진행바 */}
-                <div className="px-4 pt-1.5 pb-0.5">
-                  <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div className="h-full rounded-full" style={{
-                      width: `${Math.min(group.burnRate * 100, 100)}%`,
-                      background: burnColor(group.burnRate),
-                    }} />
-                  </div>
-                </div>
 
                 {/* 항목 테이블 */}
                 {!isCollapsed && group.subItems.length > 0 && (
@@ -2163,9 +2155,8 @@ export function PortalBudget() {
                         <tr className="bg-muted/30">
                           <th className="px-4 py-2 text-left" style={{ fontWeight: 600, minWidth: 140 }}>세목 / 세세목</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>최초 예산</th>
-                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>수정 예산</th>
+                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>최종 수정예산</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>소진금액</th>
-                          <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 50 }}>소진율</th>
                           <th className="px-3 py-2 text-right" style={{ fontWeight: 600, minWidth: 90 }}>잔액</th>
                           <th className="px-4 py-2 text-left hidden lg:table-cell" style={{ fontWeight: 600, minWidth: 120 }}>특이사항</th>
                         </tr>
@@ -2185,7 +2176,7 @@ export function PortalBudget() {
                                 ? `세세목 최초예산 합계 ${fmtKRW(subItem.leafInitialBudgetTotal)}원이 세목 최초예산 ${fmtKRW(subItem.targetInitialBudget)}원과 다릅니다.`
                                 : '',
                               subItem.hasRevisedBudgetMismatch
-                                ? `세세목 수정예산 합계 ${fmtKRW(subItem.leafRevisedBudgetTotal)}원이 세목 수정예산 ${fmtKRW(subItem.targetRevisedBudget)}원과 다릅니다.`
+                                ? `세세목 최종 수정예산 합계 ${fmtKRW(subItem.leafRevisedBudgetTotal)}원이 세목 최종 수정예산 ${fmtKRW(subItem.targetRevisedBudget)}원과 다릅니다.`
                                 : '',
                             ].filter(Boolean);
                             return (
@@ -2240,11 +2231,6 @@ export function PortalBudget() {
                                     <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: subItem.spent > 0 ? '#e11d48' : undefined }}>
                                       {fmtKRW(subItem.spent)}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right">
-                                      <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(subItem.burnRate), background: `${burnColor(subItem.burnRate)}10` }}>
-                                        {fmtPercent(subItem.burnRate)}
-                                      </span>
-                                    </td>
                                     <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
                                       {fmtKRW(subItem.balance)}
                                     </td>
@@ -2271,7 +2257,7 @@ export function PortalBudget() {
                                   </tr>
                                 {!subCollapsed && warningMessages.length > 0 ? (
                                   <tr className="border-t border-border/20 bg-rose-50/60">
-                                    <td colSpan={7} className="px-4 py-2 text-[10px] text-rose-600">
+                                    <td colSpan={6} className="px-4 py-2 text-[10px] text-rose-600">
                                       {warningMessages.join(' ')}
                                     </td>
                                   </tr>
@@ -2332,11 +2318,6 @@ export function PortalBudget() {
                                       </td>
                                       <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: leaf.spent > 0 ? '#e11d48' : undefined }}>
                                         {fmtKRW(leaf.spent)}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right">
-                                        <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(leaf.burnRate), background: `${burnColor(leaf.burnRate)}10` }}>
-                                          {fmtPercent(leaf.burnRate)}
-                                        </span>
                                       </td>
                                       <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
                                         {fmtKRW(leaf.balance)}
@@ -2425,11 +2406,6 @@ export function PortalBudget() {
                               <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: leaf.spent > 0 ? '#e11d48' : undefined }}>
                                 {fmtKRW(leaf.spent)}
                               </td>
-                              <td className="px-3 py-2.5 text-right">
-                                <span className="inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[9px]" style={{ fontWeight: 600, color: burnColor(leaf.burnRate), background: `${burnColor(leaf.burnRate)}10` }}>
-                                  {fmtPercent(leaf.burnRate)}
-                                </span>
-                              </td>
                               <td className="px-3 py-2.5 text-right" style={{ fontVariantNumeric: 'tabular-nums', color: '#059669' }}>
                                 {fmtKRW(leaf.balance)}
                               </td>
@@ -2493,9 +2469,8 @@ export function PortalBudget() {
                     ['세목', selectedRow.subCode || '—'],
                     ['세세목', selectedRow.subSubCode || '—'],
                     ['최초 예산', fmtKRW(selectedRow.initialBudget) + '원'],
-                    ['수정 예산', selectedRow.revisedBudget > 0 ? fmtKRW(selectedRow.revisedBudget) + '원' : '—'],
+                    ['최종 수정예산', selectedRow.revisedBudget > 0 ? fmtKRW(selectedRow.revisedBudget) + '원' : '—'],
                     ['소진금액', fmtKRW(selectedRow.spent) + '원'],
-                    ['소진율', fmtPercent(selectedRow.burnRate)],
                     ['잔액', fmtKRW(selectedRow.balance) + '원'],
                   ].map(([l, v]) => (
                     <div key={l as string}>
@@ -2514,19 +2489,6 @@ export function PortalBudget() {
                   </div>
                 )}
 
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">소진율</p>
-                  <div className="w-full h-3 rounded-full bg-muted overflow-hidden">
-                    <div className="h-full rounded-full transition-all" style={{
-                      width: `${Math.min(selectedRow.burnRate * 100, 100)}%`,
-                      background: burnColor(selectedRow.burnRate),
-                    }} />
-                  </div>
-                  <div className="flex justify-between mt-1 text-[9px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span>{fmtPercent(selectedRow.burnRate)}</span>
-                    <span>잔액 {fmtKRW(selectedRow.balance)}원</span>
-                  </div>
-                </div>
               </div>
             )}
           </DialogContent>

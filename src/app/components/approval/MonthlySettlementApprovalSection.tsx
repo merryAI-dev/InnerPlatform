@@ -590,7 +590,7 @@ export function MonthlySettlementApprovalSection({
             <DialogDescription className="text-[11px]">검토한 저장 문서에 대한 처리 의견을 남깁니다.</DialogDescription>
           </DialogHeader>
           {actionError ? <div role="alert" className="border border-red-200 bg-red-50 p-3 text-[12px] text-red-800">{actionError}</div> : null}
-          <Textarea value={reason} onChange={(event) => { setReason(event.target.value); setActionError(''); }} maxLength={2000} aria-label={action?.decision === 'APPROVE' ? '승인 코멘트' : '반려 사유'} className="min-h-[88px] text-[12px]" placeholder={action?.decision === 'APPROVE' ? '승인 코멘트 (선택)' : '반려 사유 (필수)'} />
+          <Textarea value={reason} onChange={(event) => { setReason(event.target.value); setActionError(''); }} maxLength={1000} aria-label={action?.decision === 'APPROVE' ? '승인 코멘트' : '반려 사유'} className="min-h-[88px] text-[12px]" placeholder={action?.decision === 'APPROVE' ? '승인 코멘트 (선택)' : '반려 사유 (필수)'} />
           <DialogFooter>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => setAction(null)}>취소</Button>
             <Button
