@@ -2,6 +2,10 @@
 
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import {
+  isRemovedVercelDeployment,
+  isVercelProtectedRedirect,
+} from "./assert_vercel_edge_route_policy.mjs";
 
 const defaultHosts = [
   "myscube.myscguard.app",
@@ -176,12 +180,16 @@ async function checkDirectOrigin(host) {
       headers: { "user-agent": "MYSCube-edge-smoke/1.0" },
     });
     const location = response.headers.get("location") || "";
+    const vercelError = response.headers.get("x-vercel-error") || "";
     const canonicalRedirect = response.status >= 300 && response.status < 400 && location.startsWith("https://myscube.myscguard.app/");
-    const removedAlias = response.status === 404;
-    return result(`https://${host}/ direct-origin`, canonicalRedirect || removedAlias, {
+    const protectedRedirect = isVercelProtectedRedirect(response.status, location);
+    const removedAlias = isRemovedVercelDeployment(response.status, vercelError);
+    return result(`https://${host}/ direct-origin`, canonicalRedirect || protectedRedirect || removedAlias, {
       status: response.status,
       location,
+      vercelError,
       canonicalRedirect,
+      protectedRedirect,
       removedAlias,
     });
   } catch (error) {

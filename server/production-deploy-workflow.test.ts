@@ -37,6 +37,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toMatch(/environment:\n\s+name: Production/);
     expect(workflowText).toContain('if [ "${GITHUB_REF}" != "refs/heads/main" ]; then');
     expect(workflowText).toContain('ref: main');
+    expect(workflowText).toContain('test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"');
   });
 
   it('does not interpolate manual workflow inputs directly inside shell run blocks', () => {
@@ -71,6 +72,30 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('deployment_url="$(grep -Eo');
     expect(workflowText).toContain('| tail -n 1 || true)"');
     expect(workflowText).toContain('Could not parse Vercel deployment URL');
+  });
+
+  it('forces the production artifact into Live maintenance before alias promotion', () => {
+    expect(workflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
+    expect(workflowText).toContain('BFF_DEPLOY_ENV: live');
+    expect(workflowText).toContain("BFF_EDIT_LEASES_ENABLED: 'false'");
+    expect(workflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
+    expect(workflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
+    expect(workflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'true'");
+    expect(workflowText).toContain('--env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
+    expect(workflowText).toContain('--env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
+    expect(workflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
+    expect(workflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
+    expect(workflowText).toContain('--env SLACK_ALERT_WEBHOOK_URL=');
+    expect(workflowText).toContain('--build-env VITE_FIRESTORE_CORE_ENABLED=false');
+    expect(workflowText).toContain('--build-env VITE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
+    expect(workflowText).toContain('VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}');
+    expect(workflowText).toContain("'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET");
+    expect(workflowText).toContain('deploy --prod --yes --skip-domain');
+    expect(workflowText).toContain('/api/v1/__maintenance_probe__');
+    expect(workflowText).toContain('worker_scheduler_disabled');
+    expect(workflowText.indexOf('Verify production maintenance surface before alias')).toBeLessThan(
+      workflowText.indexOf('Promote canonical production alias'),
+    );
   });
 
   it('uses a production-scoped Vercel token secret to avoid repo/environment name shadowing', () => {
@@ -149,9 +174,9 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).not.toContain('RBAC policy verify');
     expect(stageWorkflowText).not.toContain('Stage build');
 
-    expect(workflowText).not.toContain('Verify CI succeeded for this commit');
-    expect(workflowText).not.toContain('gh run list');
-    expect(workflowText).not.toContain('CI must be green before production deploy');
+    expect(workflowText).toContain('Verify CI succeeded for this commit');
+    expect(workflowText).toContain('actions/workflows/ci.yml/runs');
+    expect(workflowText).toContain('CI must be green for ${GITHUB_SHA} before production deploy.');
     expect(workflowText).not.toContain('node scripts/assert-safe-live-deploy.mjs');
     expect(workflowText).not.toContain('Verify production deploy policy');
     expect(workflowText).not.toContain('run: npm ci');
