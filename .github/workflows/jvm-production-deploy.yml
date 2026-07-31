@@ -1,0 +1,162 @@
+name: JVM Production Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: inner-platform-jvm-production
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy JVM candidate and promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Production
+    env:
+      PROJECT_ID: inner-platform-live-20260316
+      REGION: asia-northeast3
+      SERVICE: innerplatform-jvm-weekly-api-live
+      RUNTIME_SERVICE_ACCOUNT: innerplatform-jvm-runtime@inner-platform-live-20260316.iam.gserviceaccount.com
+      IMAGE: gcr.io/inner-platform-live-20260316/innerplatform-jvm-weekly-api-live
+      JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
+      JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
+      CASHFLOW_PROJECT_ID: p1773817948751
+      CASHFLOW_YEAR_MONTH: 2026-07
+
+    steps:
+      - name: Require main
+        run: test "${GITHUB_REF}" = refs/heads/main
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Verify dispatched main commit
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Verify CI succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f head_sha="${GITHUB_SHA}" -f branch=main -f event=push -f per_page=20)"
+          jq -e --arg sha "${GITHUB_SHA}" '
+            [.workflow_runs[] | select(.head_sha == $sha and .status == "completed" and .conclusion == "success")]
+            | length > 0
+          ' <<< "${runs}" >/dev/null
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
+          service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Capture current live revision
+        id: previous
+        run: |
+          revision="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \
+            | jq -r '.status.traffic[] | select(.percent == 100) | .revisionName' | head -n 1)"
+          test -n "${revision}"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build tested image
+        id: image
+        run: |
+          mvn -f server/jvm-weekly-api/pom.xml test
+          gcloud builds submit . \
+            --project "${PROJECT_ID}" \
+            --config cloudbuild.jvm-weekly-api-live.yaml \
+            --substitutions "_IMAGE=${IMAGE}:${GITHUB_SHA}"
+          digest="$(gcloud container images describe "${IMAGE}:${GITHUB_SHA}" --format='value(image_summary.digest)')"
+          test -n "${digest}"
+          echo "uri=${IMAGE}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy candidate without live traffic
+        id: candidate
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+        run: |
+          revision_suffix="hotfix-${GITHUB_SHA::8}"
+          gcloud run deploy "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --platform managed \
+            --image "${IMAGE_URI}" \
+            --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
+            --revision-suffix "${revision_suffix}" \
+            --no-traffic \
+            --tag candidate \
+            --ingress all \
+            --set-env-vars '^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=live|JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=|JVM_WEEKLY_EDIT_LEASES_ENABLED=false|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_ALLOWED_ORIGINS=https://myscube.myscguard.app' \
+            --set-secrets 'JVM_WEEKLY_INTERNAL_API_TOKEN=innerplatform-weekly-api-token:latest,JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY=innerplatform-cashflow-settled-week-confirmation-key:latest'
+          revision="${SERVICE}-${revision_suffix}"
+          candidate_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \
+            | jq -r --arg revision "${revision}" '.status.traffic[] | select(.revisionName == $revision and .tag == "candidate") | .url')"
+          test -n "${candidate_url}"
+          echo "revision=${revision}" >> "${GITHUB_OUTPUT}"
+          echo "url=${candidate_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify candidate against legacy live read
+        env:
+          CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
+        run: |
+          id_token="$(gcloud auth print-identity-token --audiences="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}")"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${id_token}" \
+            "${CANDIDATE_URL}/api/v1/health" \
+            | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${id_token}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H 'x-actor-id: github-jvm-deployer' \
+            -H 'x-actor-role: ADMIN' \
+            "${CANDIDATE_URL}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
+            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH' >/dev/null
+
+      - name: Promote verified candidate
+        id: promote
+        env:
+          REVISION: ${{ steps.candidate.outputs.revision }}
+        run: |
+          gcloud run services update-traffic "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --to-revisions "${REVISION}=100" \
+            --set-tags "candidate=${REVISION}"
+
+      - name: Verify canonical service after promotion
+        run: |
+          canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
+          id_token="$(gcloud auth print-identity-token --audiences="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}")"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${id_token}" \
+            "${canonical_url}/api/v1/health" \
+            | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${id_token}" \
+            -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
+            -H 'x-tenant-id: mysc' \
+            -H 'x-actor-id: github-jvm-deployer' \
+            -H 'x-actor-role: ADMIN' \
+            "${canonical_url}/api/v1/cashflow/${CASHFLOW_PROJECT_ID}/month-close/dashboard-source?yearMonth=${CASHFLOW_YEAR_MONTH}" \
+            | jq -e '.monthClose.projectId == env.CASHFLOW_PROJECT_ID and .monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH' >/dev/null
+
+      - name: Roll back failed promotion
+        if: failure() && steps.promote.outcome == 'success'
+        env:
+          PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+        run: |
+          gcloud run services update-traffic "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --to-revisions "${PREVIOUS_REVISION}=100" \
+            --set-tags "candidate=${PREVIOUS_REVISION}"
