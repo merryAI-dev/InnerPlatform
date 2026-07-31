@@ -58,9 +58,12 @@ jobs:
           ' <<< "${runs}" >/dev/null
 
       - uses: google-github-actions/auth@v3
+        id: auth
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER_LIVE }}
           service_account: ${{ vars.GCP_JVM_DEPLOYER_SERVICE_ACCOUNT_LIVE }}
+          token_format: id_token
+          id_token_audience: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
 
       - uses: google-github-actions/setup-gcloud@v3
 
@@ -114,14 +117,14 @@ jobs:
       - name: Verify candidate against legacy live read
         env:
           CANDIDATE_URL: ${{ steps.candidate.outputs.url }}
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
         run: |
-          id_token="$(gcloud auth print-identity-token --audiences="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}")"
           curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${id_token}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
             "${CANDIDATE_URL}/api/v1/health" \
             | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
           curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${id_token}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
             -H 'x-actor-id: github-jvm-deployer' \
@@ -141,15 +144,16 @@ jobs:
             --set-tags "candidate=${REVISION}"
 
       - name: Verify canonical service after promotion
+        env:
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
         run: |
           canonical_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
-          id_token="$(gcloud auth print-identity-token --audiences="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}")"
           curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${id_token}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
             "${canonical_url}/api/v1/health" \
             | jq -e '.ok == true and .service == "jvm-weekly-api"' >/dev/null
           curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${id_token}" \
+            -H "Authorization: Bearer ${ID_TOKEN}" \
             -H "x-inner-platform-service-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN}" \
             -H 'x-tenant-id: mysc' \
             -H 'x-actor-id: github-jvm-deployer' \
