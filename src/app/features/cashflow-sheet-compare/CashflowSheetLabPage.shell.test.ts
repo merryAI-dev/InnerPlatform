@@ -22,6 +22,9 @@ const portalCashflowSource = readFileSync(
 describe('CashflowSheetLabPage shell', () => {
   it('keeps sheet lab as an explicit route, not auto-mounted inside portal cashflow', () => {
     expect(routesSource).toContain("path: '/portal'");
+    expect(routesSource).toContain("path: 'cashflow'");
+    expect(routesSource).toContain("{ path: 'cashflow', element: <S C={CashflowSheetLabPage} /> }");
+    expect(routesSource).toContain("{ path: 'cashflow/:projectId', element: <S C={CashflowSheetLabPage} /> }");
     expect(routesSource).toContain("path: 'cashflow/sheets-lab'");
     expect(routesSource).toContain('CashflowSheetLabPage');
     expect(routesSource).not.toContain('StageOnlyCashflowSheetLabRoute');
