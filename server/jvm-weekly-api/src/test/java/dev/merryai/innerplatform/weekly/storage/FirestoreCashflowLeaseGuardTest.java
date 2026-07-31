@@ -3480,6 +3480,42 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthCloseReadAcceptsLegacyOpenDocument() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            monthClosePath("project-a", "2026-06"),
+            new LinkedHashMap<>(Map.of("status", "OPEN"))
+        );
+
+        WeeklyExpensePersistence.CashflowMonthCloseRecord result = fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.findCashflowMonthClose("tenant-a", "project-a", "2026-06")
+        );
+        assertThat(result.status()).isEqualTo("OPEN");
+        assertThat(result.revision()).isZero();
+    }
+
+    @Test
+    void monthCloseWritesStillRejectAnotherLegacyMonth() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-05"), new LinkedHashMap<>(Map.of(
+            "projectId", "project-a",
+            "yearMonth", "2026-05",
+            "status", "CLOSED"
+        )));
+        fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.requestCashflowMonthReopen(
+                ACTOR,
+                "project-a",
+                new RequestCashflowMonthReopenRequest("legacy-write-guard", "2026-06", 1, "증빙 재확인")
+            )
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("canonical");
+    }
+
+    @Test
     void projectWarningCountAndRevisionIncrementFailClosedOnOverflow() {
         Fixture warningFixture = fixture(activeMember(), activeLease());
         warningFixture.documents.put(

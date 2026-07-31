@@ -887,9 +887,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     ) {
         requireYearMonth(yearMonth);
         DocumentSnapshot close = get(db.document(monthlyClosePath(tenantId, projectId, yearMonth)));
-        List<Map<String, Object>> projectCloses = readProjectMonthCloses(tenantId, projectId);
-        Map<String, Object> document = close.exists() ? data(close) : Map.of();
-        if (!document.isEmpty()) canonicalMonthStatus(document, tenantId, projectId, yearMonth);
+        List<Map<String, Object>> projectCloses = readProjectMonthClosesForRead(tenantId, projectId);
+        Map<String, Object> document = close.exists()
+            ? readableMonthClose(data(close), tenantId, projectId, yearMonth)
+            : Map.of();
         return toMonthCloseRecord(tenantId, projectId, yearMonth, document, projectWarningCount(projectCloses));
     }
 
@@ -2675,6 +2676,35 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         );
     }
 
+    private Map<String, Object> readableMonthClose(
+        Map<String, Object> close,
+        String tenantId,
+        String projectId,
+        String yearMonth
+    ) {
+        if (close.isEmpty()) return close;
+        String storedContract = text(close.get("contractVersion"), "");
+        String storedTenant = text(close.get("tenantId"), "");
+        String storedProject = text(close.get("projectId"), "");
+        String storedMonth = text(close.get("yearMonth"), "");
+        if ((!storedContract.isBlank() && !CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(storedContract))
+            || (!storedTenant.isBlank() && !tenantId.equals(storedTenant))
+            || (!storedProject.isBlank() && !projectId.equals(storedProject))
+            || (!storedMonth.isBlank() && !yearMonth.equals(storedMonth))) {
+            canonicalMonthStatus(close, tenantId, projectId, yearMonth);
+        }
+        Map<String, Object> readable = new LinkedHashMap<>(close);
+        readable.put("contractVersion", CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION);
+        readable.put("tenantId", tenantId);
+        readable.put("projectId", projectId);
+        readable.put("yearMonth", yearMonth);
+        readable.put("status", text(close.get("status"), "OPEN").toUpperCase(Locale.ROOT));
+        readable.putIfAbsent("revision", 0L);
+        readable.putIfAbsent("reopenCount", 0L);
+        canonicalMonthStatus(readable, tenantId, projectId, yearMonth);
+        return readable;
+    }
+
     private void requireMutableMonthStatus(String status) {
         if ("OPEN".equals(status)) return;
         if ("CLOSED".equals(status) || "REOPEN_REQUESTED".equals(status)) {
@@ -3197,6 +3227,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             requireYearMonth(yearMonth);
             canonicalMonthStatus(close, tenantId, projectId, yearMonth);
             closes.add(close);
+        }
+        return closes;
+    }
+
+    private List<Map<String, Object>> readProjectMonthClosesForRead(String tenantId, String projectId) {
+        QuerySnapshot snapshot = query(db.collection("orgs/" + tenantId + "/monthly_closes")
+            .whereEqualTo("projectId", projectId));
+        List<Map<String, Object>> closes = new ArrayList<>();
+        for (DocumentSnapshot document : snapshot.getDocuments()) {
+            Map<String, Object> close = data(document);
+            String yearMonth = text(close.get("yearMonth"), "");
+            if (yearMonth.isBlank()) {
+                String prefix = projectId + "-";
+                yearMonth = document.getId().startsWith(prefix) ? document.getId().substring(prefix.length()) : "";
+            }
+            requireYearMonth(yearMonth);
+            closes.add(readableMonthClose(close, tenantId, projectId, yearMonth));
         }
         return closes;
     }

@@ -553,6 +553,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
+    expect(source).toContain('canonicalAnnualYears');
+    expect(source).toContain('canonicalCashflowAnnualYears');
+    expect(source).toContain('canonicalAnnualTotalFor');
     expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
     expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
     expect(source).toContain('const renderAnnualSummaryCell');
@@ -565,6 +568,11 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain("'값 없음'");
     expect(source).toContain('>미입력</');
     expect(source).toContain("cell.difference === null ? '미입력'");
+  });
+
+  it('never renders synthetic zero cashflow values after the canonical read fails', () => {
+    expect(source).toContain('shouldHideCashflowValuesAfterLoadError');
+    expect(source).toContain('현금흐름 데이터를 불러오지 못했습니다.');
   });
 
   it('aligns the Projection - Actual table to the same annual, weekly, and Total contract as the cashflow board', () => {
