@@ -1,0 +1,10 @@
+{
+  "firestore": {
+    "rules": "firebase/firestore.maintenance.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8181
+    }
+  }
+}

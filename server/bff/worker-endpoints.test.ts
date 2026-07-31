@@ -32,6 +32,23 @@ function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
 }
 
 describe('internal worker endpoints (cron)', () => {
+  it('keeps health readable but blocks every mutation during stage maintenance', async () => {
+    const app = createTestApp({
+      env: {
+        BFF_DEPLOY_ENV: 'stage',
+        BFF_MAINTENANCE_READ_ONLY: 'true',
+        BFF_WORKERS_ENABLED: 'false',
+      },
+    });
+
+    await request(app).get('/api/v1/health').expect(200);
+    for (const method of ['post', 'put', 'patch', 'delete'] as const) {
+      const mutation = await request(app)[method]('/api/internal/workers/outbox/run');
+      expect(mutation.status).toBe(503);
+      expect(mutation.body?.error).toBe('stage_maintenance_read_only');
+    }
+  });
+
   it('does not expose the retired payroll monthly-close worker', async () => {
     const app = createTestApp();
     const res = await request(app).get('/api/internal/workers/monthly-close/run');

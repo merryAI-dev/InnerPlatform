@@ -6,6 +6,10 @@ const repoRoot = resolve(__dirname, '..');
 const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/production-deploy.yml'), 'utf8');
 const stageWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/stage-deploy.yml'), 'utf8');
 const ciWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8');
+const maintenanceRulesText = readFileSync(resolve(repoRoot, 'firebase/firestore.maintenance.rules'), 'utf8');
+const maintenanceFirebaseConfig = JSON.parse(
+  readFileSync(resolve(repoRoot, 'firebase.maintenance.json'), 'utf8'),
+);
 
 function extractRunBlocks(text: string) {
   const lines = text.split('\n');
@@ -78,6 +82,13 @@ describe('production deployment workflow safety', () => {
 });
 
 describe('stage release workflow safety', () => {
+  it('keeps stage mutations blocked during the live-data rehearsal', () => {
+    expect(stageWorkflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'true'");
+    expect(stageWorkflowText).toContain('--env BFF_MAINTENANCE_READ_ONLY="${BFF_MAINTENANCE_READ_ONLY}"');
+    expect(maintenanceFirebaseConfig.firestore.rules).toBe('firebase/firestore.maintenance.rules');
+    expect(maintenanceRulesText).toContain('allow read, write: if false;');
+  });
+
   it('validates the stage Vercel token against the expected team before release work', () => {
     expect(stageWorkflowText).toMatch(/environment:\n\s+name: Stage/);
     expect(stageWorkflowText).toContain('inner-platform-internal-stage-merryai-devs-projects.vercel.app');
