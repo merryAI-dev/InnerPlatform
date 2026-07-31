@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateVercelEdgeRoutePolicy } from '../scripts/assert_vercel_edge_route_policy.mjs';
+import {
+  evaluateVercelEdgeRoutePolicy,
+  isRemovedVercelDeployment,
+  isVercelProtectedRedirect,
+} from '../scripts/assert_vercel_edge_route_policy.mjs';
 
 const baseRedirectHosts = [
   'inner-platform.vercel.app',
@@ -33,6 +37,21 @@ steps:
 `;
 
 describe('Vercel edge route policy', () => {
+  it('accepts only recognized removed deployment responses', () => {
+    expect(isRemovedVercelDeployment(404, '')).toBe(true);
+    expect(isRemovedVercelDeployment(410, 'GONE')).toBe(true);
+    expect(isRemovedVercelDeployment(410, 'deployment_not_found')).toBe(true);
+    expect(isRemovedVercelDeployment(410, '')).toBe(false);
+    expect(isRemovedVercelDeployment(410, 'random')).toBe(false);
+    expect(isRemovedVercelDeployment(200, 'GONE')).toBe(false);
+  });
+
+  it('accepts only the Vercel authentication redirect as deployment protection', () => {
+    expect(isVercelProtectedRedirect(302, 'https://vercel.com/sso-api?url=x')).toBe(true);
+    expect(isVercelProtectedRedirect(307, 'https://vercel.com/sso-api?url=x')).toBe(false);
+    expect(isVercelProtectedRedirect(302, 'https://example.com/sso-api?url=x')).toBe(false);
+  });
+
   it('accepts production direct-origin redirects while keeping stage outside the production security domain', () => {
     const result = evaluateVercelEdgeRoutePolicy({
       vercelConfig: vercelConfig(baseRedirectHosts),

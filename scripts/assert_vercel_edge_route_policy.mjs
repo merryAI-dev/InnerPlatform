@@ -64,6 +64,15 @@ function unexpectedFrom(actual, expected) {
   return actual.map(normalizeHost).filter((host) => !expectedSet.has(host));
 }
 
+export function isRemovedVercelDeployment(status, vercelError) {
+  return status === 404
+    || (status === 410 && ["GONE", "DEPLOYMENT_NOT_FOUND"].includes(String(vercelError || "").toUpperCase()));
+}
+
+export function isVercelProtectedRedirect(status, location) {
+  return status === 302 && String(location || "").startsWith("https://vercel.com/sso-api?");
+}
+
 export function evaluateVercelEdgeRoutePolicy({
   vercelConfig,
   stageWorkflowText,
