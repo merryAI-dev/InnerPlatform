@@ -32,6 +32,26 @@ function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
 }
 
 describe('internal worker endpoints (cron)', () => {
+  it('keeps the Live maintenance probe open while workers stay disabled', async () => {
+    const app = createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: [LIVE_ORIGIN],
+      env: {
+        BFF_DEPLOY_ENV: 'live',
+        BFF_MAINTENANCE_READ_ONLY: 'false',
+        BFF_WORKERS_ENABLED: 'false',
+      },
+    });
+
+    const mutationProbe = await request(app).post('/api/v1/__maintenance_probe__');
+    expect(mutationProbe.status).toBe(400);
+    expect(mutationProbe.body?.error).not.toBe('stage_maintenance_read_only');
+
+    const workerProbe = await request(app).get('/api/internal/workers/outbox/run');
+    expect(workerProbe.status).toBe(503);
+    expect(workerProbe.body?.error).toBe('worker_scheduler_disabled');
+  });
+
   it('keeps health readable but blocks every mutation during stage maintenance', async () => {
     const app = createTestApp({
       env: {
