@@ -7,6 +7,11 @@ const CANONICAL_PRODUCTION_DESTINATION = `${CANONICAL_PRODUCTION_ORIGIN}/:path*`
 const INTERNAL_STAGE_HOST = "inner-platform-internal-stage-merryai-devs-projects.vercel.app";
 const LEGACY_STAGE_HOST = "inner-platform-stage-merryai-devs-projects.vercel.app";
 const ROUTE_VERSION_ALIAS = "inner-platform-f52434-routes-merryai-devs-projects.vercel.app";
+const REQUIRED_PROTECTED_OR_REDIRECT_HOSTS = [
+  "submit-mysc.com",
+  "inner-platform-merryai-devs-projects.vercel.app",
+  "inner-platform-merryai-dev-merryai-devs-projects.vercel.app",
+];
 
 const REQUIRED_PRODUCTION_DIRECT_HOSTS = [
   "inner-platform.vercel.app",
@@ -84,7 +89,11 @@ export function evaluateVercelEdgeRoutePolicy({
   const routeHosts = productionRedirectHosts(vercelConfig);
   const smokeHosts = extractDefaultDirectHosts(smokeScriptText);
   const requiredDirectHosts = uniqueSorted(REQUIRED_PRODUCTION_DIRECT_HOSTS);
-  const requiredSmokeHosts = uniqueSorted([...REQUIRED_PRODUCTION_DIRECT_HOSTS, ROUTE_VERSION_ALIAS]);
+  const requiredSmokeHosts = uniqueSorted([
+    ...REQUIRED_PRODUCTION_DIRECT_HOSTS,
+    ...REQUIRED_PROTECTED_OR_REDIRECT_HOSTS,
+    ROUTE_VERSION_ALIAS,
+  ]);
 
   const routedStageHosts = routeHosts.filter((host) => stageHosts.includes(host));
   if (routedStageHosts.length) {

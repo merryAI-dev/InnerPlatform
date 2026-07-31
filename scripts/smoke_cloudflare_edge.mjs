@@ -34,6 +34,9 @@ const defaultDirectHosts = [
   "inner-platform-gq6813nqh-merryai-devs-projects.vercel.app",
   "inner-platform-k2x121b33-merryai-devs-projects.vercel.app",
   "inner-platform-f52434-routes-merryai-devs-projects.vercel.app",
+  "submit-mysc.com",
+  "inner-platform-merryai-devs-projects.vercel.app",
+  "inner-platform-merryai-dev-merryai-devs-projects.vercel.app",
 ];
 const directHosts = (process.env.CLOUDFLARE_EDGE_DIRECT_HOSTS || defaultDirectHosts.join(","))
   .split(",")
