@@ -89,6 +89,18 @@ describe('portal project selection helpers', () => {
     expect(financeResult.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed', 'p-other']);
   });
 
+  it('does not expose trashed projects in portal selection', () => {
+    const result = resolvePortalProjectCandidates({
+      role: 'admin',
+      projects: [
+        ...projects,
+        { id: 'p-trashed', name: 'Trashed Project', trashedAt: '2026-07-31T00:00:00.000Z' },
+      ] as unknown as Project[],
+    });
+
+    expect(result.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed', 'p-other']);
+  });
+
   it('falls back from active project to primary and then the first candidate', () => {
     expect(resolveActivePortalProjectId({
       activeProjectId: 'missing-project',

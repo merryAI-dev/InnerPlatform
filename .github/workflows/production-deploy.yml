@@ -38,7 +38,7 @@ jobs:
       BFF_EDIT_LEASES_ENABLED: 'false'
       BFF_WORKERS_ENABLED: 'false'
       BFF_SCHEDULER_OWNER: disabled
-      BFF_MAINTENANCE_READ_ONLY: 'true'
+      BFF_MAINTENANCE_READ_ONLY: 'false'
       BFF_ALLOWED_ORIGINS: https://myscube.myscguard.app
       JVM_WEEKLY_AUTH_MODE: strict
       GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: '{}'
@@ -142,7 +142,7 @@ jobs:
             --env PROJECT_REGISTRATION_SLACK_WEBHOOK_URL= \
             --env PROJECT_REGISTRATION_SLACK_BOT_TOKEN= \
             --env PROJECT_REGISTRATION_SLACK_CHANNEL_ID= \
-            --meta maintenanceReadOnly=true \
+            --meta maintenanceReadOnly=false \
             --meta githubCommitSha="${commit_sha}" \
             2>&1 | tee "${output_file}"
           deployment_url="$(grep -Eo 'https://[A-Za-z0-9.-]+\.vercel\.app' "${output_file}" | tail -n 1 || true)"
@@ -154,7 +154,7 @@ jobs:
           echo "deployment_url=${deployment_url}" >> "${GITHUB_OUTPUT}"
           echo "deployment_host=${deployment_host}" >> "${GITHUB_OUTPUT}"
 
-      - name: Verify production maintenance surface before alias
+      - name: Verify production surface before alias
         env:
           DEPLOYMENT_URL: ${{ steps.vercel_deploy.outputs.deployment_url }}
         run: |
@@ -182,9 +182,12 @@ jobs:
             throw new Error(`unsafe production health: ${health.response.status} ${JSON.stringify(health.body)}`);
           }
 
-          const mutation = await request('/api/v1/__maintenance_probe__', { method: 'POST' });
-          if (mutation.response.status !== 503 || mutation.body.error !== 'stage_maintenance_read_only') {
-            throw new Error(`maintenance guard missing: ${mutation.response.status} ${JSON.stringify(mutation.body)}`);
+          const mutation = await request('/api/v1/__maintenance_probe__', {
+            method: 'POST',
+            headers: { 'idempotency-key': 'production-auth-probe' },
+          });
+          if (mutation.response.status !== 401 || mutation.body.error !== 'missing_bearer_token') {
+            throw new Error(`production write surface is not auth-protected: ${mutation.response.status} ${JSON.stringify(mutation.body)}`);
           }
 
           for (const path of [

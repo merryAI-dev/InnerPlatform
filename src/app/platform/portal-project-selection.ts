@@ -53,7 +53,7 @@ export function resolvePortalProjectCandidates(input: {
   projects: Project[];
 }): PortalProjectCandidateSet {
   const role = normalizeRole(input.role);
-  const projects = dedupeProjects(sortProjects(input.projects || []));
+  const projects = dedupeProjects(sortProjects((input.projects || []).filter((project) => !project.trashedAt)));
 
   if (!role) {
     return {

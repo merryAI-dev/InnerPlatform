@@ -74,13 +74,13 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('Could not parse Vercel deployment URL');
   });
 
-  it('forces the production artifact into Live maintenance before alias promotion', () => {
+  it('deploys the production artifact against Live without the migration maintenance gate', () => {
     expect(workflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
     expect(workflowText).toContain('BFF_DEPLOY_ENV: live');
     expect(workflowText).toContain("BFF_EDIT_LEASES_ENABLED: 'false'");
     expect(workflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
     expect(workflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
-    expect(workflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'true'");
+    expect(workflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'false'");
     expect(workflowText).toContain('--env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
@@ -93,7 +93,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('deploy --prod --yes --skip-domain');
     expect(workflowText).toContain('/api/v1/__maintenance_probe__');
     expect(workflowText).toContain('worker_scheduler_disabled');
-    expect(workflowText.indexOf('Verify production maintenance surface before alias')).toBeLessThan(
+    expect(workflowText.indexOf('Verify production surface before alias')).toBeLessThan(
       workflowText.indexOf('Promote canonical production alias'),
     );
   });
