@@ -11,10 +11,12 @@ function extractFunction(name: string): string {
 }
 
 describe('project trash local state contract', () => {
-  it('does not seed live Firestore sessions with mock projects before remote data arrives', () => {
-    expect(source).toContain('const usesLocalSeedData = !featureFlags.firestoreCoreEnabled');
+  it('does not seed live BFF or Firestore sessions with mock projects before remote data arrives', () => {
+    expect(source).toContain('const usesLocalSeedData = !platformApiEnabled && !featureFlags.firestoreCoreEnabled');
     expect(source).toContain('useState<Project[]>(() => (usesLocalSeedData ? PROJECTS : []))');
     expect(source).toContain('setProjects(usesLocalSeedData ? PROJECTS : [])');
+    expect(source).toContain('if (platformApiEnabled && bffActor.idToken)');
+    expect(source).toContain('fetchProjectsViaBff({ tenantId: orgId, actor: bffActor })');
   });
 
   it('mirrors trash and restore success into local state even when Firestore is online', () => {
