@@ -353,7 +353,7 @@ async function readCashflowActivityDocuments(db, tenantId, collectionId, project
   let query = db.collection(`orgs/${tenantId}/${collectionId}`)
     .where('projectId', '==', projectId);
   query = collectionId === 'weekly_api_audit_events'
-    ? query.orderBy('createdAt', 'desc').limit(50)
+    ? query.limit(200)
     : query.limit(200);
   const snap = await query.get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));

@@ -763,8 +763,8 @@ describe('JVM weekly API BFF proxy', () => {
         ]);
       });
     expect(activityQueries.find((query) => query.collectionId === 'weekly_api_audit_events')).toMatchObject({
-      orderBy: ['createdAt', 'desc'],
-      limit: 50,
+      orderBy: null,
+      limit: 200,
     });
   });
 

@@ -75,6 +75,7 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
+  canonicalCashflowAnnualYears,
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
@@ -83,6 +84,8 @@ import {
   resolveCashflowComparisonScope,
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
+  shouldHideCashflowValuesAfterLoadError,
+  summarizeCanonicalCashflowYear,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
@@ -1704,15 +1707,19 @@ export function CashflowProjectSheet({
   const mirroredAnnualTotals = useMemo(() => new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
     .filter((row) => Number.isSafeInteger(row.year))
     .map((row) => [row.year, row])), [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals]);
+  const canonicalAnnualYears = canonicalCashflowAnnualYears(
+    monthCloseResult?.dashboard?.canonical?.months || [],
+    selectedYear,
+  );
   const annualYears = useMemo(() => {
     const openingBalanceYears = [
       ...(monthCloseResult?.dashboard?.openingBalances?.projection?.sources || []).map((source) => source.year),
       ...(monthCloseResult?.dashboard?.openingBalances?.actual?.sources || []).map((source) => source.year),
     ];
-    return [...new Set([...openingBalanceYears, ...mirroredAnnualTotals.keys()])]
+    return [...new Set([...openingBalanceYears, ...mirroredAnnualTotals.keys(), ...canonicalAnnualYears])]
       .filter((year) => year !== selectedYear)
       .sort((left, right) => left - right);
-  }, [mirroredAnnualTotals, monthCloseResult?.dashboard?.openingBalances, selectedYear]);
+  }, [canonicalAnnualYears, mirroredAnnualTotals, monthCloseResult?.dashboard?.openingBalances, selectedYear]);
   const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
   const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
   const comparisonAsOfWeek = monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek;
@@ -1726,11 +1733,18 @@ export function CashflowProjectSheet({
   const visibleComparisonAnnualYears = comparisonScope.annualYears;
   const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < selectedYear);
   const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > selectedYear);
+  const canonicalAnnualTotalFor = (year: number, mode: 'projection' | 'actual') => summarizeCanonicalCashflowYear(
+    monthCloseResult?.dashboard?.canonical?.months || [],
+    year,
+    mode,
+  );
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
     const pinned = monthCloseResult?.status === 'OPEN'
       ? mirroredAnnualTotals.get(year)?.[mode] || null
       : null;
     if (pinned) return pinned;
+    const canonical = canonicalAnnualTotalFor(year, mode);
+    if (canonical) return canonical;
     const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
       ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
       : null;
@@ -2072,6 +2086,16 @@ export function CashflowProjectSheet({
       return (
         <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-8 text-center text-[12px] text-slate-500">
           서버 확정 시트와 기간 합계를 불러오는 중입니다.
+        </div>
+      );
+    }
+    if (shouldHideCashflowValuesAfterLoadError(monthCloseError, Boolean(monthCloseResult?.dashboard?.canonical))) {
+      return (
+        <div className="rounded-[18px] border border-red-200 bg-red-50 px-3 py-8 text-center text-[12px] text-red-700">
+          <p>현금흐름 데이터를 불러오지 못했습니다.</p>
+          <button type="button" className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 font-semibold" onClick={() => void loadCashflowMonthClose()}>
+            다시 확인
+          </button>
         </div>
       );
     }

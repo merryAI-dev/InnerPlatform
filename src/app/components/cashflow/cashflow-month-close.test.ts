@@ -4,6 +4,7 @@ import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-rea
 import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
 import {
   buildCashflowMonthCloseDraftInput,
+  canonicalCashflowAnnualYears,
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
@@ -14,6 +15,8 @@ import {
   resolveCashflowComparisonScope,
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
+  shouldHideCashflowValuesAfterLoadError,
+  summarizeCanonicalCashflowYear,
 } from './cashflow-month-close';
 
 function mirror(): CashflowSheetLabMirrorResult {
@@ -53,6 +56,29 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
+  it('deduplicates prior years and calculates exact canonical annual totals', () => {
+    const months = [
+      { yearMonth: '2024-01', projection: { weeks: [{ amounts: { SALES_IN: 100, DIRECT_COST_OUT: 30 } }] } },
+      { yearMonth: '2024-02', projection: { weeks: [{ amounts: { SALES_IN: 50, DIRECT_COST_OUT: 20 } }] } },
+      { yearMonth: '2025-01', projection: { weeks: [{ amounts: { SALES_IN: 900 } }] } },
+      { yearMonth: '2026-01', projection: { weeks: [{ amounts: { SALES_IN: 9999 } }] } },
+    ];
+
+    expect(canonicalCashflowAnnualYears(months, 2026)).toEqual([2024, 2025]);
+    expect(summarizeCanonicalCashflowYear(months, 2024, 'projection')).toMatchObject({
+      lineAmounts: { SALES_IN: 150, DIRECT_COST_OUT: 50 },
+      lineStates: { SALES_IN: 'VALUE', DIRECT_COST_OUT: 'VALUE', SALES_VAT_IN: 'EMPTY' },
+      totalIn: 150,
+      totalOut: 50,
+      net: 100,
+    });
+  });
+
+  it('hides values only when canonical loading failed without a retained model', () => {
+    expect(shouldHideCashflowValuesAfterLoadError('409 conflict', false)).toBe(true);
+    expect(shouldHideCashflowValuesAfterLoadError('409 conflict', true)).toBe(false);
+    expect(shouldHideCashflowValuesAfterLoadError(null, false)).toBe(false);
+  });
   it('limits Projection-Actual comparison to the server KST finance week', () => {
     const asOfWeek = { yearMonth: '2026-08', weekNo: 3 };
 

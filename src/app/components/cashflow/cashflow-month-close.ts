@@ -1,4 +1,5 @@
-import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
+import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../../platform/cashflow-sheet';
+import type { CashflowSheetLineId } from '../../data/types';
 import type {
   CashflowMonthCloseCell,
   CashflowMonthCloseConfirmation,
@@ -22,6 +23,45 @@ export type CashflowMonthCloseDepositReviewRow = Omit<CashflowMonthCloseDepositS
 };
 
 export const CASHFLOW_MONTH_CLOSE_WEEK_NOS = [1, 2, 3, 4, 5] as const;
+
+type CanonicalCashflowMonth = {
+  yearMonth: string;
+  projection?: { weeks?: Array<{ amounts?: Partial<Record<CashflowSheetLineId, number>> }> };
+  actual?: { weeks?: Array<{ amounts?: Partial<Record<CashflowSheetLineId, number>> }> };
+};
+
+export function canonicalCashflowAnnualYears(months: CanonicalCashflowMonth[], selectedYear: number): number[] {
+  return [...new Set(months
+    .map((month) => Number(month.yearMonth.slice(0, 4)))
+    .filter((year) => Number.isSafeInteger(year) && year !== selectedYear))]
+    .sort((left, right) => left - right);
+}
+
+export function summarizeCanonicalCashflowYear(
+  months: CanonicalCashflowMonth[],
+  year: number,
+  mode: 'projection' | 'actual',
+) {
+  const selected = months.filter((month) => Number(month.yearMonth.slice(0, 4)) === year);
+  if (!selected.length) return null;
+  const lineAmounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [
+    lineId,
+    selected.reduce((total, month) => total + (month[mode]?.weeks || [])
+      .reduce((monthTotal, week) => monthTotal + Number(week.amounts?.[lineId] || 0), 0), 0),
+  ])) as Record<CashflowSheetLineId, number>;
+  const lineStates = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => {
+    const hasValue = selected.some((month) => (month[mode]?.weeks || [])
+      .some((week) => Object.prototype.hasOwnProperty.call(week.amounts || {}, lineId)));
+    return [lineId, hasValue ? (lineAmounts[lineId] === 0 ? 'ZERO' : 'VALUE') : 'EMPTY'];
+  })) as Record<CashflowSheetLineId, 'VALUE' | 'ZERO' | 'EMPTY'>;
+  const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + lineAmounts[lineId], 0);
+  const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + lineAmounts[lineId], 0);
+  return { lineAmounts, lineStates, totalIn, totalOut, net: totalIn - totalOut };
+}
+
+export function shouldHideCashflowValuesAfterLoadError(error: string | null, hasCanonical: boolean): boolean {
+  return Boolean(error) && !hasCanonical;
+}
 
 export function isCashflowComparisonWeekVisible(
   week: { yearMonth: string; weekNo: number },
