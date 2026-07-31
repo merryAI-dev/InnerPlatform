@@ -13,7 +13,7 @@ describe('portal canonical edit resource routes', () => {
   it('registers project and draft identities in canonical portal URLs', () => {
     expect(source).toContain("{ path: 'register-project/:draftId', element: <S C={PortalProjectRegister} /> }");
     expect(source).toContain("{ path: 'edit-project/:projectId', element: <S C={PortalProjectEdit} /> }");
-    expect(source).toContain("{ path: 'cashflow/:projectId', element: <S C={CashflowSheetLabPage} /> }");
+    expect(source).toContain("{ path: 'cashflow/:projectId', element: <S C={PortalCashflowPage} /> }");
     expect(source).toContain("{ path: 'cashflow/:projectId/sheets-lab', element: <S C={CashflowSheetLabPage} /> }");
   });
 
@@ -21,7 +21,7 @@ describe('portal canonical edit resource routes', () => {
     expect(source).toContain("{ path: 'register-project', element: <S C={PortalProjectRegister} /> }");
     expect(source).toContain("{ path: 'project-approvals', element: <S C={ProjectAssigneeApprovalPage} /> }");
     expect(source).toContain("{ path: 'edit-project', element: <S C={PortalProjectEdit} /> }");
-    expect(source).toContain("{ path: 'cashflow', element: <S C={CashflowSheetLabPage} /> }");
+    expect(source).toContain("{ path: 'cashflow', element: <S C={PortalCashflowPage} /> }");
     expect(source).toContain("{ path: 'cashflow/sheets-lab', element: <S C={CashflowSheetLabPage} /> }");
   });
 
