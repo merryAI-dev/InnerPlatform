@@ -23,7 +23,7 @@ jobs:
       REGION: asia-northeast3
       SERVICE: innerplatform-jvm-weekly-api-live
       RUNTIME_SERVICE_ACCOUNT: innerplatform-jvm-runtime@inner-platform-live-20260316.iam.gserviceaccount.com
-      IMAGE: gcr.io/inner-platform-live-20260316/innerplatform-jvm-weekly-api-live
+      IMAGE: asia-northeast3-docker.pkg.dev/inner-platform-live-20260316/jvm-images/innerplatform-jvm-weekly-api-live
       JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: ${{ vars.JVM_WEEKLY_API_ID_TOKEN_AUDIENCE_LIVE }}
       JVM_WEEKLY_INTERNAL_API_TOKEN: ${{ secrets.JVM_WEEKLY_INTERNAL_API_TOKEN_LIVE }}
       CASHFLOW_PROJECT_ID: p1773817948751
@@ -76,11 +76,13 @@ jobs:
         id: image
         run: |
           mvn -f server/jvm-weekly-api/pom.xml test
-          gcloud builds submit . \
-            --project "${PROJECT_ID}" \
-            --config cloudbuild.jvm-weekly-api-live.yaml \
-            --substitutions "_IMAGE=${IMAGE}:${GITHUB_SHA}"
-          digest="$(gcloud container images describe "${IMAGE}:${GITHUB_SHA}" --format='value(image_summary.digest)')"
+          gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
+          docker build \
+            -f server/jvm-weekly-api/Dockerfile \
+            -t "${IMAGE}:${GITHUB_SHA}" \
+            .
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          digest="$(gcloud artifacts docker images describe "${IMAGE}:${GITHUB_SHA}" --format='value(image_summary.digest)')"
           test -n "${digest}"
           echo "uri=${IMAGE}@${digest}" >> "${GITHUB_OUTPUT}"
 
