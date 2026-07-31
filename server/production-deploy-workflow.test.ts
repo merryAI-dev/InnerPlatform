@@ -120,6 +120,12 @@ describe('stage release workflow safety', () => {
     expect(stageWorkflowText).toContain('node scripts/assert-stage-edit-lease-runtime.mjs');
     expect(stageWorkflowText).toContain('--env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}"');
     expect(stageWorkflowText).toContain('--env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}"');
+    expect(stageWorkflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
+    expect(stageWorkflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
+    expect(stageWorkflowText).toContain("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: '{}'");
+    expect(stageWorkflowText).toContain('--env BFF_WORKERS_ENABLED="${BFF_WORKERS_ENABLED}"');
+    expect(stageWorkflowText).toContain('--env BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER}"');
+    expect(stageWorkflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
     expect(stageWorkflowText).toContain('--env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}"');
     expect(stageWorkflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}"');
     expect(stageWorkflowText).toContain('--env JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE}"');
