@@ -86,7 +86,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
     expect(workflowText).toContain('--env SLACK_ALERT_WEBHOOK_URL=');
-    expect(workflowText).toContain('--build-env VITE_FIRESTORE_CORE_ENABLED=true');
+    expect(workflowText).toContain('--build-env VITE_FIRESTORE_CORE_ENABLED=false');
     expect(workflowText).toContain('--build-env VITE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}');
     expect(workflowText).toContain("'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET");

@@ -121,7 +121,7 @@ jobs:
           commit_sha="$(git rev-parse HEAD)"
           npx --yes "${VERCEL_CLI_PACKAGE}" deploy --prod --yes --skip-domain --token "${VERCEL_TOKEN}" \
             --build-env VITE_PLATFORM_API_ENABLED=true \
-            --build-env VITE_FIRESTORE_CORE_ENABLED=true \
+            --build-env VITE_FIRESTORE_CORE_ENABLED=false \
             --build-env VITE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}" \
             --env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}" \
             --env BFF_AUTH_MODE="${BFF_AUTH_MODE}" \

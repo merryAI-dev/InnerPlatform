@@ -157,7 +157,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [platformApiEnabled, firestoreEnabled],
   );
 
-  const usesLocalSeedData = !featureFlags.firestoreCoreEnabled;
+  const usesLocalSeedData = !platformApiEnabled && !featureFlags.firestoreCoreEnabled;
   const [projects, setProjects] = useState<Project[]>(() => (usesLocalSeedData ? PROJECTS : []));
   const [ledgers, setLedgers] = useState<Ledger[]>(() => (usesLocalSeedData ? LEDGERS : []));
   const [transactions, setTransactions] = useState<Transaction[]>(() => (usesLocalSeedData ? TRANSACTIONS : []));
@@ -251,7 +251,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     if (!firestoreEnabled || !db) {
-      setDataSource('local');
+      setDataSource(platformApiEnabled ? 'firestore' : 'local');
       setProjects(usesLocalSeedData ? PROJECTS : []);
       setLedgers(usesLocalSeedData ? LEDGERS : []);
       setTransactions(usesLocalSeedData ? TRANSACTIONS : []);
@@ -260,6 +260,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuditLogs(usesLocalSeedData ? AUDIT_LOGS : []);
       setParticipationEntries(usesLocalSeedData ? PARTICIPATION_ENTRIES : []);
       setLocalMembers(usesLocalSeedData ? ORG_MEMBERS as Array<OrgMember & Record<string, unknown>> : []);
+
+      if (platformApiEnabled && bffActor.idToken) {
+        fetchProjectsViaBff({ tenantId: orgId, actor: bffActor })
+          .then((nextProjects) => {
+            if (!cancelled) setProjects(nextProjects);
+          })
+          .catch((error) => {
+            reportError(error, {
+              message: '[AppStore] BFF project fetch failed:',
+              options: {
+                level: 'error',
+                tags: { surface: 'app_store', action: 'project_fetch' },
+                extra: { orgId },
+              },
+            });
+          });
+      }
+
       return () => {
         cancelled = true;
       };
