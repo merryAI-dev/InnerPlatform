@@ -18,6 +18,7 @@ describe('JVM production deploy workflow', () => {
     expect(workflow.indexOf('update-traffic')).toBeGreaterThan(workflow.indexOf('/month-close/dashboard-source'));
     expect(workflow).toContain('workload_identity_provider');
     expect(workflow).toContain('actions: read');
+    expect(workflow).toContain("java-version: '21'");
     expect(workflow).not.toContain('service_account_key');
     expect(workflow).toContain('CASHFLOW_PROJECT_ID: p1773817948751');
     expect(workflow).toContain('CASHFLOW_YEAR_MONTH: 2026-07');
