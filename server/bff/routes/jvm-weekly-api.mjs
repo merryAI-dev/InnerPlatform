@@ -3062,9 +3062,20 @@ export function mountJvmWeeklyApiRoutes(app, {
           throw createHttpError(409, '이미 이 월의 결산 요청이 존재합니다.', 'cashflow_month_close_request_conflict');
         }
         const replayEvidence = buildRevisionEvidence(Number(existing.revision));
+        const legacyBuildingReplay = existing.status === 'BUILDING'
+          && !readOptionalText(existing.requestFingerprint)
+          && existing.createIdempotencyKey === req.context.idempotencyKey
+          && existing.payloadFingerprint === replayEvidence.payloadFingerprint
+          && existing.requestId === requestId
+          && existing.tenantId === req.context.tenantId
+          && existing.projectId === prepared.rawProjectId
+          && existing.yearMonth === yearMonth
+          && existing.requestedByUid === readOptionalText(req.context.actorId)
+          && existing.approverUid === approverUid
+          && Number(existing.expectedRevision) === prepared.closeBody.expectedRevision;
         if (
           existing.createIdempotencyKey === req.context.idempotencyKey
-          && existing.requestFingerprint === requestFingerprint
+          && (existing.requestFingerprint === requestFingerprint || legacyBuildingReplay)
           && existing.payloadFingerprint === replayEvidence.payloadFingerprint
         ) {
           if (!['BUILDING', 'PENDING'].includes(existing.status)) {
@@ -3464,6 +3475,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         existing
         && existing.createIdempotencyKey === req.context.idempotencyKey
         && existing.requestFingerprint !== requestFingerprint
+        && !(existing.status === 'BUILDING' && !readOptionalText(existing.requestFingerprint))
       ) {
         throw createHttpError(409, '동일한 요청 키의 월 결산 입력이 변경되었습니다.', 'cashflow_month_close_request_conflict');
       }

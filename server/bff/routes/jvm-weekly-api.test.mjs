@@ -4092,13 +4092,34 @@ describe('JVM weekly API BFF proxy', () => {
       ],
     });
     expect(created.body.monthSnapshot).toBeNull();
-    const shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
+    let shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
     expect(shardDocs).toHaveLength(44);
     expect(shardDocs.every(([, shard]) => shard.cells.length === 160)).toBe(true);
     expect(shardDocs.reduce((count, [, shard]) => count + shard.cells.length, 0)).toBe(7040);
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r1-requested')).toMatchObject({
       action: 'REQUESTED', revision: 1, actorUid: 'pm-1', manifestHash: created.body.manifestHash,
     });
+
+    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
+    const legacyBuilding = { ...source.documents.get(requestPath), status: 'BUILDING' };
+    delete legacyBuilding.requestFingerprint;
+    source.documents.set(requestPath, legacyBuilding);
+    for (const path of [...source.documents.keys()]) {
+      if (path.includes('/cashflow_month_close_request_months/') || path.endsWith('-r1-requested')) {
+        source.documents.delete(path);
+      }
+    }
+    const legacyRequester = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: stageEnv, db: source.db, now: () => new Date('2026-09-10T00:00:00.000Z') }).app;
+    const legacyRecovery = await request(legacyRequester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'cumulative-v2-create')
+      .send(createPayload);
+    expect(legacyRecovery.status, JSON.stringify(legacyRecovery.body)).toBe(202);
+    shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
+    expect(shardDocs).toHaveLength(44);
+    expect(source.documents.get(requestPath)).toMatchObject({ status: 'PENDING', requestFingerprint: expect.any(String) });
 
     const firstShard = shardDocs[0][1];
     firstShard.cells[0].amount = 1;
@@ -4234,7 +4255,6 @@ describe('JVM weekly API BFF proxy', () => {
       requestId: 'project-a-2026-08', requestRevision: 2, manifestHash: resubmitted.body.manifestHash,
       yearMonth: '2026-08', expectedRevision: 0,
     });
-    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
     const closePostCount = () => fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST').length;
     expect(closePostCount()).toBe(1);
     await request(approver)

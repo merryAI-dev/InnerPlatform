@@ -2037,6 +2037,50 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void liveLegacyTwelveLineProjectionFailsClosedWithoutPartialWrites() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-07", 3);
+        List<String> liveMissingLines = List.of(
+            "MYSC_PREPAY_DIRECT_OUT",
+            "MYSC_PREPAY_INPUT_VAT_IN",
+            "MYSC_PREPAY_LABOR_IN",
+            "MYSC_PREPAY_LABOR_OUT"
+        );
+        fixture.documents.entrySet().stream()
+            .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
+            .forEach(entry -> {
+                Map<String, Object> document = entry.getValue();
+                Map<String, Object> projection = new LinkedHashMap<>(
+                    (Map<String, Object>) document.get("projection")
+                );
+                liveMissingLines.forEach(projection::remove);
+                document.put("projection", projection);
+            });
+
+        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() ->
+            commandService(fixture.persistence).completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "live-legacy-window", "2026-07", 3, "2026-07-16T09:00:00Z"
+                )
+            )
+        ));
+
+        assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
+        WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
+        assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
+        assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
+            .hasSize(64)
+            .extracting(cell -> cell.get("lineId"))
+            .containsOnlyElementsOf(liveMissingLines);
+        assertThat(fixture.documents.keySet())
+            .noneMatch(path -> path.contains("/cashflow_weekly_update_completions/")
+                || path.contains("/cashflow_weekly_update_completion_versions/")
+                || path.contains("/weekly_api_audit_events/"));
+    }
+
+    @Test
     void lockedCashflowWeekRemainsOperationalStatusWhileProjectionChanges() {
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put(
