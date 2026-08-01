@@ -477,7 +477,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('시트 {fmt(check.sheet[field.key])} · 등록 {fmt(check.registered[field.key])}');
   });
 
-  it('removes multi-year navigation while keeping the selected-year board self-contained', () => {
+  it('keeps the selected-year board self-contained', () => {
     expect(source).not.toContain('getCashflowSheetLabYearViewViaBff');
     expect(source).not.toContain('cashflowYearView');
     expect(source).not.toContain('data-cashflow-block="multi-year-view"');
@@ -553,13 +553,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
-    expect(source).toContain('canonicalAnnualYears');
-    expect(source).toContain('canonicalCashflowAnnualYears');
+    expect(source).toContain('CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]');
     expect(source).toContain('canonicalAnnualTotalFor');
     expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
     expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
     expect(source).toContain('const renderAnnualSummaryCell');
     expect(source).toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
+    expect(source).toContain('annualYears.some((year) => !annualTotalFor(year, mode))');
     expect(source).toContain('Total');
     expect(source).toContain('const visibleWeeks = annualWeeks');
     expect(source).toContain('openingBalances?.selectedYear === selectedYear');
