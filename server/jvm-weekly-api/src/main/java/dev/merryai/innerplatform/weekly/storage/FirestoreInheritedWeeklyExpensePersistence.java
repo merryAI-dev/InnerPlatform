@@ -2661,6 +2661,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     ) {
         boolean legacyOpen = !close.containsKey("contractVersion")
             && "OPEN".equals(text(close.get("status"), ""));
+        boolean pristineLegacyOpen = legacyOpen
+            && !close.containsKey("revision")
+            && !close.containsKey("reopenCount")
+            && Collections.disjoint(close.keySet(), Set.of(
+                "snapshot", "snapshotHash", "previousSnapshot", "previousSnapshotHash",
+                "latestVersionId", "late", "closedAt", "closedByUid", "closedByName",
+                "reopenRequest", "reopenDecision", "reopenContext",
+                "amendmentCount", "postDeadlineAmendmentWarningCount", "lastAmendmentAt",
+                "lastAmendmentByUid", "lastAmendmentByName", "lastAmendmentReason",
+                "lastAmendmentDeadline", "lastAmendmentPostDeadline", "lastAmendmentEvidence"
+            ));
         if ((!legacyOpen && !CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(text(close.get("contractVersion"), "")))
             || !tenantId.equals(text(close.get("tenantId"), ""))
             || !projectId.equals(text(close.get("projectId"), ""))
@@ -2669,8 +2680,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 "Cashflow month close document is not canonical; Stage overwrite migration is required."
             );
         }
-        canonicalMonthCounter(close, "revision");
-        canonicalMonthCounter(close, "reopenCount");
+        if (!pristineLegacyOpen) {
+            canonicalMonthCounter(close, "revision");
+            canonicalMonthCounter(close, "reopenCount");
+        }
         String status = text(close.get("status"), "");
         if (Set.of("OPEN", "CLOSED", "REOPEN_REQUESTED").contains(status)) return status;
         throw new WeeklyExpenseConflictException(
