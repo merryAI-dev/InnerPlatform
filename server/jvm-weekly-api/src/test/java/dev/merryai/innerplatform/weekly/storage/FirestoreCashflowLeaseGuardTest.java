@@ -756,16 +756,15 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void monthlyApplyAcceptsLegacyOpenMonthCloseWithoutContractVersion() {
+    void monthlyApplyAcceptsPristineLegacyOpenMonthCloseWithoutCounters() {
         Fixture fixture = fixture(activeMember(), activeLease());
-        fixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
+        Map<String, Object> legacyOpen = Map.of(
             "tenantId", "tenant-a",
             "projectId", "project-a",
             "yearMonth", "2026-07",
-            "status", "OPEN",
-            "revision", 0L,
-            "reopenCount", 0L
-        ));
+            "status", "OPEN"
+        );
+        fixture.documents.put(monthClosePath("project-a", "2026-07"), legacyOpen);
         String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
 
         CashflowSheetLabApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
@@ -780,6 +779,49 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(response.savedProjectionLineCount()).isEqualTo(80);
         assertThat(response.savedActualLineCount()).isEqualTo(80);
         assertThat(fixture.documents.keySet()).anyMatch(path -> path.contains("/cashflow_weeks/"));
+        assertThat(fixture.documents.get(monthClosePath("project-a", "2026-07"))).isEqualTo(legacyOpen);
+    }
+
+    @Test
+    void monthlyApplyRejectsPartialLegacyCountersAndLegacyHistory() {
+        List<Map<String, Object>> invalidCloses = List.of(
+            Map.of("revision", 0L),
+            Map.of("reopenCount", 0L),
+            Map.of("snapshotHash", "sha256:legacy"),
+            Map.of("closedAt", "2026-07-31T00:00:00Z"),
+            Map.of("reopenRequest", Map.of()),
+            Map.of("reopenDecision", Map.of()),
+            Map.of("latestVersionId", "project-a-2026-07-r1"),
+            Map.of("late", false),
+            Map.of("reopenContext", Map.of()),
+            Map.of("lastAmendmentAt", "2026-07-31T00:00:00Z")
+        );
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+
+        for (Map<String, Object> invalid : invalidCloses) {
+            Fixture fixture = fixture(activeMember(), activeLease());
+            Map<String, Object> legacyOpen = new LinkedHashMap<>(Map.of(
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-07",
+                "status", "OPEN"
+            ));
+            legacyOpen.putAll(invalid);
+            fixture.documents.put(monthClosePath("project-a", "2026-07"), legacyOpen);
+
+            assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+                fixture.persistence
+            ).applyCashflowSheetLab(
+                ACTOR,
+                "project-a",
+                SESSION,
+                monthlyRequest("invalid-legacy-open", targetRevision, "")
+            )))
+                .isInstanceOf(WeeklyExpenseConflictException.class)
+                .hasMessageContaining("non-negative whole numbers");
+            assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weeks/"));
+            assertThat(fixture.documents.get(monthClosePath("project-a", "2026-07"))).isEqualTo(legacyOpen);
+        }
     }
 
     @Test
