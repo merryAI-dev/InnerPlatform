@@ -2659,7 +2659,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String projectId,
         String yearMonth
     ) {
-        if (!CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(text(close.get("contractVersion"), ""))
+        boolean legacyOpen = !close.containsKey("contractVersion")
+            && "OPEN".equals(text(close.get("status"), ""));
+        if ((!legacyOpen && !CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION.equals(text(close.get("contractVersion"), "")))
             || !tenantId.equals(text(close.get("tenantId"), ""))
             || !projectId.equals(text(close.get("projectId"), ""))
             || !yearMonth.equals(text(close.get("yearMonth"), ""))) {

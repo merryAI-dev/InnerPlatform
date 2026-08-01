@@ -756,6 +756,33 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthlyApplyAcceptsLegacyOpenMonthCloseWithoutContractVersion() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-07"), Map.of(
+            "tenantId", "tenant-a",
+            "projectId", "project-a",
+            "yearMonth", "2026-07",
+            "status", "OPEN",
+            "revision", 0L,
+            "reopenCount", 0L
+        ));
+        String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
+
+        CashflowSheetLabApplyResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).applyCashflowSheetLab(
+            ACTOR,
+            "project-a",
+            SESSION,
+            monthlyRequest("legacy-open-month", targetRevision, "")
+        ));
+
+        assertThat(response.savedProjectionLineCount()).isEqualTo(80);
+        assertThat(response.savedActualLineCount()).isEqualTo(80);
+        assertThat(fixture.documents.keySet()).anyMatch(path -> path.contains("/cashflow_weeks/"));
+    }
+
+    @Test
     void fullYearApplySortsMonthsAndReadsAllSixtyWeeksInOneCommandTransaction() {
         Fixture fixture = fixture(activeMember(), activeLease());
         String targetRevision = FirestoreInheritedWeeklyExpensePersistence.computeCashflowTargetRevision(List.of());
