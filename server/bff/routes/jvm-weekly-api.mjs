@@ -10,7 +10,7 @@ import {
   isWorkspaceUser,
   resolveJavaWeeklyApiServiceAccountJson,
 } from '../java-weekly-auth.mjs';
-import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
+import { assertCashflowMutationRuntime, createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import {
   buildCashflowProjectionActualComparison,
@@ -118,35 +118,6 @@ function resolveBffDataProjectId(env = process.env) {
     || readOptionalText(env.VITE_FIREBASE_PROJECT_ID)
     || readOptionalText(env.GCLOUD_PROJECT)
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
-}
-
-function cashflowMonthCloseQaDatePath(tenantId, projectId) {
-  return `orgs/${tenantId}/cashflow_month_close_qa_dates/${projectId}`;
-}
-
-function normalizeCashflowMonthCloseQaDateTime(value) {
-  const qaDateTime = readOptionalText(value);
-  if (!qaDateTime) return null;
-  if (!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d$/.test(qaDateTime)) {
-    throw createHttpError(400, 'QA 기준시각은 YYYY-MM-DDTHH:mm 형식이어야 합니다.', 'cashflow_month_close_qa_date_invalid');
-  }
-  const [qaDate, qaTime] = qaDateTime.split('T');
-  const parsedDate = new Date(`${qaDate}T00:00:00Z`);
-  if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== qaDate) {
-    throw createHttpError(400, 'QA 기준시각은 실제 날짜와 시간이어야 합니다.', 'cashflow_month_close_qa_date_invalid');
-  }
-  return `${qaDate}T${qaTime}:00+09:00`;
-}
-
-async function readCashflowMonthCloseQaClock({ db, tenantId, projectId, fallbackNow }) {
-  if (!db?.doc) return { active: false, qaDateTime: null, now: fallbackNow };
-  const snapshot = await db.doc(cashflowMonthCloseQaDatePath(tenantId, projectId)).get();
-  const setting = snapshot.exists ? snapshot.data() || {} : {};
-  const qaDateTime = setting.active === true ? readOptionalText(setting.qaDateTime) : '';
-  const parsed = qaDateTime ? new Date(qaDateTime) : null;
-  return parsed && !Number.isNaN(parsed.getTime())
-    ? { active: true, qaDateTime, now: parsed }
-    : { active: false, qaDateTime: null, now: fallbackNow };
 }
 
 function cashflowMonthCloseRequestPath(tenantId, requestId) {
@@ -2236,6 +2207,10 @@ export function mountJvmWeeklyApiRoutes(app, {
     return javaWeeklyClient.requestJson(options);
   }
 
+  function assertAlignedCashflowMutation() {
+    assertCashflowMutationRuntime({ bffDataProjectId, jvmWeeklyFirestoreProjectId: firestoreProjectId }, env);
+  }
+
   async function proxyMutation(req, path, body, {
     cashflowWrite = false,
     requireWeeklyExpenseLease = false,
@@ -2244,16 +2219,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     let editSession;
     let dataProjectId;
     if (cashflowWrite) {
-      if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-        throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-      }
-      const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
-      if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-        throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
-      }
-      if (bffDataProjectId === liveProjectId) {
-        throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-      }
+      assertAlignedCashflowMutation();
       if (requireWeeklyExpenseLease) {
         if (!weeklyExpenseEditLeasesEnabled) {
           throw createHttpError(503, '현재 환경에서는 주간 비용을 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'cashflow_edit_leases_disabled');
@@ -2463,19 +2429,13 @@ export function mountJvmWeeklyApiRoutes(app, {
       }
       cumulativeCloseMonths(yearMonth);
       const currentNow = now();
-      const qaClock = await readCashflowMonthCloseQaClock({
-        db,
-        tenantId: req.context.tenantId,
-        projectId: rawProjectId,
-        fallbackNow: currentNow,
-      });
       const comparisonBoundary = {
         ...resolveCashflowComparisonAsOf('', currentNow),
         asOfMs: currentNow.getTime(),
       };
       const weeklyComplianceBoundary = {
-        ...resolveCashflowComparisonAsOf('', qaClock.now),
-        asOfMs: qaClock.now.getTime(),
+        ...resolveCashflowComparisonAsOf('', currentNow),
+        asOfMs: currentNow.getTime(),
       };
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const traceAttempt = attempt + 1;
@@ -2574,51 +2534,6 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json(body);
   }));
 
-  app.get('/api/v1/cashflow/:projectId/month-close/qa-date', asyncHandler(async (req, res) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'read cashflow month-close QA date', authMode, workspaceEmailDomain);
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
-    }
-    if (!db?.doc) throw createHttpError(503, '기준 날짜 설정을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_qa_clock_unavailable');
-    const projectId = readOptionalText(req.params.projectId);
-    const snapshot = await db.doc(cashflowMonthCloseQaDatePath(req.context.tenantId, projectId)).get();
-    const setting = snapshot.exists ? snapshot.data() || {} : {};
-    res.status(200).json({
-      projectId,
-      active: setting.active === true && Boolean(readOptionalText(setting.qaDateTime)),
-      qaDateTime: setting.active === true ? readOptionalText(setting.qaDateTime)?.slice(0, 16) || null : null,
-      updatedAt: readOptionalText(setting.updatedAt) || null,
-      updatedBy: readOptionalText(setting.updatedByEmail) || readOptionalText(setting.updatedByUid) || null,
-    });
-  }));
-
-  app.post('/api/v1/cashflow/:projectId/month-close/qa-date', asyncHandler(async (req, res) => {
-    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'set cashflow month-close QA date', authMode, workspaceEmailDomain);
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(404, '월 결산 QA 날짜는 Stage에서만 사용할 수 있습니다.', 'cashflow_month_close_qa_date_stage_only');
-    }
-    if (!db?.doc) throw createHttpError(503, '기준 날짜 설정을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.', 'cashflow_qa_clock_unavailable');
-    const projectId = readOptionalText(req.params.projectId);
-    const qaDateTime = normalizeCashflowMonthCloseQaDateTime(commandBody(req).qaDateTime);
-    const nowIso = now().toISOString();
-    const setting = {
-      projectId,
-      active: Boolean(qaDateTime),
-      qaDateTime,
-      updatedAt: nowIso,
-      updatedByUid: readOptionalText(req.context.actorId),
-      updatedByEmail: readOptionalText(req.context.actorEmail),
-    };
-    await db.doc(cashflowMonthCloseQaDatePath(req.context.tenantId, projectId)).set(setting);
-    res.status(200).json({
-      projectId,
-      active: setting.active,
-      qaDateTime: qaDateTime?.slice(0, 16) || null,
-      updatedAt: nowIso,
-      updatedBy: setting.updatedByEmail || setting.updatedByUid || null,
-    });
-  }));
-
   app.get('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'auditor', 'viewer', 'tenant_admin', 'support', 'security'], 'read weekly cashflow update', authMode, workspaceEmailDomain);
     const projectId = readOptionalText(req.params.projectId);
@@ -2683,17 +2598,9 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.post('/api/v1/cashflow/:projectId/weekly-update-complete', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'complete weekly cashflow update', authMode, workspaceEmailDomain);
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
     const projectId = readOptionalText(req.params.projectId);
-    const qaClock = await readCashflowMonthCloseQaClock({
-      db,
-      tenantId: req.context.tenantId,
-      projectId,
-      fallbackNow: now(),
-    });
-    const boundary = resolveCashflowComparisonAsOf('', qaClock.now);
+    const currentNow = now();
+    const boundary = resolveCashflowComparisonAsOf('', currentNow);
     const requested = commandBody(req);
     const requestedYearMonth = readOptionalText(requested.yearMonth);
     const requestedWeekNo = Number(requested.weekNo);
@@ -2715,7 +2622,7 @@ export function mountJvmWeeklyApiRoutes(app, {
     const requestKey = (
       readOptionalText(req.context.idempotencyKey)
       || readOptionalText(req.context.requestId)
-      || String(qaClock.now.getTime())
+      || String(currentNow.getTime())
     ).slice(0, 96);
     const result = await proxyMutation(
       req,
@@ -2724,7 +2631,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         idempotencyKey: `cashflow-weekly:${requestKey}`,
         yearMonth: hasExplicitScope ? requestedYearMonth : boundary.asOfWeek.yearMonth,
         weekNo: hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo,
-        completedAt: qaClock.now.toISOString(),
+        completedAt: currentNow.toISOString(),
         updateResult,
       },
       { cashflowWrite: true },
@@ -2790,12 +2697,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(400, 'Cashflow month close review input is required.', 'cashflow_month_close_request_invalid');
       }
-      const qaClock = await readCashflowMonthCloseQaClock({
-        db,
-        tenantId: req.context.tenantId,
-        projectId: rawProjectId,
-        fallbackNow: now(),
-      });
+      const currentNow = now();
       const publicationBefore = await readCashflowSheetPublicationState({
         db,
         tenantId: req.context.tenantId,
@@ -2803,8 +2705,8 @@ export function mountJvmWeeklyApiRoutes(app, {
       });
       assertCashflowSheetPublicationReady(publicationBefore);
       const comparisonBoundary = {
-        ...resolveCashflowComparisonAsOf('', qaClock.now),
-        asOfMs: qaClock.now.getTime(),
+        ...resolveCashflowComparisonAsOf('', currentNow),
+        asOfMs: currentNow.getTime(),
       };
       const yearMonth = readOptionalText(requested.yearMonth);
       const source = await proxyJavaWeeklyRequest({
@@ -3257,6 +3159,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.post('/api/v1/cashflow/:projectId/month-close/approver', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'set cashflow month-close approver', authMode, workspaceEmailDomain);
+    assertAlignedCashflowMutation();
     if (!db?.doc || !db?.runTransaction) {
       throw createHttpError(503, '프로젝트 조직장 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
     }
@@ -3472,6 +3375,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.post('/api/v1/cashflow/:projectId/month-close/requests', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'request cashflow month close', authMode, workspaceEmailDomain);
+    assertAlignedCashflowMutation();
     if (!db?.doc || !db?.runTransaction) {
       throw createHttpError(503, '월 결산 요청 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
     }
@@ -3670,6 +3574,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close/requests/:requestId/review', asyncHandler(async (req, res) => {
+    assertAlignedCashflowMutation();
     if (!db?.doc || !db?.runTransaction) {
       throw createHttpError(503, '월 결산 요청 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
     }
@@ -4078,6 +3983,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.post('/api/v1/cashflow/:projectId/month-close', createJavaMutatingProxyRoute(async (req) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer'], 'close cashflow month', authMode, workspaceEmailDomain);
+    assertAlignedCashflowMutation();
     await prepareCashflowMonthClose(req);
     throw createHttpError(
       409,

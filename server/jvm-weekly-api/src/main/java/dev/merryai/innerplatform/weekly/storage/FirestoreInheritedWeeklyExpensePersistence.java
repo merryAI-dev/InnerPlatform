@@ -55,6 +55,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
@@ -114,7 +115,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final Firestore db;
     private final String firestoreProjectId;
     private final Clock clock;
-    private final CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate;
     private final byte[] cashflowSettledWeekConfirmationKey;
     private final FirestoreWeeklyExpenseDocumentMapper sheetMapper = new FirestoreWeeklyExpenseDocumentMapper();
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
@@ -129,42 +129,29 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     @Autowired
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId,
-        @Value("${weekly.cashflow-settled-week-confirmation-key:}") String cashflowSettledWeekConfirmationKey,
-        CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate
+        @Value("${weekly.cashflow-settled-week-confirmation-key:}") String cashflowSettledWeekConfirmationKey
     ) {
         this(
             createFirestore(firestoreProjectId),
             normalizeFirestoreProjectId(firestoreProjectId),
             Clock.systemUTC(),
-            cashflowMonthCloseBusinessDate,
             cashflowSettledWeekConfirmationKey
         );
     }
 
     FirestoreInheritedWeeklyExpensePersistence(Firestore db, String firestoreProjectId, Clock clock) {
-        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(null), TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
-    }
-
-    FirestoreInheritedWeeklyExpensePersistence(
-        Firestore db,
-        String firestoreProjectId,
-        Clock clock,
-        LocalDate cashflowMonthCloseQaDate
-    ) {
-        this(db, firestoreProjectId, clock, new CashflowMonthCloseBusinessDate(cashflowMonthCloseQaDate), TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
+        this(db, firestoreProjectId, clock, TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
     }
 
     private FirestoreInheritedWeeklyExpensePersistence(
         Firestore db,
         String firestoreProjectId,
         Clock clock,
-        CashflowMonthCloseBusinessDate cashflowMonthCloseBusinessDate,
         String cashflowSettledWeekConfirmationKey
     ) {
         this.db = db;
         this.firestoreProjectId = normalizeFirestoreProjectId(firestoreProjectId);
         this.clock = clock;
-        this.cashflowMonthCloseBusinessDate = cashflowMonthCloseBusinessDate;
         this.cashflowSettledWeekConfirmationKey = requireCashflowSettledWeekConfirmationKey(cashflowSettledWeekConfirmationKey);
     }
 
@@ -406,7 +393,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             .toList());
         if (months.isEmpty()) return List.of();
 
-        CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
+        LocalDate businessDate = cashflowMonthCloseBusinessDate();
         String requestedReason = text(reason, "").trim();
         Map<String, Map<String, Object>> closedMonthDocuments = new LinkedHashMap<>();
         for (String yearMonth : months) {
@@ -449,7 +436,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             Map<String, Object> close = closedMonthDocuments.get(yearMonth);
             if (close == null) continue;
             LocalDate deadline = YearMonth.parse(yearMonth).plusMonths(1).atDay(10);
-            boolean postDeadline = businessDate.date().isAfter(deadline);
+            boolean postDeadline = businessDate.isAfter(deadline);
             long closeRevision = canonicalMonthCounter(close, "revision");
             addMonthCounters(closeRevision, 1);
             String closeSnapshotHash = text(close.get("snapshotHash"), "");
@@ -1021,8 +1008,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
         requireCashflowSheetPublicationReady(actor.tenantId(), projectId);
         YearMonth targetMonth = requireYearMonth(request.yearMonth());
-        CashflowBusinessDate businessDate = cashflowMonthCloseBusinessDate(actor.tenantId(), projectId);
-        LocalDate today = businessDate.date();
+        LocalDate today = cashflowMonthCloseBusinessDate();
         if (!targetMonth.isBefore(YearMonth.from(today))) {
             throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
         }
@@ -1086,7 +1072,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> snapshot = cumulative == null
             ? buildMonthCloseSnapshot(
                 actor, projectId, request, depositScheduleRows, confirmations, replacement, source,
-                openingBalance, now, today, businessDate.qaOverrideActive()
+                openingBalance, now, today
             )
             : cumulativeCloseSnapshot(actor, projectId, request, cumulative, replacement, now);
         if (!nestedMap(current.get("reopenRequest")).isEmpty() || !nestedMap(current.get("reopenDecision")).isEmpty()) {
@@ -2677,7 +2663,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             || !projectId.equals(text(close.get("projectId"), ""))
             || !yearMonth.equals(text(close.get("yearMonth"), ""))) {
             throw new WeeklyExpenseConflictException(
-                "Cashflow month close document is not canonical; Stage overwrite migration is required."
+                "Cashflow month close document is not canonical; an administrator migration is required."
             );
         }
         if (!pristineLegacyOpen) {
@@ -2687,7 +2673,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String status = text(close.get("status"), "");
         if (Set.of("OPEN", "CLOSED", "REOPEN_REQUESTED").contains(status)) return status;
         throw new WeeklyExpenseConflictException(
-            "Cashflow month close status is not canonical; Stage overwrite migration is required."
+            "Cashflow month close status is not canonical; an administrator migration is required."
         );
     }
 
@@ -2726,7 +2712,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Cashflow month is closed and cannot be changed.");
         }
         throw new WeeklyExpenseConflictException(
-            "Cashflow month close status is not canonical; Stage overwrite migration is required."
+            "Cashflow month close status is not canonical; an administrator migration is required."
         );
     }
 
@@ -3303,7 +3289,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private WeeklyExpenseConflictException malformedMonthCloseCounter() {
         return new WeeklyExpenseConflictException(
             "Cashflow month close counters must be non-negative whole numbers in the supported range; "
-                + "Stage overwrite migration is required."
+                + "an administrator migration is required."
         );
     }
 
@@ -3317,8 +3303,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         ValidatedCloseSource source,
         CashflowOpeningBalance openingBalance,
         Instant now,
-        LocalDate evaluatedBusinessDate,
-        boolean qaDateOverride
+        LocalDate evaluatedBusinessDate
     ) {
         Map<String, Map<String, BigDecimal>> projectionByWeek = new LinkedHashMap<>();
         Map<String, Map<String, BigDecimal>> actualByWeek = new LinkedHashMap<>();
@@ -3449,33 +3434,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         snapshot.put("draftRevision", request.expectedDraftRevision());
         snapshot.put("draftInputHash", hashCanonicalJson(canonicalCloseInput(closeInputMap(request))));
         snapshot.put("evaluatedBusinessDate", evaluatedBusinessDate.toString());
-        snapshot.put("qaDateOverride", qaDateOverride);
         return snapshot;
     }
 
-    private CashflowBusinessDate cashflowMonthCloseBusinessDate(String tenantId, String projectId) {
-        LocalDate runtimeQaDate = null;
-        if (cashflowMonthCloseBusinessDate.runtimeOverrideAllowed()) {
-            DocumentSnapshot snapshot = get(db.document(
-                "orgs/" + tenantId + "/cashflow_month_close_qa_dates/" + projectId
-            ));
-            Map<String, Object> setting = snapshot.exists() ? data(snapshot) : Map.of();
-            if (bool(setting.get("active"))) {
-                String qaDateTime = text(setting.get("qaDateTime"), "");
-                try {
-                    runtimeQaDate = LocalDate.parse(qaDateTime.substring(0, 10));
-                } catch (RuntimeException error) {
-                    throw new WeeklyExpenseConflictException("Stage cashflow QA date is invalid; reset it before month close.");
-                }
-            }
-        }
-        return new CashflowBusinessDate(
-            cashflowMonthCloseBusinessDate.currentDate(clock, runtimeQaDate),
-            cashflowMonthCloseBusinessDate.qaOverrideActive(runtimeQaDate)
-        );
+    private LocalDate cashflowMonthCloseBusinessDate() {
+        return LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")));
     }
-
-    private record CashflowBusinessDate(LocalDate date, boolean qaOverrideActive) {}
 
     String hashCanonicalJson(Map<String, Object> value) {
         try {
@@ -3523,7 +3487,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             ? "OPEN"
             : canonicalMonthStatus(document, tenantId, projectId, yearMonth);
         YearMonth targetMonth = requireYearMonth(yearMonth);
-        LocalDate evaluatedBusinessDate = cashflowMonthCloseBusinessDate(tenantId, projectId).date();
+        LocalDate evaluatedBusinessDate = cashflowMonthCloseBusinessDate();
         LocalDate closeDeadline = targetMonth.plusMonths(1).atDay(10);
         boolean closeEligible = "OPEN".equals(status) && targetMonth.isBefore(YearMonth.from(evaluatedBusinessDate));
         return new CashflowMonthCloseRecord(

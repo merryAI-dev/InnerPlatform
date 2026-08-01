@@ -40,7 +40,7 @@ jobs:
       LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316
       BFF_DEPLOY_ENV: live
       BFF_AUTH_MODE: firebase_required
-      BFF_EDIT_LEASES_ENABLED: 'false'
+      BFF_EDIT_LEASES_ENABLED: 'true'
       BFF_WORKERS_ENABLED: 'false'
       BFF_SCHEDULER_OWNER: disabled
       BFF_MAINTENANCE_READ_ONLY: 'false'

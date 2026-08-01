@@ -42,9 +42,7 @@ console.log(JSON.stringify({ projectId, tenantId: tenantId || null, apply, docum
 if (!apply) process.exit(0);
 if (!tenantId) throw new Error('No weekly QA records found. Nothing was changed.');
 
-const qaSnapshot = await db.doc(`orgs/${tenantId}/cashflow_month_close_qa_dates/${projectId}`).get();
-const qaDateTime = qaSnapshot.exists && qaSnapshot.data()?.active ? String(qaSnapshot.data()?.qaDateTime || '') : '';
-const resetAt = Number.isFinite(Date.parse(qaDateTime)) ? qaDateTime : new Date().toISOString();
+const resetAt = new Date().toISOString();
 const backupDirectory = resolve(process.env.TMPDIR || '/tmp', 'myscube-stage-reset-backups');
 const backupPath = resolve(backupDirectory, `${projectId}-${Date.now()}.json`);
 await mkdir(backupDirectory, { recursive: true });

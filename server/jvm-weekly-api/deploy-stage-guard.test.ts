@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '../..');
 const deployScript = resolve(repoRoot, 'scripts/deploy_jvm_weekly_api_cloud_run.sh');
-const qaDateScript = resolve(repoRoot, 'scripts/set_stage_cashflow_month_close_qa_date.sh');
 const smokeScript = resolve(repoRoot, 'scripts/smoke_jvm_weekly_api.mjs');
 const tokenScript = resolve(repoRoot, 'scripts/create_firebase_smoke_id_token.mjs');
 
@@ -84,45 +83,6 @@ describe('Stage-only JVM deploy guards', () => {
     });
     expect(result.status).not.toBe(0);
     expect(result.output).toContain('Stage-only Firebase smoke auth requires mysc-bmp-14173451');
-  }, 20_000);
-
-  it.each([
-    { project: 'inner-platform-live-20260316', date: '2026-08-11', message: 'Stage-only QA date' },
-    { project: 'inner-platform-qa-20260310', date: '2026-02-30', message: 'valid YYYY-MM-DD' },
-  ])('rejects unsafe QA business date changes before gcloud update: %o', ({ project, date, message }) => {
-    const stubs = commandStubs();
-    const result = runIfPresent('/bin/bash', [qaDateScript, date], {
-      ...process.env,
-      PATH: `${stubs.root}:${process.env.PATH || ''}`,
-      COMMAND_MARKER: stubs.marker,
-      GOOGLE_CLOUD_PROJECT: project,
-    });
-
-    expect(result.status).not.toBe(0);
-    expect(result.output).toContain(message);
-    expect(existsSync(stubs.marker) ? readFileSync(stubs.marker, 'utf8') : '').toBe('');
-  }, 20_000);
-
-  it.each([
-    { value: '2026-08-11', flag: '--update-env-vars', setting: 'JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=2026-08-11' },
-    { value: 'reset', flag: '--remove-env-vars', setting: 'JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE' },
-  ])('targets only the Stage Cloud Run QA date setting: %o', ({ value, flag, setting }) => {
-    const stubs = commandStubs();
-    const result = runIfPresent('/bin/bash', [qaDateScript, value], {
-      ...process.env,
-      PATH: `${stubs.root}:${process.env.PATH || ''}`,
-      COMMAND_MARKER: stubs.marker,
-      GOOGLE_CLOUD_PROJECT: 'inner-platform-qa-20260310',
-    });
-    const command = existsSync(stubs.marker) ? readFileSync(stubs.marker, 'utf8') : '';
-
-    expect(result.status).toBe(91);
-    expect(command).toContain('run services update innerplatform-jvm-weekly-api-lease-stage');
-    expect(command).toContain('--project inner-platform-qa-20260310');
-    expect(command).toContain('--region asia-northeast3');
-    expect(command).toContain(flag);
-    expect(command).toContain(setting);
-    expect(command).not.toContain('inner-platform-live');
   }, 20_000);
 
   it('rejects a non-QA lease project before any Stage BFF request', () => {

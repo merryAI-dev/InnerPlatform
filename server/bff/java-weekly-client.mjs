@@ -64,6 +64,7 @@ export function assertCashflowMutationRuntime(options = {}, env = process.env) {
   const bffDataProjectId = resolveBffDataProjectId(options, env);
   const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId(options, env);
   const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+  const stageProjectId = readOptionalText(env.BFF_STAGE_FIREBASE_PROJECT_ID) || 'mysc-bmp-14173451';
 
   if (!['stage', 'live'].includes(deployEnv)) {
     throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
@@ -73,7 +74,7 @@ export function assertCashflowMutationRuntime(options = {}, env = process.env) {
   }
   const projectMatchesEnvironment = deployEnv === 'live'
     ? bffDataProjectId === liveProjectId
-    : bffDataProjectId !== liveProjectId;
+    : bffDataProjectId === stageProjectId;
   if (!projectMatchesEnvironment) {
     throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
   }

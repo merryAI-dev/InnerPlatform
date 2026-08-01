@@ -47,18 +47,9 @@ Optional environment:
 - `JVM_WEEKLY_FIRESTORE_PROJECT_ID`: Firestore project used when `JVM_WEEKLY_STORAGE_BACKEND=firestore`
 - `JVM_WEEKLY_FIREBASE_PROJECT_ID`: legacy fallback for both Firebase Auth and Firestore when the split envs are not set
 - `JVM_WEEKLY_ALLOWED_ORIGINS`: comma-separated browser origins allowed by CORS; defaults to fixed stage and live origins
-- `JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE`: optional Stage-only `YYYY-MM-DD` business date for month-close eligibility and late checks
 
 The runtime configuration fixes `weekly.legacy-week-close-enabled` to `false`.
 Only the isolated test profile sets it to `true` so the historical command service remains regression-tested.
-
-The QA date never changes lease expiry, saved timestamps, audit timestamps, or the host OS clock.
-The JVM refuses to start if this value is configured outside Stage. Change or clear the Stage value with:
-
-```bash
-GOOGLE_CLOUD_PROJECT=inner-platform-qa-20260310 scripts/set_stage_cashflow_month_close_qa_date.sh 2026-08-11
-GOOGLE_CLOUD_PROJECT=inner-platform-qa-20260310 scripts/set_stage_cashflow_month_close_qa_date.sh reset
-```
 
 ## First Endpoints
 
