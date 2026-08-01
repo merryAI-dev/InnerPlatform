@@ -10,6 +10,7 @@ import {
   extractSpreadsheetIdFromSheetInput,
   applyCashflowSheetLabViaBff,
   cashflowFormulaMismatchesFromError,
+  isCashflowSheetApplyResultUncertain,
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabShareAccountViaBff,
   refreshCashflowSheetLabMirrorViaBff,
@@ -62,11 +63,6 @@ function formatError(error: unknown) {
 function getErrorCode(error: unknown) {
   const apiError = error as { code?: string; body?: { code?: string; error?: string } };
   return apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
-}
-
-function isApplyResultUncertain(error: unknown) {
-  const status = Number((error as { status?: unknown })?.status);
-  return !Number.isInteger(status) || status >= 500;
 }
 
 function getClosedMonthDifferences(error: unknown) {
@@ -983,7 +979,7 @@ export function CashflowSheetLabPage({
         setApplyResumeRequired(false);
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
         setClosedMonthPendingApprovalAccepted(acceptPendingApprovalDifferences);
-      } else if (activeStep === 'apply' && staged && isApplyResultUncertain(error)) {
+      } else if (activeStep === 'apply' && staged && isCashflowSheetApplyResultUncertain(error)) {
         setClosedMonthStage(staged);
         setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);

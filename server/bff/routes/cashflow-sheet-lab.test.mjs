@@ -1989,6 +1989,65 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
   });
 
+  it('allows an aligned Live request to reach pinned-stage validation', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-2',
+        },
+      },
+    });
+
+    await request(createApp({
+      db,
+      routeOptions: {
+        env: {
+          BFF_DEPLOY_ENV: 'live',
+          FIREBASE_PROJECT_ID: 'live-data-project',
+          BFF_LIVE_FIREBASE_PROJECT_ID: 'live-data-project',
+          JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'live-data-project',
+          JVM_WEEKLY_API_BASE_URL: 'https://live-jvm.example',
+          JVM_WEEKLY_INTERNAL_API_TOKEN: 'service-token',
+        },
+      },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'live-apply-001' })
+      .expect(400)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_stage_run_required'));
+
+    expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1')).toBeUndefined();
+  });
+
+  it('rejects a misaligned Live runtime before reading project data', async () => {
+    let readCount = 0;
+    const db = createDb({ onGet: async () => { readCount += 1; } });
+
+    await request(createApp({
+      db,
+      routeOptions: {
+        env: {
+          BFF_DEPLOY_ENV: 'live',
+          FIREBASE_PROJECT_ID: 'stage-data-project',
+          BFF_LIVE_FIREBASE_PROJECT_ID: 'live-data-project',
+          JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
+          JVM_WEEKLY_API_BASE_URL: 'https://live-jvm.example',
+          JVM_WEEKLY_INTERNAL_API_TOKEN: 'service-token',
+        },
+      },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ idempotencyKey: 'live-apply-misaligned-001' })
+      .expect(503)
+      .expect((response) => expect(response.body.code).toBe('unsafe_bff_runtime'));
+
+    expect(readCount).toBe(0);
+  });
+
   it('rejects direct final apply without a pinned stage run', async () => {
     const db = createDb({
       project: {

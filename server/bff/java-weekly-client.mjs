@@ -59,6 +59,26 @@ export function resolveBffDataProjectId(options = {}, env = process.env) {
     || readOptionalText(env.GOOGLE_CLOUD_PROJECT);
 }
 
+export function assertCashflowMutationRuntime(options = {}, env = process.env) {
+  const deployEnv = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase();
+  const bffDataProjectId = resolveBffDataProjectId(options, env);
+  const firestoreProjectId = resolveJavaWeeklyFirestoreProjectId(options, env);
+  const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
+
+  if (!['stage', 'live'].includes(deployEnv)) {
+    throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
+  }
+  if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
+    throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
+  }
+  const projectMatchesEnvironment = deployEnv === 'live'
+    ? bffDataProjectId === liveProjectId
+    : bffDataProjectId !== liveProjectId;
+  if (!projectMatchesEnvironment) {
+    throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
+  }
+}
+
 const GENERIC_UPSTREAM_ERROR_CODES = new Set([
   'error',
   'internal_error',
@@ -426,16 +446,7 @@ export function createJavaWeeklyClient({
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
-    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
-    }
-    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
-    if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
+    assertCashflowMutationRuntime({ bffDataProjectId, jvmWeeklyFirestoreProjectId: firestoreProjectId }, env);
     const result = await requestJson({
       context,
       method: 'POST',
@@ -481,16 +492,7 @@ export function createJavaWeeklyClient({
     if (!normalizedProjectId) {
       throw createHttpError(400, 'projectId is required.', 'project_id_required');
     }
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
-    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
-    }
-    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
-    if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
+    assertCashflowMutationRuntime({ bffDataProjectId, jvmWeeklyFirestoreProjectId: firestoreProjectId }, env);
     const result = await requestJson({
       context,
       method: 'POST',
@@ -579,16 +581,7 @@ export function createJavaWeeklyClient({
   }) {
     const normalizedProjectId = encodeURIComponent(readOptionalText(projectId));
     if (!normalizedProjectId) throw createHttpError(400, 'projectId is required.', 'project_id_required');
-    if (readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() !== 'stage') {
-      throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
-    if (!bffDataProjectId || !firestoreProjectId || bffDataProjectId !== firestoreProjectId) {
-      throw createHttpError(503, '서버 설정이 서로 맞지 않아 캐시플로를 사용할 수 없습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_data_project_mismatch');
-    }
-    const liveProjectId = readOptionalText(env.BFF_LIVE_FIREBASE_PROJECT_ID) || 'inner-platform-live-20260316';
-    if (bffDataProjectId === liveProjectId) {
-      throw createHttpError(503, '테스트 환경에서는 실제 운영 자료를 변경할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
-    }
+    assertCashflowMutationRuntime({ bffDataProjectId, jvmWeeklyFirestoreProjectId: firestoreProjectId }, env);
     const result = await requestJson({
       context,
       method: 'POST',

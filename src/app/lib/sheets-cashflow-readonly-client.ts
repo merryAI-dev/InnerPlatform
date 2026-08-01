@@ -11,6 +11,14 @@ import {
   type CashflowMutationLease,
 } from './cashflow-edit-lease';
 
+export function isCashflowSheetApplyResultUncertain(error: unknown) {
+  const apiError = error as { status?: unknown; code?: string; body?: { code?: string; error?: string } };
+  const status = Number(apiError?.status);
+  if (!Number.isInteger(status)) return true;
+  const code = apiError?.code || apiError?.body?.code || apiError?.body?.error || '';
+  return code === 'cashflow_sheet_operation_uncertain';
+}
+
 export interface CashflowSheetLabWeekColumn {
   raw: string;
   year: number;

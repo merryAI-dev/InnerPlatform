@@ -13,6 +13,18 @@ function stageEnv(overrides = {}) {
   };
 }
 
+function liveEnv(overrides = {}) {
+  return {
+    BFF_DEPLOY_ENV: 'live',
+    FIREBASE_PROJECT_ID: 'live-data-project',
+    BFF_LIVE_FIREBASE_PROJECT_ID: 'live-data-project',
+    JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'live-data-project',
+    JVM_WEEKLY_API_BASE_URL: 'https://live-jvm.example',
+    JVM_WEEKLY_INTERNAL_API_TOKEN: 'service-token',
+    ...overrides,
+  };
+}
+
 const context = {
   tenantId: 'tenant-a',
   actorId: 'pm-1',
@@ -46,6 +58,58 @@ function chunkedResponse(chunks, { status = 200, headers = {} } = {}) {
 }
 
 describe('Java weekly cashflow client', () => {
+  it.each([
+    ['monthly', 'applyCashflowSheetLab', {
+      idempotencyKey: 'live-monthly-1',
+      ...monthlyContract,
+    }, '/sheet-lab/apply'],
+    ['batch', 'applyCashflowSheetBatch', {
+      idempotencyKey: 'live-batch-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      targetRevision: monthlyContract.targetRevision,
+      months: [{ yearMonth: monthlyContract.yearMonth, cells: monthlyContract.cells }],
+    }, '/sheet-lab/batch/apply'],
+    ['annual', 'applyCashflowSheetAnnualTotal', {
+      idempotencyKey: 'live-annual-1',
+      sourceRevision: monthlyContract.sourceRevision,
+      year: 2025,
+      expectedRevision: 3,
+      cells: [{ mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 }],
+    }, '/sheet-lab/annual/apply'],
+  ])('allows aligned Live %s apply to reach the JVM once', async (_case, method, payload, path) => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: responseBody({ ok: true, projectId: 'project-a' }),
+    }));
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
+
+    await client[method]({ context, projectId: 'project-a', ...payload });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0][0]).toContain(path);
+  });
+
+  it.each([
+    ['unknown runtime', liveEnv({ BFF_DEPLOY_ENV: 'preview' })],
+    ['Live using an unapproved data project', liveEnv({
+      FIREBASE_PROJECT_ID: 'other-project',
+      JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-project',
+    })],
+    ['Stage using the Live data project', liveEnv({ BFF_DEPLOY_ENV: 'stage' })],
+  ])('fails before network for %s', async (_case, env) => {
+    const fetchImpl = vi.fn();
+    const client = createJavaWeeklyClient({ env, fetchImpl });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'blocked-1',
+      ...monthlyContract,
+    })).rejects.toMatchObject({ statusCode: 503, code: 'unsafe_bff_runtime' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('forwards an annual total to the dedicated JVM authority endpoint', async () => {
     const fetchImpl = vi.fn(async (url, init) => ({
       ok: true,
