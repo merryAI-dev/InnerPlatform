@@ -4427,7 +4427,7 @@ class FirestoreCashflowLeaseGuardTest {
             authorization,
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
     }
 

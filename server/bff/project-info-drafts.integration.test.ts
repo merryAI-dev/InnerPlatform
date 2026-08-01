@@ -34,6 +34,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     db,
     authMode: 'headers',
     now: () => new Date(nowMs).toISOString(),
+    editLeasesEnabled: true,
     createProjectInfoAttachmentId: () => `info-attachment-${++attachmentSequence}`,
     createProjectInfoOutboxEvent: (input: Record<string, any>) => ({
       id: `project-info-outbox-${++outboxSequence}`,
@@ -51,9 +52,8 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     },
     env: {
       ...process.env,
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'local',
       BFF_SCHEDULER_OWNER: 'disabled',
-      BFF_EDIT_LEASES_ENABLED: 'true',
     },
   }));
 

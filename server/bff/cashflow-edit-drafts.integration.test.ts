@@ -15,12 +15,12 @@ describeIfEmulator('cashflow private drafts (Firestore emulator)', () => {
     db,
     authMode: 'headers',
     now: () => timestamp,
+    editLeasesEnabled: true,
     projectRegistrationDraftStorageService: {},
     env: {
       ...process.env,
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'local',
       BFF_SCHEDULER_OWNER: 'disabled',
-      BFF_EDIT_LEASES_ENABLED: 'true',
     },
   }));
 
@@ -64,7 +64,7 @@ describeIfEmulator('cashflow private drafts (Firestore emulator)', () => {
   beforeEach(reset, 60_000);
   afterAll(reset, 60_000);
 
-  it('mounts the Stage route and keeps an opened cashflow snapshot private to its owner', async () => {
+  it('keeps an opened cashflow snapshot private to its owner', async () => {
     const acquired = await api
       .post('/api/v1/edit-leases/cashflow/project-a/acquire')
       .set({

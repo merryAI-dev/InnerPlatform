@@ -1,19 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createJavaWeeklyClient } from './java-weekly-client.mjs';
 
-function stageEnv(overrides = {}) {
-  return {
-    BFF_DEPLOY_ENV: 'stage',
-    BFF_EDIT_LEASES_ENABLED: 'true',
-    BFF_STAGE_FIREBASE_PROJECT_ID: 'stage-data-project',
-    FIREBASE_PROJECT_ID: 'stage-data-project',
-    JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
-    JVM_WEEKLY_API_BASE_URL: 'https://stage-jvm.example',
-    JVM_WEEKLY_INTERNAL_API_TOKEN: 'service-token',
-    ...overrides,
-  };
-}
-
 function liveEnv(overrides = {}) {
   return {
     BFF_DEPLOY_ENV: 'live',
@@ -98,9 +85,6 @@ describe('Java weekly cashflow client', () => {
       JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-project',
     })],
     ['Stage using the Live data project', liveEnv({ BFF_DEPLOY_ENV: 'stage' })],
-    ['Stage using an unapproved data project', stageEnv({
-      BFF_STAGE_FIREBASE_PROJECT_ID: 'approved-stage-project',
-    })],
   ])('fails before network for %s', async (_case, env) => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({ env, fetchImpl });
@@ -122,7 +106,7 @@ describe('Java weekly cashflow client', () => {
       url,
       init,
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
     await client.applyCashflowSheetAnnualTotal({
       context,
       projectId: 'project-a',
@@ -151,7 +135,7 @@ describe('Java weekly cashflow client', () => {
       body: responseBody({ ok: true, projectId: 'project-a', sourceSheetKey: 'cashflow-sheet-lab' }),
       init,
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
     const openingBalanceCells = [
       { year: 2025, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'VALUE', amount: 1000 },
     ];
@@ -174,7 +158,7 @@ describe('Java weekly cashflow client', () => {
     });
 
     const [, init] = fetchImpl.mock.calls[0];
-    expect(init.headers).toMatchObject({ 'x-data-project-id': 'stage-data-project' });
+    expect(init.headers).toMatchObject({ 'x-data-project-id': 'live-data-project' });
     expect(init.headers['x-edit-session-id']).toBeUndefined();
     expect(init.headers['x-edit-lease-id']).toBeUndefined();
     expect(init.headers['x-edit-fence']).toBeUndefined();
@@ -195,7 +179,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a', months: [] }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
     const months = [
       { yearMonth: '2026-07', cells: monthlyContract.cells },
       { yearMonth: '2026-08', cells: monthlyContract.cells },
@@ -245,7 +229,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a', months: [] }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await client.applyCashflowSheetBatch({
       context,
@@ -275,7 +259,7 @@ describe('Java weekly cashflow client', () => {
         weeklyCheckCount: 1,
       }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
     const annualCells = [{ year: 2024, mode: 'projection', cashflowLine: 'SALES_IN', cellState: 'ZERO', amount: 0 }];
     const annualDerivedCells = ['depositTotal', 'withdrawalTotal', 'balance'].map((field) => ({
       year: 2024, periodKind: 'ANNUAL', mode: 'projection', field, amount: 0, sourceCell: 'C33',
@@ -316,7 +300,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody(response),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.validateCashflowSheetFormulas({
       context,
@@ -342,7 +326,7 @@ describe('Java weekly cashflow client', () => {
           body: responseBody({ code: 'cashflow_revision_conflict', message: '원장 revision이 변경되었습니다.' }),
         }), 10);
       }));
-      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
+      const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
       const request = client.applyCashflowSheetBatch({
         context,
         projectId: 'project-a',
@@ -367,7 +351,7 @@ describe('Java weekly cashflow client', () => {
   it('fails before network when BFF and JVM data projects differ', async () => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({
-      env: stageEnv({ JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'different-project' }),
+      env: liveEnv({ JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'different-project' }),
       fetchImpl,
     });
 
@@ -387,7 +371,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await client.applyCashflowSheetLab({
       context,
@@ -409,7 +393,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-b' }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.applyCashflowSheetLab({
       context,
@@ -420,15 +404,17 @@ describe('Java weekly cashflow client', () => {
     })).rejects.toMatchObject({ statusCode: 502, code: 'jvm_weekly_project_mismatch' });
   });
 
-  it('uses the frontend Firebase project id when it is the only Stage data-project source', async () => {
+  it('uses the frontend Firebase project id when it is the only Live data-project source', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
-    const env = stageEnv({
+    const env = liveEnv({
       FIREBASE_PROJECT_ID: undefined,
-      VITE_FIREBASE_PROJECT_ID: 'stage-data-project',
+      VITE_FIREBASE_PROJECT_ID: 'frontend-project',
+      JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'frontend-project',
+      BFF_LIVE_FIREBASE_PROJECT_ID: 'frontend-project',
     });
     const client = createJavaWeeklyClient({ env, fetchImpl });
 
@@ -440,7 +426,7 @@ describe('Java weekly cashflow client', () => {
       editSession: { sessionId: 'session-a', leaseId: 'lease-a', fence: 7 },
     });
 
-    expect(fetchImpl.mock.calls[0][1].headers['x-data-project-id']).toBe('stage-data-project');
+    expect(fetchImpl.mock.calls[0][1].headers['x-data-project-id']).toBe('frontend-project');
   });
 
   it('allows a sheet overwrite without a cashflow edit lease', async () => {
@@ -449,7 +435,7 @@ describe('Java weekly cashflow client', () => {
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await client.applyCashflowSheetLab({
       context,
@@ -469,7 +455,7 @@ describe('Java weekly cashflow client', () => {
         status: 200,
         body: responseBody({ ok: true, projectId: 'project-a' }),
       });
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await client.applyCashflowSheetLab({
       context,
@@ -492,7 +478,7 @@ describe('Java weekly cashflow client', () => {
         body: responseBody({ ok: true, projectId: 'project-a', privateAmount: 987654321 }),
       });
     const client = createJavaWeeklyClient({
-      env: stageEnv(),
+      env: liveEnv(),
       fetchImpl,
       performanceLogger: (event) => events.push(event),
     });
@@ -533,7 +519,7 @@ describe('Java weekly cashflow client', () => {
         body: responseBody({ ok: true, projectId: 'project-a' }),
       });
     const client = createJavaWeeklyClient({
-      env: stageEnv(),
+      env: liveEnv(),
       fetchImpl,
       performanceLogger: () => {
         loggerRan = true;
@@ -564,8 +550,8 @@ describe('Java weekly cashflow client', () => {
     const serviceAccountJson = JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' });
     const resolveIdentityToken = vi.fn(async () => 'stage-id-token');
     const client = createJavaWeeklyClient({
-      env: stageEnv({
-        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example',
+      env: liveEnv({
+        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example',
         JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: serviceAccountJson,
       }),
       fetchImpl,
@@ -580,7 +566,7 @@ describe('Java weekly cashflow client', () => {
     });
 
     expect(resolveIdentityToken).toHaveBeenCalledWith({
-      audience: 'https://stage-jvm.example',
+      audience: 'https://live-jvm.example',
       serviceAccountJson,
       signal: expect.any(AbortSignal),
     });
@@ -592,7 +578,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('fetch failed');
     });
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.applyCashflowSheetLab({
       context,
@@ -618,7 +604,7 @@ describe('Java weekly cashflow client', () => {
         reject(error);
       }, { once: true });
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 5 });
 
     await expect(client.applyCashflowSheetLab({
       context,
@@ -640,8 +626,8 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn();
     const resolveIdentityToken = vi.fn(() => new Promise(() => {}));
     const client = createJavaWeeklyClient({
-      env: stageEnv({
-        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example',
+      env: liveEnv({
+        JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example',
         JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' }),
       }),
       fetchImpl,
@@ -675,7 +661,7 @@ describe('Java weekly cashflow client', () => {
       }, { once: true });
     }));
     const client = createJavaWeeklyClient({
-      env: stageEnv({ JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://stage-jvm.example' }),
+      env: liveEnv({ JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example' }),
       fetchImpl,
       jvmWeeklyApiTimeoutMs: 5,
     });
@@ -701,7 +687,7 @@ describe('Java weekly cashflow client', () => {
           reject(error);
         }, { once: true });
       }));
-      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 30_000 });
+      const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 30_000 });
       const requestPromise = client.applyCashflowSheetLab({
         context,
         projectId: 'project-a',
@@ -729,7 +715,7 @@ describe('Java weekly cashflow client', () => {
           reject(error);
         }, { once: true });
       }));
-      const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 12_000 });
+      const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl, jvmWeeklyApiTimeoutMs: 12_000 });
       const requestPromise = client.requestJson({
         context,
         method: 'POST',
@@ -760,7 +746,7 @@ describe('Java weekly cashflow client', () => {
         expectedWriteCount: 501,
       }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.applyCashflowSheetLab({
       context,
@@ -781,7 +767,7 @@ describe('Java weekly cashflow client', () => {
       status: 500,
       body: responseBody({ code: 'internal_error', error: 'Internal Server Error', message: 'unexpected failure' }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.applyCashflowSheetLab({
       context,
@@ -801,7 +787,7 @@ describe('Java weekly cashflow client', () => {
       '"projectId":"project-a"}',
     ]));
     const client = createJavaWeeklyClient({
-      env: stageEnv(),
+      env: liveEnv(),
       fetchImpl,
       jvmWeeklyApiMaxResponseBytes: 64,
     });
@@ -817,7 +803,7 @@ describe('Java weekly cashflow client', () => {
       appliedMonths: [], appliedYears: [], annualRevisions: [],
     };
     const fetchImpl = vi.fn(async () => chunkedResponse([JSON.stringify(payload)]));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.getCashflowSheetOperationStatus({
       context,
@@ -826,7 +812,7 @@ describe('Java weekly cashflow client', () => {
       idempotencyKey: 'month key/1',
     })).resolves.toEqual(payload);
     expect(fetchImpl.mock.calls[0][0]).toBe(
-      'https://stage-jvm.example/api/v1/cashflow/project-a/sheet-lab/operations?operationType=MONTH_APPLY&idempotencyKey=month%20key%2F1',
+      'https://live-jvm.example/api/v1/cashflow/project-a/sheet-lab/operations?operationType=MONTH_APPLY&idempotencyKey=month%20key%2F1',
     );
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
   });
@@ -842,12 +828,12 @@ describe('Java weekly cashflow client', () => {
       headers: new Headers(),
       body: null,
     });
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.getCashflowSnapshot({ context, projectId: 'project-a' })).rejects.toMatchObject({
       statusCode: 502,
       code: 'jvm_weekly_response_invalid',
-      endpoint: 'https://stage-jvm.example',
+      endpoint: 'https://live-jvm.example',
       command: 'get_cashflow_snapshot',
       attempt: 1,
       upstreamStatus: 200,
@@ -875,7 +861,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => chunkedResponse([
       JSON.stringify({ code: upstreamCode, message: 'safe upstream message' }),
     ], { status: upstreamStatus }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     const expectedCode = upstreamStatus === 500 ? 'jvm_weekly_api_internal_error' : upstreamCode;
     await expect(client.requestJson({
@@ -911,7 +897,7 @@ describe('Java weekly cashflow client', () => {
     mutationOutcome,
   ) => {
     const fetchImpl = vi.fn(async () => chunkedResponse([responseText], { status: upstreamStatus }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.requestJson({
       context,
@@ -938,7 +924,7 @@ describe('Java weekly cashflow client', () => {
       body: { getReader: () => ({ read, cancel: vi.fn(), releaseLock: vi.fn() }) },
     }));
     const client = createJavaWeeklyClient({
-      env: stageEnv(),
+      env: liveEnv(),
       fetchImpl,
       jvmWeeklyApiMaxResponseBytes: 64,
     });
@@ -958,7 +944,7 @@ describe('Java weekly cashflow client', () => {
       '1234567890"}',
     ], { headers: { 'content-length': '2' } }));
     const client = createJavaWeeklyClient({
-      env: stageEnv(),
+      env: liveEnv(),
       fetchImpl,
       jvmWeeklyApiMaxResponseBytes: 24,
     });
@@ -983,7 +969,7 @@ describe('Java weekly cashflow client', () => {
         },
       }),
     }));
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     const error = await client.requestJson({
       context,
@@ -996,7 +982,7 @@ describe('Java weekly cashflow client', () => {
     expect(error).toMatchObject({
       statusCode: 503,
       code: 'jvm_weekly_api_unreachable',
-      endpoint: 'https://stage-jvm.example',
+      endpoint: 'https://live-jvm.example',
       command: 'save_weekly_expense',
       attempt: 1,
       retryable: true,
@@ -1012,7 +998,7 @@ describe('Java weekly cashflow client', () => {
     const fetchImpl = vi.fn(async () => {
       throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
     });
-    const client = createJavaWeeklyClient({ env: stageEnv(), fetchImpl });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
     await expect(client.requestJson({
       context,

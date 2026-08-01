@@ -3,9 +3,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import firebase_admin
-from firebase_admin import credentials, firestore
-
 from .models import EnterpriseSecurityReport
 
 
@@ -13,8 +10,11 @@ def write_report_to_firestore(report: EnterpriseSecurityReport) -> None:
     project_id = (
         os.environ.get("MYSC_SECURITY_FIRESTORE_PROJECT_ID")
         or os.environ.get("FIREBASE_PROJECT_ID")
-        or "mysc-bmp-14173451"
     )
+    if not project_id:
+        raise RuntimeError("MYSC_SECURITY_FIRESTORE_PROJECT_ID or FIREBASE_PROJECT_ID is required")
+    from firebase_admin import firestore
+
     org_id = os.environ.get("MYSC_SECURITY_ORG_ID") or "mysc"
     app = _get_or_init_app(project_id)
     client = firestore.client(app=app)
@@ -52,6 +52,9 @@ def write_report_to_firestore(report: EnterpriseSecurityReport) -> None:
 
 
 def _get_or_init_app(project_id: str) -> firebase_admin.App:
+    import firebase_admin
+    from firebase_admin import credentials
+
     app_name = f"security-control-plane-sink-{project_id}"
     try:
         return firebase_admin.get_app(app_name)

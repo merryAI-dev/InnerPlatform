@@ -125,18 +125,6 @@ export function evaluateVercelEdgeRoutePolicy({
     failures.push(`Unexpected production direct-origin smoke hosts: ${unexpectedSmokeHosts.join(", ")}`);
   }
 
-  if (!stageWorkflowText.includes(INTERNAL_STAGE_HOST)) {
-    failures.push(`Stage workflow must use ${INTERNAL_STAGE_HOST} as the canonical stage host.`);
-  }
-
-  if (stageWorkflowText.includes(LEGACY_STAGE_HOST)) {
-    failures.push(`Stage workflow must not use legacy stage host ${LEGACY_STAGE_HOST}.`);
-  }
-
-  if (stageWorkflowText.includes(CANONICAL_PRODUCTION_ORIGIN)) {
-    failures.push("Stage workflow must not reference the production security domain.");
-  }
-
   return {
     ok: failures.length === 0,
     failures,
@@ -150,12 +138,10 @@ export function evaluateVercelEdgeRoutePolicy({
 
 export function evaluateRepoVercelEdgeRoutePolicy({
   vercelPath = "vercel.json",
-  stageWorkflowPath = ".github/workflows/stage-deploy.yml",
   smokeScriptPath = "scripts/smoke_cloudflare_edge.mjs",
 } = {}) {
   return evaluateVercelEdgeRoutePolicy({
     vercelConfig: JSON.parse(readText(vercelPath)),
-    stageWorkflowText: readText(stageWorkflowPath),
     smokeScriptText: readText(smokeScriptPath),
   });
 }

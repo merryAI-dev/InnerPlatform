@@ -684,7 +684,7 @@ export function createBffApp(options = {}) {
     : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
   const maintenanceReadOnly = readOptionalText(env.BFF_MAINTENANCE_READ_ONLY).toLowerCase() === 'true';
   const localTestInjection = options.editLeasesEnabled === true && runtimeSafetyConfig.deployEnv === 'local';
-  if (editLeasesEnabled && !['stage', 'live'].includes(runtimeSafetyConfig.deployEnv) && !localTestInjection) {
+  if (editLeasesEnabled && runtimeSafetyConfig.deployEnv !== 'live' && !localTestInjection) {
     const error = new Error('Edit leases environment flag requires a deployed runtime');
     error.code = 'unsafe_bff_runtime';
     throw error;
@@ -878,10 +878,10 @@ export function createBffApp(options = {}) {
 
   app.use((req, res, next) => {
     if (maintenanceReadOnly && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) {
-      res.locals.errorCode = 'stage_maintenance_read_only';
+      res.locals.errorCode = 'maintenance_read_only';
       res.status(503).json({
-        error: 'stage_maintenance_read_only',
-        message: 'Stage is temporarily read-only for data maintenance.',
+        error: 'maintenance_read_only',
+        message: 'The service is temporarily read-only for data maintenance.',
       });
       return;
     }

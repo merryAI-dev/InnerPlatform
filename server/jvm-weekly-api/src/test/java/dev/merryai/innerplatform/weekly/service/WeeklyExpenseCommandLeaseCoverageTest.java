@@ -34,7 +34,7 @@ class WeeklyExpenseCommandLeaseCoverageTest {
             ),
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
         TrustedActorContext actor = new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm");
         CashflowEditSession missing = new CashflowEditSession("", "", "", 0);

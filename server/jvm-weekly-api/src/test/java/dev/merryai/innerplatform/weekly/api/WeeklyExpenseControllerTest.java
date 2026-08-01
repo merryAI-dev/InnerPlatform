@@ -142,7 +142,7 @@ class WeeklyExpenseControllerTest {
             """;
 
         mockMvc.perform(post("/api/v1/weekly-expenses/project-header-auth/sheets/default/save-draft")
-                .header("origin", "https://inner-platform-stage-merryai-devs-projects.vercel.app")
+                .header("origin", "https://myscube.myscguard.app")
                 .header("x-tenant-id", "tenant-auth")
                 .header("x-actor-id", "spoofed-admin")
                 .header("x-actor-role", "admin")

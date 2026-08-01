@@ -154,6 +154,6 @@ class CashflowProjectionActualSummaryServiceTest {
         WeeklyExpensePersistence persistence,
         WeeklyExpenseAuthorizationService authorization
     ) {
-        return new WeeklyExpenseCommandService(persistence, authorization, new ObjectMapper(), false, "stage");
+        return new WeeklyExpenseCommandService(persistence, authorization, new ObjectMapper(), false, "live");
     }
 }

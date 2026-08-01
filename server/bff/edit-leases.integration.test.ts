@@ -17,11 +17,11 @@ describeIfEmulator('edit leases (Firestore emulator)', () => {
     db,
     authMode: 'headers',
     now: () => new Date(nowMs).toISOString(),
+    editLeasesEnabled: true,
     env: {
       ...process.env,
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'local',
       BFF_SCHEDULER_OWNER: 'disabled',
-      BFF_EDIT_LEASES_ENABLED: 'true',
     },
   }));
 

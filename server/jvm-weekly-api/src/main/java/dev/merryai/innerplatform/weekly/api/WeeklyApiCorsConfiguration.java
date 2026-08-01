@@ -8,8 +8,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WeeklyApiCorsConfiguration implements WebMvcConfigurer {
     private static final String[] DEFAULT_ALLOWED_ORIGINS = new String[]{
-        "https://inner-platform-stage-merryai-devs-projects.vercel.app",
-        "https://inner-platform.vercel.app"
+        "https://myscube.myscguard.app"
     };
     static final String[] ALLOWED_HEADERS = new String[]{
         "authorization",

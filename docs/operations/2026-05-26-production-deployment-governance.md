@@ -149,3 +149,6 @@ Initial Kubernetes work must be local-only:
 - port-forward access only
 
 Move to stage/live Kubernetes only after GitHub production authority, environment contracts, and scheduler ownership are already enforced.
+# 현행 정책
+
+Stage 배포 경로는 2026-08-01 폐기되었습니다. 현재 운영 배포는 `main`의 `Production Deploy`와 `JVM Production Deploy` workflow만 사용합니다. 아래 Stage 관련 내용은 과거 의사결정 기록입니다.

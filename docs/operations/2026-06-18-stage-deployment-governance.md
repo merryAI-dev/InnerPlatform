@@ -62,3 +62,6 @@ To roll stage back, revert or restore the known-good source on `main`, then reru
 ## Current Baseline
 
 The recovered stage source baseline was rescued from `c70ff6e` on `rescue/cli-preview-stage-combined-20260618` and should be promoted through `main`.
+# 폐기됨
+
+이 문서는 과거 Stage 운영 기록입니다. Stage 배포 경로는 2026-08-01 폐기되었으며 아래 명령과 workflow를 실행하지 않습니다.

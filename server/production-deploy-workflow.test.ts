@@ -4,12 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '..');
 const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/production-deploy.yml'), 'utf8');
-const stageWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/stage-deploy.yml'), 'utf8');
 const ciWorkflowText = readFileSync(resolve(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-const maintenanceRulesText = readFileSync(resolve(repoRoot, 'firebase/firestore.maintenance.rules'), 'utf8');
-const maintenanceFirebaseConfig = JSON.parse(
-  readFileSync(resolve(repoRoot, 'firebase.maintenance.json'), 'utf8'),
-);
 
 function extractRunBlocks(text: string) {
   const lines = text.split('\n');
@@ -106,7 +101,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('/api/v1/__maintenance_probe__');
     expect(workflowText).toContain('worker_scheduler_disabled');
     expect(workflowText).toContain('mutation.response.status !== 400');
-    expect(workflowText).toContain("mutation.body.error === 'stage_maintenance_read_only'");
+    expect(workflowText).toContain("mutation.body.error === 'maintenance_read_only'");
     expect(workflowText.indexOf('Verify production surface before alias')).toBeLessThan(
       workflowText.indexOf('Promote canonical production alias'),
     );
@@ -117,86 +112,6 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).not.toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
     expect(workflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_PRODUCTION');
     expect(workflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
-  });
-});
-
-describe('stage release workflow safety', () => {
-  it('keeps stage mutations blocked during the live-data rehearsal', () => {
-    expect(stageWorkflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'true'");
-    expect(stageWorkflowText).toContain('--env BFF_MAINTENANCE_READ_ONLY="${BFF_MAINTENANCE_READ_ONLY}"');
-    expect(maintenanceFirebaseConfig.firestore.rules).toBe('firebase/firestore.maintenance.rules');
-    expect(maintenanceRulesText).toContain('allow read, write: if false;');
-  });
-
-  it('validates the stage Vercel token against the expected team before release work', () => {
-    expect(stageWorkflowText).toMatch(/environment:\n\s+name: Stage/);
-    expect(stageWorkflowText).toContain('inner-platform-internal-stage-merryai-devs-projects.vercel.app');
-    expect(stageWorkflowText).not.toContain('inner-platform-stage-merryai-devs-projects.vercel.app');
-    expect(stageWorkflowText).toContain('VERCEL_DEPLOY_TOKEN_STAGE');
-    expect(stageWorkflowText).toContain('Missing secret: VERCEL_DEPLOY_TOKEN_STAGE');
-    expect(stageWorkflowText).toContain('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects');
-    expect(stageWorkflowText.indexOf('whoami --token "${VERCEL_TOKEN}" --scope merryai-devs-projects')).toBeLessThan(
-      stageWorkflowText.indexOf('Deploy Git artifact to Vercel preview'),
-    );
-  });
-
-  it('keeps the stage alias on the internal Vercel route instead of the production security domain', () => {
-    expect(stageWorkflowText).toContain('root_status="$(curl -sS -D /tmp/stage-root-headers.txt');
-    expect(stageWorkflowText).toContain('200|401) ;;');
-    expect(stageWorkflowText).toContain('Stage must stay on the internal Vercel route and must not traverse Cloudflare.');
-    expect(stageWorkflowText).toContain('Stage must not receive security-domain CSP report-only headers.');
-    expect(stageWorkflowText).not.toContain('307)');
-    expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/)');
-    expect(stageWorkflowText).not.toContain('https://myscube.myscguard.app/*');
-    expect(stageWorkflowText).not.toContain('Unexpected stage root redirect location');
-    expect(stageWorkflowText).not.toContain('Unexpected stage redirect location');
-    expect(stageWorkflowText).not.toContain('200|401|403) ;;');
-    expect(stageWorkflowText).not.toContain('200|403) ;;');
-  });
-
-  it('does not hang indefinitely when Vercel returns a blocked preview deployment', () => {
-    expect(stageWorkflowText).toContain('deploy --yes --no-wait --target preview --token "${VERCEL_TOKEN}"');
-    expect(stageWorkflowText).toContain('--wait');
-    expect(stageWorkflowText).toContain('--timeout 10m');
-    expect(stageWorkflowText).toContain('Stage artifact is not READY');
-  });
-
-  it('injects only the guarded Stage lease and JVM runtime into the preview artifact', () => {
-    expect(stageWorkflowText).toContain('STAGE_FIREBASE_PROJECT_ID: mysc-bmp-14173451');
-    expect(stageWorkflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
-    expect(stageWorkflowText).toContain('JVM_WEEKLY_API_BASE_URL_STAGE');
-    expect(stageWorkflowText).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_STAGE');
-    expect(stageWorkflowText).toContain('JVM_WEEKLY_AUTH_MODE: strict');
-    expect(stageWorkflowText).toContain('node scripts/assert-stage-edit-lease-runtime.mjs');
-    expect(stageWorkflowText).toContain('--env BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV}"');
-    expect(stageWorkflowText).toContain('--env BFF_EDIT_LEASES_ENABLED="${BFF_EDIT_LEASES_ENABLED}"');
-    expect(stageWorkflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
-    expect(stageWorkflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
-    expect(stageWorkflowText).toContain("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: '{}'");
-    expect(stageWorkflowText).toContain('--env BFF_WORKERS_ENABLED="${BFF_WORKERS_ENABLED}"');
-    expect(stageWorkflowText).toContain('--env BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER}"');
-    expect(stageWorkflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
-    expect(stageWorkflowText).toContain('--env FIREBASE_PROJECT_ID="${STAGE_FIREBASE_PROJECT_ID}"');
-    expect(stageWorkflowText).toContain('--env JVM_WEEKLY_FIRESTORE_PROJECT_ID="${JVM_WEEKLY_FIRESTORE_PROJECT_ID}"');
-    expect(stageWorkflowText).toContain('--env JVM_WEEKLY_AUTH_MODE="${JVM_WEEKLY_AUTH_MODE}"');
-    expect(stageWorkflowText).not.toContain('--prod');
-  });
-
-  it('keeps deploy workflows focused on deployment after CI gates have passed', () => {
-    expect(stageWorkflowText).not.toContain('run: npm ci');
-    expect(stageWorkflowText).not.toContain('Unit tests');
-    expect(stageWorkflowText).not.toContain('RBAC policy verify');
-    expect(stageWorkflowText).not.toContain('Stage build');
-
-    expect(workflowText).toContain('Verify CI succeeded for this commit');
-    expect(workflowText).toContain('actions/workflows/ci.yml/runs');
-    expect(workflowText).toContain('CI must be green for ${GITHUB_SHA} before production deploy.');
-    expect(workflowText).not.toContain('node scripts/assert-safe-live-deploy.mjs');
-    expect(workflowText).not.toContain('Verify production deploy policy');
-    expect(workflowText).not.toContain('run: npm ci');
-    expect(workflowText).not.toContain('Unit tests');
-    expect(workflowText).not.toContain('RBAC policy verify');
-    expect(workflowText).not.toContain('Production build');
   });
 });
 

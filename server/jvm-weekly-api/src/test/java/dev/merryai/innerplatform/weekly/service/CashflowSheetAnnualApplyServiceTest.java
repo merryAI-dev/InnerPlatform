@@ -97,7 +97,7 @@ class CashflowSheetAnnualApplyServiceTest {
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
     }
 

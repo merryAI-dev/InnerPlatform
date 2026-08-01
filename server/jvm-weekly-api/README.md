@@ -93,7 +93,7 @@ The command body does not define actor or tenant authority.
 implicitly moving storage to a different Firebase project.
 
 The Java API is deployed as a private Cloud Run service. Stage BFF calls carry
-an audience-bound Google ID token from the Stage-only invoker credential; the
+an audience-bound Google ID token from the configured invoker credential; the
 service account has only `roles/run.invoker` on this Stage service. Firebase token
 verification, CORS, command authorization, idempotency, validation, and JPA
 transactions remain the runtime boundary.

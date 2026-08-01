@@ -133,6 +133,6 @@ class CashflowAppliedCellChangesServiceTest {
         WeeklyExpensePersistence persistence,
         WeeklyExpenseAuthorizationService authorization
     ) {
-        return new WeeklyExpenseCommandService(persistence, authorization, new ObjectMapper(), true, "stage");
+        return new WeeklyExpenseCommandService(persistence, authorization, new ObjectMapper(), true, "live");
     }
 }

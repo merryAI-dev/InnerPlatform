@@ -6,18 +6,15 @@ import org.junit.jupiter.api.Test;
 
 class WeeklyApiCorsConfigurationTest {
     @Test
-    void defaultOriginsIncludeFixedStageAndLive() {
+    void defaultOriginsIncludeOnlyCanonicalLive() {
         assertThat(WeeklyApiCorsConfiguration.parseOrigins(""))
-            .containsExactly(
-                "https://inner-platform-stage-merryai-devs-projects.vercel.app",
-                "https://inner-platform.vercel.app"
-            );
+            .containsExactly("https://myscube.myscguard.app");
     }
 
     @Test
     void configuredOriginsAreTrimmed() {
-        assertThat(WeeklyApiCorsConfiguration.parseOrigins(" https://stage.example , https://live.example "))
-            .containsExactly("https://stage.example", "https://live.example");
+        assertThat(WeeklyApiCorsConfiguration.parseOrigins(" https://one.example , https://two.example "))
+            .containsExactly("https://one.example", "https://two.example");
     }
 
     @Test

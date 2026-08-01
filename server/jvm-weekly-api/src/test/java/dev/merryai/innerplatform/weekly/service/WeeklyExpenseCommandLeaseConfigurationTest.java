@@ -33,7 +33,7 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
         CashflowEditSession finalSession = new CashflowEditSession(
             "stage-data-project", "session-a", "lease-a", 1, true
@@ -58,7 +58,7 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
 
         assertThatThrownBy(() -> service.upsertProjection(
@@ -154,7 +154,7 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
             authorization,
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
         UpsertProjectionRequest request = new UpsertProjectionRequest(
             "projection-over-limit",

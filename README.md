@@ -30,7 +30,7 @@
 - Frontend production build: **2,910 modules**, 성공, Docker 미사용.
 - 세부 설계와 조사 출처는 [결산 후 시트 정정 계약](docs/architecture/contracts/2026-07-22-cashflow-close-amendment-contract.md)에 기록했습니다.
 
-Stage 배포 결과는 phase gate 100점과 커밋 완료 후 이 절에 추가합니다.
+Live 배포 결과는 phase gate 100점과 커밋 완료 후 이 절에 추가합니다.
 
 ## 현금흐름 기초잔액·월 결산 조회 안정화 (2026-07-22)
 
@@ -54,8 +54,7 @@ Stage 배포 결과는 phase gate 100점과 커밋 완료 후 이 절에 추가�
 - JVM 전체 202건에서 `2025년 +2,000,000원 -> 2026년 기초잔액 +2,000,000원`, 16개 행 상태 완전성, `ZERO`/`EMPTY` 구분, 같은 순잔액의 행 변경 거절, 미래 연도 제외, prior weekly year 이중 산입 방지, 레거시 결산의 라이브 원장 미참조를 검증했습니다.
 - BFF·프론트 집중 회귀 273건에서 기초잔액을 적용한 서버 마이너스 판정, 불완전한 16행 source 거절, 검토 후 행 변경 409 거절, 누락 주차 잔액 이월, CLOSED 동결 원장 사용, 레거시·프로젝트 불일치에서 현재 값 sentinel 미노출, caller deadline 후 최종 POST 미실행·재시도 금지를 검증했습니다.
 - 이월 원본 키는 `원천연도 × Projection/Actual × 16개 정규 행 ID`이며 각 값은 금액과 `EMPTY|ZERO|VALUE` 상태를 함께 보존합니다. 연도 순잔액은 조회·검산용 파생값일 뿐 행별 회계 증거를 대체하지 않습니다.
-- 최종 전체 회귀·Stage 브라우저 측정·독립 Phase gate 점수는 [기초잔액·조회 경로 계약](docs/architecture/contracts/2026-07-22-cashflow-opening-balance-and-read-path.md)에 기록한 뒤 100점에서만 배포합니다.
-- 현재 코드 독립 감사는 100/100이며 잔여 코드 blocker는 없습니다. 다만 이 빌드는 아직 Stage에 배포하지 않아 Stage 브라우저 QA 증거가 없으므로 전체 Phase는 닫지 않았습니다.
+- 최종 전체 회귀·Live 검증·독립 Phase gate 점수는 [기초잔액·조회 경로 계약](docs/architecture/contracts/2026-07-22-cashflow-opening-balance-and-read-path.md)에 기록한 뒤 100점에서만 배포합니다.
 
 개발 배경 : 상호검증성 강화를 통한 기존 시트 방식의 모니터링, 자산화, 표준화 상에서 오류와 소통 비용 감소
 
