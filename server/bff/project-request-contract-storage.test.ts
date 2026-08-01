@@ -20,8 +20,8 @@ describe('project-request-contract-storage', () => {
     };
 
     const service = createProjectRequestContractStorageService({
-      projectId: 'mysc-bmp-14173451',
-      bucketName: 'mysc-bmp-14173451.firebasestorage.app',
+      projectId: 'example-project',
+      bucketName: 'example-project.firebasestorage.app',
       storage,
     });
 
@@ -34,7 +34,7 @@ describe('project-request-contract-storage', () => {
       contentBase64: Buffer.from('fake-pdf', 'utf8').toString('base64'),
     });
 
-    expect(storage.bucket).toHaveBeenCalledWith('mysc-bmp-14173451.firebasestorage.app');
+    expect(storage.bucket).toHaveBeenCalledWith('example-project.firebasestorage.app');
     expect(save).toHaveBeenCalled();
     expect(result.path).toContain('orgs/mysc/project-request-contracts/u001/');
     expect(result.downloadURL).toContain('firebasestorage.googleapis.com');

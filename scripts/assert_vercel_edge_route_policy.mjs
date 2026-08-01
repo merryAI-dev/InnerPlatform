@@ -4,8 +4,6 @@ import fs from "node:fs";
 
 const CANONICAL_PRODUCTION_ORIGIN = "https://myscube.myscguard.app";
 const CANONICAL_PRODUCTION_DESTINATION = `${CANONICAL_PRODUCTION_ORIGIN}/:path*`;
-const INTERNAL_STAGE_HOST = "inner-platform-internal-stage-merryai-devs-projects.vercel.app";
-const LEGACY_STAGE_HOST = "inner-platform-stage-merryai-devs-projects.vercel.app";
 const ROUTE_VERSION_ALIAS = "inner-platform-f52434-routes-merryai-devs-projects.vercel.app";
 const REQUIRED_PROTECTED_OR_REDIRECT_HOSTS = [
   "submit-mysc.com",
@@ -80,12 +78,10 @@ export function isVercelProtectedRedirect(status, location) {
 
 export function evaluateVercelEdgeRoutePolicy({
   vercelConfig,
-  stageWorkflowText,
   smokeScriptText,
 }) {
   const failures = [];
   const warnings = [];
-  const stageHosts = uniqueSorted([INTERNAL_STAGE_HOST, LEGACY_STAGE_HOST]);
   const routeHosts = productionRedirectHosts(vercelConfig);
   const smokeHosts = extractDefaultDirectHosts(smokeScriptText);
   const requiredDirectHosts = uniqueSorted(REQUIRED_PRODUCTION_DIRECT_HOSTS);
@@ -94,16 +90,6 @@ export function evaluateVercelEdgeRoutePolicy({
     ...REQUIRED_PROTECTED_OR_REDIRECT_HOSTS,
     ROUTE_VERSION_ALIAS,
   ]);
-
-  const routedStageHosts = routeHosts.filter((host) => stageHosts.includes(host));
-  if (routedStageHosts.length) {
-    failures.push(`Stage hosts must not redirect to ${CANONICAL_PRODUCTION_ORIGIN}: ${routedStageHosts.join(", ")}`);
-  }
-
-  const smokeStageHosts = smokeHosts.filter((host) => stageHosts.includes(host));
-  if (smokeStageHosts.length) {
-    failures.push(`Stage hosts must not be included in production direct-origin smoke hosts: ${smokeStageHosts.join(", ")}`);
-  }
 
   const missingProductionRoutes = missingFrom(routeHosts, requiredDirectHosts);
   if (missingProductionRoutes.length) {

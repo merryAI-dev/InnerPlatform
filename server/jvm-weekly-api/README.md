@@ -46,7 +46,7 @@ Optional environment:
 - `JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID`: Firebase Auth project whose ID tokens are accepted for browser-direct calls
 - `JVM_WEEKLY_FIRESTORE_PROJECT_ID`: Firestore project used when `JVM_WEEKLY_STORAGE_BACKEND=firestore`
 - `JVM_WEEKLY_FIREBASE_PROJECT_ID`: legacy fallback for both Firebase Auth and Firestore when the split envs are not set
-- `JVM_WEEKLY_ALLOWED_ORIGINS`: comma-separated browser origins allowed by CORS; defaults to fixed stage and live origins
+- `JVM_WEEKLY_ALLOWED_ORIGINS`: comma-separated browser origins allowed by CORS; defaults to the canonical Live origin
 
 The runtime configuration fixes `weekly.legacy-week-close-enabled` to `false`.
 Only the isolated test profile sets it to `true` so the historical command service remains regression-tested.
@@ -92,9 +92,9 @@ The command body does not define actor or tenant authority.
 `JVM_WEEKLY_FIRESTORE_PROJECT_ID` controls Firestore storage. Do not fix login by
 implicitly moving storage to a different Firebase project.
 
-The Java API is deployed as a private Cloud Run service. Stage BFF calls carry
+The Java API is deployed as a private Cloud Run service. Live BFF calls carry
 an audience-bound Google ID token from the configured invoker credential; the
-service account has only `roles/run.invoker` on this Stage service. Firebase token
+service account has only `roles/run.invoker` on this Live service. Firebase token
 verification, CORS, command authorization, idempotency, validation, and JPA
 transactions remain the runtime boundary.
 

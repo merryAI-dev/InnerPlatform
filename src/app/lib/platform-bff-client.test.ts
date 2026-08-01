@@ -668,8 +668,8 @@ describe('platform-bff-client', () => {
     const originalWindow = globalThis.window;
     vi.stubGlobal('window', {
       location: {
-        origin: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
-        hostname: 'inner-platform-stage-merryai-devs-projects.vercel.app',
+        origin: 'https://inner-platform-preview-merryai-devs-projects.vercel.app',
+        hostname: 'inner-platform-preview-merryai-devs-projects.vercel.app',
       },
     });
 
@@ -678,7 +678,7 @@ describe('platform-bff-client', () => {
       VITE_PLATFORM_API_BASE_URL: 'https://innerplatform-jvm-weekly-api-c3pm5gv7ia-du.a.run.app',
     })).toEqual({
       enabled: true,
-      baseUrl: 'https://inner-platform-stage-merryai-devs-projects.vercel.app',
+      baseUrl: 'https://inner-platform-preview-merryai-devs-projects.vercel.app',
     });
 
     vi.stubGlobal('window', originalWindow);

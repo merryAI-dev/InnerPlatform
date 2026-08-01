@@ -28,14 +28,6 @@ function smokeScript(hosts: string[]) {
   return `const defaultDirectHosts = [\n${hosts.map((host) => `  "${host}",`).join('\n')}\n];`;
 }
 
-const stageWorkflow = `
-env:
-  STAGE_CANONICAL_HOST: inner-platform-internal-stage-merryai-devs-projects.vercel.app
-steps:
-  - name: Verify stage surface
-    run: curl "https://\${STAGE_CANONICAL_HOST}/"
-`;
-
 describe('Vercel edge route policy', () => {
   it('accepts only recognized removed deployment responses', () => {
     expect(isRemovedVercelDeployment(404, '')).toBe(true);
@@ -52,10 +44,9 @@ describe('Vercel edge route policy', () => {
     expect(isVercelProtectedRedirect(302, 'https://example.com/sso-api?url=x')).toBe(false);
   });
 
-  it('accepts production direct-origin redirects while keeping stage outside the production security domain', () => {
+  it('accepts the exact production direct-origin redirect set', () => {
     const result = evaluateVercelEdgeRoutePolicy({
       vercelConfig: vercelConfig(baseRedirectHosts),
-      stageWorkflowText: stageWorkflow,
       smokeScriptText: smokeScript([
         ...baseRedirectHosts,
         'inner-platform-f52434-routes-merryai-devs-projects.vercel.app',
@@ -68,13 +59,12 @@ describe('Vercel edge route policy', () => {
     expect(result).toMatchObject({ ok: true, failures: [] });
   });
 
-  it('blocks internal stage alias redirects to the production security domain', () => {
+  it('blocks any unexpected redirect into the production security domain', () => {
     const result = evaluateVercelEdgeRoutePolicy({
       vercelConfig: vercelConfig([
         ...baseRedirectHosts,
-        'inner-platform-internal-stage-merryai-devs-projects.vercel.app',
+        'unexpected-preview.example.com',
       ]),
-      stageWorkflowText: stageWorkflow,
       smokeScriptText: smokeScript([
         ...baseRedirectHosts,
         'inner-platform-f52434-routes-merryai-devs-projects.vercel.app',
@@ -85,13 +75,12 @@ describe('Vercel edge route policy', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.failures.join('\n')).toContain('Stage hosts must not redirect');
+    expect(result.failures.join('\n')).toContain('Unexpected production direct-origin redirects');
   });
 
   it('keeps the strict smoke host list aligned with production direct-origin redirects', () => {
     const result = evaluateVercelEdgeRoutePolicy({
       vercelConfig: vercelConfig(baseRedirectHosts),
-      stageWorkflowText: stageWorkflow,
       smokeScriptText: smokeScript([
         ...baseRedirectHosts.filter((host) => host !== 'inner-platform-k2x121b33-merryai-devs-projects.vercel.app'),
         'inner-platform-f52434-routes-merryai-devs-projects.vercel.app',

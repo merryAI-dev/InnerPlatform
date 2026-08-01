@@ -3,7 +3,7 @@
  * Read-only audit for organization labels stored in project data.
  *
  * Usage:
- *   npm run firestore:audit:organization-labels -- --org mysc --firebase-project mysc-bmp-14173451
+ *   npm run firestore:audit:organization-labels -- --org mysc --firebase-project inner-platform-live-20260316
  *   npm run firestore:audit:organization-labels -- --org mysc --firebase-project inner-platform-live-20260316 --format json --fail-on-issues
  *   npm run firestore:audit:organization-labels -- --org mysc --firebase-project inner-platform-live-20260316 --database reh2607151200 --format json --fail-on-issues
  */
