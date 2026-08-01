@@ -684,12 +684,8 @@ export function createBffApp(options = {}) {
     : readOptionalText(env.BFF_EDIT_LEASES_ENABLED).toLowerCase() === 'true';
   const maintenanceReadOnly = readOptionalText(env.BFF_MAINTENANCE_READ_ONLY).toLowerCase() === 'true';
   const localTestInjection = options.editLeasesEnabled === true && runtimeSafetyConfig.deployEnv === 'local';
-  if (editLeasesEnabled && runtimeSafetyConfig.deployEnv !== 'stage' && !localTestInjection) {
-    const error = new Error(
-      runtimeSafetyConfig.deployEnv === 'live'
-        ? 'Edit leases cannot run in Live runtime'
-        : 'Edit leases environment flag requires Stage runtime',
-    );
+  if (editLeasesEnabled && !['stage', 'live'].includes(runtimeSafetyConfig.deployEnv) && !localTestInjection) {
+    const error = new Error('Edit leases environment flag requires a deployed runtime');
     error.code = 'unsafe_bff_runtime';
     throw error;
   }

@@ -35,7 +35,6 @@ describe('JVM weekly API runtime config files', () => {
     const applicationConfig = readRepoFile('server/jvm-weekly-api/src/main/resources/application.yml');
     const cloudBuild = readRepoFile('cloudbuild.jvm-weekly-api.yaml');
     const deployScript = readRepoFile('scripts/deploy_jvm_weekly_api_cloud_run.sh');
-    const qaDateScript = readRepoFile('scripts/set_stage_cashflow_month_close_qa_date.sh');
     const packageJson = readRepoFile('package.json');
     const smokeScript = readRepoFile('scripts/smoke_jvm_weekly_api.mjs');
     const smokeTokenScript = readRepoFile('scripts/create_firebase_smoke_id_token.mjs');
@@ -58,15 +57,7 @@ describe('JVM weekly API runtime config files', () => {
     expect(cloudBuild).not.toContain('_CLOUD_SQL_INSTANCE');
     expect(cloudBuild).not.toContain('_SERVERLESS_VPC_CONNECTOR');
     expect(cloudBuild).toContain('JVM_WEEKLY_DEPLOY_ENV=stage');
-    expect(applicationConfig).toContain('JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE');
     expect(applicationConfig).toContain('legacy-week-close-enabled: false');
-    expect(cloudBuild).toContain('CASHFLOW_MONTH_CLOSE_QA_DATE=${_JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE}');
-    expect(cloudBuild).toContain('JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=$${CASHFLOW_MONTH_CLOSE_QA_DATE}');
-    expect(cloudBuild).not.toContain('JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=${_JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE}');
-    expect(cloudBuild).toContain('cashflow month-close QA date must be a valid YYYY-MM-DD date');
-    expect(cloudBuild.indexOf('cashflow month-close QA date must be a valid YYYY-MM-DD date'))
-      .toBeLessThan(cloudBuild.indexOf('mvn -f server/jvm-weekly-api/pom.xml test'));
-    expect(cloudBuild).toContain('_JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE:');
     expect(cloudBuild).toContain('JVM_WEEKLY_EDIT_LEASES_ENABLED=true');
     expect(cloudBuild).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true');
     expect(cloudBuild).toContain('JVM_WEEKLY_STORAGE_BACKEND=firestore');
@@ -90,8 +81,6 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).toContain('Stage-only JVM deploy requires project $STAGE_GCP_PROJECT_ID');
     expect(deployScript).toContain('Stage-only JVM deploy requires service $STAGE_SERVICE_NAME');
     expect(deployScript).toContain('JVM_WEEKLY_DEPLOY_ENV=stage');
-    expect(deployScript).toContain('QA_DATE="${JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE:-}"');
-    expect(deployScript).toContain('JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=${QA_DATE}');
     expect(deployScript).toContain('JVM_WEEKLY_EDIT_LEASES_ENABLED=true');
     expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true');
     expect(deployScript).toContain('JVM_WEEKLY_STORAGE_BACKEND=firestore');
@@ -105,12 +94,6 @@ describe('JVM weekly API runtime config files', () => {
     expect(deployScript).not.toContain('gcloud auth print-identity-token');
     expect(deployScript).toContain('JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET');
     expect(deployScript).toContain('JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY_SECRET');
-
-    expect(qaDateScript).toContain('STAGE_GCP_PROJECT_ID="inner-platform-qa-20260310"');
-    expect(qaDateScript).toContain('STAGE_SERVICE_NAME="innerplatform-jvm-weekly-api-lease-stage"');
-    expect(qaDateScript).toContain('--update-env-vars');
-    expect(qaDateScript).toContain('--remove-env-vars');
-    expect(qaDateScript).toContain('JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE');
 
     expect(packageJson).toContain('"weekly-api:smoke": "node scripts/smoke_jvm_weekly_api.mjs"');
     expect(smokeScript).toContain("const DEPLOY_MODE = 'deploy'");

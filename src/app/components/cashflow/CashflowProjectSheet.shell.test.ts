@@ -366,10 +366,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('재오픈 요청');
   });
 
-  it('provides a Stage-only QA clock and an explicit persisted weekly settlement action', () => {
-    expect(source).toContain('type="datetime-local"');
-    expect(source).toContain('Stage QA 기준시각');
-    expect(source).toContain('setCashflowMonthCloseQaDateTimeViaBff');
+  it('provides an explicit persisted weekly settlement action without a Stage QA clock', () => {
+    expect(source).not.toContain('Stage QA 기준시각');
+    expect(source).not.toContain('setCashflowMonthCloseQaDateTimeViaBff');
     expect(source).toContain('completeCashflowWeeklyUpdateViaBff');
     expect(source).toContain('주간 정산 완료');
     expect(source).toContain('completedBy');

@@ -20,6 +20,7 @@ describe('JVM production deploy workflow', () => {
     expect(workflow).not.toContain('service_account_key');
     expect(workflow).toContain('CASHFLOW_PROJECT_ID: p1773817948751');
     expect(workflow).toContain('CASHFLOW_YEAR_MONTH: 2026-07');
+    expect(workflow).toContain('JVM_WEEKLY_EDIT_LEASES_ENABLED=true');
     expect(workflow).not.toContain('${{ inputs.project_id }}');
     expect(workflow).toContain('.monthClose.yearMonth == env.CASHFLOW_YEAR_MONTH');
     expect(workflow).toContain('gcloud auth configure-docker asia-northeast3-docker.pkg.dev');

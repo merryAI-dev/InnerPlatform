@@ -1,8 +1,6 @@
 steps:
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
-    env:
-      - 'CASHFLOW_MONTH_CLOSE_QA_DATE=${_JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE}'
     args:
       - -lc
       - |
@@ -13,12 +11,6 @@ steps:
         fi
         if ! [[ "${_IMAGE_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
           echo "[cloudbuild-jvm-weekly-api] _IMAGE_TAG is invalid"
-          exit 1
-        fi
-        if [[ -n "$${CASHFLOW_MONTH_CLOSE_QA_DATE}" ]] && \
-          { ! [[ "$${CASHFLOW_MONTH_CLOSE_QA_DATE}" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ ]] || \
-            [[ "$$(date -u -d "$${CASHFLOW_MONTH_CLOSE_QA_DATE}" +%F 2>/dev/null || true)" != "$${CASHFLOW_MONTH_CLOSE_QA_DATE}" ]]; }; then
-          echo "[cloudbuild-jvm-weekly-api] cashflow month-close QA date must be a valid YYYY-MM-DD date"
           exit 1
         fi
 
@@ -44,8 +36,6 @@ steps:
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
-    env:
-      - 'CASHFLOW_MONTH_CLOSE_QA_DATE=${_JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE}'
     args:
       - -lc
       - |
@@ -60,7 +50,7 @@ steps:
           --region asia-northeast3 \
           --platform managed \
           --ingress all \
-          --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=stage|JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=$${CASHFLOW_MONTH_CLOSE_QA_DATE}|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIRESTORE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app" \
+          --set-env-vars "^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=stage|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIRESTORE_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=mysc-bmp-14173451|JVM_WEEKLY_ALLOWED_ORIGINS=https://inner-platform-internal-stage-merryai-devs-projects.vercel.app" \
           --set-secrets "JVM_WEEKLY_INTERNAL_API_TOKEN=${_JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET}:latest,JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY=${_JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY_SECRET}:latest"
         SERVICE_URL="$(gcloud run services describe innerplatform-jvm-weekly-api-lease-stage \
           --project "$PROJECT_ID" \
@@ -79,7 +69,6 @@ substitutions:
   _IMAGE_TAG: manual
   _JVM_WEEKLY_INTERNAL_API_TOKEN_SECRET: innerplatform-weekly-api-token
   _JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY_SECRET: innerplatform-cashflow-settled-week-confirmation-key
-  _JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE: ''
 
 images:
   - gcr.io/$PROJECT_ID/innerplatform-jvm-weekly-api-lease-stage:${_IMAGE_TAG}

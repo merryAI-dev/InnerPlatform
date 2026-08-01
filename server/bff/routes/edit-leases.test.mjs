@@ -94,9 +94,9 @@ function leaseHeaders(extra = {}) {
 }
 
 describe('edit lease routes', () => {
-  it('fails closed before Firestore initialization when enabled in Live', () => {
+  it('allows Live edit leases to reach Firestore initialization', () => {
     const createDb = vi.fn(() => {
-      throw new Error('Firestore must not initialize');
+      throw new Error('Firestore initialized');
     });
 
     expect(() => createBffApp({
@@ -108,11 +108,11 @@ describe('edit lease routes', () => {
         BFF_DEPLOY_ENV: 'live',
         BFF_SCHEDULER_OWNER: 'disabled',
       },
-    })).toThrow(/edit leases.*live/i);
-    expect(createDb).not.toHaveBeenCalled();
+    })).toThrow('Firestore initialized');
+    expect(createDb).toHaveBeenCalledOnce();
   });
 
-  it('requires the environment flag to run only in Stage', () => {
+  it('rejects the environment flag outside deployed runtimes', () => {
     const createDb = vi.fn(() => {
       throw new Error('Firestore must not initialize');
     });
@@ -124,7 +124,7 @@ describe('edit lease routes', () => {
         BFF_DEPLOY_ENV: 'local',
         BFF_EDIT_LEASES_ENABLED: 'true',
       },
-    })).toThrow(/edit leases.*stage/i);
+    })).toThrow(/deployed runtime/i);
     expect(createDb).not.toHaveBeenCalled();
   });
 

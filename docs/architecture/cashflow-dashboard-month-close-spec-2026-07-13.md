@@ -313,7 +313,7 @@ collection 스키마와 기존 소비자 제거를 한 작업 단위로 처리�
 - 상세 표에 `전체` 보기가 없고 연도 이동·월 선택·월 결산이 동작한다.
 - 모든 검증과 배포는 Stage에서만 수행한다.
 - Stage QA 기준일은 월 결산 가능 여부와 다음 달 10일 초과 판정에만 적용하고, lease·저장·감사 시각은 실제 서버 시간을 유지한다.
-- QA 기준일이 적용된 결산 snapshot에는 `evaluatedBusinessDate`와 `qaDateOverride`를 남긴다.
+- 결산 snapshot에는 KST 서버 기준 `evaluatedBusinessDate`를 남긴다.
 - Stage가 아닌 JVM에 QA 기준일이 설정되면 서버 시작을 거절한다.
 
 검증 명령:

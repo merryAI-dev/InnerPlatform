@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -112,27 +113,32 @@ class WeeklyExpenseCommandLeaseConfigurationTest {
     }
 
     @Test
-    void monthReopenIsRejectedOutsideTheStageRuntimeWithoutLeaseHeaders() {
+    void liveMonthReopenUsesTheCanonicalDataProjectGuard() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         when(persistence.requireCashflowMonthClosePermission(any(), any())).thenReturn("pm");
+        doThrow(new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_data_project_mismatch",
+            "BFF and JVM cashflow data projects do not match."
+        )).when(persistence).requireCashflowDataProject("wrong-live-project");
         WeeklyExpenseCommandService service = new WeeklyExpenseCommandService(
             persistence,
             new WeeklyExpenseAuthorizationService((actor, projectId) -> true, canonicalProjectsExist(), "strict"),
             new ObjectMapper(),
-            false,
+            true,
             "live"
         );
 
         assertThatThrownBy(() -> service.requestCashflowMonthReopen(
             new TrustedActorContext("tenant-a", "pm-1", "pm@example.com", "pm"),
             "project-a",
-            "stage-data-project",
+            "wrong-live-project",
             new RequestCashflowMonthReopenRequest("reopen-live", "2026-06", 1, "정정 필요")
         ))
             .isInstanceOf(WeeklyExpenseEditLeaseException.class)
             .satisfies(error -> assertThat(((WeeklyExpenseEditLeaseException) error).code())
-                .isEqualTo("unsafe_jvm_runtime"));
-        verify(persistence, never()).requireCashflowDataProject(any());
+                .isEqualTo("cashflow_data_project_mismatch"));
+        verify(persistence).requireCashflowDataProject("wrong-live-project");
     }
 
     @Test

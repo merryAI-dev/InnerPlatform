@@ -5,6 +5,7 @@ function stageEnv(overrides = {}) {
   return {
     BFF_DEPLOY_ENV: 'stage',
     BFF_EDIT_LEASES_ENABLED: 'true',
+    BFF_STAGE_FIREBASE_PROJECT_ID: 'stage-data-project',
     FIREBASE_PROJECT_ID: 'stage-data-project',
     JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
     JVM_WEEKLY_API_BASE_URL: 'https://stage-jvm.example',
@@ -97,6 +98,9 @@ describe('Java weekly cashflow client', () => {
       JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-project',
     })],
     ['Stage using the Live data project', liveEnv({ BFF_DEPLOY_ENV: 'stage' })],
+    ['Stage using an unapproved data project', stageEnv({
+      BFF_STAGE_FIREBASE_PROJECT_ID: 'approved-stage-project',
+    })],
   ])('fails before network for %s', async (_case, env) => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({ env, fetchImpl });

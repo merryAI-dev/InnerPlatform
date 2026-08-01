@@ -150,7 +150,6 @@ public class WeeklyExpenseCommandService {
     private final WeeklyExpenseSpreadsheetService spreadsheetService;
     private final ObjectMapper objectMapper;
     private final boolean cashflowEditLeasesEnabled;
-    private final boolean cashflowStageRuntime;
 
     public WeeklyExpenseCommandService(
         WeeklyExpensePersistence persistence,
@@ -159,9 +158,9 @@ public class WeeklyExpenseCommandService {
         @Value("${weekly.cashflow-edit-leases-enabled:false}") boolean cashflowEditLeasesEnabled,
         @Value("${weekly.deploy-env:local}") String deployEnv
     ) {
-        this.cashflowStageRuntime = "stage".equalsIgnoreCase(deployEnv == null ? "" : deployEnv.trim());
-        if (cashflowEditLeasesEnabled && !cashflowStageRuntime) {
-            throw new IllegalStateException("Cashflow edit leases can only be enabled in the Stage JVM runtime.");
+        String runtime = deployEnv == null ? "" : deployEnv.trim().toLowerCase(Locale.ROOT);
+        if (cashflowEditLeasesEnabled && !Set.of("stage", "live").contains(runtime)) {
+            throw new IllegalStateException("Cashflow edit leases require a deployed JVM runtime.");
         }
         this.persistence = persistence;
         this.authorizationService = authorizationService;
@@ -1352,7 +1351,7 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
-        requireCashflowStageDataProject(dataProjectId);
+        persistence.requireCashflowDataProject(dataProjectId);
         String requestHash = hashJson(request);
         Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -1408,7 +1407,7 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
-        requireCashflowStageDataProject(dataProjectId);
+        persistence.requireCashflowDataProject(dataProjectId);
         String requestHash = hashJson(request);
         Optional<CashflowMonthCloseResponse> replay = readIdempotentResponse(
             writer.tenantId(),
@@ -3612,17 +3611,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    private void requireCashflowStageDataProject(String dataProjectId) {
-        if (!cashflowStageRuntime) {
-            throw new WeeklyExpenseEditLeaseException(
-                503,
-                "unsafe_jvm_runtime",
-                "Cashflow month reopen writes are restricted to the Stage JVM runtime."
-            );
-        }
-        persistence.requireCashflowDataProject(dataProjectId);
-    }
-
     private String requireIdempotencyKey(String value) {
         String key = value == null ? "" : value.trim();
         if (key.isBlank() || key.length() > WeeklyExpenseRequestLimits.MAX_IDEMPOTENCY_KEY_LENGTH) {
@@ -3818,7 +3806,7 @@ public class WeeklyExpenseCommandService {
             throw new WeeklyExpenseEditLeaseException(
                 503,
                 "weekly_expense_edit_leases_disabled",
-                "Weekly expense writes require the Stage edit-lease runtime."
+                "Weekly expense writes require the configured edit-lease runtime."
             );
         }
         String storedRole = persistence.requireCashflowWriteLease(actor, projectId, editSession);

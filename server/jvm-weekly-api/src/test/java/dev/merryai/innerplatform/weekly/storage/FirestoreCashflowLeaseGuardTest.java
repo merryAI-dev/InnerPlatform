@@ -3013,8 +3013,8 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void stageQaBusinessDateAllowsNextMonthCloseWithoutChangingRealTimestamps() {
-        CloseCashflowMonthRequest request = monthCloseRequest("month-close-qa-date", 0, 3, "2026-07");
+    void serverClockAllowsNextMonthCloseAndSetsStoredTimestamps() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-server-date", 0, 3, "2026-07");
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-08-01"));
         fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
         fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", pinnedMirror(request));
@@ -3032,17 +3032,15 @@ class FirestoreCashflowLeaseGuardTest {
 
         assertThat(response.status()).isEqualTo("CLOSED");
         assertThat(response.late()).isFalse();
-        assertThat(response.closedAt()).isEqualTo(NOW.toString());
-        assertThat(response.snapshot())
-            .containsEntry("evaluatedBusinessDate", "2026-08-01")
-            .containsEntry("qaDateOverride", true);
+        assertThat(response.closedAt()).isEqualTo("2026-07-31T15:00:00Z");
+        assertThat(response.snapshot()).containsEntry("evaluatedBusinessDate", "2026-08-01");
         assertThat(fixture.documents.get(leasePath("project-a")))
             .containsEntry("state", "ACTIVE")
             .doesNotContainKeys("releasedAt", "releaseReason");
     }
 
     @Test
-    void stageQaBusinessDateKeepsTheTenthOnTimeAndMarksTheEleventhLate() {
+    void serverBusinessDateKeepsTheTenthOnTimeAndMarksTheEleventhLate() {
         for (Map.Entry<LocalDate, Boolean> boundary : Map.of(
             LocalDate.parse("2026-08-10"), false,
             LocalDate.parse("2026-08-11"), true
@@ -3066,7 +3064,7 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void stageQaBusinessDateStillRejectsClosingBeforeTheTargetMonthEnds() {
+    void serverBusinessDateStillRejectsClosingBeforeTheTargetMonthEnds() {
         CloseCashflowMonthRequest request = monthCloseRequest("month-close-too-early", 0, 3, "2026-07");
         Fixture fixture = fixture(activeMember(), activeLease(), true, LocalDate.parse("2026-07-31"));
         fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
@@ -3083,28 +3081,6 @@ class FirestoreCashflowLeaseGuardTest {
         ).closeCashflowMonth(ACTOR, "project-a", SESSION, request)))
             .isInstanceOf(WeeklyExpenseConflictException.class)
             .hasMessageContaining("after the target month ends");
-    }
-
-    @Test
-    void qaBusinessDateConfigurationIsStrictAndStageOnly() {
-        Clock actualClock = Clock.fixed(NOW, ZoneOffset.UTC);
-        CashflowMonthCloseBusinessDate overridden = new CashflowMonthCloseBusinessDate("stage", "2026-08-11");
-        CashflowMonthCloseBusinessDate runtime = new CashflowMonthCloseBusinessDate("stage", "  ");
-        CashflowMonthCloseBusinessDate actual = new CashflowMonthCloseBusinessDate("local", "  ");
-
-        assertThat(overridden.currentDate(actualClock)).isEqualTo(LocalDate.parse("2026-08-11"));
-        assertThat(overridden.qaOverrideActive()).isTrue();
-        assertThat(runtime.currentDate(actualClock, LocalDate.parse("2026-08-05"))).isEqualTo(LocalDate.parse("2026-08-05"));
-        assertThat(runtime.qaOverrideActive(LocalDate.parse("2026-08-05"))).isTrue();
-        assertThat(actual.currentDate(actualClock)).isEqualTo(LocalDate.parse("2026-07-10"));
-        assertThat(actual.currentDate(actualClock, LocalDate.parse("2026-08-05"))).isEqualTo(LocalDate.parse("2026-07-10"));
-        assertThat(actual.qaOverrideActive()).isFalse();
-        assertThatThrownBy(() -> new CashflowMonthCloseBusinessDate("live", "2026-08-11"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("Stage");
-        assertThatThrownBy(() -> new CashflowMonthCloseBusinessDate("stage", "2026-02-30"))
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("YYYY-MM-DD");
     }
 
     @Test
@@ -4195,9 +4171,9 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Object> member,
         Map<String, Object> lease,
         boolean projectExists,
-        LocalDate cashflowMonthCloseQaDate
+        LocalDate businessDate
     ) {
-        return fixture(member, lease, projectExists, cashflowMonthCloseQaDate, NOW);
+        return fixture(member, lease, projectExists, businessDate, NOW);
     }
 
     @SuppressWarnings("unchecked")
@@ -4205,7 +4181,7 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Object> member,
         Map<String, Object> lease,
         boolean projectExists,
-        LocalDate cashflowMonthCloseQaDate,
+        LocalDate businessDate,
         Instant now
     ) {
         Firestore db = mock(Firestore.class);
@@ -4348,11 +4324,13 @@ class FirestoreCashflowLeaseGuardTest {
             }
         });
 
+        Instant effectiveNow = businessDate == null
+            ? now
+            : businessDate.atStartOfDay(ZoneOffset.ofHours(9)).toInstant();
         FirestoreInheritedWeeklyExpensePersistence persistence = new FirestoreInheritedWeeklyExpensePersistence(
             db,
             "stage-data-project",
-            Clock.fixed(now, ZoneOffset.UTC),
-            cashflowMonthCloseQaDate
+            Clock.fixed(effectiveNow, ZoneOffset.UTC)
         );
         return new Fixture(persistence, db, transaction, refs, collections, docs, pendingWrites, getAllSizes);
     }

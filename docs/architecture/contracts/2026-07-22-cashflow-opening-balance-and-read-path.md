@@ -179,7 +179,7 @@ review.
   generic cashflow ledger endpoint in parallel from this screen is forbidden.
 - The actual BFF route uses the shared bounded JVM client: at most 12 seconds
   per attempt and 24 seconds total. A separate 26-second whole-route deadline
-  also covers the QA clock and Firestore composition. The browser deadline is
+  also covers Firestore composition. The browser deadline is
   27 seconds so the BFF returns a stable error before browser cancellation.
 - Identity-token resolution, trusted headers, fetch, and response parsing are
   inside the same BFF deadline.

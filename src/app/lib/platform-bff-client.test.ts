@@ -38,8 +38,6 @@ import {
   saveCashflowProjectionBatchViaBff,
   fetchCashflowMonthCloseViaBff,
   saveCashflowMonthCloseApproverViaBff,
-  fetchCashflowMonthCloseQaDateTimeViaBff,
-  setCashflowMonthCloseQaDateTimeViaBff,
   completeCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyComplianceViaBff,
@@ -405,20 +403,16 @@ describe('platform-bff-client', () => {
     );
   });
 
-  it('uses project-scoped contracts for the Stage QA clock and explicit weekly settlement completion', async () => {
+  it('uses project-scoped contracts for explicit weekly settlement completion', async () => {
     const client = asMockClient({
-      get: vi.fn(async () => ({ data: { projectId: 'p001', active: true, qaDateTime: '2026-07-16T23:59' } })),
-      post: vi.fn(async (path: string) => ({ data: path.endsWith('weekly-update-complete')
-        ? { projectId: 'p001', yearMonth: '2026-07', weekNo: 3, completedAt: '2026-07-16T09:00:00.000Z', alreadyCompleted: false }
-        : { projectId: 'p001', active: true, qaDateTime: '2026-07-16T23:59' } })),
+      get: vi.fn(async () => ({ data: { projectId: 'p001', yearMonth: '2026-06', weekNo: 2 } })),
+      post: vi.fn(async () => ({ data: {
+        projectId: 'p001', yearMonth: '2026-06', weekNo: 2, completedAt: '2026-07-16T09:00:00.000Z', alreadyCompleted: false,
+      } })),
       request: vi.fn(),
     });
     const actor = { uid: 'finance-1', role: 'finance' };
 
-    await fetchCashflowMonthCloseQaDateTimeViaBff({ tenantId: 'mysc', actor, projectId: 'p001', client });
-    await setCashflowMonthCloseQaDateTimeViaBff({
-      tenantId: 'mysc', actor, projectId: 'p001', qaDateTime: '2026-07-16T23:59', client,
-    });
     await completeCashflowWeeklyUpdateViaBff({
       tenantId: 'mysc', actor, projectId: 'p001', yearMonth: '2026-06', weekNo: 2, updateResult: 'CHANGED', client,
     });
@@ -430,24 +424,20 @@ describe('platform-bff-client', () => {
       expectedRevision: 1, reason: '긴급 정정', client,
     });
 
-    expect(client.get).toHaveBeenCalledWith('/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({ retries: 0 }));
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/qa-date', expect.objectContaining({
-      body: { qaDateTime: '2026-07-16T23:59' },
-    }));
-    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
       body: { yearMonth: '2026-06', weekNo: 2, updateResult: 'CHANGED' },
     }));
     expect(client.get).toHaveBeenNthCalledWith(
-      2,
+      1,
       '/api/v1/cashflow/p001/weekly-update-complete?yearMonth=2026-06&weekNo=2',
       expect.objectContaining({ retries: 0 }),
     );
-    expect(client.post).toHaveBeenNthCalledWith(3, '/api/v1/cashflow/p001/weekly-update-complete/reopen', expect.objectContaining({
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/weekly-update-complete/reopen', expect.objectContaining({
       body: { yearMonth: '2026-06', weekNo: 2, expectedRevision: 1, reason: '긴급 정정' },
     }));
   });
 
-  it('does not turn partial or zero weekly settlement scopes into the QA-clock fallback', async () => {
+  it('does not invent missing or zero weekly settlement scope values', async () => {
     const client = asMockClient({
       post: vi.fn(async () => ({ data: { ok: true } })),
       get: vi.fn(),

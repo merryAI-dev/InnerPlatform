@@ -80,7 +80,7 @@ describe('production deployment workflow safety', () => {
   it('deploys the production artifact with Live reads and writes enabled before alias promotion', () => {
     expect(workflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
     expect(workflowText).toContain('BFF_DEPLOY_ENV: live');
-    expect(workflowText).toContain("BFF_EDIT_LEASES_ENABLED: 'false'");
+    expect(workflowText).toContain("BFF_EDIT_LEASES_ENABLED: 'true'");
     expect(workflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
     expect(workflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
     expect(workflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'false'");

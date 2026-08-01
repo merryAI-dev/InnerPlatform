@@ -288,8 +288,8 @@ transaction that already owns these values.
   lock even when a client regenerates `completedAt`; reuse for another scope is
   rejected.
 - JVM and BFF expose explicit read, complete, and reopen contracts. Complete
-  accepts an explicit year/month and week, while an omitted scope retains the
-  Stage QA-clock behavior for compatibility. Reopened documents are no longer
+  accepts an explicit year/month and week, while an omitted scope uses the
+  real server clock. Reopened documents are no longer
   counted as completed in the deadline dashboard.
 
 **Local evaluation**
@@ -307,7 +307,7 @@ transaction that already owns these values.
 - BFF route plus TypeScript client contracts passed 120/120. Coverage includes
   lease-free read/complete/reopen, exact field-presence validation, explicit
   zero rejection, JVM `409`/`503` propagation, status-aware deadline summary,
-  and the intentionally limited no-scope Stage QA-clock fallback.
+  and the no-scope real-server-clock fallback.
 - The BFF/client contracts plus the sanitized 260701 full-year workbook parser
   and exact-ledger apply regression passed 174/174 in 7.77 seconds. The fixture
   read 1,920 cells, preserved 34 values and 1,886 explicit empty cells, and

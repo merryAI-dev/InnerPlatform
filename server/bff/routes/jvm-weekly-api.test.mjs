@@ -14,8 +14,17 @@ function createIdempotencyService() {
 const stageEnv = {
   BFF_DEPLOY_ENV: 'stage',
   BFF_EDIT_LEASES_ENABLED: 'true',
+  BFF_STAGE_FIREBASE_PROJECT_ID: 'stage-data-project',
   VITE_FIREBASE_PROJECT_ID: 'stage-data-project',
   JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'stage-data-project',
+};
+
+const liveEnv = {
+  BFF_DEPLOY_ENV: 'live',
+  BFF_EDIT_LEASES_ENABLED: 'true',
+  BFF_LIVE_FIREBASE_PROJECT_ID: 'live-data-project',
+  VITE_FIREBASE_PROJECT_ID: 'live-data-project',
+  JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'live-data-project',
 };
 
 const editLeaseHeaders = {
@@ -973,31 +982,29 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('jvm_weekly_response_invalid'));
   });
 
-  it('stores and resets a project-scoped Stage QA date-time for Finance', async () => {
-    const db = createMonthCloseDb();
-    const { app } = createApp(vi.fn(), createIdempotencyService(), { actorRole: 'finance' }, { env: stageEnv, db });
+  it.each([
+    ['/api/v1/cashflow/project-a/month-close/approver', { approverUid: 'finance-1', yearMonth: '2026-08' }],
+    ['/api/v1/cashflow/project-a/month-close/requests', { expectedApproverUid: 'finance-1', expectedProjectVersion: 0 }],
+    ['/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review', { decision: 'APPROVE', expectedRevision: 0 }],
+    ['/api/v1/cashflow/project-a/month-close', { yearMonth: '2026-08' }],
+  ])('blocks %s before any BFF Firestore workflow write when BFF and JVM data projects differ', async (path, body) => {
+    const db = { doc: vi.fn(), runTransaction: vi.fn(), collection: vi.fn() };
+    const env = { ...liveEnv, JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-data-project' };
+    const { app } = createApp(vi.fn(), createIdempotencyService(), { actorRole: 'viewer' }, { env, db });
 
     await request(app)
-      .post('/api/v1/cashflow/project-a/month-close/qa-date')
-      .send({ qaDateTime: '2026-07-16T23:59' })
-      .expect(200)
-      .expect((response) => expect(response.body).toMatchObject({
-        projectId: 'project-a', active: true, qaDateTime: '2026-07-16T23:59',
-      }));
+      .post(path)
+      .set('idempotency-key', `mismatch-${path}`)
+      .send(body)
+      .expect(503)
+      .expect((response) => expect(response.body.code).toBe('jvm_weekly_data_project_mismatch'));
 
-    await request(app)
-      .get('/api/v1/cashflow/project-a/month-close/qa-date')
-      .expect(200)
-      .expect((response) => expect(response.body).toMatchObject({ active: true, qaDateTime: '2026-07-16T23:59' }));
-
-    await request(app)
-      .post('/api/v1/cashflow/project-a/month-close/qa-date')
-      .send({ qaDateTime: null })
-      .expect(200)
-      .expect((response) => expect(response.body).toMatchObject({ active: false, qaDateTime: null }));
+    expect(db.doc).not.toHaveBeenCalled();
+    expect(db.runTransaction).not.toHaveBeenCalled();
+    expect(db.collection).not.toHaveBeenCalled();
   });
 
-  it('uses the Stage QA time on both sides of the Thursday midnight deadline', async () => {
+  it('uses the real server time on both sides of the Thursday midnight deadline', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
       projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
@@ -1018,7 +1025,6 @@ describe('JVM weekly API BFF proxy', () => {
         },
       )),
     }));
-    const qaPath = 'orgs/tenant-a/cashflow_month_close_qa_dates/project-a';
     let canonicalStatus = 'PENDING';
     const weeklyComplianceResponse = () => ({
       items: [{
@@ -1027,9 +1033,9 @@ describe('JVM weekly API BFF proxy', () => {
       }],
       nextCursor: '', onTimeCount: 0, missedCount: canonicalStatus === 'MISSED' ? 1 : 0,
     });
-    source.documents.set(qaPath, { active: true, qaDateTime: '2026-07-16T23:59:00+09:00' });
     const before = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv, db: source.db, weeklyComplianceResponse,
+      now: () => new Date('2026-07-16T14:59:00.000Z'),
     });
     await request(before.app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
@@ -1041,10 +1047,10 @@ describe('JVM weekly API BFF proxy', () => {
         ]));
       });
 
-    source.documents.set(qaPath, { active: true, qaDateTime: '2026-07-17T00:01:00+09:00' });
     canonicalStatus = 'MISSED';
     const after = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv, db: source.db, weeklyComplianceResponse,
+      now: () => new Date('2026-07-16T15:01:00.000Z'),
     });
     await request(after.app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
@@ -1055,11 +1061,8 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
-  it('keeps dashboard comparison and management checks on real KST now while weekly controls use the QA clock', async () => {
+  it('keeps dashboard comparison, management checks, and weekly controls on the same real KST time', async () => {
     const source = fullMonthCloseSource();
-    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
-      active: true, qaDateTime: '2026-07-16T23:59:00+09:00',
-    });
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -1091,7 +1094,7 @@ describe('JVM weekly API BFF proxy', () => {
         });
         expect(response.body.dashboard.comparison.weeks.map((week) => week.weekNo)).toEqual([1, 2]);
         expect(response.body.dashboard.managementChecks.find((check) => check.id === 'labor-transfer')).toMatchObject({ status: 'OK' });
-        expect(response.body.dashboard.deadlineSummary.current).toMatchObject({ yearMonth: '2026-07', weekNo: 3 });
+        expect(response.body.dashboard.deadlineSummary.current).toBeNull();
       });
   });
 
@@ -1099,9 +1102,6 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
       projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
-    });
-    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
-      active: true, qaDateTime: '2026-07-17T00:01:00+09:00',
     });
     source.documents.set('orgs/tenant-a/cashflow_weekly_update_reset_controls/project-a', {
       projectId: 'project-a', trackingStartedAt: '2026-07-17T00:01:00+09:00',
@@ -1129,9 +1129,6 @@ describe('JVM weekly API BFF proxy', () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
       projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
-    });
-    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
-      active: true, qaDateTime: '2026-07-16T18:00:00+09:00',
     });
     const fetchImpl = vi.fn(async (url, init) => {
       if (init.method === 'POST' && url.endsWith('/api/v1/cashflow/project-a/weekly-update-complete')) {
@@ -1171,6 +1168,7 @@ describe('JVM weekly API BFF proxy', () => {
     };
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
       env: stageEnv, db: source.db, weeklyComplianceResponse,
+      now: () => new Date('2026-07-16T09:00:00.000Z'),
     });
 
     await request(app)
@@ -1238,6 +1236,48 @@ describe('JVM weekly API BFF proxy', () => {
       });
   });
 
+  it('allows aligned Live weekly completion using the real server clock', async () => {
+    const source = fullMonthCloseSource();
+    const fetchImpl = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          ok: true,
+          projectId: 'project-a',
+          yearMonth: body.yearMonth,
+          weekNo: body.weekNo,
+          completedAt: body.completedAt,
+          completedBy: 'pm@example.com',
+          alreadyCompleted: false,
+        }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
+      env: liveEnv,
+      db: source.db,
+      now: () => new Date('2026-08-01T05:00:00.000Z'),
+    });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .set('idempotency-key', 'live-weekly-complete-1')
+      .send({ updateResult: 'NO_CHANGES' })
+      .expect(200);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(init.headers['x-data-project-id']).toBe('live-data-project');
+    expect(JSON.parse(init.body)).toMatchObject({
+      idempotencyKey: 'cashflow-weekly:live-weekly-complete-1',
+      yearMonth: '2026-08',
+      weekNo: 1,
+      completedAt: '2026-08-01T05:00:00.000Z',
+      updateResult: 'NO_CHANGES',
+    });
+  });
+
   it('forwards an explicit weekly scope and a reasoned reopen without an edit lease', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async (url, init) => {
@@ -1271,7 +1311,7 @@ describe('JVM weekly API BFF proxy', () => {
         }),
       };
     });
-    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, { env: stageEnv, db: source.db });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, { env: liveEnv, db: source.db });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/weekly-update-complete?yearMonth=2026-06&weekNo=2')
@@ -1310,9 +1350,6 @@ describe('JVM weekly API BFF proxy', () => {
     source.documents.set('orgs/tenant-a/cashflow_sheet_stage_runs/tracking-start', {
       projectId: 'project-a', status: 'APPLIED', appliedAt: '2026-07-06T10:00:00+09:00',
     });
-    source.documents.set('orgs/tenant-a/cashflow_month_close_qa_dates/project-a', {
-      active: true, qaDateTime: '2026-07-16T18:00:00+09:00',
-    });
     source.documents.set('orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-07-w3', {
       projectId: 'project-a', yearMonth: '2026-07', weekNo: 3, status: 'OPEN',
       completedAt: '2026-07-16T09:00:00+09:00', reopenedAt: '2026-07-16T10:00:00+09:00',
@@ -1328,6 +1365,7 @@ describe('JVM weekly API BFF proxy', () => {
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: stageEnv,
       db: source.db,
+      now: () => new Date('2026-07-16T09:00:00.000Z'),
       weeklyComplianceResponse: {
         items: [{
           yearMonth: '2026-07', weekNo: 3, deadline: '2026-07-17T00:00:00+09:00', status: 'PENDING',
@@ -2506,7 +2544,7 @@ describe('JVM weekly API BFF proxy', () => {
     }));
     const requester = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'pm-1', actorRole: 'pm',
-    }, { env: stageEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z') }).app;
+    }, { env: liveEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z') }).app;
     const read = await request(requester).get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06').expect(200);
 
     const created = await request(requester)
@@ -2534,7 +2572,7 @@ describe('JVM weekly API BFF proxy', () => {
     });
     const approver = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'finance-1', actorRole: 'finance',
-    }, { env: stageEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z') }).app;
+    }, { env: liveEnv, db: source.db, now: () => new Date('2026-07-10T00:00:00.000Z') }).app;
     await request(approver)
       .post(`/api/v1/cashflow/project-a/month-close/requests/${created.body.requestId}/review`)
       .set('idempotency-key', 'month-close-missing-mirror-approval')
@@ -4566,7 +4604,7 @@ describe('JVM weekly API BFF proxy', () => {
       const { app } = createApp(fetchImpl, createIdempotencyService(), {
         actorId: `${actorRole}-1`,
         actorRole,
-      }, { env: stageEnv });
+      }, { env: liveEnv });
 
       await request(app)
         .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
@@ -4578,7 +4616,7 @@ describe('JVM weekly API BFF proxy', () => {
       expect(url).toBe('http://jvm-weekly.local/api/v1/cashflow/project-a/month-close/reopen-decision');
       expect(init.headers['x-actor-role']).toBe(actorRole);
       expect(init.headers['x-edit-session-id']).toBeUndefined();
-      expect(init.headers['x-data-project-id']).toBe('stage-data-project');
+      expect(init.headers['x-data-project-id']).toBe('live-data-project');
       expect(JSON.parse(init.body)).toMatchObject({
         idempotencyKey: `month-reopen-decision-${actorRole}`,
         yearMonth: '2026-06',
@@ -4591,7 +4629,7 @@ describe('JVM weekly API BFF proxy', () => {
   it.each([
     [{ ...stageEnv, BFF_DEPLOY_ENV: 'live' }, 'unsafe_bff_runtime'],
     [{ ...stageEnv, JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-data-project' }, 'jvm_weekly_data_project_mismatch'],
-  ])('blocks reopen writes before the JVM when the Stage data guard fails', async (env, code) => {
+  ])('blocks reopen writes before the JVM when runtime alignment fails', async (env, code) => {
     const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'pm-1', actorRole: 'pm',

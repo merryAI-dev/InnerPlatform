@@ -105,7 +105,7 @@ jobs:
             --no-traffic \
             --tag candidate \
             --ingress all \
-            --set-env-vars '^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=live|JVM_WEEKLY_CASHFLOW_MONTH_CLOSE_QA_DATE=|JVM_WEEKLY_EDIT_LEASES_ENABLED=false|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_ALLOWED_ORIGINS=https://myscube.myscguard.app' \
+            --set-env-vars '^|^WEEKLY_API_PORT=8080|JVM_WEEKLY_DEPLOY_ENV=live|JVM_WEEKLY_EDIT_LEASES_ENABLED=true|JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED=true|JVM_WEEKLY_STORAGE_BACKEND=firestore|JVM_WEEKLY_PROJECT_ACCESS_BACKEND=firestore|JVM_WEEKLY_AUTH_MODE=strict|JVM_WEEKLY_WORKSPACE_EMAIL_DOMAIN=mysc.co.kr|JVM_WEEKLY_FIREBASE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIRESTORE_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID=inner-platform-live-20260316|JVM_WEEKLY_ALLOWED_ORIGINS=https://myscube.myscguard.app' \
             --set-secrets 'JVM_WEEKLY_INTERNAL_API_TOKEN=innerplatform-weekly-api-token:latest,JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY=innerplatform-cashflow-settled-week-confirmation-key:latest'
           revision="${SERVICE}-${revision_suffix}"
           candidate_url="$(gcloud run services describe "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --format=json \

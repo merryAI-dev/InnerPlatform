@@ -42,15 +42,12 @@ import {
   decideCashflowMonthReopenViaBff,
   fetchCashflowMonthCloseViaBff,
   fetchCurrentCashflowMonthCloseRequestViaBff,
-  fetchCashflowMonthCloseQaDateTimeViaBff,
   fetchCashflowWeeklyComplianceViaBff,
   requestCashflowMonthReopenViaBff,
-  setCashflowMonthCloseQaDateTimeViaBff,
   type CashflowMonthCloseCell,
   type CashflowMonthCloseDraftInput,
   type CashflowMonthCloseResult,
   type CashflowMonthCloseRequest,
-  type CashflowMonthCloseQaDateTimeSetting,
   type CashflowCumulativeCloseScope,
   type CashflowDeadlineSummary,
   type CashflowActivityEvent,
@@ -313,8 +310,6 @@ export function CashflowProjectSheet({
   const canFinalizeMonth = role === 'viewer' || role === 'pm' || role === 'finance' || role === 'admin' || role === 'tenant_admin';
   const canCompleteWeekly = canFinalizeMonth || role === 'tenant_admin';
   const canRequestMonthReopen = canFinalizeMonth;
-  const isStageHost = typeof window !== 'undefined'
-    && (/stage/i.test(window.location.hostname) || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   const todayIso = getSeoulTodayIso();
   const todayYearMonth = todayIso.slice(0, 7);
   const bffActor = useMemo(() => ({
@@ -378,10 +373,6 @@ export function CashflowProjectSheet({
   const [selectedExecutiveApproverId, setSelectedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [savedExecutiveApproverId, setSavedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [executiveApproverBusy, setExecutiveApproverBusy] = useState(false);
-  const [qaClockOpen, setQaClockOpen] = useState(false);
-  const [qaClockBusy, setQaClockBusy] = useState(false);
-  const [qaClockInput, setQaClockInput] = useState('');
-  const [qaClockSetting, setQaClockSetting] = useState<CashflowMonthCloseQaDateTimeSetting | null>(null);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
@@ -722,64 +713,6 @@ export function CashflowProjectSheet({
   useEffect(() => {
     void loadMonthCloseRequest();
   }, [loadMonthCloseRequest]);
-
-  const loadQaClockSetting = useCallback(async (): Promise<void> => {
-    if (!isStageHost || !canReviewReopen || !projectId || !orgId || !user?.uid) return;
-    const readSetting = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
-      fetchCashflowMonthCloseQaDateTimeViaBff({ tenantId: orgId, actor, projectId })
-    );
-    try {
-      let actor = await resolveBffActor();
-      if (!actor?.idToken) return;
-      try {
-        setQaClockSetting(await readSetting(actor));
-      } catch (error) {
-        if (!isBffAuthRejection(error)) throw error;
-        actor = await resolveBffActor({ forceRefresh: true });
-        if (!actor?.idToken) throw error;
-        setQaClockSetting(await readSetting(actor));
-      }
-    } catch {
-      setQaClockSetting(null);
-    }
-  }, [canReviewReopen, isStageHost, orgId, projectId, resolveBffActor, user?.uid]);
-
-  useEffect(() => {
-    void loadQaClockSetting();
-  }, [loadQaClockSetting]);
-
-  const handleSetQaClock = useCallback(async (qaDateTime: string | null): Promise<void> => {
-    if (!canReviewReopen || !isStageHost) return;
-    setQaClockBusy(true);
-    try {
-      let actor = await resolveBffActor();
-      if (!actor?.idToken) throw new Error('로그인 세션이 만료되었습니다.');
-      const saveSetting = (targetActor: typeof actor) => setCashflowMonthCloseQaDateTimeViaBff({
-        tenantId: orgId,
-        actor: targetActor,
-        projectId,
-        qaDateTime,
-      });
-      let setting: CashflowMonthCloseQaDateTimeSetting;
-      try {
-        setting = await saveSetting(actor);
-      } catch (error) {
-        if (!isBffAuthRejection(error)) throw error;
-        actor = await resolveBffActor({ forceRefresh: true });
-        if (!actor?.idToken) throw error;
-        setting = await saveSetting(actor);
-      }
-      setQaClockSetting(setting);
-      setQaClockInput(setting.qaDateTime || '');
-      setQaClockOpen(false);
-      await loadCashflowMonthClose();
-      toast.success(setting.active ? 'QA 기준시각을 적용했습니다.' : '실제 서버 시각으로 복구했습니다.');
-    } catch (error) {
-      toast.error(resolveApiErrorMessage(error, 'QA 기준시각을 저장하지 못했습니다.'));
-    } finally {
-      setQaClockBusy(false);
-    }
-  }, [canReviewReopen, isStageHost, loadCashflowMonthClose, orgId, projectId, resolveBffActor]);
 
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
     if (!canCompleteWeekly || !weeklyUpdateResult) return;
@@ -2840,20 +2773,6 @@ export function CashflowProjectSheet({
                 ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
                   <span>{monthCloseResult?.dashboard?.summary?.closeDeadline ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
-                  {isStageHost && canReviewReopen ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 rounded-md px-2 text-[12px] text-slate-500 hover:bg-slate-100 hover:text-[#17324D]"
-                      onClick={() => {
-                        setQaClockInput(qaClockSetting?.qaDateTime || `${todayIso}T10:00`);
-                        setQaClockOpen(true);
-                      }}
-                    >
-                      QA 기준시각
-                    </Button>
-                  ) : null}
                 </div>
               </div>
           </section>
@@ -3243,41 +3162,6 @@ export function CashflowProjectSheet({
           </div>
           {weeklyComplianceNextCursor ? <Button type="button" variant="outline" disabled={weeklyComplianceHistoryLoading} onClick={() => void loadMoreWeeklyComplianceHistory()}>{weeklyComplianceHistoryLoading ? '추가 이력 불러오는 중…' : '이전 이력 더 불러오기'}</Button> : null}
           <AlertDialogFooter><AlertDialogCancel>닫기</AlertDialogCancel></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={qaClockOpen} onOpenChange={(open) => { if (!qaClockBusy) setQaClockOpen(open); }}>
-        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[380px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Stage QA 기준시각</AlertDialogTitle>
-            <AlertDialogDescription>
-              이 프로젝트의 월 결산 가능일과 목요일 자정 주간 마감을 선택한 시각 기준으로 확인합니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <label className="grid gap-1.5 text-[12px] font-semibold text-slate-700">
-            테스트 날짜와 시간
-            <Input
-              type="datetime-local"
-              value={qaClockInput}
-              disabled={qaClockBusy}
-              onChange={(event) => setQaClockInput(event.target.value)}
-            />
-          </label>
-          <div className="rounded-md bg-[#EAF0F5] px-3 py-2 text-[12px] leading-4 text-[#17324D]">
-            Stage 전용이며 이 프로젝트에만 적용됩니다. 운영 데이터와 실제 서버 시각은 바뀌지 않습니다.
-          </div>
-          <AlertDialogFooter>
-            {qaClockSetting?.active ? (
-              <Button type="button" variant="outline" disabled={qaClockBusy} onClick={() => void handleSetQaClock(null)}>
-                실제 시각으로 복구
-              </Button>
-            ) : null}
-            <AlertDialogCancel disabled={qaClockBusy}>취소</AlertDialogCancel>
-            <Button type="button" disabled={qaClockBusy || !qaClockInput} onClick={() => void handleSetQaClock(qaClockInput)}>
-              {qaClockBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-              적용
-            </Button>
-          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 

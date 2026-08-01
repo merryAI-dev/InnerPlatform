@@ -1273,14 +1273,6 @@ export interface CashflowMonthCloseResult {
   dashboard?: CashflowMonthCloseDashboard;
 }
 
-export interface CashflowMonthCloseQaDateTimeSetting {
-  projectId: string;
-  active: boolean;
-  qaDateTime: string | null;
-  updatedAt: string | null;
-  updatedBy: string | null;
-}
-
 export interface CashflowWeeklyUpdateCompletionResult {
   ok?: boolean;
   commandName?: string;
@@ -2791,44 +2783,6 @@ export async function fetchCashflowMonthCloseViaBff(params: {
   } finally {
     if (clientRequests.get(requestKey) === request) clientRequests.delete(requestKey);
   }
-}
-
-export async function fetchCashflowMonthCloseQaDateTimeViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseQaDateTimeSetting> {
-  const response = await resolveClient(params.client).get<CashflowMonthCloseQaDateTimeSetting>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/qa-date`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data;
-}
-
-export async function setCashflowMonthCloseQaDateTimeViaBff(params: {
-  tenantId: string;
-  actor: ActorLike;
-  projectId: string;
-  qaDateTime: string | null;
-  client?: PlatformApiClientLike;
-}): Promise<CashflowMonthCloseQaDateTimeSetting> {
-  const response = await resolveClient(params.client).post<CashflowMonthCloseQaDateTimeSetting>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/qa-date`,
-    {
-      tenantId: params.tenantId,
-      actor: toRequestActor(params.actor),
-      body: { qaDateTime: params.qaDateTime },
-      retries: 0,
-      timeoutMs: 12000,
-    },
-  );
-  return response.data;
 }
 
 export async function completeCashflowWeeklyUpdateViaBff(params: {
