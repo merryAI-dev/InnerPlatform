@@ -171,6 +171,46 @@ class CashflowSheetMonthlyApplyServiceTest {
 
         verify(persistence, never()).replaceCashflowSheetMonth(any(), any(), any(), any(), any(), any());
         verify(persistence, never()).saveAuditEvent(any());
+
+        CashflowSheetLabApplyRequest accepted = new CashflowSheetLabApplyRequest(
+            "apply-formula-mismatch-accepted",
+            SOURCE_REVISION,
+            TARGET_REVISION,
+            "2026-07",
+            false,
+            null,
+            null,
+            List.of(),
+            calculationChecks("2026-07"),
+            completeCells(5),
+            true
+        );
+        when(persistence.replaceCashflowSheetMonth(
+            eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION),
+            eq(accepted.cells()), eq(false), isNull(), eq(SOURCE_REVISION), eq("apply-formula-mismatch-accepted")
+        )).thenReturn(new WeeklyExpensePersistence.CashflowSheetMonthReplacement(
+            List.of(), List.of(), List.of(), TARGET_REVISION
+        ));
+        when(persistence.saveAuditEvent(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(persistence.saveIdempotency(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CashflowSheetLabApplyResponse response = service(persistence).applyCashflowSheetLab(
+            ACTOR, "project-a", SESSION, accepted
+        );
+
+        assertThat(response.calculationChecks())
+            .filteredOn(check -> check.mode().equals("projection") && check.weekNo() == 1)
+            .singleElement()
+            .satisfies(check -> {
+                assertThat(check.reported().balance()).isEqualByComparingTo("0");
+                assertThat(check.calculated().depositTotal()).isEqualByComparingTo("700");
+                assertThat(check.calculated().withdrawalTotal()).isEqualByComparingTo("900");
+                assertThat(check.calculated().balance()).isEqualByComparingTo("-200");
+            });
+        verify(persistence).replaceCashflowSheetMonth(
+            eq("tenant-a"), eq("project-a"), eq("cashflow-sheet-lab"), eq("2026-07"), eq(TARGET_REVISION),
+            eq(accepted.cells()), eq(false), isNull(), eq(SOURCE_REVISION), eq("apply-formula-mismatch-accepted")
+        );
     }
 
     @Test

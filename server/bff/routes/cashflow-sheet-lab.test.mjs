@@ -3797,6 +3797,21 @@ describe('cashflow sheet lab route', () => {
     });
     expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
 
+    const originalSourceRevision = currentMirror.sourceRevision;
+    currentMirror.sourceRevision = `sha256:${'9'.repeat(64)}`;
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({
+        stageRunId: stage.body.runId,
+        idempotencyKey: 'apply-formula-mismatch-stale-confirmation',
+        acceptFormulaMismatches: true,
+      })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_mirror_revision_conflict'));
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    currentMirror.sourceRevision = originalSourceRevision;
+
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({
@@ -3812,6 +3827,95 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[0][0].acceptFormulaMismatches).toBe(false);
     expect(javaWeeklyClient.validateCashflowSheetFormulas.mock.calls[1][0].acceptFormulaMismatches).toBe(true);
     expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a monthly close missing only contractVersion as legacy v1 and reaches formula validation', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      initialDocuments: {
+        'orgs/tenant-a/monthly_closes/project-a-2026-01': {
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-01',
+          status: 'OPEN',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      validateCashflowSheetFormulas: vi.fn(async () => {
+        throw Object.assign(new Error('formula confirmation required'), {
+          statusCode: 409,
+          code: 'cashflow_formula_mismatch_confirmation_required',
+          details: { mismatchCount: 1, mismatches: [] },
+        });
+      }),
+    };
+    const app = createApp({ db, routeOptions: { javaWeeklyClient } });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'refresh-legacy-month-close' })
+      .expect(200);
+    const stage = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-legacy-month-close' })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-legacy-month-close' })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_formula_mismatch_confirmation_required'));
+    expect(javaWeeklyClient.validateCashflowSheetFormulas).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['contract version', { contractVersion: 'cashflow-month-close-v0' }],
+    ['blank contract version', { contractVersion: ' ' }],
+    ['legacy closed status', { status: 'CLOSED' }],
+    ['tenant', { tenantId: 'tenant-b' }],
+    ['project', { projectId: 'project-b' }],
+    ['month', { yearMonth: '2026-02' }],
+    ['status', { status: 'INVALID' }],
+  ])('still rejects a monthly close with an invalid %s', async (_field, override) => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+      initialDocuments: {
+        'orgs/tenant-a/monthly_closes/project-a-2026-01': {
+          tenantId: 'tenant-a',
+          projectId: 'project-a',
+          yearMonth: '2026-01',
+          status: 'OPEN',
+          ...override,
+        },
+      },
+    });
+    const app = createApp({ db });
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: `refresh-invalid-month-close-${_field}` })
+      .expect(200);
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: `stage-invalid-month-close-${_field}` })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_contract_invalid'));
   });
 
   it('applies a settled-week sheet change without a weekly confirmation', async () => {

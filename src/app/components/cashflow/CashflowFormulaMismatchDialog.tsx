@@ -77,7 +77,7 @@ export function CashflowFormulaMismatchDialog({
             {first
               ? `${periodLabel(first)} ${first.mode === 'projection' ? 'Projection' : 'Actual'}의 ${fieldLabels[first.field]}가 공식 시트 양식의 계산 결과와 다릅니다.`
               : ''}
-            {' '}아래 계산대로 시트를 고친 뒤 다시 불러오는 것을 권장합니다.
+            {' '}아래 계산대로 시트를 고친 뒤 다시 불러오는 것을 권장합니다. 계속하면 시트의 원천 항목값을 가져오고, 입금 합계·출금 합계·잔액은 플랫폼 계산값으로 반영합니다.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="max-h-80 space-y-3 overflow-y-auto rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-slate-800">
@@ -96,7 +96,7 @@ export function CashflowFormulaMismatchDialog({
           <AlertDialogCancel disabled={busy} onClick={onCancel}>취소</AlertDialogCancel>
           <Button type="button" className="bg-[#17324D] hover:bg-slate-800" disabled={busy} onClick={onConfirm}>
             {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            그래도 현재 시트값 반영
+            차이를 확인하고 원천값 반영
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
