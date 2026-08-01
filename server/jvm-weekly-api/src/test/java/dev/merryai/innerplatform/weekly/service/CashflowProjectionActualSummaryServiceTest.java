@@ -129,6 +129,27 @@ class CashflowProjectionActualSummaryServiceTest {
         )).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void directSummaryFromTheDashboardSourceMatchesTheBatchSummary() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = service(persistence, authorization);
+        WeeklyExpenseProjectionEntity projection = new WeeklyExpenseProjectionEntity(
+            "tenant-a", "project-a", "2023-01", 1, "SALES_IN"
+        );
+        projection.setAmount(BigDecimal.TEN);
+        WeeklyExpensePersistence.CashflowLedgerSource source =
+            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of(), List.of(2023));
+        when(persistence.findCashflowLedgerSource(eq("tenant-a"), eq("project-a"), eq("2023-01"), anyString()))
+            .thenReturn(source);
+
+        CashflowProjectionActualSummaryBatchResponse.Item batch = service.readCashflowProjectionActualSummaries(
+            ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"))
+        ).items().getFirst();
+
+        assertThat(service.readCashflowProjectionActualSummary(ACTOR, "project-a", source)).isEqualTo(batch);
+    }
+
     private static WeeklyExpenseCommandService service(
         WeeklyExpensePersistence persistence,
         WeeklyExpenseAuthorizationService authorization

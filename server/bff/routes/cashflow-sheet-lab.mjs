@@ -1977,14 +1977,19 @@ async function reserveCashflowSheetApply({
     if (readOptionalText(stageRun.projectId) !== readOptionalText(projectId)) {
       throw createHttpError(404, '시트 검토 run을 찾을 수 없습니다.', 'cashflow_sheet_stage_run_not_found');
     }
+    const publicationSnap = await transaction.get(publicationRef);
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
     const status = readOptionalText(stageRun.status);
     if (status === 'APPLIED') {
       assertApplyRequestMatches(stageRun, applyRequestHash);
-      if (stageRun.applyResponse) return { replay: stageRun.applyResponse, resume: false, stageRun };
-      throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
+      const replay = appliedCashflowSheetResponse(stageRun, publication, {
+        projectId,
+        stagedRunId,
+        applyRequestHash,
+      });
+      if (replay) return { replay, resume: false, stageRun };
+      throw createHttpError(409, '이미 반영된 시트 검토 run의 완료 근거가 일치하지 않습니다.', 'cashflow_sheet_stage_run_applied');
     }
-    const publicationSnap = await transaction.get(publicationRef);
-    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
     if (
       readOptionalText(publication.status).toUpperCase() === 'APPLYING'
       && readOptionalText(publication.stagedRunId) !== stagedRunId
@@ -2174,10 +2179,60 @@ function yearApplyIdempotencyKey({ idempotencyKey, stagedRunId, year }) {
   return `cf-sheet-year-${stableHash({ idempotencyKey, stagedRunId, year }).slice(0, 48)}`;
 }
 
+function appliedCashflowSheetResponse(run, publication, {
+  projectId,
+  stagedRunId,
+  idempotencyKey = '',
+  applyRequestHash,
+}) {
+  const response = run?.applyResponse;
+  const sourceRevision = readOptionalText(run?.sourceRevision);
+  const targetRevision = readOptionalText(response?.resultingTargetRevision);
+  const valid = readOptionalText(run?.status) === 'APPLIED'
+    && readOptionalText(run?.projectId) === projectId
+    && (!idempotencyKey || readOptionalText(run?.appliedIdempotencyKey) === idempotencyKey)
+    && readOptionalText(run.applyRequestHash) === applyRequestHash
+    && response?.ok === true
+    && readOptionalText(response?.projectId) === projectId
+    && readOptionalText(response?.stagedRunId) === stagedRunId
+    && readOptionalText(response?.sourceRevision) === sourceRevision
+    && Boolean(targetRevision)
+    && readOptionalText(publication?.status).toUpperCase() === 'APPLIED'
+    && readOptionalText(publication?.projectId) === projectId
+    && readOptionalText(publication?.stagedRunId) === stagedRunId
+    && readOptionalText(publication?.sourceRevision) === sourceRevision
+    && readOptionalText(publication?.appliedTargetRevision) === targetRevision;
+  return valid ? response : null;
+}
+
+async function readAppliedCashflowSheetResponse({
+  db,
+  tenantId,
+  projectId,
+  stagedRunId,
+  idempotencyKey = '',
+  applyRequestHash,
+}) {
+  const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`);
+  const publicationRef = db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`);
+  return db.runTransaction(async (transaction) => {
+    const [runSnap, publicationSnap] = await Promise.all([
+      transaction.get(runRef),
+      transaction.get(publicationRef),
+    ]);
+    return appliedCashflowSheetResponse(
+      runSnap.exists ? (runSnap.data() || {}) : {},
+      publicationSnap.exists ? (publicationSnap.data() || {}) : {},
+      { projectId, stagedRunId, idempotencyKey, applyRequestHash },
+    );
+  });
+}
+
 async function checkpointCashflowSheetApplyOperation({
   db,
   runRef,
   publicationRef,
+  projectId,
   stagedRunId,
   idempotencyKey,
   applyRequestHash,
@@ -2198,6 +2253,12 @@ async function checkpointCashflowSheetApplyOperation({
       || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
       || readOptionalText(publication.stagedRunId) !== stagedRunId
     ) {
+      if (appliedCashflowSheetResponse(run, publication, {
+        projectId,
+        stagedRunId,
+        idempotencyKey,
+        applyRequestHash,
+      })) return;
       throw createHttpError(409, '시트 반영 작업 상태가 변경되었습니다.', 'cashflow_sheet_apply_operation_conflict');
     }
     transaction.set(runRef, {
@@ -2543,7 +2604,14 @@ async function applyStagedCashflowSheetLab({
   });
   if (replaying) {
     assertApplyRequestMatches(stageRun, applyRequestHash);
-    if (stageRun.applyResponse) return stageRun.applyResponse;
+    const replay = await readAppliedCashflowSheetResponse({
+      db,
+      tenantId,
+      projectId,
+      stagedRunId,
+      applyRequestHash,
+    });
+    if (replay) return replay;
     throw createHttpError(409, '이미 반영된 시트 검토 run입니다.', 'cashflow_sheet_stage_run_applied');
   }
   if (resuming) assertApplyRequestMatches(stageRun, applyRequestHash);
@@ -2764,6 +2832,7 @@ async function applyStagedCashflowSheetLab({
       db,
       runRef: reservation.runRef,
       publicationRef: reservation.publicationRef,
+      projectId,
       stagedRunId,
       idempotencyKey: effectiveIdempotencyKey,
       applyRequestHash,
@@ -3214,32 +3283,47 @@ async function applyStagedCashflowSheetLab({
       .filter((year) => !candidateYears.includes(year))
       .sort((left, right) => left - right),
   });
-  await db.runTransaction(async (transaction) => {
-    const currentRunSnap = await transaction.get(reservation.runRef);
-    const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
-    const publicationSnap = await transaction.get(reservation.publicationRef);
-    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
-    if (
-      readOptionalText(currentRun.status) !== 'APPLYING'
-      || readOptionalText(currentRun.appliedIdempotencyKey) !== effectiveIdempotencyKey
-      || readOptionalText(currentRun.applyRequestHash) !== applyRequestHash
-      || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
-      || readOptionalText(publication.stagedRunId) !== stagedRunId
-    ) {
-      throw createHttpError(409, '시트 반영 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_apply_completion_conflict');
-    }
-    transaction.set(reservation.runRef, runCompletionPatch, { merge: true });
-    transaction.set(mirrorRef, mirrorCompletionPatch, { merge: true });
-    transaction.set(reservation.publicationRef, stripUndefinedDeep({
+  let finalizedResponse = response;
+  try {
+    await db.runTransaction(async (transaction) => {
+      const currentRunSnap = await transaction.get(reservation.runRef);
+      const currentRun = currentRunSnap.exists ? (currentRunSnap.data() || {}) : {};
+      const publicationSnap = await transaction.get(reservation.publicationRef);
+      const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
+      if (
+        readOptionalText(currentRun.status) !== 'APPLYING'
+        || readOptionalText(currentRun.appliedIdempotencyKey) !== effectiveIdempotencyKey
+        || readOptionalText(currentRun.applyRequestHash) !== applyRequestHash
+        || readOptionalText(publication.status).toUpperCase() !== 'APPLYING'
+        || readOptionalText(publication.stagedRunId) !== stagedRunId
+      ) {
+        throw createHttpError(409, '시트 반영 완료 상태가 변경되었습니다. 다시 확인해 주세요.', 'cashflow_sheet_apply_completion_conflict');
+      }
+      transaction.set(reservation.runRef, runCompletionPatch, { merge: true });
+      transaction.set(mirrorRef, mirrorCompletionPatch, { merge: true });
+      transaction.set(reservation.publicationRef, stripUndefinedDeep({
+        projectId,
+        status: 'APPLIED',
+        stagedRunId,
+        sourceRevision: stageRun.sourceRevision,
+        appliedTargetRevision: targetRevision,
+        appliedAt: now,
+        applyFailure: null,
+      }), { merge: true });
+    });
+  } catch (error) {
+    if (error?.code !== 'cashflow_sheet_apply_completion_conflict') throw error;
+    const replay = await readAppliedCashflowSheetResponse({
+      db,
+      tenantId,
       projectId,
-      status: 'APPLIED',
       stagedRunId,
-      sourceRevision: stageRun.sourceRevision,
-      appliedTargetRevision: targetRevision,
-      appliedAt: now,
-      applyFailure: null,
-    }), { merge: true });
-  });
+      idempotencyKey: effectiveIdempotencyKey,
+      applyRequestHash,
+    });
+    if (!replay) throw error;
+    finalizedResponse = replay;
+  }
   try {
     await markCashflowChangeCandidatesStatus({
       db,
@@ -3255,7 +3339,7 @@ async function applyStagedCashflowSheetLab({
       ...routeErrorDetails(error),
     }, 'warn');
   }
-  return response;
+  return finalizedResponse;
 }
 
 async function stagePinnedCashflowSheetLab({
