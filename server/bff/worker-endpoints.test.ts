@@ -45,17 +45,19 @@ describe('internal worker endpoints (cron)', () => {
 
     const mutationProbe = await request(app).post('/api/v1/__maintenance_probe__');
     expect(mutationProbe.status).toBe(400);
-    expect(mutationProbe.body?.error).not.toBe('stage_maintenance_read_only');
+    expect(mutationProbe.body?.error).not.toBe('maintenance_read_only');
 
     const workerProbe = await request(app).get('/api/internal/workers/outbox/run');
     expect(workerProbe.status).toBe(503);
     expect(workerProbe.body?.error).toBe('worker_scheduler_disabled');
   });
 
-  it('keeps health readable but blocks every mutation during stage maintenance', async () => {
+  it('keeps health readable but blocks every mutation during live maintenance', async () => {
     const app = createTestApp({
+      projectId: LIVE_PROJECT_ID,
+      allowedOrigins: [LIVE_ORIGIN],
       env: {
-        BFF_DEPLOY_ENV: 'stage',
+        BFF_DEPLOY_ENV: 'live',
         BFF_MAINTENANCE_READ_ONLY: 'true',
         BFF_WORKERS_ENABLED: 'false',
       },
@@ -65,7 +67,7 @@ describe('internal worker endpoints (cron)', () => {
     for (const method of ['post', 'put', 'patch', 'delete'] as const) {
       const mutation = await request(app)[method]('/api/internal/workers/outbox/run');
       expect(mutation.status).toBe(503);
-      expect(mutation.body?.error).toBe('stage_maintenance_read_only');
+      expect(mutation.body?.error).toBe('maintenance_read_only');
     }
   });
 

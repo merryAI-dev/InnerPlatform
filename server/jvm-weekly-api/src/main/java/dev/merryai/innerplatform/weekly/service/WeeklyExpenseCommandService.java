@@ -159,7 +159,7 @@ public class WeeklyExpenseCommandService {
         @Value("${weekly.deploy-env:local}") String deployEnv
     ) {
         String runtime = deployEnv == null ? "" : deployEnv.trim().toLowerCase(Locale.ROOT);
-        if (cashflowEditLeasesEnabled && !Set.of("stage", "live").contains(runtime)) {
+        if (cashflowEditLeasesEnabled && !"live".equals(runtime)) {
             throw new IllegalStateException("Cashflow edit leases require a deployed JVM runtime.");
         }
         this.persistence = persistence;

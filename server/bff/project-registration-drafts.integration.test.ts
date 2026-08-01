@@ -69,6 +69,7 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     db,
     authMode: 'headers',
     now: () => new Date(nowMs).toISOString(),
+    editLeasesEnabled: true,
     createProjectRegistrationDraftId: () => `opaque-draft-${++draftSequence}`,
     createProjectRegistrationLeaseId: () => `draft-lease-${++leaseSequence}`,
     createProjectRegistrationAttachmentId: () => `draft-attachment-${++attachmentSequence}`,
@@ -85,9 +86,8 @@ describeIfEmulator('private project registration drafts (Firestore emulator)', (
     },
     env: {
       ...process.env,
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'local',
       BFF_SCHEDULER_OWNER: 'disabled',
-      BFF_EDIT_LEASES_ENABLED: 'true',
     },
   }));
 

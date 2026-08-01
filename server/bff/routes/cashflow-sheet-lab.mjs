@@ -3734,8 +3734,9 @@ export function mountCashflowSheetLabRoutes(app, {
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
   });
-  const authoritativeWritesEnabled = ['stage', 'live'].includes(readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase())
-    || Boolean(javaWeeklyClient);
+  const deployEnv = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() || 'local';
+  const authoritativeWritesEnabled = deployEnv === 'live'
+    || (deployEnv === 'local' && Boolean(javaWeeklyClient));
   const authoritativeJavaClient = authoritativeWritesEnabled
     ? (javaWeeklyClient || createJavaWeeklyClient({ env, performanceLogger, performanceNow }))
     : null;

@@ -63,7 +63,7 @@ echo "true" | vercel env add VITE_PLATFORM_API_ENABLED production
 
 ### 2-4. Cloud Run BFF 배포
 ```bash
-npm run bff:deploy:cloud-run
+gh workflow run "Production Deploy" --ref main -f promote_alias=true
 ```
 
 ## 검증 체크리스트

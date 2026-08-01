@@ -198,7 +198,7 @@ jobs:
           }
 
           const mutation = await request('/api/v1/__maintenance_probe__', { method: 'POST' });
-          if (mutation.response.status !== 400 || mutation.body.error === 'stage_maintenance_read_only') {
+          if (mutation.response.status !== 400 || mutation.body.error === 'maintenance_read_only') {
             throw new Error(`production maintenance guard still active: ${mutation.response.status} ${JSON.stringify(mutation.body)}`);
           }
 

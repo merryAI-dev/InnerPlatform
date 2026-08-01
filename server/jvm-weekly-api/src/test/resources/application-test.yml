@@ -9,7 +9,7 @@ spring:
   flyway:
     enabled: true
 weekly:
-  deploy-env: stage
+  deploy-env: live
   legacy-week-close-enabled: true
   cashflow-edit-leases-enabled: true
   internal-api-token-enabled: true

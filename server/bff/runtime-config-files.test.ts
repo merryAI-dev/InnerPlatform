@@ -18,24 +18,6 @@ describe('BFF runtime config files', () => {
     expect(dockerfile).toContain('ENV BFF_SCHEDULER_OWNER=disabled');
   });
 
-  it('keeps Cloud Run deployment defaults stage-scoped with disabled workers and explicit origins', () => {
-    const script = readRepoFile('scripts/deploy_bff_cloud_run.sh');
-
-    expect(script).toContain('BFF_DEPLOY_ENV="${BFF_DEPLOY_ENV:-stage}"');
-    expect(script).toContain('BFF_WORKERS_ENABLED="${BFF_WORKERS_ENABLED:-false}"');
-    expect(script).toContain('BFF_SCHEDULER_OWNER="${BFF_SCHEDULER_OWNER:-disabled}"');
-    expect(script).not.toContain('BFF_ALLOWED_ORIGINS="${BFF_ALLOWED_ORIGINS:-*}"');
-  });
-
-  it('keeps Cloud Build BFF deployment defaults stage-scoped with disabled workers', () => {
-    const cloudBuild = readRepoFile('cloudbuild.bff.yaml');
-
-    expect(cloudBuild).toContain('_DEPLOY_ENV: stage');
-    expect(cloudBuild).toContain("_WORKERS_ENABLED: 'false'");
-    expect(cloudBuild).toContain('_SCHEDULER_OWNER: disabled');
-    expect(cloudBuild).not.toContain("_ALLOWED_ORIGINS: '*'");
-  });
-
   it('caps emulator JVM heap under memory pressure while preserving an explicit caller override', () => {
     const script = readRepoFile('scripts/test_bff_integration.sh');
 

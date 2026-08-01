@@ -171,7 +171,7 @@ class CashflowSheetOperationStatusServiceTest {
             }, "strict"),
             new ObjectMapper(),
             true,
-            "stage"
+            "live"
         );
     }
 }

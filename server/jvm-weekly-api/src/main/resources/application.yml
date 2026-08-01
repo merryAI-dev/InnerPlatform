@@ -30,4 +30,4 @@ weekly:
   firebase-auth-project-id: ${JVM_WEEKLY_FIREBASE_AUTH_PROJECT_ID:${weekly.firebase-project-id}}
   firestore-project-id: ${JVM_WEEKLY_FIRESTORE_PROJECT_ID:${weekly.firebase-project-id}}
   project-access-backend: ${JVM_WEEKLY_PROJECT_ACCESS_BACKEND:firestore}
-  allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://inner-platform-stage-merryai-devs-projects.vercel.app,https://inner-platform.vercel.app}
+  allowed-origins: ${JVM_WEEKLY_ALLOWED_ORIGINS:https://myscube.myscguard.app}

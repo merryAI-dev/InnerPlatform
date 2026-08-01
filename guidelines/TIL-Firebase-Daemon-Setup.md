@@ -64,7 +64,7 @@ npm run bff:cleanup:idempotency
 npm run bff:outbox:worker
 
 # Cloud Run 배포
-npm run bff:deploy:cloud-run
+gh workflow run "Production Deploy" --ref main -f promote_alias=true
 ```
 
 ### 메뉴 H: Firestore 인덱스/백업 운영

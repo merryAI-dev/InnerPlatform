@@ -93,11 +93,11 @@
   "rewrites": [
     {
       "source": "/__/auth/:path*",
-      "destination": "https://mysc-bmp-14173451.firebaseapp.com/__/auth/:path*"
+      "destination": "https://inner-platform-live-20260316.firebaseapp.com/__/auth/:path*"
     },
     {
       "source": "/__/firebase/:path*",
-      "destination": "https://mysc-bmp-14173451.firebaseapp.com/__/firebase/:path*"
+      "destination": "https://inner-platform-live-20260316.firebaseapp.com/__/firebase/:path*"
     },
     {
       "source": "/api/v1",

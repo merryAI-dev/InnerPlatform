@@ -18,12 +18,12 @@ function buildConfig(input: Parameters<typeof resolveBffRuntimeSafetyConfig>[0],
 }
 
 describe('BFF runtime safety', () => {
-  it('rejects stage/live wildcard origins before Firestore can be initialized', () => {
+  it('rejects live wildcard origins before Firestore can be initialized', () => {
     const config = buildConfig({
-      projectId: 'inner-platform-stage-20260316',
+      projectId: LIVE_PROJECT_ID,
       allowedOrigins: ['*'],
     }, {
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'live',
       BFF_SCHEDULER_OWNER: 'vercel',
       CRON_SECRET: LONG_CRON_SECRET,
     });
@@ -87,7 +87,7 @@ describe('BFF runtime safety', () => {
 
   it('rejects live BFF when the Firebase project is not the declared live project', () => {
     const config = buildConfig({
-      projectId: 'inner-platform-stage-20260316',
+      projectId: 'non-live-project',
       allowedOrigins: [LEGACY_VERCEL_LIVE_ORIGIN],
     }, {
       BFF_DEPLOY_ENV: 'live',
@@ -143,7 +143,7 @@ describe('BFF runtime safety', () => {
       projectId: LIVE_PROJECT_ID,
       allowedOrigins: ['http://127.0.0.1:5173'],
     }, {
-      BFF_DEPLOY_ENV: 'stage',
+      BFF_DEPLOY_ENV: 'preview',
       BFF_SCHEDULER_OWNER: 'disabled',
     });
 
@@ -162,7 +162,7 @@ describe('BFF runtime safety', () => {
     expect(() => assertBffRuntimeSafety(config)).not.toThrow();
   });
 
-  it('rejects weak stage/live scheduler secrets when workers are enabled', () => {
+  it('rejects weak live scheduler secrets when workers are enabled', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
       allowedOrigins: [LIVE_ORIGIN],
@@ -214,7 +214,7 @@ describe('BFF runtime safety', () => {
     expect(() => assertBffStandaloneWorkerExecutionAllowed(config, 'outbox worker')).toThrow(/BFF_SCHEDULER_OWNER=vercel/);
   });
 
-  it('blocks Kubernetes scheduler ownership for stage/live while Vercel crons remain configured', () => {
+  it('blocks Kubernetes scheduler ownership for live while Vercel crons remain configured', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
       allowedOrigins: [LIVE_ORIGIN],
@@ -224,7 +224,7 @@ describe('BFF runtime safety', () => {
       K8S_WORKER_SECRET: LONG_K8S_SECRET,
     });
 
-    expect(() => assertBffRuntimeSafety(config)).toThrow(/k8s is blocked for stage\/live/);
+    expect(() => assertBffRuntimeSafety(config)).toThrow(/k8s is blocked for live/);
   });
 
   it('allows standalone worker CLIs when local Kubernetes owns the scheduler', () => {

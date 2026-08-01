@@ -4,8 +4,6 @@ const DEPLOY_ENV_ALIASES = new Map([
   ['test', 'local'],
   ['local', 'local'],
   ['preview', 'preview'],
-  ['staging', 'stage'],
-  ['stage', 'stage'],
   ['prod', 'live'],
   ['production', 'live'],
   ['live', 'live'],
@@ -74,7 +72,7 @@ function resolveSchedulerOwner(deployEnv, env = process.env) {
   if (workersEnabled === false) return 'disabled';
 
   if (readOptionalText(env.VERCEL_ENV)) return 'vercel';
-  if (deployEnv === 'stage' || deployEnv === 'live') return 'disabled';
+  if (deployEnv === 'live') return 'disabled';
   return 'manual';
 }
 
@@ -167,20 +165,20 @@ export function assertBffRuntimeSafety(config) {
     firestoreEmulator,
   } = config;
 
-  if (!['local', 'preview', 'stage', 'live'].includes(deployEnv)) {
-    violations.push(`BFF_DEPLOY_ENV must be one of local, preview, stage, live (received: ${deployEnv || 'missing'})`);
+  if (!['local', 'preview', 'live'].includes(deployEnv)) {
+    violations.push(`BFF_DEPLOY_ENV must be one of local, preview, live (received: ${deployEnv || 'missing'})`);
   }
 
   if (!['manual', 'vercel', 'k8s', 'disabled'].includes(schedulerOwner)) {
     violations.push(`BFF_SCHEDULER_OWNER must be one of manual, vercel, k8s, disabled (received: ${schedulerOwner || 'missing'})`);
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && !projectId) {
-    violations.push('FIREBASE_PROJECT_ID is required for stage/live BFF');
+  if (deployEnv === 'live' && !projectId) {
+    violations.push('FIREBASE_PROJECT_ID is required for live BFF');
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && allowedOrigins.includes('*')) {
-    violations.push('BFF_ALLOWED_ORIGINS cannot include * for stage/live BFF');
+  if (deployEnv === 'live' && allowedOrigins.includes('*')) {
+    violations.push('BFF_ALLOWED_ORIGINS cannot include * for live BFF');
   }
 
   if (deployEnv === 'live' && allowedOrigins.some(isKnownMyscPreviewOrigin)) {
@@ -191,20 +189,20 @@ export function assertBffRuntimeSafety(config) {
     violations.push(`live BFF_ALLOWED_ORIGINS must contain only approved live origins: ${liveAllowedOrigins.join(', ')}`);
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && schedulerOwner === 'manual') {
-    violations.push('BFF_SCHEDULER_OWNER cannot be manual for stage/live BFF');
+  if (deployEnv === 'live' && schedulerOwner === 'manual') {
+    violations.push('BFF_SCHEDULER_OWNER cannot be manual for live BFF');
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && schedulerOwner === 'k8s') {
-    violations.push('BFF_SCHEDULER_OWNER=k8s is blocked for stage/live until Vercel crons are removed');
+  if (deployEnv === 'live' && schedulerOwner === 'k8s') {
+    violations.push('BFF_SCHEDULER_OWNER=k8s is blocked for live until Vercel crons are removed');
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && schedulerOwner === 'vercel' && workerSecrets.vercel.length < 32) {
-    violations.push('CRON_SECRET must be at least 32 characters when stage/live workers are owned by Vercel');
+  if (deployEnv === 'live' && schedulerOwner === 'vercel' && workerSecrets.vercel.length < 32) {
+    violations.push('CRON_SECRET must be at least 32 characters when live workers are owned by Vercel');
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && schedulerOwner === 'k8s' && workerSecrets.k8s.length < 32) {
-    violations.push('K8S_WORKER_SECRET or BFF_WORKER_SECRET must be at least 32 characters when stage/live workers are owned by Kubernetes');
+  if (deployEnv === 'live' && schedulerOwner === 'k8s' && workerSecrets.k8s.length < 32) {
+    violations.push('K8S_WORKER_SECRET or BFF_WORKER_SECRET must be at least 32 characters when live workers are owned by Kubernetes');
   }
 
   if (deployEnv === 'live' && firestoreEmulator) {
@@ -257,7 +255,7 @@ export function evaluateWorkerAuthorization({ headerSecret = '', bearerSecret = 
     };
   }
 
-  if ((deployEnv === 'stage' || deployEnv === 'live') && !['vercel', 'k8s'].includes(schedulerOwner)) {
+  if (deployEnv === 'live' && !['vercel', 'k8s'].includes(schedulerOwner)) {
     return {
       ok: false,
       statusCode: 503,
