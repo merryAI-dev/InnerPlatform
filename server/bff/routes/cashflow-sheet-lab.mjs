@@ -1499,8 +1499,9 @@ async function readCanonicalClosedCashflowMonths({ db, tenantId, projectId, year
     const snap = await db.doc(`orgs/${tenantId}/monthly_closes/${projectId}-${yearMonth}`).get();
     if (!snap.exists) return;
     const close = snap.data() || {};
+    const legacyOpen = !Object.hasOwn(close, 'contractVersion') && readOptionalText(close.status) === 'OPEN';
     if (
-      readOptionalText(close.contractVersion) !== 'cashflow-month-close-v1'
+      (!legacyOpen && readOptionalText(close.contractVersion) !== 'cashflow-month-close-v1')
       || readOptionalText(close.tenantId) !== tenantId
       || readOptionalText(close.projectId) !== projectId
       || readOptionalText(close.yearMonth) !== yearMonth
