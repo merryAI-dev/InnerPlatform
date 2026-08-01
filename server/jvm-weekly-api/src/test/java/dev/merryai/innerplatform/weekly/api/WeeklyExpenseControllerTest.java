@@ -41,6 +41,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -1542,17 +1543,18 @@ class WeeklyExpenseControllerTest {
             "2026-07-20", "2026-07-10", true,
             null, null, null, null, null, null, null, null, null, null, null
         ));
+        WeeklyExpensePersistence.CashflowLedgerSource dashboardSource =
+            new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of(2024));
         when(dashboardPersistence.findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard"))
-            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(), List.of(), List.of(2024)));
-        when(dashboardCommandService.readCashflowProjectionActualSummaries(
-            any(), any(CashflowProjectionActualSummaryBatchRequest.class)
-        )).thenReturn(new CashflowProjectionActualSummaryBatchResponse("1", List.of(
-            new CashflowProjectionActualSummaryBatchResponse.Item(
+            .thenReturn(dashboardSource);
+        when(dashboardCommandService.readCashflowProjectionActualSummary(
+            any(), eq("project-month-dashboard"), same(dashboardSource)
+        ))
+            .thenReturn(new CashflowProjectionActualSummaryBatchResponse.Item(
                 "project-month-dashboard", "2023-01",
                 new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek("2026-07", 4),
                 new java.math.BigDecimal("18371453"), false
-            )
-        )));
+            ));
         Map<String, String> completeAnnualStates = new LinkedHashMap<>();
         CashflowLineCatalog.ALL_LINES.forEach(line -> completeAnnualStates.put(line, "EMPTY"));
         completeAnnualStates.put("SALES_IN", "VALUE");
@@ -1615,6 +1617,12 @@ class WeeklyExpenseControllerTest {
         });
         assertThat(response.projectionActualSummary().settlementDifferenceAmount())
             .isEqualByComparingTo("18371453");
+        verify(dashboardPersistence, times(1))
+            .findCashflowLedgerSource("tenant-month-dashboard", "project-month-dashboard");
+        verify(dashboardCommandService).readCashflowProjectionActualSummary(
+            any(), eq("project-month-dashboard"), same(dashboardSource)
+        );
+        verify(dashboardCommandService, never()).readCashflowProjectionActualSummaries(any(), any());
     }
 
     @Test

@@ -471,15 +471,20 @@ public class WeeklyExpenseController {
         if (cumulative == null) {
             cumulative = new WeeklyExpensePersistence.CashflowCumulativeCloseHead("OPEN", "2023-01", "", "", 0);
         }
-        CashflowProjectionActualSummaryBatchResponse summaryResponse = commandService
-            .readCashflowProjectionActualSummaries(
-                actor, new CashflowProjectionActualSummaryBatchRequest(List.of(projectId))
-            );
-        if (summaryResponse == null || summaryResponse.items().size() != 1
-            || !projectId.equals(summaryResponse.items().getFirst().projectId())) {
-            throw new WeeklyExpenseConflictException("Canonical projection-actual summary is unavailable.");
+        CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary;
+        if (source != null) {
+            projectionActualSummary = commandService.readCashflowProjectionActualSummary(actor, projectId, source);
+        } else {
+            CashflowProjectionActualSummaryBatchResponse summaryResponse = commandService
+                .readCashflowProjectionActualSummaries(
+                    actor, new CashflowProjectionActualSummaryBatchRequest(List.of(projectId))
+                );
+            if (summaryResponse == null || summaryResponse.items().size() != 1
+                || !projectId.equals(summaryResponse.items().getFirst().projectId())) {
+                throw new WeeklyExpenseConflictException("Canonical projection-actual summary is unavailable.");
+            }
+            projectionActualSummary = summaryResponse.items().getFirst();
         }
-        CashflowProjectionActualSummaryBatchResponse.Item projectionActualSummary = summaryResponse.items().getFirst();
         return new CashflowMonthDashboardSourceResponse(
             monthClose,
             cashflow,

@@ -3641,6 +3641,104 @@ describe('cashflow sheet lab route', () => {
       .toMatchObject({ status: 'APPLIED' });
   });
 
+  it('replays the applied response when two requests finish the same staged run together', async () => {
+    let releaseBoth;
+    let callCount = 0;
+    const returnedAuditIds = [];
+    const bothStarted = new Promise((resolve) => { releaseBoth = resolve; });
+    const resultingTargetRevision = `sha256:${'6'.repeat(64)}`;
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => {
+        const callNumber = ++callCount;
+        if (callNumber === 2) releaseBoth();
+        await bothStarted;
+        const auditId = `audit-${callNumber}`;
+        returnedAuditIds.push(auditId);
+        return { ...javaApplyResponse(input, resultingTargetRevision), auditId };
+      }),
+    };
+    const staged = await stageJanuaryApply(javaWeeklyClient, 'concurrent-completion');
+    const payload = {
+      stageRunId: staged.stage.body.runId,
+      idempotencyKey: 'apply-concurrent-completion',
+    };
+
+    const responses = await Promise.all([
+      request(staged.app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply').send(payload),
+      request(staged.app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply').send(payload),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(responses[0].body).toEqual(responses[1].body);
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(2);
+    expect(returnedAuditIds.sort()).toEqual(['audit-1', 'audit-2']);
+    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].idempotencyKey)
+      .toBe(javaWeeklyClient.applyCashflowSheetLab.mock.calls[1][0].idempotencyKey);
+    const storedRun = staged.db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${staged.stage.body.runId}`);
+    expect(storedRun).toMatchObject({ status: 'APPLIED', applyResponse: responses[0].body });
+    expect(responses[0].body).toEqual(storedRun.applyResponse);
+  });
+
+  it('replays the applied response when a concurrent request checkpoints after completion', async () => {
+    let releaseSecond;
+    let secondStarted;
+    let callCount = 0;
+    const returnedAuditIds = [];
+    const secondMayFinish = new Promise((resolve) => { releaseSecond = resolve; });
+    const secondHasStarted = new Promise((resolve) => { secondStarted = resolve; });
+    const resultingTargetRevision = `sha256:${'5'.repeat(64)}`;
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => {
+        const callNumber = ++callCount;
+        if (callNumber === 2) {
+          secondStarted();
+          await secondMayFinish;
+        } else {
+          await secondHasStarted;
+        }
+        const auditId = `audit-${callNumber}`;
+        returnedAuditIds.push(auditId);
+        return { ...javaApplyResponse(input, resultingTargetRevision), auditId };
+      }),
+    };
+    const staged = await stageJanuaryApply(javaWeeklyClient, 'late-checkpoint');
+    const payload = { stageRunId: staged.stage.body.runId, idempotencyKey: 'apply-late-checkpoint' };
+
+    const first = request(staged.app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply').send(payload)
+      .then((response) => response);
+    const second = request(staged.app).post('/api/v1/projects/project-a/cashflow-sheet-lab/apply').send(payload)
+      .then((response) => response);
+    const firstResponse = await first;
+    releaseSecond();
+    const secondResponse = await second;
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(returnedAuditIds.sort()).toEqual(['audit-1', 'audit-2']);
+    expect(secondResponse.body).toEqual(firstResponse.body);
+    expect(secondResponse.body).toEqual(staged.db
+      .__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${staged.stage.body.runId}`).applyResponse);
+  });
+
+  it('does not replay an applied response when publication completion evidence differs', async () => {
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'4'.repeat(64)}`)),
+    };
+    const staged = await stageJanuaryApply(javaWeeklyClient, 'invalid-applied-evidence');
+    const payload = { stageRunId: staged.stage.body.runId, idempotencyKey: 'apply-invalid-evidence' };
+    await request(staged.app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(payload)
+      .expect(200);
+    staged.db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a').appliedTargetRevision = `sha256:${'3'.repeat(64)}`;
+
+    await request(staged.app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(payload)
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_stage_run_applied'));
+  });
+
   it.each([
     ['malformed status', () => ({ status: 'APPLIED' }), 'MISMATCH'],
     ['wrong project', (input, sourceRevision, targetRevision) => javaOperationApplied(input, {

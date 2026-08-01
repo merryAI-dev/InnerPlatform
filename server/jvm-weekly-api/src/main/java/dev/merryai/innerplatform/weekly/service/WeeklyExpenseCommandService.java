@@ -204,15 +204,7 @@ public class WeeklyExpenseCommandService {
                 WeeklyExpensePersistence.CashflowLedgerSource source = persistence.findCashflowLedgerSource(
                     actor.tenantId(), projectId, CashflowProjectionActualSummaryCalculator.FROM_MONTH, boundary.yearMonth()
                 );
-                CashflowProjectionActualSummaryCalculator.Summary summary =
-                    CashflowProjectionActualSummaryCalculator.calculate(projectId, source.projection(), source.actual(), boundary);
-                items.add(new CashflowProjectionActualSummaryBatchResponse.Item(
-                    summary.projectId(), summary.fromMonth(),
-                    new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek(
-                        summary.comparisonAsOfWeek().yearMonth(), summary.comparisonAsOfWeek().weekNo()
-                    ),
-                    summary.settlementDifferenceAmount(), summary.settlementMatches()
-                ));
+                items.add(toProjectionActualSummary(projectId, source, boundary));
             } catch (WeeklyExpenseForbiddenException denied) {
                 throw denied;
             } catch (RuntimeException unavailable) {
@@ -222,6 +214,36 @@ public class WeeklyExpenseCommandService {
             }
         }
         return new CashflowProjectionActualSummaryBatchResponse("1", items, errors);
+    }
+
+    @Transactional(readOnly = true)
+    public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(
+        TrustedActorContext actor,
+        String projectId,
+        WeeklyExpensePersistence.CashflowLedgerSource source
+    ) {
+        authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
+        return toProjectionActualSummary(
+            projectId,
+            source,
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC())
+        );
+    }
+
+    private CashflowProjectionActualSummaryBatchResponse.Item toProjectionActualSummary(
+        String projectId,
+        WeeklyExpensePersistence.CashflowLedgerSource source,
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary
+    ) {
+        CashflowProjectionActualSummaryCalculator.Summary summary =
+            CashflowProjectionActualSummaryCalculator.calculate(projectId, source.projection(), source.actual(), boundary);
+        return new CashflowProjectionActualSummaryBatchResponse.Item(
+            summary.projectId(), summary.fromMonth(),
+            new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek(
+                summary.comparisonAsOfWeek().yearMonth(), summary.comparisonAsOfWeek().weekNo()
+            ),
+            summary.settlementDifferenceAmount(), summary.settlementMatches()
+        );
     }
 
     @Transactional(readOnly = true)
