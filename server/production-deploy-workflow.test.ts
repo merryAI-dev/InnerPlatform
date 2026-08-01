@@ -95,7 +95,8 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('--env JVM_WEEKLY_API_ID_TOKEN_AUDIENCE="${JVM_WEEKLY_API_ID_TOKEN_AUDIENCE}"');
     expect(workflowText).toContain('--env JVM_WEEKLY_INTERNAL_API_TOKEN="${JVM_WEEKLY_INTERNAL_API_TOKEN}"');
     expect(workflowText).toContain('--env JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON="${JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON}"');
-    expect(workflowText).toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON}"');
+    expect(workflowText).not.toContain("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: '{}'");
+    expect(workflowText).not.toContain('--env GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=');
     expect(workflowText).toContain('--env SLACK_ALERT_WEBHOOK_URL=');
     expect(workflowText).toContain('--build-env VITE_FIRESTORE_CORE_ENABLED=false');
     expect(workflowText).toContain('--build-env VITE_FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
