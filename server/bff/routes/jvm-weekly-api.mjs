@@ -11,6 +11,7 @@ import {
   resolveJavaWeeklyApiServiceAccountJson,
 } from '../java-weekly-auth.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
+import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import {
   buildCashflowProjectionActualComparison,
   resolveCashflowComparisonAsOf,
@@ -2182,6 +2183,8 @@ export function mountJvmWeeklyApiRoutes(app, {
   jvmWeeklyFirestoreProjectId,
   jvmWeeklyApiTimeoutMs,
   cashflowMonthCloseRouteTimeoutMs,
+  performanceLogger,
+  performanceNow,
   now = () => new Date(),
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
@@ -2225,6 +2228,8 @@ export function mountJvmWeeklyApiRoutes(app, {
     jvmWeeklyWorkspaceEmailDomain: workspaceEmailDomain,
     jvmWeeklyFirestoreProjectId: firestoreProjectId,
     jvmWeeklyApiTimeoutMs,
+    performanceLogger,
+    performanceNow,
   });
 
   function proxyJavaWeeklyRequest(options) {
@@ -2442,6 +2447,12 @@ export function mountJvmWeeklyApiRoutes(app, {
   }));
 
   app.get('/api/v1/cashflow/:projectId/month-close', asyncHandler(async (req, res) => {
+    const trace = createCashflowPerformanceTrace({
+      requestId: req.context?.requestId || req.requestId,
+      operation: 'cashflow.month_close.read',
+      ...(performanceLogger ? { logger: performanceLogger } : {}),
+      ...(performanceNow ? { now: performanceNow } : {}),
+    });
     const body = await withCashflowMonthCloseDeadline(async () => {
       assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow month close', authMode, workspaceEmailDomain);
       const rawProjectId = readOptionalText(req.params.projectId);
@@ -2467,17 +2478,26 @@ export function mountJvmWeeklyApiRoutes(app, {
         asOfMs: qaClock.now.getTime(),
       };
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const publicationBefore = await readCashflowSheetPublicationState({
-          db,
-          tenantId: req.context.tenantId,
-          projectId: rawProjectId,
-        });
+        const traceAttempt = attempt + 1;
+        const publicationBefore = await trace.measure(
+          'publication_before',
+          () => readCashflowSheetPublicationState({
+            db,
+            tenantId: req.context.tenantId,
+            projectId: rawProjectId,
+          }),
+          { attempt: traceAttempt },
+        );
         assertCashflowSheetPublicationReady(publicationBefore);
-        const source = await proxyJavaWeeklyRequest({
-          context: req.context,
-          method: 'GET',
-          path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
-        });
+        const source = await trace.measure(
+          'jvm_dashboard',
+          () => proxyJavaWeeklyRequest({
+            context: req.context,
+            method: 'GET',
+            path: `/api/v1/cashflow/${projectId}/month-close/dashboard-source?yearMonth=${encodeURIComponent(yearMonth)}`,
+          }),
+          { attempt: traceAttempt },
+        );
         const result = objectValue(source?.monthClose);
         const cashflow = objectValue(source?.cashflow);
         const snapshotCompatibility = objectValue(source?.snapshotCompatibility) || {
@@ -2509,25 +2529,37 @@ export function mountJvmWeeklyApiRoutes(app, {
           || typeof projectionActualSummary?.settlementMatches !== 'boolean') {
           throw createHttpError(502, 'JVM 누적 Projection-Actual 요약을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
         }
-        const weeklyCompliance = await readWeeklyCompliance(req.context, rawProjectId);
-        const dashboard = await composeCashflowMonthDashboard({
-          db,
-          req,
-          projectId: rawProjectId,
-          yearMonth,
-          close: result,
-          cashflow,
-          openingBalances,
-          comparisonBoundary,
-          weeklyCompliance,
-          projectionActualSummary,
-          weeklyComplianceBoundary,
-        });
-        const publicationAfter = await readCashflowSheetPublicationState({
-          db,
-          tenantId: req.context.tenantId,
-          projectId: rawProjectId,
-        });
+        const weeklyCompliance = await trace.measure(
+          'jvm_compliance',
+          () => readWeeklyCompliance(req.context, rawProjectId),
+          { attempt: traceAttempt },
+        );
+        const dashboard = await trace.measure(
+          'dashboard_compose',
+          () => composeCashflowMonthDashboard({
+            db,
+            req,
+            projectId: rawProjectId,
+            yearMonth,
+            close: result,
+            cashflow,
+            openingBalances,
+            comparisonBoundary,
+            weeklyCompliance,
+            projectionActualSummary,
+            weeklyComplianceBoundary,
+          }),
+          { attempt: traceAttempt },
+        );
+        const publicationAfter = await trace.measure(
+          'publication_after',
+          () => readCashflowSheetPublicationState({
+            db,
+            tenantId: req.context.tenantId,
+            projectId: rawProjectId,
+          }),
+          { attempt: traceAttempt },
+        );
         assertCashflowSheetPublicationReady(publicationAfter);
         if (publicationBefore.fingerprint === publicationAfter.fingerprint) {
           return { ...result, dashboard };

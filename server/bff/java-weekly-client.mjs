@@ -3,6 +3,7 @@ import {
   buildJavaWeeklyTrustedHeaders,
   resolveJavaWeeklyApiServiceAccountJson,
 } from './java-weekly-auth.mjs';
+import { createCashflowPerformanceTrace } from './cashflow-performance.mjs';
 
 export {
   buildJavaWeeklyTrustedHeaders,
@@ -162,6 +163,8 @@ export function createJavaWeeklyClient({
   jvmWeeklyFirestoreProjectId,
   jvmWeeklyApiTimeoutMs,
   jvmWeeklyApiMaxResponseBytes,
+  performanceLogger,
+  performanceNow,
 } = {}) {
   const baseUrl = resolveJavaWeeklyApiBaseUrl({ jvmWeeklyApiBaseUrl }, env);
   const serviceToken = resolveJavaWeeklyApiServiceToken({ jvmWeeklyApiServiceToken }, env);
@@ -204,6 +207,12 @@ export function createJavaWeeklyClient({
     const requestStartedAt = Date.now();
     const endpoint = safeEndpoint(baseUrl);
     const commandName = readOptionalText(command) || method.toLowerCase();
+    const trace = createCashflowPerformanceTrace({
+      requestId: context?.requestId,
+      operation: commandName,
+      ...(performanceLogger ? { logger: performanceLogger } : {}),
+      ...(performanceNow ? { now: performanceNow } : {}),
+    });
     const metadata = (attempt, upstreamStatus, retryable, mutationOutcome) => ({
       endpoint,
       command: commandName,
@@ -214,6 +223,11 @@ export function createJavaWeeklyClient({
       mutationOutcome,
     });
     if (!baseUrl) {
+      trace.emit('request_rejected', {
+        outcome: 'error',
+        statusCode: 503,
+        errorCode: 'jvm_weekly_api_unconfigured',
+      });
       throw attachTransportMetadata(
         createHttpError(503, '캐시플로 서버 주소가 설정되지 않았습니다. 담당자에게 문의해 주세요.', 'jvm_weekly_api_unconfigured'),
         metadata(0, undefined, false, mutation ? 'not_started' : 'failed'),
@@ -234,6 +248,7 @@ export function createJavaWeeklyClient({
       metadata(attempt, undefined, true, mutationOutcome),
     );
     const send = async (attempt) => {
+      trace.emit('attempt_start', { attempt, outcome: 'started' });
       const remainingMs = requestDeadlineAtMs - Date.now();
       if (remainingMs <= 0) {
         if (callerDeadlineReached()) throw callerDeadlineError(attempt, mutation ? 'not_started' : 'failed');
@@ -256,7 +271,7 @@ export function createJavaWeeklyClient({
       });
       timeout.unref?.();
       const attemptPromise = (async () => {
-        const headers = await buildJavaWeeklyTrustedHeaders({
+        const headers = await trace.measure('auth_headers', () => buildJavaWeeklyTrustedHeaders({
           fetchImpl,
           context,
           serviceToken,
@@ -268,16 +283,20 @@ export function createJavaWeeklyClient({
           editSession,
           dataProjectId,
           signal: controller.signal,
-        });
+        }), { attempt });
         sent = true;
-        const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
+        const response = await trace.measure('upstream_ttfb', () => fetchImpl(`${baseUrl.replace(/\/$/, '')}${path}`, {
           method,
           headers,
           body: method === 'GET' ? undefined : JSON.stringify(body || {}),
           signal: controller.signal,
-        });
+        }), { attempt });
         upstreamStatus = response.status;
-        const parsed = await readJsonResponse(response, maxResponseBytes);
+        const parsed = await trace.measure(
+          'body_read',
+          () => readJsonResponse(response, maxResponseBytes),
+          { attempt, statusCode: response.status },
+        );
         if (!response.ok) {
           throw attachTransportMetadata(
             readJavaError(response.status, parsed.payload),
@@ -293,8 +312,21 @@ export function createJavaWeeklyClient({
         return parsed.payload;
       })();
       try {
-        return await Promise.race([attemptPromise, timeoutPromise]);
+        const result = await Promise.race([attemptPromise, timeoutPromise]);
+        trace.emit('attempt_complete', {
+          attempt,
+          outcome: 'ok',
+          statusCode: upstreamStatus,
+        });
+        return result;
       } catch (error) {
+        trace.emit('attempt_complete', {
+          attempt,
+          outcome: 'error',
+          statusCode: error?.statusCode || upstreamStatus,
+          retryable: !Number.isInteger(error?.statusCode) || Boolean(error?.transportFailure),
+          errorCode: error?.code || error?.name,
+        });
         if (Number.isInteger(error?.statusCode)) {
           if (!Number.isInteger(error.attempt)) {
             attachTransportMetadata(
@@ -326,6 +358,12 @@ export function createJavaWeeklyClient({
       if (!error?.transportFailure) throw error;
       if (callerDeadlineReached()) throw callerDeadlineError(1, error.mutationOutcome);
       if (!retryAllowed) throw error;
+      trace.emit('retry_scheduled', {
+        attempt: 2,
+        outcome: 'retry',
+        retryable: true,
+        errorCode: error?.code || error?.name,
+      });
       try {
         return await send(2);
       } catch (retryError) {
