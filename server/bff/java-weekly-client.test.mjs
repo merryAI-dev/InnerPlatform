@@ -414,6 +414,79 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl.mock.calls[1][1].body).toBe(fetchImpl.mock.calls[0][1].body);
   });
 
+  it('separates auth, TTFB, body read, and retry timing without logging request data', async () => {
+    const events = [];
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: responseBody({ ok: true, projectId: 'project-a', privateAmount: 987654321 }),
+      });
+    const client = createJavaWeeklyClient({
+      env: stageEnv(),
+      fetchImpl,
+      performanceLogger: (event) => events.push(event),
+    });
+
+    await client.applyCashflowSheetLab({
+      context: { ...context, requestId: 'req-performance-1' },
+      projectId: 'project-a',
+      idempotencyKey: 'apply-performance-1',
+      ...monthlyContract,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(events.every((event) => event.requestId === 'req-performance-1')).toBe(true);
+    expect(events.filter((event) => event.phase === 'attempt_start').map((event) => event.attempt)).toEqual([1, 2]);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'auth_headers', attempt: 1, outcome: 'ok' }),
+      expect.objectContaining({ phase: 'upstream_ttfb', attempt: 1, outcome: 'error' }),
+      expect.objectContaining({ phase: 'retry_scheduled', attempt: 2, retryable: true }),
+      expect.objectContaining({ phase: 'upstream_ttfb', attempt: 2, outcome: 'ok' }),
+      expect.objectContaining({ phase: 'body_read', attempt: 2, outcome: 'ok', statusCode: 200 }),
+      expect.objectContaining({ phase: 'attempt_complete', attempt: 2, outcome: 'ok', statusCode: 200 }),
+    ]));
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain('project-a');
+    expect(serialized).not.toContain('apply-performance-1');
+    expect(serialized).not.toContain('987654321');
+    expect(serialized).not.toContain('service-token');
+  });
+
+  it('starts the retry before a slow performance logger runs', async () => {
+    let loggerRan = false;
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        body: responseBody({ ok: true, projectId: 'project-a' }),
+      });
+    const client = createJavaWeeklyClient({
+      env: stageEnv(),
+      fetchImpl,
+      performanceLogger: () => {
+        loggerRan = true;
+        const until = Date.now() + 20;
+        while (Date.now() < until) {}
+      },
+    });
+
+    await expect(client.applyCashflowSheetLab({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'apply-slow-logger',
+      ...monthlyContract,
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(loggerRan).toBe(false);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(loggerRan).toBe(true);
+  });
+
   it('uses the Stage invoker credential instead of the GCP metadata server', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,

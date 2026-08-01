@@ -625,6 +625,7 @@ describe('cashflow sheet lab route', () => {
   });
 
   it('reads Google Sheets only on explicit mirror refresh and pins the result', async () => {
+    const performanceEvents = [];
     const db = createDb({
       project: {
         id: 'project-a',
@@ -645,7 +646,11 @@ describe('cashflow sheet lab route', () => {
       availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
       matrix: buildMatrix(),
     }));
-    const app = createApp({ db, googleSheetsService: { previewSpreadsheet } });
+    const app = createApp({
+      db,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { performanceLogger: (event) => performanceEvents.push(event) },
+    });
 
     const beforeRefresh = await request(app)
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
@@ -673,6 +678,18 @@ describe('cashflow sheet lab route', () => {
     expect(pinned.body.cells).toHaveLength(32);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(performanceEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'project_read', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'mirror_read', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'refresh_reserve', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'google_sheet_fetch', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'sheet_parse_validate', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'target_snapshot_read', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'mirror_build', operation: 'cashflow.sheet_mirror.refresh' }),
+      expect.objectContaining({ phase: 'mirror_publish', operation: 'cashflow.sheet_mirror.refresh' }),
+    ]));
+    expect(performanceEvents.every((event) => event.requestId === 'req-1')).toBe(true);
   });
 
   it('stores weekly values and annual totals without requiring a missing future year', async () => {

@@ -569,6 +569,7 @@ describe('JVM weekly API BFF proxy', () => {
   });
 
   it('reads a cashflow month-close through the JVM with the requested yearMonth', async () => {
+    const performanceEvents = [];
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -582,7 +583,7 @@ describe('JVM weekly API BFF proxy', () => {
     const { app } = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'auditor-1',
       actorRole: 'auditor',
-    });
+    }, { performanceLogger: (event) => performanceEvents.push(event) });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
@@ -602,6 +603,15 @@ describe('JVM weekly API BFF proxy', () => {
     );
     expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
     expect(fetchImpl.mock.calls[0][1].body).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(performanceEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'publication_before' }),
+      expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'jvm_dashboard' }),
+      expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'jvm_compliance' }),
+      expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'dashboard_compose' }),
+      expect.objectContaining({ operation: 'cashflow.month_close.read', phase: 'publication_after' }),
+    ]));
+    expect(performanceEvents.every((event) => event.requestId === 'req-1')).toBe(true);
   });
 
   it('publishes the server-owned cumulative close scope and pinned sheet source for 2026-08', async () => {

@@ -20,6 +20,7 @@ import {
   summarizeCashflowAnnualMode,
 } from '../cashflow-annual-total.mjs';
 import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
+import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import { stableStringify } from '../utils.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import {
@@ -3632,6 +3633,8 @@ export function mountCashflowSheetLabRoutes(app, {
   javaWeeklyClient,
   workspaceEmailDomain = 'mysc.co.kr',
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
+  performanceLogger,
+  performanceNow,
 } = {}) {
   if (enabled === false) {
     app.use('/api/v1/projects/:projectId/cashflow-sheet-lab', (_req, res) => {
@@ -3650,7 +3653,7 @@ export function mountCashflowSheetLabRoutes(app, {
   const authoritativeWritesEnabled = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() === 'stage'
     || Boolean(javaWeeklyClient);
   const authoritativeJavaClient = authoritativeWritesEnabled
-    ? (javaWeeklyClient || createJavaWeeklyClient({ env }))
+    ? (javaWeeklyClient || createJavaWeeklyClient({ env, performanceLogger, performanceNow }))
     : null;
   const systemAccountEmail = resolveSystemAccountEmail(googleSheetsService);
 
@@ -3699,6 +3702,12 @@ export function mountCashflowSheetLabRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const trace = createCashflowPerformanceTrace({
+      requestId: req.context?.requestId || req.requestId,
+      operation: 'cashflow.sheet_mirror.refresh',
+      ...(performanceLogger ? { logger: performanceLogger } : {}),
+      ...(performanceNow ? { now: performanceNow } : {}),
+    });
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(
@@ -3706,7 +3715,10 @@ export function mountCashflowSheetLabRoutes(app, {
       req.body,
       'Invalid cashflow sheet mirror refresh payload',
     );
-    const project = await readProjectDocument(db, tenantId, projectId);
+    const project = await trace.measure(
+      'project_read',
+      () => readProjectDocument(db, tenantId, projectId),
+    );
     const sourceYear = resolveSourceYear(parsed.sourceYear, parsed, project);
     const source = resolvePreviewSource(
       { ...parsed, sourceYear },
@@ -3714,7 +3726,10 @@ export function mountCashflowSheetLabRoutes(app, {
     );
     const weekRange = normalizeWeekRange(source);
     const configRevision = computeCashflowSheetConfigRevision({ ...source, ...weekRange });
-    const previousMirror = await readCashflowSheetMirror(db, tenantId, projectId);
+    const previousMirror = await trace.measure(
+      'mirror_read',
+      () => readCashflowSheetMirror(db, tenantId, projectId),
+    );
     const refreshRequestHash = stableHash({
       sourceYear,
       value: source.value,
@@ -3729,16 +3744,19 @@ export function mountCashflowSheetLabRoutes(app, {
     ) {
       throw createHttpError(409, '같은 idempotencyKey에 다른 시트 연동 요청을 사용할 수 없습니다.', 'idempotency_key_reused');
     }
-    const refreshRun = await beginCashflowSheetRefreshRun({
-      db,
-      tenantId,
-      projectId,
-      idempotencyKey: parsed.idempotencyKey,
-      requestHash: refreshRequestHash,
-      configRevision,
-      attemptedAt,
-      context: req.context,
-    });
+    const refreshRun = await trace.measure(
+      'refresh_reserve',
+      () => beginCashflowSheetRefreshRun({
+        db,
+        tenantId,
+        projectId,
+        idempotencyKey: parsed.idempotencyKey,
+        requestHash: refreshRequestHash,
+        configRevision,
+        attemptedAt,
+        context: req.context,
+      }),
+    );
     if (refreshRun.replay) {
       res.status(200).json(refreshRun.replay);
       return;
@@ -3768,13 +3786,19 @@ export function mountCashflowSheetLabRoutes(app, {
     });
 
     try {
-      const preview = await loadSheetPreview({
-        value: source.value,
-        sheetName: source.sheetName,
-        bypassCache: true,
-      });
+      const preview = await trace.measure(
+        'google_sheet_fetch',
+        () => loadSheetPreview({
+          value: source.value,
+          sheetName: source.sheetName,
+          bypassCache: true,
+        }),
+      );
       assertCashflowUsageLinkedSheet(preview);
-      const template = analyzeCashflowSheetTemplate(preview.matrix);
+      const template = trace.measureSync(
+        'sheet_parse_validate',
+        () => analyzeCashflowSheetTemplate(preview.matrix),
+      );
       assertConfiguredWeekRangeExistsInTemplate(template, weekRange);
       if (!template.supported) {
         throw Object.assign(createHttpError(
@@ -3787,9 +3811,12 @@ export function mountCashflowSheetLabRoutes(app, {
         });
       }
 
-      const targetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);
+      const targetSnapshot = await trace.measure(
+        'target_snapshot_read',
+        () => readCashflowWeeksSnapshot(db, tenantId, projectId),
+      );
       const mappings = template.mappingCandidates.filter((mapping) => isInWeekRange(mapping, weekRange));
-      const mirror = createCashflowPinnedSnapshot({
+      const mirror = trace.measureSync('mirror_build', () => createCashflowPinnedSnapshot({
         projectId,
         spreadsheetId: preview.spreadsheetId,
         spreadsheetTitle: preview.spreadsheetTitle,
@@ -3804,7 +3831,7 @@ export function mountCashflowSheetLabRoutes(app, {
           email: req.context?.actorEmail,
           role: req.context?.actorRole || 'workspace_user',
         },
-      });
+      }));
       mirror.activeWeekRange = {
         startWeek: weekRange.startWeek,
         endWeek: weekRange.endWeek,
@@ -3817,16 +3844,19 @@ export function mountCashflowSheetLabRoutes(app, {
       mirror.lastRefreshIdempotencyKey = parsed.idempotencyKey;
       mirror.lastRefreshRequestHash = refreshRequestHash;
       const mergedMirror = mergeCashflowSourceMirror(previousMirror, mirror, sourceYear);
-      const completedMirror = await completeCashflowSheetRefreshRun({
-        db,
-        tenantId,
-        projectId,
-        runRef: refreshRun.runRef,
-        requestHash: refreshRequestHash,
-        generation: refreshRun.generation,
-        response: mergedMirror,
-        completedAt: new Date().toISOString(),
-      });
+      const completedMirror = await trace.measure(
+        'mirror_publish',
+        () => completeCashflowSheetRefreshRun({
+          db,
+          tenantId,
+          projectId,
+          runRef: refreshRun.runRef,
+          requestHash: refreshRequestHash,
+          generation: refreshRun.generation,
+          response: mergedMirror,
+          completedAt: new Date().toISOString(),
+        }),
+      );
       logCashflowSheetLab('mirror.refresh.ok', req, {
         projectId,
         sourceRevision: completedMirror.sourceRevision,
@@ -3865,16 +3895,19 @@ export function mountCashflowSheetLabRoutes(app, {
           lastRefreshIdempotencyKey: parsed.idempotencyKey,
           lastRefreshRequestHash: refreshRequestHash,
         };
-      const completedMirror = await completeCashflowSheetRefreshRun({
-        db,
-        tenantId,
-        projectId,
-        runRef: refreshRun.runRef,
-        requestHash: refreshRequestHash,
-        generation: refreshRun.generation,
-        response: mirror,
-        completedAt: new Date().toISOString(),
-      });
+      const completedMirror = await trace.measure(
+        'mirror_publish_error',
+        () => completeCashflowSheetRefreshRun({
+          db,
+          tenantId,
+          projectId,
+          runRef: refreshRun.runRef,
+          requestHash: refreshRequestHash,
+          generation: refreshRun.generation,
+          response: mirror,
+          completedAt: new Date().toISOString(),
+        }),
+      );
       logCashflowSheetLab('mirror.refresh.failed', req, {
         projectId,
         mirrorStatus: completedMirror.status,
@@ -4016,13 +4049,19 @@ export function mountCashflowSheetLabRoutes(app, {
 
   app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/stage', asyncHandler(async (req, res) => {
     assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const trace = createCashflowPerformanceTrace({
+      requestId: req.context?.requestId || req.requestId,
+      operation: 'cashflow.sheet_stage',
+      ...(performanceLogger ? { logger: performanceLogger } : {}),
+      ...(performanceNow ? { now: performanceNow } : {}),
+    });
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabStageSchema, req.body, 'Invalid cashflow sheet lab stage payload');
     await readProjectDocument(db, tenantId, projectId);
 
     try {
-      const result = await stagePinnedCashflowSheetLab({
+      const result = await trace.measure('stage_total', () => stagePinnedCashflowSheetLab({
         db,
         tenantId,
         projectId,
@@ -4031,7 +4070,7 @@ export function mountCashflowSheetLabRoutes(app, {
         logger: (event, details = {}, level = 'info') => {
           logCashflowSheetLab(`stage.${event}`, req, details, level);
         },
-      });
+      }));
       res.status(200).json(result);
     } catch (error) {
       logCashflowSheetLab('stage.error', req, {
