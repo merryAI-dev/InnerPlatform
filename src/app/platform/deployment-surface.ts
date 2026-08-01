@@ -20,9 +20,7 @@ function readCurrentHostname(): string {
 
 export function isLiveMyscguardHost(hostname = readCurrentHostname()): boolean {
   const normalized = normalizeHostname(hostname);
-  if (!normalized) return false;
-  if (LIVE_MYSCGUARD_HOSTS.has(normalized)) return true;
-  return normalized.endsWith('.myscguard.app') && !normalized.includes('stage');
+  return LIVE_MYSCGUARD_HOSTS.has(normalized);
 }
 
 export function shouldShowCashflowSheetLab(_hostname = readCurrentHostname()): boolean {

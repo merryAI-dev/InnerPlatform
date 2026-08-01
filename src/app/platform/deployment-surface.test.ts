@@ -8,9 +8,10 @@ describe('deployment surface visibility', () => {
     expect(shouldShowCashflowSheetLab('myscube.myscguard.app')).toBe(true);
   });
 
-  it('keeps all known hosts aligned for cashflow sheet lab route availability', () => {
-    expect(isLiveMyscguardHost('inner-platform-stage-merryai-devs-projects.vercel.app')).toBe(false);
-    expect(shouldShowCashflowSheetLab('inner-platform-stage-merryai-devs-projects.vercel.app')).toBe(true);
+  it('does not classify preview or unknown hosts as live', () => {
+    expect(isLiveMyscguardHost('inner-platform-preview-merryai-devs-projects.vercel.app')).toBe(false);
+    expect(isLiveMyscguardHost('unknown.myscguard.app')).toBe(false);
+    expect(shouldShowCashflowSheetLab('inner-platform-preview-merryai-devs-projects.vercel.app')).toBe(true);
     expect(shouldShowCashflowSheetLab('inner-platform-7lwazqaf6-merryai-devs-projects.vercel.app')).toBe(true);
     expect(shouldShowCashflowSheetLab('localhost')).toBe(true);
   });

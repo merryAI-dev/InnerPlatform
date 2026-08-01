@@ -124,7 +124,7 @@ describe('BFF runtime safety', () => {
     expect(() => assertBffRuntimeSafety(config)).toThrow(`approved live origins: ${LIVE_ORIGIN}`);
   });
 
-  it('supports explicit live origin overrides for staged cutovers', () => {
+  it('supports explicit live origin overrides for controlled cutovers', () => {
     const config = buildConfig({
       projectId: LIVE_PROJECT_ID,
       allowedOrigins: [LIVE_ORIGIN, LEGACY_VERCEL_LIVE_ORIGIN],

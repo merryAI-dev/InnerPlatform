@@ -84,7 +84,7 @@ describe('Java weekly cashflow client', () => {
       FIREBASE_PROJECT_ID: 'other-project',
       JVM_WEEKLY_FIRESTORE_PROJECT_ID: 'other-project',
     })],
-    ['Stage using the Live data project', liveEnv({ BFF_DEPLOY_ENV: 'stage' })],
+    ['unsupported runtime using the Live data project', liveEnv({ BFF_DEPLOY_ENV: 'unsupported' })],
   ])('fails before network for %s', async (_case, env) => {
     const fetchImpl = vi.fn();
     const client = createJavaWeeklyClient({ env, fetchImpl });
@@ -541,14 +541,14 @@ describe('Java weekly cashflow client', () => {
     expect(loggerRan).toBe(true);
   });
 
-  it('uses the Stage invoker credential instead of the GCP metadata server', async () => {
+  it('uses the configured Live invoker credential instead of the GCP metadata server', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
       body: responseBody({ ok: true, projectId: 'project-a' }),
     }));
-    const serviceAccountJson = JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' });
-    const resolveIdentityToken = vi.fn(async () => 'stage-id-token');
+    const serviceAccountJson = JSON.stringify({ client_email: 'live-invoker@example.iam.gserviceaccount.com' });
+    const resolveIdentityToken = vi.fn(async () => 'live-id-token');
     const client = createJavaWeeklyClient({
       env: liveEnv({
         JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example',
@@ -561,7 +561,7 @@ describe('Java weekly cashflow client', () => {
     await client.applyCashflowSheetLab({
       context,
       projectId: 'project-a',
-      idempotencyKey: 'apply-stage-invoker-1',
+      idempotencyKey: 'apply-live-invoker-1',
       ...monthlyContract,
     });
 
@@ -571,7 +571,7 @@ describe('Java weekly cashflow client', () => {
       signal: expect.any(AbortSignal),
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer stage-id-token');
+    expect(fetchImpl.mock.calls[0][1].headers.authorization).toBe('Bearer live-id-token');
   });
 
   it('returns a clear retryable service error when JVM transport remains unavailable', async () => {
@@ -628,7 +628,7 @@ describe('Java weekly cashflow client', () => {
     const client = createJavaWeeklyClient({
       env: liveEnv({
         JVM_WEEKLY_API_ID_TOKEN_AUDIENCE: 'https://live-jvm.example',
-        JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'stage-invoker@example.iam.gserviceaccount.com' }),
+        JVM_WEEKLY_API_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: 'live-invoker@example.iam.gserviceaccount.com' }),
       }),
       fetchImpl,
       jvmWeeklyApiIdentityTokenResolver: resolveIdentityToken,

@@ -15,8 +15,6 @@ from .sink import write_report_to_firestore
 
 DEFAULT_FIREBASE_PROJECTS = [
     "inner-platform-live-20260316",
-    "inner-platform-qa-20260310",
-    "mysc-bmp-14173451",
     "startup-acceleration-platform",
     "startup-diagnosis-platform",
     "submit-mysc-20260507",
