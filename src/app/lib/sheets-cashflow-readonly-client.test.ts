@@ -7,6 +7,7 @@ import {
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
   getCashflowSheetLabYearViewViaBff,
+  isCashflowSheetApplyResultUncertain,
   refreshCashflowSheetLabMirrorViaBff,
   saveCashflowSheetLabConfigViaBff,
   stageCashflowSheetLabViaBff,
@@ -30,6 +31,22 @@ function asMockClient(client: {
 }
 
 describe('sheets cashflow readonly client', () => {
+  it('treats only transport-uncertain apply failures as resumable', () => {
+    expect(isCashflowSheetApplyResultUncertain({
+      status: 503,
+      body: { code: 'unsafe_bff_runtime' },
+    })).toBe(false);
+    expect(isCashflowSheetApplyResultUncertain({
+      status: 503,
+      body: { code: 'jvm_weekly_api_unconfigured' },
+    })).toBe(false);
+    expect(isCashflowSheetApplyResultUncertain({
+      status: 503,
+      body: { code: 'cashflow_sheet_operation_uncertain' },
+    })).toBe(true);
+    expect(isCashflowSheetApplyResultUncertain(new TypeError('Failed to fetch'))).toBe(true);
+  });
+
   it('has no retired direct preview or sheet writeback client path', () => {
     expect(clientSource).not.toContain('previewCashflowSheetLabViaBff');
     expect(clientSource).not.toContain('/cashflow-sheet-lab/preview');

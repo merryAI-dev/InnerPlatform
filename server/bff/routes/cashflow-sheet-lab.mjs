@@ -19,7 +19,7 @@ import {
   cashflowAnnualTotalDocPath,
   summarizeCashflowAnnualMode,
 } from '../cashflow-annual-total.mjs';
-import { createJavaWeeklyClient } from '../java-weekly-client.mjs';
+import { assertCashflowMutationRuntime, createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import { stableStringify } from '../utils.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
@@ -3650,7 +3650,7 @@ export function mountCashflowSheetLabRoutes(app, {
     googleSheetsService,
     cacheTtlMs: sheetPreviewCacheTtlMs,
   });
-  const authoritativeWritesEnabled = readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase() === 'stage'
+  const authoritativeWritesEnabled = ['stage', 'live'].includes(readOptionalText(env.BFF_DEPLOY_ENV).toLowerCase())
     || Boolean(javaWeeklyClient);
   const authoritativeJavaClient = authoritativeWritesEnabled
     ? (javaWeeklyClient || createJavaWeeklyClient({ env, performanceLogger, performanceNow }))
@@ -4002,6 +4002,7 @@ export function mountCashflowSheetLabRoutes(app, {
     if (!authoritativeWritesEnabled) {
       throw createHttpError(503, '현재 환경에서는 캐시플로를 저장할 수 없습니다. 담당자에게 문의해 주세요.', 'unsafe_bff_runtime');
     }
+    if (!javaWeeklyClient) assertCashflowMutationRuntime({}, env);
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabApplySchema, req.body, 'Invalid cashflow sheet lab apply payload');

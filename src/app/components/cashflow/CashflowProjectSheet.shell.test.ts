@@ -433,6 +433,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('resumes the same staged sheet apply after an uncertain server response', () => {
     expect(source).toContain('getCashflowSheetLabApplyStatusViaBff');
+    expect(source).toContain('isCashflowSheetApplyResultUncertain(finalError)');
     expect(source).toContain("status.status !== 'APPLYING'");
     expect(source).toContain('setLateSheetApply(stage)');
     expect(source).toContain('setSheetApplyResumeRequired(true)');

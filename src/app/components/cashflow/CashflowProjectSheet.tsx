@@ -66,6 +66,7 @@ import {
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
+  isCashflowSheetApplyResultUncertain,
   refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabMirrorResult,
@@ -1578,9 +1579,14 @@ export function CashflowProjectSheet({
         setSheetApplyResumeRequired(false);
         return;
       }
-      setLateSheetApply(stage);
-      setLateSheetFormulaAccepted(acceptFormulaMismatches);
-      setSheetApplyResumeRequired(true);
+      if (isCashflowSheetApplyResultUncertain(finalError)) {
+        setLateSheetApply(stage);
+        setLateSheetFormulaAccepted(acceptFormulaMismatches);
+        setSheetApplyResumeRequired(true);
+      } else {
+        setLateSheetApply(null);
+        setSheetApplyResumeRequired(false);
+      }
       toast.error(resolveApiErrorMessage(finalError, '시트 값을 MYSCube 시트에 반영하지 못했습니다.'));
     } finally {
       setSheetStageApplyLoading(false);
