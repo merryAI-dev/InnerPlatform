@@ -75,7 +75,6 @@ import {
 } from '../../lib/sheets-cashflow-readonly-client';
 import {
   buildCashflowMonthCloseDraftInput,
-  canonicalCashflowAnnualYears,
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
@@ -92,6 +91,8 @@ import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
+
+const CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032] as const;
 
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -1707,19 +1708,9 @@ export function CashflowProjectSheet({
   const mirroredAnnualTotals = useMemo(() => new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
     .filter((row) => Number.isSafeInteger(row.year))
     .map((row) => [row.year, row])), [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals]);
-  const canonicalAnnualYears = canonicalCashflowAnnualYears(
-    monthCloseResult?.dashboard?.canonical?.months || [],
-    selectedYear,
-  );
   const annualYears = useMemo(() => {
-    const openingBalanceYears = [
-      ...(monthCloseResult?.dashboard?.openingBalances?.projection?.sources || []).map((source) => source.year),
-      ...(monthCloseResult?.dashboard?.openingBalances?.actual?.sources || []).map((source) => source.year),
-    ];
-    return [...new Set([...openingBalanceYears, ...mirroredAnnualTotals.keys(), ...canonicalAnnualYears])]
-      .filter((year) => year !== selectedYear)
-      .sort((left, right) => left - right);
-  }, [canonicalAnnualYears, mirroredAnnualTotals, monthCloseResult?.dashboard?.openingBalances, selectedYear]);
+    return CASHFLOW_STANDARD_ANNUAL_YEARS.filter((year) => year !== selectedYear);
+  }, [selectedYear]);
   const previousAnnualYears = annualYears.filter((year) => year < selectedYear);
   const followingAnnualYears = annualYears.filter((year) => year > selectedYear);
   const comparisonAsOfWeek = monthCloseResult?.dashboard?.summary?.comparisonAsOfWeek;
@@ -1773,6 +1764,7 @@ export function CashflowProjectSheet({
       lineAmounts?: Record<CashflowSheetLineId, number>;
     } | null | undefined;
     const selectedYearTotal = rangeTotals?.rowTotals?.[lineId] ?? rangeTotals?.lineAmounts?.[lineId] ?? 0;
+    if (annualYears.some((year) => !annualTotalFor(year, mode))) return null;
     return annualYears.reduce(
       (sum, year) => sum + Number(annualTotalFor(year, mode)?.lineAmounts?.[lineId] || 0),
       Number(selectedYearTotal),
@@ -2051,7 +2043,7 @@ export function CashflowProjectSheet({
 
   function renderSummaryCell(input: {
     keyName: string;
-    value: number;
+    value: number | null;
     mode: 'projection' | 'actual';
     isThisWeek?: boolean;
     isAltRow?: boolean;
@@ -2074,7 +2066,7 @@ export function CashflowProjectSheet({
       <td key={input.keyName} className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 align-middle ${input.stickyRight ? 'sticky right-0 z-20 shadow-[-12px_0_24px_rgba(15,23,42,0.08)]' : ''} ${bgClass}`}>
         <div className="flex items-center justify-end gap-1 text-[12px] leading-4">
           <span className={`font-semibold tabular-nums ${input.mode === 'actual' ? 'text-slate-700' : valueClass}`}>
-            {fmt(input.value)}
+            {input.value === null ? <span className="text-slate-400">미입력</span> : fmt(input.value)}
           </span>
         </div>
       </td>
@@ -2185,6 +2177,9 @@ export function CashflowProjectSheet({
           net: Number(sheetGrandTotal.net || 0),
         };
       }
+      if (annualYears.some((year) => !annualTotalFor(year, mode))) {
+        return { totalIn: null, totalOut: null, net: null };
+      }
       const totalIn = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalIn || 0), Number(derived[mode].monthTotals.totalIn || 0));
       const totalOut = annualYears.reduce((sum, year) => sum + Number(annualTotalFor(year, mode)?.totalOut || 0), Number(derived[mode].monthTotals.totalOut || 0));
       return { totalIn, totalOut, net: totalIn - totalOut };
@@ -2224,7 +2219,7 @@ export function CashflowProjectSheet({
       rowTone?: 'income' | 'expense',
     ) => renderSummaryCell({
       keyName: `${mode}-${kind}-${year}-annual`,
-      value: Number(annualTotalFor(year, mode)?.[kind] || 0),
+      value: annualTotalFor(year, mode)?.[kind] ?? null,
       mode,
       emphasis,
       rowTone,
@@ -2885,7 +2880,6 @@ export function CashflowProjectSheet({
               </Button>
             </div>
           ) : null}
-
           {dashboardSummary}
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
