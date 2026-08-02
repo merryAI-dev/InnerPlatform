@@ -5,17 +5,36 @@ import { PageHeader } from '../layout/PageHeader';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Label } from '../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../ui/alert-dialog';
 import { useAppStore } from '../../data/store';
 import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
-import { fetchCashflowWeeklyComplianceViaBff, type CashflowWeeklyCompliancePage } from '../../lib/platform-bff-client';
+import { fetchCashflowWeeklyComplianceViaBff, type CashflowWeeklyComplianceItem, type CashflowWeeklyCompliancePage } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
+import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 import type { CashflowWeekTotals } from '../../data/types';
 
 function emptyTotals(): CashflowWeekTotals {
   return { totalIn: 0, totalOut: 0, net: 0 };
+}
+
+export function filterCashflowProjectsByDepartment<T extends { department?: unknown }>(projects: T[], department: string): T[] {
+  return projects.filter((project) => department === 'ALL' || normalizeProjectDepartment(project.department) === department);
+}
+
+export function findCashflowWeeklyCompliance(
+  items: CashflowWeeklyComplianceItem[],
+  yearMonth: string,
+  weekNo: number,
+): CashflowWeeklyComplianceItem | undefined {
+  return items.find((item) => item.yearMonth === yearMonth && item.weekNo === weekNo);
+}
+
+export function isCashflowSettlementCompleted(status?: CashflowWeeklyComplianceItem['status']): boolean {
+  return status === 'ON_TIME' || status === 'COMPLETED_LATE';
 }
 
 export function CashflowWeeklyPage() {
@@ -30,15 +49,23 @@ export function CashflowWeeklyPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailProjectId, setDetailProjectId] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
+  const [deptFilter, setDeptFilter] = useState('ALL');
+  const departments = useMemo(() => Array.from(new Set([
+    ...getProjectRegistrationCicOptions(),
+    ...projects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean),
+  ])).sort((left, right) => left.localeCompare(right, 'ko')), [projects]);
+  const filteredProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
 
   useEffect(() => {
-    if (!user?.idToken || projects.length === 0) {
+    if (!user?.idToken || filteredProjects.length === 0) {
       setCanonicalHistory({});
+      setHistoryErrors({});
+      setHistoryLoading(false);
       return;
     }
     let active = true;
     setHistoryLoading(true);
-    void Promise.allSettled(projects.map(async (project) => ({
+    void Promise.allSettled(filteredProjects.map(async (project) => ({
       projectId: project.id,
       page: await fetchCashflowWeeklyComplianceViaBff({ tenantId: orgId, actor: user, projectId: project.id, limit: 50 }),
     }))).then((results) => {
@@ -46,7 +73,7 @@ export function CashflowWeeklyPage() {
       const next: Record<string, CashflowWeeklyCompliancePage> = {};
       const errors: Record<string, string> = {};
       results.forEach((result, index) => {
-        const projectId = projects[index]?.id;
+        const projectId = filteredProjects[index]?.id;
         if (!projectId) return;
         if (result.status === 'fulfilled') next[projectId] = result.value.page;
         else errors[projectId] = '주간 정산 이력을 불러오지 못했습니다.';
@@ -56,7 +83,7 @@ export function CashflowWeeklyPage() {
       setHistoryLoading(false);
     });
     return () => { active = false; };
-  }, [orgId, projects, user, yearMonth]);
+  }, [filteredProjects, orgId, user, yearMonth]);
 
   async function loadMoreHistory(projectId: string) {
     const current = canonicalHistory[projectId];
@@ -113,6 +140,22 @@ export function CashflowWeeklyPage() {
         )}
       />
 
+      <div className="flex items-end gap-3 rounded-lg border bg-white px-4 py-3">
+        <div className="w-[180px]">
+          <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">담당조직</Label>
+          <Select value={deptFilter} onValueChange={setDeptFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">전체 조직</SelectItem>
+              {departments.map((department) => (
+                <SelectItem key={department} value={department}>{department}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <span className="pb-2 text-[11px] text-muted-foreground">{filteredProjects.length}개 프로젝트</span>
+      </div>
+
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <div className="max-h-[calc(100vh-190px)] overflow-auto">
@@ -132,7 +175,7 @@ export function CashflowWeeklyPage() {
                 </tr>
               </thead>
               <tbody>
-                {projects.map((project) => {
+                {filteredProjects.map((project) => {
                   const projectWeeks = monthWeeks.map((week) => byProjectWeek.get(`${project.id}:${week.weekNo}`));
                   const projectHistory = canonicalHistory[project.id];
                   const projectStatuses = projectHistory?.items || [];
@@ -164,10 +207,10 @@ export function CashflowWeeklyPage() {
                       const projection = status?.projectionTotals || emptyTotals();
                       const actual = status?.actualTotals || emptyTotals();
                       const difference = projection.net - actual.net;
-                      const compliance = projectStatuses.find((item) => item.yearMonth === yearMonth && item.weekNo === week.weekNo);
-                      const settlementCompleted = compliance?.status === 'ON_TIME' || compliance?.status === 'COMPLETED_LATE';
+                      const compliance = findCashflowWeeklyCompliance(projectStatuses, yearMonth, week.weekNo);
+                      const settlementCompleted = isCashflowSettlementCompleted(compliance?.status);
                       return (
-                        <td key={week.weekNo} className={`px-3 py-3 ${settlementCompleted ? '' : 'bg-red-50 dark:bg-red-950/30'}`}>
+                        <td key={week.weekNo} className={`px-3 py-3 ${settlementCompleted ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
                           <div className="space-y-1.5">
                             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                               {!projectHistory ? historyLoading ? '확인 중' : '조회 오류' : settlementCompleted ? '완료' : '미완료'}
@@ -190,7 +233,7 @@ export function CashflowWeeklyPage() {
                   </tr>
                   );
                 })}
-                {projects.length === 0 ? (
+                {filteredProjects.length === 0 ? (
                   <tr>
                     <td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={monthWeeks.length + 4}>프로젝트가 없습니다.</td>
                   </tr>
