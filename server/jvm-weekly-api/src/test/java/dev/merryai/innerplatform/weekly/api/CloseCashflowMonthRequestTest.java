@@ -1,5 +1,8 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -12,6 +15,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CloseCashflowMonthRequestTest {
+    private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+    @Test
+    void cumulativeV2CompactContractDoesNotRequireLegacyOpeningBalances() {
+        CloseCashflowMonthRequest request = compactCumulativeRequest();
+
+        assertThat(request.cumulativeV2()).isTrue();
+        assertThat(validator.validate(request)).isEmpty();
+    }
+
+    @Test
+    void contractValidationFlagIsNotPartOfTheJvmJsonPayload() throws Exception {
+        String json = new ObjectMapper().writeValueAsString(compactCumulativeRequest());
+
+        assertThat(json).doesNotContain("openingBalancesContractValid");
+    }
+
+    @Test
+    void legacyContractStillRequiresOpeningBalances() {
+        CloseCashflowMonthRequest request = new CloseCashflowMonthRequest(
+            "legacy-close", "", "", "2026-01", 0, 0, true,
+            List.of(), List.of(), List.of(), List.of(), List.of(), null, null
+        );
+
+        assertThat(request.cumulativeV2()).isFalse();
+        assertThat(validator.validate(request))
+            .extracting(violation -> violation.getPropertyPath().toString())
+            .contains("openingBalancesContractValid");
+    }
+
     @Test
     void monthCloseRejectsAnUnattestedHumanReview() {
         assertThatThrownBy(() -> CloseCashflowMonthRequest.requireHumanReviewed(false))
@@ -118,6 +151,28 @@ class CloseCashflowMonthRequestTest {
             states.put(line, line.equals(valueLine) ? "VALUE" : "EMPTY");
         }
         return states;
+    }
+
+    private static CloseCashflowMonthRequest compactCumulativeRequest() {
+        return new CloseCashflowMonthRequest(
+            "cumulative-close",
+            "",
+            "",
+            "2026-08",
+            0,
+            0,
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "project-a-2026-08",
+            2,
+            "sha256:" + "a".repeat(64)
+        );
     }
 
     private static List<CloseCashflowMonthRequest.DepositScheduleRow> validNotApplicableRows() {

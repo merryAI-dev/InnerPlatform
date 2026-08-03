@@ -22,7 +22,7 @@ public class FirestoreStorageBackendEnvironmentPostProcessor implements Environm
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-        String backend = environment.getProperty("weekly.storage-backend", "jpa").trim();
+        String backend = environment.getProperty("weekly.storage-backend", "firestore").trim();
         if (!"firestore".equalsIgnoreCase(backend)) return;
 
         Set<String> excludes = new LinkedHashSet<>();

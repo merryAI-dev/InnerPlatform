@@ -8,7 +8,9 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    open-in-view: false
 weekly:
+  storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:local-weekly-api-token}
   cashflow-settled-week-confirmation-key: ${JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY:local-cashflow-settled-week-confirmation-key-32}

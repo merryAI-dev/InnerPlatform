@@ -1,7 +1,9 @@
 package dev.merryai.innerplatform.weekly.api;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import dev.merryai.innerplatform.weekly.domain.CashflowLineCatalog;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -37,7 +39,7 @@ public record CloseCashflowMonthRequest(
     List<Confirmation> confirmations,
     @Valid @NotNull @Size(max = 4) List<ManagementCheck> managementChecks,
     @Valid @NotNull @Size(max = 4) List<ManagementConfirmation> managementConfirmations,
-    @Valid @NotNull CashflowOpeningBalancesResponse openingBalances,
+    @Valid CashflowOpeningBalancesResponse openingBalances,
     @Valid DeadlineSummary deadlineSummary,
     @Size(max = 160) String requestId,
     @PositiveOrZero long requestRevision,
@@ -162,6 +164,12 @@ public record CloseCashflowMonthRequest(
 
     public boolean cumulativeV2() {
         return !requestId.isBlank() || !manifestHash.isBlank();
+    }
+
+    @AssertTrue(message = "Legacy cashflow month close requires openingBalances.")
+    @JsonIgnore
+    public boolean isOpeningBalancesContractValid() {
+        return cumulativeV2() || openingBalances != null;
     }
 
     public static CashflowOpeningBalancesResponse requireOpeningBalances(

@@ -47,6 +47,9 @@ describe('AdminApprovalPage shell contract', () => {
     expect(monthlySource).toContain("request.documentType === 'MONTHLY_CLOSE'");
     expect(monthlySource).toContain('문서 열기');
     expect(monthlySource).toContain('월 결산 승인서');
+    expect(monthlySource).toContain('w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)]');
+    expect(monthlySource).toContain('sm:w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)]');
+    expect(monthlySource).toContain('<DialogContent className="max-w-sm">');
     expect(monthlySource).not.toContain('월 결산 검토 및 승인서');
     expect(monthlySource).toContain('MYSCube · MONTHLY CLOSE');
     expect(monthlySource).toContain('기안');
