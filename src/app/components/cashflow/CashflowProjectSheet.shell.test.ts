@@ -58,7 +58,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toMatch(/>해당 없음<\/Button>/);
     expect(source).not.toContain('!monthCloseProgress.complete');
     expect(source).toContain('monthCloseResult?.dashboard?.cumulativeCloseScope');
-    expect(source).toContain('scope?.throughMonth === selectedMonth');
+    expect(source).toContain('const throughMonth = previousYearMonth(selectedMonth)');
+    expect(source).toContain('scope?.throughMonth === throughMonth');
     expect(source).toContain('prepared.dashboard?.cumulativeCloseScope');
     expect(source).toContain('cumulativeRequestScope.fromMonth} ~ {cumulativeRequestScope.throughMonth');
     expect(source).toContain('서버 고정 범위');

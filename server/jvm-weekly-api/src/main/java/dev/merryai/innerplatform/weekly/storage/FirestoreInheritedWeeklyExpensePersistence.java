@@ -1009,12 +1009,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         requireCashflowSheetPublicationReady(actor.tenantId(), projectId);
         YearMonth targetMonth = requireYearMonth(request.yearMonth());
         LocalDate today = cashflowMonthCloseBusinessDate();
-        if (!targetMonth.isBefore(YearMonth.from(today))) {
-            throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
-        }
         ValidatedCumulativeClose cumulative = request.cumulativeV2()
             ? requireCumulativeCloseApproval(actor, projectId, request)
             : null;
+        YearMonth closeThrough = cumulative == null ? targetMonth : requireYearMonth(cumulative.throughMonth());
+        if (!closeThrough.isBefore(YearMonth.from(today))) {
+            throw new WeeklyExpenseConflictException("Cashflow month close is available after the target month ends.");
+        }
         Map<String, Object> approval = cumulative == null
             ? requireMonthCloseApproval(actor, projectId, request.yearMonth())
             : Map.of();
@@ -1022,6 +1023,17 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         List<CashflowSheetLabApplyRequest.Cell> cells = cumulative == null
             ? CashflowSheetLabApplyRequest.requireCompleteMonth(request.cells())
             : cumulative.cells();
+        List<CashflowClosedMonthAmendment> legacyTransitionAmendments = List.of();
+        if (cumulative != null && cumulative.legacyHeadTransition()) {
+            legacyTransitionAmendments = authorizeCashflowSheetMonthAmendments(
+                actor,
+                projectId,
+                List.of(cumulative.throughMonth()),
+                cumulative.sourceRevision(),
+                "누적 결산 계약 전환",
+                request.idempotencyKey()
+            );
+        }
         List<CloseCashflowMonthRequest.DepositScheduleRow> depositScheduleRows;
         List<CloseCashflowMonthRequest.Confirmation> confirmations;
         ValidatedCloseSource source;
@@ -1064,10 +1076,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             actor.tenantId(),
             projectId,
             sourceSheetKey,
-            request.yearMonth(),
+            cumulative == null ? request.yearMonth() : cumulative.throughMonth(),
             cumulative == null ? request.targetRevision() : cumulative.targetRevision(),
             cells
         );
+        if (!legacyTransitionAmendments.isEmpty()) {
+            recordCashflowSheetMonthAmendments(
+                actor,
+                projectId,
+                legacyTransitionAmendments,
+                cumulative.sourceRevision(),
+                cumulative.targetRevision(),
+                replacement.resultingTargetRevision(),
+                Map.of(),
+                "누적 결산 계약 전환",
+                request.idempotencyKey()
+            );
+        }
         Instant now = clock.instant();
         Map<String, Object> snapshot = cumulative == null
             ? buildMonthCloseSnapshot(
@@ -1144,7 +1169,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             head.put("projectId", projectId);
             head.put("status", "CLOSED");
             head.put("fromMonth", CASHFLOW_CUMULATIVE_BASELINE.toString());
-            head.put("closedThrough", request.yearMonth());
+            head.put("closedThrough", cumulative.throughMonth());
+            head.put("settlementMonth", request.yearMonth());
             head.put("rootHash", request.manifestHash());
             head.put("revision", cumulative.headRevision());
             head.put("requestId", request.requestId());
@@ -1617,7 +1643,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         requireYearMonth(request.yearMonth());
         Map<String, Object> cumulativeHead = cumulativeCloseHead(actor.tenantId(), projectId);
         boolean cumulative = !cumulativeHead.isEmpty();
-        if (cumulative && !request.yearMonth().equals(text(cumulativeHead.get("closedThrough"), ""))) {
+        String cumulativeSettlementMonth = text(
+            cumulativeHead.get("settlementMonth"),
+            text(cumulativeHead.get("closedThrough"), "")
+        );
+        if (cumulative && !request.yearMonth().equals(cumulativeSettlementMonth)) {
             throw new WeeklyExpenseConflictException("Only the latest cumulative close horizon can be reopened.");
         }
         DocumentReference closeRef = db.document(monthlyClosePath(actor.tenantId(), projectId, request.yearMonth()));
@@ -1674,7 +1704,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         requireYearMonth(request.yearMonth());
         Map<String, Object> cumulativeHead = cumulativeCloseHead(actor.tenantId(), projectId);
         boolean cumulative = !cumulativeHead.isEmpty();
-        if (cumulative && (!request.yearMonth().equals(text(cumulativeHead.get("closedThrough"), ""))
+        String cumulativeSettlementMonth = text(
+            cumulativeHead.get("settlementMonth"),
+            text(cumulativeHead.get("closedThrough"), "")
+        );
+        if (cumulative && (!request.yearMonth().equals(cumulativeSettlementMonth)
             || !"REOPEN_REQUESTED".equals(text(cumulativeHead.get("status"), "")))) {
             throw new WeeklyExpenseConflictException("Only the latest requested cumulative close horizon can be decided.");
         }
@@ -1698,13 +1732,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Instant now = clock.instant();
         Map<DocumentReference, Map<String, Object>> weeklyReopenPatches = new LinkedHashMap<>();
         if (approved) {
+            String dataYearMonth = cumulative
+                ? text(cumulativeHead.get("closedThrough"), request.yearMonth())
+                : request.yearMonth();
             DocumentReference[] weeklyCompletionRefs = java.util.stream.IntStream.rangeClosed(
                     1,
                     CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT
                 )
                 .mapToObj(weekNo -> db.document(cashflowWeeklyUpdateCompletionPath(
                     actor.tenantId(),
-                    projectId + "-" + request.yearMonth() + "-w" + weekNo
+                    projectId + "-" + dataYearMonth + "-w" + weekNo
                 )))
                 .toArray(DocumentReference[]::new);
             for (DocumentSnapshot weeklyCompletion : getAll(weeklyCompletionRefs)) {
@@ -1712,7 +1749,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 Map<String, Object> completion = data(weeklyCompletion);
                 int weekNo = intValue(completion.get("weekNo"), 0);
                 if (!projectId.equals(text(completion.get("projectId"), ""))
-                    || !request.yearMonth().equals(text(completion.get("yearMonth"), ""))
+                    || !dataYearMonth.equals(text(completion.get("yearMonth"), ""))
                     || weekNo < 1
                     || weekNo > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
                     throw new WeeklyExpenseConflictException("Stored weekly cashflow completion scope is invalid.");
@@ -1750,7 +1787,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             headPatch.put("status", "CLOSED");
             headPatch.put("revision", Math.addExact(longValue(cumulativeHead.get("revision"), 0), 1));
             if (approved) {
-                headPatch.put("closedThrough", YearMonth.parse(request.yearMonth()).minusMonths(1).toString());
+                String currentClosedThrough = text(cumulativeHead.get("closedThrough"), request.yearMonth());
+                String currentSettlementMonth = text(cumulativeHead.get("settlementMonth"), "");
+                String reopenedThrough = YearMonth.parse(currentClosedThrough).minusMonths(1).toString();
+                headPatch.put(
+                    "closedThrough",
+                    reopenedThrough
+                );
+                if (currentSettlementMonth.isBlank() || currentSettlementMonth.equals(currentClosedThrough)) {
+                    headPatch.put("settlementMonth", reopenedThrough);
+                }
             }
             headPatch.put("reopenDecision", decision);
             headPatch.put("updatedAt", now.toString());
@@ -2839,10 +2885,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Cumulative close request header evidence does not match approval.");
         }
         YearMonth target = YearMonth.parse(request.yearMonth());
-        if (target.isBefore(CASHFLOW_CUMULATIVE_BASELINE)) {
+        String storedThroughMonth = text(header.get("throughMonth"), "");
+        YearMonth throughMonth = YearMonth.parse(storedThroughMonth.isBlank() ? target.toString() : storedThroughMonth);
+        YearMonth expectedThroughMonth = storedThroughMonth.isBlank() ? target : target.minusMonths(1);
+        if (throughMonth.isBefore(CASHFLOW_CUMULATIVE_BASELINE)) {
             throw new WeeklyExpenseConflictException("Cumulative close cannot precede the 2023-01 baseline.");
         }
-        long monthCount = java.time.temporal.ChronoUnit.MONTHS.between(CASHFLOW_CUMULATIVE_BASELINE, target) + 1;
+        if (!throughMonth.equals(expectedThroughMonth)) {
+            throw new WeeklyExpenseConflictException("Cumulative close through month does not match the settlement contract.");
+        }
+        long monthCount = java.time.temporal.ChronoUnit.MONTHS.between(CASHFLOW_CUMULATIVE_BASELINE, throughMonth) + 1;
         List<String> months = java.util.stream.LongStream.range(0, monthCount)
             .mapToObj(CASHFLOW_CUMULATIVE_BASELINE::plusMonths)
             .map(YearMonth::toString)
@@ -2889,7 +2941,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
                 throw new WeeklyExpenseConflictException("Cumulative close month shard hash mismatch: " + yearMonth);
             }
             manifestMonths.add(Map.of("yearMonth", yearMonth, "shardHash", shardHash));
-            if (yearMonth.equals(request.yearMonth())) {
+            if (yearMonth.equals(throughMonth.toString())) {
                 selectedCells = cumulativeCells(canonicalCells);
                 selectedSource = source;
             }
@@ -2907,15 +2959,27 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         Map<String, Object> currentHead = cumulativeCloseHead(actor.tenantId(), projectId);
         String closedThrough = text(currentHead.get("closedThrough"), "");
-        if (!closedThrough.isBlank() && !YearMonth.parse(closedThrough).isBefore(target)) {
-            throw new WeeklyExpenseConflictException("Cumulative close horizon must extend the current horizon.");
+        boolean legacyHeadTransition = false;
+        if (!closedThrough.isBlank()) {
+            YearMonth previousHorizon = YearMonth.parse(closedThrough);
+            String settlementMonth = text(currentHead.get("settlementMonth"), "");
+            boolean legacyHead = settlementMonth.isBlank()
+                || YearMonth.parse(settlementMonth).equals(previousHorizon);
+            legacyHeadTransition = legacyHead && previousHorizon.equals(throughMonth);
+            boolean extendsHorizon = legacyHead
+                ? previousHorizon.isBefore(target)
+                : previousHorizon.isBefore(throughMonth);
+            if (!extendsHorizon) {
+                throw new WeeklyExpenseConflictException("Cumulative close horizon must extend the current horizon.");
+            }
         }
         long headRevision = Math.addExact(longValue(currentHead.get("revision"), 0), 1);
         String sourceRevision = text(selectedSource.get("sourceRevision"), request.manifestHash());
         String targetRevision = text(selectedSource.get("targetRevision"), request.manifestHash());
         return new ValidatedCumulativeClose(
-            selectedCells, selectedSource, sourceRevision, targetRevision, headRevision,
-            text(header.get("approvalId"), ""), text(header.get("operationId"), ""), manifestMonths
+            selectedCells, selectedSource, sourceRevision, targetRevision, throughMonth.toString(), headRevision,
+            text(header.get("approvalId"), ""), text(header.get("operationId"), ""), manifestMonths,
+            legacyHeadTransition
         );
     }
 
@@ -3021,10 +3085,12 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Map<String, Object> source,
         String sourceRevision,
         String targetRevision,
+        String throughMonth,
         long headRevision,
         String approvalId,
         String operationId,
-        List<Map<String, Object>> manifestMonths
+        List<Map<String, Object>> manifestMonths,
+        boolean legacyHeadTransition
     ) {}
 
     private List<Map<String, Object>> reviewWarnings(Object value) {

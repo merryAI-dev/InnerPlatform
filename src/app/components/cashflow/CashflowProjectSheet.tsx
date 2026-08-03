@@ -93,13 +93,21 @@ import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loa
 
 const CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032] as const;
 
+function previousYearMonth(yearMonth: string): string {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) return '';
+  const month = new Date(`${yearMonth}-01T00:00:00Z`);
+  month.setUTCMonth(month.getUTCMonth() - 1);
+  return month.toISOString().slice(0, 7);
+}
+
 function fmt(n: number): string {
   return n.toLocaleString('ko-KR');
 }
 
 function isCumulativeCloseScopeReady(scope: CashflowCumulativeCloseScope | null | undefined, selectedMonth: string): scope is CashflowCumulativeCloseScope {
-  return scope?.throughMonth === selectedMonth
-    && scope.lockRange.throughMonth === selectedMonth
+  const throughMonth = previousYearMonth(selectedMonth);
+  return scope?.throughMonth === throughMonth
+    && scope.lockRange.throughMonth === throughMonth
     && scope.lockRange.fromMonth === scope.fromMonth
     && scope.lockRange.fromWeekNo === 1
     && scope.lockRange.throughWeekNo === 5;
@@ -2697,6 +2705,8 @@ export function CashflowProjectSheet({
                         ? monthCloseRequest.status === 'UNCERTAIN' ? '서버 처리 결과를 다시 확인하고 있습니다.' : '지정 조직장의 검토를 기다리고 있습니다.'
                         : monthCloseRequest?.status === 'REJECTED'
                           ? `반려됨${monthCloseRequest.decisionReason ? ` · ${monthCloseRequest.decisionReason}` : ''}`
+                        : monthCloseRequest?.status === 'REOPENED'
+                          ? '재오픈됨 · 수정 후 월 결산을 다시 요청해 주세요.'
                       : monthClosePreparation.status === 'READY'
                         ? `${yearMonth} 결산 승인을 요청하면 조직장 승인 전까지 확정되지 않습니다.`
                         : monthClosePreparation.title}
@@ -2712,7 +2722,7 @@ export function CashflowProjectSheet({
                         onClick={handleOpenMonthCloseReview}
                       >
                         <CheckCircle2 className="mr-1 h-3 w-3" />
-                        {monthCloseError || !monthCloseResult ? '월 결산 점검' : monthCloseRequest?.status === 'REJECTED' ? '월 결산 재요청' : '월 결산 요청'}
+                        {monthCloseError || !monthCloseResult ? '월 결산 점검' : ['REJECTED', 'REOPENED'].includes(monthCloseRequest?.status || '') ? '월 결산 재요청' : '월 결산 요청'}
                       </Button>
                     ) : null}
                     {!monthCloseError && canRequestMonthReopen && monthCloseResult?.status === 'CLOSED' ? (
@@ -3064,6 +3074,8 @@ export function CashflowProjectSheet({
           ? '조직장 승인 대기'
           : monthCloseRequest?.status === 'REJECTED'
             ? '월 결산 반려'
+            : monthCloseRequest?.status === 'REOPENED'
+              ? '재결산 필요'
       : '결산 전';
   const monthCloseStatusClass = monthCloseError
     ? 'border border-red-200 bg-red-50 text-red-700'

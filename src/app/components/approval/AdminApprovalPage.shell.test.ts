@@ -84,7 +84,8 @@ describe('AdminApprovalPage shell contract', () => {
     expect(monthlySource).toContain('저장 시트 링크 없음');
     expect(monthlySource).toContain('selectedSource.spreadsheetTitle');
     expect(monthlySource).toContain('selectedSource.selectedSheetName');
-    expect(monthlySource).toContain('annualSummaries');
+    expect(monthlySource).not.toContain('annualSummaries');
+    expect(monthlySource).not.toContain('복구 상태');
     expect(monthlySource).toContain('CumulativeSettlementMonthDetails');
     expect(monthlySource).toContain('expectedManifestHash: action.request.manifestHash');
     expect(monthlySource).toContain('승인하면 이 범위의 모든 주차가 수정 불가 상태가 됩니다.');

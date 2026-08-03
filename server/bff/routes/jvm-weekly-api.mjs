@@ -132,18 +132,49 @@ function cashflowCloseHash(value) {
   return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
 }
 
+export function buildCashflowMonthCloseRevisionChanges(previousCells, currentCells) {
+  const key = (cell) => `${cell.mode}|${cell.weekNo}|${cell.cashflowLine}`;
+  const previousByKey = new Map((previousCells || []).map((cell) => [key(cell), cell]));
+  const currentByKey = new Map((currentCells || []).map((cell) => [key(cell), cell]));
+  const orderedKeys = [
+    ...currentByKey.keys(),
+    ...[...previousByKey.keys()].filter((cellKey) => !currentByKey.has(cellKey)),
+  ];
+
+  return orderedKeys.flatMap((cellKey) => {
+    const before = previousByKey.get(cellKey);
+    const current = currentByKey.get(cellKey);
+    if (before && current && before.cellState === current.cellState && before.amount === current.amount) return [];
+    const identity = current || before;
+    const previousAmount = before && typeof before.amount === 'number' ? before.amount : null;
+    const currentAmount = current && typeof current.amount === 'number' ? current.amount : null;
+    return [{
+      mode: identity.mode,
+      weekNo: identity.weekNo,
+      cashflowLine: identity.cashflowLine,
+      previousState: before?.cellState || 'MISSING',
+      previousAmount,
+      currentState: current?.cellState || 'MISSING',
+      currentAmount,
+      amountDelta: previousAmount === null || currentAmount === null ? null : currentAmount - previousAmount,
+    }];
+  });
+}
+
 function cashflowMonthCloseRequestAuditPath(tenantId, requestId, revision, action) {
   return `orgs/${tenantId}/cashflow_month_close_request_audits/${requestId}-r${revision}-${action}`;
 }
 
 function cashflowMonthCloseRequestView(record, partyNames = {}) {
   if (record.contractVersion === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT) {
+    const throughMonth = readOptionalText(record.throughMonth) || record.yearMonth;
     return {
       documentType: 'MONTHLY_CLOSE',
       contractVersion: record.contractVersion,
       requestId: record.requestId,
       projectId: record.projectId,
       yearMonth: record.yearMonth,
+      throughMonth,
       fromMonth: record.fromMonth,
       status: record.status,
       revision: record.revision,
@@ -168,7 +199,7 @@ function cashflowMonthCloseRequestView(record, partyNames = {}) {
       lockRange: {
         fromMonth: record.fromMonth,
         fromWeekNo: 1,
-        throughMonth: record.yearMonth,
+        throughMonth,
         throughWeekNo: 5,
       },
       reconciliationEvidence: objectValue(record.reconciliationEvidence),
@@ -1340,12 +1371,19 @@ function monthsBetween(startYearMonth, endYearMonth) {
   return result;
 }
 
+function previousYearMonth(yearMonth) {
+  const month = new Date(`${yearMonth}-01T00:00:00Z`);
+  month.setUTCMonth(month.getUTCMonth() - 1);
+  return month.toISOString().slice(0, 7);
+}
+
 function cumulativeCloseMonths(yearMonth) {
-  const months = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, yearMonth);
+  const throughMonth = previousYearMonth(yearMonth);
+  const months = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, throughMonth);
   if (
-    yearMonth < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
+    throughMonth < CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH
     || months.length === 0
-    || months.at(-1) !== yearMonth
+    || months.at(-1) !== throughMonth
   ) {
     throw createHttpError(
       400,
@@ -1358,6 +1396,7 @@ function cumulativeCloseMonths(yearMonth) {
 
 function buildCumulativeCloseScope(yearMonth, evidence = null) {
   const months = cumulativeCloseMonths(yearMonth);
+  const throughMonth = months.at(-1);
   const nestedSource = objectValue(evidence?.source) || {};
   const sourceField = (...keys) => {
     for (const key of keys) {
@@ -1372,11 +1411,11 @@ function buildCumulativeCloseScope(yearMonth, evidence = null) {
   return {
     contractVersion: CASHFLOW_CUMULATIVE_CLOSE_CONTRACT,
     fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
-    throughMonth: yearMonth,
+    throughMonth,
     lockRange: {
       fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
       fromWeekNo: 1,
-      throughMonth: yearMonth,
+      throughMonth,
       throughWeekNo: 5,
     },
     monthCount,
@@ -2762,6 +2801,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         projectId,
         rawProjectId,
         cashflow,
+        sourceCloseStatus: readOptionalText(sourceClose.status),
         closeBody,
         reviewWarnings,
         monthSnapshot,
@@ -2927,8 +2967,8 @@ export function mountJvmWeeklyApiRoutes(app, {
     let annualSummaries;
     let payloadFingerprint;
     let auditAction;
-    const buildRevisionEvidence = (requestRevision) => {
-      const revisionShards = cumulativeMonths.map((monthKey) => cumulativeMonthCloseShard({
+    const buildRevisionEvidence = (requestRevision, evidenceMonths = cumulativeMonths) => {
+      const revisionShards = evidenceMonths.map((monthKey) => cumulativeMonthCloseShard({
         requestId,
         requestRevision,
         projectId: prepared.rawProjectId,
@@ -2995,11 +3035,23 @@ export function mountJvmWeeklyApiRoutes(app, {
           || !Number.isSafeInteger(Number(existing.revision)) || Number(existing.revision) < 1) {
           throw createHttpError(409, '이미 이 월의 결산 요청이 존재합니다.', 'cashflow_month_close_request_conflict');
         }
-        const replayEvidence = buildRevisionEvidence(Number(existing.revision));
+        let replayEvidence = buildRevisionEvidence(Number(existing.revision));
+        const legacyBuildingEvidence = existing.status === 'BUILDING'
+          && !readOptionalText(existing.throughMonth)
+          && !readOptionalText(existing.requestFingerprint)
+          && existing.requestId === requestId
+          && existing.projectId === prepared.rawProjectId
+          && existing.yearMonth === yearMonth
+          ? buildRevisionEvidence(
+            Number(existing.revision),
+            monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, existing.yearMonth),
+          )
+          : null;
         const legacyBuildingReplay = existing.status === 'BUILDING'
+          && legacyBuildingEvidence !== null
           && !readOptionalText(existing.requestFingerprint)
           && existing.createIdempotencyKey === req.context.idempotencyKey
-          && existing.payloadFingerprint === replayEvidence.payloadFingerprint
+          && existing.payloadFingerprint === legacyBuildingEvidence?.payloadFingerprint
           && existing.requestId === requestId
           && existing.tenantId === req.context.tenantId
           && existing.projectId === prepared.rawProjectId
@@ -3007,6 +3059,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           && existing.requestedByUid === readOptionalText(req.context.actorId)
           && existing.approverUid === approverUid
           && Number(existing.expectedRevision) === prepared.closeBody.expectedRevision;
+        if (legacyBuildingReplay) replayEvidence = legacyBuildingEvidence;
         if (
           existing.createIdempotencyKey === req.context.idempotencyKey
           && (existing.requestFingerprint === requestFingerprint || legacyBuildingReplay)
@@ -3018,11 +3071,34 @@ export function mountJvmWeeklyApiRoutes(app, {
           revision = Number(existing.revision);
           ({ shards, manifest, totals, annualSummaries, payloadFingerprint } = replayEvidence);
           auditAction = revision === 1 ? 'REQUESTED' : 'RESUBMITTED';
-        } else if (existing.status !== 'REJECTED') {
+        } else if (!['REJECTED', 'REOPENED'].includes(existing.status)
+          && !(existing.status === 'APPROVED' && prepared.sourceCloseStatus === 'OPEN')) {
           throw createHttpError(409, '이미 이 월의 결산 요청이 존재합니다.', 'cashflow_month_close_request_conflict');
         } else {
           revision = Number(existing.revision) + 1;
           auditAction = 'RESUBMITTED';
+          const existingThroughMonth = readOptionalText(existing.throughMonth);
+          if (existingThroughMonth && existingThroughMonth !== cumulativeMonths.at(-1)) {
+            throw createHttpError(
+              409,
+              '저장된 누적 월 결산 범위가 현재 계약과 다릅니다.',
+              'cashflow_month_close_request_horizon_invalid',
+            );
+          }
+          const legacyMonthCount = monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, yearMonth).length;
+          if (!existingThroughMonth && Number(existing.monthCount) !== legacyMonthCount) {
+            throw createHttpError(
+              409,
+              '저장된 레거시 누적 월 결산 범위를 확인할 수 없습니다.',
+              'cashflow_month_close_request_horizon_invalid',
+            );
+          }
+          if (!existingThroughMonth) {
+            ({ shards, manifest, totals, annualSummaries, payloadFingerprint } = buildRevisionEvidence(
+              revision,
+              monthsBetween(CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH, yearMonth),
+            ));
+          }
         }
       } else {
         revision = 1;
@@ -3046,6 +3122,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         tenantId: req.context.tenantId,
         projectId: prepared.rawProjectId,
         yearMonth,
+        ...(shards.at(-1)?.yearMonth === yearMonth ? {} : { throughMonth: shards.at(-1)?.yearMonth }),
         fromMonth: CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH,
         status: 'PENDING',
         revision,
@@ -3107,7 +3184,7 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   async function verifyCumulativeRequestShards(tenantId, record) {
     const shards = [];
-    for (const yearMonth of monthsBetween(record.fromMonth, record.yearMonth)) {
+    for (const yearMonth of monthsBetween(record.fromMonth, readOptionalText(record.throughMonth) || record.yearMonth)) {
       const snapshot = await db.doc(cashflowMonthCloseRequestMonthPath(
         tenantId, record.requestId, record.revision, yearMonth,
       )).get();
@@ -3347,7 +3424,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
       }
     }
-    const allMonths = monthsBetween(record.fromMonth, record.yearMonth);
+    const allMonths = monthsBetween(record.fromMonth, readOptionalText(record.throughMonth) || record.yearMonth);
     const start = cursor ? allMonths.findIndex((month) => month >= cursor) : 0;
     const pageMonths = allMonths.slice(start < 0 ? allMonths.length : start, (start < 0 ? allMonths.length : start) + limit);
     const months = [];
@@ -3371,6 +3448,61 @@ export function mountJvmWeeklyApiRoutes(app, {
       months,
       nextCursor: nextIndex < allMonths.length ? allMonths[nextIndex] : null,
     });
+  }));
+
+  app.get('/api/v1/cashflow/:projectId/month-close/requests/:requestId/revision-diff', asyncHandler(async (req, res) => {
+    if (!db?.doc) throw createHttpError(503, '월 결산 요청 저장소에 연결하지 못했습니다.', 'cashflow_month_close_request_store_unavailable');
+    const projectId = readOptionalText(req.params.projectId);
+    const requestId = readOptionalText(req.params.requestId);
+    const actorId = readOptionalText(req.context.actorId);
+    await readActiveCashflowMember({ db, tenantId: req.context.tenantId, actorId });
+    const requestSnapshot = await db.doc(cashflowMonthCloseRequestPath(req.context.tenantId, requestId)).get();
+    const record = requestSnapshot.exists ? requestSnapshot.data() || {} : null;
+    if (!record || record.projectId !== projectId || record.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT) {
+      throw createHttpError(404, '월 결산 요청을 찾을 수 없습니다.', 'cashflow_month_close_request_not_found');
+    }
+    if (![record.requestedByUid, record.approverUid].includes(actorId)) {
+      throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
+    }
+    if (record.approverUid === actorId) {
+      const canonicalApproverUid = await readCanonicalCashflowApprover({
+        db, tenantId: req.context.tenantId, projectId, requesterUid: record.requestedByUid,
+      });
+      if (canonicalApproverUid !== actorId) {
+        throw createHttpError(403, '이 월 결산 요청을 조회할 권한이 없습니다.', 'cashflow_month_close_request_forbidden');
+      }
+    }
+    const currentRevision = Number(record.revision);
+    const throughMonth = readOptionalText(record.throughMonth) || record.yearMonth;
+    if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) {
+      throw createHttpError(409, '월 결산 요청 revision이 올바르지 않습니다.', 'cashflow_month_close_request_evidence_invalid');
+    }
+    const readShard = async (revision) => {
+      const snapshot = await db.doc(cashflowMonthCloseRequestMonthPath(
+        req.context.tenantId, requestId, revision, throughMonth,
+      )).get();
+      const stored = snapshot.exists ? snapshot.data() || {} : null;
+      const { shardHash, ...base } = stored || {};
+      if (!stored
+        || stored.requestId !== requestId
+        || stored.projectId !== projectId
+        || Number(stored.requestRevision) !== revision
+        || stored.yearMonth !== throughMonth
+        || stored.cells?.length !== 160
+        || shardHash !== cashflowCloseHash(base)) {
+        throw createHttpError(409, '저장된 revision 비교 근거가 손상되었습니다.', 'cashflow_month_close_request_evidence_tampered');
+      }
+      return stored;
+    };
+    const current = await readShard(currentRevision);
+    if (currentRevision === 1) {
+      res.status(200).json({ requestId, yearMonth: throughMonth, currentRevision, previousRevision: null, changes: [] });
+      return;
+    }
+    const previousRevision = currentRevision - 1;
+    const previous = await readShard(previousRevision);
+    const changes = buildCashflowMonthCloseRevisionChanges(previous.cells, current.cells);
+    res.status(200).json({ requestId, yearMonth: throughMonth, currentRevision, previousRevision, changes });
   }));
 
   app.post('/api/v1/cashflow/:projectId/month-close/requests', asyncHandler(async (req, res) => {
@@ -4006,13 +4138,48 @@ export function mountJvmWeeklyApiRoutes(app, {
 
   app.post('/api/v1/cashflow/:projectId/month-close/reopen-decision', createJavaMutatingProxyRoute(async (req) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance'], 'decide cashflow month reopen', authMode, workspaceEmailDomain);
-    const projectId = encodeURIComponent(readOptionalText(req.params.projectId));
+    const rawProjectId = readOptionalText(req.params.projectId);
+    const projectId = encodeURIComponent(rawProjectId);
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${projectId}/month-close/reopen-decision`,
       commandBody(req),
       { cashflowWrite: true },
     );
+    const decision = readOptionalText(req.body?.decision).toUpperCase();
+    const yearMonth = readOptionalText(req.body?.yearMonth);
+    if (decision === 'APPROVE') {
+      if (readOptionalText(result?.projectId) !== rawProjectId
+        || readOptionalText(result?.yearMonth) !== yearMonth
+        || readOptionalText(result?.status) !== 'OPEN') {
+        throw createHttpError(502, 'JVM 월 결산 재개 결과를 확인할 수 없습니다.', 'cashflow_jvm_invalid_response');
+      }
+      try {
+        if (db?.doc && db?.runTransaction) {
+          const requestId = `${rawProjectId}-${yearMonth}`;
+          const requestRef = db.doc(cashflowMonthCloseRequestPath(req.context.tenantId, requestId));
+          await db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(requestRef);
+            if (!snapshot.exists) return;
+            const current = snapshot.data() || {};
+            if (current.contractVersion !== CASHFLOW_CUMULATIVE_CLOSE_CONTRACT
+              || current.requestId !== requestId
+              || current.projectId !== rawProjectId
+              || current.yearMonth !== yearMonth
+              || current.status === 'REOPENED'
+              || !['APPROVED', 'APPROVING', 'UNCERTAIN'].includes(current.status)) return;
+            transaction.set(requestRef, {
+              ...current,
+              status: 'REOPENED',
+              reopenedAt: now().toISOString(),
+              reopenDecisionIdempotencyKey: req.context.idempotencyKey,
+            });
+          });
+        }
+      } catch {
+        // The JVM reopen is authoritative; a workflow read-model failure cannot undo it.
+      }
+    }
     return { status: 200, body: result };
   }));
 
