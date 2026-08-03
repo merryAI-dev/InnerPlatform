@@ -31,6 +31,8 @@ describe('PortalBudget manual editing surface contract', () => {
     expect(portalBudgetSource).not.toContain('fmtPercent(group.burnRate)');
     expect(portalBudgetSource).not.toContain('fmtPercent(subItem.burnRate)');
     expect(portalBudgetSource).not.toContain('fmtPercent(leaf.burnRate)');
+    expect(portalBudgetSource).not.toContain('전체 소진율');
+    expect(portalBudgetSource).toContain('gap-y-1 text-[11px]');
   });
 
   it('keeps the adjacent admin summary editing description', () => {

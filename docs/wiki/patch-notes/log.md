@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-08-03] patch-note | portal-budget | 예산 총계 가독성 정리
+- pages: [portal-budget](./pages/portal-budget.md)
+- summary: 포털 예산 화면의 중복 전체 소진율·집행·잔액 표시를 제거하고 예산·집행·잔액 총계의 글자 크기를 한 단계 키웠다.
+
 ## [2026-07-24] hotfix | cashflow-legacy-close-summary | 이전 월 결산 합계 표시 복구
 - pages: [portal-cashflow](./pages/portal-cashflow.md)
 - summary: 이전 형식의 월 결산 기록에 주차별 `reported` 합계가 없어도 현금흐름 화면이 중단되지 않도록 보강했다. 해당 값이 없을 때는 저장된 행 값의 합계를 사용한다.
