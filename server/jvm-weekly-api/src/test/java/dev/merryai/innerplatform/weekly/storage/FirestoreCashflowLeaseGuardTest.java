@@ -2067,89 +2067,6 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void lockedWeeklyReplayStillRejectsOneMissingCellInTheSixteenthFinanceWeek() {
-        Fixture fixture = fixture(activeMember(), Map.of());
-        putCompleteProjectionWindow(fixture, "2026-07", 3);
-        WeeklyExpenseCommandService service = commandService(fixture.persistence);
-        fixture.persistence.runCommandTransaction(() -> service.completeCashflowWeeklyUpdate(
-            ACTOR,
-            "project-a",
-            new CompleteCashflowWeeklyUpdateRequest(
-                "weekly-window-lock", "2026-07", 3, "2026-07-16T09:00:00Z"
-            )
-        ));
-        String sixteenthWeekPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-10-w3";
-        Map<String, Object> sixteenthWeek = new LinkedHashMap<>(fixture.documents.get(sixteenthWeekPath));
-        Map<String, Object> projection = new LinkedHashMap<>((Map<String, Object>) sixteenthWeek.get("projection"));
-        projection.remove("SALES_IN");
-        sixteenthWeek.put("projection", projection);
-        fixture.documents.put(sixteenthWeekPath, sixteenthWeek);
-
-        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() ->
-            service.completeCashflowWeeklyUpdate(
-                ACTOR,
-                "project-a",
-                new CompleteCashflowWeeklyUpdateRequest(
-                    "weekly-window-replay", "2026-07", 3, "2026-07-16T10:00:00Z"
-                )
-            )
-        ));
-
-        assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
-        WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
-        assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
-        assertThat(incomplete.details())
-            .containsEntry("requiredWeekCount", 16)
-            .containsEntry("requiredCellCount", 256);
-        assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
-            .containsExactly(Map.of("yearMonth", "2026-10", "weekNo", 3, "lineId", "SALES_IN"));
-    }
-
-    @Test
-    void liveLegacyTwelveLineProjectionFailsClosedWithoutPartialWrites() {
-        Fixture fixture = fixture(activeMember(), Map.of());
-        putCompleteProjectionWindow(fixture, "2026-07", 3);
-        List<String> liveMissingLines = List.of(
-            "MYSC_PREPAY_DIRECT_OUT",
-            "MYSC_PREPAY_INPUT_VAT_IN",
-            "MYSC_PREPAY_LABOR_IN",
-            "MYSC_PREPAY_LABOR_OUT"
-        );
-        fixture.documents.entrySet().stream()
-            .filter(entry -> entry.getKey().contains("/cashflow_weeks/"))
-            .forEach(entry -> {
-                Map<String, Object> document = entry.getValue();
-                Map<String, Object> projection = new LinkedHashMap<>(
-                    (Map<String, Object>) document.get("projection")
-                );
-                liveMissingLines.forEach(projection::remove);
-                document.put("projection", projection);
-            });
-
-        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() ->
-            commandService(fixture.persistence).completeCashflowWeeklyUpdate(
-                ACTOR,
-                "project-a",
-                new CompleteCashflowWeeklyUpdateRequest(
-                    "live-legacy-window", "2026-07", 3, "2026-07-16T09:00:00Z"
-                )
-            )
-        ));
-
-        assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
-        WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
-        assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
-        assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
-            .hasSize(64)
-            .extracting(cell -> cell.get("lineId"))
-            .containsOnlyElementsOf(liveMissingLines);
-        assertThat(fixture.documents.keySet())
-            .noneMatch(path -> path.contains("/cashflow_weekly_update_completions/")
-                || path.contains("/cashflow_weekly_update_completion_versions/")
-                || path.contains("/weekly_api_audit_events/"));
-    }
-
-    @Test
     void lockedCashflowWeekRemainsOperationalStatusWhileProjectionChanges() {
         Fixture fixture = fixture(activeMember(), Map.of());
         fixture.documents.put(
@@ -2581,36 +2498,16 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void weeklyCompletionChecksSixteenWeeksAcrossYearBoundaryAndTreatsNullAsEmptyButZeroAsWritten() {
+    void weeklyCompletionTracksStatusWithoutRequiringProjectionValues() {
         Fixture fixture = fixture(activeMember(), Map.of());
-        putCompleteProjectionWindow(fixture, "2026-12", 4);
-        String nullPath = "orgs/tenant-a/cashflow_weeks/project-a-2027-01-w2";
-        Map<String, Object> nullWeek = new LinkedHashMap<>(fixture.documents.get(nullPath));
-        Map<String, Object> projection = new LinkedHashMap<>((Map<String, Object>) nullWeek.get("projection"));
-        projection.put("SALES_IN", null);
-        nullWeek.put("projection", projection);
-        fixture.documents.put(nullPath, nullWeek);
         CompleteCashflowWeeklyUpdateRequest request = new CompleteCashflowWeeklyUpdateRequest(
             "window-cross-year", "2026-12", 4, "2026-12-24T14:59:00Z", "NO_CHANGES"
         );
 
-        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
-            fixture.persistence
-        ).completeCashflowWeeklyUpdate(ACTOR, "project-a", request)));
-        assertThat(failure).isInstanceOf(WeeklyExpenseEditLeaseException.class);
-        WeeklyExpenseEditLeaseException incomplete = (WeeklyExpenseEditLeaseException) failure;
-        assertThat(incomplete.code()).isEqualTo("cashflow_projection_window_incomplete");
-        assertThat(incomplete.details())
-            .containsEntry("requiredWeekCount", 16)
-            .containsEntry("requiredCellCount", 256);
-        assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
-            .contains(Map.of("yearMonth", "2027-01", "weekNo", 2, "lineId", "SALES_IN"));
-
-        projection.put("SALES_IN", 0L);
-        fixture.documents.put(nullPath, nullWeek);
         CashflowWeeklyUpdateCompletionResponse completed = fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).completeCashflowWeeklyUpdate(ACTOR, "project-a", request));
+        assertThat(completed.status()).isEqualTo("LOCKED");
         assertThat(completed.updateResult()).isEqualTo("NO_CHANGES");
         assertThat(completed.complianceStatus()).isEqualTo("ON_TIME");
     }
