@@ -218,7 +218,7 @@ function formatFinancialYears(payload: ProjectRequestPayload): string {
     const payments = row.paymentPlan
       ? ` · 입금 선금 ${formatShortAmount(row.paymentPlan.contract)} / 중도금 ${formatShortAmount(row.paymentPlan.interim)} / 잔금 ${formatShortAmount(row.paymentPlan.final)}`
       : '';
-    return `${row.year}년 · 계약 ${formatShortAmount(row.contractAmount)} · 총수익 ${formatShortAmount(row.totalRevenueAmount)} · 총실비(원가) ${formatShortAmount(row.totalActualCost)}${payments} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+    return `${row.year}년 · 계약 ${formatShortAmount(row.contractAmount)} · 총수익 ${formatShortAmount(row.totalRevenueAmount)} · 총실비(원가) ${formatShortAmount(row.totalActualCost)}${payments} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
   }).join('\n');
 }
 
@@ -316,10 +316,11 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
     buildTextItem('accountType', '통장 유형', formatAccountType(payload.accountType)),
     buildTextItem('fundInputMode', '자금 입력 방식', formatFundInputMode(payload.fundInputMode)),
     buildTextItem('interestRefundPolicy', '이자 반납 여부', payload.interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[payload.interestRefundPolicy] : ''),
-    buildTextItem('finalPaymentExpectedWeek', '최종 입금 재무주차', payload.finalPaymentExpectedWeek),
     buildSettlementPolicyItem(payload.settlementSheetPolicy),
     buildTextItem('settlementGuide', '계약/재무 안내', payload.settlementGuide),
     buildTextItem('quoteDocument', '산출내역서(견적서)', payload.quoteDocument?.name || (payload.quoteSubmissionDeferred ? '이후 제출 예정' : '')),
+    buildTextItem('proposalPptOriginal', '제안서(구글드라이브 링크)', payload.registrationConfirmations?.proposalPptOriginal || ''),
+    buildTextItem('presentationPptOriginal', '발표자료(구글드라이브 링크)', payload.registrationConfirmations?.presentationPptOriginal || ''),
   ];
 
   const teamItems: ProjectRequestReviewItem[] = [

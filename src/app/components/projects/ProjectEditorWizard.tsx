@@ -17,7 +17,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useBlocker } from 'react-router';
 import {
@@ -76,7 +76,7 @@ import {
   type ProjectRequestDocumentKind,
 } from '../../platform/project-contract-upload';
 import { formatProfitRatePercentInput } from '../../platform/project-financials';
-import { getYearFinanceWeeks } from '../../platform/cashflow-week-core.mjs';
+import { isValidDriveUrl } from '../../platform/evidence-helpers';
 import {
   createProjectEditorDraft,
   hasInvalidProjectContractPeriod,
@@ -96,7 +96,6 @@ import {
 } from '../ui/alert-dialog';
 import {
   formatProjectTeamMembersSummary,
-  hasInvalidProjectTeamMemberLaborPeriod,
   hasInvalidProjectSettlementSupportMember,
   hasIncompleteProjectTeamMembers,
   hasProjectOperatingManager,
@@ -260,7 +259,7 @@ const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
   {
     number: 1,
     label: '계약서 *',
-    description: '계약서 써니(사업지원팀)에게 제출했습니다.',
+    description: '',
     kinds: ['contract'],
   },
   {
@@ -283,13 +282,13 @@ const REGISTRATION_DOCUMENT_SLOTS: RegistrationDocumentSlot[] = [
   },
   {
     number: 5,
-    label: '제안서(PPT 원본)',
+    label: '제안서(구글드라이브 링크)',
     description: '있을 시',
     kinds: ['proposal_ppt_original'],
   },
   {
     number: 6,
-    label: '발표자료(PPT 원본)',
+    label: '발표자료(구글드라이브 링크)',
     description: '있을 시',
     kinds: ['presentation_ppt_original'],
   },
@@ -1080,7 +1079,7 @@ export function ProjectEditorWizard({
 
   const updateFinancialYear = (
     index: number,
-    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'finalPaymentExpectedWeek' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
+    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
     value: number | string | boolean | ProjectFinancialYear['paymentPlan'],
   ) => {
     setDraft((prev) => {
@@ -1270,10 +1269,20 @@ export function ProjectEditorWizard({
       if (!draft.projectPurpose.trim()) issues.push({ step: 'basic', label: '프로젝트 목적' });
       if (!draft.description.trim()) issues.push({ step: 'basic', label: '프로젝트 주요 내용' });
       if (!draft.contractDocument) issues.push({ step: 'financial', label: '계약서 PDF' });
+      if (draft.registrationConfirmations.modusignContractUsed === null) issues.push({ step: 'financial', label: '모두 싸인으로 진행하셨나요?' });
+      if (draft.registrationConfirmations.modusignContractUsed === false && draft.registrationConfirmations.originalContractSubmitted !== true) {
+        issues.push({ step: 'financial', label: '계약서를 써니(사업지원팀)에게 제출했습니다.' });
+      }
+      if (draft.registrationConfirmations.proposalPptOriginal && !isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)) {
+        issues.push({ step: 'financial', label: '제안서 구글드라이브 링크' });
+      }
+      if (draft.registrationConfirmations.presentationPptOriginal && !isValidDriveUrl(draft.registrationConfirmations.presentationPptOriginal)) {
+        issues.push({ step: 'financial', label: '발표자료 구글드라이브 링크' });
+      }
       if (onProjectDocumentFileUpload) {
         if (!draft.customerBusinessRegistrationDocument) issues.push({ step: 'financial', label: '고객사 사업자등록증 PDF' });
-        if (!draft.quoteDocument && !draft.quoteSubmissionDeferred) issues.push({ step: 'financial', label: '산출내역서(견적서) PDF 또는 이후 제출' });
       }
+      if (!draft.quoteDocument && !draft.quoteSubmissionDeferred) issues.push({ step: 'financial', label: '산출내역서(견적서) PDF 또는 이후 제출' });
       if (
         draft.contractStart.trim()
         && draft.contractEnd.trim()
@@ -1335,21 +1344,18 @@ export function ProjectEditorWizard({
     }
     if (!draft.managerName.trim()) issues.push({ step: 'team', label: 'PM' });
     if (isSelfExecutiveApprover) {
-      issues.push({ step: 'team', label: '사업 담당자와 지정 결재자는 달라야 합니다.' });
+      issues.push({ step: 'team', label: '사업 담당자와 최종 결재자는 달라야 합니다.' });
     } else if (!draft.executiveApproverId || !selectedExecutiveApprover) {
-      issues.push({ step: 'team', label: '지정 결재자' });
+      issues.push({ step: 'team', label: '최종 결재자 지정 (사업총괄)' });
     }
     if (usesRegistrationV2 && hasIncompleteProjectTeamMembers(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '참여인력 이름·역할·서류상 여부' });
+      issues.push({ step: 'team', label: '참여인력 이름·역할' });
     }
     if (usesRegistrationV2 && !hasProjectOperatingManager(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '실제 투입 운영 매니저 1인 이상' });
+      issues.push({ step: 'team', label: '운영매니저 1인 이상' });
     }
     if (usesRegistrationV2 && hasInvalidProjectSettlementSupportMember(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 실제 투입인력으로 선택' });
-    }
-    if (usesRegistrationV2 && hasInvalidProjectTeamMemberLaborPeriod(draft.teamMembersDetailed)) {
-      issues.push({ step: 'team', label: '인건비 투입 종료월은 시작월 이후여야 합니다.' });
+      issues.push({ step: 'team', label: '정산지원은 도담 또는 써니를 선택' });
     }
     return issues;
   }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
@@ -1644,7 +1650,7 @@ export function ProjectEditorWizard({
     <div className="space-y-4">
       {onContractFileUpload || onProjectDocumentFileUpload ? (
         <div className="space-y-3">
-          {usesRegistrationV2 && onProjectDocumentFileUpload ? (
+          {usesRegistrationV2 ? (
             <>
               <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                 <p className="text-sm font-semibold text-[#001e46]">등록 제출서류 7종</p>
@@ -1652,11 +1658,53 @@ export function ProjectEditorWizard({
                   1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다.
                 </p>
               </div>
-              {REGISTRATION_DOCUMENT_SLOTS.map(renderRegistrationDocumentSlot)}
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
-                <Checkbox checked={draft.quoteSubmissionDeferred} onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)} />
-                산출내역서(견적서) 이후 제출(예외 처리)
-              </label>
+              {REGISTRATION_DOCUMENT_SLOTS.map((slot) => (
+                <Fragment key={slot.number}>
+                  {slot.number === 5 || slot.number === 6 ? (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <Label className="text-xs">{slot.number}. {slot.label}</Label>
+                      <p className="mt-1 text-[11px] text-muted-foreground">{slot.description}</p>
+                      <Input
+                        type="url"
+                        value={slot.number === 5
+                          ? draft.registrationConfirmations.proposalPptOriginal
+                          : draft.registrationConfirmations.presentationPptOriginal}
+                        onChange={(event) => update('registrationConfirmations', {
+                          ...draft.registrationConfirmations,
+                          [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
+                        })}
+                        placeholder="https://drive.google.com/..."
+                        className="mt-2 h-9 text-sm"
+                      />
+                    </div>
+                  ) : slot.number === 1 || onProjectDocumentFileUpload ? renderRegistrationDocumentSlot(slot) : null}
+                  {slot.number === 1 ? (
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+                      <p className="mb-2 font-medium">모두 싸인으로 진행하셨나요? *</p>
+                      <div className="flex gap-4">
+                        {[true, false].map((value) => (
+                          <label key={String(value)} className="flex items-center gap-2">
+                            <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
+                            {value ? '예' : '아니오'}
+                          </label>
+                        ))}
+                      </div>
+                      {draft.registrationConfirmations.modusignContractUsed === false ? (
+                        <label className="mt-3 flex items-center gap-2">
+                          <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
+                          계약서를 써니(사업지원팀)에게 제출했습니다.
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {slot.number === 3 ? (
+                    <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+                      <Checkbox checked={draft.quoteSubmissionDeferred} onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)} />
+                      산출내역서(견적서) 이후 제출(예외 처리)
+                    </label>
+                  ) : null}
+                </Fragment>
+              ))}
             </>
           ) : registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
         </div>
@@ -2036,7 +2084,7 @@ export function ProjectEditorWizard({
           ) : null}
         </div>
         <div>
-          <Label className="text-xs">지정 결재자 *</Label>
+          <Label className="text-xs">최종 결재자 지정 (사업총괄) *</Label>
           <Select value={selectedExecutiveApprover?.uid} onValueChange={(value) => {
             const member = executiveApproverOptions.find((item) => item.uid === value);
             if (!member) return;
@@ -2064,7 +2112,7 @@ export function ProjectEditorWizard({
           </p>
           {isSelfExecutiveApprover ? (
             <p className="mt-1 text-[11px] text-red-700">
-              사업 담당자와 지정 결재자는 달라야 합니다.
+              사업 담당자와 최종 결재자는 달라야 합니다.
             </p>
           ) : hasUnlinkedStoredExecutiveApprover ? (
             <p className="mt-1 text-[11px] text-red-700">
@@ -2076,7 +2124,7 @@ export function ProjectEditorWizard({
       <div className="flex items-center justify-between gap-3">
         <div>
           <Label className="text-xs">참여인력 (서류상·실제)</Label>
-          <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력, 역할, 참여율을 같은 구조로 저장합니다.</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">계약·협약서에 남길 참여인력과 역할을 저장합니다.</p>
         </div>
         <Button type="button" onClick={addTeamMember} className="gap-2">
           <Plus className="h-4 w-4" />
@@ -2116,7 +2164,7 @@ export function ProjectEditorWizard({
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
                   <div>
                     <Label className="text-xs">입력 방식</Label>
                     <Select
@@ -2176,49 +2224,6 @@ export function ProjectEditorWizard({
                       <p className="mt-1 text-[10px] text-red-700">정산지원은 도담 또는 써니를 선택해 주세요.</p>
                     ) : null}
                   </div>
-                  <div>
-                    <Label className="text-xs">참여율(%)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={member.participationRate || ''}
-                      onChange={(event) => updateTeamMember(index, { participationRate: Number(event.target.value) || 0 })}
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">참여 구분</Label>
-                    <Select
-                      value={member.isDocumentOnly === true ? 'document' : 'actual'}
-                      onValueChange={(value) => updateTeamMember(index, { isDocumentOnly: value === 'document' })}
-                    >
-                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="actual">실제 투입인력</SelectItem>
-                        <SelectItem value="document">서류상 참여인력</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs">인건비 시작월</Label>
-                    <Input
-                      type="month"
-                      value={member.laborAllocationStartMonth || ''}
-                      onChange={(event) => updateTeamMember(index, { laborAllocationStartMonth: event.target.value })}
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">인건비 종료월</Label>
-                    <Input
-                      type="month"
-                      value={member.laborAllocationEndMonth || ''}
-                      onChange={(event) => updateTeamMember(index, { laborAllocationEndMonth: event.target.value })}
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
                 </div>
               </div>
             );
@@ -2237,14 +2242,6 @@ export function ProjectEditorWizard({
       } else {
         update('paymentPlan', { ...paymentPlan, [field]: value });
       }
-    };
-    const financeWeekYear = financialYear?.year || Number(draft.contractEnd.slice(0, 4)) || 0;
-    const finalPaymentExpectedWeek = financialYear
-      ? (financialYear.finalPaymentExpectedWeek || '')
-      : draft.finalPaymentExpectedWeek;
-    const updateFinalPaymentExpectedWeek = (value: string) => {
-      if (financialYear && financialYearIndex !== undefined) updateFinancialYear(financialYearIndex, 'finalPaymentExpectedWeek', value);
-      else update('finalPaymentExpectedWeek', value);
     };
     const yearAdvanceInterimRatio = financialYear && financialYear.contractAmount > 0
       ? (paymentPlan.contract + paymentPlan.interim) / financialYear.contractAmount
@@ -2274,14 +2271,6 @@ export function ProjectEditorWizard({
           <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.final, financialYear?.contractAmount || draft.contractAmount)}</p>
           {!financialYear ? <><Label className="mt-3 block text-xs">입금 예상월{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" value={draft.paymentExpectedMonths.final} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, final: event.target.value })} className="mt-1 h-9 text-sm" /></> : null}
         </div>
-      </div>
-      <div>
-        <Label className="text-xs">최종 입금 재무주차</Label>
-        <Select value={finalPaymentExpectedWeek || undefined} onValueChange={updateFinalPaymentExpectedWeek} disabled={!financeWeekYear}>
-          <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="예: 26-8-1" /></SelectTrigger>
-          <SelectContent>{getYearFinanceWeeks(financeWeekYear).map((week) => <SelectItem key={week.label} value={week.label}>{week.label}</SelectItem>)}</SelectContent>
-        </Select>
-        {!financeWeekYear ? <p className="mt-1 text-[11px] text-muted-foreground">계약 종료일을 입력하면 재무주차를 선택할 수 있습니다.</p> : null}
       </div>
       {financialYear ? (
         <label className="flex items-center gap-2 text-[12px] text-slate-700">
@@ -2415,13 +2404,13 @@ export function ProjectEditorWizard({
     },
     {
       number: 5,
-      label: '제안서(PPT 원본)',
-      value: draft.proposalPptOriginalDocument?.name || '미첨부',
+      label: '제안서(구글드라이브 링크)',
+      value: draft.registrationConfirmations.proposalPptOriginal || draft.proposalPptOriginalDocument?.name || '미입력',
     },
     {
       number: 6,
-      label: '발표자료(PPT 원본)',
-      value: draft.presentationPptOriginalDocument?.name || '미첨부',
+      label: '발표자료(구글드라이브 링크)',
+      value: draft.registrationConfirmations.presentationPptOriginal || draft.presentationPptOriginalDocument?.name || '미입력',
     },
     { number: 7, label: 'RFP', value: draft.rfpRequestEvidenceDocument?.name || '미첨부' },
   ];
@@ -2499,7 +2488,7 @@ export function ProjectEditorWizard({
                 <ReviewRow
                   label="연도별 재무"
                   value={draft.financialYears.map((row) => (
-                    `${row.year}년 계약 ${fmtKRW(row.contractAmount)}원 · 매출VAT ${fmtKRW(row.salesVatAmount)}원 · 총수익 ${fmtKRW(row.totalRevenueAmount)}원 · 총실비 ${fmtKRW(row.totalActualCost)}원 · 지원금 ${fmtKRW(row.supportAmount)}원 · 선금 ${fmtKRW(row.paymentPlan?.contract || 0)}원 · 중도금 ${fmtKRW(row.paymentPlan?.interim || 0)}원 · 잔금 ${fmtKRW(row.paymentPlan?.final || 0)}원 · 최종 입금 주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''} · 수익률 ${(row.profitRate * 100).toFixed(2)}%${row.confirmed ? ' · 확인' : ' · 미확인'}`
+                    `${row.year}년 계약 ${fmtKRW(row.contractAmount)}원 · 매출VAT ${fmtKRW(row.salesVatAmount)}원 · 총수익 ${fmtKRW(row.totalRevenueAmount)}원 · 총실비 ${fmtKRW(row.totalActualCost)}원 · 지원금 ${fmtKRW(row.supportAmount)}원 · 선금 ${fmtKRW(row.paymentPlan?.contract || 0)}원 · 중도금 ${fmtKRW(row.paymentPlan?.interim || 0)}원 · 잔금 ${fmtKRW(row.paymentPlan?.final || 0)}원 · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''} · 수익률 ${(row.profitRate * 100).toFixed(2)}%${row.confirmed ? ' · 확인' : ' · 미확인'}`
                   )).join('\n')}
                 />
                 <ReviewRow
@@ -2533,7 +2522,7 @@ export function ProjectEditorWizard({
           <CardContent>
             <ReviewRow label="PM" value={draft.managerName} />
             <ReviewRow label="담당자 계정" value={draft.managerId || '-'} />
-            <ReviewRow label="지정 결재자" value={draft.executiveApproverName} />
+            <ReviewRow label="최종 결재자 지정 (사업총괄)" value={draft.executiveApproverName} />
             <ReviewRow label="참여인력 (서류상·실제)" value={teamMembersSummary} />
           </CardContent>
         </Card>
@@ -2550,7 +2539,6 @@ export function ProjectEditorWizard({
             {requiresAdvanceInterimReason ? <ReviewRow label="70% 미만 사유" value={draft.advanceInterimBelow70Reason} /> : null}
             <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />
             <ReviewRow label="계약/재무 안내" value={draft.settlementGuide} />
-            {!hasMultiYearContract ? <ReviewRow label="최종 입금 재무주차" value={draft.finalPaymentExpectedWeek} /> : null}
             {showProjectCheckout ? (
               <ReviewRow
                 label="종료사업 체크아웃"

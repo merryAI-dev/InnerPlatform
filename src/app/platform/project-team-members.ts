@@ -47,6 +47,11 @@ function normalizeProjectTeamMemberRow(
   };
   if (typeof member?.isDocumentOnly === 'boolean') {
     normalized.isDocumentOnly = member.isDocumentOnly;
+  } else if (normalized.memberName && (
+    PROJECT_TEAM_MEMBER_ROLES.includes(normalized.role as typeof PROJECT_TEAM_MEMBER_ROLES[number])
+    || RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(normalized.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number])
+  )) {
+    normalized.isDocumentOnly = false;
   }
   const laborAllocationStartMonth = toMonth(member?.laborAllocationStartMonth);
   const laborAllocationEndMonth = toMonth(member?.laborAllocationEndMonth);
@@ -91,7 +96,6 @@ export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment)
       PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof PROJECT_TEAM_MEMBER_ROLES[number])
       || RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number])
     )
-    && typeof member.isDocumentOnly === 'boolean',
   );
 }
 
@@ -105,7 +109,7 @@ export function hasProjectOperatingManager(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ) {
   return normalizeProjectTeamMembers(members).some((member) => (
-    member.role === '운영매니저' && member.isDocumentOnly === false
+    member.role === '운영매니저'
   ));
 }
 
@@ -128,7 +132,7 @@ export function hasInvalidProjectSettlementSupportMember(
 ) {
   return normalizeProjectTeamMembers(members).some((member) => (
     member.role === '정산지원'
-    && (member.isDocumentOnly !== false || !isProjectSettlementSupportMember(member))
+    && !isProjectSettlementSupportMember(member)
   ));
 }
 

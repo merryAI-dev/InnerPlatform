@@ -83,13 +83,21 @@ describe('project-team-members', () => {
     ])).toBe(false);
   });
 
+  it('defaults a legacy PPT role missing isDocumentOnly to actual participation', () => {
+    expect(projectTeamMembersForWrite([
+      { memberName: '김다은', memberNickname: '', role: '운영매니저', participationRate: 0 },
+    ])).toEqual([
+      { memberName: '김다은', memberNickname: '', role: '운영매니저', participationRate: 0, isDocumentOnly: false },
+    ]);
+  });
+
   it('preserves the retired final-responsible role on legacy rows', () => {
     expect(hasIncompleteProjectTeamMembers([
       { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 50, isDocumentOnly: false },
     ])).toBe(false);
   });
 
-  it('rejects a legacy free-text role or missing document-only choice in v2 completeness checks', () => {
+  it('defaults a missing legacy document-only choice without accepting an invalid role', () => {
     expect(hasIncompleteProjectTeamMembers([
       { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 50 },
     ])).toBe(true);
@@ -147,7 +155,7 @@ describe('project-team-members', () => {
     ])).toBe(true);
     expect(hasProjectOperatingManager([
       { memberName: '김다은', memberNickname: '', role: '운영매니저', participationRate: 0, isDocumentOnly: true },
-    ])).toBe(false);
+    ])).toBe(true);
   });
 
   it('keeps the retired final-responsible role readable without offering it for new selection', () => {

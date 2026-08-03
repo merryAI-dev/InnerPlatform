@@ -240,7 +240,7 @@ function RegistrationEditor({
             </div>
             <div>
               <h1 className="text-xl font-semibold text-slate-950">프로젝트 등록 요청이 최종 저장되었습니다</h1>
-              <p className="mt-2 text-sm text-slate-600">이제 지정 결재자의 조직장 검토 화면에 표시됩니다.</p>
+              <p className="mt-2 text-sm text-slate-600">이제 최종 결재자 (사업총괄)의 조직장 검토 화면에 표시됩니다.</p>
             </div>
             <Button onClick={() => navigate('/portal/project-select')}>프로젝트 선택으로 돌아가기</Button>
           </CardContent>
@@ -277,7 +277,7 @@ function RegistrationEditor({
       <ProjectEditorWizard
         mode="portal-register"
         title="프로젝트 등록"
-        description="임시저장 내용은 본인에게만 보이며, 최종 저장 후 지정 결재자의 조직장 검토 화면에 표시됩니다."
+        description="임시저장 내용은 본인에게만 보이며, 최종 저장 후 최종 결재자 (사업총괄)의 조직장 검토 화면에 표시됩니다."
         embeddedInShell
         initialDraft={editorDraft}
         draftKey={`portal-register-${record.draftId}`}

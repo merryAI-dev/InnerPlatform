@@ -230,6 +230,10 @@ describe('isValidDriveUrl', () => {
     expect(isValidDriveUrl('https://docs.google.com/spreadsheets/d/abc')).toBe(true);
   });
 
+  it('rejects lookalike Google Drive hosts', () => {
+    expect(isValidDriveUrl('https://drive.google.com.evil.example/file')).toBe(false);
+  });
+
   it('accepts http URL', () => {
     expect(isValidDriveUrl('http://drive.google.com/drive/folders/abc')).toBe(true);
   });

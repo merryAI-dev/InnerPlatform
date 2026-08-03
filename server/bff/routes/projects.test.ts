@@ -94,6 +94,8 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
       customerSettlementBasisConfirmed: true,
       modusignContractUsed: false,
       originalContractSubmitted: true,
+      proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+      presentationPptOriginal: 'http://docs.google.com/presentation/d/presentation/edit',
     },
     registrationOptionalDocumentNotes: {
       proposalWordOriginal: '제안서 Word 원본은 고객사 제공 자료가 없어 제출 제외',
@@ -173,18 +175,17 @@ describe('project route helpers', () => {
     expect(submission.projectRequest.payload.contractAnalysis).toBeNull();
   });
 
-  it('builds a registration v2 canonical record without retired registration confirmations', () => {
+  it('builds a registration v2 canonical record with contract confirmations and no retired finance week', () => {
     const canonical = registrationV2Canonical();
 
     expect(canonical.projectRequest.payload).toMatchObject({
       registrationRequirementsVersion: 2,
       financialYears: [
-        { year: 2026, confirmed: true, profitRate: 0.4, totalActualCost: 25_000, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, finalPaymentExpectedWeek: '26-8-1', advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
-        { year: 2027, confirmed: true, profitRate: 0.4, totalActualCost: 50_000, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, finalPaymentExpectedWeek: '27-12-4', isSettled: false },
+        { year: 2026, confirmed: true, profitRate: 0.4, totalActualCost: 25_000, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
+        { year: 2027, confirmed: true, profitRate: 0.4, totalActualCost: 50_000, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, isSettled: false },
       ],
       totalActualCost: 75_000,
       interestRefundPolicy: 'REFUND',
-      finalPaymentExpectedWeek: '27-12-4',
       quoteSubmissionDeferred: false,
       settlementSystem: 'BOTAEM_E',
       laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
@@ -197,8 +198,13 @@ describe('project route helpers', () => {
       executiveApproverName: '조직장 A',
       executiveApproverEmail: 'head-a@mysc.co.kr',
     });
-    expect(canonical.projectRequest.payload).not.toHaveProperty('registrationConfirmations');
-    expect(canonical.project).not.toHaveProperty('registrationConfirmations');
+    expect(canonical.projectRequest.payload.registrationConfirmations).toMatchObject({
+      modusignContractUsed: false,
+      originalContractSubmitted: true,
+      proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+      presentationPptOriginal: 'http://docs.google.com/presentation/d/presentation/edit',
+    });
+    expect(canonical.project.registrationConfirmations).toMatchObject({ modusignContractUsed: false, originalContractSubmitted: true });
     expect(canonical.projectRequest.payload).not.toHaveProperty('groupwareName');
     expect(canonical.projectRequest.payload).toMatchObject({
       registrationOptionalDocumentNotes: {
@@ -211,10 +217,7 @@ describe('project route helpers', () => {
     expect(canonical.project.executiveReviewHistory?.[0]?.reviewComment).toBe('PM 신규 등록');
     expect(canonical.project).toMatchObject({
       registrationRequirementsVersion: 2,
-      financialYears: [
-        { year: 2026, confirmed: true, finalPaymentExpectedWeek: '26-8-1' },
-        { year: 2027, confirmed: true, finalPaymentExpectedWeek: '27-12-4' },
-      ],
+      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
       executiveApproverId: 'head-a',
       executiveApproverName: '조직장 A',
       executiveApproverEmail: 'head-a@mysc.co.kr',
@@ -419,20 +422,19 @@ describe('project route helpers', () => {
     expect(submission.projectPatch).not.toHaveProperty('executiveReviewStatus');
   });
 
-  it('allows a v2 settlement-none basis without retired registration confirmations', () => {
+  it('allows a v2 settlement-none basis with required contract confirmations', () => {
     const canonical = registrationV2Canonical(registrationV2Payload({
       settlementType: 'TYPE1',
       basis: 'NONE',
       settlementSystem: 'NONE',
       laborSettlementBasis: 'NONE',
-      registrationConfirmations: undefined,
     }));
 
     expect(canonical.projectRequest.payload).toMatchObject({
       settlementType: 'TYPE1',
       basis: 'NONE',
     });
-    expect(canonical.projectRequest.payload).not.toHaveProperty('registrationConfirmations');
+    expect(canonical.projectRequest.payload.registrationConfirmations).toBeDefined();
   });
 
   it.each(registrationV2RequiredAttachmentKinds)('requires the %s registration attachment', (missingKind) => {
@@ -545,22 +547,23 @@ describe('project route helpers', () => {
       'Project registration teamMembersDetailed.0.role is invalid',
     ],
     [
-      'team document-only choice',
-      { teamMembersDetailed: [{ memberName: '변민욱', role: '실무책임자', participationRate: 50 }] },
-      'Project registration teamMembersDetailed.0.isDocumentOnly is required',
-    ],
-    [
       'operating manager',
       { teamMembersDetailed: [{ memberName: '변민욱', role: '실무책임자', participationRate: 50, isDocumentOnly: false }] },
       'Project registration requires at least one operating manager',
     ],
-    [
-      'actual operating manager',
-      { teamMembersDetailed: [{ memberName: '변민욱', role: '운영매니저', participationRate: 0, isDocumentOnly: true }] },
-      'Project registration requires at least one actual operating manager',
-    ],
   ])('rejects registration v2 with incomplete %s', (_label, overrides, message) => {
     expect(() => registrationV2Canonical(registrationV2Payload(overrides))).toThrowError(message);
+  });
+
+  it.each([undefined, true])('accepts a legacy operating manager with isDocumentOnly=%s', (isDocumentOnly) => {
+    expect(() => registrationV2Canonical(registrationV2Payload({
+      teamMembersDetailed: [{
+        memberName: '변민욱',
+        role: '운영매니저',
+        participationRate: 0,
+        ...(isDocumentOnly === undefined ? {} : { isDocumentOnly }),
+      }],
+    }))).not.toThrow();
   });
 
   it('preserves version 1 compatibility for an existing-project change request', () => {
@@ -572,22 +575,23 @@ describe('project route helpers', () => {
     expect(patch.registrationRequirementsVersion).toBe(1);
   });
 
-  it('preserves legacy confirmations and new finance fields on an existing-project change', () => {
+  it('preserves confirmations and historical finance weeks on an existing-project change', () => {
     const legacyConfirmations = registrationV2Payload().registrationConfirmations;
     const payload = registrationV2Payload({ registrationConfirmations: legacyConfirmations });
-    const patch = buildProjectPatchFromChangeRequestPayload(payload, { id: 'existing-project', version: 3 });
+    const patch = buildProjectPatchFromChangeRequestPayload(payload, { id: 'existing-project', version: 3, finalPaymentExpectedWeek: '27-12-4', financialYears: payload.financialYears });
 
     expect(patch.registrationConfirmations).toEqual(legacyConfirmations);
     expect(patch).toMatchObject({
       totalActualCost: 75_000,
       interestRefundPolicy: 'REFUND',
-      finalPaymentExpectedWeek: '27-12-4',
       quoteSubmissionDeferred: false,
       financialYears: [
         expect.objectContaining({ paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, advanceInterimBelow70Reason: '연차별 일정', isSettled: true }),
         expect.objectContaining({ paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, isSettled: false }),
       ],
     });
+    expect(patch).not.toHaveProperty('finalPaymentExpectedWeek');
+    expect(patch.financialYears?.[0]?.finalPaymentExpectedWeek).toBe('26-8-1');
   });
 
   it('preserves legacy finance notes when a change request omits or empties their payload fields', () => {
@@ -716,11 +720,13 @@ describe('project route helpers', () => {
   });
 
   it.each([
-    ['invalid annual finance week', registrationV2Payload({ financialYears: [
-      { ...registrationV2Payload().financialYears[0], finalPaymentExpectedWeek: '2026-W31' },
-      registrationV2Payload().financialYears[1],
-    ] })],
     ['invalid interest refund policy', registrationV2Payload({ interestRefundPolicy: 'KEEP' })],
+    ['invalid PPT URL', registrationV2Payload({
+      registrationConfirmations: {
+        ...registrationV2Payload().registrationConfirmations,
+        proposalPptOriginal: 'https://example.com/proposal.pptx',
+      },
+    })],
   ])('rejects registration v2 with %s as 422', (_label, payload) => {
     expect(() => registrationV2Canonical(payload)).toThrow(expect.objectContaining({
       statusCode: 422,

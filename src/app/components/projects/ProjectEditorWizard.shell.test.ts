@@ -11,12 +11,13 @@ const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '
 describe('ProjectEditorWizard dropdown contract', () => {
   it('requires documents 1-2, allows document 3 to be deferred, and keeps documents 4-7 optional', () => {
     expect(source).toContain("label: '계약서 *'");
-    expect(source).toContain("description: '계약서 써니(사업지원팀)에게 제출했습니다.'");
+    expect(source).toContain('모두 싸인으로 진행하셨나요? *');
+    expect(source).toContain('계약서를 써니(사업지원팀)에게 제출했습니다.');
     expect(source).toContain("label: '고객사 사업자등록증 *'");
     expect(source).toContain("label: '산출내역서(견적서) *'");
     expect(source).toContain("label: '제안서(워드)'");
-    expect(source).toContain("label: '제안서(PPT 원본)'");
-    expect(source).toContain("label: '발표자료(PPT 원본)'");
+    expect(source).toContain("label: '제안서(구글드라이브 링크)'");
+    expect(source).toContain("label: '발표자료(구글드라이브 링크)'");
     expect(source).toContain("label: 'RFP'");
     expect(source.match(/description: '있을 시'/g)).toHaveLength(3);
     expect(source).toContain("description: '없으면 사업요청사항을 확인할 수 있는 메일 본문 등 첨부'");
@@ -75,7 +76,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   });
 
   it('lets project registration and edit choose a designated executive approver from the member directory', () => {
-    expect(source).toContain('지정 결재자 *');
+    expect(source).toContain('최종 결재자 지정 (사업총괄) *');
     expect(source).toContain('const selectedExecutiveApprover = useMemo');
     expect(source).toContain('const executiveApproverOptions = useMemo');
     expect(source).toContain('requesterId?: string');
@@ -83,7 +84,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(portalRegisterSource).toContain('requesterId={actor.uid}');
     expect(source).toContain('requesterId, ownerOptions');
     expect(source).toContain('const isSelfExecutiveApprover = Boolean(');
-    expect(source).toContain('사업 담당자와 지정 결재자는 달라야 합니다.');
+    expect(source).toContain('사업 담당자와 최종 결재자는 달라야 합니다.');
   });
 
   it('offers only active members as project owners and designated executive approvers', () => {
@@ -163,8 +164,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('normalizeProjectTeamMemberDraftRows');
     expect(addTeamMemberBlock).toContain('teamMembersDetailed: [...prev.teamMembersDetailed, createEmptyTeamMember()]');
     expect(addTeamMemberBlock).not.toContain('createProjectEditorDraft');
-    expect(source).toContain('인건비 시작월');
-    expect(source).toContain('인건비 종료월');
+    expect(source).not.toContain('<Label className="text-xs">인건비 시작월</Label>');
+    expect(source).not.toContain('<Label className="text-xs">인건비 종료월</Label>');
     expect(source).toContain('laborAllocationStartMonth');
     expect(source).toContain('laborAllocationEndMonth');
     expect(source).toContain('<Plus className="h-4 w-4" />');
@@ -353,19 +354,23 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' })");
     expect(source).toContain('고객사 사업자등록증 PDF');
     expect(source).toContain('계약 종료일은 시작일 이후여야 합니다.');
-    expect(source).toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
-    expect(source).toContain('실제 투입 운영 매니저 1인 이상');
+    expect(source).not.toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
+    expect(source).toContain('운영매니저 1인 이상');
     expect(source).toContain("const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE'");
     expect(source).not.toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
-    expect(source).toContain('md:grid-cols-2 xl:grid-cols-4');
+    expect(source).toContain('md:grid-cols-3');
     expect(source).not.toContain('xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]');
     expect(source).not.toContain('alternativeDocumentAttached');
     expect(source).not.toContain('특이사항 (메모란)');
     expect(source).not.toContain('lg:sticky lg:bottom-4');
     expect(source).not.toContain('발주처');
     expect(source).toMatch(/number: 4,\s+label: '제안서\(워드\)'/);
-    expect(source).toMatch(/number: 5,\s+label: '제안서\(PPT 원본\)'/);
-    expect(source).toMatch(/number: 6,\s+label: '발표자료\(PPT 원본\)'/);
+    expect(source).toMatch(/number: 5,\s+label: '제안서\(구글드라이브 링크\)'/);
+    expect(source).toMatch(/number: 6,\s+label: '발표자료\(구글드라이브 링크\)'/);
+    expect(source).toContain('{usesRegistrationV2 ? (');
+    expect(source).toContain('slot.number === 1 || onProjectDocumentFileUpload');
+    expect(source).toContain('{slot.description}');
+    expect(source).toContain('isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)');
     expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
     expect(source).toContain('연도별 계약·재무 *');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
@@ -398,8 +403,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('총실비(원가)');
     expect(source).toContain('ACCOUNT_TYPE_LABELS');
     expect(source).toContain('INTEREST_REFUND_POLICY_LABELS');
-    expect(source).toContain('최종 입금 재무주차');
-    expect(source).toContain('placeholder="예: 26-8-1"');
+    expect(source).not.toContain('최종 입금 재무주차');
+    expect(source).not.toContain('placeholder="예: 26-8-1"');
     expect(source).toContain('const effectivePaymentPlan = hasMultiYearContract');
     expect(source).toContain('total.contract + (row.paymentPlan?.contract || 0)');
     expect(source).toContain('년 선금·중도금 합계 70% 미만 사유 *');
@@ -407,9 +412,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("updateFinancialYear(financialYearIndex!, 'isSettled'");
     expect(source).toContain('(기존값 · 선택 불가)');
     expect(source).toContain('disabled>{member.role}');
-    expect(source).toContain('최종 입금 주차 ${row.finalPaymentExpectedWeek || \'-\'}');
-    expect(source).toContain('disabled={!financeWeekYear}');
-    expect(source).toContain('계약 종료일을 입력하면 재무주차를 선택할 수 있습니다.');
+    expect(source).not.toContain('최종 입금 주차 ${row.finalPaymentExpectedWeek || \'-\'}');
+    expect(source).not.toContain('disabled={!financeWeekYear}');
+    expect(source).not.toContain('계약 종료일을 입력하면 재무주차를 선택할 수 있습니다.');
     expect(source).not.toContain('입금계획');
   });
 

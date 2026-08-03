@@ -192,6 +192,8 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
     customerSettlementBasisConfirmed: false,
     modusignContractUsed: null,
     originalContractSubmitted: null,
+    proposalPptOriginal: '',
+    presentationPptOriginal: '',
   },
   registrationOptionalDocumentNotes: {
     proposalWordOriginal: '',
@@ -349,6 +351,10 @@ function projectFinancialYears(
   });
 }
 
+function projectFinancialYearsForWrite(rows: ProjectFinancialYear[]): ProjectFinancialYear[] {
+  return rows.map(({ finalPaymentExpectedWeek: _historicalWeek, ...row }) => row);
+}
+
 function registrationConfirmations(value: unknown): ProjectRegistrationConfirmations {
   const source = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<ProjectRegistrationConfirmations>
@@ -360,6 +366,8 @@ function registrationConfirmations(value: unknown): ProjectRegistrationConfirmat
     customerSettlementBasisConfirmed: source.customerSettlementBasisConfirmed === true,
     modusignContractUsed: optionalBoolean(source.modusignContractUsed),
     originalContractSubmitted: optionalBoolean(source.originalContractSubmitted),
+    proposalPptOriginal: text(source.proposalPptOriginal),
+    presentationPptOriginal: text(source.presentationPptOriginal),
   };
 }
 
@@ -487,7 +495,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'laborSettlementBasis', label: '인건비 정산 기준', before: (project) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(project.laborSettlementBasis)] || '-', after: (draft) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(draft.laborSettlementBasis)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
   { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
-  { key: 'executiveApproverName', label: '지정 결재자', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
+  { key: 'executiveApproverName', label: '최종 결재자 지정 (사업총괄)', before: (project) => normalizeChangeValue(project.executiveApproverName), after: (draft) => normalizeChangeValue(draft.executiveApproverName) },
   { key: 'teamName', label: '사내기업팀', before: (project) => normalizeChangeValue(project.teamName), after: (draft) => normalizeChangeValue(draft.teamName) },
   { key: 'teamMembersDetailed', label: '참여인력 (서류상·실제)', before: (project) => formatTeamMembersForChange(project.teamMembersDetailed), after: (draft) => formatTeamMembersForChange(draft.teamMembersDetailed) },
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
@@ -505,6 +513,8 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'proposalWordOriginalDocument', label: '제안서 Word 원본', before: (project) => normalizeChangeValue(project.proposalWordOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalWordOriginalDocument?.name) },
   { key: 'proposalPptOriginalDocument', label: '제안서 PPT 원본', before: (project) => normalizeChangeValue(project.proposalPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalPptOriginalDocument?.name) },
   { key: 'presentationPptOriginalDocument', label: '발표자료 PPT 원본', before: (project) => normalizeChangeValue(project.presentationPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.presentationPptOriginalDocument?.name) },
+  { key: 'proposalPptOriginal', label: '제안서(구글드라이브 링크)', before: (project) => normalizeChangeValue(project.registrationConfirmations?.proposalPptOriginal), after: (draft) => normalizeChangeValue(draft.registrationConfirmations.proposalPptOriginal) },
+  { key: 'presentationPptOriginal', label: '발표자료(구글드라이브 링크)', before: (project) => normalizeChangeValue(project.registrationConfirmations?.presentationPptOriginal), after: (draft) => normalizeChangeValue(draft.registrationConfirmations.presentationPptOriginal) },
   { key: 'rfpRequestEvidenceDocument', label: 'RFP 또는 요청 메일 증빙', before: (project) => normalizeChangeValue(project.rfpRequestEvidenceDocument?.name), after: (draft) => normalizeChangeValue(draft.rfpRequestEvidenceDocument?.name) },
   { key: 'customerBusinessRegistrationDocument', label: '고객사 사업자등록증 PDF', before: (project) => normalizeChangeValue(project.customerBusinessRegistrationDocument?.name), after: (draft) => normalizeChangeValue(draft.customerBusinessRegistrationDocument?.name) },
   { key: 'performanceCertificateDocument', label: '수행확인서 PDF', before: (project) => normalizeChangeValue(project.performanceCertificateDocument?.name), after: (draft) => normalizeChangeValue(draft.performanceCertificateDocument?.name) },
@@ -759,8 +769,9 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     supportAmount: nonNegativeAmount(draft.supportAmount),
     financialInputFlags: normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft),
     registrationRequirementsVersion: draft.registrationRequirementsVersion,
-    financialYears: draft.financialYears,
+    financialYears: projectFinancialYearsForWrite(draft.financialYears),
     registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
+    registrationConfirmations: draft.registrationConfirmations,
     checkout: draft.checkout,
     contractStart: text(draft.contractStart),
     contractEnd: text(draft.contractEnd),
@@ -775,7 +786,6 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
-    finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),
     laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
@@ -885,7 +895,6 @@ export function buildProjectEditorProjectPatch(
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
-    finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),
     laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
@@ -904,6 +913,8 @@ export function buildProjectEditorProjectPatch(
     registrationRequirementsVersion: draft.registrationRequirementsVersion,
     financialYears: draft.financialYears,
     registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
+    registrationConfirmations: draft.registrationConfirmations,
+    finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),
     checkout: draft.checkout,
     settlementGuide: text(draft.settlementGuide),
     note: text(draft.note),

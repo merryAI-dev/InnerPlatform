@@ -114,7 +114,7 @@ async function assertActiveRegistrationMembersInTransaction({ tx, db, tenantId, 
       && readOptionalText(member.status).toUpperCase() === 'ACTIVE';
   });
   if (!everyMemberIsActive) {
-    throw createHttpError(403, '같은 조직의 활성 구성원만 사업 담당자와 지정 결재자로 선택할 수 있습니다.', 'forbidden');
+    throw createHttpError(403, '같은 조직의 활성 구성원만 사업 담당자와 최종 결재자 (사업총괄)로 선택할 수 있습니다.', 'forbidden');
   }
 }
 
