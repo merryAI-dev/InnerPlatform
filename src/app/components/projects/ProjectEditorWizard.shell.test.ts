@@ -247,8 +247,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).not.toContain('/10자');
     expect(source).not.toContain("event.target.value.slice(0, mode === 'portal-register' ? 10 : 80)");
     expect(source).toContain('계약연도+프로젝트명 형식으로 입력해 주세요.');
-    expect(source).toContain('재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다.');
-    expect(source).toContain('다년도 사업은 같은 프로젝트명을 사용해 주세요.');
+    expect(source).toContain('다년도 사업은 같은 연도만 변경된 동일 프로젝트명을 사용해주세요.(재경팀이 부여하는 A_, C_와 같은 코드는 기입하지 않습니다)');
+    expect(source).not.toContain('재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다.');
     expect(source).toContain('사업자등록증상 법인명을 띄어쓰기까지 동일하게 입력해 주세요.');
     expect(source).toContain('어떤 대상에게 어떤 가치를 제공하는 프로젝트인지 입력');
     expect(source).toContain('CJ푸드빌 새로운 점포를 만들어갈 사내기업가 육성');
