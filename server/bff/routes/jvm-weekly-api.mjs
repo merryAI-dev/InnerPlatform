@@ -3826,7 +3826,9 @@ export function mountJvmWeeklyApiRoutes(app, {
       await verifyCumulativeRequestShards(req.context.tenantId, initialRecord);
       const approvalId = `cashflow-month-close:${requestId}:r${expectedRevision}`;
       const operationId = approvalId;
-      const jvmIdempotencyKey = `cashflow-month-close-approval:${requestId}:r${expectedRevision}`;
+      const jvmIdempotencyKey = resumesApproval
+        ? initialRecord.reviewIdempotencyKey
+        : req.context.idempotencyKey;
       const closeBody = {
         idempotencyKey: jvmIdempotencyKey,
         requestId,

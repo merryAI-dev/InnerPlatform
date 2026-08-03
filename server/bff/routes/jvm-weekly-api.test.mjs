@@ -4463,8 +4463,9 @@ describe('JVM weekly API BFF proxy', () => {
     const approvalBody = JSON.parse(fetchImpl.mock.calls.find(
       ([url, init]) => url.endsWith('/month-close') && init.method === 'POST',
     )[1].body);
+    expect(approvalBody.idempotencyKey).toBe(source.documents.get(requestPath).reviewIdempotencyKey);
     expect(approvalBody).toEqual({
-      idempotencyKey: 'cashflow-month-close-approval:project-a-2026-08:r2',
+      idempotencyKey: 'cumulative-v2-approve',
       requestId: 'project-a-2026-08', requestRevision: 2, manifestHash: resubmitted.body.manifestHash,
       yearMonth: '2026-08', expectedRevision: 0,
     });
@@ -4500,6 +4501,24 @@ describe('JVM weekly API BFF proxy', () => {
         .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 }));
       expect(closePostCount()).toBe(1);
     }
+    closedMonthClose = null;
+    dashboardSourceUnavailable = true;
+    source.documents.set(requestPath, {
+      ...source.documents.get(requestPath),
+      status: 'UNCERTAIN',
+      reviewIdempotencyKey: 'prior-uncertain-repost',
+    });
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .set('idempotency-key', 'resume-uncertain-repost')
+      .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
+      .expect(200);
+    const repostBody = JSON.parse(fetchImpl.mock.calls.filter(
+      ([url, init]) => url.endsWith('/month-close') && init.method === 'POST',
+    ).at(-1)[1].body);
+    expect(repostBody.idempotencyKey).toBe('prior-uncertain-repost');
+    expect(closePostCount()).toBe(2);
+    dashboardSourceUnavailable = false;
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
       .set('idempotency-key', 'unsafe-reject-after-approval-start')
