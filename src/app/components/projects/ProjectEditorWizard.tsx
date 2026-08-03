@@ -1413,7 +1413,7 @@ export function ProjectEditorWizard({
           className="mt-1 h-9 text-sm"
         />
         <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
-          계약연도+프로젝트명 형식으로 입력해 주세요. 재경팀이 부여하는 프로젝트 코드는 직접 입력하지 않습니다. 다년도 사업은 같은 프로젝트명을 사용해 주세요.
+          계약연도+프로젝트명 형식으로 입력해 주세요. 다년도 사업은 같은 연도만 변경된 동일 프로젝트명을 사용해주세요.(재경팀이 부여하는 A_, C_와 같은 코드는 기입하지 않습니다)
         </p>
       </div>
 
