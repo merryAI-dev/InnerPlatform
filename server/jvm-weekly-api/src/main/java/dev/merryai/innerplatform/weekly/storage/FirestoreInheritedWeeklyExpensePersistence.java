@@ -327,6 +327,20 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (!("MONTH".equals(period) || period.matches("WEEK_[1-5]"))) {
             throw new IllegalArgumentException("Cashflow settlement period is invalid.");
         }
+        if ("APPROVE".equals(action)) {
+            DocumentReference projectRef = db.document("orgs/" + actor.tenantId() + "/projects/" + projectId);
+            Map<String, Object> project = cachedDocumentIfPresent(projectRef).orElseGet(() -> {
+                DocumentSnapshot snapshot = get(projectRef);
+                return snapshot.exists() ? data(snapshot) : Map.of();
+            });
+            if (!isDesignatedCashflowSettlementApprover(project, actor.id())) {
+                throw leaseError(
+                    403,
+                    "cashflow_settlement_approval_forbidden",
+                    "Only the project's designated executive approver can approve this settlement."
+                );
+            }
+        }
         DocumentReference ref = settlementStatusRef(actor.tenantId(), projectId, yearMonth);
         Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
             DocumentSnapshot snapshot = get(ref);
@@ -377,11 +391,11 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String period,
         Map<String, Object> stored
     ) {
-        String status = text(stored.get("status"), "WAITING_FOR_UPDATE");
-        if ("COMPLETED".equals(status)
-            && !text(stored.get("valueRevision"), "").equals(settlementValueRevision(tenantId, projectId, yearMonth, period))) {
-            status = "PENDING_APPROVAL";
-        }
+        String status = effectiveSettlementStatus(
+            text(stored.get("status"), "WAITING_FOR_UPDATE"),
+            text(stored.get("valueRevision"), ""),
+            settlementValueRevision(tenantId, projectId, yearMonth, period)
+        );
         return new CashflowSettlementStatusRecord(
             period,
             status,
@@ -402,6 +416,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             if (snapshot.exists()) weeks.add(data(snapshot));
         }
         return computeCashflowTargetRevision(weeks);
+    }
+
+    static boolean isDesignatedCashflowSettlementApprover(Map<String, Object> project, String actorId) {
+        return actorId != null && !actorId.isBlank() && actorId.equals(textValue(
+            project == null ? null : project.get("executiveApproverId")
+        ));
+    }
+
+    static String effectiveSettlementStatus(String storedStatus, String approvedValueRevision, String currentValueRevision) {
+        return "COMPLETED".equals(storedStatus) && !String.valueOf(approvedValueRevision).equals(currentValueRevision)
+            ? "PENDING_APPROVAL"
+            : storedStatus;
     }
 
     private Map<String, Object> settlementStatusDocument(String tenantId, String projectId, String yearMonth) {
