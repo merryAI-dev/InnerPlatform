@@ -88,6 +88,7 @@ import {
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
+import { AxrMonthCloseQaPanel } from './AxrMonthCloseQaPanel';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 
 const CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032] as const;
@@ -3087,6 +3088,16 @@ export function CashflowProjectSheet({
           <strong>이전 형식의 월 결산입니다.</strong> 결산 당시 저장된 값은 읽을 수 있지만, 항목별 전년도 이월 근거와 전체 동결 시트는 보관되지 않았습니다. 수정이 필요하면 재오픈 승인 후 시트값을 다시 반영하고 재결산해 주세요.
         </div>
       ) : null}
+      <AxrMonthCloseQaPanel
+        projectId={projectId}
+        projectName={projectName}
+        yearMonth={yearMonth}
+        tenantId={orgId}
+        role={role}
+        resolveActor={resolveBffActor}
+        onOpenMonthCloseRequest={() => setMonthCloseReviewOpen(true)}
+        onRefresh={async () => { await Promise.all([loadCashflowMonthClose(), loadMonthCloseRequest(), loadCashflowEvents()]); }}
+      />
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
         {renderOperationsPanel()}
         {renderOpsTimeline()}
