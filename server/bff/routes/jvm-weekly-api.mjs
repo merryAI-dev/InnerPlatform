@@ -3921,6 +3921,19 @@ export function mountJvmWeeklyApiRoutes(app, {
       let monthClose;
       if (resumesApproval) monthClose = await reconcileStoredClose();
       if (!monthClose) {
+        if (initialRecord.status === 'UNCERTAIN') {
+          await db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(requestRef);
+            const current = snapshot.exists ? snapshot.data() || {} : null;
+            if (!current || !['UNCERTAIN', 'APPROVING'].includes(current.status)
+              || current.operationId !== operationId || current.reviewedByUid !== req.context.actorId
+              || current.reviewIdempotencyKey !== jvmIdempotencyKey
+              || current.manifestHash !== expectedManifestHash || Number(current.revision) !== expectedRevision) {
+              throw createHttpError(409, '월 결산 승인 상태가 변경되었습니다.', 'cashflow_month_close_request_revision_stale');
+            }
+            if (current.status === 'UNCERTAIN') transaction.set(requestRef, { ...current, status: 'APPROVING' });
+          });
+        }
         try {
           monthClose = assertCumulativeCloseResult(await proxyMutation(
             req,

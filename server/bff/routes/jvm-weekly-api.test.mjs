@@ -4178,6 +4178,11 @@ describe('JVM weekly API BFF proxy', () => {
       }
       if (init.method === 'POST') {
         const closeBody = JSON.parse(init.body);
+        if (closeBody.requestId) {
+          expect(source.documents.get(
+            `orgs/tenant-a/cashflow_month_close_requests/${closeBody.requestId}`,
+          )?.status).toBe('APPROVING');
+        }
         closedMonthClose = {
           ok: true, projectId: 'project-a', requestId: 'project-a-2026-08', requestRevision: closeBody.requestRevision,
           manifestHash: closeBody.manifestHash, yearMonth: '2026-08', status: 'CLOSED',
