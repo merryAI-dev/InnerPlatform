@@ -2095,32 +2095,14 @@ export function PortalBudget() {
           </CardContent>
         </Card>
 
-        {/* 소진율 바 총괄 */}
+        {/* 예산 총계 */}
         <Card>
           <CardContent className="p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px]" style={{ fontWeight: 600 }}>전체 소진율</span>
-              <span className="text-[13px]" style={{ fontWeight: 700, color: burnColor(total.burnRate || 0) }}>
-                {fmtPercent(total.burnRate || 0)}
-              </span>
-            </div>
-            <div className="w-full h-3 rounded-full bg-muted overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-500" style={{
-                width: `${Math.min((total.burnRate || 0) * 100, 100)}%`,
-                background: `linear-gradient(90deg, ${burnColor(total.burnRate || 0)}, ${burnColor(total.burnRate || 0)}cc)`,
-              }} />
-            </div>
-            <div className="flex justify-between mt-1.5 text-[9px] text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              <span>집행 {fmtKRW(total.spent || 0)}원</span>
-              <span>잔액 {fmtKRW(total.balance || 0)}원</span>
-            </div>
-            <div className="mt-2.5 pt-2 border-t border-border/60">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <span className="text-muted-foreground">총계</span>
-                <span>예산 <strong>{fmtKRW(total.effectiveBudget || 0)}</strong></span>
-                <span>집행 <strong style={{ color: '#e11d48' }}>{fmtKRW(total.spent || 0)}</strong></span>
-                <span>잔액 <strong style={{ color: '#059669' }}>{fmtKRW(total.balance || 0)}</strong></span>
-              </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              <span className="text-muted-foreground">총계</span>
+              <span>예산 <strong>{fmtKRW(total.effectiveBudget || 0)}</strong></span>
+              <span>집행 <strong style={{ color: '#e11d48' }}>{fmtKRW(total.spent || 0)}</strong></span>
+              <span>잔액 <strong style={{ color: '#059669' }}>{fmtKRW(total.balance || 0)}</strong></span>
             </div>
           </CardContent>
         </Card>
