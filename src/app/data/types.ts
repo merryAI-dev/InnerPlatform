@@ -509,7 +509,7 @@ export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
 };
 
 export const LABOR_SETTLEMENT_BASIS_LABELS: Record<LaborSettlementBasis, string> = {
-  INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금포함 실급여',
+  INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 포함 실급여',
   EXCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 제외 실급여',
   FIXED_AMOUNT: '정액정산',
   NONE: '정산없음',
@@ -624,6 +624,8 @@ export interface ProjectRegistrationConfirmations {
   customerSettlementBasisConfirmed: boolean;
   modusignContractUsed: boolean | null;
   originalContractSubmitted: boolean | null;
+  proposalPptOriginal?: string;
+  presentationPptOriginal?: string;
 }
 
 export interface ProjectRegistrationOptionalDocumentNotes {

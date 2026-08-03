@@ -53,6 +53,15 @@ function createRequest(overrides: ProjectRequestFixtureOverrides = {}): ProjectR
       interestRefundPolicy: 'REFUND',
       finalPaymentExpectedWeek: '26-8-1',
       quoteSubmissionDeferred: true,
+      registrationConfirmations: {
+        laborIncludesFourInsurance: null,
+        laborIncludesRetirementPay: null,
+        customerSettlementBasisConfirmed: false,
+        modusignContractUsed: true,
+        originalContractSubmitted: null,
+        proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+        presentationPptOriginal: 'https://docs.google.com/presentation/d/presentation/edit',
+      },
       settlementGuide: '잔금은 검수 후 지급',
       projectPurpose: '프로젝트 목적',
       managerName: '보람',
@@ -103,13 +112,15 @@ describe('project-request-review', () => {
     const financial = model.checklistGroups.find((group) => group.key === 'financial');
 
     expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('입금 선금 600만');
-    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('최종 입금 재무주차 26-8-1');
+    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).not.toContain('최종 입금 재무주차');
     expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('정산 완료');
     expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('70% 미만 사유 계약상 선금 50%');
     expect(financial?.items.find((item) => item.key === 'totalActualCost')?.value).toBe('800만');
     expect(financial?.items.find((item) => item.key === 'interestRefundPolicy')?.value).not.toBe('-');
-    expect(financial?.items.find((item) => item.key === 'finalPaymentExpectedWeek')?.value).toBe('26-8-1');
+    expect(financial?.items.find((item) => item.key === 'finalPaymentExpectedWeek')).toBeUndefined();
     expect(financial?.items.find((item) => item.key === 'quoteDocument')?.value).toBe('이후 제출 예정');
+    expect(financial?.items.find((item) => item.key === 'proposalPptOriginal')?.value).toContain('drive.google.com');
+    expect(financial?.items.find((item) => item.key === 'presentationPptOriginal')?.value).toContain('docs.google.com');
     expect(model.checklistGroups.flatMap((group) => group.items).find((item) => item.key === 'note')?.value).toBe('검토 필요');
   });
 

@@ -137,6 +137,10 @@ describe('ProjectMigrationAuditPage review flow', () => {
             proposalPptOriginal: '제안서가 PDF로만 작성됨',
             presentationPptOriginal: '별도 발표자료 없음',
           },
+          registrationConfirmations: {
+            proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+            presentationPptOriginal: 'https://docs.google.com/presentation/d/presentation/edit',
+          },
         },
       },
     } as unknown as MigrationAuditConsoleRecord;
@@ -147,6 +151,9 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(slots[0]?.entries[0]?.document.name).toBe('submitted-contract.pdf');
     expect(slots[3]?.entries).toEqual([]);
     expect(slots[3]?.note).toBe('고객사가 Word 원본을 제공하지 않음');
+    expect(slots[4]?.link).toBe('https://drive.google.com/file/d/proposal/view');
+    expect(slots[4]?.note).toBe('제안서가 PDF로만 작성됨');
+    expect(slots[5]?.link).toBe('https://docs.google.com/presentation/d/presentation/edit');
     expect(slots[4]?.note).toBe('제안서가 PDF로만 작성됨');
     expect(slots[5]?.note).toBe('별도 발표자료 없음');
     expect(slots[6]?.entries.map((entry) => entry.kind)).toEqual(['rfp_request_evidence']);
@@ -187,8 +194,8 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(documentSource).toContain('연도별 계약/재무');
     expect(documentSource).toContain('총실비(원가)');
     expect(documentSource).toContain('이자 반납 여부');
-    expect(documentSource).toContain('최종 입금 재무주차');
-    expect(documentSource).toContain('row.finalPaymentExpectedWeek');
+    expect(documentSource).not.toContain('최종 입금 재무주차');
+    expect(documentSource).not.toContain('row.finalPaymentExpectedWeek');
     expect(documentSource).toContain("row.isSettled ? '완료' : '미완료'");
     expect(documentSource).toContain('row.advanceInterimBelow70Reason');
     expect(documentSource).toContain('label="등록 메모"');

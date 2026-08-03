@@ -164,7 +164,6 @@ describe('project change request helpers', () => {
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
-      finalPaymentExpectedWeek: '26-12-4',
       quoteSubmissionDeferred: true,
       registeredById: 'u-berry',
       registeredByName: '김인효(베리)',
@@ -203,7 +202,6 @@ describe('project change request helpers', () => {
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
-      finalPaymentExpectedWeek: '26-12-4',
       quoteSubmissionDeferred: true,
       executiveReviewStatus: 'APPROVED',
     });

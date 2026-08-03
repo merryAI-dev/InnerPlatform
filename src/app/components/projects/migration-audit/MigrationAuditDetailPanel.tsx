@@ -70,7 +70,7 @@ function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjec
     const payment = row.paymentPlan
       ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
       : '';
-    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
   }).join('\n') || '-';
 }
 
@@ -218,10 +218,10 @@ export function MigrationAuditDetailPanel({
   const totalActualCost = requestPayload?.totalActualCost ?? record.project.totalActualCost;
   const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
   const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
-  const finalPaymentExpectedWeek = requestPayload?.finalPaymentExpectedWeek ?? record.project.finalPaymentExpectedWeek;
   const registrationNote = requestPayload?.note ?? record.project.note;
   const quoteDocument = requestPayload?.quoteDocument !== undefined ? requestPayload.quoteDocument : record.project.quoteDocument;
   const quoteSubmissionDeferred = requestPayload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
+  const registrationConfirmations = requestPayload?.registrationConfirmations ?? record.project.registrationConfirmations;
   const contractDocument = useRequestPayloadAsCurrent
     ? (requestPayload?.contractDocument || record.project.contractDocument || null)
     : (record.project.contractDocument || requestPayload?.contractDocument || null);
@@ -324,11 +324,12 @@ export function MigrationAuditDetailPanel({
                 { label: '총실비(원가)', value: formatMoney(totalActualCost) },
                 { label: '총지원금', value: dossier.budget.supportAmountLabel },
                 { label: '이자 반납 여부', value: interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-' },
-                { label: '최종 입금 재무주차', value: finalPaymentExpectedWeek || '-' },
                 { label: '연도별 계약/재무', value: formatFinancialYears(financialYears), wide: true },
                 { label: '입금 계획', value: dossier.budget.paymentPlanDesc, wide: true },
                 { label: '입금 분할', value: dossier.budget.paymentPlanSplitLabel, wide: true },
                 { label: '산출내역서(견적서)', value: quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-'), wide: true },
+                { label: '제안서(구글드라이브 링크)', value: registrationConfirmations?.proposalPptOriginal || '-', wide: true },
+                { label: '발표자료(구글드라이브 링크)', value: registrationConfirmations?.presentationPptOriginal || '-', wide: true },
               ]}
             />
           </ReviewSection>

@@ -177,14 +177,14 @@ describe('project editor draft mapping', () => {
       totalActualCost: 12_000,
       interestRefundPolicy: 'MYSC_REVENUE',
       quoteSubmissionDeferred: true,
-      finalPaymentExpectedWeek: '26-8-1',
     });
+    expect(payload).not.toHaveProperty('finalPaymentExpectedWeek');
     expect(patch).toMatchObject({
       totalActualCost: 12_000,
       interestRefundPolicy: 'MYSC_REVENUE',
       quoteSubmissionDeferred: true,
-      finalPaymentExpectedWeek: '26-8-1',
     });
+    expect(patch.finalPaymentExpectedWeek).toBe('26-8-1');
     expect(payload.teamMembersDetailed?.map((member) => member.role)).toEqual(['사업 최종 책임자', '운영매니저']);
     expect(patch.teamMembersDetailed?.map((member) => member.role)).toEqual(['사업 최종 책임자', '운영매니저']);
   });
@@ -323,7 +323,7 @@ describe('project editor draft mapping', () => {
     expect(normalizeAccountType('OTHER')).toBe('OTHER');
     expect(SETTLEMENT_SYSTEM_LABELS.NONE).toBe('정산없음');
     expect(LABOR_SETTLEMENT_BASIS_LABELS).toMatchObject({
-      INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금포함 실급여',
+      INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 포함 실급여',
       EXCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 제외 실급여',
       FIXED_AMOUNT: '정액정산',
       NONE: '정산없음',
@@ -476,7 +476,8 @@ describe('project editor draft mapping', () => {
     expect(payload.advanceInterimBelow70Reason).toBe('발주처 지급 조건');
     expect(payload).not.toHaveProperty('finalPaymentNote');
     expect(payload.note).toBe('기존 비고 유지');
-    expect(payload).not.toHaveProperty('registrationConfirmations');
+    expect(payload.registrationConfirmations).toEqual(draft.registrationConfirmations);
+    expect(payload).not.toHaveProperty('finalPaymentExpectedWeek');
     expect(payload.quoteDocument?.name).toBe('quote.pdf');
     expect(payload.proposalDocument?.name).toBe('proposal.pdf');
     expect(payload.contractAnalysis).toEqual({ provider: 'heuristic', summary: '기존 분석값' });
@@ -517,6 +518,8 @@ describe('project editor draft mapping', () => {
         customerSettlementBasisConfirmed: true,
         modusignContractUsed: false,
         originalContractSubmitted: true,
+        proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+        presentationPptOriginal: 'https://docs.google.com/presentation/d/presentation/edit',
       },
       checkout: {
         finalPaymentReceived: true,
@@ -537,7 +540,12 @@ describe('project editor draft mapping', () => {
     ]);
     const payload = buildProjectRequestPayloadFromDraft(draft);
     expect(payload.registrationRequirementsVersion).toBe(2);
-    expect(payload).not.toHaveProperty('registrationConfirmations');
+    expect(payload.registrationConfirmations).toMatchObject({
+      modusignContractUsed: false,
+      originalContractSubmitted: true,
+      proposalPptOriginal: 'https://drive.google.com/file/d/proposal/view',
+      presentationPptOriginal: 'https://docs.google.com/presentation/d/presentation/edit',
+    });
     expect(payload.checkout?.evidenceDeletedAfterUsb).toBe(true);
     expect(payload.customerBusinessRegistrationDocument?.name).toBe('customer-registration.pdf');
     expect(payload.performanceCertificateDocument?.name).toBe('performance.pdf');

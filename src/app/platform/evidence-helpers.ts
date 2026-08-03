@@ -188,7 +188,7 @@ export function computeEvidenceStatus(tx: Transaction): EvidenceStatus {
  */
 export function isValidDriveUrl(url: string): boolean {
   if (!url?.trim()) return false;
-  return /^https?:\/\/(drive\.google\.com|docs\.google\.com)/.test(url.trim());
+  return /^https?:\/\/(drive\.google\.com|docs\.google\.com)(?:[/:?#]|$)/.test(url.trim());
 }
 
 /**

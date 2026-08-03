@@ -67,6 +67,7 @@ type ReviewDocumentEntry = ReviewDocumentDefinition & {
 type ReviewDocumentSlot = ReviewDocumentSlotDefinition & {
   entries: ReviewDocumentEntry[];
   note: string;
+  link: string;
   conflict: boolean;
 };
 
@@ -86,8 +87,8 @@ const REVIEW_DOCUMENT_SLOTS: ReviewDocumentSlotDefinition[] = [
   { number: 2, label: '고객사 사업자등록증 PDF', kinds: ['customer_business_registration'] },
   { number: 3, label: '산출내역서(견적서) PDF', kinds: ['quote'] },
   { number: 4, label: '제안서 Word 원본 (선택)', kinds: ['proposal_word_original'], optional: true, noteField: 'proposalWordOriginal' },
-  { number: 5, label: '제안서 PPT 원본 (선택)', kinds: ['proposal_ppt_original'], optional: true, noteField: 'proposalPptOriginal' },
-  { number: 6, label: '발표자료 PPT 원본 (선택)', kinds: ['presentation_ppt_original'], optional: true, noteField: 'presentationPptOriginal' },
+  { number: 5, label: '제안서(구글드라이브 링크)', kinds: ['proposal_ppt_original'], optional: true, noteField: 'proposalPptOriginal' },
+  { number: 6, label: '발표자료(구글드라이브 링크)', kinds: ['presentation_ppt_original'], optional: true, noteField: 'presentationPptOriginal' },
   { number: 7, label: 'RFP/요청 메일 증빙 (선택)', kinds: ['rfp_request_evidence'], optional: true },
 ];
 
@@ -104,6 +105,7 @@ export function buildMigrationReviewDocumentSlots(record: MigrationAuditConsoleR
     ? (requestNotes || {})
     : (record.project.registrationOptionalDocumentNotes || {});
   const quoteSubmissionDeferred = payload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
+  const confirmations = payload?.registrationConfirmations ?? record.project.registrationConfirmations;
   const documentByKind = new Map<ProjectRequestDocumentKind, ReviewDocumentEntry>();
 
   REVIEW_DOCUMENT_DEFINITIONS.forEach((definition) => {
@@ -123,6 +125,9 @@ export function buildMigrationReviewDocumentSlots(record: MigrationAuditConsoleR
     return {
       ...slot,
       entries,
+      link: slot.number === 5
+        ? String(confirmations?.proposalPptOriginal || '').trim()
+        : slot.number === 6 ? String(confirmations?.presentationPptOriginal || '').trim() : '',
       note: slot.number === 3 && quoteSubmissionDeferred
         ? '이후 제출 예정'
         : slot.noteField ? String(notes[slot.noteField] || '').trim() : '',
@@ -149,7 +154,7 @@ function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjec
     const payment = row.paymentPlan
       ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
       : '';
-    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
   }).join('\n') || '-';
 }
 
@@ -219,7 +224,6 @@ export function MigrationAuditDocumentDialog({
   const totalActualCost = requestPayload?.totalActualCost ?? record.project.totalActualCost;
   const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
   const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
-  const finalPaymentExpectedWeek = requestPayload?.finalPaymentExpectedWeek ?? record.project.finalPaymentExpectedWeek;
   const registrationNote = requestPayload?.note ?? record.project.note;
   const quoteDocument = requestPayload?.quoteDocument !== undefined ? requestPayload.quoteDocument : record.project.quoteDocument;
   const quoteSubmissionDeferred = requestPayload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
@@ -324,7 +328,7 @@ export function MigrationAuditDocumentDialog({
             <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} />
           </dl></section>
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">계약/재무</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
-            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} /><DocumentCell label="최종 입금 재무주차" value={finalPaymentExpectedWeek || '-'} className="md:col-span-2" /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
+            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
           </dl></section>
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 내용</h3><dl className="border border-t-0 border-slate-400">
             <DocumentCell label="프로젝트 목적" value={dossier.notes.projectPurpose} /><DocumentCell label="상세 설명" value={dossier.notes.description} /><DocumentCell label="참여 조건" value={dossier.notes.participantCondition} /><DocumentCell label="등록 메모" value={registrationNote || '-'} />
@@ -371,6 +375,8 @@ export function MigrationAuditDocumentDialog({
                           </p>
                         ) : null}
                       </div>
+                    ) : slot.link ? (
+                      <a className="break-all text-blue-700 underline" href={slot.link} target="_blank" rel="noreferrer">{slot.link}</a>
                     ) : slot.note ? (
                       <p><span className="font-semibold text-slate-600">미첨부 사유</span> · {slot.note}</p>
                     ) : slot.optional ? (
