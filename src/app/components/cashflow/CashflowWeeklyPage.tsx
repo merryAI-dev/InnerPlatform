@@ -12,7 +12,7 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import {
-  fetchCashflowSettlementStatusesViaBff,
+  fetchCashflowSettlementStatusesBatchViaBff,
   transitionCashflowSettlementStatusViaBff,
   type CashflowSettlementPeriod,
   type CashflowSettlementStatusItem,
@@ -86,21 +86,20 @@ export function CashflowWeeklyPage() {
     }
     let active = true;
     setStatusesLoading(true);
-    void Promise.allSettled(filteredProjects.map(async (project) => ({
-      projectId: project.id,
-      result: await fetchCashflowSettlementStatusesViaBff({
-        tenantId: orgId, actor: user, projectId: project.id, yearMonth,
-      }),
-    }))).then((results) => {
+    const projectIds = filteredProjects.map((project) => project.id);
+    const batches = Array.from(
+      { length: Math.ceil(projectIds.length / 100) },
+      (_, index) => projectIds.slice(index * 100, (index + 1) * 100),
+    );
+    void Promise.all(batches.map(async (batchProjectIds) => fetchCashflowSettlementStatusesBatchViaBff({
+      tenantId: orgId, actor: user, projectIds: batchProjectIds, yearMonth,
+    }).catch(() => ({
+      items: [],
+      errors: batchProjectIds.map((projectId) => ({ projectId, code: 'STATUS_UNAVAILABLE' as const })),
+    })))).then((results) => {
       if (!active) return;
-      const next: Record<string, CashflowSettlementStatusesResult> = {};
-      const errors: Record<string, string> = {};
-      results.forEach((result, index) => {
-        const projectId = filteredProjects[index]?.id;
-        if (!projectId) return;
-        if (result.status === 'fulfilled') next[projectId] = result.value.result;
-        else errors[projectId] = '결산 상태를 불러오지 못했습니다.';
-      });
+      const next = Object.fromEntries(results.flatMap((result) => result.items).map((item) => [item.projectId, item]));
+      const errors = Object.fromEntries(results.flatMap((result) => result.errors).map((error) => [error.projectId, '결산 상태를 불러오지 못했습니다.']));
       setStatuses(next);
       setStatusErrors(errors);
       setStatusesLoading(false);

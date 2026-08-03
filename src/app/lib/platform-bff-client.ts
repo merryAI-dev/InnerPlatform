@@ -1354,6 +1354,11 @@ export interface CashflowSettlementStatusesResult {
   items: CashflowSettlementStatusItem[];
 }
 
+export interface CashflowSettlementStatusesBatchResult {
+  items: CashflowSettlementStatusesResult[];
+  errors: Array<{ projectId: string; code: 'STATUS_UNAVAILABLE' }>;
+}
+
 export interface CashflowProjectionActualSummary {
   projectId: string;
   fromMonth: string;
@@ -2899,6 +2904,26 @@ export async function fetchCashflowSettlementStatusesViaBff(params: {
   const response = await resolveClient(params.client).get<CashflowSettlementStatusesResult>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(params.yearMonth)}`,
     { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowSettlementStatusesBatchViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectIds: string[];
+  yearMonth: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSettlementStatusesBatchResult> {
+  const response = await resolveClient(params.client).post<CashflowSettlementStatusesBatchResult>(
+    '/api/v1/cashflow/settlement-statuses/batch',
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { projectIds: params.projectIds, yearMonth: params.yearMonth },
+      retries: 0,
+      timeoutMs: 12000,
+    },
   );
   return response.data;
 }

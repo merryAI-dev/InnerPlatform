@@ -22,6 +22,8 @@ import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchRequest;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesBatchResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
@@ -189,6 +191,31 @@ public class WeeklyExpenseCommandService {
             yearMonth,
             persistence.findCashflowSettlementStatuses(actor.tenantId(), projectId, yearMonth)
         );
+    }
+
+    public CashflowSettlementStatusesBatchResponse readCashflowSettlementStatusesBatch(
+        TrustedActorContext actor,
+        CashflowSettlementStatusesBatchRequest request
+    ) {
+        List<String> projectIds = request.requireUniqueProjectIds();
+        for (String projectId : projectIds) {
+            authorizationService.requireProjectAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId);
+        }
+        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> recordsByProject =
+            persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth());
+        List<CashflowSettlementStatusesResponse> items = new ArrayList<>();
+        List<CashflowSettlementStatusesBatchResponse.ErrorItem> errors = new ArrayList<>();
+        for (String projectId : projectIds) {
+            List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = recordsByProject.get(projectId);
+            if (records == null) {
+                errors.add(new CashflowSettlementStatusesBatchResponse.ErrorItem(
+                    projectId, CashflowSettlementStatusesBatchResponse.STATUS_UNAVAILABLE
+                ));
+            } else {
+                items.add(settlementStatusesResponse(projectId, request.yearMonth(), records));
+            }
+        }
+        return new CashflowSettlementStatusesBatchResponse(items, errors);
     }
 
     public CashflowSettlementStatusesResponse transitionCashflowSettlementStatus(

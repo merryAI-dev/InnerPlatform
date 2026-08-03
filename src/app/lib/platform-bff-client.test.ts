@@ -42,6 +42,7 @@ import {
   fetchCashflowWeeklyUpdateViaBff,
   fetchCashflowWeeklyComplianceViaBff,
   fetchCashflowProjectionActualSummariesViaBff,
+  fetchCashflowSettlementStatusesBatchViaBff,
   fetchCashflowActivityViaBff,
   fetchCashflowAppliedCellChangesViaBff,
   type CashflowCumulativeCloseScope,
@@ -75,6 +76,21 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('posts all settlement project IDs in one bounded batch request', async () => {
+    const data = { items: [], errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' }] };
+    const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
+    const result = await fetchCashflowSettlementStatusesBatchViaBff({
+      tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' },
+      projectIds: ['p001', 'p002'], yearMonth: '2026-08', client,
+    });
+
+    expect(client.post).toHaveBeenCalledTimes(1);
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/settlement-statuses/batch', expect.objectContaining({
+      body: { projectIds: ['p001', 'p002'], yearMonth: '2026-08' }, retries: 0, timeoutMs: 12000,
+    }));
+    expect(result).toEqual(data);
+  });
+
   it('posts project IDs to the canonical JVM projection-actual summary adapter unchanged', async () => {
     const data = {
       version: '1',

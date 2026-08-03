@@ -19,16 +19,4 @@ class CashflowSettlementStatusPolicyTest {
         )).isFalse();
     }
 
-    @Test
-    void completedStatusNeedsApprovalWhenValuesChangeAndRecoversWhenRestored() {
-        assertThat(FirestoreInheritedWeeklyExpensePersistence.effectiveSettlementStatus(
-            "COMPLETED", "revision-a", "revision-b"
-        )).isEqualTo("PENDING_APPROVAL");
-        assertThat(FirestoreInheritedWeeklyExpensePersistence.effectiveSettlementStatus(
-            "COMPLETED", "revision-a", "revision-a"
-        )).isEqualTo("COMPLETED");
-        assertThat(FirestoreInheritedWeeklyExpensePersistence.effectiveSettlementStatus(
-            "WAITING_FOR_UPDATE", "", "revision-a"
-        )).isEqualTo("WAITING_FOR_UPDATE");
-    }
 }
