@@ -20,11 +20,13 @@ function createRequest(overrides: ProjectRequestFixtureOverrides = {}): ProjectR
       contractAmount: 12000000,
       salesVatAmount: 1200000,
       totalRevenueAmount: 13200000,
+      totalActualCost: 8000000,
       supportAmount: 0,
       financialInputFlags: {
         contractAmount: true,
         salesVatAmount: true,
         totalRevenueAmount: true,
+        totalActualCost: true,
         supportAmount: false,
       },
       contractStart: '2026-04-01',
@@ -34,6 +36,23 @@ function createRequest(overrides: ProjectRequestFixtureOverrides = {}): ProjectR
       accountType: 'OPERATING',
       fundInputMode: 'BANK_UPLOAD',
       paymentPlanDesc: '선금 50%, 잔금 50%',
+      financialYears: [{
+        year: 2026,
+        contractAmount: 12000000,
+        salesVatAmount: 1200000,
+        totalRevenueAmount: 13200000,
+        totalActualCost: 8000000,
+        supportAmount: 0,
+        profitRate: 0.39,
+        confirmed: true,
+        paymentPlan: { contract: 6000000, interim: 0, final: 6000000 },
+        finalPaymentExpectedWeek: '26-8-1',
+        isSettled: true,
+        advanceInterimBelow70Reason: '계약상 선금 50%',
+      }],
+      interestRefundPolicy: 'REFUND',
+      finalPaymentExpectedWeek: '26-8-1',
+      quoteSubmissionDeferred: true,
       settlementGuide: '잔금은 검수 후 지급',
       projectPurpose: '프로젝트 목적',
       managerName: '보람',
@@ -71,13 +90,27 @@ describe('project-request-review', () => {
       '기본 정보',
       '계약/운영',
       '계약/재무',
-      '정산',
       '팀/인력',
     ]);
     expect(model.badges.map((badge) => badge.label)).toEqual(expect.arrayContaining([
       expect.stringContaining('누락'),
       expect.stringContaining('확인 필요'),
     ]));
+  });
+
+  it('keeps new registration finance facts in one review section', () => {
+    const model = buildProjectRequestReviewModel(createRequest());
+    const financial = model.checklistGroups.find((group) => group.key === 'financial');
+
+    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('입금 선금 600만');
+    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('최종 입금 재무주차 26-8-1');
+    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('정산 완료');
+    expect(financial?.items.find((item) => item.key === 'financialYears')?.value).toContain('70% 미만 사유 계약상 선금 50%');
+    expect(financial?.items.find((item) => item.key === 'totalActualCost')?.value).toBe('800만');
+    expect(financial?.items.find((item) => item.key === 'interestRefundPolicy')?.value).not.toBe('-');
+    expect(financial?.items.find((item) => item.key === 'finalPaymentExpectedWeek')?.value).toBe('26-8-1');
+    expect(financial?.items.find((item) => item.key === 'quoteDocument')?.value).toBe('이후 제출 예정');
+    expect(model.checklistGroups.flatMap((group) => group.items).find((item) => item.key === 'note')?.value).toBe('검토 필요');
   });
 
   it('surfaces optional contract review highlights, warnings, and next actions', () => {
@@ -145,7 +178,7 @@ describe('project-request-review', () => {
     const items = model.checklistGroups.flatMap((group) => group.items);
     expect(items.find((item) => item.key === 'settlementType')?.value).toBe('정산 없음');
     expect(items.find((item) => item.key === 'basis')?.value).toBe('공급가액 기준');
-    expect(items.find((item) => item.key === 'accountType')?.value).toBe('일반 사업');
+    expect(items.find((item) => item.key === 'accountType')?.value).toBe('일반사업(MYSC법인통장)');
     expect(items.find((item) => item.key === 'fundInputMode')?.value).toBe('통장내역 업로드');
   });
 

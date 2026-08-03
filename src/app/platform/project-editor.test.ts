@@ -3,6 +3,7 @@ import type { Project } from '../data/types';
 import {
   ACCOUNT_TYPE_LABELS,
   getProjectTypeSelectableOptions,
+  INTEREST_REFUND_POLICY_LABELS,
   LABOR_SETTLEMENT_BASIS_LABELS,
   normalizeAccountType,
   normalizeProjectContractType,
@@ -10,6 +11,7 @@ import {
   PROJECT_SETTLEMENT_SYSTEM_CODES,
   PROJECT_TYPE_LABELS,
   SETTLEMENT_SYSTEM_LABELS,
+  SETTLEMENT_TYPE_LABELS,
 } from '../data/types';
 import {
   buildProjectEditorDraftFromProject,
@@ -101,6 +103,92 @@ const baseProject: Project = {
 };
 
 describe('project editor draft mapping', () => {
+  it('serializes executive review clears as null for BFF JSON writes', () => {
+    const reviewedProject: Project = {
+      ...baseProject,
+      registrationSource: 'pm_portal',
+      executiveReviewStatus: 'APPROVED',
+      executiveReviewedAt: '2026-08-01T00:00:00.000Z',
+      executiveReviewedById: 'reviewer-1',
+      executiveReviewedByName: '검토자',
+    };
+    const patch = buildProjectEditorProjectPatch(createProjectEditorDraft(reviewedProject), {
+      baseProject: reviewedProject,
+      mode: 'portal-edit',
+      actorId: 'pm-1',
+      actorName: 'PM',
+      now: '2026-08-03T00:00:00.000Z',
+    });
+    const jsonPatch = JSON.parse(JSON.stringify(patch));
+
+    expect(jsonPatch).toMatchObject({
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+    });
+  });
+
+  it('normalizes and persists the shared contract-finance fields', () => {
+    const legacyFinalWeekPayload = {
+      finalPaymentExpectedWeek: '26-8-1',
+    };
+    const draft = buildProjectEditorDraftFromProject({
+      ...baseProject,
+      registrationRequirementsVersion: 2,
+      contractStart: '2026-01-01',
+      contractEnd: '2027-12-31',
+      totalActualCost: 12_000,
+      interestRefundPolicy: 'MYSC_REVENUE',
+      quoteSubmissionDeferred: true,
+      teamMembersDetailed: [
+        { memberName: '기존 책임자', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false },
+        { memberName: '운영자', memberNickname: '', role: '운영매니저', participationRate: 100, isDocumentOnly: false },
+      ],
+      financialYears: [
+        { year: 2027, contractAmount: 2, salesVatAmount: 0, totalRevenueAmount: 2, totalActualCost: 1, supportAmount: 0, profitRate: 0, confirmed: false },
+        { year: 2026, contractAmount: 1, salesVatAmount: 0, totalRevenueAmount: 1, totalActualCost: 3, supportAmount: 0, profitRate: 0, confirmed: true },
+      ],
+    }, legacyFinalWeekPayload);
+
+    expect(Object.keys(INTEREST_REFUND_POLICY_LABELS)).toEqual([
+      'REFUND',
+      'USE_AS_PROJECT_EXPENSE',
+      'MYSC_REVENUE',
+      'REVIEW_LATER',
+    ]);
+    expect(SETTLEMENT_TYPE_LABELS.TYPE3).toBe('Type3. 세금계산서미발행 + 공급가액');
+    expect(draft.finalPaymentExpectedWeek).toBe('26-8-1');
+    expect(draft.financialYears.map(({ year, totalActualCost }) => ({ year, totalActualCost }))).toEqual([
+      { year: 2026, totalActualCost: 3 },
+      { year: 2027, totalActualCost: 1 },
+    ]);
+    expect(draft.teamMembersDetailed[0].role).toBe('사업 최종 책임자');
+
+    const payload = buildProjectRequestPayloadFromDraft(draft);
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject,
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-08-03T00:00:00.000Z',
+    });
+
+    expect(payload).toMatchObject({
+      totalActualCost: 12_000,
+      interestRefundPolicy: 'MYSC_REVENUE',
+      quoteSubmissionDeferred: true,
+      finalPaymentExpectedWeek: '26-8-1',
+    });
+    expect(patch).toMatchObject({
+      totalActualCost: 12_000,
+      interestRefundPolicy: 'MYSC_REVENUE',
+      quoteSubmissionDeferred: true,
+      finalPaymentExpectedWeek: '26-8-1',
+    });
+    expect(payload.teamMembersDetailed?.map((member) => member.role)).toEqual(['사업 최종 책임자', '운영매니저']);
+    expect(patch.teamMembersDetailed?.map((member) => member.role)).toEqual(['사업 최종 책임자', '운영매니저']);
+  });
+
   it('uses the same canonical dropdown values for every project editor surface', () => {
     expect(getProjectTypeSelectableOptions()).toEqual(Object.keys(PROJECT_TYPE_LABELS));
     expect(getProjectTypeSelectableOptions()).toContain('I2');
@@ -144,6 +232,7 @@ describe('project editor draft mapping', () => {
         contractAmount: 120_000,
         salesVatAmount: 0,
         totalRevenueAmount: 90_000,
+        totalActualCost: 0,
         supportAmount: 0,
         profitRate: 0,
         confirmed: true,
@@ -179,6 +268,7 @@ describe('project editor draft mapping', () => {
         contractAmount: 120_000,
         salesVatAmount: 12_000,
         totalRevenueAmount: 90_000,
+        totalActualCost: 0,
         supportAmount: 5_000,
         profitRate: 0.75,
         confirmed: true,
@@ -347,6 +437,7 @@ describe('project editor draft mapping', () => {
       paymentExpectedMonths: { contract: '2026-04', interim: '2026-06', final: '2026-10' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
       finalPaymentNote: '잔금은 검수 후 2주 이내',
+      note: '기존 비고 유지',
       businessManagementGoogleFolderLink: 'https://drive.google.com/drive/folders/project-folder',
       quoteDocument: {
         path: 'orgs/mysc/project-request-documents/u001/quote.pdf',
@@ -376,14 +467,16 @@ describe('project editor draft mapping', () => {
       { memberName: '변민욱', memberNickname: '보람', role: '실무책임자', participationRate: 40, isDocumentOnly: true },
     ]);
     expect(payload.teamMembers).toBe('김다은 (데이나) / 총괄책임자 / 60% / 실제 참여 / 인건비 2026-04~2026-09, 변민욱 (보람) / 실무책임자 / 40% / 서류상 인력');
-    expect(payload.groupwareName).toBe('기후테크');
+    expect(payload.groupwareName).toBe('기후테크GW');
     expect(payload.businessManagementGoogleFolderLink).toBe('https://drive.google.com/drive/folders/project-folder');
     expect(payload.settlementSystem).toBe('KOCCA_PMS');
     expect(payload.laborSettlementBasis).toBe('FIXED_AMOUNT');
     expect(payload.paymentPlan).toEqual({ contract: 50_000, interim: 30_000, final: 20_000 });
     expect(payload.paymentExpectedMonths).toEqual({ contract: '2026-04', interim: '2026-06', final: '2026-10' });
     expect(payload.advanceInterimBelow70Reason).toBe('발주처 지급 조건');
-    expect(payload.finalPaymentNote).toBe('잔금은 검수 후 2주 이내');
+    expect(payload).not.toHaveProperty('finalPaymentNote');
+    expect(payload.note).toBe('기존 비고 유지');
+    expect(payload).not.toHaveProperty('registrationConfirmations');
     expect(payload.quoteDocument?.name).toBe('quote.pdf');
     expect(payload.proposalDocument?.name).toBe('proposal.pdf');
     expect(payload.contractAnalysis).toEqual({ provider: 'heuristic', summary: '기존 분석값' });
@@ -413,6 +506,7 @@ describe('project editor draft mapping', () => {
         contractAmount: 100_000,
         salesVatAmount: 9_000,
         totalRevenueAmount: 91_000,
+        totalActualCost: 0,
         supportAmount: 5_000,
         profitRate: 0.91,
         confirmed: true,
@@ -443,7 +537,7 @@ describe('project editor draft mapping', () => {
     ]);
     const payload = buildProjectRequestPayloadFromDraft(draft);
     expect(payload.registrationRequirementsVersion).toBe(2);
-    expect(payload.registrationConfirmations?.originalContractSubmitted).toBe(true);
+    expect(payload).not.toHaveProperty('registrationConfirmations');
     expect(payload.checkout?.evidenceDeletedAfterUsb).toBe(true);
     expect(payload.customerBusinessRegistrationDocument?.name).toBe('customer-registration.pdf');
     expect(payload.performanceCertificateDocument?.name).toBe('performance.pdf');
@@ -610,6 +704,24 @@ describe('project editor draft mapping', () => {
 
     expect(patch.department).toBe('CIC2');
     expect(patch.cic).toBe('CIC2');
+  });
+
+  it('preserves a distinct groupware name in direct project patches', () => {
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(baseProject),
+      name: '기후테크',
+      groupwareName: '기후테크GW',
+    });
+
+    const patch = buildProjectEditorProjectPatch(draft, {
+      baseProject,
+      mode: 'admin',
+      actorId: 'admin-1',
+      actorName: '관리자',
+      now: '2026-05-20T00:00:00.000Z',
+    });
+
+    expect(patch.groupwareName).toBe('기후테크GW');
   });
 
   it('keeps zero-won payment split values visible in deterministic review changes', () => {

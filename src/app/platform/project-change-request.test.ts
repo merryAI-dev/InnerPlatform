@@ -30,6 +30,7 @@ const baseProject = {
   clientOrg: 'KOICA',
   groupwareName: '',
   participantCondition: '',
+  contractType: '',
   department: '개발협력센터',
   teamName: '',
   managerId: 'u-old',
@@ -157,10 +158,14 @@ describe('project change request helpers', () => {
       ...baseProject,
       name: '2026 CTS2 수정',
       contractAmount: 3000,
+      totalActualCost: 900,
+      interestRefundPolicy: 'MYSC_REVENUE',
       settlementSystem: 'SMTECH',
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
+      finalPaymentExpectedWeek: '26-12-4',
+      quoteSubmissionDeferred: true,
       registeredById: 'u-berry',
       registeredByName: '김인효(베리)',
       executiveApproverId: 'head-berry',
@@ -187,6 +192,8 @@ describe('project change request helpers', () => {
     expect(patch).toMatchObject({
       name: '2026 CTS2 수정',
       contractAmount: 3000,
+      totalActualCost: 900,
+      interestRefundPolicy: 'MYSC_REVENUE',
       registeredById: 'u-berry',
       managerId: 'u-berry',
       executiveApproverId: 'head-berry',
@@ -196,8 +203,30 @@ describe('project change request helpers', () => {
       laborSettlementBasis: 'EXCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
       advanceInterimBelow70Reason: '발주처 지급 조건',
+      finalPaymentExpectedWeek: '26-12-4',
+      quoteSubmissionDeferred: true,
       executiveReviewStatus: 'APPROVED',
     });
     expect(patch.executiveReviewHistory?.at(-1)?.changes?.length).toBeGreaterThan(0);
+  });
+
+  it('preserves a legacy final payment note when a change payload omits the field', () => {
+    const payload = buildProjectChangeRequest({
+      baseProject: { ...baseProject, finalPaymentNote: '기존 잔금 메모' },
+      draft: createProjectEditorDraft(baseProject),
+      actorId: 'u-berry',
+      actorName: '김인효(베리)',
+      actorEmail: 'berry@example.com',
+      tenantId: 'mysc',
+      requestedAt: '2026-05-29T01:29:00.000Z',
+    }).payload;
+
+    expect(payload).not.toHaveProperty('finalPaymentNote');
+    expect(buildProjectPatchFromRequestPayload(payload, {
+      baseProject: { ...baseProject, finalPaymentNote: '기존 잔금 메모' },
+      approvedAt: '2026-05-29T02:00:00.000Z',
+      reviewerId: 'admin',
+      reviewerName: '관리자',
+    })).not.toHaveProperty('finalPaymentNote');
   });
 });

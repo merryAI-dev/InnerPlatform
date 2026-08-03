@@ -30,6 +30,7 @@ export type Basis = '공급가액' | '공급대가' | '기타' | 'NONE';
 export type ProjectCurrency = 'KRW' | 'USD';
 
 export type AccountType = 'DEDICATED' | 'OPERATING' | 'NONE' | 'OTHER'; // 전용계좌 사업(이나라도움) / 전용계좌(이나라도움x) / 일반 사업 / 기타
+export type InterestRefundPolicy = 'REFUND' | 'USE_AS_PROJECT_EXPENSE' | 'MYSC_REVENUE' | 'REVIEW_LATER';
 export type ProjectFundInputMode = 'BANK_UPLOAD' | 'DIRECT_ENTRY';
 export type SettlementSheetPolicyPreset = 'STANDARD' | 'DIRECT_ENTRY' | 'BALANCE_TRACKING';
 export type SettlementSheetDerivedField = 'balance' | 'expenseAmount' | 'bankAmount' | 'vatIn';
@@ -140,7 +141,7 @@ export const PROJECT_TYPE_SHORT_LABELS: Record<ProjectType, string> = {
 export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
   TYPE1: 'Type1. 세금계산서발행+공급가액',
   TYPE2: 'Type2. 세금계산서발행+공급대가',
-  TYPE3: 'Type3. 세금계산서 미발행 + 공급가액',
+  TYPE3: 'Type3. 세금계산서미발행 + 공급가액',
   TYPE4: 'Type4. 세금계산서미발행+공급대가',
   TYPE5: 'Type5. 이나라도움+공급가액',
   NONE: '정산 없음',
@@ -184,9 +185,25 @@ export function normalizeBasis(raw: unknown): Basis {
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   DEDICATED: '전용계좌 사업(이나라도움)',
   OPERATING: '전용계좌(이나라도움x)',
-  NONE: '일반 사업',
+  NONE: '일반사업(MYSC법인통장)',
   OTHER: '기타',
 };
+
+export const INTEREST_REFUND_POLICY_LABELS: Record<InterestRefundPolicy, string> = {
+  REFUND: '반납',
+  USE_AS_PROJECT_EXPENSE: '사업비로 모두 사용 (미사용액 반납)',
+  MYSC_REVENUE: 'MYSC 수익화',
+  REVIEW_LATER: '확인 필요 (이후 업데이트 하겠음)',
+};
+
+export function normalizeInterestRefundPolicy(raw: unknown): InterestRefundPolicy | '' {
+  return raw === 'REFUND'
+    || raw === 'USE_AS_PROJECT_EXPENSE'
+    || raw === 'MYSC_REVENUE'
+    || raw === 'REVIEW_LATER'
+    ? raw
+    : '';
+}
 
 export function normalizeAccountType(raw: unknown): AccountType {
   if (raw === 'DEDICATED' || raw === 'OPERATING' || raw === 'OTHER') return raw;
@@ -320,6 +337,7 @@ export interface ProjectFinancialInputFlags {
   contractAmount?: boolean;
   salesVatAmount?: boolean;
   totalRevenueAmount?: boolean;
+  totalActualCost?: boolean;
   supportAmount?: boolean;
 }
 
@@ -590,9 +608,14 @@ export interface ProjectFinancialYear {
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;
+  totalActualCost: number;
   supportAmount: number;
   profitRate: number;
   confirmed: boolean;
+  paymentPlan?: Project['paymentPlan'];
+  finalPaymentExpectedWeek?: string;
+  advanceInterimBelow70Reason?: string;
+  isSettled?: boolean;
 }
 
 export interface ProjectRegistrationConfirmations {
@@ -636,9 +659,9 @@ export interface Project {
   projectCode?: string;
   registeredAt?: string;
   executiveReviewStatus?: ProjectExecutiveReviewStatus;
-  executiveReviewedAt?: string;
-  executiveReviewedById?: string;
-  executiveReviewedByName?: string;
+  executiveReviewedAt?: string | null;
+  executiveReviewedById?: string | null;
+  executiveReviewedByName?: string | null;
   executiveReviewComment?: string | null;
   executiveReviewHistory?: ProjectExecutiveReviewHistoryEntry[];
   managementPlanningReviewStatus?: ProjectManagementPlanningReviewStatus;
@@ -665,6 +688,7 @@ export interface Project {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;      // 전용통장/운영통장
+  interestRefundPolicy?: InterestRefundPolicy;
   settlementSystem?: SettlementSystemCode;
   laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
@@ -676,6 +700,7 @@ export interface Project {
     final: number;       // 잔금
   };
   paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  finalPaymentExpectedWeek?: string;
   laborTransferPlan?: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;       // 입금계획 텍스트 (e.g. "선금80%, 잔금20%")
@@ -689,6 +714,7 @@ export interface Project {
   contractType: string;          // 계약서 유형 (계약서(날인), 기타 등)
   projectPurpose?: string;
   totalRevenueAmount?: number;
+  totalActualCost?: number;
   supportAmount?: number;
   salesVatAmount?: number;
   financialInputFlags?: ProjectFinancialInputFlags;
@@ -700,6 +726,7 @@ export interface Project {
   settlementGuide?: string;
   contractDocument?: FileAttachment | null;
   quoteDocument?: FileAttachment | null;
+  quoteSubmissionDeferred?: boolean;
   proposalDocument?: FileAttachment | null;
   proposalWordOriginalDocument?: FileAttachment | null;
   proposalPptOriginalDocument?: FileAttachment | null;
@@ -758,7 +785,7 @@ export interface ProjectExecutiveReviewHistoryEntry {
   reviewedAt: string;
   reviewedById: string;
   reviewedByName: string;
-  reviewComment?: string;
+  reviewComment?: string | null;
   projectCode?: string;
   changes?: ProjectReviewFieldChange[];
 }
@@ -872,6 +899,7 @@ export interface ProjectRequestPayload {
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;
+  totalActualCost: number;
   supportAmount: number;
   financialInputFlags?: ProjectFinancialInputFlags;
   registrationRequirementsVersion?: 1 | 2;
@@ -885,12 +913,14 @@ export interface ProjectRequestPayload {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  interestRefundPolicy?: InterestRefundPolicy;
   settlementSystem?: SettlementSystemCode;
   laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
   paymentPlan?: Project['paymentPlan'];
   paymentExpectedMonths?: ProjectPaymentExpectedMonths;
+  finalPaymentExpectedWeek?: string;
   laborTransferPlan?: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason?: string;
   paymentPlanDesc: string;
@@ -912,6 +942,7 @@ export interface ProjectRequestPayload {
   note: string;
   contractDocument: FileAttachment | null;
   quoteDocument?: FileAttachment | null;
+  quoteSubmissionDeferred?: boolean;
   proposalDocument?: FileAttachment | null;
   proposalWordOriginalDocument?: FileAttachment | null;
   proposalPptOriginalDocument?: FileAttachment | null;
@@ -948,7 +979,7 @@ export interface ProjectRequest {
   reviewedBy?: string;
   reviewedByName?: string;
   reviewedAt?: string;
-  reviewComment?: string;
+  reviewComment?: string | null;
   rejectedReason?: string;
   approvedProjectId?: string;
   createdAt?: string;

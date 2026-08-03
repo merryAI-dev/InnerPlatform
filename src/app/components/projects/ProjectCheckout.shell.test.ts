@@ -11,7 +11,7 @@ describe('Project Check out integration shell', () => {
     expect(portalSource).toContain('showCheckoutEntry');
     expect(portalSource).toContain("uploadDocument(kind, file)");
     expect(editorSource).toContain('data-testid="project-checkout-entry"');
-    expect(editorSource).toContain("item.id === 'payment'");
+    expect(editorSource).toContain("item.id === 'financial'");
     expect(editorSource).toContain("'performance_certificate'");
     expect(editorSource).toContain("'tax_invoice'");
     expect(editorSource).toContain("'final_settlement_report'");

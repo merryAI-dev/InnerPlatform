@@ -9,21 +9,24 @@ const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/Po
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
-  it('renders the seven PPT page 29 registration uploads without alternative-document rules', () => {
+  it('requires documents 1-2, allows document 3 to be deferred, and keeps documents 4-7 optional', () => {
     expect(source).toContain("label: '계약서 *'");
-    expect(source).toContain("description: '아직 날인 전이라면 날인 후 업로드 필수'");
+    expect(source).toContain("description: '계약서 써니(사업지원팀)에게 제출했습니다.'");
     expect(source).toContain("label: '고객사 사업자등록증 *'");
-    expect(source).toContain("label: '견적서 *'");
-    expect(source).toContain("label: '제안서(워드) *'");
-    expect(source).toContain("label: '제안서(PPT 원본) *'");
-    expect(source).toContain("label: '발표자료(PPT 원본) *'");
-    expect(source).toContain("label: 'RFP *'");
+    expect(source).toContain("label: '산출내역서(견적서) *'");
+    expect(source).toContain("label: '제안서(워드)'");
+    expect(source).toContain("label: '제안서(PPT 원본)'");
+    expect(source).toContain("label: '발표자료(PPT 원본)'");
+    expect(source).toContain("label: 'RFP'");
     expect(source.match(/description: '있을 시'/g)).toHaveLength(3);
     expect(source).toContain("description: '없으면 사업요청사항을 확인할 수 있는 메일 본문 등 첨부'");
-    expect(source).toContain("const hasRequiredRegistrationDocuments = REGISTRATION_DOCUMENT_KINDS.every");
+    expect(source).toContain("&& (draft.quoteDocument || draft.quoteSubmissionDeferred)");
     expect(source).toContain("mode === 'portal-register' && !hasRequiredRegistrationDocuments");
     expect(source).not.toContain("kinds: ['proposal', 'rfp_request_evidence']");
     expect(source).not.toContain('제안서와 RFP/요청 메일 중 하나만 남겨주세요.');
+    expect(source).toContain('산출내역서(견적서) 이후 제출(예외 처리)');
+    expect(source).toContain("!draft.quoteDocument && !draft.quoteSubmissionDeferred");
+    expect(source).not.toContain("if (!draft.proposalWordOriginalDocument)");
   });
 
   it('lets the portal shell own the page title without rendering a duplicate editor header', () => {
@@ -176,9 +179,9 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('formatProjectAmountInput(draft.supportAmount, hasSupportAmountInput)');
     expect(source).toContain('formatProjectAmountInput(draft.budgetCurrentYear, draft.budgetCurrentYear > 0)');
     expect(source).toContain('formatProjectAmountInput(draft.taxInvoiceAmount, draft.taxInvoiceAmount > 0)');
-    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.contract, true)');
-    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.interim, true)');
-    expect(source).toContain('formatProjectAmountInput(draft.paymentPlan.final, true)');
+    expect(source).toContain('formatProjectAmountInput(paymentPlan.contract, true)');
+    expect(source).toContain('formatProjectAmountInput(paymentPlan.interim, true)');
+    expect(source).toContain('formatProjectAmountInput(paymentPlan.final, true)');
   });
 
   it('shows annual profit rates as derived values and keys v2 settlement details to the basis', () => {
@@ -213,7 +216,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(basicIndex).toBeGreaterThan(-1);
     expect(basicIndex).toBeLessThan(financialIndex);
     expect(financialIndex).toBeLessThan(teamIndex);
-    expect(teamIndex).toBeLessThan(paymentIndex);
+    expect(paymentIndex).toBe(-1);
   });
 
   it('keeps portal edit drafts stable when async listener data refreshes', () => {
@@ -323,7 +326,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('입력값은 자동으로 바꾸지 않습니다.');
     expect(source).toContain('`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`');
     expect(source).toContain('`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체`');
-    expect(source).toContain('견적서 PDF');
+    expect(source).toContain('산출내역서(견적서) PDF');
     expect(source).toContain('제안서 PDF');
     expect(source).toContain('quoteDocument');
     expect(source).toContain('proposalDocument');
@@ -345,7 +348,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('등록 제출서류 7종');
     expect(source).toContain('stacked');
     expect(source).toContain("className=\"grid gap-1.5 text-left\"");
-    expect(source).toContain('프로젝트 유형과 관계없이 7개 서류를 모두 첨부해야 저장할 수 있습니다.');
+    expect(source).toContain('1~2번은 필수, 3번은 첨부 또는 이후 제출');
     expect(source).toContain('등록 제출서류');
     expect(source).toContain("if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' })");
     expect(source).toContain('고객사 사업자등록증 PDF');
@@ -353,22 +356,22 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('인건비 투입 종료월은 시작월 이후여야 합니다.');
     expect(source).toContain('실제 투입 운영 매니저 1인 이상');
     expect(source).toContain("const requiresSettlementConfirmations = usesRegistrationV2 ? draft.basis !== 'NONE' : draft.settlementType !== 'NONE'");
-    expect(source).toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
+    expect(source).not.toContain('정산 기준이 정산없음인 사업은 인건비·고객사 정산 확인을 입력하지 않습니다.');
     expect(source).toContain('md:grid-cols-2 xl:grid-cols-4');
     expect(source).not.toContain('xl:grid-cols-[132px_minmax(0,1.4fr)_minmax(0,1fr)_110px_120px_140px_140px]');
     expect(source).not.toContain('alternativeDocumentAttached');
-    expect(source).toContain('특이사항 (메모란)');
+    expect(source).not.toContain('특이사항 (메모란)');
     expect(source).not.toContain('lg:sticky lg:bottom-4');
     expect(source).not.toContain('발주처');
-    expect(source).toMatch(/number: 4,\s+label: '제안서\(워드\) \*'/);
-    expect(source).toMatch(/number: 5,\s+label: '제안서\(PPT 원본\) \*'/);
-    expect(source).toMatch(/number: 6,\s+label: '발표자료\(PPT 원본\) \*'/);
-    expect(source).toMatch(/number: 7,\s+label: 'RFP \*'/);
+    expect(source).toMatch(/number: 4,\s+label: '제안서\(워드\)'/);
+    expect(source).toMatch(/number: 5,\s+label: '제안서\(PPT 원본\)'/);
+    expect(source).toMatch(/number: 6,\s+label: '발표자료\(PPT 원본\)'/);
+    expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
     expect(source).toContain('연도별 계약·재무 *');
     expect(source).toContain('계약기간 전체 연도별 재무 확인');
-    expect(source).toContain('4대보험 포함 확인');
-    expect(source).toContain('퇴직급여 포함 확인');
-    expect(source).toContain('모두싸인으로 계약했나요? *');
+    expect(source).not.toContain('4대보험 포함 확인');
+    expect(source).not.toContain('퇴직급여 포함 확인');
+    expect(source).not.toContain('모두싸인으로 계약했나요? *');
     expect(source).toContain('종료사업 체크아웃');
     expect(source).toContain("'performance_certificate'");
     expect(source).toContain("'tax_invoice'");
@@ -380,6 +383,34 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('paymentExpectedMonths');
     expect(source).toContain('선금·중도금 합계 70% 미만 사유 *');
     expect(source).toContain('최종 저장 후 사업관리 폴더가 자동 생성');
+  });
+
+  it('merges payment fields into the contract-finance step and removes retired registration fields', () => {
+    expect(source).not.toContain("{ id: 'payment', label: '입금/정산'");
+    expect(source).not.toContain("if (step.id === 'payment')");
+    expect(source).toContain('renderPaymentFields(row, index)');
+    expect(source).toContain('!hasMultiYearContract ? renderPaymentFields() : null');
+    expect(source).not.toContain('최종 입금 메모');
+    expect(source).not.toContain('기타 참고사항');
+    expect(source).not.toContain('등록 전 확인사항');
+    expect(source).not.toContain('renderRegistrationConfirmations');
+    expect(source).not.toContain("issues.push({ step: 'payment'");
+    expect(source).toContain('총실비(원가)');
+    expect(source).toContain('ACCOUNT_TYPE_LABELS');
+    expect(source).toContain('INTEREST_REFUND_POLICY_LABELS');
+    expect(source).toContain('최종 입금 재무주차');
+    expect(source).toContain('placeholder="예: 26-8-1"');
+    expect(source).toContain('const effectivePaymentPlan = hasMultiYearContract');
+    expect(source).toContain('total.contract + (row.paymentPlan?.contract || 0)');
+    expect(source).toContain('년 선금·중도금 합계 70% 미만 사유 *');
+    expect(source).toContain("updateFinancialYear(financialYearIndex!, 'advanceInterimBelow70Reason'");
+    expect(source).toContain("updateFinancialYear(financialYearIndex!, 'isSettled'");
+    expect(source).toContain('(기존값 · 선택 불가)');
+    expect(source).toContain('disabled>{member.role}');
+    expect(source).toContain('최종 입금 주차 ${row.finalPaymentExpectedWeek || \'-\'}');
+    expect(source).toContain('disabled={!financeWeekYear}');
+    expect(source).toContain('계약 종료일을 입력하면 재무주차를 선택할 수 있습니다.');
+    expect(source).not.toContain('입금계획');
   });
 
   it('wires admin project editor to contract upload without automatic analysis merge', () => {

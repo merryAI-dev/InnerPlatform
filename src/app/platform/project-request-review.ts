@@ -9,6 +9,7 @@ import type {
 import {
   ACCOUNT_TYPE_LABELS,
   BASIS_LABELS,
+  INTEREST_REFUND_POLICY_LABELS,
   normalizeAccountType,
   normalizeBasis,
   normalizeProjectFundInputMode,
@@ -212,6 +213,15 @@ function formatFundInputMode(value: ProjectRequestPayload['fundInputMode']): str
   return PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(value)] || value;
 }
 
+function formatFinancialYears(payload: ProjectRequestPayload): string {
+  return (payload.financialYears || []).map((row) => {
+    const payments = row.paymentPlan
+      ? ` · 입금 선금 ${formatShortAmount(row.paymentPlan.contract)} / 중도금 ${formatShortAmount(row.paymentPlan.interim)} / 잔금 ${formatShortAmount(row.paymentPlan.final)}`
+      : '';
+    return `${row.year}년 · 계약 ${formatShortAmount(row.contractAmount)} · 총수익 ${formatShortAmount(row.totalRevenueAmount)} · 총실비(원가) ${formatShortAmount(row.totalActualCost)}${payments} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+  }).join('\n');
+}
+
 function buildAnalysisHighlights(analysis?: ProjectRequestContractAnalysis | null): ProjectRequestReviewAnalysisHighlight[] {
   if (!analysis) return [];
   return (Object.entries(analysis.fields) as Array<[keyof ProjectRequestContractAnalysis['fields'], ProjectRequestContractAnalysis['fields'][keyof ProjectRequestContractAnalysis['fields']]]>)
@@ -274,6 +284,7 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
       status: analysisStatusByKey.get('description') || undefined,
     }),
     buildTextItem('participantCondition', '참여 조건', payload.participantCondition),
+    buildTextItem('note', '등록 메모', payload.note),
   ];
   if (contractAnalysis) {
     contractItems.splice(2, 0, {
@@ -296,30 +307,30 @@ function buildChecklistGroups(payload: ProjectRequestPayload, analysisHighlights
     buildMoneyItem('contractAmount', '계약금액', payload.contractAmount, payload.financialInputFlags),
     buildMoneyItem('salesVatAmount', '총매출부가세', payload.salesVatAmount, payload.financialInputFlags),
     buildMoneyItem('totalRevenueAmount', '총수익', payload.totalRevenueAmount, payload.financialInputFlags),
+    buildMoneyItem('totalActualCost', '총실비(원가)', payload.totalActualCost, payload.financialInputFlags),
     buildMoneyItem('supportAmount', '총지원금', payload.supportAmount, payload.financialInputFlags),
+    buildTextItem('financialYears', '연도별 계약/재무', formatFinancialYears(payload)),
     buildTextItem('paymentPlanDesc', '입금 계획', payload.paymentPlanDesc),
-  ];
-
-  const settlementItems: ProjectRequestReviewItem[] = [
     buildTextItem('settlementType', '정산 유형', formatSettlementType(payload.settlementType)),
     buildTextItem('basis', '정산 기준', formatBasis(payload.basis)),
     buildTextItem('accountType', '통장 유형', formatAccountType(payload.accountType)),
     buildTextItem('fundInputMode', '자금 입력 방식', formatFundInputMode(payload.fundInputMode)),
+    buildTextItem('interestRefundPolicy', '이자 반납 여부', payload.interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[payload.interestRefundPolicy] : ''),
+    buildTextItem('finalPaymentExpectedWeek', '최종 입금 재무주차', payload.finalPaymentExpectedWeek),
     buildSettlementPolicyItem(payload.settlementSheetPolicy),
-    buildTextItem('settlementGuide', '정산 가이드', payload.settlementGuide),
+    buildTextItem('settlementGuide', '계약/재무 안내', payload.settlementGuide),
+    buildTextItem('quoteDocument', '산출내역서(견적서)', payload.quoteDocument?.name || (payload.quoteSubmissionDeferred ? '이후 제출 예정' : '')),
   ];
 
   const teamItems: ProjectRequestReviewItem[] = [
     buildTextItem('teamName', '팀명', payload.teamName),
     buildTextItem('teamMembers', '팀원', formatTeamMembers(payload)),
-    buildTextItem('note', '비고', payload.note),
   ];
 
   return [
     { key: 'identity', label: '기본 정보', items: identityItems },
     { key: 'contract', label: '계약/운영', items: contractItems },
     { key: 'financial', label: '계약/재무', items: financialItems },
-    { key: 'settlement', label: '정산', items: settlementItems },
     { key: 'team', label: '팀/인력', items: teamItems },
   ];
 }
@@ -328,10 +339,9 @@ function buildFacts(
   groups: ProjectRequestReviewGroup[],
 ): ProjectRequestReviewFacts {
   const financialGroup = groups.find((group) => group.key === 'financial');
-  const settlementGroup = groups.find((group) => group.key === 'settlement');
   return {
     financial: financialGroup?.items.slice(0, 4) || [],
-    settlement: settlementGroup?.items.slice(0, 4) || [],
+    settlement: financialGroup?.items.filter((item) => ['settlementType', 'basis', 'accountType', 'fundInputMode'].includes(item.key)) || [],
   };
 }
 

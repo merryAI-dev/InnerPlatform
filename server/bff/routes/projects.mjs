@@ -697,10 +697,13 @@ function normalizeProjectType(value) {
 const REGISTRATION_PROJECT_TYPES = new Set(['C1', 'A1', 'A2', 'I1', 'I2', 'I3', 'D1', 'S1', 'S2', 'E1', 'P1', 'Z1']);
 const REGISTRATION_REQUIRED_DOCUMENT_KINDS = PROJECT_REGISTRATION_REQUIRED_DOCUMENT_KINDS;
 const PRIVATE_DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
-const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const REGISTRATION_AMOUNT_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'totalActualCost', 'supportAmount'];
 const REGISTRATION_PAYMENT_FIELDS = ['contract', 'interim', 'final'];
-const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'supportAmount'];
+const REGISTRATION_FINANCIAL_FLAG_FIELDS = ['contractAmount', 'salesVatAmount', 'totalRevenueAmount', 'totalActualCost', 'supportAmount'];
 const REGISTRATION_SETTLEMENT_TYPES = new Set(['TYPE1', 'TYPE2', 'TYPE3', 'TYPE4', 'TYPE5', 'NONE']);
+const REGISTRATION_INTEREST_REFUND_POLICIES = new Set([
+  'REFUND', 'USE_AS_PROJECT_EXPENSE', 'MYSC_REVENUE', 'REVIEW_LATER',
+]);
 const REGISTRATION_SETTLEMENT_BASES = new Set([
   'SUPPLY_AMOUNT', '공급가액', 'SUPPLY_PRICE', '공급대가', 'OTHER', '기타', 'NONE',
 ]);
@@ -840,11 +843,6 @@ function assertRegistrationTeamMembers(value) {
       ? 'Project registration requires at least one actual operating manager'
       : 'Project registration requires at least one operating manager');
   }
-  if (!value.some((member) => (
-    readOptionalText(member?.role) === '사업 최종 책임자' && member?.isDocumentOnly === false
-  ))) {
-    invalidRegistration('Project registration requires an actual project final responsible member');
-  }
   const invalidSettlementSupport = value.some((member) => {
     if (readOptionalText(member?.role) !== '정산지원') return false;
     const memberName = readOptionalText(member?.memberName);
@@ -938,6 +936,7 @@ function registrationFinancialInputFlags(value = {}, amounts = {}) {
     contractAmount: value?.contractAmount === true || registrationAmount(amounts.contractAmount) > 0,
     salesVatAmount: value?.salesVatAmount === true || registrationAmount(amounts.salesVatAmount) > 0,
     totalRevenueAmount: value?.totalRevenueAmount === true || registrationAmount(amounts.totalRevenueAmount) > 0,
+    totalActualCost: value?.totalActualCost === true || registrationAmount(amounts.totalActualCost) > 0,
     supportAmount: value?.supportAmount === true || registrationAmount(amounts.supportAmount) > 0,
   };
 }
@@ -1018,11 +1017,34 @@ function normalizeRegistrationFinancialYears(value) {
       contractAmount,
       salesVatAmount: registrationAmount(row?.salesVatAmount),
       totalRevenueAmount,
+      totalActualCost: registrationAmount(row?.totalActualCost),
       supportAmount: registrationAmount(row?.supportAmount),
       profitRate: contractAmount > 0 ? Math.min(1, totalRevenueAmount / contractAmount) : 0,
       confirmed: row?.confirmed === true,
+      ...(row?.paymentPlan && typeof row.paymentPlan === 'object' && !Array.isArray(row.paymentPlan) ? {
+        paymentPlan: {
+          contract: registrationAmount(row.paymentPlan.contract),
+          interim: registrationAmount(row.paymentPlan.interim),
+          final: registrationAmount(row.paymentPlan.final),
+        },
+      } : {}),
+      ...(Object.hasOwn(row || {}, 'advanceInterimBelow70Reason') ? {
+        advanceInterimBelow70Reason: readOptionalText(row.advanceInterimBelow70Reason),
+      } : {}),
+      ...(typeof row?.isSettled === 'boolean' ? { isSettled: row.isSettled } : {}),
+      ...(readOptionalText(row?.finalPaymentExpectedWeek) ? {
+        finalPaymentExpectedWeek: readOptionalText(row.finalPaymentExpectedWeek),
+      } : {}),
     }];
   });
+}
+
+function isRegistrationFinanceWeek(value, year) {
+  const match = /^(\d{2})-(\d{1,2})-([1-5])$/.exec(readOptionalText(value));
+  return Boolean(match
+    && Number(match[1]) === year % 100
+    && Number(match[2]) >= 1
+    && Number(match[2]) <= 12);
 }
 
 function normalizeRegistrationConfirmations(value) {
@@ -1127,6 +1149,7 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
   const accountType = readOptionalText(payload.accountType);
   const settlementSystem = readOptionalText(payload.settlementSystem);
   const laborSettlementBasis = readOptionalText(payload.laborSettlementBasis);
+  const interestRefundPolicy = readOptionalText(payload.interestRefundPolicy);
   if (!REGISTRATION_SETTLEMENT_TYPES.has(settlementType)) {
     invalidRegistration('Project registration settlementType is invalid');
   }
@@ -1146,10 +1169,13 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
   if (settlementDetailsEnabled && laborSettlementBasis && !LABOR_SETTLEMENT_BASES.has(laborSettlementBasis)) {
     invalidRegistration('Project registration laborSettlementBasis is invalid');
   }
+  if (interestRefundPolicy && !REGISTRATION_INTEREST_REFUND_POLICIES.has(interestRefundPolicy)) {
+    invalidRegistration('Project registration interestRefundPolicy is invalid');
+  }
   assertRegistrationV2PaymentPlan(payload);
 
   if (validateAttachments) {
-    const missingDocumentKind = missingProjectRegistrationRequiredDocumentKind(attachmentRefs);
+    const missingDocumentKind = missingProjectRegistrationRequiredDocumentKind(attachmentRefs, payload);
     if (missingDocumentKind) {
       invalidRegistration(`Project registration required attachment is missing: ${missingDocumentKind}`);
     }
@@ -1181,6 +1207,21 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
       for (const field of REGISTRATION_AMOUNT_FIELDS) {
         assertRegistrationAmount(row[field], `financialYears.${year}.${field}`, { required: true });
       }
+      if (row.paymentPlan !== undefined) {
+        if (!row.paymentPlan || typeof row.paymentPlan !== 'object' || Array.isArray(row.paymentPlan)) {
+          invalidRegistration(`Project registration financialYears.${year}.paymentPlan is invalid`);
+        }
+        for (const field of REGISTRATION_PAYMENT_FIELDS) {
+          assertRegistrationAmount(row.paymentPlan[field], `financialYears.${year}.paymentPlan.${field}`, { required: true });
+        }
+      }
+      if (row.isSettled !== undefined && typeof row.isSettled !== 'boolean') {
+        invalidRegistration(`Project registration financialYears.${year}.isSettled must be boolean`);
+      }
+      if (readOptionalText(row.finalPaymentExpectedWeek)
+        && !isRegistrationFinanceWeek(row.finalPaymentExpectedWeek, year)) {
+        invalidRegistration(`Project registration financialYears.${year}.finalPaymentExpectedWeek is invalid`);
+      }
       if (typeof row.profitRate !== 'number' || !Number.isFinite(row.profitRate) || row.profitRate < 0 || row.profitRate > 1) {
         invalidRegistration(`Project registration financialYears.${year}.profitRate must be between 0 and 1`);
       }
@@ -1203,28 +1244,6 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
     }
   }
 
-  const confirmations = payload.registrationConfirmations;
-  if (!confirmations || typeof confirmations !== 'object' || Array.isArray(confirmations)) {
-    invalidRegistration('Project registration confirmations are required');
-  }
-  const requiresSettlementConfirmations = settlementDetailsEnabled;
-  if (requiresSettlementConfirmations) {
-    if (confirmations.laborIncludesFourInsurance !== true) {
-      invalidRegistration('Project registration 4-insurance confirmation is required');
-    }
-    if (confirmations.laborIncludesRetirementPay !== true) {
-      invalidRegistration('Project registration retirement pay confirmation is required');
-    }
-    if (confirmations.customerSettlementBasisConfirmed !== true) {
-      invalidRegistration('Project registration customer settlement basis confirmation is required');
-    }
-  }
-  if (typeof confirmations.modusignContractUsed !== 'boolean') {
-    invalidRegistration('Project registration Modusign confirmation is required');
-  }
-  if (confirmations.modusignContractUsed === false && confirmations.originalContractSubmitted !== true) {
-    invalidRegistration('Project registration original contract submission is required without Modusign');
-  }
 }
 
 const REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS = {
@@ -1408,11 +1427,11 @@ export function buildProjectRegistrationCanonicalDocuments({
     contractAmount: registrationAmount(payload.contractAmount),
     salesVatAmount: registrationAmount(payload.salesVatAmount),
     totalRevenueAmount: registrationAmount(payload.totalRevenueAmount),
+    totalActualCost: registrationAmount(payload.totalActualCost),
     supportAmount: registrationAmount(payload.supportAmount),
     financialInputFlags: registrationFinancialInputFlags(payload.financialInputFlags, payload),
     registrationRequirementsVersion: registrationRequirementsVersion(payload.registrationRequirementsVersion),
     financialYears: normalizeRegistrationFinancialYears(payload.financialYears),
-    registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
     registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
       payload.registrationOptionalDocumentNotes,
     ),
@@ -1436,6 +1455,9 @@ export function buildProjectRegistrationCanonicalDocuments({
       final: registrationAmount(payload.paymentPlan?.final),
     },
     paymentExpectedMonths: normalizePaymentExpectedMonths(payload.paymentExpectedMonths),
+    interestRefundPolicy: readOptionalText(payload.interestRefundPolicy) || undefined,
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek) || undefined,
+    quoteSubmissionDeferred: payload.quoteSubmissionDeferred === true,
     advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
     paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
     settlementGuide: readOptionalText(payload.settlementGuide),
@@ -1587,6 +1609,7 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     contractAmount: pickNumber('contractAmount'),
     salesVatAmount: pickNumber('salesVatAmount'),
     totalRevenueAmount: pickNumber('totalRevenueAmount'),
+    totalActualCost: pickNumber('totalActualCost'),
     supportAmount: pickNumber('supportAmount'),
     financialInputFlags: project?.financialInputFlags || existingPayload.financialInputFlags || undefined,
     registrationRequirementsVersion: pickValue('registrationRequirementsVersion'),
@@ -1609,6 +1632,9 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     settlementSheetPolicy: pickValue('settlementSheetPolicy') || undefined,
     paymentPlan: pickValue('paymentPlan') || { contract: 0, interim: 0, final: 0 },
     paymentExpectedMonths: normalizePaymentExpectedMonths(pickValue('paymentExpectedMonths')),
+    interestRefundPolicy: pickText('interestRefundPolicy') || undefined,
+    finalPaymentExpectedWeek: pickText('finalPaymentExpectedWeek') || undefined,
+    quoteSubmissionDeferred: pickValue('quoteSubmissionDeferred') === true,
     advanceInterimBelow70Reason: pickText('advanceInterimBelow70Reason'),
     paymentPlanDesc: pickText('paymentPlanDesc'),
     settlementGuide: pickText('settlementGuide'),
@@ -1704,11 +1730,14 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     contractAmount: Number.isFinite(Number(payload.contractAmount)) ? Math.max(0, Math.round(Number(payload.contractAmount))) : 0,
     salesVatAmount: Number.isFinite(Number(payload.salesVatAmount)) ? Math.max(0, Math.round(Number(payload.salesVatAmount))) : 0,
     totalRevenueAmount: Number.isFinite(Number(payload.totalRevenueAmount)) ? Math.max(0, Math.round(Number(payload.totalRevenueAmount))) : 0,
+    totalActualCost: Number.isFinite(Number(payload.totalActualCost)) ? Math.max(0, Math.round(Number(payload.totalActualCost))) : 0,
     supportAmount: Number.isFinite(Number(payload.supportAmount)) ? Math.max(0, Math.round(Number(payload.supportAmount))) : 0,
     financialInputFlags: payload.financialInputFlags,
     registrationRequirementsVersion: registrationVersion,
     financialYears: normalizeRegistrationFinancialYears(payload.financialYears),
-    registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
+    ...(Object.hasOwn(payload, 'registrationConfirmations') ? {
+      registrationConfirmations: normalizeRegistrationConfirmations(payload.registrationConfirmations),
+    } : {}),
     registrationOptionalDocumentNotes: normalizeRegistrationOptionalDocumentNotes(
       payload.registrationOptionalDocumentNotes,
     ),
@@ -1730,10 +1759,17 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       payload.paymentExpectedMonths || currentProject.paymentExpectedMonths,
     ),
+    interestRefundPolicy: readOptionalText(payload.interestRefundPolicy)
+      || readOptionalText(currentProject.interestRefundPolicy)
+      || undefined,
+    finalPaymentExpectedWeek: readOptionalText(payload.finalPaymentExpectedWeek) || undefined,
+    quoteSubmissionDeferred: payload.quoteSubmissionDeferred === true,
     advanceInterimBelow70Reason: readOptionalText(payload.advanceInterimBelow70Reason),
     paymentPlanDesc: readOptionalText(payload.paymentPlanDesc),
     settlementGuide: readOptionalText(payload.settlementGuide),
-    finalPaymentNote: readOptionalText(payload.finalPaymentNote),
+    ...(Object.hasOwn(payload, 'finalPaymentNote') ? {
+      finalPaymentNote: readOptionalText(payload.finalPaymentNote),
+    } : {}),
     projectPurpose: readOptionalText(payload.projectPurpose),
     registeredById: managerId,
     registeredByName: managerName,
@@ -1778,6 +1814,7 @@ const PROJECT_INFO_CHANGE_LABELS = {
   contractAmount: '계약금액',
   salesVatAmount: '총매출부가세',
   totalRevenueAmount: '총수익',
+  totalActualCost: '총실비(원가)',
   supportAmount: '총지원금',
   settlementType: '정산 유형',
   basis: '정산 기준',
@@ -1792,6 +1829,9 @@ const PROJECT_INFO_CHANGE_LABELS = {
   teamMembersDetailed: '참여인력 (서류상·실제)',
   paymentPlan: '입금 분할',
   paymentExpectedMonths: '입금 예상월',
+  interestRefundPolicy: '이자 반납 여부',
+  finalPaymentExpectedWeek: '최종 입금 재무주차',
+  quoteSubmissionDeferred: '산출내역서 이후 제출',
   advanceInterimBelow70Reason: '선금·중도금 70% 미만 사유',
   paymentPlanDesc: '입금 계획',
   finalPaymentNote: '최종 입금 메모',
@@ -1818,11 +1858,12 @@ const PROJECT_INFO_CHANGE_LABELS = {
 const PROJECT_INFO_PAYLOAD_FIELDS = [
   'name', 'officialContractName', 'type', 'status', 'phase', 'description', 'clientOrg', 'businessManagementGoogleFolderLink',
   'department', 'groupwareName', 'currency', 'contractAmount', 'salesVatAmount',
-  'totalRevenueAmount', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
+  'totalRevenueAmount', 'totalActualCost', 'supportAmount', 'financialInputFlags', 'registrationRequirementsVersion',
   'financialYears', 'registrationConfirmations', 'registrationOptionalDocumentNotes', 'checkout', 'contractStart', 'contractEnd',
   'contractType', 'settlementType', 'basis', 'accountType', 'settlementSystem',
   'laborSettlementBasis', 'laborTransferPlan', 'fundInputMode', 'settlementSheetPolicy', 'paymentPlan',
-  'paymentExpectedMonths', 'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
+  'paymentExpectedMonths', 'interestRefundPolicy', 'finalPaymentExpectedWeek', 'quoteSubmissionDeferred',
+  'advanceInterimBelow70Reason', 'paymentPlanDesc', 'settlementGuide',
   'finalPaymentNote', 'projectPurpose', 'registeredById', 'registeredByName',
   'registeredByEmail', 'executiveApproverId', 'executiveApproverName', 'executiveApproverEmail',
   'managerId', 'managerName', 'teamName', 'teamMembers',
@@ -2103,14 +2144,14 @@ function hasCanonicalRegistrationV2Documents(request, payload, tenantId) {
     !readOptionalText(payload?.[field]?.path) || isCanonicalDocument(field)
   ));
   if (!allExistingDocumentsAreCanonical) return false;
-  if (REGISTRATION_REQUIRED_DOCUMENT_KINDS.every((kind) => (
+  const hasRequiredDocument = (kind) => (
     isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[kind])
-  ))) return true;
+      || (kind === 'quote' && payload?.quoteSubmissionDeferred === true)
+  );
+  if (REGISTRATION_REQUIRED_DOCUMENT_KINDS.every(hasRequiredDocument)) return true;
 
   // Preserve approval of registrations already submitted under the former alternative-document contract.
-  if (!['contract', 'customer_business_registration', 'quote'].every((kind) => (
-    isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS[kind])
-  ))) return false;
+  if (!['contract', 'customer_business_registration', 'quote'].every(hasRequiredDocument)) return false;
   const hasProposal = isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS.proposal);
   const hasRfpEvidence = isCanonicalDocument(REGISTRATION_REQUIREMENT_DOCUMENT_FIELDS.rfp_request_evidence);
   if (hasProposal === hasRfpEvidence) return false;

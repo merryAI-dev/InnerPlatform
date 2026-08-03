@@ -66,11 +66,13 @@ describe('normalizeProjectFinancialInputFlagsForAmounts', () => {
       contractAmount: 100_000,
       salesVatAmount: 10_000,
       totalRevenueAmount: 91_000,
+      totalActualCost: 0,
       supportAmount: 0,
     })).toEqual({
       contractAmount: true,
       salesVatAmount: true,
       totalRevenueAmount: true,
+      totalActualCost: false,
       supportAmount: false,
     });
   });

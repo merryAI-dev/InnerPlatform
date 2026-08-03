@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FileAttachment, ProjectRegistrationOptionalDocumentNotes } from '../../../data/types';
+import { INTEREST_REFUND_POLICY_LABELS, type FileAttachment, type ProjectRegistrationOptionalDocumentNotes } from '../../../data/types';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import { getMigrationAuditStatusLabel } from '../../../platform/project-migration-console';
 import { resolveProjectRequestPayload } from '../../../platform/project-change-request';
@@ -56,6 +56,7 @@ type ReviewDocumentSlotDefinition = {
   number: number;
   label: string;
   kinds: ProjectRequestDocumentKind[];
+  optional?: boolean;
   noteField?: keyof ProjectRegistrationOptionalDocumentNotes;
 };
 
@@ -83,11 +84,11 @@ const REVIEW_DOCUMENT_DEFINITIONS: ReviewDocumentDefinition[] = [
 const REVIEW_DOCUMENT_SLOTS: ReviewDocumentSlotDefinition[] = [
   { number: 1, label: '계약서 PDF', kinds: ['contract'] },
   { number: 2, label: '고객사 사업자등록증 PDF', kinds: ['customer_business_registration'] },
-  { number: 3, label: '견적서 PDF', kinds: ['quote'] },
-  { number: 4, label: '제안서 PDF 또는 RFP/요청 메일 증빙', kinds: ['proposal', 'rfp_request_evidence'] },
-  { number: 5, label: '제안서 Word 원본', kinds: ['proposal_word_original'], noteField: 'proposalWordOriginal' },
-  { number: 6, label: '제안서 PPT 원본', kinds: ['proposal_ppt_original'], noteField: 'proposalPptOriginal' },
-  { number: 7, label: '발표자료 PPT 원본', kinds: ['presentation_ppt_original'], noteField: 'presentationPptOriginal' },
+  { number: 3, label: '산출내역서(견적서) PDF', kinds: ['quote'] },
+  { number: 4, label: '제안서 Word 원본 (선택)', kinds: ['proposal_word_original'], optional: true, noteField: 'proposalWordOriginal' },
+  { number: 5, label: '제안서 PPT 원본 (선택)', kinds: ['proposal_ppt_original'], optional: true, noteField: 'proposalPptOriginal' },
+  { number: 6, label: '발표자료 PPT 원본 (선택)', kinds: ['presentation_ppt_original'], optional: true, noteField: 'presentationPptOriginal' },
+  { number: 7, label: 'RFP/요청 메일 증빙 (선택)', kinds: ['rfp_request_evidence'], optional: true },
 ];
 
 function isFileAttachment(value: unknown): value is FileAttachment {
@@ -102,6 +103,7 @@ export function buildMigrationReviewDocumentSlots(record: MigrationAuditConsoleR
   const notes: Partial<ProjectRegistrationOptionalDocumentNotes> = requestNotes !== undefined
     ? (requestNotes || {})
     : (record.project.registrationOptionalDocumentNotes || {});
+  const quoteSubmissionDeferred = payload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
   const documentByKind = new Map<ProjectRequestDocumentKind, ReviewDocumentEntry>();
 
   REVIEW_DOCUMENT_DEFINITIONS.forEach((definition) => {
@@ -121,8 +123,10 @@ export function buildMigrationReviewDocumentSlots(record: MigrationAuditConsoleR
     return {
       ...slot,
       entries,
-      note: slot.noteField ? String(notes[slot.noteField] || '').trim() : '',
-      conflict: slot.number === 4 && entries.length > 1,
+      note: slot.number === 3 && quoteSubmissionDeferred
+        ? '이후 제출 예정'
+        : slot.noteField ? String(notes[slot.noteField] || '').trim() : '',
+      conflict: false,
     };
   });
 }
@@ -134,6 +138,19 @@ function formatDateTime(value?: string) {
   return new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(date);
+}
+
+function formatMoney(value?: number) {
+  return Number.isFinite(value) ? `${Number(value).toLocaleString('ko-KR')}원` : '-';
+}
+
+function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjectRequestPayload>>['financialYears'] = []) {
+  return (years || []).map((row) => {
+    const payment = row.paymentPlan
+      ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
+      : '';
+    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+  }).join('\n') || '-';
 }
 
 function ApprovalSeal({ name, state }: { name: string; state: 'submitted' | 'approved' | 'rejected' }) {
@@ -199,6 +216,13 @@ export function MigrationAuditDocumentDialog({
 
   const dossier = buildMigrationReviewDossier(record.project, record.request);
   const requestPayload = resolveProjectRequestPayload(record.request);
+  const totalActualCost = requestPayload?.totalActualCost ?? record.project.totalActualCost;
+  const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
+  const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
+  const finalPaymentExpectedWeek = requestPayload?.finalPaymentExpectedWeek ?? record.project.finalPaymentExpectedWeek;
+  const registrationNote = requestPayload?.note ?? record.project.note;
+  const quoteDocument = requestPayload?.quoteDocument !== undefined ? requestPayload.quoteDocument : record.project.quoteDocument;
+  const quoteSubmissionDeferred = requestPayload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
   const designatedApproverName = requestPayload?.executiveApproverName || record.project.executiveApproverName || '';
   const isManagementPlanning = reviewStage === 'managementPlanning';
   const organizationReviewStatus = record.project.executiveReviewStatus;
@@ -281,11 +305,10 @@ export function MigrationAuditDocumentDialog({
             <h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">의견 및 처리 이력</h3>
             <div className="border border-t-0 border-slate-400 text-[12px]">
               {dossier.audit.requestSummary !== '-' ? <ReviewMessage label="요청 요약" by={dossier.audit.requestedByName} at={dossier.audit.requestedAt} message={dossier.audit.requestSummary} /> : null}
-              {dossier.notes.note !== '-' ? <ReviewMessage label="실무자 기안 메모" by={dossier.audit.requestedByName} at={dossier.audit.requestUpdatedAt} message={dossier.notes.note} /> : null}
               {hasDistinctRequestReviewComment ? <ReviewMessage label="실무자 제출/재제출 메모" by={record.request?.requestedByName || dossier.audit.requestedByName} at={record.request?.requestedAt || dossier.audit.requestUpdatedAt} message={requestReviewComment} /> : null}
               {reviewMessages.map((entry, index) => <ReviewMessage key={`${entry.status}-${entry.reviewedAt}-${index}`} label={entry.status === 'PENDING' ? '실무자 제출/재제출 메모' : entry.status === 'APPROVED' ? '조직장 승인 메모' : entry.status === 'REVISION_REJECTED' ? '조직장 반려 메모' : '조직장 폐기 메모'} by={entry.reviewedByName} at={entry.reviewedAt} message={entry.reviewComment} />)}
               {managementMessages.map((entry, index) => <ReviewMessage key={`management-${entry.status}-${entry.reviewedAt}-${index}`} label={entry.status === 'AGREED' ? '경영기획실 합의 메모' : '경영기획실 반려 메모'} by={entry.reviewedByName} at={formatDateTime(entry.reviewedAt)} message={String(entry.reviewComment || '-')} />)}
-              {dossier.audit.requestSummary === '-' && dossier.notes.note === '-' && !hasDistinctRequestReviewComment && reviewMessages.length === 0 && managementMessages.length === 0 ? <p className="px-3 py-4 text-slate-500">등록된 의견 또는 처리 메모가 없습니다.</p> : null}
+              {dossier.audit.requestSummary === '-' && !hasDistinctRequestReviewComment && reviewMessages.length === 0 && managementMessages.length === 0 ? <p className="px-3 py-4 text-slate-500">등록된 의견 또는 처리 메모가 없습니다.</p> : null}
             </div>
           </section>
 
@@ -300,11 +323,11 @@ export function MigrationAuditDocumentDialog({
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">기본정보</h3><dl className="border border-t-0 border-slate-400">
             <DocumentCell label="프로젝트명" value={dossier.headerTitle} /><DocumentCell label="공식 계약명" value={dossier.identity.officialContractName} /><DocumentCell label="계약 대상" value={dossier.identity.clientOrg} /><DocumentCell label="담당조직(CIC)" value={dossier.identity.cic} /><DocumentCell label="사업 담당자" value={dossier.identity.pmName} /><DocumentCell label="프로젝트 코드" value={managementReview.projectCode || '부여 대기'} />
           </dl></section>
-          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">계약 및 정산 정보</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
-            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" />
+          <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">계약/재무</h3><dl className="grid border border-t-0 border-slate-400 md:grid-cols-2">
+            <DocumentCell label="계약 기간" value={dossier.contract.periodLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="정산 유형" value={dossier.contract.settlementTypeLabel} /><DocumentCell label="계약금액" value={dossier.budget.contractAmountLabel} className="md:border-r md:border-slate-400" /><DocumentCell label="총수익" value={dossier.budget.totalRevenueAmountLabel} /><DocumentCell label="총실비(원가)" value={formatMoney(totalActualCost)} className="md:border-r md:border-slate-400" /><DocumentCell label="이자 반납 여부" value={interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-'} /><DocumentCell label="최종 입금 재무주차" value={finalPaymentExpectedWeek || '-'} className="md:col-span-2" /><DocumentCell label="연도별 계약/재무" value={formatFinancialYears(financialYears)} className="md:col-span-2" /><DocumentCell label="입금 계획" value={dossier.budget.paymentPlanDesc} className="md:col-span-2" /><DocumentCell label="산출내역서(견적서)" value={quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-')} className="md:col-span-2" />
           </dl></section>
           <section className="mt-6"><h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 내용</h3><dl className="border border-t-0 border-slate-400">
-            <DocumentCell label="프로젝트 목적" value={dossier.notes.projectPurpose} /><DocumentCell label="상세 설명" value={dossier.notes.description} /><DocumentCell label="참여 조건" value={dossier.notes.participantCondition} /><DocumentCell label="비고" value={dossier.notes.note} />
+            <DocumentCell label="프로젝트 목적" value={dossier.notes.projectPurpose} /><DocumentCell label="상세 설명" value={dossier.notes.description} /><DocumentCell label="참여 조건" value={dossier.notes.participantCondition} /><DocumentCell label="등록 메모" value={registrationNote || '-'} />
           </dl></section>
           <section className="mt-6">
             <h3 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">등록 제출서류 7종</h3>
@@ -350,6 +373,8 @@ export function MigrationAuditDocumentDialog({
                       </div>
                     ) : slot.note ? (
                       <p><span className="font-semibold text-slate-600">미첨부 사유</span> · {slot.note}</p>
+                    ) : slot.optional ? (
+                      <p className="text-slate-500">선택 · 미제출</p>
                     ) : (
                       <p className="text-rose-700">미제출</p>
                     )}

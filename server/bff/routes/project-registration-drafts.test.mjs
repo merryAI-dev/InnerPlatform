@@ -261,16 +261,18 @@ function validRegistrationV2Payload(overrides = {}) {
     contractAmount: 300_000,
     salesVatAmount: 30_000,
     totalRevenueAmount: 120_000,
+    totalActualCost: 75_000,
     supportAmount: 10_000,
     financialInputFlags: {
       contractAmount: true,
       salesVatAmount: true,
       totalRevenueAmount: true,
+      totalActualCost: true,
       supportAmount: true,
     },
     financialYears: [
-      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
-      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
     ],
     registrationConfirmations: {
       laborIncludesFourInsurance: true,
@@ -623,10 +625,6 @@ describe('project registration draft service', () => {
     'contract',
     'customer_business_registration',
     'quote',
-    'proposal_word_original',
-    'proposal_ppt_original',
-    'presentation_ppt_original',
-    'rfp_request_evidence',
   ])('rejects a v2 save when the %s attachment is missing', async (missingKind) => {
     const { db, service, base } = createHarness();
     const created = await service.create({ ...base, idempotencyKey: `idem-save-${missingKind}-create` });
@@ -647,6 +645,33 @@ describe('project registration draft service', () => {
       expectedDraftRevision: 0,
       payload: validRegistrationV2Payload(),
     }), 422, 'project_registration_invalid');
+  });
+
+  it.each([
+    ['quote attached', {}, true],
+    ['quote deferred', { quoteSubmissionDeferred: true }, false],
+  ])('accepts a v2 save when the %s path satisfies the quote requirement', async (_label, payloadOverrides, includeQuote) => {
+    const { db, service, base } = createHarness();
+    const created = await service.create({ ...base, idempotencyKey: `idem-save-${_label}-create` });
+    addRequiredRegistrationAttachments(db, created.body.draft.draftId);
+    const path = `orgs/tenant-a/projectRequestDrafts/${created.body.draft.draftId}`;
+    if (!includeQuote) {
+      const draft = db.documents.get(path);
+      db.documents.set(path, {
+        ...draft,
+        attachmentRefs: draft.attachmentRefs.filter((attachment) => attachment.documentKind !== 'quote'),
+      });
+    }
+
+    await expect(service.update({
+      ...base,
+      draftId: created.body.draft.draftId,
+      leaseId: created.body.lease.leaseId,
+      fence: created.body.lease.fence,
+      idempotencyKey: `idem-save-${_label}`,
+      expectedDraftRevision: 0,
+      payload: validRegistrationV2Payload(payloadOverrides),
+    })).resolves.toMatchObject({ status: 200 });
   });
 
   it('atomically submits only the stored private draft and replays after releasing the lease', async () => {
@@ -968,7 +993,7 @@ describe('project registration draft service', () => {
       .toEqual(documents.map(([documentKind]) => documentKind));
   });
 
-  it('requires RFP even when a legacy proposal exists', async () => {
+  it('allows optional RFP to be omitted when a legacy proposal exists', async () => {
     const { db, service, base } = createHarness();
     const created = await service.create({
       ...base,
@@ -990,14 +1015,14 @@ describe('project registration draft service', () => {
       attachmentRefs: draft.attachmentRefs.filter((attachment) => attachment.documentKind !== 'rfp_request_evidence'),
     });
 
-    await expectHttpError(service.submit({
+    await expect(service.submit({
       ...base,
       idempotencyKey: 'idem-v2-rfp-submit',
       draftId: created.body.draft.draftId,
       leaseId: created.body.lease.leaseId,
       fence: created.body.lease.fence,
       expectedDraftRevision: 0,
-    }), 422, 'project_registration_invalid');
+    })).resolves.toMatchObject({ status: 201 });
   });
 
   it('keeps a stored legacy proposal when the required RFP is uploaded', async () => {
@@ -1323,8 +1348,8 @@ describe('project registration draft service', () => {
       type: 'I1',
       supportAmount: 0,
       financialYears: [
-        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
-        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
       ],
     });
     delete payload.financialInputFlags;
@@ -1347,6 +1372,7 @@ describe('project registration draft service', () => {
       contractAmount: true,
       salesVatAmount: true,
       totalRevenueAmount: true,
+      totalActualCost: true,
       supportAmount: false,
     });
   });

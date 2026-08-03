@@ -1,5 +1,6 @@
 import type {
   AccountType,
+  InterestRefundPolicy,
   Basis,
   FileAttachment,
   Project,
@@ -35,6 +36,7 @@ import {
   normalizeProjectContractType,
   normalizeProjectFundInputMode,
   normalizeLaborSettlementBasis,
+  normalizeInterestRefundPolicy,
   normalizeProjectPhase,
   normalizeProjectStatus,
   normalizeProjectType,
@@ -55,8 +57,10 @@ import { normalizeProjectRevenueFields } from './project-financials';
 import {
   formatProjectTeamMembersSummary,
   normalizeProjectTeamMembers,
+  projectTeamMembersForWrite,
 } from './project-team-members';
 import { normalizeProjectDepartment, resolveProjectCic } from './project-cic';
+import { getYearFinanceWeeks } from './cashflow-week-core.mjs';
 
 export type ProjectEditorMode = 'portal-register' | 'portal-edit' | 'admin';
 
@@ -93,6 +97,7 @@ export interface ProjectEditorDraft {
   contractAmount: number;
   salesVatAmount: number;
   totalRevenueAmount: number;
+  totalActualCost: number;
   supportAmount: number;
   financialInputFlags: ProjectFinancialInputFlags;
   registrationRequirementsVersion: 1 | 2;
@@ -103,6 +108,7 @@ export interface ProjectEditorDraft {
   settlementType: SettlementType;
   basis: Basis;
   accountType: AccountType;
+  interestRefundPolicy: InterestRefundPolicy | '';
   settlementSystem: SettlementSystemCode;
   laborSettlementBasis: LaborSettlementBasis;
   fundInputMode: ProjectFundInputMode;
@@ -126,6 +132,7 @@ export interface ProjectEditorDraft {
   groupwareName: string;
   paymentPlan: Project['paymentPlan'];
   paymentExpectedMonths: ProjectPaymentExpectedMonths;
+  finalPaymentExpectedWeek: string;
   laborTransferPlan: ProjectLaborTransferPlan;
   advanceInterimBelow70Reason: string;
   finalPaymentNote: string;
@@ -133,6 +140,7 @@ export interface ProjectEditorDraft {
   taxInvoiceAmount: number;
   contractDocument: FileAttachment | null;
   quoteDocument: FileAttachment | null;
+  quoteSubmissionDeferred: boolean;
   proposalDocument: FileAttachment | null;
   proposalWordOriginalDocument: FileAttachment | null;
   proposalPptOriginalDocument: FileAttachment | null;
@@ -173,6 +181,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   contractAmount: 0,
   salesVatAmount: 0,
   totalRevenueAmount: 0,
+  totalActualCost: 0,
   supportAmount: 0,
   financialInputFlags: createEmptyProjectFinancialInputFlags(),
   registrationRequirementsVersion: 1,
@@ -202,6 +211,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   settlementType: 'NONE',
   basis: 'NONE',
   accountType: 'NONE',
+  interestRefundPolicy: '',
   settlementSystem: 'NONE',
   laborSettlementBasis: 'NONE',
   fundInputMode: 'BANK_UPLOAD',
@@ -225,6 +235,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   groupwareName: '',
   paymentPlan: { contract: 0, interim: 0, final: 0 },
   paymentExpectedMonths: { contract: '', interim: '', final: '' },
+  finalPaymentExpectedWeek: '',
   laborTransferPlan: { mode: 'MONTHLY_WEEK_3', milestoneAmounts: { contract: 0, interim: 0, final: 0 } },
   advanceInterimBelow70Reason: '',
   finalPaymentNote: '',
@@ -232,6 +243,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   taxInvoiceAmount: 0,
   contractDocument: null,
   quoteDocument: null,
+  quoteSubmissionDeferred: false,
   proposalDocument: null,
   proposalWordOriginalDocument: null,
   proposalPptOriginalDocument: null,
@@ -254,6 +266,15 @@ function text(value: unknown): string {
   return String(value || '').trim();
 }
 
+function normalizeFinanceWeek(value: unknown, expectedYear?: number | null): string {
+  const label = text(value);
+  const match = /^(\d{2})-(\d{1,2})-([1-5])$/.exec(label);
+  if (!match) return '';
+  const labelYear = 2000 + Number(match[1]);
+  if (expectedYear && labelYear !== expectedYear) return '';
+  return getYearFinanceWeeks(labelYear).some((week) => week.label === label) ? label : '';
+}
+
 function registrationRequirementsVersion(value: unknown): 1 | 2 {
   return value === 2 ? 2 : 1;
 }
@@ -272,7 +293,7 @@ function projectFinancialYears(
   value: unknown,
   contractStart: unknown,
   contractEnd: unknown,
-  totals: Pick<ProjectEditorDraft, 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'supportAmount' | 'profitRate'>,
+  totals: Pick<ProjectEditorDraft, 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'profitRate'>,
   version: 1 | 2,
 ): ProjectFinancialYear[] {
   const rows = Array.isArray(value) ? value : [];
@@ -289,9 +310,14 @@ function projectFinancialYears(
       contractAmount,
       salesVatAmount: nonNegativeAmount(source.salesVatAmount),
       totalRevenueAmount,
+      totalActualCost: nonNegativeAmount(source.totalActualCost),
       supportAmount: nonNegativeAmount(source.supportAmount),
       profitRate: projectFinancialYearProfitRate(contractAmount, totalRevenueAmount),
       confirmed: source.confirmed === true,
+      paymentPlan: normalizePaymentPlan(source.paymentPlan),
+      finalPaymentExpectedWeek: normalizeFinanceWeek(source.finalPaymentExpectedWeek, year),
+      advanceInterimBelow70Reason: text(source.advanceInterimBelow70Reason),
+      isSettled: source.isSettled === true,
     });
   }
   if (version !== 2) return [...normalized.values()].sort((a, b) => a.year - b.year);
@@ -306,6 +332,7 @@ function projectFinancialYears(
       contractAmount: offset === 0 ? nonNegativeAmount(totals.contractAmount) : 0,
       salesVatAmount: offset === 0 ? nonNegativeAmount(totals.salesVatAmount) : 0,
       totalRevenueAmount: offset === 0 ? nonNegativeAmount(totals.totalRevenueAmount) : 0,
+      totalActualCost: offset === 0 ? nonNegativeAmount(totals.totalActualCost) : 0,
       supportAmount: offset === 0 ? nonNegativeAmount(totals.supportAmount) : 0,
       profitRate: offset === 0
         ? projectFinancialYearProfitRate(
@@ -314,6 +341,10 @@ function projectFinancialYears(
         )
         : 0,
       confirmed: false,
+      paymentPlan: { contract: 0, interim: 0, final: 0 },
+      finalPaymentExpectedWeek: '',
+      advanceInterimBelow70Reason: '',
+      isSettled: false,
     };
   });
 }
@@ -447,6 +478,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'currency', label: '통화', before: (project) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(project.currency)] || '-', after: (draft) => PROJECT_CURRENCY_LABELS[normalizeProjectCurrency(draft.currency)] || '-' },
   { key: 'contractAmount', label: '계약금액', before: (project) => formatAmountForChange(project.contractAmount), after: (draft) => formatAmountForChange(draft.contractAmount) },
   { key: 'totalRevenueAmount', label: '총수익', before: (project) => formatAmountForChange(project.totalRevenueAmount), after: (draft) => formatAmountForChange(draft.totalRevenueAmount) },
+  { key: 'totalActualCost', label: '총실비(원가)', before: (project) => formatAmountForChange(project.totalActualCost), after: (draft) => formatAmountForChange(draft.totalActualCost) },
   { key: 'supportAmount', label: '총지원금', before: (project) => formatAmountForChange(project.supportAmount), after: (draft) => formatAmountForChange(draft.supportAmount) },
   { key: 'settlementType', label: '정산 유형', before: (project) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType)] || '-', after: (draft) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(draft.settlementType)] || '-' },
   { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
@@ -467,7 +499,8 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'description', label: '주요 내용', before: (project) => normalizeChangeValue(project.description), after: (draft) => normalizeChangeValue(draft.description) },
   { key: 'note', label: '비고', before: (project) => normalizeChangeValue(project.note), after: (draft) => normalizeChangeValue(draft.note) },
   { key: 'contractDocument', label: '계약서 PDF', before: (project) => normalizeChangeValue(project.contractDocument?.name), after: (draft) => normalizeChangeValue(draft.contractDocument?.name) },
-  { key: 'quoteDocument', label: '견적서 PDF', before: (project) => normalizeChangeValue(project.quoteDocument?.name), after: (draft) => normalizeChangeValue(draft.quoteDocument?.name) },
+  { key: 'quoteDocument', label: '산출내역서(견적서) PDF', before: (project) => normalizeChangeValue(project.quoteDocument?.name), after: (draft) => normalizeChangeValue(draft.quoteDocument?.name) },
+  { key: 'quoteSubmissionDeferred', label: '산출내역서(견적서) 이후 제출', before: (project) => project.quoteSubmissionDeferred === true ? '예' : '아니오', after: (draft) => draft.quoteSubmissionDeferred ? '예' : '아니오' },
   { key: 'proposalDocument', label: '제안서 PDF', before: (project) => normalizeChangeValue(project.proposalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalDocument?.name) },
   { key: 'proposalWordOriginalDocument', label: '제안서 Word 원본', before: (project) => normalizeChangeValue(project.proposalWordOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalWordOriginalDocument?.name) },
   { key: 'proposalPptOriginalDocument', label: '제안서 PPT 원본', before: (project) => normalizeChangeValue(project.proposalPptOriginalDocument?.name), after: (draft) => normalizeChangeValue(draft.proposalPptOriginalDocument?.name) },
@@ -488,6 +521,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     contractAmount: nonNegativeAmount(overrides.contractAmount ?? DEFAULT_DRAFT.contractAmount),
     salesVatAmount: nonNegativeAmount(overrides.salesVatAmount ?? DEFAULT_DRAFT.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(overrides.totalRevenueAmount ?? DEFAULT_DRAFT.totalRevenueAmount),
+    totalActualCost: nonNegativeAmount(overrides.totalActualCost ?? DEFAULT_DRAFT.totalActualCost),
     supportAmount: nonNegativeAmount(overrides.supportAmount ?? DEFAULT_DRAFT.supportAmount),
     profitRate: Math.min(1, Math.max(0, Number(overrides.profitRate ?? DEFAULT_DRAFT.profitRate) || 0)),
   };
@@ -500,6 +534,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
         contractAmount: overrides.contractAmount ?? DEFAULT_DRAFT.contractAmount,
         salesVatAmount: overrides.salesVatAmount ?? DEFAULT_DRAFT.salesVatAmount,
         totalRevenueAmount: overrides.totalRevenueAmount ?? DEFAULT_DRAFT.totalRevenueAmount,
+        totalActualCost: overrides.totalActualCost ?? DEFAULT_DRAFT.totalActualCost,
         supportAmount: overrides.supportAmount ?? DEFAULT_DRAFT.supportAmount,
       },
     ),
@@ -511,6 +546,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     accountType: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeAccountType(overrides.accountType ?? DEFAULT_DRAFT.accountType),
+    interestRefundPolicy: normalizeInterestRefundPolicy(overrides.interestRefundPolicy),
     settlementSystem: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeSettlementSystemCode(overrides.settlementSystem ?? DEFAULT_DRAFT.settlementSystem),
@@ -536,6 +572,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       overrides.paymentExpectedMonths ?? DEFAULT_DRAFT.paymentExpectedMonths,
     ),
+    finalPaymentExpectedWeek: normalizeFinanceWeek(overrides.finalPaymentExpectedWeek),
     laborTransferPlan: normalizeLaborTransferPlan(
       overrides.laborTransferPlan ?? DEFAULT_DRAFT.laborTransferPlan,
     ),
@@ -551,6 +588,7 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     registrationConfirmations: registrationConfirmations(overrides.registrationConfirmations),
     registrationOptionalDocumentNotes: registrationOptionalDocumentNotes(overrides.registrationOptionalDocumentNotes),
     checkout: projectCheckout(overrides.checkout, settlementDetailsEnabled),
+    quoteSubmissionDeferred: overrides.quoteSubmissionDeferred === true,
   };
   return normalizeProjectRevenueFields(draft, 'totalRevenueAmount');
 }
@@ -613,6 +651,7 @@ export function buildProjectEditorDraftFromProject(
     contractAmount: nonNegativeAmount(normalizedProject.contractAmount ?? payload?.contractAmount),
     salesVatAmount: nonNegativeAmount(normalizedProject.salesVatAmount ?? payload?.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(normalizedProject.totalRevenueAmount ?? payload?.totalRevenueAmount),
+    totalActualCost: nonNegativeAmount(normalizedProject.totalActualCost ?? payload?.totalActualCost),
     supportAmount: nonNegativeAmount(normalizedProject.supportAmount ?? payload?.supportAmount),
     financialInputFlags: normalizeProjectFinancialInputFlagsForAmounts(
       normalizedProject.financialInputFlags || payload?.financialInputFlags,
@@ -620,6 +659,7 @@ export function buildProjectEditorDraftFromProject(
         contractAmount: normalizedProject.contractAmount ?? payload?.contractAmount,
         salesVatAmount: normalizedProject.salesVatAmount ?? payload?.salesVatAmount,
         totalRevenueAmount: normalizedProject.totalRevenueAmount ?? payload?.totalRevenueAmount,
+        totalActualCost: normalizedProject.totalActualCost ?? payload?.totalActualCost,
         supportAmount: normalizedProject.supportAmount ?? payload?.supportAmount,
       },
     ),
@@ -634,6 +674,9 @@ export function buildProjectEditorDraftFromProject(
     settlementType: normalizeSettlementType(normalizedProject.settlementType || payload?.settlementType),
     basis: normalizeBasis(normalizedProject.basis || payload?.basis),
     accountType: normalizeAccountType(normalizedProject.accountType || payload?.accountType),
+    interestRefundPolicy: normalizeInterestRefundPolicy(
+      normalizedProject.interestRefundPolicy || payload?.interestRefundPolicy,
+    ),
     settlementSystem: normalizeSettlementSystemCode(
       normalizedProject.settlementSystem || payload?.settlementSystem,
     ),
@@ -666,6 +709,9 @@ export function buildProjectEditorDraftFromProject(
     paymentExpectedMonths: normalizePaymentExpectedMonths(
       normalizedProject.paymentExpectedMonths || payload?.paymentExpectedMonths,
     ),
+    finalPaymentExpectedWeek: normalizeFinanceWeek(
+      normalizedProject.finalPaymentExpectedWeek || payload?.finalPaymentExpectedWeek,
+    ),
     laborTransferPlan: normalizeLaborTransferPlan(
       normalizedProject.laborTransferPlan || payload?.laborTransferPlan,
     ),
@@ -677,6 +723,7 @@ export function buildProjectEditorDraftFromProject(
     taxInvoiceAmount: nonNegativeAmount(normalizedProject.taxInvoiceAmount),
     contractDocument,
     quoteDocument,
+    quoteSubmissionDeferred: normalizedProject.quoteSubmissionDeferred === true || payload?.quoteSubmissionDeferred === true,
     proposalDocument,
     proposalWordOriginalDocument,
     proposalPptOriginalDocument,
@@ -692,7 +739,7 @@ export function buildProjectEditorDraftFromProject(
 
 export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDraft): ProjectRequestPayload {
   const draft = createProjectEditorDraft(draftInput);
-  const teamMembersDetailed = normalizeProjectTeamMembers(draft.teamMembersDetailed);
+  const teamMembersDetailed = projectTeamMembersForWrite(draft.teamMembersDetailed);
   return {
     name: text(draft.name),
     officialContractName: text(draft.officialContractName),
@@ -703,16 +750,16 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     clientOrg: text(draft.clientOrg),
     businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
     department: normalizeProjectDepartment(draft.department),
-    groupwareName: text(draft.name),
+    groupwareName: text(draft.groupwareName),
     currency: normalizeProjectCurrency(draft.currency),
     contractAmount: nonNegativeAmount(draft.contractAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     totalRevenueAmount: nonNegativeAmount(draft.totalRevenueAmount),
+    totalActualCost: nonNegativeAmount(draft.totalActualCost),
     supportAmount: nonNegativeAmount(draft.supportAmount),
     financialInputFlags: normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft),
     registrationRequirementsVersion: draft.registrationRequirementsVersion,
     financialYears: draft.financialYears,
-    registrationConfirmations: draft.registrationConfirmations,
     registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
     checkout: draft.checkout,
     contractStart: text(draft.contractStart),
@@ -721,17 +768,19 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
     accountType: normalizeAccountType(draft.accountType),
+    interestRefundPolicy: normalizeInterestRefundPolicy(draft.interestRefundPolicy) || undefined,
     settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
     laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),
     laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     settlementGuide: text(draft.settlementGuide),
-    finalPaymentNote: text(draft.finalPaymentNote),
+    note: text(draft.note),
     projectPurpose: text(draft.projectPurpose),
     registeredById: text(draft.registeredById),
     registeredByName: text(draft.registeredByName),
@@ -745,9 +794,9 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     teamMembers: formatProjectTeamMembersSummary(teamMembersDetailed, '', ', '),
     teamMembersDetailed,
     participantCondition: text(draft.participantCondition),
-    note: text(draft.note),
     contractDocument: draft.contractDocument,
     quoteDocument: draft.quoteDocument,
+    quoteSubmissionDeferred: draft.quoteSubmissionDeferred,
     proposalDocument: draft.proposalDocument,
     proposalWordOriginalDocument: draft.proposalWordOriginalDocument,
     proposalPptOriginalDocument: draft.proposalPptOriginalDocument,
@@ -814,7 +863,7 @@ export function buildProjectEditorProjectPatch(
 ): Partial<Project> {
   const draft = createProjectEditorDraft(draftInput);
   const flags = normalizeProjectFinancialInputFlagsForAmounts(draft.financialInputFlags, draft);
-  const teamMembersDetailed = normalizeProjectTeamMembers(draft.teamMembersDetailed);
+  const teamMembersDetailed = projectTeamMembersForWrite(draft.teamMembersDetailed);
   const reviewChanges = options.baseProject
     ? (buildProjectEditorReviewChanges(options.baseProject, draft) || [])
     : [];
@@ -829,35 +878,38 @@ export function buildProjectEditorProjectPatch(
     settlementType: normalizeSettlementType(draft.settlementType),
     basis: normalizeBasis(draft.basis),
     accountType: normalizeAccountType(draft.accountType),
+    interestRefundPolicy: normalizeInterestRefundPolicy(draft.interestRefundPolicy) || undefined,
     settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
     laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
     paymentPlan: normalizePaymentPlan(draft.paymentPlan),
     paymentExpectedMonths: normalizePaymentExpectedMonths(draft.paymentExpectedMonths),
+    finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),
     laborTransferPlan: normalizeLaborTransferPlan(draft.laborTransferPlan),
     advanceInterimBelow70Reason: text(draft.advanceInterimBelow70Reason),
     paymentPlanDesc: text(draft.paymentPlanDesc),
     clientOrg: text(draft.clientOrg),
     businessManagementGoogleFolderLink: text(draft.businessManagementGoogleFolderLink),
-    groupwareName: text(draft.name),
+    groupwareName: text(draft.groupwareName),
     participantCondition: text(draft.participantCondition),
-    note: text(draft.note),
     teamMembersDetailed,
     contractType: normalizeProjectContractType(draft.contractType),
     projectPurpose: text(draft.projectPurpose),
     totalRevenueAmount: nonNegativeAmount(draft.totalRevenueAmount),
+    totalActualCost: nonNegativeAmount(draft.totalActualCost),
     supportAmount: nonNegativeAmount(draft.supportAmount),
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     financialInputFlags: flags,
     registrationRequirementsVersion: draft.registrationRequirementsVersion,
     financialYears: draft.financialYears,
-    registrationConfirmations: draft.registrationConfirmations,
     registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
     checkout: draft.checkout,
     settlementGuide: text(draft.settlementGuide),
+    note: text(draft.note),
     contractDocument: draft.contractDocument,
     quoteDocument: draft.quoteDocument,
+    quoteSubmissionDeferred: draft.quoteSubmissionDeferred,
     proposalDocument: draft.proposalDocument,
     proposalWordOriginalDocument: draft.proposalWordOriginalDocument,
     proposalPptOriginalDocument: draft.proposalPptOriginalDocument,
@@ -883,7 +935,6 @@ export function buildProjectEditorProjectPatch(
     taxInvoiceAmount: nonNegativeAmount(draft.taxInvoiceAmount),
     profitRate: draft.profitRate,
     profitAmount: draft.profitAmount,
-    finalPaymentNote: text(draft.finalPaymentNote),
     description: text(draft.description),
     updatedAt: options.now,
   };

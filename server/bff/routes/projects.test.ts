@@ -24,6 +24,7 @@ const registrationV2AttachmentKinds = [
   'presentation_ppt_original',
   'rfp_request_evidence',
 ];
+const registrationV2RequiredAttachmentKinds = registrationV2AttachmentKinds.slice(0, 3);
 
 function registrationV2Payload(overrides: Record<string, unknown> = {}) {
   return {
@@ -47,6 +48,7 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     contractAmount: 300_000,
     salesVatAmount: 30_000,
     totalRevenueAmount: 120_000,
+    totalActualCost: 75_000,
     supportAmount: 10_000,
     settlementType: 'TYPE1',
     basis: '공급가액',
@@ -66,7 +68,7 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
       {
         memberName: '김세은',
         memberNickname: '람쥐',
-        role: '사업 최종 책임자',
+        role: '총괄책임자',
         participationRate: 0,
         isDocumentOnly: false,
       },
@@ -75,13 +77,17 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
       contractAmount: true,
       salesVatAmount: true,
       totalRevenueAmount: true,
+      totalActualCost: true,
       supportAmount: true,
     },
     registrationRequirementsVersion: 2,
     financialYears: [
-      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0.4, confirmed: true },
-      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, finalPaymentExpectedWeek: '26-8-1', advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, finalPaymentExpectedWeek: '27-12-4', advanceInterimBelow70Reason: '', isSettled: false },
     ],
+    interestRefundPolicy: 'REFUND',
+    finalPaymentExpectedWeek: '27-12-4',
+    quoteSubmissionDeferred: false,
     registrationConfirmations: {
       laborIncludesFourInsurance: true,
       laborIncludesRetirementPay: true,
@@ -100,7 +106,7 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
 
 function registrationV2Canonical(
   payload = registrationV2Payload(),
-  requiredKinds = registrationV2AttachmentKinds,
+  requiredKinds = registrationV2RequiredAttachmentKinds,
   attachmentKinds: string[] = [],
 ) {
   return buildProjectRegistrationCanonicalDocuments({
@@ -167,33 +173,32 @@ describe('project route helpers', () => {
     expect(submission.projectRequest.payload.contractAnalysis).toBeNull();
   });
 
-  it('builds a registration v2 canonical record after the PPT four-document contract and confirmations pass', () => {
+  it('builds a registration v2 canonical record without retired registration confirmations', () => {
     const canonical = registrationV2Canonical();
 
     expect(canonical.projectRequest.payload).toMatchObject({
       registrationRequirementsVersion: 2,
       financialYears: [
-        { year: 2026, confirmed: true, profitRate: 0.4 },
-        { year: 2027, confirmed: true, profitRate: 0.4 },
+        { year: 2026, confirmed: true, profitRate: 0.4, totalActualCost: 25_000, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, finalPaymentExpectedWeek: '26-8-1', advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
+        { year: 2027, confirmed: true, profitRate: 0.4, totalActualCost: 50_000, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, finalPaymentExpectedWeek: '27-12-4', isSettled: false },
       ],
-      registrationConfirmations: {
-        laborIncludesFourInsurance: true,
-        laborIncludesRetirementPay: true,
-        customerSettlementBasisConfirmed: true,
-        modusignContractUsed: false,
-        originalContractSubmitted: true,
-      },
+      totalActualCost: 75_000,
+      interestRefundPolicy: 'REFUND',
+      finalPaymentExpectedWeek: '27-12-4',
+      quoteSubmissionDeferred: false,
       settlementSystem: 'BOTAEM_E',
       laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
       paymentExpectedMonths: { contract: '2026-01', interim: '2026-06', final: '2027-12' },
       teamMembersDetailed: [
         { role: '운영매니저', isDocumentOnly: false },
-        { role: '사업 최종 책임자', isDocumentOnly: false },
+        { role: '총괄책임자', isDocumentOnly: false },
       ],
       executiveApproverId: 'head-a',
       executiveApproverName: '조직장 A',
       executiveApproverEmail: 'head-a@mysc.co.kr',
     });
+    expect(canonical.projectRequest.payload).not.toHaveProperty('registrationConfirmations');
+    expect(canonical.project).not.toHaveProperty('registrationConfirmations');
     expect(canonical.projectRequest.payload).not.toHaveProperty('groupwareName');
     expect(canonical.projectRequest.payload).toMatchObject({
       registrationOptionalDocumentNotes: {
@@ -206,7 +211,10 @@ describe('project route helpers', () => {
     expect(canonical.project.executiveReviewHistory?.[0]?.reviewComment).toBe('PM 신규 등록');
     expect(canonical.project).toMatchObject({
       registrationRequirementsVersion: 2,
-      financialYears: [{ year: 2026, confirmed: true }, { year: 2027, confirmed: true }],
+      financialYears: [
+        { year: 2026, confirmed: true, finalPaymentExpectedWeek: '26-8-1' },
+        { year: 2027, confirmed: true, finalPaymentExpectedWeek: '27-12-4' },
+      ],
       executiveApproverId: 'head-a',
       executiveApproverName: '조직장 A',
       executiveApproverEmail: 'head-a@mysc.co.kr',
@@ -249,8 +257,8 @@ describe('project route helpers', () => {
       settlementSystem: 'BOTAEM_E',
       laborSettlementBasis: 'INCLUDE_ACTUAL_SALARY',
       financialYears: [
-        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 0, confirmed: true },
-        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.9, confirmed: true },
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.9, confirmed: true },
       ],
     }));
 
@@ -281,12 +289,12 @@ describe('project route helpers', () => {
     })).projectRequest.payload.name).toBe('26프로젝트이름글자수제한없는테스트');
   });
 
-  it('requires an actual project final responsible member', () => {
+  it('accepts a registration without the retired final-responsible role', () => {
     expect(() => registrationV2Canonical(registrationV2Payload({
       teamMembersDetailed: [{
         memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50, isDocumentOnly: false,
       }],
-    }))).toThrowError('Project registration requires an actual project final responsible member');
+    }))).not.toThrow();
   });
 
   it('allows only 도담 or 써니 as settlement support', () => {
@@ -296,7 +304,7 @@ describe('project route helpers', () => {
           memberName: '변민욱', memberNickname: '보람', role: '운영매니저', participationRate: 50, isDocumentOnly: false,
         },
         {
-          memberName: '김세은', memberNickname: '람쥐', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false,
+          memberName: '김세은', memberNickname: '람쥐', role: '총괄책임자', participationRate: 0, isDocumentOnly: false,
         },
         {
           memberName: '다른 구성원', memberNickname: '', role: '정산지원', participationRate: 0, isDocumentOnly: false,
@@ -411,37 +419,38 @@ describe('project route helpers', () => {
     expect(submission.projectPatch).not.toHaveProperty('executiveReviewStatus');
   });
 
-  it('allows a v2 settlement-none basis without labor or customer settlement confirmations', () => {
+  it('allows a v2 settlement-none basis without retired registration confirmations', () => {
     const canonical = registrationV2Canonical(registrationV2Payload({
       settlementType: 'TYPE1',
       basis: 'NONE',
       settlementSystem: 'NONE',
       laborSettlementBasis: 'NONE',
-      registrationConfirmations: {
-        laborIncludesFourInsurance: null,
-        laborIncludesRetirementPay: null,
-        customerSettlementBasisConfirmed: false,
-        modusignContractUsed: false,
-        originalContractSubmitted: true,
-      },
+      registrationConfirmations: undefined,
     }));
 
     expect(canonical.projectRequest.payload).toMatchObject({
       settlementType: 'TYPE1',
       basis: 'NONE',
-      registrationConfirmations: {
-        laborIncludesFourInsurance: null,
-        laborIncludesRetirementPay: null,
-        customerSettlementBasisConfirmed: false,
-      },
     });
+    expect(canonical.projectRequest.payload).not.toHaveProperty('registrationConfirmations');
   });
 
-  it.each(registrationV2AttachmentKinds)('requires the %s registration attachment', (missingKind) => {
+  it.each(registrationV2RequiredAttachmentKinds)('requires the %s registration attachment', (missingKind) => {
     expect(() => registrationV2Canonical(
       registrationV2Payload(),
-      registrationV2AttachmentKinds.filter((kind) => kind !== missingKind),
+      registrationV2RequiredAttachmentKinds.filter((kind) => kind !== missingKind),
     )).toThrowError(`Project registration required attachment is missing: ${missingKind}`);
+  });
+
+  it('allows optional registration attachments 4 through 7 to be omitted', () => {
+    expect(() => registrationV2Canonical(registrationV2Payload(), registrationV2RequiredAttachmentKinds)).not.toThrow();
+  });
+
+  it('allows a deferred quote without a quote attachment', () => {
+    expect(() => registrationV2Canonical(
+      registrationV2Payload({ quoteSubmissionDeferred: true }),
+      ['contract', 'customer_business_registration'],
+    )).not.toThrow();
   });
 
   it('accepts all seven required attachments and preserves a legacy proposal as an extra document', () => {
@@ -563,6 +572,36 @@ describe('project route helpers', () => {
     expect(patch.registrationRequirementsVersion).toBe(1);
   });
 
+  it('preserves legacy confirmations and new finance fields on an existing-project change', () => {
+    const legacyConfirmations = registrationV2Payload().registrationConfirmations;
+    const payload = registrationV2Payload({ registrationConfirmations: legacyConfirmations });
+    const patch = buildProjectPatchFromChangeRequestPayload(payload, { id: 'existing-project', version: 3 });
+
+    expect(patch.registrationConfirmations).toEqual(legacyConfirmations);
+    expect(patch).toMatchObject({
+      totalActualCost: 75_000,
+      interestRefundPolicy: 'REFUND',
+      finalPaymentExpectedWeek: '27-12-4',
+      quoteSubmissionDeferred: false,
+      financialYears: [
+        expect.objectContaining({ paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, advanceInterimBelow70Reason: '연차별 일정', isSettled: true }),
+        expect.objectContaining({ paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, isSettled: false }),
+      ],
+    });
+  });
+
+  it('preserves legacy finance notes when a change request omits or empties their payload fields', () => {
+    const payload = registrationV2Payload({ interestRefundPolicy: '' });
+    delete (payload as Record<string, unknown>).finalPaymentNote;
+    const patch = buildProjectPatchFromChangeRequestPayload(payload, {
+      interestRefundPolicy: 'MYSC_REVENUE',
+      finalPaymentNote: '레거시 메모',
+    });
+
+    expect(patch.interestRefundPolicy).toBe('MYSC_REVENUE');
+    expect(patch).not.toHaveProperty('finalPaymentNote');
+  });
+
   it('preserves a legacy groupware name when a v2 project change request omits the hidden field', () => {
     const patch = buildProjectPatchFromChangeRequestPayload(
       registrationV2Payload(),
@@ -641,7 +680,7 @@ describe('project route helpers', () => {
     [
       'one contract year is missing',
       registrationV2Payload({ financialYears: [
-        { year: 2026, contractAmount: 300_000, salesVatAmount: 30_000, totalRevenueAmount: 120_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+        { year: 2026, contractAmount: 300_000, salesVatAmount: 30_000, totalRevenueAmount: 120_000, totalActualCost: 75_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
       ] }),
       registrationV2AttachmentKinds,
     ],
@@ -653,8 +692,8 @@ describe('project route helpers', () => {
     [
       'annual profit rate is outside 0..1',
       registrationV2Payload({ financialYears: [
-        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, supportAmount: 0, profitRate: 1.01, confirmed: true },
-        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
+        { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 1.01, confirmed: true },
+        { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true },
       ] }),
       registrationV2AttachmentKinds,
     ],
@@ -662,17 +701,6 @@ describe('project route helpers', () => {
       'customer business registration is missing',
       registrationV2Payload(),
       ['contract', 'quote', 'rfp_request_evidence'],
-    ],
-    [
-      'original submission fallback is missing',
-      registrationV2Payload({ registrationConfirmations: {
-        laborIncludesFourInsurance: true,
-        laborIncludesRetirementPay: true,
-        customerSettlementBasisConfirmed: true,
-        modusignContractUsed: false,
-        originalContractSubmitted: false,
-      } }),
-      registrationV2AttachmentKinds,
     ],
   ])('rejects registration v2 when %s', (_label, payload, requiredKinds) => {
     let caught: unknown;
@@ -685,6 +713,19 @@ describe('project route helpers', () => {
       statusCode: 422,
       code: 'project_registration_invalid',
     });
+  });
+
+  it.each([
+    ['invalid annual finance week', registrationV2Payload({ financialYears: [
+      { ...registrationV2Payload().financialYears[0], finalPaymentExpectedWeek: '2026-W31' },
+      registrationV2Payload().financialYears[1],
+    ] })],
+    ['invalid interest refund policy', registrationV2Payload({ interestRefundPolicy: 'KEEP' })],
+  ])('rejects registration v2 with %s as 422', (_label, payload) => {
+    expect(() => registrationV2Canonical(payload)).toThrow(expect.objectContaining({
+      statusCode: 422,
+      code: 'project_registration_invalid',
+    }));
   });
 
   it('serves a canonical private attachment only through the authorized BFF route', async () => {
@@ -1439,7 +1480,7 @@ describe('project route helpers', () => {
       },
     },
     {
-      label: 'markerless v2 registration missing the three original-document slots',
+      label: 'markerless v2 registration missing the required quote',
       requestId: 'registration-p001',
       projectRequest: {
         requestKind: 'REGISTRATION',
@@ -1458,10 +1499,7 @@ describe('project route helpers', () => {
             path: 'orgs/mysc/project-registration-documents/p001/customer.pdf',
             name: 'customer.pdf',
           },
-          quoteDocument: {
-            path: 'orgs/mysc/project-registration-documents/p001/quote.pdf',
-            name: 'quote.pdf',
-          },
+          quoteDocument: null,
           proposalDocument: {
             path: 'orgs/mysc/project-registration-documents/p001/proposal.pdf',
             name: 'proposal.pdf',
