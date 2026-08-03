@@ -4,23 +4,13 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
-  datasource:
-    url: ${JVM_WEEKLY_DATABASE_URL:jdbc:postgresql://localhost:5432/innerplatform_weekly}
-    username: ${JVM_WEEKLY_DATABASE_USER:innerplatform}
-    password: ${JVM_WEEKLY_DATABASE_PASSWORD:innerplatform}
-  flyway:
-    enabled: true
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
 server:
   port: ${WEEKLY_API_PORT:8088}
 weekly:
   deploy-env: ${JVM_WEEKLY_DEPLOY_ENV:local}
   legacy-week-close-enabled: false
   cashflow-edit-leases-enabled: ${JVM_WEEKLY_EDIT_LEASES_ENABLED:false}
-  storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:jpa}
+  storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:firestore}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
   cashflow-settled-week-confirmation-key: ${JVM_WEEKLY_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY:}

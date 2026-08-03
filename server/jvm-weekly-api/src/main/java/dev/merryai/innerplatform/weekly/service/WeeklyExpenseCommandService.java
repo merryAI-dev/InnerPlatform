@@ -88,7 +88,6 @@ import dev.merryai.innerplatform.weekly.domain.SpreadsheetValueType;
 import dev.merryai.innerplatform.weekly.storage.WeeklyExpensePersistence;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -177,7 +176,6 @@ public class WeeklyExpenseCommandService {
         authorizationService.requireProjectAllowed(commandName, actor, projectId);
     }
 
-    @Transactional(readOnly = true)
     public CashflowProjectionActualSummaryBatchResponse readCashflowProjectionActualSummaries(
         TrustedActorContext actor,
         CashflowProjectionActualSummaryBatchRequest request
@@ -215,7 +213,6 @@ public class WeeklyExpenseCommandService {
         return new CashflowProjectionActualSummaryBatchResponse("1", items, errors);
     }
 
-    @Transactional(readOnly = true)
     public CashflowProjectionActualSummaryBatchResponse.Item readCashflowProjectionActualSummary(
         TrustedActorContext actor,
         String projectId,
@@ -245,7 +242,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional(readOnly = true)
     public WeeklyExpenseSheetResponse readSheet(TrustedActorContext actor, String projectId, String sheetKey) {
         authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
         Optional<WeeklyExpenseSheetEntity> found = persistence.findSheetForUpdate(actor.tenantId(), projectId, sheetKey);
@@ -255,7 +251,6 @@ public class WeeklyExpenseCommandService {
         return toSheetResponse(projectId, found.get(), recentAuditEvents(actor.tenantId(), projectId));
     }
 
-    @Transactional(readOnly = true)
     public WeeklyExpenseSheetsResponse listSheets(TrustedActorContext actor, String projectId) {
         authorizationService.requireProjectAllowed(SHEET_READ_COMMAND, actor, projectId);
         List<WeeklyExpenseSheetResponse> sheets = persistence.findSheets(actor.tenantId(), projectId).stream()
@@ -264,7 +259,6 @@ public class WeeklyExpenseCommandService {
         return new WeeklyExpenseSheetsResponse(true, projectId, sheets, recentAuditEvents(actor.tenantId(), projectId));
     }
 
-    @Transactional(readOnly = true)
     public CashflowSheetOperationStatusResponse readCashflowSheetOperationStatus(
         TrustedActorContext actor,
         String projectId,
@@ -405,7 +399,6 @@ public class WeeklyExpenseCommandService {
         return "";
     }
 
-    @Transactional
     public SaveDraftResponse saveDraft(
         TrustedActorContext actor,
         String projectId,
@@ -468,7 +461,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional(readOnly = true)
     public BankStatementImportLinesResponse listBankStatementImportLines(
         TrustedActorContext actor,
         String projectId,
@@ -509,7 +501,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public ImportBankStatementBatchResponse importBankStatementBatch(
         TrustedActorContext actor,
         String projectId,
@@ -634,7 +625,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public ApplyBankStatementItemsResponse applyBankStatementItems(
         TrustedActorContext actor,
         String projectId,
@@ -774,7 +764,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public UpsertProjectionResponse upsertProjection(
         TrustedActorContext actor,
         String projectId,
@@ -834,7 +823,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional(readOnly = true)
     public CashflowMonthCloseResponse readCashflowMonthClose(
         TrustedActorContext actor,
         String projectId,
@@ -849,7 +837,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public CashflowVarianceResponse updateCashflowVariance(
         TrustedActorContext actor,
         String projectId,
@@ -918,7 +905,6 @@ public class WeeklyExpenseCommandService {
         }
     }
 
-    @Transactional
     public CashflowMonthCloseResponse closeCashflowMonth(
         TrustedActorContext actor,
         String projectId,
@@ -981,7 +967,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CashflowWeeklyUpdateCompletionResponse completeCashflowWeeklyUpdate(
         TrustedActorContext actor,
         String projectId,
@@ -1055,7 +1040,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional(readOnly = true)
     public CashflowWeeklyUpdateCompletionResponse readCashflowWeeklyUpdate(
         TrustedActorContext actor,
         String projectId,
@@ -1068,7 +1052,6 @@ public class WeeklyExpenseCommandService {
         return weeklyCompletionResponse(READ_CASHFLOW_WEEKLY_UPDATE_COMMAND, record);
     }
 
-    @Transactional(readOnly = true)
     public CashflowWeeklyComplianceHistoryResponse readCashflowWeeklyComplianceHistory(
         TrustedActorContext actor,
         String projectId,
@@ -1090,7 +1073,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional(readOnly = true)
     public CashflowAppliedCellChangesResponse readCashflowAppliedCellChanges(
         TrustedActorContext actor,
         String projectId,
@@ -1273,7 +1255,6 @@ public class WeeklyExpenseCommandService {
     private record AppliedCellChangeCandidate(CashflowAppliedCellChangesResponse.Item item, int ordinal) {
     }
 
-    @Transactional
     public CashflowWeeklyUpdateCompletionResponse reopenCashflowWeeklyUpdate(
         TrustedActorContext actor,
         String projectId,
@@ -1336,7 +1317,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CashflowMonthCloseResponse requestCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
@@ -1391,7 +1371,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CashflowMonthCloseResponse decideCashflowMonthReopen(
         TrustedActorContext actor,
         String projectId,
@@ -1447,7 +1426,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CashflowSheetLabApplyResponse applyCashflowSheetLab(
         TrustedActorContext actor,
         String projectId,
@@ -1606,7 +1584,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CashflowSheetBatchApplyResponse applyCashflowSheetBatch(
         TrustedActorContext actor,
         String projectId,
@@ -1997,7 +1974,6 @@ public class WeeklyExpenseCommandService {
         return values;
     }
 
-    @Transactional
     public CashflowSheetAnnualApplyResponse applyCashflowSheetAnnualTotal(
         TrustedActorContext actor,
         String projectId,
@@ -2095,7 +2071,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public SubmitWeekResponse submitWeek(
         TrustedActorContext actor,
         String projectId,
@@ -2222,7 +2197,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CloseWeekResponse closeWeek(
         TrustedActorContext actor,
         String projectId,
@@ -2312,7 +2286,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CreateAuditExportResponse createAuditExport(
         TrustedActorContext actor,
         String projectId,
@@ -2399,7 +2372,6 @@ public class WeeklyExpenseCommandService {
         return response;
     }
 
-    @Transactional
     public CellCommandResponse patchCells(
         TrustedActorContext actor,
         String projectId,
@@ -2444,7 +2416,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public CellCommandResponse copyCells(
         TrustedActorContext actor,
         String projectId,
@@ -2490,7 +2461,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public CellCommandResponse pasteCells(
         TrustedActorContext actor,
         String projectId,
@@ -2546,7 +2516,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public CellCommandResponse cutCells(
         TrustedActorContext actor,
         String projectId,
@@ -2594,7 +2563,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public RowCommandResponse insertRows(
         TrustedActorContext actor,
         String projectId,
@@ -2641,7 +2609,6 @@ public class WeeklyExpenseCommandService {
         );
     }
 
-    @Transactional
     public RowCommandResponse deleteRows(
         TrustedActorContext actor,
         String projectId,

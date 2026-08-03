@@ -21,14 +21,16 @@ import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseSheetRepository;
 import dev.merryai.innerplatform.weekly.repository.WeeklyExpenseWeeklyStatusRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 
 @Repository
-@ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "jpa", matchIfMissing = true)
+@ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "jpa")
 public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
     private final WeeklyExpenseSheetRepository sheetRepository;
     private final WeeklyExpenseIdempotencyRepository idempotencyRepository;
@@ -60,6 +62,12 @@ public class JpaWeeklyExpensePersistence implements WeeklyExpensePersistence {
         this.auditExportRepository = auditExportRepository;
         this.bankImportBatchRepository = bankImportBatchRepository;
         this.bankImportLineRepository = bankImportLineRepository;
+    }
+
+    @Override
+    @Transactional
+    public <T> T runCommandTransaction(Callable<T> action) {
+        return WeeklyExpensePersistence.super.runCommandTransaction(action);
     }
 
     @Override

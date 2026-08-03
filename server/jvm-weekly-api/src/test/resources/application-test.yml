@@ -6,9 +6,11 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    open-in-view: false
   flyway:
     enabled: true
 weekly:
+  storage-backend: jpa
   deploy-env: live
   legacy-week-close-enabled: true
   cashflow-edit-leases-enabled: true

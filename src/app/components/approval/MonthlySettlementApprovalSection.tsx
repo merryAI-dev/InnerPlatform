@@ -400,13 +400,13 @@ export function MonthlySettlementApprovalSection({
       )}
 
       <Dialog open={Boolean(selectedRequest)} onOpenChange={(open) => { if (!open) { setSelectedRequest(null); setWarningsAcknowledged(false); setCumulativeEvidenceReady(false); } }}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[1180px] overflow-y-auto rounded-none border border-slate-300 bg-slate-100 p-3 sm:p-6">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-none border border-slate-300 bg-slate-100 p-3 sm:max-h-[calc(100dvh-2rem)] sm:w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)] sm:p-6">
           <DialogHeader className="sr-only">
             <DialogTitle>월 결산 승인서</DialogTitle>
             <DialogDescription>제출 당시 저장된 월 결산 자료를 검토하고 승인 또는 반려합니다.</DialogDescription>
           </DialogHeader>
           {selectedRequest ? (
-            <article className="mx-auto w-full max-w-[1080px] border border-slate-300 bg-white p-5 shadow-sm sm:p-8">
+            <article className="mx-auto w-full border border-slate-300 bg-white p-5 shadow-sm sm:p-8">
               <header className="border-b-2 border-slate-700 pb-5">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
                   <div className="flex min-h-[138px] flex-col justify-center">

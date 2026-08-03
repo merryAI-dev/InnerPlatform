@@ -29,8 +29,26 @@ class FirestoreStorageBackendEnvironmentPostProcessorTest {
     }
 
     @Test
-    void leavesJpaAutoconfigurationAloneByDefault() {
+    void excludesJpaAutoconfigurationByDefault() {
         StandardEnvironment environment = new StandardEnvironment();
+
+        new FirestoreStorageBackendEnvironmentPostProcessor()
+            .postProcessEnvironment(environment, new SpringApplication());
+
+        String excludes = environment.getProperty("spring.autoconfigure.exclude", "");
+        assertThat(excludes).contains("DataSourceAutoConfiguration");
+        assertThat(excludes).contains("HibernateJpaAutoConfiguration");
+        assertThat(excludes).contains("FlywayAutoConfiguration");
+        assertThat(environment.getProperty("spring.flyway.enabled")).isEqualTo("false");
+    }
+
+    @Test
+    void leavesJpaAutoconfigurationAloneWhenJpaIsExplicit() {
+        StandardEnvironment environment = new StandardEnvironment();
+        TestPropertySourceUtils.addInlinedPropertiesToEnvironment(
+            environment,
+            "weekly.storage-backend=jpa"
+        );
 
         new FirestoreStorageBackendEnvironmentPostProcessor()
             .postProcessEnvironment(environment, new SpringApplication());
