@@ -128,20 +128,6 @@ function formatSheetAppliedAt(value?: string | null): string {
   }).format(date);
 }
 
-type WeeklyProjectionMissingCell = { yearMonth: string; weekNo: number; lineId: string };
-
-function weeklyProjectionMissingCells(error: unknown): WeeklyProjectionMissingCell[] {
-  const details = (error as { body?: { details?: { missingCells?: unknown } } })?.body?.details;
-  return Array.isArray(details?.missingCells)
-    ? details.missingCells.filter((cell): cell is WeeklyProjectionMissingCell => Boolean(
-      cell && typeof cell === 'object'
-      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(String((cell as WeeklyProjectionMissingCell).yearMonth))
-      && Number.isInteger(Number((cell as WeeklyProjectionMissingCell).weekNo))
-      && typeof (cell as WeeklyProjectionMissingCell).lineId === 'string',
-    ))
-    : [];
-}
-
 function decodeActivityActor(value?: string): string {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -386,7 +372,6 @@ export function CashflowProjectSheet({
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
   const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
-  const [weeklyMissingCells, setWeeklyMissingCells] = useState<WeeklyProjectionMissingCell[]>([]);
   const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
   const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
   const [weeklyComplianceHistoryLoading, setWeeklyComplianceHistoryLoading] = useState(false);
@@ -759,7 +744,6 @@ export function CashflowProjectSheet({
       await loadCashflowMonthClose();
       setWeeklyCompletionOpen(false);
       setWeeklyCompletionError('');
-      setWeeklyMissingCells([]);
       setWeeklyUpdateResult('');
       logCashflowSettlement({
         phase: 'success',
@@ -785,7 +769,6 @@ export function CashflowProjectSheet({
       });
       const message = resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.');
       setWeeklyCompletionError(message);
-      setWeeklyMissingCells(weeklyProjectionMissingCells(error));
       toast.error(message);
     } finally {
       setWeeklyCompletionBusy(false);
@@ -2677,7 +2660,6 @@ export function CashflowProjectSheet({
                       disabled={weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
                       onClick={() => {
                         setWeeklyCompletionError('');
-                        setWeeklyMissingCells([]);
                         setWeeklyUpdateResult('');
                         setWeeklyCompletionOpen(true);
                       }}
@@ -3134,19 +3116,9 @@ export function CashflowProjectSheet({
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
           <AlertDialogHeader>
             <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
-            <AlertDialogDescription>
-              대상 {monthCloseResult?.dashboard?.deadlineSummary?.current?.yearMonth || yearMonth} {monthCloseResult?.dashboard?.deadlineSummary?.current?.weekNo || '-'}주차와 그 이후 15개 재무주차(총 16주·256칸)의 모든 Projection 항목이 작성되어 있어야 합니다.
-            </AlertDialogDescription>
+            <AlertDialogDescription>이번 주차의 처리 결과만 선택해 정산 상태를 업데이트합니다.</AlertDialogDescription>
           </AlertDialogHeader>
           {weeklyCompletionError ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">{weeklyCompletionError}</div> : null}
-          {weeklyMissingCells.length > 0 ? (
-            <details open className="max-h-[260px] overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-[12px]">
-              <summary className="cursor-pointer font-bold text-red-950">서버가 확인한 EMPTY 항목 {weeklyMissingCells.length.toLocaleString()}건</summary>
-              <ul className="mt-2 space-y-1" aria-label="Projection 미입력 주차와 항목">
-                {weeklyMissingCells.map((cell) => <li key={`${cell.yearMonth}:${cell.weekNo}:${cell.lineId}`}>{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}이 미작성입니다.</li>)}
-              </ul>
-            </details>
-          ) : null}
           <fieldset className="space-y-2">
             <legend className="mb-2 text-[13px] font-bold text-slate-900">이번 주차 처리 결과를 하나 선택해 주세요.</legend>
             {([
@@ -3162,7 +3134,7 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={weeklyCompletionBusy}>취소</AlertDialogCancel>
             <Button type="button" disabled={weeklyCompletionBusy || !weeklyUpdateResult} onClick={() => void handleCompleteWeeklyUpdate()}>
-              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}선택한 결과로 완료
+              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}무시하고 반영
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

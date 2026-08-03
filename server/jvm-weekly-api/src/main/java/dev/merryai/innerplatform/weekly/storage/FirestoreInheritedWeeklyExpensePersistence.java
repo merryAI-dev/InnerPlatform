@@ -1553,34 +1553,6 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             WeekDocParts parts = parseCashflowWeekId(projectId, weekSnapshot.getId());
             projectWeeks.put(weekSnapshot.getId(), week);
         }
-        List<Map<String, Object>> missingCells = new ArrayList<>();
-        for (CashflowWeekScope scope : consecutiveFinanceWeeks(request.yearMonth(), request.weekNo(), 16)) {
-            Map<String, Object> candidate = projectWeeks.getOrDefault(
-                cashflowWeekId(projectId, scope.yearMonth(), scope.weekNo()),
-                Map.of()
-            );
-            Map<String, Object> projection = nestedMap(candidate.get("projection"));
-            for (String lineId : CASHFLOW_CUMULATIVE_LINES) {
-                if (projection.containsKey(lineId) && projection.get(lineId) != null) continue;
-                missingCells.add(Map.of(
-                    "yearMonth", scope.yearMonth(),
-                    "weekNo", scope.weekNo(),
-                    "lineId", lineId
-                ));
-            }
-        }
-        if (!missingCells.isEmpty()) {
-            throw new WeeklyExpenseEditLeaseException(
-                409,
-                "cashflow_projection_window_incomplete",
-                "대상 주차와 그 이후 15개 재무주차의 Projection 값을 모두 입력해 주세요.",
-                Map.of(
-                    "requiredWeekCount", 16,
-                    "requiredCellCount", 256,
-                    "missingCells", List.copyOf(missingCells)
-                )
-            );
-        }
         if (lockedCompletion != null) {
             return toWeeklyCompletionRecord(
                 projectId, request.yearMonth(), request.weekNo(), lockedCompletion, true

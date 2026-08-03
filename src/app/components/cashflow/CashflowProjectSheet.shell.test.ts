@@ -377,10 +377,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("updateResult: weeklyUpdateResult");
     expect(source).toContain("['CHANGED', '변경사항 반영 완료'");
     expect(source).toContain("['NO_CHANGES', '변경사항 없음'");
-    expect(source).toContain('그 이후 15개 재무주차(총 16주·256칸)');
+    expect(source).toContain('이번 주차의 처리 결과만 선택해 정산 상태를 업데이트합니다.');
+    expect(source).toContain('무시하고 반영');
+    expect(source).not.toContain('선택한 결과로 완료');
+    expect(source).not.toContain('그 이후 15개 재무주차(총 16주·256칸)');
     expect(source).not.toContain('ZERO(0원)는 작성값이며 EMPTY(미입력)는 완료할 수 없습니다.');
     expect(source).not.toContain('Cashflow weekly lock no longer matches');
-    expect(source).toContain('weeklyProjectionMissingCells(error)');
+    expect(source).not.toContain('weeklyProjectionMissingCells(error)');
     expect(source).toContain('fetchCashflowWeeklyComplianceViaBff');
     expect(source).toContain("week.status === 'ON_TIME'");
     expect(source).toContain("week.status === 'COMPLETED_LATE'");
@@ -549,8 +552,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
   });
 
-  it('spells out every JVM 15-week missing Projection cell', () => {
-    expect(source).toContain("{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}이 미작성입니다.");
+  it('does not expose the retired Projection completeness gate', () => {
+    expect(source).not.toContain('서버가 확인한 EMPTY 항목');
+    expect(source).not.toContain('Projection 미입력 주차와 항목');
   });
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
