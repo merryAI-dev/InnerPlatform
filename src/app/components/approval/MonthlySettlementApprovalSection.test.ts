@@ -88,7 +88,7 @@ describe('MonthlySettlementApprovalSection cumulative totals', () => {
     });
   });
 
-  it('builds persisted request, review, and recovery history without exposing UIDs', () => {
+  it('builds persisted request and review history without exposing recovery internals or UIDs', () => {
     const request = {
       documentType: 'MONTHLY_CLOSE', requestId: 'request-1', projectId: 'project-a', yearMonth: '2026-07',
       status: 'UNCERTAIN', revision: 1, requestedByUid: 'uid-requester', requestedByName: '변민욱(보람)',
@@ -103,9 +103,23 @@ describe('MonthlySettlementApprovalSection cumulative totals', () => {
     expect(entries).toEqual([
       expect.objectContaining({ kind: 'REQUESTED', actorName: '변민욱(보람)', at: '2026-07-30T07:27:41.384Z' }),
       expect.objectContaining({ kind: 'REVIEWED', actorName: '(AX) AI', at: '2026-07-30T07:30:00.000Z', detail: '확인 중' }),
-      expect.objectContaining({ kind: 'RECOVERY', actorName: '(AX) AI' }),
     ]);
+    expect(JSON.stringify(entries)).not.toContain('복구');
     expect(JSON.stringify(entries)).not.toContain('uid-requester');
     expect(JSON.stringify(entries)).not.toContain('uid-approver');
+  });
+
+  it('labels reopened month-close history for non-developer users', () => {
+    const request = {
+      documentType: 'MONTHLY_CLOSE', requestId: 'request-1', projectId: 'project-a', yearMonth: '2026-08',
+      status: 'REOPENED', revision: 2, requestedByUid: 'uid-requester', requestedAt: '2026-09-01T00:00:00.000Z',
+      approverUid: 'uid-approver', reviewedByUid: 'uid-approver', reviewedAt: '2026-09-02T00:00:00.000Z',
+      decisionReason: null, reviewWarnings: [], monthSnapshot: null,
+      lockRange: { fromMonth: '2023-01', fromWeekNo: 1, throughMonth: '2026-07', throughWeekNo: 5 }, monthCount: 43,
+    } as Parameters<typeof buildMonthCloseHistoryEntries>[0];
+
+    expect(buildMonthCloseHistoryEntries(request, [])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'REVIEWED', detail: '재오픈' }),
+    ]));
   });
 });

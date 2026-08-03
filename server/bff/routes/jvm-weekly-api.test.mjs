@@ -1,7 +1,61 @@
 import express from 'express';
 import request from 'supertest';
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { buildCashflowManagementChecks, cashflowMonthCloseDeadline, mountJvmWeeklyApiRoutes } from './jvm-weekly-api.mjs';
+import {
+  buildCashflowManagementChecks,
+  buildCashflowMonthCloseRevisionChanges,
+  cashflowMonthCloseDeadline,
+  mountJvmWeeklyApiRoutes,
+} from './jvm-weekly-api.mjs';
+
+describe('cashflow month-close revision diff', () => {
+  it('preserves EMPTY, ZERO, VALUE, amount changes, and missing keys', () => {
+    const cell = (cashflowLine, cellState, amount) => ({
+      mode: 'projection', weekNo: 1, cashflowLine, cellState, ...(amount === undefined ? {} : { amount }),
+    });
+    const previous = [
+      cell('EMPTY_TO_ZERO', 'EMPTY'),
+      cell('ZERO_TO_EMPTY', 'ZERO', 0),
+      cell('EMPTY_TO_VALUE', 'EMPTY'),
+      cell('VALUE_TO_EMPTY', 'VALUE', 10),
+      cell('ZERO_TO_VALUE', 'ZERO', 0),
+      cell('VALUE_TO_ZERO', 'VALUE', 20),
+      cell('VALUE_AMOUNT', 'VALUE', 30),
+      cell('REMOVED_KEY', 'VALUE', 40),
+    ];
+    const current = [
+      cell('EMPTY_TO_ZERO', 'ZERO', 0),
+      cell('ZERO_TO_EMPTY', 'EMPTY'),
+      cell('EMPTY_TO_VALUE', 'VALUE', 10),
+      cell('VALUE_TO_EMPTY', 'EMPTY'),
+      cell('ZERO_TO_VALUE', 'VALUE', 20),
+      cell('VALUE_TO_ZERO', 'ZERO', 0),
+      cell('VALUE_AMOUNT', 'VALUE', 35),
+      cell('ADDED_KEY', 'VALUE', 50),
+    ];
+
+    const changes = buildCashflowMonthCloseRevisionChanges(previous, current);
+
+    expect(changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cashflowLine: 'EMPTY_TO_ZERO', previousState: 'EMPTY', currentState: 'ZERO', previousAmount: null, currentAmount: 0, amountDelta: null }),
+      expect.objectContaining({ cashflowLine: 'ZERO_TO_EMPTY', previousState: 'ZERO', currentState: 'EMPTY', previousAmount: 0, currentAmount: null, amountDelta: null }),
+      expect.objectContaining({ cashflowLine: 'EMPTY_TO_VALUE', previousState: 'EMPTY', currentState: 'VALUE', previousAmount: null, currentAmount: 10, amountDelta: null }),
+      expect.objectContaining({ cashflowLine: 'VALUE_TO_EMPTY', previousState: 'VALUE', currentState: 'EMPTY', previousAmount: 10, currentAmount: null, amountDelta: null }),
+      expect.objectContaining({ cashflowLine: 'ZERO_TO_VALUE', previousState: 'ZERO', currentState: 'VALUE', previousAmount: 0, currentAmount: 20, amountDelta: 20 }),
+      expect.objectContaining({ cashflowLine: 'VALUE_TO_ZERO', previousState: 'VALUE', currentState: 'ZERO', previousAmount: 20, currentAmount: 0, amountDelta: -20 }),
+      expect.objectContaining({ cashflowLine: 'VALUE_AMOUNT', previousState: 'VALUE', currentState: 'VALUE', previousAmount: 30, currentAmount: 35, amountDelta: 5 }),
+      expect.objectContaining({ cashflowLine: 'ADDED_KEY', previousState: 'MISSING', currentState: 'VALUE', previousAmount: null, currentAmount: 50, amountDelta: null }),
+      expect.objectContaining({ cashflowLine: 'REMOVED_KEY', previousState: 'VALUE', currentState: 'MISSING', previousAmount: 40, currentAmount: null, amountDelta: null }),
+    ]));
+    expect(changes).toHaveLength(9);
+  });
+});
+import { stableStringify } from '../utils.mjs';
+
+function cashflowEvidenceHash(value) {
+  return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
+}
 
 function createIdempotencyService() {
   return {
@@ -636,16 +690,16 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.dashboard.cumulativeCloseScope).toEqual({
           contractVersion: 'cashflow-cumulative-close-v2',
           fromMonth: '2023-01',
-          throughMonth: '2026-08',
+          throughMonth: '2026-07',
           lockRange: {
             fromMonth: '2023-01',
             fromWeekNo: 1,
-            throughMonth: '2026-08',
+            throughMonth: '2026-07',
             throughWeekNo: 5,
           },
-          monthCount: 44,
-          weekCount: 220,
-          cellCount: 7040,
+          monthCount: 43,
+          weekCount: 215,
+          cellCount: 6880,
           source: {
             sourceRevision: source.sourceRevision,
             targetRevision: source.targetRevision,
@@ -662,7 +716,7 @@ describe('JVM weekly API BFF proxy', () => {
   it.each([
     ['invalid format', '2026-13'],
     ['before the cumulative baseline', '2022-12'],
-    ['beyond the bounded cumulative range', '2043-01'],
+    ['beyond the bounded cumulative range', '2043-02'],
   ])('rejects %s before reading the JVM month-close source', async (_label, yearMonth) => {
     const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService());
@@ -2211,10 +2265,10 @@ describe('JVM weekly API BFF proxy', () => {
           source: { kind: 'MONTH_CLOSE_SNAPSHOT', sourceRevision: `sha256:${'f'.repeat(64)}` },
           cumulativeCloseScope: {
             fromMonth: '2023-01',
-            throughMonth: '2026-06',
-            monthCount: 42,
-            weekCount: 210,
-            cellCount: 6720,
+            throughMonth: '2026-05',
+            monthCount: 41,
+            weekCount: 205,
+            cellCount: 6560,
             source: {
               sourceRevision: `sha256:${'f'.repeat(64)}`,
               targetRevision: `sha256:${'a'.repeat(64)}`,
@@ -3502,6 +3556,30 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_member_inactive'));
   });
 
+  it('keeps the original through month when reading a legacy cumulative request without throughMonth', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08',
+      fromMonth: '2023-01', status: 'PENDING', revision: 1,
+      monthCount: 44, weekCount: 220, cellCount: 7040,
+      manifestHash: `sha256:${'a'.repeat(64)}`,
+      requestedByUid: 'pm-1', approverUid: 'finance-1',
+    });
+    const requester = createApp(vi.fn(), createIdempotencyService(), {
+      actorId: 'pm-1', actorRole: 'pm',
+    }, { env: runtimeEnv, db: source.db }).app;
+
+    await request(requester)
+      .get('/api/v1/cashflow/project-a/month-close/requests/current?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => expect(response.body.request).toMatchObject({
+        throughMonth: '2026-08',
+        lockRange: { throughMonth: '2026-08' },
+        monthCount: 44,
+      }));
+  });
+
   it('lets only the saved designated approver review and closes only after approval', async () => {
     const source = fullMonthCloseSource();
     const fetchImpl = vi.fn(async (url, init) => ({
@@ -3930,6 +4008,7 @@ describe('JVM weekly API BFF proxy', () => {
     const closeCalls = fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST');
     expect(closeCalls).toHaveLength(1);
     expect(JSON.parse(closeCalls[0][1].body).idempotencyKey).toBe('cashflow-month-close-approval:project-a-2026-06:r3');
+
   });
 
   it('approves from stored evidence when live publication and dashboard sources change or disappear', async () => {
@@ -4014,7 +4093,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(closeBody.cells).toEqual(snapshotCells);
   });
 
-  it('rejects, resubmits, and replays a verified 44-month cumulative v2 request without live evidence', async () => {
+  it('recovers a legacy 44-month BUILDING request, then rejects and resubmits the previous-month cumulative v2 request', async () => {
     const source = fullMonthCloseSource();
     const runTransaction = source.db.runTransaction;
     let transactionTail = Promise.resolve();
@@ -4037,6 +4116,10 @@ describe('JVM weekly API BFF proxy', () => {
     let closedMonthClose = null;
     let dashboardSourceUnavailable = false;
     const fetchImpl = vi.fn(async (url, init) => {
+      if (url.endsWith('/month-close/reopen-decision')) {
+        closedMonthClose = { ...closedMonthClose, status: 'OPEN', revision: 2 };
+        return { ok: true, status: 200, text: async () => JSON.stringify(closedMonthClose) };
+      }
       if (url.includes('/dashboard-source')) {
         if (dashboardSourceUnavailable) throw new Error('live dashboard source drifted after persistence');
         return {
@@ -4053,7 +4136,7 @@ describe('JVM weekly API BFF proxy', () => {
         closedMonthClose = {
           ok: true, projectId: 'project-a', requestId: 'project-a-2026-08', requestRevision: closeBody.requestRevision,
           manifestHash: closeBody.manifestHash, yearMonth: '2026-08', status: 'CLOSED',
-          revision: 1, rootHash: closeBody.manifestHash, headRevision: 44, auditId: `audit-cumulative-${closeBody.requestRevision}`,
+          revision: 1, rootHash: closeBody.manifestHash, headRevision: 43, auditId: `audit-cumulative-${closeBody.requestRevision}`,
         };
         return { ok: true, status: 200, text: async () => JSON.stringify(closedMonthClose) };
       }
@@ -4119,29 +4202,72 @@ describe('JVM weekly API BFF proxy', () => {
       .send(createPayload)
       .expect(202);
     expect(created.body).toMatchObject({
-      documentType: 'MONTHLY_CLOSE', contractVersion: 'cashflow-cumulative-close-v2', status: 'PENDING', monthCount: 44,
-      weekCount: 220, cellCount: 7040,
-      fromMonth: '2023-01', yearMonth: '2026-08', revision: 1,
+      documentType: 'MONTHLY_CLOSE', contractVersion: 'cashflow-cumulative-close-v2', status: 'PENDING', monthCount: 43,
+      weekCount: 215, cellCount: 6880,
+      fromMonth: '2023-01', yearMonth: '2026-08', throughMonth: '2026-07', revision: 1,
       source: { spreadsheetId: 'spreadsheet-a', selectedSheetName: 'cashflow(사용내역 연동)' },
       totals: { projection: 0, actual: 0, difference: 0 },
       annualSummaries: [
         { year: 2023, monthCount: 12, projection: 0, actual: 0, difference: 0 },
         { year: 2024, monthCount: 12, projection: 0, actual: 0, difference: 0 },
         { year: 2025, monthCount: 12, projection: 0, actual: 0, difference: 0 },
-        { year: 2026, monthCount: 8, projection: 0, actual: 0, difference: 0 },
+        { year: 2026, monthCount: 7, projection: 0, actual: 0, difference: 0 },
       ],
     });
     expect(created.body.monthSnapshot).toBeNull();
     let shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
-    expect(shardDocs).toHaveLength(44);
+    expect(shardDocs).toHaveLength(43);
     expect(shardDocs.every(([, shard]) => shard.cells.length === 160)).toBe(true);
-    expect(shardDocs.reduce((count, [, shard]) => count + shard.cells.length, 0)).toBe(7040);
+    expect(shardDocs.reduce((count, [, shard]) => count + shard.cells.length, 0)).toBe(6880);
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r1-requested')).toMatchObject({
       action: 'REQUESTED', revision: 1, actorUid: 'pm-1', manifestHash: created.body.manifestHash,
     });
+    await request(requester)
+      .get('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/revision-diff')
+      .expect(200)
+      .expect((response) => expect(response.body).toEqual({
+        requestId: 'project-a-2026-08', yearMonth: '2026-07',
+        currentRevision: 1, previousRevision: null, changes: [],
+      }));
 
     const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
-    const legacyBuilding = { ...source.documents.get(requestPath), status: 'BUILDING' };
+    const canonicalRequestRecord = { ...source.documents.get(requestPath) };
+    const requestedAuditPath = 'orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r1-requested';
+    const canonicalRequestedAudit = { ...source.documents.get(requestedAuditPath) };
+    const legacyAugustBase = {
+      ...Object.fromEntries(Object.entries(shardDocs.find(([, shard]) => shard.yearMonth === '2026-07')[1])
+        .filter(([key]) => key !== 'shardHash')),
+      yearMonth: '2026-08',
+    };
+    const legacyAugustShard = { ...legacyAugustBase, shardHash: cashflowEvidenceHash(legacyAugustBase) };
+    const legacyManifest = {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      requestId: 'project-a-2026-08',
+      requestRevision: 1,
+      projectId: 'project-a',
+      fromMonth: '2023-01',
+      yearMonth: '2026-08',
+      months: [...shardDocs.map(([, shard]) => ({ yearMonth: shard.yearMonth, shardHash: shard.shardHash })), {
+        yearMonth: '2026-08', shardHash: legacyAugustShard.shardHash,
+      }],
+    };
+    const legacyManifestHash = cashflowEvidenceHash(legacyManifest);
+    const legacyBuilding = {
+      ...source.documents.get(requestPath),
+      status: 'BUILDING',
+      manifestHash: legacyManifestHash,
+      monthCount: 44,
+      weekCount: 220,
+      cellCount: 7040,
+      payloadFingerprint: cashflowEvidenceHash({
+        contractVersion: 'cashflow-cumulative-close-v2',
+        approverUid: 'finance-1',
+        yearMonth: '2026-08',
+        expectedRevision: 0,
+        manifestHash: legacyManifestHash,
+      }),
+    };
+    delete legacyBuilding.throughMonth;
     delete legacyBuilding.requestFingerprint;
     source.documents.set(requestPath, legacyBuilding);
     for (const path of [...source.documents.keys()]) {
@@ -4159,7 +4285,44 @@ describe('JVM weekly API BFF proxy', () => {
     expect(legacyRecovery.status, JSON.stringify(legacyRecovery.body)).toBe(202);
     shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
     expect(shardDocs).toHaveLength(44);
-    expect(source.documents.get(requestPath)).toMatchObject({ status: 'PENDING', requestFingerprint: expect.any(String) });
+    expect(source.documents.get(requestPath)).toMatchObject({
+      status: 'PENDING', monthCount: 44,
+      manifestHash: legacyManifestHash, requestFingerprint: expect.any(String),
+    });
+    expect(source.documents.get(requestPath).throughMonth).toBeUndefined();
+    source.documents.set(requestPath, { ...source.documents.get(requestPath), status: 'REJECTED' });
+    await request(legacyRequester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'legacy-cumulative-resubmit')
+      .send(createPayload)
+      .expect(202)
+      .expect((response) => expect(response.body).toMatchObject({
+        status: 'PENDING', revision: 2, monthCount: 44,
+      }));
+    expect(source.documents.get(requestPath).throughMonth).toBeUndefined();
+    expect([...source.documents.keys()].filter((path) => (
+      path.includes('/cashflow_month_close_request_months/project-a-2026-08-r2-')
+    ))).toHaveLength(44);
+    source.documents.set(requestPath, {
+      ...source.documents.get(requestPath), status: 'REJECTED', throughMonth: '2026-08', monthCount: 43,
+    });
+    await request(legacyRequester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'invalid-explicit-legacy-horizon')
+      .send(createPayload)
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_request_horizon_invalid'));
+    expect([...source.documents.keys()].filter((path) => (
+      path.includes('/cashflow_month_close_request_months/project-a-2026-08-r3-')
+    ))).toHaveLength(0);
+    for (const path of [...source.documents.keys()]) {
+      if (path.includes('/cashflow_month_close_request_months/project-a-2026-08-r2-')
+        || path.endsWith('/project-a-2026-08-r2-resubmitted')) source.documents.delete(path);
+    }
+    source.documents.delete('orgs/tenant-a/cashflow_month_close_request_months/project-a-2026-08-r1-2026-08');
+    source.documents.set(requestPath, canonicalRequestRecord);
+    source.documents.set(requestedAuditPath, canonicalRequestedAudit);
+    shardDocs = [...source.documents.entries()].filter(([path]) => path.includes('/cashflow_month_close_request_months/'));
 
     const firstShard = shardDocs[0][1];
     firstShard.cells[0].amount = 1;
@@ -4173,6 +4336,9 @@ describe('JVM weekly API BFF proxy', () => {
     }, { env: runtimeEnv, db: source.db }).app;
     await request(unrelated)
       .get('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/months?limit=1')
+      .expect(403);
+    await request(unrelated)
+      .get('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/revision-diff')
       .expect(403);
 
     await request(requester)
@@ -4230,13 +4396,20 @@ describe('JVM weekly API BFF proxy', () => {
     expect(resubmitAttempts.find(({ status }) => status === 409)?.body.code).toBe('cashflow_month_close_request_conflict');
     const resubmitted = resubmitAttempts.find(({ status }) => status === 202);
     const winningResubmitKey = resubmitAttempts[0].status === 202 ? 'cumulative-v2-resubmit-a' : 'cumulative-v2-resubmit-b';
-    expect(resubmitted.body).toMatchObject({ status: 'PENDING', revision: 2, monthCount: 44 });
+    expect(resubmitted.body).toMatchObject({ status: 'PENDING', revision: 2, monthCount: 43 });
     expect(resubmitted.body.manifestHash).not.toBe(created.body.manifestHash);
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-resubmitted')).toMatchObject({
       action: 'RESUBMITTED', revision: 2, actorUid: 'pm-1', manifestHash: resubmitted.body.manifestHash,
     });
     expect([...r1Shards].every(([path, json]) => JSON.stringify(source.documents.get(path)) === json)).toBe(true);
-    expect([...source.documents.keys()].filter((path) => path.includes('/cashflow_month_close_request_months/project-a-2026-08-r2-'))).toHaveLength(44);
+    expect([...source.documents.keys()].filter((path) => path.includes('/cashflow_month_close_request_months/project-a-2026-08-r2-'))).toHaveLength(43);
+    await request(approver)
+      .get('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/revision-diff')
+      .expect(200)
+      .expect((response) => expect(response.body).toEqual({
+        requestId: 'project-a-2026-08', yearMonth: '2026-07',
+        currentRevision: 2, previousRevision: 1, changes: [],
+      }));
     const dashboardSourceCallCount = fetchImpl.mock.calls.filter(([url]) => url.includes('/dashboard-source')).length;
     dashboardSourceUnavailable = true;
     await request(requester)
@@ -4327,12 +4500,28 @@ describe('JVM weekly API BFF proxy', () => {
         .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 }));
       expect(closePostCount()).toBe(1);
     }
-    source.documents.set(requestPath, { ...source.documents.get(requestPath), status: 'UNCERTAIN' });
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
       .set('idempotency-key', 'unsafe-reject-after-approval-start')
       .send({ decision: 'REJECT', reason: '취소', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(409);
+
+    const reopenRunTransaction = source.db.runTransaction;
+    source.db.runTransaction = vi.fn()
+      .mockRejectedValueOnce(new Error('workflow read model unavailable'))
+      .mockImplementation(reopenRunTransaction);
+    await request(approver)
+      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
+      .set('idempotency-key', 'reopen-with-post-hook-failure')
+      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '복구 후 재결산' })
+      .expect(200);
+    expect(source.documents.get(requestPath).status).toBe('APPROVED');
+    const afterReopen = await request(requester)
+      .post('/api/v1/cashflow/project-a/month-close/requests')
+      .set('idempotency-key', 'cumulative-v2-after-missed-reopen-hook')
+      .send({ ...createPayload, expectedRevision: 2 });
+    expect(afterReopen.status, JSON.stringify(afterReopen.body)).toBe(202);
+    expect(afterReopen.body).toMatchObject({ status: 'PENDING', revision: 3 });
   });
 
   it('blocks the legacy direct month-close mutation route', async () => {
@@ -4617,6 +4806,114 @@ describe('JVM weekly API BFF proxy', () => {
       });
     },
   );
+
+  it.each(['APPROVED', 'APPROVING', 'UNCERTAIN'])(
+    'marks a %s cumulative request REOPENED after the JVM reopens it', async (status) => {
+    const source = fullMonthCloseSource();
+    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
+    source.documents.set(requestPath, {
+      contractVersion: 'cashflow-cumulative-close-v2',
+      requestId: 'project-a-2026-08',
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      throughMonth: '2026-07',
+      status,
+      revision: 1,
+    });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN' }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1', actorRole: 'finance',
+    }, { env: runtimeEnv, db: source.db, now: () => new Date('2026-08-03T03:00:00.000Z') });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
+      .set('idempotency-key', 'reopen-approved-cumulative')
+      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '수정 후 재결산' })
+      .expect(200);
+
+    expect(source.documents.get(requestPath)).toMatchObject({
+      status: 'REOPENED',
+      reopenDecisionIdempotencyKey: 'reopen-approved-cumulative',
+      reopenedAt: '2026-08-03T03:00:00.000Z',
+    });
+  });
+
+  it('keeps a successful JVM reopen successful when the colocated request is not cumulative', async () => {
+    const source = fullMonthCloseSource();
+    const requestPath = 'orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08';
+    source.documents.set(requestPath, { contractVersion: 'cashflow-month-close-v1', status: 'APPROVED' });
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN' }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1', actorRole: 'finance',
+    }, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
+      .set('idempotency-key', 'reopen-non-cumulative')
+      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '수정' })
+      .expect(200);
+
+    expect(source.documents.get(requestPath)).toEqual({
+      contractVersion: 'cashflow-month-close-v1', status: 'APPROVED',
+    });
+  });
+
+  it.each([
+    ['document reference creation', { doc: () => { throw new Error('doc unavailable'); }, runTransaction: vi.fn() }],
+    ['workflow transaction', { doc: vi.fn(() => ({ path: 'request' })), runTransaction: vi.fn().mockRejectedValue(new Error('transaction unavailable')) }],
+  ])('keeps a successful JVM reopen successful when %s fails', async (_label, db) => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN' }),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1', actorRole: 'finance',
+    }, { env: runtimeEnv, db });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
+      .set('idempotency-key', `reopen-post-hook-${_label}`)
+      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '수정' })
+      .expect(200)
+      .expect((response) => expect(response.body).toMatchObject({
+        projectId: 'project-a', yearMonth: '2026-08', status: 'OPEN',
+      }));
+  });
+
+  it.each([
+    [{ projectId: 'project-b', yearMonth: '2026-08', status: 'OPEN' }, 'projectId'],
+    [{ projectId: 'project-a', yearMonth: '2026-07', status: 'OPEN' }, 'yearMonth'],
+    [{ projectId: 'project-a', yearMonth: '2026-08', status: 'CLOSED' }, 'status'],
+  ])('rejects a mismatched JVM reopen %s response before updating the workflow request', async (result) => {
+    const db = { doc: vi.fn(), runTransaction: vi.fn() };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(result),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {
+      actorId: 'finance-1', actorRole: 'finance',
+    }, { env: runtimeEnv, db });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
+      .set('idempotency-key', 'reopen-invalid-jvm-result')
+      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '수정' })
+      .expect(502)
+      .expect((response) => expect(response.body.code).toBe('cashflow_jvm_invalid_response'));
+
+    expect(db.doc).not.toHaveBeenCalled();
+    expect(db.runTransaction).not.toHaveBeenCalled();
+  });
 
   it.each([
     [{ ...runtimeEnv, BFF_DEPLOY_ENV: 'preview' }, 'unsafe_bff_runtime'],

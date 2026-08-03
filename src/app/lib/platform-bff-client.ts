@@ -1071,7 +1071,7 @@ export interface CloseCashflowMonthPayload {
   closeInput: CashflowMonthCloseDraftInput;
 }
 
-export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED';
+export type CashflowMonthCloseRequestStatus = 'BUILDING' | 'PENDING' | 'APPROVING' | 'UNCERTAIN' | 'APPROVED' | 'REJECTED' | 'REOPENED';
 
 export interface CashflowMonthCloseStoredSource {
   sourceRevision: string | null;
@@ -1162,6 +1162,7 @@ export interface CashflowMonthCloseRequest {
   requestId: string;
   projectId: string;
   yearMonth: string;
+  throughMonth?: string;
   status: CashflowMonthCloseRequestStatus;
   revision: number;
   fromMonth?: string;
@@ -1184,6 +1185,23 @@ export interface CashflowMonthCloseRequest {
   decisionReason: string | null;
   reviewWarnings: Array<{ code: string; message: string; details?: unknown }>;
   monthSnapshot: CashflowMonthCloseMonthSnapshot | null;
+}
+
+export interface CashflowMonthCloseRevisionDiff {
+  requestId: string;
+  yearMonth: string;
+  currentRevision: number;
+  previousRevision: number | null;
+  changes: Array<{
+    mode: 'projection' | 'actual';
+    weekNo: number;
+    cashflowLine: string;
+    previousState: CashflowMonthCloseMonthSnapshotCell['cellState'] | 'MISSING';
+    previousAmount: number | null;
+    currentState: CashflowMonthCloseMonthSnapshotCell['cellState'] | 'MISSING';
+    currentAmount: number | null;
+    amountDelta: number | null;
+  }>;
 }
 
 export interface ReviewCashflowMonthCloseRequestPayload {
@@ -3045,6 +3063,25 @@ export async function fetchCashflowMonthCloseRequestMonthsViaBff(params: {
   if (params.cursor) query.set('cursor', params.cursor);
   const response = await resolveClient(params.client).get<CashflowMonthCloseMonthShardPage>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/months?${query.toString()}`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      retries: 0,
+      timeoutMs: 12000,
+    },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowMonthCloseRevisionDiffViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  requestId: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowMonthCloseRevisionDiff> {
+  const response = await resolveClient(params.client).get<CashflowMonthCloseRevisionDiff>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/revision-diff`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

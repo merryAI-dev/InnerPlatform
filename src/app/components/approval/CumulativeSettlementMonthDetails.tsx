@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
 import {
   fetchCashflowMonthCloseRequestMonthsViaBff,
+  fetchCashflowMonthCloseRevisionDiffViaBff,
   type CashflowMonthCloseMonthShard,
   type CashflowMonthCloseMonthShardPage,
   type CashflowMonthCloseRequest,
+  type CashflowMonthCloseRevisionDiff,
 } from '../../lib/platform-bff-client';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
 import { CASHFLOW_ALL_LINES } from '../../platform/cashflow-sheet';
@@ -35,16 +37,18 @@ function monthsBetween(fromMonth: string, throughMonth: string) {
 }
 
 function expectedRequestMonths(request: CashflowMonthCloseRequest) {
+  const throughMonth = request.throughMonth || request.lockRange?.throughMonth;
   if (
     !request.fromMonth
+    || !throughMonth
     || !request.lockRange
     || request.lockRange.fromMonth !== request.fromMonth
-    || request.lockRange.throughMonth !== request.yearMonth
+    || request.lockRange.throughMonth !== throughMonth
     || request.lockRange.fromWeekNo !== 1
     || request.lockRange.throughWeekNo !== 5
     || !Number.isSafeInteger(request.monthCount)
   ) throw new Error('누적 결산 문서의 고정 범위가 요청 header와 일치하지 않습니다.');
-  const expected = monthsBetween(request.fromMonth, request.yearMonth);
+  const expected = monthsBetween(request.fromMonth, throughMonth);
   if (expected.length !== request.monthCount) throw new Error('누적 결산 문서의 월 수가 요청 header와 일치하지 않습니다.');
   return expected;
 }
@@ -173,6 +177,26 @@ function MonthTable({ shard, mode }: { shard: CashflowMonthCloseMonthShard; mode
   );
 }
 
+function revisionValue(state: 'VALUE' | 'ZERO' | 'EMPTY' | 'MISSING', amount: number | null) {
+  if (state === 'MISSING') return '키 누락';
+  if (state === 'EMPTY') return '미입력';
+  return formatMoney(amount ?? 0);
+}
+
+export function matchesCashflowMonthCloseRevisionDiff(
+  request: Pick<CashflowMonthCloseRequest, 'requestId' | 'revision' | 'throughMonth' | 'lockRange'>,
+  result: CashflowMonthCloseRevisionDiff,
+) {
+  const throughMonth = request.throughMonth || request.lockRange?.throughMonth;
+  if (request.throughMonth && request.lockRange?.throughMonth && request.throughMonth !== request.lockRange.throughMonth) {
+    return false;
+  }
+  return result.requestId === request.requestId
+    && result.currentRevision === request.revision
+    && Boolean(throughMonth)
+    && result.yearMonth === throughMonth;
+}
+
 export function CumulativeSettlementMonthDetails({
   tenantId,
   actor,
@@ -188,6 +212,8 @@ export function CumulativeSettlementMonthDetails({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [revisionDiff, setRevisionDiff] = useState<CashflowMonthCloseRevisionDiff | null>(null);
+  const [revisionDiffError, setRevisionDiffError] = useState('');
   const generationRef = useRef(0);
 
   const load = useCallback(async (
@@ -244,14 +270,21 @@ export function CumulativeSettlementMonthDetails({
     return () => { generationRef.current += 1; };
   }, [load, onReadyChange]);
 
-  const years = useMemo(() => {
-    const groups = new Map<string, CashflowMonthCloseMonthShard[]>();
-    months.forEach((month) => {
-      const year = month.yearMonth.slice(0, 4);
-      groups.set(year, [...(groups.get(year) || []), month]);
-    });
-    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
-  }, [months]);
+  useEffect(() => {
+    let active = true;
+    setRevisionDiff(null);
+    setRevisionDiffError('');
+    if (!actor.idToken) return () => { active = false; };
+    void fetchCashflowMonthCloseRevisionDiffViaBff({ tenantId, actor, projectId: request.projectId, requestId: request.requestId })
+      .then((result) => {
+        if (active && matchesCashflowMonthCloseRevisionDiff(request, result)) setRevisionDiff(result);
+      })
+      .catch((loadError) => { if (active) setRevisionDiffError(resolveApiErrorMessage(loadError, '직전 revision 비교를 불러오지 못했습니다.')); });
+    return () => { active = false; };
+  }, [actor, request.projectId, request.requestId, request.revision, request.throughMonth, request.lockRange?.throughMonth, tenantId]);
+
+  const targetMonth = request.lockRange?.throughMonth || request.throughMonth;
+  const targetShard = months.find((month) => month.yearMonth === targetMonth);
 
   if (loading && months.length === 0) {
     return <div className="flex min-h-[120px] items-center justify-center gap-2 border border-slate-300 text-[12px] text-slate-500" aria-busy="true"><Loader2 className="h-4 w-4 animate-spin" />월별 저장 문서를 불러오고 있습니다.</div>;
@@ -274,26 +307,28 @@ export function CumulativeSettlementMonthDetails({
           <Loader2 className="h-3.5 w-3.5 animate-spin" />월별 저장 문서 검증 중 · {months.length.toLocaleString()}/{request.monthCount?.toLocaleString()}개월
         </p>
       ) : null}
-      {years.map(([year, yearMonths]) => (
-        <details key={year} className="border border-slate-300 bg-white" open={years.length === 1}>
-          <summary className="cursor-pointer bg-slate-100 px-4 py-3 text-[13px] font-bold text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#174a7c]">
-            {year}년 · {yearMonths.length}개월 불러옴
-          </summary>
-          <div className="space-y-3 p-3">
-            {yearMonths.map((month) => (
-              <details key={month.yearMonth} className="border border-slate-200">
-                <summary className="cursor-pointer px-3 py-2 text-[12px] font-semibold text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#174a7c]">
-                  {month.yearMonth} · 제출 시점 저장본
-                </summary>
-                <div className="border-t border-slate-200 p-3">
-                  <MonthTable shard={month} mode="projection" />
-                  <MonthTable shard={month} mode="actual" />
-                </div>
-              </details>
-            ))}
-          </div>
-        </details>
-      ))}
+      {targetShard ? <div className="space-y-3 border border-slate-300 bg-white p-3">
+        <p className="text-[12px] font-semibold text-slate-800">{request.yearMonth} 월 결산 · 데이터 기준 {targetShard.yearMonth}</p>
+        <MonthTable shard={targetShard} mode="projection" />
+        <MonthTable shard={targetShard} mode="actual" />
+      </div> : null}
+      {revisionDiff ? <section className="border border-slate-300 bg-white p-3" aria-label={`${revisionDiff.yearMonth} 직전 revision 대비 변경사항`}>
+        <h6 className="text-[12px] font-bold text-[#001e46]">{revisionDiff.yearMonth} 직전 revision 대비 변경사항</h6>
+        {revisionDiff.previousRevision === null ? <p className="mt-2 text-[11px] text-slate-600">최초 제출본이라 비교할 이전 revision이 없습니다.</p>
+          : revisionDiff.changes.length === 0 ? <p className="mt-2 text-[11px] text-slate-600">{revisionDiff.yearMonth}에는 revision {revisionDiff.previousRevision} 대비 변경사항이 없습니다.</p>
+            : <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-[11px]"><caption className="sr-only">{revisionDiff.yearMonth} 한 달의 직전 revision 대비 변경사항</caption>
+              <thead className="bg-slate-100"><tr><th className="border px-2 py-2 text-left">구분</th><th className="border px-2 py-2 text-left">항목</th><th className="border px-2 py-2 text-right">주차</th><th className="border px-2 py-2 text-right">이전</th><th className="border px-2 py-2 text-right">이번</th><th className="border px-2 py-2 text-right">증감</th></tr></thead>
+              <tbody>{revisionDiff.changes.map((change) => <tr key={`${change.mode}:${change.weekNo}:${change.cashflowLine}`}>
+                <td className="border px-2 py-2">{change.mode === 'projection' ? 'Projection' : 'Actual'}</td>
+                <th className="border px-2 py-2 text-left font-medium">{CASHFLOW_SHEET_LINE_LABELS[change.cashflowLine as CashflowSheetLineId] || change.cashflowLine}</th>
+                <td className="border px-2 py-2 text-right">{change.weekNo}주차</td>
+                <td className="border px-2 py-2 text-right">{revisionValue(change.previousState, change.previousAmount)}</td>
+                <td className="border px-2 py-2 text-right">{revisionValue(change.currentState, change.currentAmount)}</td>
+                <td className="border px-2 py-2 text-right">{change.amountDelta === null ? '—' : formatMoney(change.amountDelta)}</td>
+              </tr>)}</tbody>
+            </table></div>}
+      </section> : null}
+      {revisionDiffError ? <p className="border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">{revisionDiffError} 현재 저장본 검증과 승인은 계속할 수 있습니다.</p> : null}
       {error ? <div role="alert" className="border border-red-200 bg-red-50 p-3 text-[12px] text-red-800">{error} <span className="font-semibold">검증 완료 {months.length.toLocaleString()}/{request.monthCount?.toLocaleString()}개월</span> <Button type="button" variant="outline" size="sm" className="ml-2" onClick={() => void load(nextCursor || undefined, months, generationRef.current)}><RefreshCw className="mr-1 h-3.5 w-3.5" />다시 시도</Button></div> : null}
       {!loading && !error && nextCursor === null && months.length === request.monthCount ? (
         <p className="text-center text-[11px] text-slate-500" aria-live="polite">월별 저장 문서 {months.length.toLocaleString()}건을 모두 불러왔습니다.</p>

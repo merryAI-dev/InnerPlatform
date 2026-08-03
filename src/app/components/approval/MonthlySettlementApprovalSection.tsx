@@ -46,6 +46,7 @@ const REQUEST_STATUS_LABELS: Record<CashflowMonthCloseRequest['status'], string>
   UNCERTAIN: '서버 결과 확인 필요',
   APPROVED: '승인',
   REJECTED: '반려',
+  REOPENED: '재오픈',
 };
 
 export function formatMoney(value: number | null | undefined) {
@@ -90,7 +91,7 @@ export function resolveRequestPartyName(explicitName: string | null | undefined,
 
 export function buildMonthCloseHistoryEntries(request: CashflowMonthCloseRequest, members: OrgMember[]) {
   const summary = `${request.yearMonth} 월 결산 승인 요청 · ${request.lockRange ? `${request.lockRange.fromMonth} ${request.lockRange.fromWeekNo}주차 ~ ${request.lockRange.throughMonth} ${request.lockRange.throughWeekNo}주차 · ${request.monthCount?.toLocaleString()}개월` : '제출 시점 저장본'}`;
-  const entries: Array<{ kind: 'REQUESTED' | 'REVIEWED' | 'RECOVERY'; actorName: string; at: string; detail: string }> = [{
+  const entries: Array<{ kind: 'REQUESTED' | 'REVIEWED'; actorName: string; at: string; detail: string }> = [{
     kind: 'REQUESTED',
     actorName: resolveRequestPartyName(request.requestedByName, members, request.requestedByUid),
     at: request.requestedAt,
@@ -101,12 +102,6 @@ export function buildMonthCloseHistoryEntries(request: CashflowMonthCloseRequest
     actorName: resolveRequestPartyName(request.reviewedByName || request.approverName, members, request.reviewedByUid || request.approverUid),
     at: request.reviewedAt || request.requestedAt,
     detail: request.decisionReason || REQUEST_STATUS_LABELS[request.status],
-  });
-  if (['APPROVING', 'UNCERTAIN'].includes(request.status)) entries.push({
-    kind: 'RECOVERY' as const,
-    actorName: resolveRequestPartyName(request.approverName, members, request.approverUid),
-    at: request.reviewedAt || request.requestedAt,
-    detail: request.status === 'UNCERTAIN' ? '서버 결과를 조회해 중복 마감 없이 복구합니다.' : '저장된 승인 작업을 동일한 요청으로 재개합니다.',
   });
   return entries;
 }
@@ -435,7 +430,7 @@ export function MonthlySettlementApprovalSection({
                 <div className="border border-t-0 border-slate-400 text-[12px]">
                   {buildMonthCloseHistoryEntries(selectedRequest, members).map((entry) => (
                     <div key={`${entry.kind}:${entry.at}`} className="grid gap-1 border-t border-slate-300 px-3 py-3 first:border-t-0 sm:grid-cols-[120px_1fr]">
-                      <strong>{entry.kind === 'REQUESTED' ? '요청' : entry.kind === 'REVIEWED' ? '검토' : '복구 상태'}</strong>
+                      <strong>{entry.kind === 'REQUESTED' ? '요청' : '검토'}</strong>
                       <span><span className="font-semibold">{entry.actorName}</span> · {formatDateTime(entry.at)}<br />{entry.detail}</span>
                     </div>
                   ))}
@@ -498,19 +493,6 @@ export function MonthlySettlementApprovalSection({
                           <p className="mt-2 text-right text-[14px] font-semibold tabular-nums">{formatMoney(selectedRequest.totals?.[mode])}</p>
                         </div>
                       ))}
-                    </div>
-                  </section>
-
-                  <section>
-                    <h4 className="border-b-2 border-slate-700 pb-2 text-[14px] font-bold">연도별 요약</h4>
-                    <div className="overflow-x-auto border border-t-0 border-slate-300" role="region" aria-label="누적 결산 연도별 요약" tabIndex={0}>
-                      <table className="w-full min-w-[1080px] border-collapse text-[11px]">
-                        <caption className="sr-only">연도별 Projection, Actual, 차이의 셀 금액 합계</caption>
-                        <thead className="bg-slate-100"><tr><th className="px-3 py-2 text-left">연도</th><th className="px-3 py-2 text-right">포함 월</th>{(['Projection 합계', 'Actual 합계', '차이'] as const).map((label) => <th key={label} className="px-3 py-2 text-right">{label}</th>)}</tr></thead>
-                        <tbody>{(selectedRequest.annualSummaries || []).map((annual) => (
-                          <tr key={annual.year} className="border-t border-slate-200"><th className="px-3 py-2 text-left">{annual.year}년</th><td className="px-3 py-2 text-right">{annual.monthCount}개월</td>{(['projection', 'actual', 'difference'] as const).map((mode) => <td key={mode} className="px-3 py-2 text-right tabular-nums">{formatMoney(annual[mode])}</td>)}</tr>
-                        ))}</tbody>
-                      </table>
                     </div>
                   </section>
 
