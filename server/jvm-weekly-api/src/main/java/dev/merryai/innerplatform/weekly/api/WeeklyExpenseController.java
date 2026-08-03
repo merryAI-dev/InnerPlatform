@@ -385,6 +385,34 @@ public class WeeklyExpenseController {
         );
     }
 
+    @GetMapping("/cashflow/{projectId}/settlement-statuses")
+    public CashflowSettlementStatusesResponse readCashflowSettlementStatuses(
+        @PathVariable String projectId,
+        @RequestParam("yearMonth") String yearMonth,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail
+    ) {
+        return commandService.readCashflowSettlementStatuses(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, yearMonth
+        );
+    }
+
+    @PostMapping("/cashflow/{projectId}/settlement-statuses/transition")
+    public CashflowSettlementStatusesResponse transitionCashflowSettlementStatus(
+        @PathVariable String projectId,
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody TransitionCashflowSettlementStatusRequest request
+    ) {
+        return commandService.transitionCashflowSettlementStatus(
+            actorContext(tenantId, actorId, actorRole, actorEmail), projectId, request
+        );
+    }
+
     @GetMapping("/cashflow/{projectId}/month-close/dashboard-source")
     public CashflowMonthDashboardSourceResponse readCashflowMonthDashboardSource(
         @PathVariable String projectId,

@@ -2598,6 +2598,43 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json(result);
   }));
 
+  app.get('/api/v1/cashflow/:projectId/settlement-statuses', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow settlement statuses', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    const yearMonth = readOptionalText(req.query.yearMonth);
+    if (!projectId || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
+      throw createHttpError(400, '조회할 결산 연월을 정확히 입력해 주세요.', 'cashflow_settlement_status_scope_invalid');
+    }
+    const result = await proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'GET',
+      path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(yearMonth)}`,
+    });
+    res.status(200).json(result);
+  }));
+
+  app.post('/api/v1/cashflow/:projectId/settlement-statuses/transition', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'update cashflow settlement status', authMode, workspaceEmailDomain);
+    const projectId = readOptionalText(req.params.projectId);
+    const requested = commandBody(req);
+    const yearMonth = readOptionalText(requested.yearMonth);
+    const period = readOptionalText(requested.period).toUpperCase();
+    const action = readOptionalText(requested.action).toUpperCase();
+    if (!projectId
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+      || !/^(MONTH|WEEK_[1-5])$/.test(period)
+      || !/^(SUBMIT|APPROVE)$/.test(action)) {
+      throw createHttpError(400, '결산 대상과 처리 상태를 정확히 입력해 주세요.', 'cashflow_settlement_status_transition_invalid');
+    }
+    const result = await proxyMutation(
+      req,
+      `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses/transition`,
+      { yearMonth, period, action },
+      { cashflowWrite: true },
+    );
+    res.status(200).json(result);
+  }));
+
   app.get('/api/v1/cashflow/:projectId/weekly-update-compliance', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'auditor', 'viewer', 'tenant_admin', 'support', 'security'], 'read weekly cashflow compliance', authMode, workspaceEmailDomain);
     const projectId = readOptionalText(req.params.projectId);
