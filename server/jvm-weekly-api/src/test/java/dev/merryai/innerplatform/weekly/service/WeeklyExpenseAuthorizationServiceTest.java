@@ -4,10 +4,42 @@ import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WeeklyExpenseAuthorizationServiceTest {
+    @Test
+    void tenantWideBatchAuthorizationUsesOneExistenceLookup() {
+        int[] batchCalls = {0};
+        WeeklyProjectExistenceRepository projects = new WeeklyProjectExistenceRepository() {
+            @Override
+            public boolean exists(String tenantId, String projectId) {
+                throw new AssertionError("batch authorization must not use sequential existence reads");
+            }
+
+            @Override
+            public Set<String> existingProjectIds(String tenantId, List<String> projectIds) {
+                batchCalls[0] += 1;
+                return Set.copyOf(projectIds);
+            }
+        };
+        WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(
+            (actor, projectId) -> false, projects, "strict"
+        );
+        TrustedActorContext admin = new TrustedActorContext("tenant-a", "admin-1", "admin@example.com", "admin");
+
+        assertThatCode(() -> service.requireProjectsAllowed(
+            WeeklyExpenseCommandService.CASHFLOW_MONTH_CLOSE_READ_COMMAND,
+            admin,
+            List.of("project-a", "project-b")
+        )).doesNotThrowAnyException();
+        assertThat(batchCalls[0]).isEqualTo(1);
+    }
+
     @Test
     void pmCanMutateOnlyAssignedProject() {
         WeeklyExpenseAuthorizationService service = new WeeklyExpenseAuthorizationService(

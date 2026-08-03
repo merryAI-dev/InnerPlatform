@@ -198,9 +198,7 @@ public class WeeklyExpenseCommandService {
         CashflowSettlementStatusesBatchRequest request
     ) {
         List<String> projectIds = request.requireUniqueProjectIds();
-        for (String projectId : projectIds) {
-            authorizationService.requireProjectAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId);
-        }
+        authorizationService.requireProjectsAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectIds);
         Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> recordsByProject =
             persistence.findCashflowSettlementStatusesBatch(actor.tenantId(), projectIds, request.yearMonth());
         List<CashflowSettlementStatusesResponse> items = new ArrayList<>();

@@ -3,12 +3,21 @@ package dev.merryai.innerplatform.weekly.service;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
+import com.google.cloud.firestore.DocumentReference;
+import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @Repository
 @ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "firestore")
@@ -45,6 +54,33 @@ public class FirestoreWeeklyProjectExistenceRepository implements WeeklyProjectE
             return hasExistingProjectScopedData(tenant, project);
         } catch (Exception error) {
             return false;
+        }
+    }
+
+    @Override
+    public Set<String> existingProjectIds(String tenantId, List<String> projectIds) {
+        String tenant = text(tenantId);
+        if (tenant.isBlank() || projectIds == null || projectIds.isEmpty()) return Set.of();
+        try {
+            DocumentReference[] refs = projectIds.stream()
+                .map(projectId -> db.document("orgs/" + tenant + "/projects/" + text(projectId)))
+                .toArray(DocumentReference[]::new);
+            List<DocumentSnapshot> snapshots = db.getAll(refs).get();
+            Set<String> result = new LinkedHashSet<>();
+            Map<String, Future<Boolean>> legacyChecks = new LinkedHashMap<>();
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                for (int index = 0; index < projectIds.size(); index += 1) {
+                    String projectId = text(projectIds.get(index));
+                    if (snapshots.get(index).exists()) result.add(projectId);
+                    else legacyChecks.put(projectId, executor.submit(() -> hasExistingProjectScopedData(tenant, projectId)));
+                }
+                for (Map.Entry<String, Future<Boolean>> entry : legacyChecks.entrySet()) {
+                    if (entry.getValue().get()) result.add(entry.getKey());
+                }
+            }
+            return Set.copyOf(result);
+        } catch (Exception error) {
+            return Set.of();
         }
     }
 
