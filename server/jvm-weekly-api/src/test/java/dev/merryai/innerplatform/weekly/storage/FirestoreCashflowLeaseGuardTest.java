@@ -165,6 +165,29 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void isolatesFailedSettlementStatusReadAndKeepsStoredStatus() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String successPath = "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08";
+        fixture.documents.put(successPath, Map.of("periods", Map.of(
+            "MONTH", Map.of("status", "COMPLETED", "revision", 3)
+        )));
+        String failedPath = "orgs/tenant-a/cashflow_settlement_statuses/project-b-2026-08";
+        DocumentReference failing = mock(DocumentReference.class);
+        when(failing.getPath()).thenReturn(failedPath);
+        when(failing.get()).thenReturn(ApiFutures.immediateFailedFuture(new RuntimeException("Firestore unavailable")));
+        when(fixture.db.document(failedPath)).thenReturn(failing);
+
+        Map<String, List<WeeklyExpensePersistence.CashflowSettlementStatusRecord>> result =
+            fixture.persistence.findCashflowSettlementStatusesBatch(
+                "tenant-a", List.of("project-a", "project-b"), "2026-08"
+            );
+
+        assertThat(result).containsOnlyKeys("project-a");
+        assertThat(result.get("project-a")).hasSize(6);
+        assertThat(result.get("project-a").getFirst().status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
     void validatesStoredMemberAndLeaseInTheSameTransactionAsCanonicalWrite() {
         Fixture fixture = fixture(activeMember(), activeLease());
 

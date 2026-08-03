@@ -28,6 +28,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -410,6 +411,18 @@ public interface WeeklyExpensePersistence {
             "cashflow_settlement_status_backend_unavailable",
             "Cashflow settlement status reads require the Firestore transaction backend."
         );
+    }
+
+    default Map<String, List<CashflowSettlementStatusRecord>> findCashflowSettlementStatusesBatch(
+        String tenantId,
+        List<String> projectIds,
+        String yearMonth
+    ) {
+        Map<String, List<CashflowSettlementStatusRecord>> result = new LinkedHashMap<>();
+        for (String projectId : projectIds) {
+            result.put(projectId, findCashflowSettlementStatuses(tenantId, projectId, yearMonth));
+        }
+        return Map.copyOf(result);
     }
 
     default CashflowSettlementStatusRecord transitionCashflowSettlementStatus(

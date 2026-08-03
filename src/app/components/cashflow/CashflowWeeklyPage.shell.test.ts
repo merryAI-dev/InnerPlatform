@@ -18,7 +18,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
   it('uses the simple persisted status flow and updates only the affected project state', () => {
     expect(source).toContain('sticky top-0');
     expect(source).toContain('sticky left-0');
-    expect(source).toContain('fetchCashflowSettlementStatusesViaBff');
+    expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
     expect(source).toContain('실무자 업데이트 대기 중');
     expect(source).toContain('조직장 승인 필요');
@@ -33,7 +33,8 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('getProjectRegistrationCicOptions()');
     expect(source).toContain('normalizeProjectDepartment(project.department)');
     expect(source).toContain('filterCashflowProjectsByDepartment(projects, deptFilter)');
-    expect(source).toContain('Promise.allSettled(filteredProjects.map');
+    expect(source).not.toContain('Promise.allSettled(filteredProjects.map');
+    expect(source).toContain('projectIds.slice(index * 100, (index + 1) * 100)');
     expect(source).toContain('{filteredProjects.map((project) => {');
     expect(source).toContain('filteredProjects.length === 0');
     expect(source).toContain('>담당조직</Label>');

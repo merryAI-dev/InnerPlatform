@@ -399,6 +399,19 @@ public class WeeklyExpenseController {
         );
     }
 
+    @PostMapping("/cashflow/settlement-statuses/batch")
+    public CashflowSettlementStatusesBatchResponse readCashflowSettlementStatusesBatch(
+        @RequestHeader("x-tenant-id") String tenantId,
+        @RequestHeader("x-actor-id") String actorId,
+        @RequestHeader("x-actor-role") String actorRole,
+        @RequestHeader(value = "x-actor-email", required = false) String actorEmail,
+        @Valid @RequestBody CashflowSettlementStatusesBatchRequest request
+    ) {
+        return commandService.readCashflowSettlementStatusesBatch(
+            actorContext(tenantId, actorId, actorRole, actorEmail), request
+        );
+    }
+
     @PostMapping("/cashflow/{projectId}/settlement-statuses/transition")
     public CashflowSettlementStatusesResponse transitionCashflowSettlementStatus(
         @PathVariable String projectId,

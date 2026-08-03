@@ -455,6 +455,29 @@ describe('JVM weekly API BFF proxy', () => {
     );
   });
 
+  it('reads up to 100 project settlement statuses with one JVM batch request', async () => {
+    const projectIds = Array.from({ length: 100 }, (_, index) => `project-${index + 1}`);
+    const canonical = {
+      items: [{ projectId: 'project-1', yearMonth: '2026-08', items: [] }],
+      errors: [{ projectId: 'project-2', code: 'STATUS_UNAVAILABLE' }],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/settlement-statuses/batch')
+      .send({ projectIds, yearMonth: '2026-08' })
+      .expect(200, canonical);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://jvm-weekly.local/api/v1/cashflow/settlement-statuses/batch',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ projectIds, yearMonth: '2026-08' }) }),
+    );
+  });
+
   it('rejects invalid settlement scopes before calling JVMP', async () => {
     const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
@@ -465,6 +488,14 @@ describe('JVM weekly API BFF proxy', () => {
     await request(app)
       .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
       .send({ yearMonth: '2026-08', period: 'WEEK_6', action: 'APPROVE' })
+      .expect(400);
+    await request(app)
+      .post('/api/v1/cashflow/settlement-statuses/batch')
+      .send({ projectIds: ['duplicate', 'duplicate'], yearMonth: '2026-08' })
+      .expect(400);
+    await request(app)
+      .post('/api/v1/cashflow/settlement-statuses/batch')
+      .send({ projectIds: Array.from({ length: 101 }, (_, index) => `project-${index}`), yearMonth: '2026-08' })
       .expect(400);
     expect(fetchImpl).not.toHaveBeenCalled();
   });

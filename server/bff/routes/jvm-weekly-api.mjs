@@ -2613,6 +2613,33 @@ export function mountJvmWeeklyApiRoutes(app, {
     res.status(200).json(result);
   }));
 
+  app.post('/api/v1/cashflow/settlement-statuses/batch', asyncHandler(async (req, res) => {
+    assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow settlement statuses', authMode, workspaceEmailDomain);
+    const projectIds = req.body?.projectIds;
+    const yearMonth = readOptionalText(req.body?.yearMonth);
+    if (!Array.isArray(projectIds)
+      || projectIds.length < 1
+      || projectIds.length > 100
+      || projectIds.some((projectId) => typeof projectId !== 'string'
+        || projectId.length < 1
+        || projectId.length > 120
+        || projectId.includes('/')
+        || projectId.trim() !== projectId)
+      || new Set(projectIds).size !== projectIds.length
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
+      throw createHttpError(400, '조회할 프로젝트와 결산 연월을 정확히 입력해 주세요.', 'cashflow_settlement_status_batch_request_invalid');
+    }
+    const result = await proxyJavaWeeklyRequest({
+      context: req.context,
+      method: 'POST',
+      path: '/api/v1/cashflow/settlement-statuses/batch',
+      command: 'read_cashflow_settlement_statuses_batch',
+      body: { projectIds, yearMonth },
+      mutation: false,
+    });
+    res.status(200).json(result);
+  }));
+
   app.post('/api/v1/cashflow/:projectId/settlement-statuses/transition', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ['admin', 'finance', 'pm', 'viewer', 'tenant_admin'], 'update cashflow settlement status', authMode, workspaceEmailDomain);
     const projectId = readOptionalText(req.params.projectId);
