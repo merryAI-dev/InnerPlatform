@@ -424,6 +424,51 @@ function createApp(fetchImpl, idempotencyService = createIdempotencyService(), c
 }
 
 describe('JVM weekly API BFF proxy', () => {
+  it('proxies the lightweight month and weekly settlement status flow', async () => {
+    const canonical = {
+      projectId: 'project-a',
+      yearMonth: '2026-08',
+      items: [{ period: 'MONTH', status: 'PENDING_APPROVAL', revision: 1 }],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(canonical), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
+      .expect(200, canonical);
+    await request(app)
+      .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
+      .send({ yearMonth: '2026-08', period: 'WEEK_3', action: 'SUBMIT' })
+      .expect(200, canonical);
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses/transition',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ yearMonth: '2026-08', period: 'WEEK_3', action: 'SUBMIT' }) }),
+    );
+  });
+
+  it('rejects invalid settlement scopes before calling JVMP', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-13')
+      .expect(400);
+    await request(app)
+      .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
+      .send({ yearMonth: '2026-08', period: 'WEEK_6', action: 'APPROVE' })
+      .expect(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('forwards the canonical projection-actual batch summary unchanged', async () => {
     const canonical = {
       version: '1',

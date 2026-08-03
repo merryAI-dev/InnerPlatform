@@ -299,6 +299,146 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         return requireCashflowPermission(actor, projectId, true);
     }
 
+    @Override
+    public List<CashflowSettlementStatusRecord> findCashflowSettlementStatuses(
+        String tenantId,
+        String projectId,
+        String yearMonth
+    ) {
+        requireYearMonth(yearMonth);
+        Map<String, Object> stored = settlementStatusDocument(tenantId, projectId, yearMonth);
+        Map<String, Object> periods = nestedMap(stored.get("periods"));
+        List<CashflowSettlementStatusRecord> result = new ArrayList<>();
+        for (String period : List.of("MONTH", "WEEK_1", "WEEK_2", "WEEK_3", "WEEK_4", "WEEK_5")) {
+            result.add(settlementStatusRecord(tenantId, projectId, yearMonth, period, nestedMap(periods.get(period))));
+        }
+        return List.copyOf(result);
+    }
+
+    @Override
+    public CashflowSettlementStatusRecord transitionCashflowSettlementStatus(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth,
+        String period,
+        String action
+    ) {
+        requireYearMonth(yearMonth);
+        if (!("MONTH".equals(period) || period.matches("WEEK_[1-5]"))) {
+            throw new IllegalArgumentException("Cashflow settlement period is invalid.");
+        }
+        if ("APPROVE".equals(action)) {
+            DocumentReference projectRef = db.document("orgs/" + actor.tenantId() + "/projects/" + projectId);
+            Map<String, Object> project = cachedDocumentIfPresent(projectRef).orElseGet(() -> {
+                DocumentSnapshot snapshot = get(projectRef);
+                return snapshot.exists() ? data(snapshot) : Map.of();
+            });
+            if (!isDesignatedCashflowSettlementApprover(project, actor.id())) {
+                throw leaseError(
+                    403,
+                    "cashflow_settlement_approval_forbidden",
+                    "Only the project's designated executive approver can approve this settlement."
+                );
+            }
+        }
+        DocumentReference ref = settlementStatusRef(actor.tenantId(), projectId, yearMonth);
+        Map<String, Object> document = cachedDocumentIfPresent(ref).orElseGet(() -> {
+            DocumentSnapshot snapshot = get(ref);
+            return snapshot.exists() ? data(snapshot) : new LinkedHashMap<>();
+        });
+        Map<String, Object> periods = nestedMap(document.get("periods"));
+        Map<String, Object> current = nestedMap(periods.get(period));
+        CashflowSettlementStatusRecord effective = settlementStatusRecord(
+            actor.tenantId(), projectId, yearMonth, period, current
+        );
+        String expected = "SUBMIT".equals(action) ? "WAITING_FOR_UPDATE" : "PENDING_APPROVAL";
+        String next = "SUBMIT".equals(action) ? "PENDING_APPROVAL" : "APPROVE".equals(action) ? "COMPLETED" : "";
+        if (next.isBlank()) throw new IllegalArgumentException("Cashflow settlement action is invalid.");
+        if (next.equals(effective.status())) return effective;
+        if (!expected.equals(effective.status())) {
+            throw new WeeklyExpenseConflictException("Cashflow settlement status changed. Check the current status and try again.");
+        }
+        Instant now = clock.instant();
+        Map<String, Object> updated = new LinkedHashMap<>(current);
+        updated.put("status", next);
+        updated.put("revision", Math.addExact(longValue(current.get("revision"), 0), 1));
+        updated.put("valueRevision", settlementValueRevision(actor.tenantId(), projectId, yearMonth, period));
+        updated.put("updatedAt", now.toString());
+        if ("SUBMIT".equals(action)) {
+            updated.put("submittedAt", now.toString());
+            updated.put("submittedBy", actor.name().isBlank() ? actor.id() : actor.name());
+            updated.remove("approvedAt");
+            updated.remove("approvedBy");
+        } else {
+            updated.put("approvedAt", now.toString());
+            updated.put("approvedBy", actor.name().isBlank() ? actor.id() : actor.name());
+        }
+        periods.put(period, updated);
+        Map<String, Object> patch = new LinkedHashMap<>();
+        patch.put("tenantId", actor.tenantId());
+        patch.put("projectId", projectId);
+        patch.put("yearMonth", yearMonth);
+        patch.put("periods", periods);
+        patch.put("updatedAt", now.toString());
+        set(ref, patch);
+        return settlementStatusRecord(actor.tenantId(), projectId, yearMonth, period, updated);
+    }
+
+    private CashflowSettlementStatusRecord settlementStatusRecord(
+        String tenantId,
+        String projectId,
+        String yearMonth,
+        String period,
+        Map<String, Object> stored
+    ) {
+        String status = effectiveSettlementStatus(
+            text(stored.get("status"), "WAITING_FOR_UPDATE"),
+            text(stored.get("valueRevision"), ""),
+            settlementValueRevision(tenantId, projectId, yearMonth, period)
+        );
+        return new CashflowSettlementStatusRecord(
+            period,
+            status,
+            text(stored.get("submittedAt"), ""),
+            text(stored.get("submittedBy"), ""),
+            text(stored.get("approvedAt"), ""),
+            text(stored.get("approvedBy"), ""),
+            longValue(stored.get("revision"), 0)
+        );
+    }
+
+    private String settlementValueRevision(String tenantId, String projectId, String yearMonth, String period) {
+        List<Map<String, Object>> weeks = new ArrayList<>();
+        int from = "MONTH".equals(period) ? 1 : Integer.parseInt(period.substring("WEEK_".length()));
+        int through = "MONTH".equals(period) ? 5 : from;
+        for (int weekNo = from; weekNo <= through; weekNo += 1) {
+            DocumentSnapshot snapshot = get(cashflowWeekRef(tenantId, cashflowWeekId(projectId, yearMonth, weekNo)));
+            if (snapshot.exists()) weeks.add(data(snapshot));
+        }
+        return computeCashflowTargetRevision(weeks);
+    }
+
+    static boolean isDesignatedCashflowSettlementApprover(Map<String, Object> project, String actorId) {
+        return actorId != null && !actorId.isBlank() && actorId.equals(textValue(
+            project == null ? null : project.get("executiveApproverId")
+        ));
+    }
+
+    static String effectiveSettlementStatus(String storedStatus, String approvedValueRevision, String currentValueRevision) {
+        return "COMPLETED".equals(storedStatus) && !String.valueOf(approvedValueRevision).equals(currentValueRevision)
+            ? "PENDING_APPROVAL"
+            : storedStatus;
+    }
+
+    private Map<String, Object> settlementStatusDocument(String tenantId, String projectId, String yearMonth) {
+        DocumentSnapshot snapshot = get(settlementStatusRef(tenantId, projectId, yearMonth));
+        return snapshot.exists() ? data(snapshot) : Map.of();
+    }
+
+    private DocumentReference settlementStatusRef(String tenantId, String projectId, String yearMonth) {
+        return db.document("orgs/" + tenantId + "/cashflow_settlement_statuses/" + projectId + "-" + yearMonth);
+    }
+
     private String requireCashflowPermission(TrustedActorContext actor, String projectId, boolean monthCloseOnly) {
         if (currentTransaction.get() == null) {
             throw leaseError(

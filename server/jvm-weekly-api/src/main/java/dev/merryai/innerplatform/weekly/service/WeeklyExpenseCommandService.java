@@ -21,6 +21,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowProjectionActualSummaryBatch
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowSheetFormulaPreflightResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowSnapshotResponse;
+import dev.merryai.innerplatform.weekly.api.CashflowSettlementStatusesResponse;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceRequest;
 import dev.merryai.innerplatform.weekly.api.CashflowVarianceResponse;
 import dev.merryai.innerplatform.weekly.api.CloseWeekRequest;
@@ -50,6 +51,7 @@ import dev.merryai.innerplatform.weekly.api.SaveDraftResponse;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekRequest;
 import dev.merryai.innerplatform.weekly.api.SubmitWeekResponse;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
+import dev.merryai.innerplatform.weekly.api.TransitionCashflowSettlementStatusRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionRequest;
 import dev.merryai.innerplatform.weekly.api.UpsertProjectionResponse;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
@@ -174,6 +176,60 @@ public class WeeklyExpenseCommandService {
 
     public void requireProjectAllowed(String commandName, TrustedActorContext actor, String projectId) {
         authorizationService.requireProjectAllowed(commandName, actor, projectId);
+    }
+
+    public CashflowSettlementStatusesResponse readCashflowSettlementStatuses(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth
+    ) {
+        authorizationService.requireProjectAllowed(CASHFLOW_MONTH_CLOSE_READ_COMMAND, actor, projectId);
+        return settlementStatusesResponse(
+            projectId,
+            yearMonth,
+            persistence.findCashflowSettlementStatuses(actor.tenantId(), projectId, yearMonth)
+        );
+    }
+
+    public CashflowSettlementStatusesResponse transitionCashflowSettlementStatus(
+        TrustedActorContext actor,
+        String projectId,
+        TransitionCashflowSettlementStatusRequest request
+    ) {
+        if ("APPROVE".equals(request.action())) {
+            requireCashflowMonthClosePermission(CLOSE_CASHFLOW_MONTH_COMMAND, actor, projectId);
+        } else {
+            requireCashflowWritePermissionWithoutLeaseRuntime(
+                COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId
+            );
+        }
+        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = new ArrayList<>(
+            persistence.findCashflowSettlementStatuses(actor.tenantId(), projectId, request.yearMonth())
+        );
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord updated = persistence.transitionCashflowSettlementStatus(
+            actor, projectId, request.yearMonth(), request.period(), request.action()
+        );
+        records.replaceAll(record -> record.period().equals(updated.period()) ? updated : record);
+        return settlementStatusesResponse(
+            projectId,
+            request.yearMonth(),
+            records
+        );
+    }
+
+    private CashflowSettlementStatusesResponse settlementStatusesResponse(
+        String projectId,
+        String yearMonth,
+        List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records
+    ) {
+        return new CashflowSettlementStatusesResponse(
+            projectId,
+            yearMonth,
+            records.stream().map(record -> new CashflowSettlementStatusesResponse.Item(
+                record.period(), record.status(), record.submittedAt(), record.submittedBy(),
+                record.approvedAt(), record.approvedBy(), record.revision()
+            )).toList()
+        );
     }
 
     public CashflowProjectionActualSummaryBatchResponse readCashflowProjectionActualSummaries(

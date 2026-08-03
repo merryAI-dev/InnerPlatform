@@ -343,6 +343,17 @@ public interface WeeklyExpensePersistence {
     record CashflowWeekScope(String yearMonth, int weekNo) {
     }
 
+    record CashflowSettlementStatusRecord(
+        String period,
+        String status,
+        String submittedAt,
+        String submittedBy,
+        String approvedAt,
+        String approvedBy,
+        long revision
+    ) {
+    }
+
     default <T> T runCommandTransaction(Callable<T> action) {
         try {
             return action.call();
@@ -386,6 +397,32 @@ public interface WeeklyExpensePersistence {
             503,
             "cashflow_month_close_permission_backend_unavailable",
             "Cashflow month-close permission checks require the Firestore transaction backend."
+        );
+    }
+
+    default List<CashflowSettlementStatusRecord> findCashflowSettlementStatuses(
+        String tenantId,
+        String projectId,
+        String yearMonth
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_status_backend_unavailable",
+            "Cashflow settlement status reads require the Firestore transaction backend."
+        );
+    }
+
+    default CashflowSettlementStatusRecord transitionCashflowSettlementStatus(
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth,
+        String period,
+        String action
+    ) {
+        throw new WeeklyExpenseEditLeaseException(
+            503,
+            "cashflow_settlement_status_backend_unavailable",
+            "Cashflow settlement status updates require the Firestore transaction backend."
         );
     }
 

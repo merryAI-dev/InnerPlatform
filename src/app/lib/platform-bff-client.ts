@@ -1335,6 +1335,25 @@ export interface CashflowWeeklyCompliancePage {
   missedCount: number;
 }
 
+export type CashflowSettlementPeriod = 'MONTH' | `WEEK_${1 | 2 | 3 | 4 | 5}`;
+export type CashflowSettlementStatus = 'WAITING_FOR_UPDATE' | 'PENDING_APPROVAL' | 'COMPLETED';
+
+export interface CashflowSettlementStatusItem {
+  period: CashflowSettlementPeriod;
+  status: CashflowSettlementStatus;
+  submittedAt: string;
+  submittedBy: string;
+  approvedAt: string;
+  approvedBy: string;
+  revision: number;
+}
+
+export interface CashflowSettlementStatusesResult {
+  projectId: string;
+  yearMonth: string;
+  items: CashflowSettlementStatusItem[];
+}
+
 export interface CashflowProjectionActualSummary {
   projectId: string;
   fromMonth: string;
@@ -2866,6 +2885,42 @@ export async function fetchCashflowWeeklyComplianceViaBff(params: {
   const response = await resolveClient(params.client).get<CashflowWeeklyCompliancePage>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/weekly-update-compliance?${query.toString()}`,
     { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
+  );
+  return response.data;
+}
+
+export async function fetchCashflowSettlementStatusesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSettlementStatusesResult> {
+  const response = await resolveClient(params.client).get<CashflowSettlementStatusesResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(params.yearMonth)}`,
+    { tenantId: params.tenantId, actor: toRequestActor(params.actor), retries: 0, timeoutMs: 12000 },
+  );
+  return response.data;
+}
+
+export async function transitionCashflowSettlementStatusViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  yearMonth: string;
+  period: CashflowSettlementPeriod;
+  action: 'SUBMIT' | 'APPROVE';
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSettlementStatusesResult> {
+  const response = await resolveClient(params.client).post<CashflowSettlementStatusesResult>(
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses/transition`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { yearMonth: params.yearMonth, period: params.period, action: params.action },
+      retries: 0,
+      timeoutMs: 12000,
+    },
   );
   return response.data;
 }
