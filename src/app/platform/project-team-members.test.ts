@@ -4,11 +4,12 @@ import {
   hasInvalidProjectTeamMemberLaborPeriod,
   hasIncompleteProjectTeamMembers,
   hasInvalidProjectSettlementSupportMember,
-  hasProjectFinalResponsibleMember,
   hasProjectOperatingManager,
   normalizeProjectTeamMemberDraftRows,
   normalizeProjectTeamMembers,
   parseProjectTeamMemberIdentityInput,
+  PROJECT_TEAM_MEMBER_ROLES,
+  projectTeamMembersForWrite,
 } from './project-team-members';
 
 describe('project-team-members', () => {
@@ -82,6 +83,12 @@ describe('project-team-members', () => {
     ])).toBe(false);
   });
 
+  it('preserves the retired final-responsible role on legacy rows', () => {
+    expect(hasIncompleteProjectTeamMembers([
+      { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 50, isDocumentOnly: false },
+    ])).toBe(false);
+  });
+
   it('rejects a legacy free-text role or missing document-only choice in v2 completeness checks', () => {
     expect(hasIncompleteProjectTeamMembers([
       { memberName: '김다은', memberNickname: '', role: 'PM', participationRate: 50 },
@@ -143,14 +150,15 @@ describe('project-team-members', () => {
     ])).toBe(false);
   });
 
-  it('requires an actual project final responsible member for registration v2', () => {
-    expect(hasProjectFinalResponsibleMember([])).toBe(false);
-    expect(hasProjectFinalResponsibleMember([
-      { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: true },
-    ])).toBe(false);
-    expect(hasProjectFinalResponsibleMember([
-      { memberName: '김다은', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false },
-    ])).toBe(true);
+  it('keeps the retired final-responsible role readable without offering it for new selection', () => {
+    expect(PROJECT_TEAM_MEMBER_ROLES).not.toContain('사업 최종 책임자');
+    expect(projectTeamMembersForWrite([
+      { memberName: '기존 책임자', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false },
+      { memberName: '운영자', memberNickname: '', role: '운영매니저', participationRate: 100, isDocumentOnly: false },
+    ])).toEqual([
+      { memberName: '기존 책임자', memberNickname: '', role: '사업 최종 책임자', participationRate: 0, isDocumentOnly: false },
+      { memberName: '운영자', memberNickname: '', role: '운영매니저', participationRate: 100, isDocumentOnly: false },
+    ]);
   });
 
   it('allows only 도담 or 써니 as settlement support', () => {

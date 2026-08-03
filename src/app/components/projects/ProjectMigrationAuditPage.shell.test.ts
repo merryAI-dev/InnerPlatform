@@ -88,7 +88,8 @@ describe('ProjectMigrationAuditPage review flow', () => {
     expect(documentSource).toContain('data-testid="migration-review-document-slots"');
     expect(documentSource).toContain("number: 1");
     expect(documentSource).toContain("number: 7");
-    expect(documentSource).toContain("kinds: ['proposal', 'rfp_request_evidence']");
+    expect(documentSource).toContain("number: 4, label: '제안서 Word 원본 (선택)'");
+    expect(documentSource).toContain("number: 7, label: 'RFP/요청 메일 증빙 (선택)'");
     expect(documentSource).toContain('customerBusinessRegistrationDocument');
     expect(documentSource).toContain('proposalWordOriginalDocument');
     expect(documentSource).toContain('proposalPptOriginalDocument');
@@ -144,14 +145,15 @@ describe('ProjectMigrationAuditPage review flow', () => {
 
     expect(slots).toHaveLength(7);
     expect(slots[0]?.entries[0]?.document.name).toBe('submitted-contract.pdf');
-    expect(slots[3]?.entries.map((entry) => entry.kind)).toEqual(['rfp_request_evidence']);
-    expect(slots[4]?.entries).toEqual([]);
-    expect(slots[4]?.note).toBe('고객사가 Word 원본을 제공하지 않음');
-    expect(slots[5]?.note).toBe('제안서가 PDF로만 작성됨');
-    expect(slots[6]?.note).toBe('별도 발표자료 없음');
+    expect(slots[3]?.entries).toEqual([]);
+    expect(slots[3]?.note).toBe('고객사가 Word 원본을 제공하지 않음');
+    expect(slots[4]?.note).toBe('제안서가 PDF로만 작성됨');
+    expect(slots[5]?.note).toBe('별도 발표자료 없음');
+    expect(slots[6]?.entries.map((entry) => entry.kind)).toEqual(['rfp_request_evidence']);
+    expect(slots.slice(3).every((slot) => slot.optional)).toBe(true);
   });
 
-  it('surfaces contradictory slot-four data and does not revive cleared or inaccessible metadata', () => {
+  it('does not revive cleared or inaccessible metadata', () => {
     const record = {
       project: {
         registrationOptionalDocumentNotes: {
@@ -164,6 +166,7 @@ describe('ProjectMigrationAuditPage review flow', () => {
         requestKind: 'REGISTRATION',
         payload: {
           customerBusinessRegistrationDocument: { name: '경로가 없는 파일.pdf' },
+          quoteSubmissionDeferred: true,
           proposalDocument: { name: 'proposal.pdf', path: 'requests/proposal.pdf' },
           rfpRequestEvidenceDocument: { name: 'request.eml', path: 'requests/request.eml' },
           registrationOptionalDocumentNotes: null,
@@ -174,8 +177,27 @@ describe('ProjectMigrationAuditPage review flow', () => {
     const slots = buildMigrationReviewDocumentSlots(record);
 
     expect(slots[1]?.entries).toEqual([]);
-    expect(slots[3]?.entries.map((entry) => entry.kind)).toEqual(['proposal', 'rfp_request_evidence']);
-    expect(slots[3]?.conflict).toBe(true);
-    expect(slots[4]?.note).toBe('');
+    expect(slots[2]?.note).toBe('이후 제출 예정');
+    expect(slots[3]?.entries).toEqual([]);
+    expect(slots[3]?.note).toBe('');
+    expect(slots[6]?.entries.map((entry) => entry.kind)).toEqual(['rfp_request_evidence']);
+  });
+
+  it('shows the submitted contract and finance facts without retired registration assumptions', () => {
+    expect(documentSource).toContain('연도별 계약/재무');
+    expect(documentSource).toContain('총실비(원가)');
+    expect(documentSource).toContain('이자 반납 여부');
+    expect(documentSource).toContain('최종 입금 재무주차');
+    expect(documentSource).toContain('row.finalPaymentExpectedWeek');
+    expect(documentSource).toContain("row.isSettled ? '완료' : '미완료'");
+    expect(documentSource).toContain('row.advanceInterimBelow70Reason');
+    expect(documentSource).toContain('label="등록 메모"');
+    expect(documentSource).toContain('산출내역서(견적서)');
+    expect(documentSource).toContain('이후 제출 예정');
+    expect(documentSource).toContain('선택 · 미제출');
+    expect(documentSource).not.toContain('최종 입금 메모');
+    expect(documentSource).not.toContain('등록 전 확인사항');
+    expect(documentSource).not.toContain('모두싸인');
+    expect(documentSource).not.toContain('label="비고"');
   });
 });

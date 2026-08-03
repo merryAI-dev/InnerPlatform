@@ -75,6 +75,7 @@ function makeRequest(overrides: Partial<ProjectRequest> = {}): ProjectRequest {
       contractAmount: 10000000,
       salesVatAmount: 0,
       totalRevenueAmount: 10000000,
+      totalActualCost: 0,
       supportAmount: 0,
       contractStart: '2026-01-01',
       contractEnd: '2026-12-31',

@@ -100,6 +100,7 @@ const request: ProjectRequest = {
     contractAmount: 120000000,
     salesVatAmount: 10000000,
     totalRevenueAmount: 120000000,
+    totalActualCost: 0,
     supportAmount: 0,
     contractStart: '2026-01-01',
     contractEnd: '2026-12-31',
@@ -136,7 +137,7 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.contract.contractType).toBe('계약서(날인)');
     expect(dossier.contract.periodLabel).toContain('2026-01-01');
     expect(dossier.contract.basisLabel).toBe('공급가액 기준');
-    expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
+    expect(dossier.contract.accountTypeLabel).toBe('일반사업(MYSC법인통장)');
     expect(dossier.contract.fundInputModeLabel).toBe('직접 입력');
 
     expect(dossier.budget.contractAmountLabel).toContain('120,000,000');
@@ -168,7 +169,7 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.identity.cic).toBe('CIC1');
     expect(dossier.identity.pmName).toBe('변민욱');
     expect(dossier.contract.contractType).toBe('전자계약 시스템');
-    expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
+    expect(dossier.contract.accountTypeLabel).toBe('일반사업(MYSC법인통장)');
     expect(dossier.people.members[0]).toContain('변민욱');
     expect(dossier.audit.requestedByName).toBe('-');
     expect(dossier.audit.reviewedByName).toBe('-');
@@ -188,7 +189,7 @@ describe('buildMigrationReviewDossier', () => {
     expect(dossier.contract.projectTypeLabel).toBe('D-1 개발협력사업 - AVPN 포함');
     expect(dossier.contract.settlementTypeLabel).toBe('정산 없음');
     expect(dossier.contract.basisLabel).toBe('공급가액 기준');
-    expect(dossier.contract.accountTypeLabel).toBe('일반 사업');
+    expect(dossier.contract.accountTypeLabel).toBe('일반사업(MYSC법인통장)');
     expect(dossier.contract.fundInputModeLabel).toBe('통장내역 업로드');
   });
 

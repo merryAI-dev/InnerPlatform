@@ -8,6 +8,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { INTEREST_REFUND_POLICY_LABELS } from '../../../data/types';
 import type { MigrationAuditConsoleRecord } from '../../../platform/project-migration-console';
 import {
   describeMigrationAuditActionState,
@@ -58,6 +59,19 @@ function statusStripClass(tone: ReviewTone) {
 
 function valueClass(value: string) {
   return value === '-' ? 'text-slate-400' : 'text-slate-950';
+}
+
+function formatMoney(value?: number) {
+  return Number.isFinite(value) ? `${Number(value).toLocaleString('ko-KR')}원` : '-';
+}
+
+function formatFinancialYears(years: NonNullable<ReturnType<typeof resolveProjectRequestPayload>>['financialYears'] = []) {
+  return (years || []).map((row) => {
+    const payment = row.paymentPlan
+      ? ` · 입금 선금 ${formatMoney(row.paymentPlan.contract)} / 중도금 ${formatMoney(row.paymentPlan.interim)} / 잔금 ${formatMoney(row.paymentPlan.final)}`
+      : '';
+    return `${row.year}년 · 계약 ${formatMoney(row.contractAmount)} · 총수익 ${formatMoney(row.totalRevenueAmount)} · 총실비(원가) ${formatMoney(row.totalActualCost)}${payment} · 최종 입금 재무주차 ${row.finalPaymentExpectedWeek || '-'} · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''}`;
+  }).join('\n') || '-';
 }
 
 function ReviewSection({
@@ -201,6 +215,13 @@ export function MigrationAuditDetailPanel({
   });
   const useRequestPayloadAsCurrent = isChangeRequest && record.request?.status === 'PENDING';
   const requestPayload = resolveProjectRequestPayload(record.request);
+  const totalActualCost = requestPayload?.totalActualCost ?? record.project.totalActualCost;
+  const financialYears = requestPayload?.financialYears ?? record.project.financialYears;
+  const interestRefundPolicy = requestPayload?.interestRefundPolicy ?? record.project.interestRefundPolicy;
+  const finalPaymentExpectedWeek = requestPayload?.finalPaymentExpectedWeek ?? record.project.finalPaymentExpectedWeek;
+  const registrationNote = requestPayload?.note ?? record.project.note;
+  const quoteDocument = requestPayload?.quoteDocument !== undefined ? requestPayload.quoteDocument : record.project.quoteDocument;
+  const quoteSubmissionDeferred = requestPayload?.quoteSubmissionDeferred ?? record.project.quoteSubmissionDeferred;
   const contractDocument = useRequestPayloadAsCurrent
     ? (requestPayload?.contractDocument || record.project.contractDocument || null)
     : (record.project.contractDocument || requestPayload?.contractDocument || null);
@@ -285,8 +306,8 @@ export function MigrationAuditDetailPanel({
 
           <ReviewSection
             eyebrow="계약/재무"
-            title="계약 구조와 정산 기준"
-            description="프로젝트 유형, 계약 기간, 정산/통장 기준을 한 묶음으로 확인합니다."
+            title="계약 구조와 재무 계획"
+            description="계약·정산 기준과 연도별 금액·입금 계획을 한 번에 확인합니다."
           >
             <ReviewFactGrid
               items={[
@@ -297,24 +318,17 @@ export function MigrationAuditDetailPanel({
                 { label: '정산 기준', value: dossier.contract.basisLabel },
                 { label: '통장 유형', value: dossier.contract.accountTypeLabel },
                 { label: '자금 입력 방식', value: dossier.contract.fundInputModeLabel },
-              ]}
-            />
-          </ReviewSection>
-
-          <ReviewSection
-            eyebrow="계약/재무"
-            title="금액과 입금 계획"
-            description="계약금, 수익, 지원금, 입금 분할이 서로 어긋나지 않는지 봅니다."
-          >
-            <ReviewFactGrid
-              items={[
                 { label: '계약금액', value: dossier.budget.contractAmountLabel },
                 { label: '총매출부가세', value: dossier.budget.salesVatAmountLabel },
                 { label: '총수익', value: dossier.budget.totalRevenueAmountLabel },
+                { label: '총실비(원가)', value: formatMoney(totalActualCost) },
                 { label: '총지원금', value: dossier.budget.supportAmountLabel },
+                { label: '이자 반납 여부', value: interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[interestRefundPolicy] : '-' },
+                { label: '최종 입금 재무주차', value: finalPaymentExpectedWeek || '-' },
+                { label: '연도별 계약/재무', value: formatFinancialYears(financialYears), wide: true },
                 { label: '입금 계획', value: dossier.budget.paymentPlanDesc, wide: true },
                 { label: '입금 분할', value: dossier.budget.paymentPlanSplitLabel, wide: true },
-                { label: '최종 입금 메모', value: dossier.budget.finalPaymentNote, wide: true },
+                { label: '산출내역서(견적서)', value: quoteDocument?.name || (quoteSubmissionDeferred ? '이후 제출 예정' : '-'), wide: true },
               ]}
             />
           </ReviewSection>
@@ -358,7 +372,7 @@ export function MigrationAuditDetailPanel({
                 { label: '프로젝트 목적', value: dossier.notes.projectPurpose, wide: true },
                 { label: '참여 조건', value: dossier.notes.participantCondition, wide: true },
                 { label: '상세 설명', value: dossier.notes.description, wide: true },
-                { label: '비고', value: dossier.notes.note, wide: true },
+                { label: '등록 메모', value: registrationNote || '-', wide: true },
               ]}
             />
           </ReviewSection>

@@ -726,7 +726,7 @@ export function createProjectRegistrationDraftService({
         });
         const revision = assertRevision(draft, expectedDraftRevision) + 1;
         if (payload.registrationRequirementsVersion === 2) {
-          const missingDocumentKind = missingProjectRegistrationRequiredDocumentKind(attachmentRefs(draft));
+          const missingDocumentKind = missingProjectRegistrationRequiredDocumentKind(attachmentRefs(draft), payload);
           if (missingDocumentKind) {
             throw createHttpError(
               422,

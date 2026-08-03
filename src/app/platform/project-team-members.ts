@@ -5,8 +5,9 @@ export const PROJECT_TEAM_MEMBER_ROLES = [
   '실무책임자',
   '운영매니저',
   '정산지원',
-  '사업 최종 책임자',
 ] as const;
+
+export const RETIRED_PROJECT_TEAM_MEMBER_ROLES = ['사업 최종 책임자'] as const;
 
 function toRate(value: unknown) {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -86,7 +87,10 @@ export function normalizeProjectTeamMemberDraftRows(
 export function isProjectTeamMemberComplete(member: ProjectTeamMemberAssignment) {
   return Boolean(
     member.memberName
-    && PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof PROJECT_TEAM_MEMBER_ROLES[number])
+    && (
+      PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof PROJECT_TEAM_MEMBER_ROLES[number])
+      || RETIRED_PROJECT_TEAM_MEMBER_ROLES.includes(member.role as typeof RETIRED_PROJECT_TEAM_MEMBER_ROLES[number])
+    )
     && typeof member.isDocumentOnly === 'boolean',
   );
 }
@@ -105,12 +109,10 @@ export function hasProjectOperatingManager(
   ));
 }
 
-export function hasProjectFinalResponsibleMember(
+export function projectTeamMembersForWrite(
   members: ProjectTeamMemberAssignment[] | null | undefined,
 ) {
-  return normalizeProjectTeamMembers(members).some((member) => (
-    member.role === '사업 최종 책임자' && member.isDocumentOnly === false
-  ));
+  return normalizeProjectTeamMembers(members);
 }
 
 export function isProjectSettlementSupportMember(

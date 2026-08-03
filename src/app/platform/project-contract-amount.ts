@@ -4,6 +4,7 @@ export const EMPTY_PROJECT_FINANCIAL_INPUT_FLAGS: Required<ProjectFinancialInput
   contractAmount: false,
   salesVatAmount: false,
   totalRevenueAmount: false,
+  totalActualCost: false,
   supportAmount: false,
 };
 
@@ -30,6 +31,7 @@ export function normalizeProjectFinancialInputFlagsForAmounts(
     contractAmount?: number | null;
     salesVatAmount?: number | null;
     totalRevenueAmount?: number | null;
+    totalActualCost?: number | null;
     supportAmount?: number | null;
   },
 ): Required<ProjectFinancialInputFlags> {
@@ -38,6 +40,7 @@ export function normalizeProjectFinancialInputFlagsForAmounts(
     contractAmount: normalized.contractAmount || Number(amounts.contractAmount || 0) > 0,
     salesVatAmount: normalized.salesVatAmount || Number(amounts.salesVatAmount || 0) > 0,
     totalRevenueAmount: normalized.totalRevenueAmount || Number(amounts.totalRevenueAmount || 0) > 0,
+    totalActualCost: normalized.totalActualCost || Number(amounts.totalActualCost || 0) > 0,
     supportAmount: normalized.supportAmount || Number(amounts.supportAmount || 0) > 0,
   };
 }
