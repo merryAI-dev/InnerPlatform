@@ -91,13 +91,16 @@ describe('platform-bff-client', () => {
     expect(result).toEqual(data);
   });
 
-  it('posts project IDs to the canonical JVM projection-actual summary adapter unchanged', async () => {
+  it('posts project IDs and the selected month to the canonical JVM projection-actual summary adapter unchanged', async () => {
     const data = {
       version: '1',
       items: Array.from({ length: 9 }, (_, index) => ({
         projectId: `p00${index + 1}`, fromMonth: '2023-01',
         comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+        projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index,
+        projectionActualDifferenceAmount: 10_000_000,
         settlementDifferenceAmount: 18_371_453 + index, settlementMatches: false,
+        periods: [{ period: 'MONTH' as const, projectionAmount: 30_000_000 + index, actualAmount: 20_000_000 + index, projectionActualDifferenceAmount: 10_000_000 }],
       })),
       errors: [{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' as const }],
     };
@@ -106,12 +109,12 @@ describe('platform-bff-client', () => {
     });
 
     const result = await fetchCashflowProjectionActualSummariesViaBff({
-      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`), client,
+      tenantId: 'mysc', actor: { uid: 'u001', role: 'pm' }, projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`), yearMonth: '2026-11', client,
     });
 
     expect(result).toBe(data);
     expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/projection-actual-summary/batch', expect.objectContaining({
-      body: { projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`) }, retries: 0, timeoutMs: 12000,
+      body: { projectIds: Array.from({ length: 10 }, (_, index) => `p0${String(index + 1).padStart(2, '0')}`), yearMonth: '2026-11' }, retries: 0, timeoutMs: 12000,
     }));
     expect(result.items).toHaveLength(9);
     expect(result.errors).toEqual([{ projectId: 'p010', code: 'SUMMARY_UNAVAILABLE' }]);

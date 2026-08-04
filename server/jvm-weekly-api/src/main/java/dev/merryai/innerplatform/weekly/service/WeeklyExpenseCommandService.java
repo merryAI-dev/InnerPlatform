@@ -224,9 +224,7 @@ public class WeeklyExpenseCommandService {
         if ("APPROVE".equals(request.action())) {
             requireCashflowMonthClosePermission(CLOSE_CASHFLOW_MONTH_COMMAND, actor, projectId);
         } else {
-            requireCashflowWritePermissionWithoutLeaseRuntime(
-                COMPLETE_CASHFLOW_WEEKLY_UPDATE_COMMAND, actor, projectId
-            );
+            throw new WeeklyExpenseForbiddenException("A settlement can only be submitted by its completion workflow.");
         }
         List<WeeklyExpensePersistence.CashflowSettlementStatusRecord> records = new ArrayList<>(
             persistence.findCashflowSettlementStatuses(actor.tenantId(), projectId, request.yearMonth())
@@ -275,14 +273,16 @@ public class WeeklyExpenseCommandService {
         }
         CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
             CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        String selectedYearMonth = request.yearMonth() == null ? boundary.yearMonth() : request.yearMonth();
+        String throughMonth = selectedYearMonth.compareTo(boundary.yearMonth()) > 0 ? selectedYearMonth : boundary.yearMonth();
         List<CashflowProjectionActualSummaryBatchResponse.Item> items = new ArrayList<>();
         List<CashflowProjectionActualSummaryBatchResponse.ErrorItem> errors = new ArrayList<>();
         for (String projectId : projectIds) {
             try {
                 WeeklyExpensePersistence.CashflowLedgerSource source = persistence.findCashflowLedgerSource(
-                    actor.tenantId(), projectId, CashflowProjectionActualSummaryCalculator.FROM_MONTH, boundary.yearMonth()
+                    actor.tenantId(), projectId, CashflowProjectionActualSummaryCalculator.FROM_MONTH, throughMonth
                 );
-                items.add(toProjectionActualSummary(projectId, source, boundary));
+                items.add(toProjectionActualSummary(projectId, source, boundary, selectedYearMonth));
             } catch (WeeklyExpenseForbiddenException denied) {
                 throw denied;
             } catch (RuntimeException unavailable) {
@@ -300,26 +300,29 @@ public class WeeklyExpenseCommandService {
         WeeklyExpensePersistence.CashflowLedgerSource source
     ) {
         authorizationService.requireProjectAllowed(CASHFLOW_READ_COMMAND, actor, projectId);
-        return toProjectionActualSummary(
-            projectId,
-            source,
-            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC())
-        );
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary =
+            CashflowProjectionActualSummaryCalculator.currentFinanceWeek(Clock.systemUTC());
+        return toProjectionActualSummary(projectId, source, boundary, boundary.yearMonth());
     }
 
     private CashflowProjectionActualSummaryBatchResponse.Item toProjectionActualSummary(
         String projectId,
         WeeklyExpensePersistence.CashflowLedgerSource source,
-        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary
+        CashflowProjectionActualSummaryCalculator.FinanceWeek boundary,
+        String selectedYearMonth
     ) {
         CashflowProjectionActualSummaryCalculator.Summary summary =
-            CashflowProjectionActualSummaryCalculator.calculate(projectId, source.projection(), source.actual(), boundary);
+            CashflowProjectionActualSummaryCalculator.calculate(projectId, source.projection(), source.actual(), boundary, selectedYearMonth);
         return new CashflowProjectionActualSummaryBatchResponse.Item(
             summary.projectId(), summary.fromMonth(),
             new CashflowProjectionActualSummaryBatchResponse.ComparisonAsOfWeek(
                 summary.comparisonAsOfWeek().yearMonth(), summary.comparisonAsOfWeek().weekNo()
             ),
-            summary.settlementDifferenceAmount(), summary.settlementMatches()
+            summary.projectionAmount(), summary.actualAmount(), summary.projectionActualDifferenceAmount(),
+            summary.settlementDifferenceAmount(), summary.settlementMatches(),
+            summary.periods().stream().map(period -> new CashflowProjectionActualSummaryBatchResponse.PeriodSummary(
+                period.period(), period.projectionAmount(), period.actualAmount(), period.projectionActualDifferenceAmount()
+            )).toList()
         );
     }
 

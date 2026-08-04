@@ -2653,6 +2653,9 @@ export function mountJvmWeeklyApiRoutes(app, {
       || !/^(SUBMIT|APPROVE)$/.test(action)) {
       throw createHttpError(400, '결산 대상과 처리 상태를 정확히 입력해 주세요.', 'cashflow_settlement_status_transition_invalid');
     }
+    if (action === 'SUBMIT') {
+      throw createHttpError(403, '실무자 포털에서 정산을 완료한 뒤에만 제출할 수 있습니다.', 'cashflow_settlement_submit_forbidden');
+    }
     const result = await proxyMutation(
       req,
       `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses/transition`,
@@ -2677,6 +2680,7 @@ export function mountJvmWeeklyApiRoutes(app, {
   app.post('/api/v1/cashflow/projection-actual-summary/batch', asyncHandler(async (req, res) => {
     assertWeeklyWorkspaceOrRoleAllowed(req, ROUTE_ROLES.readCore, 'read cashflow projection-actual summary', authMode, workspaceEmailDomain);
     const projectIds = req.body?.projectIds;
+    const yearMonth = readOptionalText(req.body?.yearMonth);
     if (!Array.isArray(projectIds)
       || projectIds.length < 1
       || projectIds.length > 10
@@ -2685,7 +2689,8 @@ export function mountJvmWeeklyApiRoutes(app, {
         || projectId.length > 120
         || projectId.includes('/')
         || projectId.trim() !== projectId)
-      || new Set(projectIds).size !== projectIds.length) {
+      || new Set(projectIds).size !== projectIds.length
+      || (yearMonth && !/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth))) {
       throw createHttpError(400, '현금흐름 요약 조회 범위가 올바르지 않습니다.', 'cashflow_projection_actual_summary_request_invalid');
     }
     const result = await proxyJavaWeeklyRequest({
@@ -2693,7 +2698,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       method: 'POST',
       path: '/api/v1/cashflow/projection-actual-summary/batch',
       command: 'read_cashflow_projection_actual_summaries',
-      body: { projectIds },
+      body: { projectIds, ...(yearMonth ? { yearMonth } : {}) },
       mutation: false,
     });
     res.status(200).json(result);
@@ -3073,11 +3078,13 @@ export function mountJvmWeeklyApiRoutes(app, {
       };
     };
     return db.runTransaction(async (transaction) => {
-      const [projectSnapshot, approverSnapshot, requesterSnapshot, requestSnapshot] = await Promise.all([
+      const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${yearMonth}`);
+      const [projectSnapshot, approverSnapshot, requesterSnapshot, requestSnapshot, settlementStatusSnapshot] = await Promise.all([
         transaction.get(db.doc(`orgs/${req.context.tenantId}/projects/${prepared.rawProjectId}`)),
         transaction.get(db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`)),
         transaction.get(db.doc(`orgs/${req.context.tenantId}/members/${readOptionalText(req.context.actorId)}`)),
         transaction.get(requestRef),
+        transaction.get(settlementStatusRef),
       ]);
       const project = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
       const approver = approverSnapshot.exists ? approverSnapshot.data() || {} : {};
@@ -3209,6 +3216,30 @@ export function mountJvmWeeklyApiRoutes(app, {
         if (!snapshot.exists) transaction.set(shardRefs[index], shards[index]);
       });
       transaction.set(requestRef, storedRecord);
+      const settlementStatus = settlementStatusSnapshot.exists ? settlementStatusSnapshot.data() || {} : {};
+      const settlementPeriods = settlementStatus.periods && typeof settlementStatus.periods === 'object'
+        ? settlementStatus.periods : {};
+      const monthStatus = settlementPeriods.MONTH && typeof settlementPeriods.MONTH === 'object'
+        ? settlementPeriods.MONTH : {};
+      if (!readOptionalText(monthStatus.status) || readOptionalText(monthStatus.status) === 'WAITING_FOR_UPDATE') {
+        transaction.set(settlementStatusRef, {
+          tenantId: req.context.tenantId,
+          projectId: prepared.rawProjectId,
+          yearMonth,
+          periods: {
+            ...settlementPeriods,
+            MONTH: {
+              status: 'PENDING_APPROVAL',
+              revision: Number.isSafeInteger(Number(monthStatus.revision)) ? Number(monthStatus.revision) + 1 : 1,
+              submittedAt: requestedAt,
+              submittedBy: readOptionalText(requester.name) || readOptionalText(req.context.actorId),
+              approvedAt: '',
+              approvedBy: '',
+            },
+          },
+          updatedAt: requestedAt,
+        }, { merge: true });
+      }
       transaction.set(
         db.doc(cashflowMonthCloseRequestAuditPath(
           req.context.tenantId, requestId, revision, auditAction.toLowerCase(),
@@ -3655,14 +3686,16 @@ export function mountJvmWeeklyApiRoutes(app, {
     const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${prepared.rawProjectId}`);
     const approverRef = db.doc(`orgs/${req.context.tenantId}/members/${approverUid}`);
     const requesterRef = db.doc(`orgs/${req.context.tenantId}/members/${readOptionalText(req.context.actorId)}`);
+    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${prepared.rawProjectId}-${yearMonth}`);
     const requestedAt = now().toISOString();
     let storedRecord;
     await db.runTransaction(async (transaction) => {
-      const [projectSnapshot, approverSnapshot, requesterSnapshot, snapshot] = await Promise.all([
+      const [projectSnapshot, approverSnapshot, requesterSnapshot, snapshot, settlementStatusSnapshot] = await Promise.all([
         transaction.get(projectRef),
         transaction.get(approverRef),
         transaction.get(requesterRef),
         transaction.get(requestRef),
+        transaction.get(settlementStatusRef),
       ]);
       const currentProject = projectSnapshot.exists ? projectSnapshot.data() || {} : {};
       const currentApprover = approverSnapshot.exists ? approverSnapshot.data() || {} : {};
@@ -3683,6 +3716,30 @@ export function mountJvmWeeklyApiRoutes(app, {
       ) {
         throw createHttpError(403, '이 프로젝트의 월 결산을 요청할 권한이 없습니다.', 'cashflow_month_close_project_forbidden');
       }
+      const settlementStatus = settlementStatusSnapshot.exists ? settlementStatusSnapshot.data() || {} : {};
+      const settlementPeriods = objectValue(settlementStatus.periods) || {};
+      const monthStatus = objectValue(settlementPeriods.MONTH) || {};
+      const holdMonthForApproval = () => {
+        const status = readOptionalText(monthStatus.status);
+        if (status && status !== 'WAITING_FOR_UPDATE') return;
+        transaction.set(settlementStatusRef, {
+          tenantId: req.context.tenantId,
+          projectId: prepared.rawProjectId,
+          yearMonth,
+          periods: {
+            ...settlementPeriods,
+            MONTH: {
+              status: 'PENDING_APPROVAL',
+              revision: Number.isSafeInteger(Number(monthStatus.revision)) ? Number(monthStatus.revision) + 1 : 1,
+              submittedAt: requestedAt,
+              submittedBy: readOptionalText(currentRequester.name) || readOptionalText(req.context.actorId),
+              approvedAt: '',
+              approvedBy: '',
+            },
+          },
+          updatedAt: requestedAt,
+        }, { merge: true });
+      };
       if (snapshot.exists) {
         const existing = snapshot.data() || {};
         if (
@@ -3715,6 +3772,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           };
           assertCashflowMonthCloseRequestSize(storedRecord);
           transaction.set(requestRef, storedRecord);
+          holdMonthForApproval();
           transaction.set(
             db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, revision, 'resubmitted')),
             {
@@ -3752,6 +3810,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       };
       assertCashflowMonthCloseRequestSize(storedRecord);
       transaction.set(requestRef, storedRecord);
+      holdMonthForApproval();
       transaction.set(
         db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, 0, 'requested')),
         {
@@ -3815,7 +3874,29 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     const projectRef = db.doc(`orgs/${req.context.tenantId}/projects/${projectId}`);
     const reviewerRef = db.doc(`orgs/${req.context.tenantId}/members/${req.context.actorId}`);
+    const settlementStatusRef = db.doc(`orgs/${req.context.tenantId}/cashflow_settlement_statuses/${projectId}-${initialRecord.yearMonth}`);
     const reviewedAt = now().toISOString();
+    const completeMonthSettlement = (transaction, snapshot) => {
+      const status = snapshot.exists ? snapshot.data() || {} : {};
+      const periods = objectValue(status.periods) || {};
+      const month = objectValue(periods.MONTH) || {};
+      transaction.set(settlementStatusRef, {
+        tenantId: req.context.tenantId,
+        projectId,
+        yearMonth: initialRecord.yearMonth,
+        periods: {
+          ...periods,
+          MONTH: {
+            ...month,
+            status: 'COMPLETED',
+            revision: Number.isSafeInteger(Number(month.revision)) ? Number(month.revision) + 1 : 1,
+            approvedAt: reviewedAt,
+            approvedBy: req.context.actorId,
+          },
+        },
+        updatedAt: reviewedAt,
+      }, { merge: true });
+    };
     if (initialRecord.contractVersion === CASHFLOW_CUMULATIVE_CLOSE_CONTRACT) {
       const expectedManifestHash = readOptionalText(req.body?.expectedManifestHash);
       if (expectedManifestHash !== initialRecord.manifestHash) {
@@ -3965,7 +4046,10 @@ export function mountJvmWeeklyApiRoutes(app, {
       }
       let approved;
       await db.runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(requestRef);
+        const [snapshot, settlementSnapshot] = await Promise.all([
+          transaction.get(requestRef),
+          transaction.get(settlementStatusRef),
+        ]);
         const current = snapshot.exists ? snapshot.data() || {} : null;
         if (!current || !['APPROVING', 'UNCERTAIN'].includes(current.status)
           || current.operationId !== operationId || current.reviewedByUid !== req.context.actorId
@@ -3980,6 +4064,7 @@ export function mountJvmWeeklyApiRoutes(app, {
           monthCloseResult: monthClose,
         };
         transaction.set(requestRef, approved);
+        completeMonthSettlement(transaction, settlementSnapshot);
         transaction.set(
           db.doc(cashflowMonthCloseRequestAuditPath(
             req.context.tenantId, requestId, expectedRevision, 'approved',
@@ -4145,7 +4230,10 @@ export function mountJvmWeeklyApiRoutes(app, {
     }
     let approved;
     await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(requestRef);
+      const [snapshot, settlementSnapshot] = await Promise.all([
+        transaction.get(requestRef),
+        transaction.get(settlementStatusRef),
+      ]);
       const current = snapshot.exists ? snapshot.data() || {} : null;
       if (
         !current
@@ -4160,6 +4248,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       delete approved.publicationFingerprint;
       delete approved.reconciliationEvidence;
       transaction.set(requestRef, approved);
+      completeMonthSettlement(transaction, settlementSnapshot);
       transaction.set(
         db.doc(cashflowMonthCloseRequestAuditPath(req.context.tenantId, requestId, reviewRevision, 'approved')),
         {

@@ -2,16 +2,22 @@ package dev.merryai.innerplatform.weekly.api;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
 public record CashflowProjectionActualSummaryBatchRequest(
     @NotNull @Size(min = 1, max = MAX_PROJECT_COUNT)
-    List<@NotBlank @Size(max = MAX_PROJECT_ID_LENGTH) String> projectIds
+    List<@NotBlank @Size(max = MAX_PROJECT_ID_LENGTH) String> projectIds,
+    @Pattern(regexp = "20\\d{2}-(0[1-9]|1[0-2])") String yearMonth
 ) {
     public static final int MAX_PROJECT_COUNT = 10;
     public static final int MAX_PROJECT_ID_LENGTH = 120;
+
+    public CashflowProjectionActualSummaryBatchRequest(List<String> projectIds) {
+        this(projectIds, null);
+    }
 
     public List<String> requireUniqueProjectIds() {
         List<String> normalized = projectIds == null

@@ -22,7 +22,8 @@ public final class CashflowProjectionActualSummaryCalculator {
         List<WeeklyExpenseActualEntity> actual,
         Clock clock
     ) {
-        return calculate(projectId, projection, actual, currentFinanceWeek(clock));
+        FinanceWeek boundary = currentFinanceWeek(clock);
+        return calculate(projectId, projection, actual, boundary, boundary.yearMonth());
     }
 
     public static Summary calculate(
@@ -31,29 +32,86 @@ public final class CashflowProjectionActualSummaryCalculator {
         List<WeeklyExpenseActualEntity> actual,
         FinanceWeek boundary
     ) {
+        return calculate(projectId, projection, actual, boundary, boundary.yearMonth());
+    }
+
+    public static Summary calculate(
+        String projectId,
+        List<WeeklyExpenseProjectionEntity> projection,
+        List<WeeklyExpenseActualEntity> actual,
+        FinanceWeek boundary,
+        String selectedYearMonth
+    ) {
         Map<CellKey, BigDecimal> projectionAmounts = new LinkedHashMap<>();
         Map<CellKey, BigDecimal> actualAmounts = new LinkedHashMap<>();
+        Map<CellKey, BigDecimal> selectedProjectionAmounts = new LinkedHashMap<>();
+        Map<CellKey, BigDecimal> selectedActualAmounts = new LinkedHashMap<>();
         for (WeeklyExpenseProjectionEntity line : projection == null
             ? List.<WeeklyExpenseProjectionEntity>of() : projection) {
             requireProject(projectId, line.getProjectId());
             add(projectionAmounts, line.getYearMonth(), line.getWeekNo(), line.getCashflowLine(), line.getAmount(), boundary);
+            addSelected(selectedProjectionAmounts, line.getYearMonth(), line.getWeekNo(), line.getCashflowLine(), line.getAmount(), selectedYearMonth);
         }
         for (WeeklyExpenseActualEntity line : actual == null ? List.<WeeklyExpenseActualEntity>of() : actual) {
             requireProject(projectId, line.getProjectId());
             add(actualAmounts, line.getYearMonth(), line.getWeekNo(), line.getCashflowLine(), line.getAmount(), boundary);
+            addSelected(selectedActualAmounts, line.getYearMonth(), line.getWeekNo(), line.getCashflowLine(), line.getAmount(), selectedYearMonth);
         }
+        BigDecimal projectionTotal = BigDecimal.ZERO;
+        BigDecimal actualTotal = BigDecimal.ZERO;
         BigDecimal difference = BigDecimal.ZERO;
         for (String yearMonth : monthsThrough(boundary.yearMonth())) {
             int throughWeek = yearMonth.equals(boundary.yearMonth()) ? boundary.weekNo() : 5;
             for (int weekNo = 1; weekNo <= throughWeek; weekNo += 1) {
                 for (String lineId : CashflowLineCatalog.ALL_LINES) {
                     CellKey key = new CellKey(yearMonth, weekNo, lineId);
-                    difference = difference.add(projectionAmounts.getOrDefault(key, BigDecimal.ZERO)
-                        .subtract(actualAmounts.getOrDefault(key, BigDecimal.ZERO)).abs());
+                    BigDecimal projectionAmount = projectionAmounts.getOrDefault(key, BigDecimal.ZERO);
+                    BigDecimal actualAmount = actualAmounts.getOrDefault(key, BigDecimal.ZERO);
+                    projectionTotal = projectionTotal.add(projectionAmount);
+                    actualTotal = actualTotal.add(actualAmount);
+                    difference = difference.add(projectionAmount.subtract(actualAmount).abs());
                 }
             }
         }
-        return new Summary(projectId, FROM_MONTH, boundary, difference, difference.signum() == 0);
+        List<PeriodSummary> periods = java.util.stream.IntStream.rangeClosed(1, 5)
+            .mapToObj(weekNo -> periodSummary("WEEK_" + weekNo, weekNo, weekNo, selectedProjectionAmounts, selectedActualAmounts))
+            .toList();
+        List<PeriodSummary> withMonth = new java.util.ArrayList<>();
+        withMonth.add(periodSummary("MONTH", 1, 5, selectedProjectionAmounts, selectedActualAmounts));
+        withMonth.addAll(periods);
+        return new Summary(
+            projectId, FROM_MONTH, boundary, projectionTotal, actualTotal,
+            projectionTotal.subtract(actualTotal), difference, difference.signum() == 0, withMonth
+        );
+    }
+
+    private static void addSelected(
+        Map<CellKey, BigDecimal> target, String yearMonth, int weekNo, String rawLineId,
+        BigDecimal amount, String selectedYearMonth
+    ) {
+        String lineId = CashflowLineCatalog.canonicalize(rawLineId);
+        if (!selectedYearMonth.equals(yearMonth) || weekNo < 1 || weekNo > 5
+            || !CashflowLineCatalog.ALL_LINES.contains(lineId)) return;
+        target.merge(new CellKey(yearMonth, weekNo, lineId), amount == null ? BigDecimal.ZERO : amount, BigDecimal::add);
+    }
+
+    private static PeriodSummary periodSummary(
+        String period, int fromWeek, int throughWeek,
+        Map<CellKey, BigDecimal> projection, Map<CellKey, BigDecimal> actual
+    ) {
+        BigDecimal projectionTotal = BigDecimal.ZERO;
+        BigDecimal actualTotal = BigDecimal.ZERO;
+        for (Map.Entry<CellKey, BigDecimal> entry : projection.entrySet()) {
+            if (entry.getKey().weekNo() >= fromWeek && entry.getKey().weekNo() <= throughWeek) {
+                projectionTotal = projectionTotal.add(entry.getValue());
+            }
+        }
+        for (Map.Entry<CellKey, BigDecimal> entry : actual.entrySet()) {
+            if (entry.getKey().weekNo() >= fromWeek && entry.getKey().weekNo() <= throughWeek) {
+                actualTotal = actualTotal.add(entry.getValue());
+            }
+        }
+        return new PeriodSummary(period, projectionTotal, actualTotal, projectionTotal.subtract(actualTotal));
     }
 
     public static FinanceWeek currentFinanceWeek(Clock clock) {
@@ -114,8 +172,19 @@ public final class CashflowProjectionActualSummaryCalculator {
         String projectId,
         String fromMonth,
         FinanceWeek comparisonAsOfWeek,
+        BigDecimal projectionAmount,
+        BigDecimal actualAmount,
+        BigDecimal projectionActualDifferenceAmount,
         BigDecimal settlementDifferenceAmount,
-        boolean settlementMatches
+        boolean settlementMatches,
+        List<PeriodSummary> periods
     ) {
     }
+
+    public record PeriodSummary(
+        String period,
+        BigDecimal projectionAmount,
+        BigDecimal actualAmount,
+        BigDecimal projectionActualDifferenceAmount
+    ) {}
 }

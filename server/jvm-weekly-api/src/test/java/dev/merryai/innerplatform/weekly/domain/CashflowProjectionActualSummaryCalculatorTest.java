@@ -30,8 +30,16 @@ class CashflowProjectionActualSummaryCalculatorTest {
         assertThat(summary.fromMonth()).isEqualTo("2023-01");
         assertThat(summary.comparisonAsOfWeek())
             .isEqualTo(new CashflowProjectionActualSummaryCalculator.FinanceWeek("2026-08", 4));
+        assertThat(summary.projectionAmount()).isEqualByComparingTo("12371453");
+        assertThat(summary.actualAmount()).isEqualByComparingTo("6000000");
+        assertThat(summary.projectionActualDifferenceAmount()).isEqualByComparingTo("6371453");
         assertThat(summary.settlementDifferenceAmount()).isEqualByComparingTo("18371453");
         assertThat(summary.settlementMatches()).isFalse();
+        assertThat(summary.periods()).extracting(CashflowProjectionActualSummaryCalculator.PeriodSummary::period)
+            .containsExactly("MONTH", "WEEK_1", "WEEK_2", "WEEK_3", "WEEK_4", "WEEK_5");
+        assertThat(summary.periods().getFirst().projectionAmount()).isEqualByComparingTo("100371453");
+        assertThat(summary.periods().getFirst().actualAmount()).isEqualByComparingTo("6000000");
+        assertThat(summary.periods().getLast().projectionAmount()).isEqualByComparingTo("88000000");
     }
 
     @Test
