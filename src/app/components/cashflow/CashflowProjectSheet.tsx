@@ -2955,7 +2955,7 @@ export function CashflowProjectSheet({
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-2 pb-3">
             <div>
-              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">일반 활동 기록</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-slate-950">실제 반영 기록</div>
               <div className="mt-0.5 text-[12px] leading-4 text-slate-600">{latestCashflowEventSummary(latestEvent)}</div>
             </div>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
@@ -2970,7 +2970,7 @@ export function CashflowProjectSheet({
             </div>
           </div>
           <div className="mb-2 grid gap-2 sm:grid-cols-3">
-            <Input aria-label="일반 활동 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자·source 검색" />
+            <Input aria-label="실제 반영 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자 검색" />
             <select aria-label="실제 반영 mode 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
             <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
           </div>
@@ -2982,7 +2982,7 @@ export function CashflowProjectSheet({
           ))}
           <div className="max-h-[230px] space-y-0 overflow-auto rounded-md border border-slate-200 bg-slate-50 px-2 py-2 pr-1">
             {cashflowEventLoadingSources.length > 0 && filteredEvents.length === 0 ? (
-              <div role="status" className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">일반 활동 기록을 불러오는 중입니다.</div>
+              <div role="status" className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">실제 반영 기록을 불러오는 중입니다.</div>
             ) : filteredEvents.length === 0 ? (
               <div className="px-2 py-8 text-center text-[12px] leading-4 text-slate-500">
                 아직 표시할 변경 기록이 없습니다.
@@ -3017,7 +3017,6 @@ export function CashflowProjectSheet({
                     <div className="shrink-0 text-[12px] tabular-nums text-slate-400">{formatSheetAppliedAt(event.createdAt)}</div>
                   </div>
                   <div className="mt-1 text-[12px] leading-4 text-slate-500">{cashflowEventDetail(event)}</div>
-                  <div className="mt-1 break-all text-[12px] leading-4 text-slate-400">source {event.sourceDetail || event.source || '-'} · operation {event.operation || event.type} · operation ID {event.operationId || '-'} · run {event.runId || '-'} · audit {event.auditId || '-'} · 사유 {event.reason || '미기록'}</div>
                   {canRevert && (
                     <Button
                       type="button"

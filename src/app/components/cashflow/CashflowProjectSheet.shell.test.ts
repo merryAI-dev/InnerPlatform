@@ -506,15 +506,13 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('keeps exact applied history in General Activity and searchable', () => {
     expect(source).not.toContain('AppliedCellHistory');
-    expect(source).toContain('일반 활동 기록');
-    expect(source).toContain('aria-label="일반 활동 기록 검색"');
+    expect(source).toContain('실제 반영 기록');
+    expect(source).toContain('aria-label="실제 반영 기록 검색"');
     expect(source).toContain("event.beforeState === 'EMPTY'");
     expect(source).toContain("event.beforeState === 'ZERO'");
     expect(source).toContain("event.afterState === 'EMPTY'");
-    expect(source).toContain('event.operationId');
-    expect(source).toContain('event.auditId');
-    expect(source).toContain('source {event.sourceDetail || event.source ||');
-    expect(source).toContain('operation {event.operation || event.type}');
+    expect(source).not.toContain('source {event.sourceDetail || event.source ||');
+    expect(source).not.toContain('operation {event.operation || event.type}');
     expect(source).toContain('aria-label="마감 후 변경 후보 전체 목록"');
   });
 
@@ -529,7 +527,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('setCashflowEvents((current) => mergeCashflowEvents(current, response.events))');
     expect(source).toContain('cashflowEventErrors.map');
     expect(source).toContain('onClick={() => void loadCashflowEventSource(failure.source)}');
-    expect(source).toContain('일반 활동 기록을 불러오는 중입니다.');
+    expect(source).toContain('실제 반영 기록을 불러오는 중입니다.');
     expect(source).toContain('아직 표시할 변경 기록이 없습니다.');
     expect(source).toContain('role="alert"');
     expect(source).not.toContain("setCashflowEventsError(resolveApiErrorMessage(error, '변경 이력을 불러오지 못했습니다.'))");
