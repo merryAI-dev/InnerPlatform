@@ -228,7 +228,7 @@ export function CashflowWeeklyPage() {
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={() => navigate('/approvals')}
+                            onAction={(action) => void transition(project.id, 'MONTH', action)}
                           />
                         )}
                         <PeriodAmounts summary={projectionActual.summaries[project.id]} period="MONTH" loading={projectionActual.loading[project.id]} error={projectionActual.errors[project.id]} />
