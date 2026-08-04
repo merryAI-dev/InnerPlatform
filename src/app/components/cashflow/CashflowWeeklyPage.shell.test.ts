@@ -10,9 +10,14 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('title="전사 현금흐름 현황"');
     expect(source).toContain('>월 결산</th>');
     expect(source).toContain('>현금흐름(링크)</th>');
-    expect(source).toContain('<div>{week.weekNo}주</div>');
+    expect(source).toContain('<div>{week.label}</div>');
     expect(source).not.toContain('>요약<');
     expect(source).not.toContain('Projection-Actual 차이');
+    expect(source).not.toContain('dashboard.waiting');
+    expect(source).not.toContain('dashboard.projection');
+    expect(source).not.toContain("['P - A'");
+    expect(source).not.toContain('금액 조회 오류');
+    expect(source).not.toContain('>조회 오류</span>');
   });
 
   it('uses the simple persisted status flow and updates only the affected project state', () => {
@@ -20,6 +25,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
+    expect(source).toContain("onAction={() => navigate('/approvals')}");
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
     expect(source).toContain('조직장 승인 필요');

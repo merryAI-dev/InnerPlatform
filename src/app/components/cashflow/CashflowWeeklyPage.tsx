@@ -76,7 +76,7 @@ function PeriodAmounts({
   loading?: boolean;
   error?: boolean;
 }) {
-  if (error) return <div className="mt-1 text-[9px] text-red-600">금액 조회 오류</div>;
+  if (error) return null;
   if (loading) return <div className="mt-1 text-[9px] text-slate-400">금액 확인 중…</div>;
   const amounts = summary?.periods.find((item) => item.period === period);
   if (!amounts) return null;
@@ -107,27 +107,6 @@ export function CashflowWeeklyPage() {
   const filteredProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
   const projectIds = useMemo(() => filteredProjects.map((project) => project.id), [filteredProjects]);
   const projectionActual = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds, yearMonth });
-  const dashboard = useMemo(() => {
-    const counts = { waiting: 0, pending: 0, completed: 0 };
-    for (const project of filteredProjects) {
-      for (const period of ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'] as CashflowSettlementPeriod[]) {
-        const status = statusItem(statuses[project.id], period)?.status || 'WAITING_FOR_UPDATE';
-        if (status === 'PENDING_APPROVAL') counts.pending += 1;
-        else if (status === 'COMPLETED') counts.completed += 1;
-        else counts.waiting += 1;
-      }
-    }
-    const summaries = filteredProjects.flatMap((project) => {
-      const summary = projectionActual.summaries[project.id]?.periods.find((period) => period.period === 'MONTH');
-      return summary ? [summary] : [];
-    });
-    return {
-      ...counts,
-      projection: summaries.reduce((sum, item) => sum + item.projectionAmount, 0),
-      actual: summaries.reduce((sum, item) => sum + item.actualAmount, 0),
-      difference: summaries.reduce((sum, item) => sum + item.projectionActualDifferenceAmount, 0),
-    };
-  }, [filteredProjects, projectionActual.summaries, statuses]);
 
   useEffect(() => {
     if (!user?.idToken || filteredProjects.length === 0) {
@@ -165,9 +144,7 @@ export function CashflowWeeklyPage() {
     const key = `${projectId}:${period}`;
     setActionKey(key);
     try {
-      const result = await transitionCashflowSettlementStatusViaBff({
-        tenantId: orgId, actor: user, projectId, yearMonth, period, action,
-      });
+      const result = await transitionCashflowSettlementStatusViaBff({ tenantId: orgId, actor: user, projectId, yearMonth, period, action });
       setStatuses((current) => ({ ...current, [projectId]: result }));
       setStatusErrors((current) => ({ ...current, [projectId]: '' }));
       toast.success(action === 'APPROVE' ? '정산을 승인했습니다.' : '조직장 승인 대기로 변경했습니다.');
@@ -201,22 +178,6 @@ export function CashflowWeeklyPage() {
         )}
       />
 
-      <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
-        {[
-          ['정산 이전', dashboard.waiting, 'border-red-200 bg-red-50 text-red-700'],
-          ['승인 필요', dashboard.pending, 'border-amber-200 bg-amber-50 text-amber-800'],
-          ['승인 완료', dashboard.completed, 'border-emerald-200 bg-emerald-50 text-emerald-700'],
-          ['Projection', `${dashboard.projection.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
-          ['Actual', `${dashboard.actual.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
-          ['P - A', `${dashboard.difference.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
-        ].map(([label, value, className]) => (
-          <div key={label} className={`rounded-lg border px-3 py-2 ${className}`}>
-            <div className="text-[10px] font-semibold">{label}</div>
-            <div className="mt-0.5 text-[15px] font-bold tabular-nums">{value}</div>
-          </div>
-        ))}
-      </div>
-
       <div className="flex items-end gap-3 rounded-lg border bg-white px-4 py-3">
         <div className="w-[180px]">
           <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">담당조직</Label>
@@ -243,7 +204,7 @@ export function CashflowWeeklyPage() {
                   <th className="sticky top-0 z-30 min-w-[140px] border-b bg-slate-50 px-3 py-2 text-center font-bold">현금흐름(링크)</th>
                   {monthWeeks.map((week) => (
                     <th key={week.weekNo} className="sticky top-0 z-30 min-w-[170px] border-b bg-slate-50 px-3 py-2 text-center font-bold">
-                      <div>{week.weekNo}주</div>
+                      <div>{week.label}</div>
                       <div className="mt-0.5 text-[10px] text-muted-foreground">{week.weekStart}~{week.weekEnd}</div>
                     </th>
                   ))}
@@ -261,13 +222,13 @@ export function CashflowWeeklyPage() {
                       </td>
                       <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{project.managerName}</td>
                       <td className="px-3 py-3 text-center">
-                        {statusErrors[project.id] ? <span className="text-red-700">조회 오류</span> : statusesLoading && !projectStatuses ? <span className="text-muted-foreground">확인 중…</span> : (
+                        {statusErrors[project.id] || (statusesLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
                             item={statusItem(projectStatuses, 'MONTH')}
                             period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
-                            onAction={(action) => void transition(project.id, 'MONTH', action)}
+                            onAction={() => navigate('/approvals')}
                           />
                         )}
                         <PeriodAmounts summary={projectionActual.summaries[project.id]} period="MONTH" loading={projectionActual.loading[project.id]} error={projectionActual.errors[project.id]} />
@@ -281,7 +242,7 @@ export function CashflowWeeklyPage() {
                         const period = `WEEK_${week.weekNo}` as CashflowSettlementPeriod;
                         return (
                           <td key={week.weekNo} className="px-3 py-3 text-center">
-                            {statusErrors[project.id] ? <span className="text-red-700">조회 오류</span> : statusesLoading && !projectStatuses ? <span className="text-muted-foreground">확인 중…</span> : (
+                            {statusErrors[project.id] || (statusesLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                               <SettlementStatusButton
                                 item={statusItem(projectStatuses, period)}
                                 period={period}
