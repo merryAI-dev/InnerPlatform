@@ -2784,7 +2784,7 @@ export function CashflowProjectSheet({
                       </Button>
                     </div>
                     <p className="mt-1.5 text-[12px] leading-4 text-slate-500">
-                      확정한 조직장에게 월 결산 요청이 배정되고 관리자 등록/승인 화면에서 승인·반려할 수 있습니다.
+                      확정한 조직장에게 월 결산 요청이 배정되고, 조직장이 이 화면에서 승인·반려할 수 있습니다.
                     </p>
                   </div>
                 ) : null}

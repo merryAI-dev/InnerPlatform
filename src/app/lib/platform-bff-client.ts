@@ -2962,7 +2962,7 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
       throw new Error('승인할 월 결산 요청을 찾을 수 없습니다.');
     }
     if ((request.reviewWarnings ?? []).length > 0) {
-      throw new Error('확인이 필요한 월 결산 항목이 있어 결재 페이지에서 검토해 주세요.');
+      throw new Error('확인이 필요한 월 결산 항목이 있습니다. 해당 항목을 정리한 뒤 다시 승인해 주세요.');
     }
     await reviewCashflowMonthCloseRequestViaBff({
       ...params,
