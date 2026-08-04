@@ -1,4 +1,4 @@
-const CACHE_NAME = 'myscube-shell-v2';
+const CACHE_NAME = 'myscube-shell-v3';
 const CACHEABLE_PREFIXES = ['/brand/'];
 const NEVER_CACHE_PREFIXES = ['/api/', '/api/v1/', '/business-card-imports/'];
 
