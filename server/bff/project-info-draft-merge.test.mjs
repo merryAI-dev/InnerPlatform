@@ -70,6 +70,25 @@ describe('mergeProjectInfoDraftFields', () => {
     expect(result.merged.paymentPlan).toEqual({ contract: 500, interim: 0, final: 0 });
   });
 
+  it('does not invent a conflict when Firestore returns the same map in another key order', () => {
+    const result = mergeProjectInfoDraftFields({
+      base: { paymentPlan: { contract: 0, interim: 0, final: 0 } },
+      mine: { paymentPlan: { final: 0, contract: 0, interim: 0 } },
+      theirs: { paymentPlan: { interim: 0, final: 0, contract: 0 } },
+    });
+    expect(result.conflicts).toEqual([]);
+    expect(result.autoMerged).toEqual([]);
+  });
+
+  it('ignores key order inside arrays of objects too', () => {
+    const result = mergeProjectInfoDraftFields({
+      base: { teamMembersDetailed: [{ memberName: '변민욱', role: '운영매니저' }] },
+      mine: { teamMembersDetailed: [{ role: '운영매니저', memberName: '변민욱' }] },
+      theirs: { teamMembersDetailed: [{ memberName: '변민욱', role: '운영매니저' }] },
+    });
+    expect(result.conflicts).toEqual([]);
+  });
+
   it('treats every difference as a conflict for drafts opened before rebase support', () => {
     const result = mergeProjectInfoDraftFields({
       base: null,

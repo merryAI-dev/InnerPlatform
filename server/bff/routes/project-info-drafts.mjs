@@ -268,8 +268,22 @@ function assertActive(draft) {
   }
 }
 
+// Firestore returns map keys in its own order, so a draft read back from storage
+// and a freshly computed snapshot can hold identical values in a different key
+// order. Compare by value, not by serialization order.
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((sorted, key) => {
+      sorted[key] = stableValue(value[key]);
+      return sorted;
+    }, {});
+  }
+  return value ?? null;
+}
+
 function sameFieldValue(left, right) {
-  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 
 // Three-way merge between the canonical values the draft started from (base),
