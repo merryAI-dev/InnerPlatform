@@ -656,6 +656,7 @@ export function ProjectEditorWizard({
   const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle');
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [exitIntent, setExitIntent] = useState<'cancel' | 'route' | null>(null);
+  const [submitBlockedNotice, setSubmitBlockedNotice] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
   const [lastAutosavedAt, setLastAutosavedAt] = useState('');
   const [preloadWarningVisible, setPreloadWarningVisible] = useState(false);
@@ -1387,6 +1388,52 @@ export function ProjectEditorWizard({
   }, [departmentOptionSet, draft, hasContractAmountInput, hasMultiYearContract, onProjectDocumentFileUpload, requiresAdvanceInterimReason, requiresSettlementConfirmations, selectedExecutiveApprover, showProjectCheckout, usesRegistrationV2]);
 
   const canSubmit = submitIssues.length === 0;
+
+  const submitBlockedStatusReason = uploadInProgress
+    ? '첨부파일을 처리하고 있습니다. 처리가 끝난 뒤 최종 저장해 주세요.'
+    : hasPendingRetryFile
+      ? '업로드하지 못한 첨부파일이 있습니다. 해당 파일을 다시 첨부해 주세요.'
+      : autosaveState === 'saving'
+        ? '임시저장을 진행하고 있습니다. 잠시 후 다시 시도해 주세요.'
+        : null;
+  const submitBlocked = !canSubmit || Boolean(submitBlockedStatusReason);
+
+  useEffect(() => {
+    if (!submitBlocked) setSubmitBlockedNotice(false);
+  }, [submitBlocked]);
+
+  const renderSubmitBlockers = () => {
+    if (!submitBlocked) return null;
+    return (
+      <div
+        aria-live="polite"
+        className={cn(
+          'rounded-lg border bg-white px-4 py-3 text-[12px] text-red-700',
+          submitBlockedNotice ? 'border-red-400' : 'border-slate-200',
+        )}
+      >
+        <p className="font-medium">
+          {submitBlockedNotice ? '아직 최종 저장할 수 없습니다' : '최종 저장 전 확인이 필요합니다'}
+        </p>
+        {submitBlockedStatusReason ? <p className="mt-1.5">{submitBlockedStatusReason}</p> : null}
+        {submitIssues.length > 0 ? (
+          <ul className="mt-1.5 grid gap-1">
+            {submitIssues.map((issue, index) => (
+              <li key={`${issue.step}-${issue.label}-${index}`}>
+                <button
+                  type="button"
+                  onClick={() => setStepIndex(Math.max(0, STEPS.findIndex((step) => step.id === issue.step)))}
+                  className="text-left underline underline-offset-2 hover:text-red-900"
+                >
+                  {issue.label} · {STEPS.find((step) => step.id === issue.step)?.label} 단계로 이동
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderBasicStep = () => (
     <div className="space-y-4">
@@ -2868,6 +2915,9 @@ export function ProjectEditorWizard({
       </div>
 
       <div className="z-20 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+        {stepIndex === STEPS.length - 1 && !readOnly ? (
+          <div className="mb-3 empty:mb-0">{renderSubmitBlockers()}</div>
+        ) : null}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <CalendarRange className="h-4 w-4" />
@@ -2925,8 +2975,14 @@ export function ProjectEditorWizard({
                     key={action.id}
                     type="button"
                     variant={action.variant || 'default'}
-                    disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId || action.disabled || !canSubmit}
-                    onClick={() => void handleActionSubmit(action.id)}
+                    disabled={readOnly || !!busyActionId || action.disabled}
+                    onClick={() => {
+                      if (submitBlocked) {
+                        setSubmitBlockedNotice(true);
+                        return;
+                      }
+                      void handleActionSubmit(action.id);
+                    }}
                     className="gap-2"
                   >
                     <Icon className={`h-4 w-4 ${busyActionId === action.id ? 'animate-spin' : ''}`} />

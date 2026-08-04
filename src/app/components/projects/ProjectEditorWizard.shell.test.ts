@@ -442,7 +442,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('readOnly?: boolean');
     expect(source).toContain('<fieldset disabled={readOnly} className="contents">');
     expect(source).toContain('disabled={readOnly || autosaveState');
-    expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId");
+    expect(source).toContain('disabled={readOnly || !!busyActionId || action.disabled}');
     expect(source).toContain('shouldResetProjectEditorDraft({');
     expect(source).toContain('autosave?.onSave, draftKey, hasPendingRetryFile, hasRequiredRegistrationDocuments, mode, readOnly, uploadInProgress');
   });
@@ -474,7 +474,23 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 임시저장해 주세요.')");
     expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.')");
     expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || (mode === 'portal-register' && !hasRequiredRegistrationDocuments)}");
-    expect(source).toContain("disabled={readOnly || autosaveState === 'saving' || uploadInProgress || hasPendingRetryFile || !!busyActionId || action.disabled || !canSubmit}");
+    expect(source).toContain("toast.error('첨부파일 처리를 완료한 뒤 최종 저장해 주세요.')");
+  });
+
+  it('keeps the final save button pressable and explains every reason it cannot submit yet', () => {
+    expect(source).toContain('disabled={readOnly || !!busyActionId || action.disabled}');
+    expect(source).toContain('const submitBlocked = !canSubmit || Boolean(submitBlockedStatusReason);');
+    expect(source).toContain('if (submitBlocked) {');
+    expect(source).toContain('setSubmitBlockedNotice(true);');
+    expect(source).toContain("'첨부파일을 처리하고 있습니다. 처리가 끝난 뒤 최종 저장해 주세요.'");
+    expect(source).toContain("'업로드하지 못한 첨부파일이 있습니다. 해당 파일을 다시 첨부해 주세요.'");
+    expect(source).toContain("'임시저장을 진행하고 있습니다. 잠시 후 다시 시도해 주세요.'");
+    expect(source).toContain('아직 최종 저장할 수 없습니다');
+    expect(source).toContain('최종 저장 전 확인이 필요합니다');
+    expect(source).toContain('setStepIndex(Math.max(0, STEPS.findIndex((step) => step.id === issue.step)))');
+    expect(source).toContain('단계로 이동');
+    expect(source).toContain('{stepIndex === STEPS.length - 1 && !readOnly ? (');
+    expect(source).toContain('if (!submitBlocked) setSubmitBlockedNotice(false);');
   });
 
   it('removes private registration attachments through the owner-authorized draft API before clearing local state', () => {
