@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildCashflowManagementChecks,
   buildCashflowMonthCloseRevisionChanges,
+  cashflowCumulativeCloseCycle,
   cashflowMonthCloseDeadline,
   mountJvmWeeklyApiRoutes,
 } from './jvm-weekly-api.mjs';
@@ -769,12 +770,28 @@ describe('JVM weekly API BFF proxy', () => {
         status: 'OPEN',
       })),
     }));
-    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+      now: () => new Date('2026-08-04T01:00:00.000Z'),
+    });
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-08')
       .expect(200)
       .expect((response) => {
+        expect(response.body).toMatchObject({
+          yearMonth: '2026-08',
+          cycleYearMonth: '2026-08',
+          targetYearMonth: '2026-07',
+          closeDeadline: '2026-08-10',
+          closeEligible: true,
+        });
+        expect(response.body.dashboard.summary).toMatchObject({
+          cycleYearMonth: '2026-08',
+          targetYearMonth: '2026-07',
+          closeDeadline: '2026-08-10',
+        });
         expect(response.body.dashboard.cumulativeCloseScope).toEqual({
           contractVersion: 'cashflow-cumulative-close-v2',
           fromMonth: '2023-01',
@@ -5883,5 +5900,24 @@ describe('cashflowMonthCloseDeadline', () => {
   it('returns null for a malformed month instead of guessing', () => {
     expect(cashflowMonthCloseDeadline('not-a-month')).toBeNull();
     expect(cashflowMonthCloseDeadline('')).toBeNull();
+  });
+});
+
+describe('cashflowCumulativeCloseCycle', () => {
+  it('keeps the current cycle while closing through the previous month', () => {
+    expect(cashflowCumulativeCloseCycle('2026-08', '2026-08-04')).toEqual({
+      cycleYearMonth: '2026-08',
+      targetYearMonth: '2026-07',
+      deadline: '2026-08-10',
+      eligible: true,
+    });
+    expect(cashflowCumulativeCloseCycle('2026-01', '2026-01-04')).toEqual({
+      cycleYearMonth: '2026-01',
+      targetYearMonth: '2025-12',
+      deadline: '2026-01-10',
+      eligible: true,
+    });
+    expect(cashflowCumulativeCloseCycle('2026-08', '2026-07-31')?.eligible).toBe(false);
+    expect(cashflowCumulativeCloseCycle('2026-08', '2026-08-01')?.eligible).toBe(true);
   });
 });

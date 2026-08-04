@@ -1476,6 +1476,18 @@ export function cashflowMonthCloseDeadline(yearMonth) {
   return `${deadlineYear}-${String(deadlineMonth).padStart(2, '0')}-10`;
 }
 
+export function cashflowCumulativeCloseCycle(yearMonth, businessDate) {
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(yearMonth))
+    || !/^20\d{2}-(0[1-9]|1[0-2])-\d{2}$/.test(String(businessDate))) return null;
+  const targetYearMonth = previousYearMonth(yearMonth);
+  return {
+    cycleYearMonth: yearMonth,
+    targetYearMonth,
+    deadline: `${yearMonth}-10`,
+    eligible: targetYearMonth < String(businessDate).slice(0, 7),
+  };
+}
+
 async function readCashflowMonthCloseStatuses({ db, tenantId, projectId, businessDate = '' }) {
   if (!db?.collection) return [];
   const snapshot = await db.collection(`orgs/${tenantId}/monthly_closes`)
@@ -2014,6 +2026,8 @@ async function composeCashflowMonthDashboard({
       comparisonAsOfDate: comparisonBoundary.asOfDate,
       comparisonAsOfWeek: comparisonBoundary.asOfWeek,
       evaluatedBusinessDate: readOptionalText(close?.evaluatedBusinessDate) || null,
+      cycleYearMonth: readOptionalText(close?.cycleYearMonth) || yearMonth,
+      targetYearMonth: readOptionalText(close?.targetYearMonth) || buildCumulativeCloseScope(yearMonth).throughMonth,
       closeDeadline: readOptionalText(close?.closeDeadline) || null,
       late: Boolean(close?.late),
     },
@@ -2533,6 +2547,22 @@ export function mountJvmWeeklyApiRoutes(app, {
           () => readWeeklyCompliance(req.context, rawProjectId),
           { attempt: traceAttempt },
         );
+        const cycleBusinessDate = readOptionalText(result?.evaluatedBusinessDate) || comparisonBoundary.asOfDate;
+        const cumulativeCycle = cashflowCumulativeCloseCycle(yearMonth, cycleBusinessDate);
+        if (!cumulativeCycle) {
+          throw createHttpError(502, '월 결산 회차 기준일을 확인할 수 없습니다.', 'jvm_weekly_response_invalid');
+        }
+        const cumulativeClose = {
+          ...result,
+          cycleYearMonth: cumulativeCycle.cycleYearMonth,
+          targetYearMonth: cumulativeCycle.targetYearMonth,
+          evaluatedBusinessDate: cycleBusinessDate,
+          closeDeadline: cumulativeCycle.deadline,
+          closeEligible: readOptionalText(result?.status) === 'OPEN' && cumulativeCycle.eligible,
+          late: readOptionalText(result?.status) === 'OPEN'
+            ? cycleBusinessDate > cumulativeCycle.deadline
+            : Boolean(result?.late),
+        };
         const dashboard = await trace.measure(
           'dashboard_compose',
           () => composeCashflowMonthDashboard({
@@ -2540,7 +2570,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             req,
             projectId: rawProjectId,
             yearMonth,
-            close: result,
+            close: cumulativeClose,
             cashflow,
             openingBalances,
             comparisonBoundary,
@@ -2561,7 +2591,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         );
         assertCashflowSheetPublicationReady(publicationAfter);
         if (publicationBefore.fingerprint === publicationAfter.fingerprint) {
-          return { ...result, dashboard };
+          return { ...cumulativeClose, dashboard };
         }
       }
       throw createHttpError(

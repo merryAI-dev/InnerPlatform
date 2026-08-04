@@ -5,6 +5,10 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowProjectSheet.tsx'), 'utf8');
 
 describe('CashflowProjectSheet monthly close shell', () => {
+  it('labels the cumulative target month separately from its cycle deadline', () => {
+    expect(source).toContain('까지 ${monthCloseResult.dashboard.summary.targetYearMonth}월 결산');
+  });
+
   it('uses the approval-backed BFF/JVM month-close contract and removes weekly close actions', () => {
     expect(source).toContain('fetchCashflowMonthCloseViaBff');
     expect(source).toContain('requestCashflowMonthCloseViaBff');
