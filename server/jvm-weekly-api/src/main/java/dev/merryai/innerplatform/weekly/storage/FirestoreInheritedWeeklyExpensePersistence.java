@@ -1559,6 +1559,61 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             WeekDocParts parts = parseCashflowWeekId(projectId, weekSnapshot.getId());
             projectWeeks.put(weekSnapshot.getId(), week);
         }
+        List<Map<String, Object>> missingCells = new ArrayList<>();
+        List<CashflowWeekScope> projectionValidationWindow = consecutiveFinanceWeeks(
+            request.yearMonth(), request.weekNo(), 16
+        );
+        for (CashflowWeekScope scope : projectionValidationWindow) {
+            Map<String, Object> candidate = projectWeeks.getOrDefault(
+                cashflowWeekId(projectId, scope.yearMonth(), scope.weekNo()),
+                Map.of()
+            );
+            Map<String, Object> projection = nestedMap(candidate.get("projection"));
+            for (String lineId : CASHFLOW_CUMULATIVE_LINES) {
+                if (projection.containsKey(lineId) && projection.get(lineId) != null) continue;
+                missingCells.add(Map.of(
+                    "yearMonth", scope.yearMonth(),
+                    "weekNo", scope.weekNo(),
+                    "lineId", lineId
+                ));
+            }
+        }
+        Map<String, Object> projectionValidationEvidence = Map.ofEntries(
+            Map.entry("tenantId", actor.tenantId()),
+            Map.entry("projectId", projectId),
+            Map.entry("yearMonth", request.yearMonth()),
+            Map.entry("weekNo", request.weekNo()),
+            Map.entry("windowStart", projectionValidationWindow.getFirst().yearMonth() + "-w" + projectionValidationWindow.getFirst().weekNo()),
+            Map.entry("windowEnd", projectionValidationWindow.getLast().yearMonth() + "-w" + projectionValidationWindow.getLast().weekNo()),
+            Map.entry("requiredWeekCount", 16),
+            Map.entry("requiredCellCount", 256),
+            Map.entry("missingCells", List.copyOf(missingCells))
+        );
+        String projectionValidationEvidenceHash = hashCanonicalJson(projectionValidationEvidence);
+        if (!missingCells.isEmpty() && !request.ignoreProjectionValidation()) {
+            Map<String, Object> details = new LinkedHashMap<>(projectionValidationEvidence);
+            details.put("evidenceHash", projectionValidationEvidenceHash);
+            throw new WeeklyExpenseEditLeaseException(
+                409,
+                "cashflow_projection_window_incomplete",
+                "대상 주차와 그 이후 15개 재무주차의 Projection 값을 모두 입력해 주세요.",
+                Map.copyOf(details)
+            );
+        }
+        if (request.ignoreProjectionValidation() && (
+            !projectionValidationEvidenceHash.equals(text(request.projectionValidationEvidenceHash(), ""))
+            || request.projectionValidationIssueCount() != missingCells.size()
+        )) {
+            Map<String, Object> details = new LinkedHashMap<>(projectionValidationEvidence);
+            details.put("evidenceHash", projectionValidationEvidenceHash);
+            throw new WeeklyExpenseEditLeaseException(
+                409,
+                "cashflow_projection_window_changed",
+                "Projection 검증 결과가 변경되었습니다. 최신 결과를 다시 확인해 주세요.",
+                Map.copyOf(details)
+            );
+        }
+        boolean projectionValidationOverride = request.ignoreProjectionValidation() && !missingCells.isEmpty();
         if (lockedCompletion != null) {
             submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), settlementStatus);
             return toWeeklyCompletionRecord(
@@ -1620,6 +1675,9 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         completion.put("completedByEmail", actor.email());
         completion.put("completedByName", actor.name());
         completion.put("updateResult", request.updateResult());
+        completion.put("projectionValidationOverride", projectionValidationOverride);
+        completion.put("projectionValidationIssueCount", missingCells.size());
+        completion.put("projectionValidationEvidenceHash", projectionValidationEvidenceHash);
         Instant deadline = financeWeekDeadline(request.yearMonth(), request.weekNo());
         completion.put("deadline", deadline.toString());
         completion.put("complianceStatus", weeklyComplianceStatus(request.yearMonth(), request.weekNo(), completedAt, deadline));
@@ -3781,7 +3839,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(document.get("complianceStatus"), ""),
             text(document.get("operationId"), ""),
             text(document.get("auditId"), ""),
-            text(document.get("updateResult"), "")
+            text(document.get("updateResult"), ""),
+            bool(document.get("projectionValidationOverride")),
+            intValue(document.get("projectionValidationIssueCount"), 0),
+            text(document.get("projectionValidationEvidenceHash"), "")
         );
     }
 

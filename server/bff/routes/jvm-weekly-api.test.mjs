@@ -1685,6 +1685,11 @@ describe('JVM weekly API BFF proxy', () => {
     const fetchImpl = vi.fn(async (_url, init) => {
       const body = JSON.parse(init.body);
       expect(body.updateResult).toBe('NO_CHANGES');
+      expect(body).toMatchObject({
+        ignoreProjectionValidation: false,
+        projectionValidationEvidenceHash: '',
+        projectionValidationIssueCount: 0,
+      });
       return {
         ok: false,
         status: 409,
@@ -1705,7 +1710,11 @@ describe('JVM weekly API BFF proxy', () => {
     await request(app)
       .post('/api/v1/cashflow/project-a/weekly-update-complete')
       .set('idempotency-key', 'weekly-no-changes')
-      .send({ yearMonth: '2026-06', weekNo: 2, updateResult: 'NO_CHANGES' })
+      .send({
+        yearMonth: '2026-06', weekNo: 2, updateResult: 'NO_CHANGES',
+        projectionValidationEvidenceHash: `sha256:${'f'.repeat(64)}`,
+        projectionValidationIssueCount: 42,
+      })
       .expect(409)
       .expect((response) => expect(response.body).toMatchObject({
         code: 'cashflow_projection_window_incomplete',
@@ -1714,6 +1723,35 @@ describe('JVM weekly API BFF proxy', () => {
           missingCells: [{ yearMonth: '2026-05', weekNo: 1, lineId: 'SALES_IN' }],
         },
       }));
+  });
+
+  it('forwards an explicit projection validation override and its evidence to JVM', async () => {
+    const evidenceHash = `sha256:${'a'.repeat(64)}`;
+    const fetchImpl = vi.fn(async (_url, init) => {
+      expect(JSON.parse(init.body)).toMatchObject({
+        updateResult: 'CHANGED',
+        ignoreProjectionValidation: true,
+        projectionValidationEvidenceHash: evidenceHash,
+        projectionValidationIssueCount: 32,
+      });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ projectId: 'project-a', yearMonth: '2026-06', weekNo: 2, status: 'LOCKED' }),
+      };
+    });
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'viewer' }, {
+      env: runtimeEnv, db: fullMonthCloseSource().db,
+    });
+    await request(app)
+      .post('/api/v1/cashflow/project-a/weekly-update-complete')
+      .send({
+        yearMonth: '2026-06', weekNo: 2, updateResult: 'CHANGED',
+        ignoreProjectionValidation: true,
+        projectionValidationEvidenceHash: evidenceHash,
+        projectionValidationIssueCount: 32,
+      })
+      .expect(200);
   });
 
   it('adapts the canonical JVM weekly compliance cursor page and validates its query', async () => {

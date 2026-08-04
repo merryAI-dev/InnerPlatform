@@ -1061,11 +1061,17 @@ public class WeeklyExpenseCommandService {
             actor,
             projectId
         );
-        String requestHash = hashJson(Map.of(
+        Map<String, Object> requestHashInput = new LinkedHashMap<>(Map.of(
             "yearMonth", request.yearMonth(),
             "weekNo", request.weekNo(),
             "updateResult", request.updateResult()
         ));
+        if (request.ignoreProjectionValidation()) {
+            requestHashInput.put("ignoreProjectionValidation", true);
+            requestHashInput.put("projectionValidationEvidenceHash", normalizeText(request.projectionValidationEvidenceHash()));
+            requestHashInput.put("projectionValidationIssueCount", request.projectionValidationIssueCount());
+        }
+        String requestHash = hashJson(requestHashInput);
         Optional<CashflowWeeklyUpdateCompletionResponse> replay = readIdempotentResponse(
             writer.tenantId(),
             projectId,
@@ -1081,7 +1087,14 @@ public class WeeklyExpenseCommandService {
             projectId,
             request
         );
-        if (!saved.alreadyCompleted()) {
+        if (!saved.alreadyCompleted() || request.ignoreProjectionValidation()) {
+            String auditEventId = saved.alreadyCompleted()
+                ? "weekly-override-" + hashJson(Map.of(
+                    "tenantId", writer.tenantId(),
+                    "projectId", projectId,
+                    "idempotencyKey", request.idempotencyKey()
+                )).replace("sha256:", "")
+                : saved.auditId();
             WeeklyExpenseAuditEventEntity event = new WeeklyExpenseAuditEventEntity(
                 writer.tenantId(),
                 projectId,
@@ -1098,15 +1111,18 @@ public class WeeklyExpenseCommandService {
                     Map.entry("deadline", saved.deadline()),
                     Map.entry("status", saved.complianceStatus()),
                     Map.entry("operationId", saved.operationId()),
-                    Map.entry("auditId", saved.auditId()),
+                    Map.entry("auditId", auditEventId),
                     Map.entry("updateResult", saved.updateResult()),
+                    Map.entry("projectionValidationOverride", saved.projectionValidationOverride()),
+                    Map.entry("projectionValidationIssueCount", saved.projectionValidationIssueCount()),
+                    Map.entry("projectionValidationEvidenceHash", saved.projectionValidationEvidenceHash()),
                     Map.entry("snapshotHash", saved.snapshotHash()),
                     Map.entry("sourceRevision", saved.sourceRevision()),
                     Map.entry("targetRevision", saved.targetRevision()),
                     Map.entry("revision", saved.revision())
                 ))
             );
-            event.restorePersistenceState(saved.auditId(), event.getCreatedAt());
+            event.restorePersistenceState(auditEventId, event.getCreatedAt());
             persistence.saveAuditEvent(event);
         }
         CashflowWeeklyUpdateCompletionResponse response = weeklyCompletionResponse(

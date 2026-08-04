@@ -2845,6 +2845,9 @@ export async function completeCashflowWeeklyUpdateViaBff(params: {
   yearMonth?: string;
   weekNo?: number;
   updateResult: 'CHANGED' | 'NO_CHANGES';
+  ignoreProjectionValidation?: boolean;
+  projectionValidationEvidenceHash?: string;
+  projectionValidationIssueCount?: number;
   client?: PlatformApiClientLike;
 }): Promise<CashflowWeeklyUpdateCompletionResult> {
   const hasExplicitScope = params.yearMonth !== undefined || params.weekNo !== undefined;
@@ -2856,6 +2859,11 @@ export async function completeCashflowWeeklyUpdateViaBff(params: {
       body: {
         ...(hasExplicitScope ? { yearMonth: params.yearMonth, weekNo: params.weekNo } : {}),
         updateResult: params.updateResult,
+        ...(params.ignoreProjectionValidation ? {
+          ignoreProjectionValidation: true,
+          projectionValidationEvidenceHash: params.projectionValidationEvidenceHash,
+          projectionValidationIssueCount: params.projectionValidationIssueCount,
+        } : {}),
       },
       retries: 0,
       timeoutMs: 12000,

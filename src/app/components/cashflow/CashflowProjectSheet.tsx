@@ -128,6 +128,25 @@ function formatSheetAppliedAt(value?: string | null): string {
   }).format(date);
 }
 
+type WeeklyProjectionMissingCell = { yearMonth: string; weekNo: number; lineId: string };
+type WeeklyProjectionValidation = { missingCells: WeeklyProjectionMissingCell[]; evidenceHash: string };
+
+function weeklyProjectionValidation(error: unknown): WeeklyProjectionValidation | null {
+  const details = (error as { body?: { details?: { missingCells?: unknown; evidenceHash?: unknown } } })?.body?.details;
+  const missingCells = Array.isArray(details?.missingCells)
+    ? details.missingCells.filter((cell): cell is WeeklyProjectionMissingCell => Boolean(
+      cell && typeof cell === 'object'
+      && /^20\d{2}-(0[1-9]|1[0-2])$/.test(String((cell as WeeklyProjectionMissingCell).yearMonth))
+      && Number.isInteger(Number((cell as WeeklyProjectionMissingCell).weekNo))
+      && typeof (cell as WeeklyProjectionMissingCell).lineId === 'string',
+    ))
+    : [];
+  const evidenceHash = typeof details?.evidenceHash === 'string' ? details.evidenceHash : '';
+  return missingCells.length > 0 && /^sha256:[a-f0-9]{64}$/.test(evidenceHash)
+    ? { missingCells, evidenceHash }
+    : null;
+}
+
 function decodeActivityActor(value?: string): string {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -372,6 +391,7 @@ export function CashflowProjectSheet({
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
   const [weeklyCompletionError, setWeeklyCompletionError] = useState('');
+  const [weeklyProjectionWarning, setWeeklyProjectionWarning] = useState<WeeklyProjectionValidation | null>(null);
   const [weeklyHistoryOpen, setWeeklyHistoryOpen] = useState(false);
   const [weeklyComplianceHistory, setWeeklyComplianceHistory] = useState<CashflowWeeklyComplianceItem[]>([]);
   const [weeklyComplianceHistoryLoading, setWeeklyComplianceHistoryLoading] = useState(false);
@@ -731,6 +751,9 @@ export function CashflowProjectSheet({
         yearMonth: currentDeadline?.yearMonth,
         weekNo: currentDeadline?.weekNo,
         updateResult: weeklyUpdateResult,
+        ignoreProjectionValidation: Boolean(weeklyProjectionWarning),
+        projectionValidationEvidenceHash: weeklyProjectionWarning?.evidenceHash,
+        projectionValidationIssueCount: weeklyProjectionWarning?.missingCells.length,
       });
       let result;
       try {
@@ -744,6 +767,7 @@ export function CashflowProjectSheet({
       await loadCashflowMonthClose();
       setWeeklyCompletionOpen(false);
       setWeeklyCompletionError('');
+      setWeeklyProjectionWarning(null);
       setWeeklyUpdateResult('');
       logCashflowSettlement({
         phase: 'success',
@@ -769,11 +793,12 @@ export function CashflowProjectSheet({
       });
       const message = resolveApiErrorMessage(error, '주간 정산 완료 상태를 저장하지 못했습니다.');
       setWeeklyCompletionError(message);
+      setWeeklyProjectionWarning(weeklyProjectionValidation(error));
       toast.error(message);
     } finally {
       setWeeklyCompletionBusy(false);
     }
-  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyUpdateResult, yearMonth]);
+  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
 
   const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
     setWeeklyComplianceHistoryLoading(true);
@@ -2658,6 +2683,7 @@ export function CashflowProjectSheet({
                       disabled={weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
                       onClick={() => {
                         setWeeklyCompletionError('');
+                        setWeeklyProjectionWarning(null);
                         setWeeklyUpdateResult('');
                         setWeeklyCompletionOpen(true);
                       }}
@@ -3084,13 +3110,26 @@ export function CashflowProjectSheet({
 
       {renderUnifiedMonthlyBoard()}
 
-      <AlertDialog open={weeklyCompletionOpen} onOpenChange={(open) => { if (!weeklyCompletionBusy) setWeeklyCompletionOpen(open); }}>
+      <AlertDialog open={weeklyCompletionOpen} onOpenChange={(open) => {
+        if (!weeklyCompletionBusy) {
+          setWeeklyCompletionOpen(open);
+          if (!open) setWeeklyProjectionWarning(null);
+        }
+      }}>
         <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-[620px]">
           <AlertDialogHeader>
             <AlertDialogTitle>주간 정산 완료</AlertDialogTitle>
-            <AlertDialogDescription>이번 주차의 처리 결과만 선택해 정산 상태를 업데이트합니다.</AlertDialogDescription>
+            <AlertDialogDescription>대상 주차와 그 이후 15개 재무주차(총 16주·256칸)의 JVM 저장 Projection 값을 확인합니다.</AlertDialogDescription>
           </AlertDialogHeader>
           {weeklyCompletionError ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-[12px] leading-5 text-red-800">{weeklyCompletionError}</div> : null}
+          {weeklyProjectionWarning ? (
+            <details open className="max-h-[260px] overflow-auto rounded-md border border-red-300 bg-red-50 p-3 text-[12px]">
+              <summary className="cursor-pointer font-bold text-red-950">서버가 확인한 미입력 항목 {weeklyProjectionWarning.missingCells.length.toLocaleString()}건</summary>
+              <ul className="mt-2 space-y-1" aria-label="Projection 미입력 주차와 항목">
+                {weeklyProjectionWarning.missingCells.map((cell) => <li key={`${cell.yearMonth}:${cell.weekNo}:${cell.lineId}`}>{cell.yearMonth} {cell.weekNo}주차 · {CASHFLOW_SHEET_LINE_LABELS[cell.lineId as CashflowSheetLineId] || cell.lineId}이 미작성입니다.</li>)}
+              </ul>
+            </details>
+          ) : null}
           <fieldset className="space-y-2">
             <legend className="mb-2 text-[13px] font-bold text-slate-900">이번 주차 처리 결과를 하나 선택해 주세요.</legend>
             {([
@@ -3106,7 +3145,7 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={weeklyCompletionBusy}>취소</AlertDialogCancel>
             <Button type="button" disabled={weeklyCompletionBusy || !weeklyUpdateResult} onClick={() => void handleCompleteWeeklyUpdate()}>
-              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}반영
+              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}{weeklyProjectionWarning ? '무시하고 반영' : '반영'}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
