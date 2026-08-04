@@ -3235,6 +3235,9 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
       timeoutMs: 27_000,
     },
   );
+  if (params.payload.decision === 'APPROVE' && response.data.request.status !== 'APPROVED') {
+    throw new Error('월 결산 승인 상태를 확인하지 못했습니다.');
+  }
   return response.data;
 }
 

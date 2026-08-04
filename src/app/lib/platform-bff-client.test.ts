@@ -106,6 +106,24 @@ describe('platform-bff-client', () => {
     }));
   });
 
+  it('does not report a direct canonical review as successful until approval is complete', async () => {
+    const monthRequest = {
+      requestId: 'p001-2026-08', projectId: 'p001', yearMonth: '2026-08', status: 'PENDING',
+      revision: 3, manifestHash: 'sha256:manifest', reviewWarnings: [],
+    };
+    const client = asMockClient({
+      get: vi.fn(),
+      post: vi.fn().mockResolvedValue({ data: { request: { ...monthRequest, status: 'APPROVING' } } }),
+      request: vi.fn(),
+    });
+
+    await expect(reviewCashflowMonthCloseRequestViaBff({
+      tenantId: 'mysc', actor: { uid: 'head-1', role: 'admin' }, projectId: 'p001', requestId: monthRequest.requestId,
+      payload: { decision: 'APPROVE', expectedRevision: 3, expectedManifestHash: 'sha256:manifest' },
+      idempotencyKey: 'month-close-review-1', client,
+    })).rejects.toThrow('월 결산 승인 상태를 확인하지 못했습니다.');
+  });
+
   it('posts all settlement project IDs in one bounded batch request', async () => {
     const data = { items: [], errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' }] };
     const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
@@ -273,6 +291,7 @@ describe('platform-bff-client', () => {
         projectId: 'p001',
         yearMonth: '2026-06',
         status: 'CLOSED',
+        request: { status: 'APPROVED' },
       } })),
       request: vi.fn(),
     });
