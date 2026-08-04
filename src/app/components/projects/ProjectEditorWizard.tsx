@@ -2367,15 +2367,6 @@ export function ProjectEditorWizard({
           <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}잔금 예상 입금 시점`} aria-required={paymentPlan.final > 0} value={paymentExpectedMonths.final} onChange={(event) => updatePaymentExpectedMonth('final', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
       </div>
-      {financialYear ? (
-        <div>
-          <label className="flex items-center gap-2 text-[12px] text-slate-700">
-            <Checkbox checked={financialYear.isSettled === true} onCheckedChange={(checked) => updateFinancialYear(financialYearIndex!, 'isSettled', checked === true)} />
-            {financialYear.year}년 계약/재무 정산 완료
-          </label>
-          <p className="ml-6 mt-1 text-[11px] text-muted-foreground">해당 연도의 계약금 수납과 정산 업무가 모두 끝났음을 표시합니다. 현금흐름 월결산과는 별개입니다.</p>
-        </div>
-      ) : null}
       {requiresYearAdvanceInterimReason ? (
         <div>
           <Label className="text-xs">{financialYear.year}년 선금·중도금 합계 70% 미만 사유 *</Label>
@@ -2521,11 +2512,6 @@ export function ProjectEditorWizard({
 
   const renderReviewStep = () => (
     <div className="space-y-4">
-      {submitIssues.length > 0 ? (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px] text-red-700">
-          제출 전 {submitIssues.map((issue) => issue.label).join(', ')} 입력이 필요합니다.
-        </div>
-      ) : null}
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <Card className="shadow-none lg:col-start-1 lg:row-start-1 lg:self-start">
           <CardHeader className="pb-2"><CardTitle className="text-sm">기본 정보</CardTitle></CardHeader>
