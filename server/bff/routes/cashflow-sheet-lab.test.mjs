@@ -596,7 +596,7 @@ async function stageJanuaryApply(javaWeeklyClient, suffix) {
     .expect(200);
   const stage = await request(app)
     .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-    .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: `stage-${suffix}` })
+    .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: `stage-${suffix}` })
     .expect(200);
   return { app, db, mirror, stage };
 }
@@ -667,7 +667,7 @@ describe('cashflow sheet lab route', () => {
       status: 'FRESH',
       sourceRevision: expect.stringMatching(/^sha256:/),
       targetRevisionAtFetch: expect.stringMatching(/^sha256:/),
-      summary: { cellCount: 32, valueCount: 32, emptyCount: 0, invalidCount: 0 },
+      summary: { cellCount: 1920, valueCount: 1920, emptyCount: 0, invalidCount: 0 },
     });
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
 
@@ -675,7 +675,7 @@ describe('cashflow sheet lab route', () => {
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/mirror')
       .expect(200);
     expect(pinned.body.sourceRevision).toBe(refreshed.body.sourceRevision);
-    expect(pinned.body.cells).toHaveLength(32);
+    expect(pinned.body.cells).toHaveLength(1920);
     expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
     expect(db.__getDocument().cashflowSheetLab.activeWeeks).toBeUndefined();
     await new Promise((resolve) => setImmediate(resolve));
@@ -736,7 +736,7 @@ describe('cashflow sheet lab route', () => {
     expect(mirror[0].data).toMatchObject({ projectId: 'project-a', status: 'FRESH', snapshotSchemaVersion: 2 });
     expect(mirror[0].data.snapshotId).toMatch(/^cfsnap_[a-f0-9]{32}$/);
     expect(snapshots).toHaveLength(1);
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(1);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_months/')).toHaveLength(12);
     const yearSnapshots = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_snapshot_years/');
     expect(yearSnapshots).toHaveLength(9);
     const reordered = yearSnapshots.find(({ data }) => data.year === 2025);
@@ -782,6 +782,7 @@ describe('cashflow sheet lab route', () => {
     const annualCallsReady = new Promise((resolve) => { releaseAnnualCalls = resolve; });
     const javaWeeklyClient = {
       applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
       applyCashflowSheetAnnualTotal: vi.fn(async (input) => {
         annualCallsStarted += 1;
         if (annualCallsStarted === 3) releaseAnnualCalls();
@@ -824,7 +825,7 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'annual-refresh-001' })
       .expect(200);
-    expect(mirror.body.cells).toHaveLength(160);
+    expect(mirror.body.cells).toHaveLength(1920);
     expect(mirror.body.annualCells).toHaveLength(288);
     expect(mirror.body.totalCells).toHaveLength(38);
 
@@ -832,22 +833,31 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'annual-stage-001' })
       .expect(200);
-    expect(stage.body).toMatchObject({ stagedMonths: ['2026-01'], stagedYears: [2024, 2025, 2028], annualLineCount: 96 });
+    expect(stage.body).toMatchObject({
+      stagedMonths: Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`),
+      stagedYears: [2024, 2025, 2028],
+      annualLineCount: 96,
+    });
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_years/')).toHaveLength(3);
 
     const applied = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'annual-apply-001' })
       .expect(200);
-    expect(applied.body).toMatchObject({ appliedMonths: ['2026-01'], appliedYears: [2024, 2025, 2028], appliedLineCount: 256 });
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledWith(expect.objectContaining({
+    expect(applied.body).toMatchObject({
+      appliedMonths: Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`),
+      appliedYears: [2024, 2025, 2028],
+      appliedLineCount: 2016,
+    });
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledWith(expect.objectContaining({
       openingBalanceCells: expect.arrayContaining([
         expect.objectContaining({ year: 2025, mode: 'projection', cashflowLine: 'MYSC_PREPAY_IN', cellState: 'ZERO', amount: 0 }),
         expect.objectContaining({ year: 2025, mode: 'actual', cashflowLine: 'BANK_INTEREST_OUT', cellState: 'VALUE', amount: 50 }),
       ]),
     }));
-    expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].openingBalanceCells).toHaveLength(64);
+    expect(javaWeeklyClient.applyCashflowSheetBatch.mock.calls[0][0].openingBalanceCells).toHaveLength(64);
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'project-a',
       year: 2025,
@@ -902,6 +912,7 @@ describe('cashflow sheet lab route', () => {
     });
     const javaWeeklyClient = {
       applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
       applyCashflowSheetAnnualTotal: vi.fn(async (input) => ({
         ...javaAnnualApplyResponse(input),
         commandName: 'weeklyExpense.cashflowSheetAnnual.apply',
@@ -977,6 +988,7 @@ describe('cashflow sheet lab route', () => {
         return javaAnnualApplyResponse(input);
       }),
       applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
+      applyCashflowSheetBatch: vi.fn(async (input) => javaBatchApplyResponse(input, `sha256:${'1'.repeat(64)}`)),
     };
     const app = createApp({
       db,
@@ -1033,7 +1045,8 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     expect(replay.body.appliedYears).toEqual([2024, 2025, 2028]);
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).toHaveBeenCalledTimes(4);
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);
     expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toMatchObject({
       status: 'APPLIED',
       stagedRunId: stage.body.runId,
@@ -2138,6 +2151,7 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({
         expectedMirrorRevision: mirror.body.sourceRevision,
+        yearMonth: '2026-01',
         idempotencyKey: 'stage-001',
       })
       .expect(200);
@@ -2234,6 +2248,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const payload = {
       expectedMirrorRevision: mirror.body.sourceRevision,
+      yearMonth: '2026-01',
       idempotencyKey: 'stage-replay-001',
     };
 
@@ -2283,6 +2298,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const payload = {
       expectedMirrorRevision: mirror.body.sourceRevision,
+      yearMonth: '2026-01',
       idempotencyKey: 'stage-overlap-001',
     };
     let tick = 0;
@@ -2337,7 +2353,7 @@ describe('cashflow sheet lab route', () => {
 
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-invalid-month' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-invalid-month' })
       .expect(200);
     expect(stage.body).toMatchObject({
       status: 'BLOCKED',
@@ -2385,7 +2401,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-empty-cell' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-empty-cell' })
       .expect(200);
     const removal = stage.body.candidates.find((candidate) => (
       candidate.mode === 'projection' && candidate.lineId === 'MYSC_PREPAY_IN'
@@ -2441,7 +2457,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-source-specific-actual' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-source-specific-actual' })
       .expect(200);
 
     expect(stage.body.candidates).toContainEqual(expect.objectContaining({
@@ -2494,7 +2510,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-legacy-actual' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-legacy-actual' })
       .expect(200);
 
     expect(stage.body.candidates).toContainEqual(expect.objectContaining({
@@ -2543,7 +2559,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-close' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-pending-close' })
       .expect(200);
 
     expect(stage.body.pendingApprovalDifferenceCount).toBe(160);
@@ -2632,7 +2648,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-race' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-pending-race' })
       .expect(200);
     db.__getDocument('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-01').status = 'APPROVING';
 
@@ -2678,7 +2694,7 @@ describe('cashflow sheet lab route', () => {
     const mirror = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({ idempotencyKey: 'refresh-pending-100' }).expect(200);
     const stage = await request(app).post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-pending-100' }).expect(200);
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-pending-100' }).expect(200);
     expect(stage.body.pendingApprovalDifferenceCount).toBe(100);
     const applyPayload = {
       stageRunId: stage.body.runId,
@@ -2793,7 +2809,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-closed-month' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-closed-month' })
       .expect(200);
 
     expect(stage.body).toMatchObject({
@@ -2890,6 +2906,7 @@ describe('cashflow sheet lab route', () => {
     const canonicalBefore = db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_weeks/');
     const payload = {
       expectedMirrorRevision: mirror.body.sourceRevision,
+      yearMonth: '2026-01',
       idempotencyKey: 'stage-closed-month-same-values',
     };
     const stage = await request(app)
@@ -2976,6 +2993,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const payload = {
       expectedMirrorRevision: mirror.body.sourceRevision,
+      yearMonth: '2026-01',
       idempotencyKey: 'stage-expired-no-changes',
     };
     let now = Date.now();
@@ -3178,7 +3196,7 @@ describe('cashflow sheet lab route', () => {
     });
   });
 
-  it('stages every complete month from a multi-month mirror for one explicit apply', async () => {
+  it('stages every complete month from the selected tab for one explicit apply', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -3226,28 +3244,33 @@ describe('cashflow sheet lab route', () => {
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-two-months' })
       .expect(200);
 
-    expect(stage.body.stagedMonths).toEqual(['2026-01', '2026-02']);
+    const fullYearMonths = Array.from(
+      { length: 12 },
+      (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`,
+    );
+    expect(stage.body.stagedMonths).toEqual(fullYearMonths);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/').length).toBeGreaterThan(0);
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_runs/')).toHaveLength(1);
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(2);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(12);
     const apply = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
       .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-two-months' })
       .expect(200);
 
     expect(apply.body).toMatchObject({
-      appliedMonths: ['2026-01', '2026-02'],
-      appliedLineCount: 320,
-      verifiedLineCount: 320,
+      appliedMonths: fullYearMonths,
+      appliedLineCount: 1920,
+      verifiedLineCount: 1920,
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledTimes(1);
     expect(javaWeeklyClient.applyCashflowSheetBatch).toHaveBeenCalledWith(expect.objectContaining({
       targetRevision: mirror.body.targetRevisionAtFetch,
-      months: [
+      months: expect.arrayContaining([
         expect.objectContaining({ yearMonth: '2026-01', cells: expect.any(Array) }),
         expect.objectContaining({ yearMonth: '2026-02', cells: expect.any(Array) }),
-      ],
+      ]),
     }));
+    expect(javaWeeklyClient.applyCashflowSheetBatch.mock.calls[0][0].months).toHaveLength(12);
     expect(editLeaseService.release).not.toHaveBeenCalled();
   });
 
@@ -3510,7 +3533,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-jvm-mismatch' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-jvm-mismatch' })
       .expect(200);
 
     await request(app)
@@ -3567,7 +3590,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-resume-months' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-resume-months' })
       .expect(200);
     const headers = {
       'x-edit-session-id': 'session-a',
@@ -3935,7 +3958,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-formula-mismatch' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-formula-mismatch' })
       .expect(200);
 
     const currentMirror = db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a');
@@ -4028,7 +4051,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-legacy-month-close' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-legacy-month-close' })
       .expect(200);
 
     await request(app)
@@ -4076,7 +4099,7 @@ describe('cashflow sheet lab route', () => {
 
     await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: `stage-invalid-month-close-${_field}` })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: `stage-invalid-month-close-${_field}` })
       .expect(409)
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_contract_invalid'));
   });
@@ -4114,7 +4137,7 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
     const stage = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
-      .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-settled-change' })
+      .send({ expectedMirrorRevision: mirror.body.sourceRevision, yearMonth: '2026-01', idempotencyKey: 'stage-settled-change' })
       .expect(200);
 
     const applied = await request(app)
@@ -4126,7 +4149,7 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab.mock.calls[0][0].settledWeekChangeConfirmation).toBeUndefined();
   });
 
-  it('blocks a partial month instead of authoritatively replacing only weeks 4 and 5', async () => {
+  it('ignores a legacy saved weeks 4 and 5 range and stages the full selected tab', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -4147,12 +4170,10 @@ describe('cashflow sheet lab route', () => {
         matrix: buildMatrixWithWeekLabels(['26-2-4', '26-2-5']),
       })),
     };
-    const javaWeeklyClient = { applyCashflowSheetLab: vi.fn() };
-
     const app = createApp({
       db,
       googleSheetsService,
-      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+      routeOptions: { editLeasesEnabled: true },
     });
     const mirror = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
@@ -4163,27 +4184,17 @@ describe('cashflow sheet lab route', () => {
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-fixed-weeks' })
       .expect(200);
     expect(stage.body).toMatchObject({
-      status: 'BLOCKED',
-      blockedMonths: ['2026-02'],
-      stagedLineCount: 0,
+      status: 'READY',
+      blockedMonths: [],
+      stagedLineCount: 1920,
     });
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-002' })
-      .expect(409)
-      .expect((response) => {
-        expect(response.body.code).toBe('cashflow_sheet_stage_run_blocked');
-      });
-    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(mirror.body.activeWeekRange).toMatchObject({ startWeek: '', endWeek: '' });
+    expect(mirror.body.cells).toHaveLength(1920);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(12);
     expect(db.__getDocument('orgs/tenant-a/cashflow_weeks/project-a-2026-02-w4')).toBeUndefined();
   });
 
-  it('blocks weeks 1 and 2 because they are not a complete five-week finance month', async () => {
+  it('ignores a legacy saved weeks 1 and 2 range and stages the full selected tab', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -4216,11 +4227,13 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(stage.body).toMatchObject({
-      status: 'BLOCKED',
-      blockedMonths: ['2026-01'],
-      stagedLineCount: 0,
+      status: 'READY',
+      blockedMonths: [],
+      stagedLineCount: 1920,
     });
-    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(0);
+    expect(mirror.body.activeWeekRange).toMatchObject({ startWeek: '', endWeek: '' });
+    expect(mirror.body.cells).toHaveLength(1920);
+    expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_sheet_stage_months/')).toHaveLength(12);
   });
 
   it('retires both sheet write-back routes for inbound-only finance sync', async () => {
