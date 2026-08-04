@@ -386,6 +386,7 @@ export function CashflowProjectSheet({
   const [monthCloseBusy, setMonthCloseBusy] = useState(false);
   const [selectedExecutiveApproverId, setSelectedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [savedExecutiveApproverId, setSavedExecutiveApproverId] = useState(project?.executiveApproverId || '');
+  const weeklyCompletionBlockedByApprover = !savedExecutiveApproverId.trim();
   const [executiveApproverBusy, setExecutiveApproverBusy] = useState(false);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
@@ -729,7 +730,7 @@ export function CashflowProjectSheet({
   }, [loadMonthCloseRequest]);
 
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
-    if (!canCompleteWeekly || !weeklyUpdateResult) return;
+    if (!canCompleteWeekly || weeklyCompletionBlockedByApprover || !weeklyUpdateResult) return;
     setWeeklyCompletionBusy(true);
     const startedAt = Date.now();
     const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
@@ -798,7 +799,7 @@ export function CashflowProjectSheet({
     } finally {
       setWeeklyCompletionBusy(false);
     }
-  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
+  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyCompletionBlockedByApprover, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
 
   const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
     setWeeklyComplianceHistoryLoading(true);
@@ -2680,7 +2681,7 @@ export function CashflowProjectSheet({
                       size="sm"
                       variant="outline"
                       className="h-8 shrink-0 rounded-md border-slate-300 bg-white px-3 text-[12px] font-semibold text-[#17324D]"
-                      disabled={weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
+                      disabled={weeklyCompletionBlockedByApprover || weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
                       onClick={() => {
                         setWeeklyCompletionError('');
                         setWeeklyProjectionWarning(null);
@@ -2693,6 +2694,9 @@ export function CashflowProjectSheet({
                     </Button>
                   ) : null}
                 </div>
+                {canCompleteWeekly && weeklyCompletionBlockedByApprover ? (
+                  <div className="mt-2 text-[12px] font-medium text-red-700">조직장을 먼저 선택·확정해 주세요.</div>
+                ) : null}
                 <div className="mt-3 flex items-center gap-4 text-[12px] text-muted-foreground">
                   <span>누적 미준수 <strong className="ml-1 text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</strong></span>
                   <span>기한 내 완료 <strong className="ml-1 text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</strong></span>
