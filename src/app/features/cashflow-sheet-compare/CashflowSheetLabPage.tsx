@@ -35,7 +35,6 @@ import {
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
-import { resolveFinanceWeekForDate } from '../../platform/cashflow-weeks';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from '../../components/cashflow/CashflowFormulaMismatchDialog';
 
@@ -188,23 +187,17 @@ function buildSourceKey({
   sourceYear,
   value,
   sheetName,
-  startWeek,
-  endWeek,
 }: {
   projectId: string;
   sourceYear: number;
   value: string;
   sheetName: string;
-  startWeek: string;
-  endWeek: string;
 }) {
   return JSON.stringify({
     projectId: projectId.trim(),
     sourceYear,
     value: value.trim(),
     sheetName: sheetName.trim(),
-    startWeek: startWeek.trim(),
-    endWeek: endWeek.trim(),
   });
 }
 
@@ -261,23 +254,11 @@ export function CashflowSheetLabPage({
     const financialYears = (myProject?.financialYears || []).map((row) => row.year).filter(Number.isSafeInteger);
     return financialYears.length > 0 ? financialYears : [2026];
   }, [myProject?.contractEnd, myProject?.contractStart, myProject?.financialYears]);
-  const projectWeekRange = useCallback((year: number) => {
-    const firstYear = projectYears[0];
-    const lastYear = projectYears.at(-1);
-    const startDate = year === firstYear && myProject?.contractStart ? myProject.contractStart : `${year}-01-01`;
-    const endDate = year === lastYear && myProject?.contractEnd ? myProject.contractEnd : `${year}-12-31`;
-    return {
-      startWeek: resolveFinanceWeekForDate(startDate)?.label || `${String(year).slice(2)}-1-1`,
-      endWeek: resolveFinanceWeekForDate(endDate)?.label || `${String(year).slice(2)}-12-5`,
-    };
-  }, [myProject?.contractEnd, myProject?.contractStart, projectYears]);
   const [sourceYear, setSourceYear] = useState(() => (
     projectYears.includes(2026) ? 2026 : projectYears[0] || 2026
   ));
   const [sheetLink, setSheetLink] = useState('');
   const [sheetName, setSheetName] = useState('cashflow(사용내역 연동)');
-  const [startWeek, setStartWeek] = useState('');
-  const [endWeek, setEndWeek] = useState('');
   const [mirror, setMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
   const [reviewedSourceKey, setReviewedSourceKey] = useState('');
   const [savedConfig, setSavedConfig] = useState<CashflowSheetLabShareAccountResult['config']>(null);
@@ -328,15 +309,13 @@ export function CashflowSheetLabPage({
   const tutorialStorageKey = projectId ? `cashflow-sheet-tutorial:${projectId}` : '';
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
-  const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim() || startWeek.trim() || endWeek.trim());
+  const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim());
   const sourceKey = useMemo(() => buildSourceKey({
     projectId,
     sourceYear,
     value: sheetLink,
     sheetName,
-    startWeek,
-    endWeek,
-  }), [endWeek, projectId, sheetLink, sheetName, sourceYear, startWeek]);
+  }), [projectId, sheetLink, sheetName, sourceYear]);
   const detectedYearModes = useMemo(() => (mirror?.sheetFacts?.annualCashflowTotals || []).map((row) => {
     const sources = new Set([row.projection.source, row.actual.source]);
     const valueCellCount = row.projection.valueCellCount + row.actual.valueCellCount;
@@ -352,8 +331,6 @@ export function CashflowSheetLabPage({
           sourceYear,
           value: savedConfig.value,
           sheetName: savedConfig.sheetName || '',
-          startWeek: savedConfig.startWeek || '',
-          endWeek: savedConfig.endWeek || '',
         })
       : ''
   ), [projectId, savedConfig, sourceYear]);
@@ -530,13 +507,6 @@ export function CashflowSheetLabPage({
   }, [projectYears, sourceYear]);
 
   useEffect(() => {
-    if (savedConfig?.sourceYear === sourceYear || startWeek || endWeek) return;
-    const range = projectWeekRange(sourceYear);
-    setStartWeek(range.startWeek);
-    setEndWeek(range.endWeek);
-  }, [endWeek, projectWeekRange, savedConfig?.sourceYear, sourceYear, startWeek]);
-
-  useEffect(() => {
     if (routeProjectId || !projectId) return;
     navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true });
   }, [currentPath, navigate, projectId, routeProjectId]);
@@ -573,13 +543,10 @@ export function CashflowSheetLabPage({
 
   function handleSourceYearChange(nextYear: number) {
     const nextConfig = savedConfigs.find((config) => config.sourceYear === nextYear) || null;
-    const range = projectWeekRange(nextYear);
     setSourceYear(nextYear);
     setSavedConfig(nextConfig);
     setSheetLink(nextConfig?.value || '');
     setSheetName(nextConfig?.sheetName || 'cashflow(사용내역 연동)');
-    setStartWeek(nextConfig?.startWeek || range.startWeek);
-    setEndWeek(nextConfig?.endWeek || range.endWeek);
     setReviewedSourceKey('');
     setReflectResult(null);
     setStatusMessage('');
@@ -617,8 +584,6 @@ export function CashflowSheetLabPage({
       if (scopedConfig?.value && (forceHydrate || !hasSheetDraft || scopedConfig.sourceYear !== savedConfig?.sourceYear)) {
         setSheetLink(scopedConfig.value);
         setSheetName(scopedConfig.sheetName || 'cashflow(사용내역 연동)');
-        setStartWeek(scopedConfig.startWeek || '');
-        setEndWeek(scopedConfig.endWeek || '');
       }
       if (!scopedConfig?.value) setStatusMessage('공유 계정을 확인했습니다.');
       logCashflowLab('share_account.load.ok', {
@@ -636,13 +601,10 @@ export function CashflowSheetLabPage({
   useEffect(() => {
     if (!projectId || !actor.idToken) return;
     configLoadGenerationRef.current += 1;
-    const range = projectWeekRange(sourceYear);
     setSavedConfig(null);
     setSavedConfigs([]);
     setSheetLink('');
     setSheetName('cashflow(사용내역 연동)');
-    setStartWeek(range.startWeek);
-    setEndWeek(range.endWeek);
     setMirror(null);
     setReviewedSourceKey('');
     setReflectResult(null);
@@ -674,8 +636,6 @@ export function CashflowSheetLabPage({
           sourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
-          startWeek: startWeek || undefined,
-          endWeek: endWeek || undefined,
         })
       ));
       if (!result) return;
@@ -713,8 +673,6 @@ export function CashflowSheetLabPage({
           sourceYear,
           value: sheetLink,
           sheetName: sheetName || undefined,
-          startWeek: startWeek || undefined,
-          endWeek: endWeek || undefined,
           idempotencyKey: refreshIdempotencyKey,
         })
       ));
@@ -731,7 +689,7 @@ export function CashflowSheetLabPage({
           }
         : result);
       setReviewedSourceKey(result.status === 'FRESH' && result.sourceRevision
-        ? buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })
+        ? buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName })
         : '');
       if (result.status === 'FRESH' && result.sourceRevision) {
         setStatusMessage('시트 최신값을 고정했습니다. 시트 값으로 덮어쓸 수 있습니다.');
@@ -1081,26 +1039,12 @@ export function CashflowSheetLabPage({
                 aria-label="Google Sheet 링크"
                 className="h-11 rounded-none text-[13px]"
               />
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div>
                 <Input
                   value={sheetName}
                   onChange={(event) => setSheetName(event.target.value)}
                   placeholder="시트 탭 이름"
                   aria-label="시트 탭 이름"
-                  className="h-10 rounded-none text-[12px]"
-                />
-                <Input
-                  value={startWeek}
-                  onChange={(event) => setStartWeek(event.target.value)}
-                  placeholder="시작 주차"
-                  aria-label="시작 주차"
-                  className="h-10 rounded-none text-[12px]"
-                />
-                <Input
-                  value={endWeek}
-                  onChange={(event) => setEndWeek(event.target.value)}
-                  placeholder="종료 주차"
-                  aria-label="종료 주차"
                   className="h-10 rounded-none text-[12px]"
                 />
               </div>
@@ -1117,7 +1061,7 @@ export function CashflowSheetLabPage({
                   {isCurrentSheetConfigSaved ? '저장됨' : '시트 정보 저장'}
                 </Button>
                 <div className="text-[12px] text-slate-500">
-                  {sourceYear}년 링크와 {String(sourceYear).slice(2)}-1-1 ~ {String(sourceYear).slice(2)}-12-5 범위를 입력하세요.
+                  {sourceYear}년 링크와 탭 이름을 입력하면 선택한 탭 전체를 불러옵니다.
                 </div>
               </div>
               <div className="mt-2 space-y-2 border-l-2 border-blue-200 pl-3 text-[12px] text-slate-600" aria-label="Google Sheet 편집자 공유 안내">
@@ -1431,20 +1375,18 @@ export function CashflowSheetLabPage({
                 <DialogHeader>
                   <div className="text-[12px] font-bold text-blue-700">MISSION 2 · 연결 정보</div>
                   <DialogTitle className="text-[25px] font-black leading-tight text-slate-950">
-                    이 네 칸만 시트와 똑같이 적어주세요
+                    이 두 칸만 시트와 똑같이 적어주세요
                   </DialogTitle>
                   <DialogDescription className="text-[14px] leading-relaxed text-slate-600">
-                    Google Sheet 링크, 탭 이름, 시작 주차와 종료 주차를 입력합니다.
+                    Google Sheet 링크와 탭 이름을 입력합니다. 선택한 탭 전체를 불러옵니다.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="mt-6 border-2 border-blue-200 bg-blue-50/60 p-4 shadow-[0_12px_30px_rgba(79,124,255,0.1)]">
                   <div className="mb-3 h-10 border border-blue-300 bg-white px-3 py-2 text-[12px] text-slate-400">
                     https://docs.google.com/spreadsheets/d/...
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div>
                     <div className="border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700">cashflow(사용내역 연동)</div>
-                    <div className="border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700">{startWeek || '예: 26-1-1'}</div>
-                    <div className="border border-slate-200 bg-white px-3 py-2 text-[12px] font-medium text-slate-700">{endWeek || '예: 26-12-5'}</div>
                   </div>
                 </div>
                 <div className="mt-4 flex gap-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-[12px] leading-relaxed text-amber-950">

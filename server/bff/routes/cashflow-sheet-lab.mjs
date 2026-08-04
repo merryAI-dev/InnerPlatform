@@ -516,8 +516,8 @@ function resolvePreviewSource(parsed, savedConfig) {
       sourceYear: Number(parsed.sourceYear || savedConfig?.sourceYear),
       value,
       sheetName: readOptionalText(parsed.sheetName) || undefined,
-      startWeek: readOptionalText(parsed.startWeek),
-      endWeek: readOptionalText(parsed.endWeek),
+      startWeek: '',
+      endWeek: '',
       source: 'request',
     };
   }
@@ -526,8 +526,8 @@ function resolvePreviewSource(parsed, savedConfig) {
       sourceYear: Number(savedConfig.sourceYear),
       value: savedConfig.value,
       sheetName: readOptionalText(parsed.sheetName) || savedConfig.sheetName || undefined,
-      startWeek: readOptionalText(parsed.startWeek) || savedConfig.startWeek,
-      endWeek: readOptionalText(parsed.endWeek) || savedConfig.endWeek,
+      startWeek: '',
+      endWeek: '',
       source: 'saved_config',
     };
   }
@@ -566,14 +566,11 @@ function normalizeWeekRange({ startWeek, endWeek }) {
 }
 
 function computeCashflowSheetConfigRevision(config = {}) {
-  const weekRange = normalizeWeekRange(config);
   const rawValue = readOptionalText(config?.value);
   return `sha256:${stableHash({
     sourceYear: Number(config?.sourceYear) || null,
     spreadsheetId: extractSpreadsheetId(rawValue) || rawValue,
     sheetName: readOptionalText(config?.sheetName),
-    startWeek: weekRange.startWeek,
-    endWeek: weekRange.endWeek,
   })}`;
 }
 
@@ -804,8 +801,8 @@ async function saveCashflowSheetLabConfig({ db, tenantId, projectId, project, pa
     sheetName: readOptionalText(parsed.sheetName),
     spreadsheetId,
     spreadsheetTitle: shouldKeepVerifiedMetadata ? readOptionalText(existingConfig?.spreadsheetTitle) : '',
-    startWeek: readOptionalText(parsed.startWeek),
-    endWeek: readOptionalText(parsed.endWeek),
+    startWeek: '',
+    endWeek: '',
     weekBasis: CASHFLOW_WEEK_BASIS,
     totalBasis: CASHFLOW_WEEK_BASIS,
     updatedAt: now,
@@ -4008,14 +4005,13 @@ export function mountCashflowSheetLabRoutes(app, {
     const { tenantId } = req.context;
     const { projectId } = req.params;
     const parsed = parseWithSchema(cashflowSheetLabConfigSchema, req.body, 'Invalid cashflow sheet lab config payload');
-    normalizeWeekRange(parsed);
     logCashflowSheetLab('config.save.start', req, {
       projectId,
       authMode: 'bff_config_only',
       sheetName: parsed.sheetName || null,
       valueProvided: Boolean(parsed.value),
-      startWeek: parsed.startWeek || null,
-      endWeek: parsed.endWeek || null,
+      startWeek: null,
+      endWeek: null,
     });
 
     const project = await readProjectDocument(db, tenantId, projectId);

@@ -435,6 +435,7 @@ export type SettlementSystemCode =
   | 'NIPA'           // 정보통신산업진흥원 사업관리시스템
   | 'ACCOUNTANT'     // 회계사정산 (전문 회계법인 정산)
   | 'PRIVATE'        // 민간사업
+  | 'OTHER'          // 기타 직접 입력
   | 'NONE';          // 미정/없음
 
 export type LaborSettlementBasis =
@@ -475,7 +476,8 @@ export const SETTLEMENT_SYSTEM_LABELS: Record<SettlementSystemCode, string> = {
   NIPA: 'NIPA 사업관리시스템',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간사업',
-  NONE: '정산없음',
+  OTHER: '기타',
+  NONE: '시스템 미사용',
 };
 
 export const PROJECT_SETTLEMENT_SYSTEM_CODES: SettlementSystemCode[] = [
@@ -488,6 +490,7 @@ export const PROJECT_SETTLEMENT_SYSTEM_CODES: SettlementSystemCode[] = [
   'KOCCA_PMS',
   'NIPA',
   'IRIS',
+  'OTHER',
 ];
 
 export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
@@ -505,6 +508,7 @@ export const SETTLEMENT_SYSTEM_SHORT: Record<SettlementSystemCode, string> = {
   NIPA: 'NIPA',
   ACCOUNTANT: '회계사정산',
   PRIVATE: '민간',
+  OTHER: '기타',
   NONE: '정산없음',
 };
 
@@ -613,6 +617,7 @@ export interface ProjectFinancialYear {
   profitRate: number;
   confirmed: boolean;
   paymentPlan?: Project['paymentPlan'];
+  paymentExpectedMonths?: ProjectPaymentExpectedMonths;
   finalPaymentExpectedWeek?: string;
   advanceInterimBelow70Reason?: string;
   isSettled?: boolean;
@@ -692,6 +697,7 @@ export interface Project {
   accountType: AccountType;      // 전용통장/운영통장
   interestRefundPolicy?: InterestRefundPolicy;
   settlementSystem?: SettlementSystemCode;
+  settlementSystemOther?: string;
   laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;
@@ -917,6 +923,7 @@ export interface ProjectRequestPayload {
   accountType: AccountType;
   interestRefundPolicy?: InterestRefundPolicy;
   settlementSystem?: SettlementSystemCode;
+  settlementSystemOther?: string;
   laborSettlementBasis?: LaborSettlementBasis;
   fundInputMode?: ProjectFundInputMode;
   settlementSheetPolicy?: SettlementSheetPolicy;

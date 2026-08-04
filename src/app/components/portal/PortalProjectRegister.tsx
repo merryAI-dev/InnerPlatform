@@ -78,7 +78,7 @@ function RegistrationEditor({
 }) {
   const navigate = useNavigate();
   const { orgId } = useFirebase();
-  const { members } = usePortalStore();
+  const { members, projects } = usePortalStore();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [record, setRecord] = useState(initialRecord);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -284,6 +284,7 @@ function RegistrationEditor({
         members={members}
         requesterId={actor.uid}
         departmentOptions={departmentOptions}
+        settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
         topSlot={topSlot}
         readOnly={!lease.canEdit}
         autosave={autosave}

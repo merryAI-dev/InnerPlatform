@@ -110,6 +110,7 @@ export interface ProjectEditorDraft {
   accountType: AccountType;
   interestRefundPolicy: InterestRefundPolicy | '';
   settlementSystem: SettlementSystemCode;
+  settlementSystemOther: string;
   laborSettlementBasis: LaborSettlementBasis;
   fundInputMode: ProjectFundInputMode;
   settlementSheetPolicy: SettlementSheetPolicy;
@@ -215,6 +216,7 @@ const DEFAULT_DRAFT: ProjectEditorDraft = {
   accountType: 'NONE',
   interestRefundPolicy: '',
   settlementSystem: 'NONE',
+  settlementSystemOther: '',
   laborSettlementBasis: 'NONE',
   fundInputMode: 'BANK_UPLOAD',
   settlementSheetPolicy: createSettlementSheetPolicy('STANDARD'),
@@ -317,8 +319,9 @@ function projectFinancialYears(
       profitRate: projectFinancialYearProfitRate(contractAmount, totalRevenueAmount),
       confirmed: source.confirmed === true,
       paymentPlan: normalizePaymentPlan(source.paymentPlan),
+      paymentExpectedMonths: normalizePaymentExpectedMonths(source.paymentExpectedMonths),
       finalPaymentExpectedWeek: normalizeFinanceWeek(source.finalPaymentExpectedWeek, year),
-      advanceInterimBelow70Reason: text(source.advanceInterimBelow70Reason),
+      advanceInterimBelow70Reason: String(source.advanceInterimBelow70Reason || ''),
       isSettled: source.isSettled === true,
     });
   }
@@ -344,6 +347,7 @@ function projectFinancialYears(
         : 0,
       confirmed: false,
       paymentPlan: { contract: 0, interim: 0, final: 0 },
+      paymentExpectedMonths: { contract: '', interim: '', final: '' },
       finalPaymentExpectedWeek: '',
       advanceInterimBelow70Reason: '',
       isSettled: false,
@@ -352,7 +356,11 @@ function projectFinancialYears(
 }
 
 function projectFinancialYearsForWrite(rows: ProjectFinancialYear[]): ProjectFinancialYear[] {
-  return rows.map(({ finalPaymentExpectedWeek: _historicalWeek, ...row }) => row);
+  return rows.map(({ finalPaymentExpectedWeek: _historicalWeek, ...row }) => ({
+    ...row,
+    paymentExpectedMonths: normalizePaymentExpectedMonths(row.paymentExpectedMonths),
+    advanceInterimBelow70Reason: text(row.advanceInterimBelow70Reason),
+  }));
 }
 
 function registrationConfirmations(value: unknown): ProjectRegistrationConfirmations {
@@ -491,7 +499,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'settlementType', label: '정산 유형', before: (project) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(project.settlementType)] || '-', after: (draft) => SETTLEMENT_TYPE_LABELS[normalizeSettlementType(draft.settlementType)] || '-' },
   { key: 'basis', label: '정산 기준', before: (project) => BASIS_LABELS[normalizeBasis(project.basis)] || '-', after: (draft) => BASIS_LABELS[normalizeBasis(draft.basis)] || '-' },
   { key: 'accountType', label: '통장 유형', before: (project) => ACCOUNT_TYPE_LABELS[normalizeAccountType(project.accountType)] || '-', after: (draft) => ACCOUNT_TYPE_LABELS[normalizeAccountType(draft.accountType)] || '-' },
-  { key: 'settlementSystem', label: '정산 시스템', before: (project) => SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(project.settlementSystem)] || '-', after: (draft) => SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(draft.settlementSystem)] || '-' },
+  { key: 'settlementSystem', label: '정산 시스템', before: (project) => normalizeSettlementSystemCode(project.settlementSystem) === 'OTHER' ? normalizeChangeValue(project.settlementSystemOther) : SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(project.settlementSystem)] || '-', after: (draft) => normalizeSettlementSystemCode(draft.settlementSystem) === 'OTHER' ? normalizeChangeValue(draft.settlementSystemOther) : SETTLEMENT_SYSTEM_LABELS[normalizeSettlementSystemCode(draft.settlementSystem)] || '-' },
   { key: 'laborSettlementBasis', label: '인건비 정산 기준', before: (project) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(project.laborSettlementBasis)] || '-', after: (draft) => LABOR_SETTLEMENT_BASIS_LABELS[normalizeLaborSettlementBasis(draft.laborSettlementBasis)] || '-' },
   { key: 'fundInputMode', label: '자금 입력 방식', before: (project) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(project.fundInputMode)] || '-', after: (draft) => PROJECT_FUND_INPUT_MODE_LABELS[normalizeProjectFundInputMode(draft.fundInputMode)] || '-' },
   { key: 'registeredByName', label: '사업 담당자', before: (project) => normalizeChangeValue(project.registeredByName || project.managerName), after: (draft) => normalizeChangeValue(draft.registeredByName || draft.managerName) },
@@ -501,7 +509,7 @@ const REVIEW_CHANGE_FIELDS: Array<{
   { key: 'paymentPlan', label: '입금 분할', before: (project) => formatPaymentPlanForChange(project.paymentPlan), after: (draft) => formatPaymentPlanForChange(draft.paymentPlan) },
   { key: 'paymentExpectedMonths', label: '입금 예상월', before: (project) => formatPaymentExpectedMonthsForChange(project.paymentExpectedMonths), after: (draft) => formatPaymentExpectedMonthsForChange(draft.paymentExpectedMonths) },
   { key: 'advanceInterimBelow70Reason', label: '선금·중도금 70% 미만 사유', before: (project) => normalizeChangeValue(project.advanceInterimBelow70Reason), after: (draft) => normalizeChangeValue(draft.advanceInterimBelow70Reason) },
-  { key: 'paymentPlanDesc', label: '입금 계획', before: (project) => normalizeChangeValue(project.paymentPlanDesc), after: (draft) => normalizeChangeValue(draft.paymentPlanDesc) },
+  { key: 'paymentPlanDesc', label: '기타 메모', before: (project) => normalizeChangeValue(project.paymentPlanDesc), after: (draft) => normalizeChangeValue(draft.paymentPlanDesc) },
   { key: 'finalPaymentNote', label: '최종 입금 메모', before: (project) => normalizeChangeValue(project.finalPaymentNote), after: (draft) => normalizeChangeValue(draft.finalPaymentNote) },
   { key: 'projectPurpose', label: '프로젝트 목적', before: (project) => normalizeChangeValue(project.projectPurpose), after: (draft) => normalizeChangeValue(draft.projectPurpose) },
   { key: 'description', label: '주요 내용', before: (project) => normalizeChangeValue(project.description), after: (draft) => normalizeChangeValue(draft.description) },
@@ -560,6 +568,9 @@ export function createProjectEditorDraft(overrides: Partial<ProjectEditorDraft> 
     settlementSystem: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeSettlementSystemCode(overrides.settlementSystem ?? DEFAULT_DRAFT.settlementSystem),
+    settlementSystemOther: !settlementDetailsEnabled
+      ? ''
+      : String(overrides.settlementSystemOther || ''),
     laborSettlementBasis: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeLaborSettlementBasis(overrides.laborSettlementBasis ?? DEFAULT_DRAFT.laborSettlementBasis),
@@ -690,6 +701,9 @@ export function buildProjectEditorDraftFromProject(
     settlementSystem: normalizeSettlementSystemCode(
       normalizedProject.settlementSystem || payload?.settlementSystem,
     ),
+    settlementSystemOther: text(
+      normalizedProject.settlementSystemOther || payload?.settlementSystemOther,
+    ),
     laborSettlementBasis: normalizeLaborSettlementBasis(
       normalizedProject.laborSettlementBasis || payload?.laborSettlementBasis,
     ),
@@ -781,6 +795,7 @@ export function buildProjectRequestPayloadFromDraft(draftInput: ProjectEditorDra
     accountType: normalizeAccountType(draft.accountType),
     interestRefundPolicy: normalizeInterestRefundPolicy(draft.interestRefundPolicy) || undefined,
     settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
+    settlementSystemOther: draft.settlementSystem === 'OTHER' ? text(draft.settlementSystemOther) : '',
     laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
@@ -890,6 +905,7 @@ export function buildProjectEditorProjectPatch(
     accountType: normalizeAccountType(draft.accountType),
     interestRefundPolicy: normalizeInterestRefundPolicy(draft.interestRefundPolicy) || undefined,
     settlementSystem: normalizeSettlementSystemCode(draft.settlementSystem),
+    settlementSystemOther: draft.settlementSystem === 'OTHER' ? text(draft.settlementSystemOther) : '',
     laborSettlementBasis: normalizeLaborSettlementBasis(draft.laborSettlementBasis),
     fundInputMode: normalizeProjectFundInputMode(draft.fundInputMode),
     settlementSheetPolicy: normalizeSettlementSheetPolicy(draft.settlementSheetPolicy, normalizeProjectFundInputMode(draft.fundInputMode)),
@@ -911,7 +927,7 @@ export function buildProjectEditorProjectPatch(
     salesVatAmount: nonNegativeAmount(draft.salesVatAmount),
     financialInputFlags: flags,
     registrationRequirementsVersion: draft.registrationRequirementsVersion,
-    financialYears: draft.financialYears,
+    financialYears: projectFinancialYearsForWrite(draft.financialYears),
     registrationOptionalDocumentNotes: draft.registrationOptionalDocumentNotes,
     registrationConfirmations: draft.registrationConfirmations,
     finalPaymentExpectedWeek: normalizeFinanceWeek(draft.finalPaymentExpectedWeek),

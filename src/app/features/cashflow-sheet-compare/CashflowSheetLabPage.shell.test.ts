@@ -85,7 +85,10 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');
-    expect(pageSource).toContain('buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName, startWeek, endWeek })');
+    expect(pageSource).toContain('buildSourceKey({ projectId, sourceYear, value: sheetLink, sheetName: nextSheetName })');
+    expect(pageSource).not.toContain('startWeek');
+    expect(pageSource).not.toContain('endWeek');
+    expect(pageSource).toContain('선택한 탭 전체를 불러옵니다.');
     expect(pageSource).toContain('expectedMirrorRevision,');
     expect(pageSource).toContain('const refreshIdempotencyKey =');
     expect(pageSource).toContain('const stageIdempotencyKey =');

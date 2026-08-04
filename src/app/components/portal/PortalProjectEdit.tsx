@@ -225,6 +225,7 @@ function ProjectInfoEditor({
   members,
   project,
   requestDoc,
+  settlementSystemOptions,
   session,
 }: {
   actor: ActorLike;
@@ -234,6 +235,7 @@ function ProjectInfoEditor({
   members: ReturnType<typeof usePortalStore>['members'];
   project: Project;
   requestDoc: ProjectRequest | null;
+  settlementSystemOptions: string[];
   session: EditSession;
 }) {
   const navigate = useNavigate();
@@ -539,6 +541,7 @@ function ProjectInfoEditor({
         members={members}
         requesterId={actor.uid}
         departmentOptions={departmentOptions}
+        settlementSystemOptions={settlementSystemOptions}
         topSlot={topSlot}
         showCheckoutEntry
         readOnly={!editorCanEdit}
@@ -740,6 +743,7 @@ export function PortalProjectEdit() {
       members={members}
       project={project}
       requestDoc={requestDoc}
+      settlementSystemOptions={projects.flatMap((item) => item.settlementSystem === 'OTHER' && item.settlementSystemOther && !item.trashedAt ? [item.settlementSystemOther] : [])}
       session={bootstrap.session}
     />
   );

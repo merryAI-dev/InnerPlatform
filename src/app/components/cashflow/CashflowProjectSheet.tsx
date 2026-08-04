@@ -1271,8 +1271,6 @@ export function CashflowProjectSheet({
         sourceYear: selectedYear,
         value: cashflowSheetConfig.value,
         sheetName: cashflowSheetConfig.sheetName || undefined,
-        startWeek: cashflowSheetConfig.startWeek || undefined,
-        endWeek: cashflowSheetConfig.endWeek || undefined,
         idempotencyKey: refreshIdempotencyKey,
       })
     );
@@ -1762,7 +1760,7 @@ export function CashflowProjectSheet({
 
   const cashflowTotalPeriodLabel = comparisonScope.periodLabel;
   const sheetRangeLabel = cashflowSheetConfig
-    ? `${cashflowSheetConfig.sheetName || '시트 탭'} · ${cashflowSheetConfig.startWeek || '전체'} ~ ${cashflowSheetConfig.endWeek || '전체'}`
+    ? `${cashflowSheetConfig.sheetName || '시트 탭'} · 탭 전체`
     : '연결된 Google Sheet가 없습니다.';
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
@@ -2947,7 +2945,7 @@ export function CashflowProjectSheet({
           <div className="mb-2 grid gap-2 sm:grid-cols-3">
             <Input aria-label="실제 반영 기록 검색" value={cashflowEventQuery} onChange={(event) => setCashflowEventQuery(event.target.value)} placeholder="항목·담당자 검색" />
             <select aria-label="실제 반영 mode 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMode} onChange={(event) => setCashflowEventMode(event.target.value)}><option value="ALL">전체 mode</option><option value="projection">Projection</option><option value="actual">Actual</option></select>
-            <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].map((month) => <option key={month} value={month}>{month}</option>)}</select>
+            <select aria-label="실제 반영 월 필터" className="h-9 rounded-md border border-slate-300 bg-white px-2 text-[12px]" value={cashflowEventMonth} onChange={(event) => setCashflowEventMonth(event.target.value)}><option value="ALL">전체 월</option>{[...new Set(cashflowEvents.map((event) => event.yearMonth).filter(Boolean))].sort((left, right) => left.localeCompare(right)).map((month) => <option key={month} value={month}>{month}</option>)}</select>
           </div>
           {cashflowEventErrors.map((failure) => (
             <div key={failure.source} role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
@@ -3108,7 +3106,7 @@ export function CashflowProjectSheet({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={weeklyCompletionBusy}>취소</AlertDialogCancel>
             <Button type="button" disabled={weeklyCompletionBusy || !weeklyUpdateResult} onClick={() => void handleCompleteWeeklyUpdate()}>
-              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}무시하고 반영
+              {weeklyCompletionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}반영
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3319,7 +3317,7 @@ export function CashflowProjectSheet({
                 ['3', '변경 이력', '결산 후 변경은 시점과 사유, 경고 횟수를 기록합니다.'],
               ] : [
                 ['1', '공유 권한 확인', '연동할 Google Sheet에 조회 권한이 있는지 확인합니다.'],
-                ['2', '시트·주차 선택', '사용할 시트 탭과 시작·종료 주차를 지정합니다.'],
+                ['2', '시트 탭 선택', '사용할 시트 탭을 지정하면 탭 전체를 불러옵니다.'],
                 ['3', '명시적으로 불러오기', '설정 후 시트 설정에서 직접 값을 가져와 저장할 값을 확인합니다.'],
               ]).map(([step, title, detail]) => (
                 <div key={step} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
@@ -3334,7 +3332,7 @@ export function CashflowProjectSheet({
             <div className={`rounded-md border px-3 py-2 text-[12px] leading-5 ${cashflowSheetConfig ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-[#C7D3DF] bg-[#EAF0F5] text-[#17324D]'}`}>
               {cashflowSheetConfig
                 ? `${sheetIdentityLabel} · ${sheetRangeLabel}`
-                : '먼저 Google Sheet 공유 권한과 시트 범위를 설정해야 합니다.'}
+                : '먼저 Google Sheet 공유 권한과 시트 탭을 설정해야 합니다.'}
             </div>
           </div>
 
