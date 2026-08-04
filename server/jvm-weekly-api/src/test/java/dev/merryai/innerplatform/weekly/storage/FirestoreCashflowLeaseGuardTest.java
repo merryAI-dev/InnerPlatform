@@ -48,6 +48,7 @@ import dev.merryai.innerplatform.weekly.service.WeeklyExpenseAuthorizationServic
 import dev.merryai.innerplatform.weekly.service.WeeklyExpenseCommandService;
 import dev.merryai.innerplatform.weekly.service.WeeklyProjectExistenceRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -71,6 +72,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -185,6 +187,118 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(result).containsOnlyKeys("project-a");
         assertThat(result.get("project-a")).hasSize(6);
         assertThat(result.get("project-a").getFirst().status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void readsWeeklySettlementStatusBeforeTheFirstTransactionalWrite() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "read-before-write", "2026-08", 2, "2026-08-04T01:21:00Z", "NO_CHANGES"
+                )
+            ));
+
+        InOrder order = inOrder(fixture.transaction);
+        order.verify(fixture.transaction).get(fixture.refs.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
+        ));
+        order.verify(fixture.transaction).set(argThat(ref -> ref.getPath().equals(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-08-w2"
+        )), any(), any());
+    }
+
+    @Test
+    void writesCanonicalJanuaryAndAugustWeeklySettlementKeys() {
+        Fixture january = fixture(activeMember(), Map.of());
+        Fixture august = fixture(activeMember(), Map.of());
+
+        january.persistence.runCommandTransaction(() -> commandService(january.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "january-week-one", "2026-01", 1, "2026-01-02T01:00:00Z", "NO_CHANGES"
+                )
+            ));
+        august.persistence.runCommandTransaction(() -> commandService(august.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "august-week-two", "2026-08", 2, "2026-08-04T01:21:00Z", "NO_CHANGES"
+                )
+            ));
+
+        assertThat(january.documents)
+            .containsKey("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-01-w1")
+            .containsKey("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-01");
+        assertThat(((Map<?, ?>) ((Map<?, ?>) january.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-01"
+        ).get("periods")).get("WEEK_1")).get("status")).isEqualTo("PENDING_APPROVAL");
+        assertThat(august.documents)
+            .containsKey("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-08-w2")
+            .containsKey("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08");
+        assertThat(((Map<?, ?>) ((Map<?, ?>) august.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
+        ).get("periods")).get("WEEK_2")).get("status")).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
+    void rejectsManagerApprovalBeforeWeeklyCompletion() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a",
+            "tenantId", "tenant-a",
+            "executiveApproverId", "manager-1"
+        ));
+        TrustedActorContext manager = new TrustedActorContext(
+            "tenant-a", "manager-1", "manager@example.com", "manager", "Manager"
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.transitionCashflowSettlementStatus(
+                manager, "project-a", "2026-08", "WEEK_2", "APPROVE"
+            )
+        ))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessageContaining("status changed");
+    }
+
+    @Test
+    void allowsManagerApprovalAfterWeeklyCompletion() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a",
+            "tenantId", "tenant-a",
+            "executiveApproverId", "manager-1"
+        ));
+        TrustedActorContext manager = new TrustedActorContext(
+            "tenant-a", "manager-1", "manager@example.com", "manager", "Manager"
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(fixture.persistence)
+            .completeCashflowWeeklyUpdate(
+                ACTOR,
+                "project-a",
+                new CompleteCashflowWeeklyUpdateRequest(
+                    "complete-then-approve", "2026-08", 2, "2026-08-04T01:21:00Z", "NO_CHANGES"
+                )
+            ));
+        WeeklyExpensePersistence.CashflowSettlementStatusRecord approved = fixture.persistence
+            .runCommandTransaction(() -> fixture.persistence.transitionCashflowSettlementStatus(
+                manager, "project-a", "2026-08", "WEEK_2", "APPROVE"
+            ));
+
+        assertThat(approved.status()).isEqualTo("COMPLETED");
+        assertThat(approved.approvedBy()).isEqualTo("Manager");
+        Map<?, ?> week = (Map<?, ?>) ((Map<?, ?>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08"
+        ).get("periods")).get("WEEK_2");
+        assertThat(week.get("status")).isEqualTo("COMPLETED");
     }
 
     @Test

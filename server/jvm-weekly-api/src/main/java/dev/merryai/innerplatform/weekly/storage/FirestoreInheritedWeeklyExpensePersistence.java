@@ -1534,6 +1534,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             "orgs/" + actor.tenantId() + "/cashflow_weekly_compliance_heads/" + projectId
         );
         DocumentSnapshot complianceHeadSnapshot = get(complianceHeadRef);
+        String settlementPeriod = "WEEK_" + request.weekNo();
+        CashflowSettlementStatusRecord settlementStatus = findCashflowSettlementStatuses(
+            actor.tenantId(), projectId, request.yearMonth()
+        ).stream().filter(item -> settlementPeriod.equals(item.period())).findFirst().orElseThrow();
         Map<String, Object> lockedCompletion = null;
         if (snapshot.exists()) {
             Map<String, Object> existing = data(snapshot);
@@ -1556,7 +1560,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectWeeks.put(weekSnapshot.getId(), week);
         }
         if (lockedCompletion != null) {
-            submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), request.weekNo());
+            submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), settlementStatus);
             return toWeeklyCompletionRecord(
                 projectId, request.yearMonth(), request.weekNo(), lockedCompletion, true
             );
@@ -1651,18 +1655,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         set(ref, completion);
         set(versionRef, version);
-        submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), request.weekNo());
+        submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), settlementStatus);
         return toWeeklyCompletionRecord(projectId, request.yearMonth(), request.weekNo(), completion, false);
     }
 
     private void submitWeeklySettlementIfWaiting(
-        TrustedActorContext actor, String projectId, String yearMonth, int weekNo
+        TrustedActorContext actor,
+        String projectId,
+        String yearMonth,
+        CashflowSettlementStatusRecord status
     ) {
-        String period = "WEEK_" + weekNo;
-        CashflowSettlementStatusRecord status = findCashflowSettlementStatuses(actor.tenantId(), projectId, yearMonth)
-            .stream().filter(item -> period.equals(item.period())).findFirst().orElseThrow();
         if ("WAITING_FOR_UPDATE".equals(status.status())) {
-            transitionCashflowSettlementStatus(actor, projectId, yearMonth, period, "SUBMIT");
+            transitionCashflowSettlementStatus(actor, projectId, yearMonth, status.period(), "SUBMIT");
         }
     }
 
