@@ -19,6 +19,7 @@ import {
   projectInfoDraftAttachmentSchema,
   projectInfoDraftOpenSchema,
   projectInfoDraftPatchSchema,
+  projectInfoDraftRebaseSchema,
   projectInfoDraftSubmitSchema,
 } from '../schemas.mjs';
 import { buildRequestFingerprint, sha256 } from '../utils.mjs';
@@ -265,6 +266,64 @@ function assertActive(draft) {
   if (draft.status !== 'ACTIVE') {
     throw createHttpError(409, 'Project information draft is not active', 'draft_not_active');
   }
+}
+
+// Firestore returns map keys in its own order, so a draft read back from storage
+// and a freshly computed snapshot can hold identical values in a different key
+// order. Compare by value, not by serialization order.
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((sorted, key) => {
+      sorted[key] = stableValue(value[key]);
+      return sorted;
+    }, {});
+  }
+  return value ?? null;
+}
+
+function sameFieldValue(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+// Three-way merge between the canonical values the draft started from (base),
+// the owner's edits (mine), and the canonical values now (theirs). Only fields
+// that both sides moved in different directions are reported as conflicts;
+// everything else resolves without asking the owner.
+export function mergeProjectInfoDraftFields({ base, mine, theirs }) {
+  const asFields = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+  const baseFields = asFields(base);
+  const mineFields = asFields(mine);
+  const theirsFields = asFields(theirs);
+  // Drafts opened before rebase support have no base, so nothing can be
+  // auto-merged and every difference must be confirmed by the owner.
+  const hasBase = base !== null && base !== undefined;
+  const merged = { ...mineFields };
+  const autoMerged = [];
+  const conflicts = [];
+  Array.from(new Set([
+    ...Object.keys(baseFields),
+    ...Object.keys(mineFields),
+    ...Object.keys(theirsFields),
+  ])).sort().forEach((field) => {
+    const baseValue = baseFields[field];
+    const mineValue = mineFields[field];
+    const theirsValue = theirsFields[field];
+    if (sameFieldValue(mineValue, theirsValue)) return;
+    if (hasBase && sameFieldValue(mineValue, baseValue)) {
+      merged[field] = theirsValue;
+      autoMerged.push({ field, value: theirsValue ?? null });
+      return;
+    }
+    if (hasBase && sameFieldValue(theirsValue, baseValue)) return;
+    conflicts.push({
+      field,
+      base: hasBase ? (baseValue ?? null) : null,
+      mine: mineValue ?? null,
+      theirs: theirsValue ?? null,
+    });
+  });
+  return { merged, autoMerged, conflicts };
 }
 
 function assertRevision(draft, expected) {
@@ -558,6 +617,7 @@ export function createProjectInfoDraftService({
         await assertLease(tx, current, nowDate);
         const existing = draftSnap.exists ? (draftSnap.data() || {}) : null;
         const previousRequest = requestSnap.exists ? (requestSnap.data() || {}) : {};
+        const seed = buildProjectInfoDraftSeed(project, previousRequest);
         const draft = existing?.status === 'ACTIVE' && readOptionalText(existing.ownerUid) === current.actorId
           ? existing
           : {
@@ -567,7 +627,10 @@ export function createProjectInfoDraftService({
               resourceId: current.projectId,
               draftRevision: 0,
               baseCanonicalVersion: Number.isInteger(project.version) && project.version > 0 ? project.version : 1,
-              payload: buildProjectInfoDraftSeed(project, previousRequest),
+              // Frozen copy of the canonical values this draft started from, so a
+              // later rebase can tell "the user changed it" from "someone else did".
+              baseSnapshot: seed,
+              payload: seed,
               attachmentRefs: resumableDraftAttachments(
                 current.tenantId,
                 current.draftDocumentId,
@@ -586,6 +649,102 @@ export function createProjectInfoDraftService({
           ]);
           tx.set(draftRef, draft);
         }
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        return { status: 200, body, replayed: false };
+      });
+    },
+
+    async rebase(input) {
+      const current = context(input);
+      const expectedDraftRevision = Number(input?.expectedDraftRevision);
+      if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+        throw createHttpError(400, 'Draft rebase version is invalid', 'draft_request_invalid');
+      }
+      const resolutions = input?.resolutions && typeof input.resolutions === 'object'
+        ? input.resolutions
+        : null;
+      const method = 'POST';
+      const path = `/api/v1/project-info-drafts/${current.projectId}/rebase`;
+      const fingerprint = buildRequestFingerprint({
+        method, path,
+        body: {
+          actorId: current.actorId, sessionId: current.sessionId, leaseId: current.leaseId,
+          fence: current.fence, expectedDraftRevision, resolutions,
+        },
+      });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, project, draftRef, draft } = await ownedDraft(tx, current);
+        const requestSnap = await tx.get(refs(current).request);
+        const previousRequest = requestSnap.exists ? (requestSnap.data() || {}) : {};
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        assertActive(draft);
+        assertRevision(draft, expectedDraftRevision);
+        await assertLease(tx, current, nowDate);
+        const actualVersion = Number.isInteger(project.version) && project.version > 0 ? project.version : 1;
+        const theirs = buildProjectInfoDraftSeed(project, previousRequest);
+        const { merged, autoMerged, conflicts } = mergeProjectInfoDraftFields({
+          base: draft.baseSnapshot ?? null,
+          mine: draft.payload,
+          theirs,
+        });
+        // Without resolutions this is a preview: report the merge outcome and write nothing.
+        if (!resolutions) {
+          const body = {
+            rebased: false,
+            baseCanonicalVersion: Number.isInteger(draft.baseCanonicalVersion) ? draft.baseCanonicalVersion : 1,
+            canonicalVersion: actualVersion,
+            autoMerged,
+            conflicts,
+          };
+          completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+          return { status: 200, body, replayed: false };
+        }
+        const unresolved = conflicts.filter((conflict) => (
+          resolutions[conflict.field] !== 'MINE' && resolutions[conflict.field] !== 'THEIRS'
+        ));
+        if (unresolved.length > 0) {
+          throw createHttpError(
+            422,
+            `Unresolved rebase conflicts: ${unresolved.map((conflict) => conflict.field).join(', ')}`,
+            'draft_rebase_unresolved',
+          );
+        }
+        conflicts.forEach((conflict) => {
+          merged[conflict.field] = resolutions[conflict.field] === 'THEIRS' ? conflict.theirs : conflict.mine;
+        });
+        const nextDraft = {
+          ...draft,
+          payload: merged,
+          baseSnapshot: theirs,
+          baseCanonicalVersion: actualVersion,
+          draftRevision: expectedDraftRevision + 1,
+          updatedAt: timestamp,
+        };
+        assertDraftSize(nextDraft);
+        await auditChainService.appendManyInTransaction(tx, [
+          auditEntry(current, actorRole, 'PROJECT_INFO_DRAFT_REBASE', nextDraft.draftRevision, timestamp, {
+            fence: current.fence,
+            baseCanonicalVersion: actualVersion,
+            autoMergedFields: autoMerged.map((entry) => entry.field),
+            resolvedFields: conflicts.map((conflict) => ({
+              field: conflict.field,
+              resolution: resolutions[conflict.field],
+            })),
+          }),
+        ]);
+        tx.set(draftRef, nextDraft);
+        const body = {
+          rebased: true,
+          draft: draftContract(nextDraft),
+          canonicalVersion: actualVersion,
+          autoMerged,
+          conflicts,
+        };
         completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
         return { status: 200, body, replayed: false };
       });
@@ -1221,6 +1380,14 @@ export function mountProjectInfoDraftRoutes(app, {
       projectId: routeProjectId(req),
       documentKind: requiredText(req.params?.documentKind, 'documentKind'),
       ...parsed,
+    }));
+  }));
+
+  app.post('/api/v1/project-info-drafts/:projectId/rebase', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'rebase a project information draft');
+    const parsed = parseWithSchema(projectInfoDraftRebaseSchema, req.body);
+    sendOutcome(res, await projectInfoDraftService.rebase({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req), ...parsed,
     }));
   }));
 

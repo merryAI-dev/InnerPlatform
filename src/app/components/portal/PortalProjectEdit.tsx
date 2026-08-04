@@ -27,7 +27,18 @@ import {
   type ProjectInfoDocumentKind,
   type ProjectInfoDraft,
   type ProjectInfoFileLike,
+  type ProjectInfoRebaseConflict,
+  type ProjectInfoRebaseResolution,
 } from '../../lib/project-info-draft-client';
+import { ProjectInfoRebaseDialog } from './ProjectInfoRebaseDialog';
+import { PlatformApiError } from '../../platform/api-client';
+
+// The draft froze the project version it started from; the project has moved since.
+function isCanonicalVersionConflict(error: unknown) {
+  if (!(error instanceof PlatformApiError) || error.status !== 409) return false;
+  const body = error.body as { error?: string } | null | undefined;
+  return body?.error === 'canonical_version_conflict';
+}
 import {
   analyzeProjectRequestContractViaBff,
   fetchLatestProjectRequestViaBff,
@@ -244,6 +255,13 @@ function ProjectInfoEditor({
   const [submitted, setSubmitted] = useState(false);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [saveSuccessDialogOpen, setSaveSuccessDialogOpen] = useState(false);
+  const [rebaseState, setRebaseState] = useState<{
+    conflicts: ProjectInfoRebaseConflict[];
+    autoMerged: Array<{ field: string; value: unknown }>;
+    pendingActionId: string;
+  } | null>(null);
+  const [rebaseBusy, setRebaseBusy] = useState(false);
+  const rebasedVersionRef = useRef(0);
   const [resubmitComment, setResubmitComment] = useState('');
   const revisionRef = useRef(0);
   const recordLoadedRef = useRef(false);
@@ -410,6 +428,26 @@ function ProjectInfoEditor({
     })
   )), [draftClient, enqueueMutation, record, withOwnership]);
 
+  const submitDraft = async (actionId: string) => {
+    const shouldResubmit = canResubmit || actionId === 'resubmit';
+    const storedVersion = Number.isInteger(project.version) && Number(project.version) > 0 ? Number(project.version) : 1;
+    await enqueueMutation(() => withOwnership((ownership) => draftClient.submit(ownership, {
+      expectedDraftRevision: revisionRef.current,
+      // A rebase reports the canonical version it aligned to; the store copy can still be stale.
+      expectedVersion: rebasedVersionRef.current || storedVersion,
+      resubmit: shouldResubmit,
+      ...(shouldResubmit && resubmitComment.trim() ? { reviewComment: resubmitComment.trim() } : {}),
+    })));
+    await lease.checkStatus();
+    if (shouldResubmit) setResubmitComment('');
+    rebasedVersionRef.current = 0;
+    setSubmitted(true);
+    recordLoadedRef.current = false;
+    setRecord(null);
+    setSaveSuccessDialogOpen(true);
+    void lease.release();
+  };
+
   const handleSubmit = async (_draft: ProjectEditorDraft, actionId: string) => {
     if (busyActionId) return;
     if (!record) {
@@ -418,25 +456,58 @@ function ProjectInfoEditor({
     }
     setBusyActionId(actionId);
     try {
-      const shouldResubmit = canResubmit || actionId === 'resubmit';
-      await enqueueMutation(() => withOwnership((ownership) => draftClient.submit(ownership, {
-        expectedDraftRevision: revisionRef.current,
-        expectedVersion: Number.isInteger(project.version) && Number(project.version) > 0 ? Number(project.version) : 1,
-        resubmit: shouldResubmit,
-        ...(shouldResubmit && resubmitComment.trim() ? { reviewComment: resubmitComment.trim() } : {}),
-      })));
-      await lease.checkStatus();
-      if (shouldResubmit) setResubmitComment('');
-      setSubmitted(true);
-      recordLoadedRef.current = false;
-      setRecord(null);
-      setSaveSuccessDialogOpen(true);
-      void lease.release();
+      await submitDraft(actionId);
     } catch (error) {
+      if (isCanonicalVersionConflict(error)) {
+        try {
+          const preview = await enqueueMutation(() => withOwnership((ownership) => draftClient.rebase(ownership, {
+            expectedDraftRevision: revisionRef.current,
+          })));
+          setRebaseState({
+            conflicts: preview.conflicts,
+            autoMerged: preview.autoMerged,
+            pendingActionId: actionId,
+          });
+          return;
+        } catch (rebaseError) {
+          toast.error(rebaseError instanceof Error
+            ? rebaseError.message
+            : '프로젝트 변경 내역을 불러오지 못했습니다.');
+          return;
+        }
+      }
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
       throw error;
     } finally {
       setBusyActionId(null);
+    }
+  };
+
+  const applyRebase = async (resolutions: Record<string, ProjectInfoRebaseResolution>) => {
+    if (!rebaseState) return;
+    const actionId = rebaseState.pendingActionId;
+    setRebaseBusy(true);
+    try {
+      const result = await enqueueMutation(() => withOwnership((ownership) => draftClient.rebase(ownership, {
+        expectedDraftRevision: revisionRef.current,
+        resolutions,
+      })));
+      if (result.draft) {
+        revisionRef.current = result.draft.draftRevision;
+        setRecord(result.draft);
+      }
+      rebasedVersionRef.current = result.canonicalVersion;
+      setRebaseState(null);
+      setBusyActionId(actionId);
+      try {
+        await submitDraft(actionId);
+      } finally {
+        setBusyActionId(null);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '변경 내용을 반영하지 못했습니다. 다시 시도해주세요.');
+    } finally {
+      setRebaseBusy(false);
     }
   };
 
@@ -580,6 +651,14 @@ function ProjectInfoEditor({
         onContinueReadOnly={lease.continueReadOnly}
         onReacquire={() => { void startEditing(); }}
         onTakeover={() => { void lease.takeover(); }}
+      />
+      <ProjectInfoRebaseDialog
+        open={rebaseState !== null}
+        conflicts={rebaseState?.conflicts || []}
+        autoMerged={rebaseState?.autoMerged || []}
+        busy={rebaseBusy}
+        onConfirm={(resolutions) => { void applyRebase(resolutions); }}
+        onCancel={() => setRebaseState(null)}
       />
       <AlertDialog open={saveSuccessDialogOpen}
         onOpenChange={(open) => {
