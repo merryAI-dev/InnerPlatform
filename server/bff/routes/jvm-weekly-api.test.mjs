@@ -456,6 +456,36 @@ describe('JVM weekly API BFF proxy', () => {
     );
   });
 
+  it('uses the canonical month-close request as the MONTH status source of truth', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_month_close_requests/project-a-2026-08', {
+      requestId: 'project-a-2026-08', projectId: 'project-a', yearMonth: '2026-08', status: 'PENDING',
+    });
+    const settlement = {
+      projectId: 'project-a', yearMonth: '2026-08',
+      items: [{ period: 'MONTH', status: 'COMPLETED' }, { period: 'WEEK_1', status: 'COMPLETED' }],
+    };
+    const fetchImpl = vi.fn(async (_url, init) => new Response(JSON.stringify(
+      init.method === 'POST' ? { items: [structuredClone(settlement)], errors: [] } : structuredClone(settlement),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/settlement-statuses?yearMonth=2026-08')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.items).toEqual([
+          { period: 'MONTH', status: 'PENDING_APPROVAL' },
+          { period: 'WEEK_1', status: 'COMPLETED' },
+        ]);
+      });
+    await request(app)
+      .post('/api/v1/cashflow/settlement-statuses/batch')
+      .send({ projectIds: ['project-a'], yearMonth: '2026-08' })
+      .expect(200)
+      .expect((response) => expect(response.body.items[0].items[0]).toEqual({ period: 'MONTH', status: 'PENDING_APPROVAL' }));
+  });
+
   it('blocks an administrator from submitting an uncompleted settlement', async () => {
     const fetchImpl = vi.fn();
     const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'admin' }, { env: runtimeEnv });
@@ -1244,7 +1274,7 @@ describe('JVM weekly API BFF proxy', () => {
           comparisonAsOfWeek: { yearMonth: '2026-06', weekNo: 2 },
         });
         expect(response.body.dashboard.comparison.weeks.map((week) => week.weekNo)).toEqual([1, 2]);
-        expect(response.body.dashboard.managementChecks.find((check) => check.id === 'labor-transfer')).toMatchObject({ status: 'OK' });
+        expect(response.body.dashboard.managementChecks.find((check) => check.id === 'labor-transfer')).toMatchObject({ status: 'WARNING' });
         expect(response.body.dashboard.deadlineSummary.current).toBeNull();
       });
   });
@@ -1841,6 +1871,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(checks[1].detail).toContain('2026-06 5주차에 매출입금이 있으나 [MYSC 수익·매출부가세] 계획이 Projection에 없습니다.');
     expect(checks[0].detail).toContain('실제 0원 · 실제 미이관');
     expect(checks[0].findings).toContain('2026-06 3주차 · 예정 10원 · 실제 0원 · 실제 미이관');
+    expect(checks[0].findings).toContain('2026-08 3주차 인건비 미입력');
     expect(checks[2].findings).toHaveLength(5);
     expect(checks[2].findings[0]).toContain('2026-06 1주차');
     expect(checks[2].findings.at(-1)).toContain('2026-06 5주차');

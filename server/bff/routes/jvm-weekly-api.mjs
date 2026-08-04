@@ -124,6 +124,28 @@ function cashflowMonthCloseRequestPath(tenantId, requestId) {
   return `orgs/${tenantId}/cashflow_month_close_requests/${requestId}`;
 }
 
+async function alignMonthSettlementStatus(db, tenantId, result) {
+  const projects = Array.isArray(result?.items) && result.items.some((item) => item?.projectId)
+    ? result.items
+    : [result];
+  if (!db?.doc) return result;
+  await Promise.all(projects.map(async (project) => {
+    const projectId = readOptionalText(project?.projectId);
+    const yearMonth = readOptionalText(project?.yearMonth);
+    if (!projectId || !yearMonth || !Array.isArray(project.items)) return;
+    const snapshot = await db.doc(cashflowMonthCloseRequestPath(tenantId, `${projectId}-${yearMonth}`)).get();
+    if (!snapshot.exists) return;
+    const requestStatus = readOptionalText(snapshot.data()?.status);
+    const status = requestStatus === 'APPROVED'
+      ? 'COMPLETED'
+      : ['PENDING', 'APPROVING', 'UNCERTAIN'].includes(requestStatus)
+        ? 'PENDING_APPROVAL'
+        : 'WAITING_FOR_UPDATE';
+    project.items = project.items.map((item) => item.period === 'MONTH' ? { ...item, status } : item);
+  }));
+  return result;
+}
+
 function cashflowMonthCloseRequestMonthPath(tenantId, requestId, revision, yearMonth) {
   return `orgs/${tenantId}/cashflow_month_close_request_months/${requestId}-r${revision}-${yearMonth}`;
 }
@@ -707,12 +729,11 @@ function managementCheck(id, status, title, detail, findings = []) {
   return findings.length > 0 ? { id, status, title, detail, findings } : { id, status, title, detail };
 }
 
-function laborTransferCheck(weeks, cellStates, yearMonth, asOfKey) {
+function laborTransferCheck(weeks, cellStates, yearMonth) {
   const yearMonths = [...new Set([yearMonth, ...weeks.map((week) => readOptionalText(week.yearMonth))])].sort();
   const warnings = [];
   const reviews = [];
   for (const yearMonth of yearMonths) {
-    if (cashflowRangeSortKey({ yearMonth, weekNo: 3 }) > asOfKey) continue;
     const projection = cellStates.get(`${yearMonth}:projection:3:MYSC_LABOR_OUT`);
     if (!projection || projection.cellState === 'EMPTY') {
       warnings.push(`${yearMonth} 3주차 인건비 미입력`);
@@ -823,7 +844,7 @@ export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depo
     yearMonth: /^20\d{2}-(0[1-9]|1[0-2])$/.test(readOptionalText(row?.yearMonth)) ? row.yearMonth : yearMonth,
   }));
   return [
-    laborTransferCheck(weeks, cellStates, yearMonth, asOfKey),
+    laborTransferCheck(weeks, cellStates, yearMonth),
     profitVatAfterDepositCheck(weeks),
     negativeProjectionCheck(weeks, projectionOpeningBalance),
     futurePrepayCheck(weeks, asOfKey),
@@ -2640,7 +2661,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       method: 'GET',
       path: `/api/v1/cashflow/${encodeURIComponent(projectId)}/settlement-statuses?yearMonth=${encodeURIComponent(yearMonth)}`,
     });
-    res.status(200).json(result);
+    res.status(200).json(await alignMonthSettlementStatus(db, req.context.tenantId, result));
   }));
 
   app.post('/api/v1/cashflow/settlement-statuses/batch', asyncHandler(async (req, res) => {
@@ -2667,7 +2688,7 @@ export function mountJvmWeeklyApiRoutes(app, {
       body: { projectIds, yearMonth },
       mutation: false,
     });
-    res.status(200).json(result);
+    res.status(200).json(await alignMonthSettlementStatus(db, req.context.tenantId, result));
   }));
 
   app.post('/api/v1/cashflow/:projectId/settlement-statuses/transition', asyncHandler(async (req, res) => {
