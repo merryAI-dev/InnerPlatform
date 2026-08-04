@@ -3712,11 +3712,34 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(response.requestRevision()).isEqualTo(1);
         assertThat(response.rootHash()).isEqualTo(request.manifestHash());
         assertThat(response.headRevision()).isEqualTo(1);
+        assertThat(response.closeDeadline()).isEqualTo("2026-08-10");
+        assertThat(response.late()).isFalse();
         assertThat(fixture.getAllSizes).contains(43);
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
             .containsEntry("closedThrough", "2026-07")
             .containsEntry("rootHash", request.manifestHash())
             .containsEntry("revision", 1L);
+    }
+
+    @Test
+    void cumulativeCloseUsesTheCycleTenthForPersistedLateStatus() {
+        for (Map.Entry<LocalDate, Boolean> boundary : Map.of(
+            LocalDate.parse("2026-08-10"), false,
+            LocalDate.parse("2026-08-11"), true
+        ).entrySet()) {
+            Fixture fixture = fixture(activeMember(), activeLease(), true, boundary.getKey());
+            String requestId = "cumulative-boundary-" + boundary.getKey();
+            CloseCashflowMonthRequest request = cumulativeCloseRequest(fixture, "2026-08", requestId);
+
+            CashflowMonthCloseResponse response = fixture.persistence.runCommandTransaction(() -> commandService(
+                fixture.persistence
+            ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+            assertThat(response.closeDeadline()).isEqualTo("2026-08-10");
+            assertThat(response.late()).isEqualTo(boundary.getValue());
+            assertThat(fixture.documents.get(monthClosePath("project-a", "2026-08")))
+                .containsEntry("late", boundary.getValue());
+        }
     }
 
     @Test

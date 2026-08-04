@@ -973,8 +973,8 @@ export function CashflowProjectSheet({
       return {
         status: 'CLOSE_DATE_PENDING' as const,
         title: '아직 월 결산 가능일이 아닙니다.',
-        detail: monthCloseResult.dashboard?.summary?.closeDeadline
-          ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 해당 월의 시트값과 현금흐름을 확인한 뒤 결산할 수 있습니다.`
+        detail: monthCloseResult.dashboard?.summary?.closeDeadline && monthCloseResult.dashboard.summary.targetYearMonth
+          ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 ${monthCloseResult.dashboard.summary.targetYearMonth}월의 시트값과 현금흐름을 확인한 뒤 결산할 수 있습니다.`
           : '월 결산 가능일을 서버에서 확인한 뒤 결산할 수 있습니다.',
         actionLabel: null,
       };
@@ -2332,9 +2332,9 @@ export function CashflowProjectSheet({
               <Badge className={`h-8 rounded-full border-0 px-3 text-[12px] ${monthCloseStatusClass}`}>
                 {monthCloseLoading ? '상태 확인 중' : monthCloseStatusLabel}
               </Badge>
-              {monthCloseResult?.dashboard?.summary?.closeDeadline ? (
+              {monthCloseResult?.dashboard?.summary?.closeDeadline && monthCloseResult.dashboard.summary.targetYearMonth ? (
                 <span className="text-[12px] text-slate-500">
-                  {monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산
+                  {monthCloseResult.dashboard.summary.closeDeadline}까지 {monthCloseResult.dashboard.summary.targetYearMonth}월 결산
                 </span>
               ) : null}
             </div>
@@ -2765,7 +2765,7 @@ export function CashflowProjectSheet({
                   </div>
                 ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-                  <span>{monthCloseResult?.dashboard?.summary?.closeDeadline ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
+                  <span>{monthCloseResult?.dashboard?.summary?.closeDeadline && monthCloseResult.dashboard.summary.targetYearMonth ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 ${monthCloseResult.dashboard.summary.targetYearMonth}월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
                 </div>
               </div>
           </section>

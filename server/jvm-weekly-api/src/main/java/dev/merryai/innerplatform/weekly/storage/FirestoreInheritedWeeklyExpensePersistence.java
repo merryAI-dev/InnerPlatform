@@ -1250,7 +1250,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         String snapshotHash = hashCanonicalJson(snapshot);
         String previousSnapshotHash = text(current.get("snapshotHash"), "");
-        boolean late = today.isAfter(targetMonth.plusMonths(1).atDay(10));
+        boolean late = today.isAfter(monthCloseDeadline(targetMonth, cumulative != null));
         String versionId = projectId + "-" + request.yearMonth() + "-r" + revision;
         Map<String, Object> patch = new LinkedHashMap<>();
         patch.put("id", projectId + "-" + request.yearMonth());
@@ -3681,7 +3681,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             : canonicalMonthStatus(document, tenantId, projectId, yearMonth);
         YearMonth targetMonth = requireYearMonth(yearMonth);
         LocalDate evaluatedBusinessDate = cashflowMonthCloseBusinessDate();
-        LocalDate closeDeadline = targetMonth.plusMonths(1).atDay(10);
+        boolean cumulative = CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION.equals(
+            text(nestedMap(document.get("snapshot")).get("contractVersion"), "")
+        );
+        LocalDate closeDeadline = monthCloseDeadline(targetMonth, cumulative);
         boolean closeEligible = "OPEN".equals(status) && targetMonth.isBefore(YearMonth.from(evaluatedBusinessDate));
         return new CashflowMonthCloseRecord(
             projectId,
@@ -3718,6 +3721,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             text(reopenDecision.get("decidedAt"), ""),
             text(reopenDecision.get("decidedByUid"), "")
         );
+    }
+
+    private LocalDate monthCloseDeadline(YearMonth cycleOrTargetMonth, boolean cumulative) {
+        return cumulative ? cycleOrTargetMonth.atDay(10) : cycleOrTargetMonth.plusMonths(1).atDay(10);
     }
 
     private void requireCashflowSheetPublicationReady(String tenantId, String projectId) {

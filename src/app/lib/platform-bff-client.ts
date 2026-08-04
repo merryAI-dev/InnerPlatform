@@ -1050,6 +1050,8 @@ export interface CashflowMonthCloseDashboard {
     comparisonAsOfDate: string;
     comparisonAsOfWeek: { yearMonth: string; weekNo: number };
     evaluatedBusinessDate: string | null;
+    cycleYearMonth?: string;
+    targetYearMonth?: string;
     closeDeadline: string | null;
     late: boolean;
   };
