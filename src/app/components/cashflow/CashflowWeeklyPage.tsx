@@ -20,6 +20,7 @@ import {
 } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
+import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
 
 export function filterCashflowProjectsByDepartment<T extends { department?: unknown }>(projects: T[], department: string): T[] {
   return projects.filter((project) => department === 'ALL' || normalizeProjectDepartment(project.department) === department);
@@ -31,32 +32,59 @@ function statusItem(result: CashflowSettlementStatusesResult | undefined, period
 
 function SettlementStatusButton({
   item,
+  period,
   loading,
   canApprove,
   onAction,
 }: {
   item?: CashflowSettlementStatusItem;
+  period: CashflowSettlementPeriod;
   loading: boolean;
   canApprove: boolean;
   onAction: (action: 'SUBMIT' | 'APPROVE') => void;
 }) {
   const status = item?.status || 'WAITING_FOR_UPDATE';
   if (status === 'COMPLETED') {
-    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />정산 완료</span>;
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />승인 완료</span>;
   }
-  const action = status === 'PENDING_APPROVAL' ? 'APPROVE' : 'SUBMIT';
+  if (status === 'WAITING_FOR_UPDATE') {
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 font-semibold text-red-700"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />{period === 'MONTH' ? '결산 전' : '주정산 이전'}</span>;
+  }
   return (
     <Button
       type="button"
       size="sm"
       variant="outline"
-      className={`min-h-8 gap-1.5 whitespace-normal rounded-full px-2.5 text-[11px] font-semibold ${status === 'PENDING_APPROVAL' ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
-      disabled={loading || (action === 'APPROVE' && !canApprove)}
-      onClick={() => onAction(action)}
+      className="min-h-8 gap-1.5 whitespace-normal rounded-full border-amber-200 bg-amber-50 px-2.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+      disabled={loading || !canApprove}
+      onClick={() => onAction('APPROVE')}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${status === 'PENDING_APPROVAL' ? 'bg-amber-500' : 'bg-slate-400'}`} aria-hidden="true" />
-      {loading ? '처리 중…' : status === 'PENDING_APPROVAL' ? '조직장 승인 필요' : '주정산 전'}
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      {loading ? '처리 중…' : '조직장 승인 필요'}
     </Button>
+  );
+}
+
+function PeriodAmounts({
+  summary,
+  period,
+  loading,
+  error,
+}: {
+  summary: ReturnType<typeof useCashflowProjectionActualSummaries>['summaries'][string] | undefined;
+  period: CashflowSettlementPeriod;
+  loading?: boolean;
+  error?: boolean;
+}) {
+  if (error) return <div className="mt-1 text-[9px] text-red-600">금액 조회 오류</div>;
+  if (loading) return <div className="mt-1 text-[9px] text-slate-400">금액 확인 중…</div>;
+  const amounts = summary?.periods.find((item) => item.period === period);
+  if (!amounts) return null;
+  return (
+    <div className="mt-1 space-y-0.5 text-[9px] leading-tight text-slate-500 tabular-nums">
+      <div>P {amounts.projectionAmount.toLocaleString('ko-KR')}원 · A {amounts.actualAmount.toLocaleString('ko-KR')}원</div>
+      <div className="font-semibold text-slate-700">P-A {amounts.projectionActualDifferenceAmount.toLocaleString('ko-KR')}원</div>
+    </div>
   );
 }
 
@@ -77,6 +105,29 @@ export function CashflowWeeklyPage() {
     ...projects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean),
   ])).sort((left, right) => left.localeCompare(right, 'ko')), [projects]);
   const filteredProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
+  const projectIds = useMemo(() => filteredProjects.map((project) => project.id), [filteredProjects]);
+  const projectionActual = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds, yearMonth });
+  const dashboard = useMemo(() => {
+    const counts = { waiting: 0, pending: 0, completed: 0 };
+    for (const project of filteredProjects) {
+      for (const period of ['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'] as CashflowSettlementPeriod[]) {
+        const status = statusItem(statuses[project.id], period)?.status || 'WAITING_FOR_UPDATE';
+        if (status === 'PENDING_APPROVAL') counts.pending += 1;
+        else if (status === 'COMPLETED') counts.completed += 1;
+        else counts.waiting += 1;
+      }
+    }
+    const summaries = filteredProjects.flatMap((project) => {
+      const summary = projectionActual.summaries[project.id]?.periods.find((period) => period.period === 'MONTH');
+      return summary ? [summary] : [];
+    });
+    return {
+      ...counts,
+      projection: summaries.reduce((sum, item) => sum + item.projectionAmount, 0),
+      actual: summaries.reduce((sum, item) => sum + item.actualAmount, 0),
+      difference: summaries.reduce((sum, item) => sum + item.projectionActualDifferenceAmount, 0),
+    };
+  }, [filteredProjects, projectionActual.summaries, statuses]);
 
   useEffect(() => {
     if (!user?.idToken || filteredProjects.length === 0) {
@@ -86,26 +137,27 @@ export function CashflowWeeklyPage() {
       return;
     }
     let active = true;
-    setStatusesLoading(true);
     const projectIds = filteredProjects.map((project) => project.id);
     const batches = Array.from(
       { length: Math.ceil(projectIds.length / 100) },
       (_, index) => projectIds.slice(index * 100, (index + 1) * 100),
     );
-    void Promise.all(batches.map(async (batchProjectIds) => fetchCashflowSettlementStatusesBatchViaBff({
-      tenantId: orgId, actor: user, projectIds: batchProjectIds, yearMonth,
-    }).catch(() => ({
-      items: [],
-      errors: batchProjectIds.map((projectId) => ({ projectId, code: 'STATUS_UNAVAILABLE' as const })),
-    })))).then((results) => {
+    const load = async (showLoading: boolean) => {
+      if (showLoading) setStatusesLoading(true);
+      const results = await Promise.all(batches.map(async (batchProjectIds) => fetchCashflowSettlementStatusesBatchViaBff({
+        tenantId: orgId, actor: user, projectIds: batchProjectIds, yearMonth,
+      }).catch(() => ({
+        items: [],
+        errors: batchProjectIds.map((projectId) => ({ projectId, code: 'STATUS_UNAVAILABLE' as const })),
+      }))));
       if (!active) return;
-      const next = Object.fromEntries(results.flatMap((result) => result.items).map((item) => [item.projectId, item]));
-      const errors = Object.fromEntries(results.flatMap((result) => result.errors).map((error) => [error.projectId, '결산 상태를 불러오지 못했습니다.']));
-      setStatuses(next);
-      setStatusErrors(errors);
+      setStatuses(Object.fromEntries(results.flatMap((result) => result.items).map((item) => [item.projectId, item])));
+      setStatusErrors(Object.fromEntries(results.flatMap((result) => result.errors).map((error) => [error.projectId, '결산 상태를 불러오지 못했습니다.'])));
       setStatusesLoading(false);
-    });
-    return () => { active = false; };
+    };
+    void load(true);
+    const interval = window.setInterval(() => void load(false), 15_000);
+    return () => { active = false; window.clearInterval(interval); };
   }, [filteredProjects, orgId, user, yearMonth]);
 
   async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {
@@ -148,6 +200,22 @@ export function CashflowWeeklyPage() {
           </div>
         )}
       />
+
+      <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        {[
+          ['정산 이전', dashboard.waiting, 'border-red-200 bg-red-50 text-red-700'],
+          ['승인 필요', dashboard.pending, 'border-amber-200 bg-amber-50 text-amber-800'],
+          ['승인 완료', dashboard.completed, 'border-emerald-200 bg-emerald-50 text-emerald-700'],
+          ['Projection', `${dashboard.projection.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
+          ['Actual', `${dashboard.actual.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
+          ['P - A', `${dashboard.difference.toLocaleString('ko-KR')}원`, 'border-slate-200 bg-white text-slate-700'],
+        ].map(([label, value, className]) => (
+          <div key={label} className={`rounded-lg border px-3 py-2 ${className}`}>
+            <div className="text-[10px] font-semibold">{label}</div>
+            <div className="mt-0.5 text-[15px] font-bold tabular-nums">{value}</div>
+          </div>
+        ))}
+      </div>
 
       <div className="flex items-end gap-3 rounded-lg border bg-white px-4 py-3">
         <div className="w-[180px]">
@@ -196,11 +264,13 @@ export function CashflowWeeklyPage() {
                         {statusErrors[project.id] ? <span className="text-red-700">조회 오류</span> : statusesLoading && !projectStatuses ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
                             item={statusItem(projectStatuses, 'MONTH')}
+                            period="MONTH"
                             loading={actionKey === `${project.id}:MONTH`}
                             canApprove={canApprove}
                             onAction={(action) => void transition(project.id, 'MONTH', action)}
                           />
                         )}
+                        <PeriodAmounts summary={projectionActual.summaries[project.id]} period="MONTH" loading={projectionActual.loading[project.id]} error={projectionActual.errors[project.id]} />
                       </td>
                       <td className="px-3 py-3 text-center">
                         <Button size="sm" variant="outline" className="h-8 gap-1.5 text-[11px]" onClick={() => openProject(project.id)}>
@@ -214,11 +284,13 @@ export function CashflowWeeklyPage() {
                             {statusErrors[project.id] ? <span className="text-red-700">조회 오류</span> : statusesLoading && !projectStatuses ? <span className="text-muted-foreground">확인 중…</span> : (
                               <SettlementStatusButton
                                 item={statusItem(projectStatuses, period)}
+                                period={period}
                                 loading={actionKey === `${project.id}:${period}`}
                                 canApprove={canApprove}
                                 onAction={(action) => void transition(project.id, period, action)}
                               />
                             )}
+                            <PeriodAmounts summary={projectionActual.summaries[project.id]} period={period} loading={projectionActual.loading[project.id]} error={projectionActual.errors[project.id]} />
                           </td>
                         );
                       })}
@@ -226,7 +298,7 @@ export function CashflowWeeklyPage() {
                   );
                 })}
                 {filteredProjects.length === 0 ? (
-                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={9}>프로젝트가 없습니다.</td></tr>
+                  <tr><td className="px-4 py-8 text-center text-[12px] text-muted-foreground" colSpan={4 + monthWeeks.length}>프로젝트가 없습니다.</td></tr>
                 ) : null}
               </tbody>
             </table>

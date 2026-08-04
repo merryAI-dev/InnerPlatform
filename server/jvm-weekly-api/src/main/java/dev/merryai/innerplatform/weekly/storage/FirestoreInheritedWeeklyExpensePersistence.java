@@ -1556,6 +1556,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             projectWeeks.put(weekSnapshot.getId(), week);
         }
         if (lockedCompletion != null) {
+            submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), request.weekNo());
             return toWeeklyCompletionRecord(
                 projectId, request.yearMonth(), request.weekNo(), lockedCompletion, true
             );
@@ -1650,7 +1651,19 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
         set(ref, completion);
         set(versionRef, version);
+        submitWeeklySettlementIfWaiting(actor, projectId, request.yearMonth(), request.weekNo());
         return toWeeklyCompletionRecord(projectId, request.yearMonth(), request.weekNo(), completion, false);
+    }
+
+    private void submitWeeklySettlementIfWaiting(
+        TrustedActorContext actor, String projectId, String yearMonth, int weekNo
+    ) {
+        String period = "WEEK_" + weekNo;
+        CashflowSettlementStatusRecord status = findCashflowSettlementStatuses(actor.tenantId(), projectId, yearMonth)
+            .stream().filter(item -> period.equals(item.period())).findFirst().orElseThrow();
+        if ("WAITING_FOR_UPDATE".equals(status.status())) {
+            transitionCashflowSettlementStatus(actor, projectId, yearMonth, period, "SUBMIT");
+        }
     }
 
     private List<CashflowWeekScope> consecutiveFinanceWeeks(String yearMonth, int weekNo, int count) {

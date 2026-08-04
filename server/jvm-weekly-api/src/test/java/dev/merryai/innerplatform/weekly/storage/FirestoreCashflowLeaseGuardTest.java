@@ -2010,6 +2010,12 @@ class FirestoreCashflowLeaseGuardTest {
         );
 
         assertThat(replay).isEqualTo(first);
+        Map<?, ?> periods = (Map<?, ?>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07"
+        ).get("periods");
+        Map<?, ?> weeklyStatus = (Map<?, ?>) periods.get("WEEK_3");
+        assertThat(weeklyStatus.get("status")).isEqualTo("PENDING_APPROVAL");
+        assertThat(weeklyStatus.get("revision")).isEqualTo(1L);
         assertThat(fixture.documents.keySet().stream()
             .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
             .hasSize(1);
@@ -2507,11 +2513,22 @@ class FirestoreCashflowLeaseGuardTest {
         CashflowWeeklyUpdateCompletionResponse first = fixture.persistence.runCommandTransaction(() ->
             service.completeCashflowWeeklyUpdate(ACTOR, "project-a", request)
         );
+        Map<String, Object> settlement = fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-07"
+        );
+        Map<String, Object> periods = new LinkedHashMap<>((Map<String, Object>) settlement.get("periods"));
+        Map<String, Object> approved = new LinkedHashMap<>((Map<String, Object>) periods.get("WEEK_3"));
+        approved.put("status", "COMPLETED");
+        approved.put("revision", 2L);
+        periods.put("WEEK_3", approved);
+        settlement.put("periods", periods);
         CashflowWeeklyUpdateCompletionResponse replay = fixture.persistence.runCommandTransaction(() ->
             service.completeCashflowWeeklyUpdate(ACTOR, "project-a", request)
         );
 
         assertThat(replay).isEqualTo(first);
+        assertThat(((Map<?, ?>) ((Map<?, ?>) settlement.get("periods")).get("WEEK_3")).get("status"))
+            .isEqualTo("COMPLETED");
         assertThat(fixture.documents.keySet().stream()
             .filter(path -> path.contains("/cashflow_weekly_update_completion_versions/")))
             .hasSize(1);
@@ -2533,6 +2550,10 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(completed.status()).isEqualTo("LOCKED");
         assertThat(completed.updateResult()).isEqualTo("NO_CHANGES");
         assertThat(completed.complianceStatus()).isEqualTo("ON_TIME");
+        Map<?, ?> periods = (Map<?, ?>) fixture.documents.get(
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-12"
+        ).get("periods");
+        assertThat(((Map<?, ?>) periods.get("WEEK_4")).get("status")).isEqualTo("PENDING_APPROVAL");
     }
 
     @Test

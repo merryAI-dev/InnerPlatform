@@ -1363,8 +1363,17 @@ export interface CashflowProjectionActualSummary {
   projectId: string;
   fromMonth: string;
   comparisonAsOfWeek: { yearMonth: string; weekNo: number };
+  projectionAmount: number;
+  actualAmount: number;
+  projectionActualDifferenceAmount: number;
   settlementDifferenceAmount: number;
   settlementMatches: boolean;
+  periods: Array<{
+    period: CashflowSettlementPeriod;
+    projectionAmount: number;
+    actualAmount: number;
+    projectionActualDifferenceAmount: number;
+  }>;
 }
 
 export interface CashflowProjectionActualSummaryBatch {
@@ -2920,7 +2929,7 @@ export async function fetchCashflowSettlementStatusesBatchViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: { projectIds: params.projectIds, yearMonth: params.yearMonth },
+      body: { projectIds: params.projectIds, ...(params.yearMonth ? { yearMonth: params.yearMonth } : {}) },
       retries: 0,
       timeoutMs: 12000,
     },
@@ -2954,6 +2963,7 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
   tenantId: string;
   actor: ActorLike;
   projectIds: string[];
+  yearMonth?: string;
   client?: PlatformApiClientLike;
 }): Promise<CashflowProjectionActualSummaryBatch> {
   const response = await resolveClient(params.client).post<CashflowProjectionActualSummaryBatch>(
@@ -2961,7 +2971,7 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
-      body: { projectIds: params.projectIds },
+      body: { projectIds: params.projectIds, yearMonth: params.yearMonth },
       retries: 0,
       timeoutMs: 12000,
     },
@@ -2975,6 +2985,14 @@ export async function fetchCashflowProjectionActualSummariesViaBff(params: {
     || result.items.length > params.projectIds.length
     || itemIds.some((projectId) => !requestedIds.has(projectId))
     || new Set(itemIds).size !== itemIds.length
+    || result.items.some((item) => !Number.isFinite(item?.projectionAmount)
+      || !Number.isFinite(item?.actualAmount)
+      || !Number.isFinite(item?.projectionActualDifferenceAmount)
+      || !Array.isArray(item?.periods)
+      || item.periods.some((period) => !['MONTH', 'WEEK_1', 'WEEK_2', 'WEEK_3', 'WEEK_4', 'WEEK_5'].includes(period?.period)
+        || !Number.isFinite(period?.projectionAmount)
+        || !Number.isFinite(period?.actualAmount)
+        || !Number.isFinite(period?.projectionActualDifferenceAmount)))
     || !Array.isArray(result?.errors)
     || result.errors.length > params.projectIds.length
     || result.errors.some((error) => error?.code !== 'SUMMARY_UNAVAILABLE' || !requestedIds.has(error?.projectId))

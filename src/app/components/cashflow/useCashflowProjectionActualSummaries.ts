@@ -35,6 +35,7 @@ export function useCashflowProjectionActualSummaries(params: {
   tenantId: string;
   actor?: ActorLike | null;
   projectIds: string[];
+  yearMonth?: string;
 }) {
   const { actor, tenantId } = params;
   const projectIdsKey = JSON.stringify(params.projectIds);
@@ -50,7 +51,7 @@ export function useCashflowProjectionActualSummaries(params: {
       errors: { ...current.errors, ...Object.fromEntries(ids.map((id) => [id, false])) },
     }));
     try {
-      const response = await fetchCashflowProjectionActualSummariesViaBff({ tenantId, actor, projectIds: ids });
+      const response = await fetchCashflowProjectionActualSummariesViaBff({ tenantId, actor, projectIds: ids, yearMonth: params.yearMonth });
       if (!active()) return;
       setState((current) => mergeCashflowProjectionActualSummaryBatch(current, ids, response));
     } catch {
@@ -61,7 +62,7 @@ export function useCashflowProjectionActualSummaries(params: {
     } finally {
       if (active()) setLoading((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, false])) }));
     }
-  }, [actor, tenantId]);
+  }, [actor, params.yearMonth, tenantId]);
 
   useEffect(() => {
     let active = true;

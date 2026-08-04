@@ -440,7 +440,7 @@ describe('JVM weekly API BFF proxy', () => {
       .expect(200, canonical);
     await request(app)
       .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
-      .send({ yearMonth: '2026-08', period: 'WEEK_3', action: 'SUBMIT' })
+      .send({ yearMonth: '2026-08', period: 'WEEK_3', action: 'APPROVE' })
       .expect(200, canonical);
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -451,8 +451,20 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       'http://jvm-weekly.local/api/v1/cashflow/project-a/settlement-statuses/transition',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ yearMonth: '2026-08', period: 'WEEK_3', action: 'SUBMIT' }) }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ yearMonth: '2026-08', period: 'WEEK_3', action: 'APPROVE' }) }),
     );
+  });
+
+  it('blocks an administrator from submitting an uncompleted settlement', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'admin' }, { env: runtimeEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
+      .send({ yearMonth: '2026-08', period: 'WEEK_3', action: 'SUBMIT' })
+      .expect(403)
+      .expect((response) => expect(response.body.code).toBe('cashflow_settlement_submit_forbidden'));
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('reads up to 100 project settlement statuses with one JVM batch request', async () => {
@@ -520,7 +532,7 @@ describe('JVM weekly API BFF proxy', () => {
 
     const response = await request(app)
       .post('/api/v1/cashflow/projection-actual-summary/batch')
-      .send({ projectIds: ['project-a', 'project-b'] })
+      .send({ projectIds: ['project-a', 'project-b'], yearMonth: '2026-11' })
       .expect(200);
 
     expect(response.body).toEqual(canonical);
@@ -528,7 +540,7 @@ describe('JVM weekly API BFF proxy', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(String(url)).toBe('http://jvm-weekly.local/api/v1/cashflow/projection-actual-summary/batch');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ projectIds: ['project-a', 'project-b'] });
+    expect(JSON.parse(init.body)).toEqual({ projectIds: ['project-a', 'project-b'], yearMonth: '2026-11' });
     expect(new Headers(init.headers).get('x-tenant-id')).toBe('tenant-a');
   });
 
@@ -2637,6 +2649,8 @@ describe('JVM weekly API BFF proxy', () => {
     expect(created.body.reviewWarnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SHEET_SOURCE_NOT_APPLIED' }),
     ]));
+    expect(source.documents.get('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-06'))
+      .toMatchObject({ periods: { MONTH: { status: 'PENDING_APPROVAL', revision: 1 } } });
 
     const approver = createApp(fetchImpl, createIdempotencyService(), {
       actorId: 'finance-1', actorRole: 'finance',
@@ -2647,6 +2661,8 @@ describe('JVM weekly API BFF proxy', () => {
       .send({ decision: 'APPROVE', expectedRevision: 0 })
       .expect(200)
       .expect((result) => expect(result.body.request.status).toBe('APPROVED'));
+    expect(source.documents.get('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-06'))
+      .toMatchObject({ periods: { MONTH: { status: 'COMPLETED', revision: 2, approvedBy: 'finance-1' } } });
   });
 
   it('creates and approves a warning-backed request when the mirror document is missing but closeInput has 160 cells', async () => {

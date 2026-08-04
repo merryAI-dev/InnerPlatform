@@ -26,11 +26,54 @@ public record CashflowProjectionActualSummaryBatchResponse(
         String projectId,
         String fromMonth,
         ComparisonAsOfWeek comparisonAsOfWeek,
+        BigDecimal projectionAmount,
+        BigDecimal actualAmount,
+        BigDecimal projectionActualDifferenceAmount,
         BigDecimal settlementDifferenceAmount,
-        boolean settlementMatches
-    ) {}
+        boolean settlementMatches,
+        List<PeriodSummary> periods
+    ) {
+        public Item {
+            periods = periods == null ? List.of() : List.copyOf(periods);
+        }
+
+        public Item(
+            String projectId,
+            String fromMonth,
+            ComparisonAsOfWeek comparisonAsOfWeek,
+            BigDecimal projectionAmount,
+            BigDecimal actualAmount,
+            BigDecimal projectionActualDifferenceAmount,
+            BigDecimal settlementDifferenceAmount,
+            boolean settlementMatches
+        ) {
+            this(projectId, fromMonth, comparisonAsOfWeek, projectionAmount, actualAmount,
+                projectionActualDifferenceAmount, settlementDifferenceAmount, settlementMatches, List.of());
+        }
+
+        public Item(
+            String projectId,
+            String fromMonth,
+            ComparisonAsOfWeek comparisonAsOfWeek,
+            BigDecimal settlementDifferenceAmount,
+            boolean settlementMatches
+        ) {
+            this(
+                projectId, fromMonth, comparisonAsOfWeek,
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                settlementDifferenceAmount, settlementMatches, List.of()
+            );
+        }
+    }
 
     public record ComparisonAsOfWeek(String yearMonth, int weekNo) {}
+
+    public record PeriodSummary(
+        String period,
+        BigDecimal projectionAmount,
+        BigDecimal actualAmount,
+        BigDecimal projectionActualDifferenceAmount
+    ) {}
 
     public record ErrorItem(String projectId, String code) {}
 }

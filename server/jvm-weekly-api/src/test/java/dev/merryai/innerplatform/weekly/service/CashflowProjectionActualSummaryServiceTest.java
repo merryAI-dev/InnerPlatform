@@ -62,6 +62,31 @@ class CashflowProjectionActualSummaryServiceTest {
     }
 
     @Test
+    void returnsTheRequestedMonthAndWeekAmountsEvenWhenTheMonthIsAfterTheCurrentBoundary() {
+        WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
+        WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);
+        WeeklyExpenseCommandService service = service(persistence, authorization);
+        WeeklyExpenseProjectionEntity projection = new WeeklyExpenseProjectionEntity(
+            "tenant-a", "project-a", "2026-11", 2, "SALES_IN"
+        );
+        projection.setAmount(BigDecimal.valueOf(300));
+        when(persistence.findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-11"))
+            .thenReturn(new WeeklyExpensePersistence.CashflowLedgerSource(List.of(projection), List.of(), List.of(2026)));
+
+        CashflowProjectionActualSummaryBatchResponse.Item item = service.readCashflowProjectionActualSummaries(
+            ACTOR, new CashflowProjectionActualSummaryBatchRequest(List.of("project-a"), "2026-11")
+        ).items().getFirst();
+
+        assertThat(item.periods()).filteredOn(period -> period.period().equals("MONTH"))
+            .extracting(CashflowProjectionActualSummaryBatchResponse.PeriodSummary::projectionAmount)
+            .containsExactly(BigDecimal.valueOf(300));
+        assertThat(item.periods()).filteredOn(period -> period.period().equals("WEEK_2"))
+            .extracting(CashflowProjectionActualSummaryBatchResponse.PeriodSummary::projectionAmount)
+            .containsExactly(BigDecimal.valueOf(300));
+        verify(persistence).findCashflowLedgerSource("tenant-a", "project-a", "2023-01", "2026-11");
+    }
+
+    @Test
     void isolatesOneRepositoryFailureAcrossTenAuthorizedProjectsWithoutLeakingItsSecret() throws Exception {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class);
         WeeklyExpenseAuthorizationService authorization = mock(WeeklyExpenseAuthorizationService.class);

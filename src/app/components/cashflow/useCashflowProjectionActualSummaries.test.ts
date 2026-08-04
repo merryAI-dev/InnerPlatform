@@ -5,8 +5,12 @@ const summary = (projectId: string, amount = 18_371_453) => ({
   projectId,
   fromMonth: '2023-01',
   comparisonAsOfWeek: { yearMonth: '2026-08', weekNo: 4 },
+  projectionAmount: amount,
+  actualAmount: 0,
+  projectionActualDifferenceAmount: amount,
   settlementDifferenceAmount: amount,
   settlementMatches: amount === 0,
+  periods: [],
 });
 
 describe('mergeCashflowProjectionActualSummaryBatch', () => {

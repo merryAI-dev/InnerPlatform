@@ -20,12 +20,14 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain('주정산 전');
+    expect(source).toContain('주정산 이전');
+    expect(source).toContain('결산 전');
     expect(source).toContain('조직장 승인 필요');
-    expect(source).toContain('정산 완료');
+    expect(source).toContain('승인 완료');
     expect(source).toContain("user?.uid === project.executiveApproverId");
     expect(source).toContain("setStatuses((current) => ({ ...current, [projectId]: result }))");
     expect(source).not.toContain('window.location.reload');
+    expect(source).not.toContain("onAction('SUBMIT')");
   });
 
   it('filters both visible rows and compliance requests by normalized department', () => {
