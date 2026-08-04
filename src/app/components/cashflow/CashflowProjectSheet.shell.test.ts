@@ -406,6 +406,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(operations).toContain('주간 정산 완료');
     expect(operations).toContain('월 결산');
     expect(operations).toContain('handleOpenMonthCloseReview');
+    expect(operations).not.toContain('목요일 자정 업데이트');
     expect(operations).toContain("monthCloseError || (monthCloseResult?.status !== 'CLOSED'");
     expect(operations).toContain('closeDeadline');
     expect(operations).not.toContain('작성자 전용 임시저장본을 저장했습니다.');

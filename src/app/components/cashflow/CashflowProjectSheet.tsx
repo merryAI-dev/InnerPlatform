@@ -2800,7 +2800,7 @@ export function CashflowProjectSheet({
           ) : null}
           {dashboardSummary}
 
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+          <div className="grid gap-3">
             <div className="rounded-md border border-border bg-card px-3.5 py-3 shadow-none">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-[12px] font-bold text-card-foreground">주요 관리 항목</div>
@@ -2825,31 +2825,6 @@ export function CashflowProjectSheet({
                     </div>
                   );
                 })}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="rounded-md border border-border bg-card px-3.5 py-3 shadow-none">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[12px] font-bold text-card-foreground">목요일 자정 업데이트</div>
-                  <Badge className="h-6 rounded-md border border-slate-200 bg-slate-100 px-2 text-[12px] text-slate-700 shadow-none">
-                    {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? '정산 완료' : '완료 대기'}
-                  </Badge>
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
-                  <div className="rounded-md bg-secondary px-3 py-2"><div className="text-muted-foreground">누적 미준수</div><div className="mt-1 font-bold text-red-700">{monthCloseResult?.dashboard?.deadlineSummary?.missedCount || 0}회</div></div>
-                  <div className="rounded-md bg-secondary px-3 py-2"><div className="text-muted-foreground">기한 내 완료</div><div className="mt-1 font-bold text-primary">{monthCloseResult?.dashboard?.deadlineSummary?.completedCount || 0}회</div></div>
-                </div>
-                <div className="mt-2 text-[12px] leading-4 text-muted-foreground">
-                  {monthCloseResult?.dashboard?.deadlineSummary?.current
-                    ? `${monthCloseResult.dashboard.deadlineSummary.current.yearMonth} ${monthCloseResult.dashboard.deadlineSummary.current.weekNo}주차 · ${weeklyCompletionStatusLabel(monthCloseResult.dashboard.deadlineSummary.current.status)}`
-                    : '첫 시트 검토 완료 시점부터 집계합니다.'}
-                </div>
-                {monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt ? (
-                  <div className="mt-1 truncate text-[12px] text-muted-foreground">
-                    {monthCloseResult.dashboard.deadlineSummary.current.completedBy || '사용자'} · {formatSheetAppliedAt(monthCloseResult.dashboard.deadlineSummary.current.completedAt)}
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
