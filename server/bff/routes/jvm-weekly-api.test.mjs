@@ -498,6 +498,18 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('blocks legacy MONTH approval from bypassing the canonical review request', async () => {
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), { actorRole: 'admin' }, { env: runtimeEnv });
+
+    await request(app)
+      .post('/api/v1/cashflow/project-a/settlement-statuses/transition')
+      .send({ yearMonth: '2026-08', period: 'MONTH', action: 'APPROVE' })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_canonical_review_required'));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('reads up to 100 project settlement statuses with one JVM batch request', async () => {
     const projectIds = Array.from({ length: 100 }, (_, index) => `project-${index + 1}`);
     const canonical = {
