@@ -97,7 +97,7 @@ describe('platform-bff-client', () => {
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'MONTH', action: 'APPROVE' });
     await transitionCashflowSettlementStatusViaBff({ ...common, period: 'WEEK_2', action: 'APPROVE' });
 
-    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests/p001-2026-08/review', expect.objectContaining({
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests/p001-2026-08/status-review', expect.objectContaining({
       body: { decision: 'APPROVE', expectedRevision: 3, expectedManifestHash: 'sha256:manifest' },
       idempotencyKey: 'cashflow-settlement:p001-2026-08:r3:approve',
     }));
@@ -370,7 +370,7 @@ describe('platform-bff-client', () => {
       '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/months?limit=12&cursor=2023-12',
       expect.objectContaining({ retries: 0 }),
     );
-    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/review', expect.objectContaining({
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/month-close/requests/p001-2026-06/status-review', expect.objectContaining({
       idempotencyKey: 'month-close-review-1',
       body: { decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: 'sha256:manifest', reason: '확인 완료' },
       timeoutMs: 27_000,

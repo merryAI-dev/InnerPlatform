@@ -3225,7 +3225,7 @@ export async function reviewCashflowMonthCloseRequestViaBff(params: {
     request: CashflowMonthCloseRequest;
     monthClose?: CashflowMonthCloseResult;
   }>(
-    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/review`,
+    `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/month-close/requests/${encodeURIComponent(params.requestId)}/${params.payload.expectedManifestHash ? 'status-review' : 'review'}`,
     {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),

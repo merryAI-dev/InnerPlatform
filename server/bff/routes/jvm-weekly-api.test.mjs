@@ -3784,6 +3784,12 @@ describe('JVM weekly API BFF proxy', () => {
       .expect((response) => expect(response.body.code).toBe('cashflow_month_close_approver_mismatch'));
     source.documents.get('orgs/tenant-a/projects/project-a').executiveApproverId = 'finance-1';
     await request(approver)
+      .post(`/api/v1/cashflow/project-a/month-close/requests/${created.body.requestId}/status-review`)
+      .set('idempotency-key', 'month-close-status-review-legacy')
+      .send({ decision: 'APPROVE', expectedRevision: 0 })
+      .expect(409)
+      .expect((response) => expect(response.body.code).toBe('cashflow_month_close_status_review_unsupported'));
+    await request(approver)
       .post(`/api/v1/cashflow/project-a/month-close/requests/${created.body.requestId}/review`)
       .set('idempotency-key', 'month-close-review-approve')
       .send({ decision: 'APPROVE', expectedRevision: 0 })
@@ -4505,7 +4511,7 @@ describe('JVM weekly API BFF proxy', () => {
     }, { env: runtimeEnv, db: source.db, now: () => new Date('2026-09-10T00:00:00.000Z') }).app;
     const r1Shards = new Map(shardDocs.map(([path, shard]) => [path, JSON.stringify(shard)]));
     const rejectedResponse = await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-reject')
       .send({ decision: 'REJECT', reason: '누적 근거를 다시 확인해 주세요.', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
       .expect(200)
@@ -4521,13 +4527,13 @@ describe('JVM weekly API BFF proxy', () => {
       expectedRevision: 1, expectedManifestHash: created.body.manifestHash,
     };
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-reject')
       .send(rejectedReplayBody)
       .expect(200)
       .expect((response) => expect(response.body).toEqual(rejectedResponse.body));
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-reject-duplicate')
       .send(rejectedReplayBody)
       .expect(409);
@@ -4594,7 +4600,7 @@ describe('JVM weekly API BFF proxy', () => {
         expect(response.body.items[0]).toMatchObject({ requestId: created.body.requestId, revision: 2 });
       });
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-stale-approve')
       .send({ decision: 'APPROVE', expectedRevision: 1, expectedManifestHash: created.body.manifestHash })
       .expect(409)
@@ -4602,7 +4608,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST')).toHaveLength(0);
 
     const approvedResponse = await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-approve')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(200)
@@ -4612,26 +4618,20 @@ describe('JVM weekly API BFF proxy', () => {
     expect(source.documents.get('orgs/tenant-a/cashflow_month_close_request_audits/project-a-2026-08-r2-approved')).toMatchObject({
       action: 'APPROVED', revision: 2, actorUid: 'finance-1', manifestHash: resubmitted.body.manifestHash,
     });
-    const approvalBody = JSON.parse(fetchImpl.mock.calls.find(
-      ([url, init]) => url.endsWith('/month-close') && init.method === 'POST',
-    )[1].body);
-    expect(approvalBody.idempotencyKey).toBe(source.documents.get(requestPath).reviewIdempotencyKey);
-    expect(approvalBody).toEqual({
-      idempotencyKey: 'cumulative-v2-approve',
-      requestId: 'project-a-2026-08', requestRevision: 2, manifestHash: resubmitted.body.manifestHash,
-      yearMonth: '2026-08', expectedRevision: 0,
+    expect(source.documents.get('orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08').periods.MONTH).toMatchObject({
+      status: 'COMPLETED', approvedBy: 'finance-1',
     });
     const closePostCount = () => fetchImpl.mock.calls.filter(([url, init]) => url.endsWith('/month-close') && init.method === 'POST').length;
-    expect(closePostCount()).toBe(1);
+    expect(closePostCount()).toBe(0);
     await request(approver)
       .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
       .set('idempotency-key', 'cumulative-v2-approve')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(200)
       .expect((response) => expect(response.body).toEqual(approvedResponse.body));
-    expect(closePostCount()).toBe(1);
+    expect(closePostCount()).toBe(0);
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'cumulative-v2-approve-duplicate')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(409);
@@ -4646,12 +4646,12 @@ describe('JVM weekly API BFF proxy', () => {
         operationId: 'cashflow-month-close:project-a-2026-08:r2',
       });
       await request(approver)
-        .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+        .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
         .set('idempotency-key', `resume-${status.toLowerCase()}`)
         .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
         .expect(200)
         .expect((response) => expect(response.body.request).toMatchObject({ status: 'APPROVED', revision: 2 }));
-      expect(closePostCount()).toBe(1);
+      expect(closePostCount()).toBe(0);
     }
     closedMonthClose = null;
     dashboardSourceUnavailable = true;
@@ -4661,38 +4661,18 @@ describe('JVM weekly API BFF proxy', () => {
       reviewIdempotencyKey: 'prior-uncertain-repost',
     });
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'resume-uncertain-repost')
       .send({ decision: 'APPROVE', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(200);
-    const repostBody = JSON.parse(fetchImpl.mock.calls.filter(
-      ([url, init]) => url.endsWith('/month-close') && init.method === 'POST',
-    ).at(-1)[1].body);
-    expect(repostBody.idempotencyKey).toBe('prior-uncertain-repost');
-    expect(closePostCount()).toBe(2);
+    expect(closePostCount()).toBe(0);
     dashboardSourceUnavailable = false;
     await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/review')
+      .post('/api/v1/cashflow/project-a/month-close/requests/project-a-2026-08/status-review')
       .set('idempotency-key', 'unsafe-reject-after-approval-start')
       .send({ decision: 'REJECT', reason: '취소', expectedRevision: 2, expectedManifestHash: resubmitted.body.manifestHash })
       .expect(409);
 
-    const reopenRunTransaction = source.db.runTransaction;
-    source.db.runTransaction = vi.fn()
-      .mockRejectedValueOnce(new Error('workflow read model unavailable'))
-      .mockImplementation(reopenRunTransaction);
-    await request(approver)
-      .post('/api/v1/cashflow/project-a/month-close/reopen-decision')
-      .set('idempotency-key', 'reopen-with-post-hook-failure')
-      .send({ yearMonth: '2026-08', expectedRevision: 2, decision: 'APPROVE', reason: '복구 후 재결산' })
-      .expect(200);
-    expect(source.documents.get(requestPath).status).toBe('APPROVED');
-    const afterReopen = await request(requester)
-      .post('/api/v1/cashflow/project-a/month-close/requests')
-      .set('idempotency-key', 'cumulative-v2-after-missed-reopen-hook')
-      .send({ ...createPayload, expectedRevision: 2 });
-    expect(afterReopen.status, JSON.stringify(afterReopen.body)).toBe(202);
-    expect(afterReopen.body).toMatchObject({ status: 'PENDING', revision: 3 });
   });
 
   it('blocks the legacy direct month-close mutation route', async () => {
