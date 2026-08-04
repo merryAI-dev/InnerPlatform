@@ -554,7 +554,6 @@ function createApp({ context = {}, db = createDb(), googleSheetsService, routeOp
         matrix: buildMatrix(),
       })),
     },
-    preserveLegacySavedRange: true,
     ...routeOptions,
   });
   app.use((error, _req, res, _next) => {
@@ -1781,7 +1780,7 @@ describe('cashflow sheet lab route', () => {
           matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
         })),
       },
-      routeOptions: { editLeasesEnabled: true, javaWeeklyClient, preserveLegacySavedRange: false },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
     });
     const mirror = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')

@@ -509,7 +509,7 @@ function buildConfigResponse(projectId, config, systemAccountEmail = '', project
   };
 }
 
-function resolvePreviewSource(parsed, savedConfig, preserveLegacySavedRange = false) {
+function resolvePreviewSource(parsed, savedConfig) {
   const value = readOptionalText(parsed.value);
   if (value) {
     return {
@@ -526,8 +526,8 @@ function resolvePreviewSource(parsed, savedConfig, preserveLegacySavedRange = fa
       sourceYear: Number(savedConfig.sourceYear),
       value: savedConfig.value,
       sheetName: readOptionalText(parsed.sheetName) || savedConfig.sheetName || undefined,
-      startWeek: preserveLegacySavedRange ? savedConfig.startWeek : '',
-      endWeek: preserveLegacySavedRange ? savedConfig.endWeek : '',
+      startWeek: '',
+      endWeek: '',
       source: 'saved_config',
     };
   }
@@ -3716,7 +3716,6 @@ export function mountCashflowSheetLabRoutes(app, {
   sheetPreviewCacheTtlMs = DEFAULT_SHEET_PREVIEW_CACHE_TTL_MS,
   performanceLogger,
   performanceNow,
-  preserveLegacySavedRange = false,
 } = {}) {
   if (enabled === false) {
     app.use('/api/v1/projects/:projectId/cashflow-sheet-lab', (_req, res) => {
@@ -3806,7 +3805,6 @@ export function mountCashflowSheetLabRoutes(app, {
     const source = resolvePreviewSource(
       { ...parsed, sourceYear },
       readCashflowSheetLabConfig(project, sourceYear),
-      preserveLegacySavedRange,
     );
     const weekRange = normalizeWeekRange(source);
     const configRevision = computeCashflowSheetConfigRevision({ ...source, ...weekRange });
