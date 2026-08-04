@@ -42,7 +42,7 @@ function SettlementStatusButton({
 }) {
   const status = item?.status || 'WAITING_FOR_UPDATE';
   if (status === 'COMPLETED') {
-    return <span className="inline-flex min-h-8 items-center rounded-md bg-emerald-50 px-2.5 font-semibold text-emerald-700">정산 완료</span>;
+    return <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />정산 완료</span>;
   }
   const action = status === 'PENDING_APPROVAL' ? 'APPROVE' : 'SUBMIT';
   return (
@@ -50,11 +50,12 @@ function SettlementStatusButton({
       type="button"
       size="sm"
       variant="outline"
-      className="min-h-8 whitespace-normal text-[11px]"
+      className={`min-h-8 gap-1.5 whitespace-normal rounded-full px-2.5 text-[11px] font-semibold ${status === 'PENDING_APPROVAL' ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
       disabled={loading || (action === 'APPROVE' && !canApprove)}
       onClick={() => onAction(action)}
     >
-      {loading ? '처리 중…' : status === 'PENDING_APPROVAL' ? '조직장 승인 필요' : '실무자 업데이트 대기 중'}
+      <span className={`h-1.5 w-1.5 rounded-full ${status === 'PENDING_APPROVAL' ? 'bg-amber-500' : 'bg-slate-400'}`} aria-hidden="true" />
+      {loading ? '처리 중…' : status === 'PENDING_APPROVAL' ? '조직장 승인 필요' : '주정산 전'}
     </Button>
   );
 }

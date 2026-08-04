@@ -20,7 +20,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain('실무자 업데이트 대기 중');
+    expect(source).toContain('주정산 전');
     expect(source).toContain('조직장 승인 필요');
     expect(source).toContain('정산 완료');
     expect(source).toContain("user?.uid === project.executiveApproverId");
