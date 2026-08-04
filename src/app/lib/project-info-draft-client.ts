@@ -127,6 +127,50 @@ function parseDraftBody(value: unknown, projectId: string) {
   return { draft: parseDraft(object(value, 'project information draft').draft, projectId) };
 }
 
+export type ProjectInfoRebaseResolution = 'MINE' | 'THEIRS';
+
+export interface ProjectInfoRebaseConflict {
+  field: string;
+  base: unknown;
+  mine: unknown;
+  theirs: unknown;
+}
+
+export interface ProjectInfoRebaseResult {
+  rebased: boolean;
+  canonicalVersion: number;
+  baseCanonicalVersion?: number;
+  autoMerged: Array<{ field: string; value: unknown }>;
+  conflicts: ProjectInfoRebaseConflict[];
+  draft?: ProjectInfoDraft;
+}
+
+function parseRebaseBody(value: unknown, projectId: string): ProjectInfoRebaseResult {
+  const body = object(value, 'project information rebase');
+  const list = (input: unknown) => (Array.isArray(input) ? input : []);
+  return {
+    rebased: body.rebased === true,
+    canonicalVersion: Number(body.canonicalVersion) || 0,
+    ...(body.baseCanonicalVersion === undefined
+      ? {}
+      : { baseCanonicalVersion: Number(body.baseCanonicalVersion) || 0 }),
+    autoMerged: list(body.autoMerged).map((entry) => {
+      const row = object(entry, 'project information rebase merge');
+      return { field: String(row.field ?? ''), value: row.value ?? null };
+    }),
+    conflicts: list(body.conflicts).map((entry) => {
+      const row = object(entry, 'project information rebase conflict');
+      return {
+        field: String(row.field ?? ''),
+        base: row.base ?? null,
+        mine: row.mine ?? null,
+        theirs: row.theirs ?? null,
+      };
+    }),
+    ...(body.draft === undefined ? {} : { draft: parseDraft(body.draft, projectId) }),
+  };
+}
+
 function parseAttachment(value: unknown): ProjectInfoAttachment {
   const attachment = object(value, 'project information attachment');
   if (
@@ -249,6 +293,25 @@ export function createProjectInfoDraftClient(options: {
         },
       );
       return parseDraftBody(response.data, projectId);
+    },
+
+    // Without `resolutions` this previews the merge and writes nothing.
+    async rebase(
+      ownership: { leaseId: string; fence: number },
+      input: {
+        expectedDraftRevision: number;
+        resolutions?: Record<string, ProjectInfoRebaseResolution>;
+      },
+    ): Promise<ProjectInfoRebaseResult> {
+      const response = await client.post<unknown>(`${path}/rebase`, {
+        ...request,
+        headers: ownershipHeaders(sessionId, ownership),
+        body: {
+          expectedDraftRevision: revision(input.expectedDraftRevision),
+          ...(input.resolutions ? { resolutions: input.resolutions } : {}),
+        },
+      });
+      return parseRebaseBody(response.data, projectId);
     },
 
     async submit(
