@@ -409,7 +409,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('total.contract + (row.paymentPlan?.contract || 0)');
     expect(source).toContain('년 선금·중도금 합계 70% 미만 사유 *');
     expect(source).toContain("updateFinancialYear(financialYearIndex!, 'advanceInterimBelow70Reason'");
-    expect(source).toContain("updateFinancialYear(financialYearIndex!, 'isSettled'");
+    expect(source).not.toContain('년 계약/재무 정산 완료');
     expect(source).toContain('(기존값 · 선택 불가)');
     expect(source).toContain('disabled>{member.role}');
     expect(source).not.toContain('최종 입금 주차 ${row.finalPaymentExpectedWeek || \'-\'}');
@@ -491,6 +491,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('단계로 이동');
     expect(source).toContain('{stepIndex === STEPS.length - 1 && !readOnly ? (');
     expect(source).toContain('if (!submitBlocked) setSubmitBlockedNotice(false);');
+  });
+
+  it('shows the blocking reason only beside the final save button, not at the top of the review step', () => {
+    expect(source).not.toContain('입력이 필요합니다.');
+    expect(source.match(/renderSubmitBlockers\(\)/g)).toHaveLength(1);
   });
 
   it('removes private registration attachments through the owner-authorized draft API before clearing local state', () => {
