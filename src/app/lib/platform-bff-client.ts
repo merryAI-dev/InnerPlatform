@@ -2948,6 +2948,26 @@ export async function transitionCashflowSettlementStatusViaBff(params: {
   action: 'SUBMIT' | 'APPROVE';
   client?: PlatformApiClientLike;
 }): Promise<CashflowSettlementStatusesResult> {
+  if (params.period === 'MONTH' && params.action === 'APPROVE') {
+    const request = await fetchCurrentCashflowMonthCloseRequestViaBff(params);
+    if (!request || !['PENDING', 'APPROVING', 'UNCERTAIN'].includes(request.status)) {
+      throw new Error('승인할 월 결산 요청을 찾을 수 없습니다.');
+    }
+    if ((request.reviewWarnings ?? []).length > 0) {
+      throw new Error('확인이 필요한 월 결산 항목이 있어 결재 페이지에서 검토해 주세요.');
+    }
+    await reviewCashflowMonthCloseRequestViaBff({
+      ...params,
+      requestId: request.requestId,
+      payload: {
+        decision: 'APPROVE',
+        expectedRevision: request.revision,
+        expectedManifestHash: request.manifestHash,
+      },
+      idempotencyKey: `cashflow-settlement:${request.requestId}:r${request.revision}:approve`,
+    });
+    return fetchCashflowSettlementStatusesViaBff(params);
+  }
   const response = await resolveClient(params.client).post<CashflowSettlementStatusesResult>(
     `/api/v1/cashflow/${encodeURIComponent(params.projectId)}/settlement-statuses/transition`,
     {

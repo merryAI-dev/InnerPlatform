@@ -25,7 +25,7 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(source).toContain('sticky left-0');
     expect(source).toContain('fetchCashflowSettlementStatusesBatchViaBff');
     expect(source).toContain('transitionCashflowSettlementStatusViaBff');
-    expect(source).toContain("onAction={() => navigate('/approvals')}");
+    expect(source).toContain("onAction={(action) => void transition(project.id, 'MONTH', action)}");
     expect(source).toContain('주정산 이전');
     expect(source).toContain('결산 전');
     expect(source).toContain('조직장 승인 필요');

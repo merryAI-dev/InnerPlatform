@@ -43,6 +43,7 @@ import {
   fetchCashflowWeeklyComplianceViaBff,
   fetchCashflowProjectionActualSummariesViaBff,
   fetchCashflowSettlementStatusesBatchViaBff,
+  transitionCashflowSettlementStatusViaBff,
   fetchCashflowActivityViaBff,
   fetchCashflowAppliedCellChangesViaBff,
   type CashflowCumulativeCloseScope,
@@ -76,6 +77,35 @@ function asMockClient<T extends {
 }
 
 describe('platform-bff-client', () => {
+  it('uses the canonical month-close review hook for MONTH and the status transition hook for WEEK', async () => {
+    const status = { projectId: 'p001', yearMonth: '2026-08', items: [] };
+    const monthRequest = {
+      requestId: 'p001-2026-08', projectId: 'p001', yearMonth: '2026-08', status: 'PENDING',
+      revision: 3, manifestHash: 'sha256:manifest', reviewWarnings: [],
+    };
+    const client = asMockClient({
+      get: vi.fn()
+        .mockResolvedValueOnce({ data: { request: monthRequest } })
+        .mockResolvedValueOnce({ data: status }),
+      post: vi.fn()
+        .mockResolvedValueOnce({ data: { request: { ...monthRequest, status: 'APPROVED' } } })
+        .mockResolvedValueOnce({ data: status }),
+      request: vi.fn(),
+    });
+    const common = { tenantId: 'mysc', actor: { uid: 'head-1', role: 'admin' }, projectId: 'p001', yearMonth: '2026-08', client };
+
+    await transitionCashflowSettlementStatusViaBff({ ...common, period: 'MONTH', action: 'APPROVE' });
+    await transitionCashflowSettlementStatusViaBff({ ...common, period: 'WEEK_2', action: 'APPROVE' });
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/api/v1/cashflow/p001/month-close/requests/p001-2026-08/review', expect.objectContaining({
+      body: { decision: 'APPROVE', expectedRevision: 3, expectedManifestHash: 'sha256:manifest' },
+      idempotencyKey: 'cashflow-settlement:p001-2026-08:r3:approve',
+    }));
+    expect(client.post).toHaveBeenNthCalledWith(2, '/api/v1/cashflow/p001/settlement-statuses/transition', expect.objectContaining({
+      body: { yearMonth: '2026-08', period: 'WEEK_2', action: 'APPROVE' },
+    }));
+  });
+
   it('posts all settlement project IDs in one bounded batch request', async () => {
     const data = { items: [], errors: [{ projectId: 'p002', code: 'STATUS_UNAVAILABLE' }] };
     const client = asMockClient({ post: vi.fn(async () => ({ data })), get: vi.fn(), request: vi.fn() });
