@@ -2767,6 +2767,9 @@ export function mountJvmWeeklyApiRoutes(app, {
     const requestedYearMonth = readOptionalText(requested.yearMonth);
     const requestedWeekNo = Number(requested.weekNo);
     const updateResult = readOptionalText(requested.updateResult).toUpperCase();
+    const ignoreProjectionValidation = requested.ignoreProjectionValidation === true;
+    const projectionValidationEvidenceHash = readOptionalText(requested.projectionValidationEvidenceHash);
+    const projectionValidationIssueCount = Number(requested.projectionValidationIssueCount || 0);
     const hasExplicitScope = Object.prototype.hasOwnProperty.call(requested, 'yearMonth')
       || Object.prototype.hasOwnProperty.call(requested, 'weekNo');
     if (!['CHANGED', 'NO_CHANGES'].includes(updateResult) || (hasExplicitScope && (
@@ -2774,6 +2777,11 @@ export function mountJvmWeeklyApiRoutes(app, {
       || !Number.isSafeInteger(requestedWeekNo)
       || requestedWeekNo < 1
       || requestedWeekNo > 5
+    )) || (ignoreProjectionValidation && (
+      !/^sha256:[a-f0-9]{64}$/.test(projectionValidationEvidenceHash)
+      || !Number.isSafeInteger(projectionValidationIssueCount)
+      || projectionValidationIssueCount < 1
+      || projectionValidationIssueCount > 256
     ))) {
       throw createHttpError(
         400,
@@ -2795,6 +2803,9 @@ export function mountJvmWeeklyApiRoutes(app, {
         weekNo: hasExplicitScope ? requestedWeekNo : boundary.asOfWeek.weekNo,
         completedAt: currentNow.toISOString(),
         updateResult,
+        ignoreProjectionValidation,
+        projectionValidationEvidenceHash: ignoreProjectionValidation ? projectionValidationEvidenceHash : '',
+        projectionValidationIssueCount: ignoreProjectionValidation ? projectionValidationIssueCount : 0,
       },
       { cashflowWrite: true },
     );

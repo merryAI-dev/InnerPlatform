@@ -532,6 +532,25 @@ describe('platform-bff-client', () => {
     );
   });
 
+  it('sends an explicit projection validation override with its JVM evidence', async () => {
+    const client = asMockClient({ post: vi.fn(async () => ({ data: { ok: true } })), get: vi.fn(), request: vi.fn() });
+    await completeCashflowWeeklyUpdateViaBff({
+      tenantId: 'mysc', actor: { uid: 'pm-1', role: 'pm' }, projectId: 'p001',
+      yearMonth: '2026-08', weekNo: 2, updateResult: 'CHANGED',
+      ignoreProjectionValidation: true,
+      projectionValidationEvidenceHash: `sha256:${'a'.repeat(64)}`,
+      projectionValidationIssueCount: 32,
+      client,
+    });
+    expect(client.post).toHaveBeenCalledWith('/api/v1/cashflow/p001/weekly-update-complete', expect.objectContaining({
+      body: expect.objectContaining({
+        ignoreProjectionValidation: true,
+        projectionValidationEvidenceHash: `sha256:${'a'.repeat(64)}`,
+        projectionValidationIssueCount: 32,
+      }),
+    }));
+  });
+
   it('reads canonical weekly compliance with bounded cursor paging', async () => {
     const client = asMockClient({ post: vi.fn(), get: vi.fn(async () => ({ data: { items: [], nextCursor: '', onTimeCount: 0, missedCount: 0 } })), request: vi.fn() });
     await fetchCashflowWeeklyComplianceViaBff({ tenantId: 'mysc', actor: { uid: 'admin-1', role: 'admin' }, projectId: 'p001', limit: 50, cursor: 'opaque/cursor', client });

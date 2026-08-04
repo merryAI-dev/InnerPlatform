@@ -300,7 +300,10 @@ public interface WeeklyExpensePersistence {
         String complianceStatus,
         String operationId,
         String auditId,
-        String updateResult
+        String updateResult,
+        boolean projectionValidationOverride,
+        int projectionValidationIssueCount,
+        String projectionValidationEvidenceHash
     ) {
         public CashflowWeeklyUpdateCompletionRecord(
             String projectId, String yearMonth, int weekNo, String completedAt, String completedBy,
@@ -309,7 +312,7 @@ public interface WeeklyExpensePersistence {
         ) {
             this(projectId, yearMonth, weekNo, completedAt, completedBy, alreadyCompleted, status, revision,
                 reopenCount, snapshotHash, sourceRevision, targetRevision, reopenedAt, reopenedBy, reopenReason,
-                "", "", "", "", "");
+                "", "", "", "", "", false, 0, "");
         }
     }
 
