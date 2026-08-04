@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -121,6 +122,24 @@ public class WeeklyExpenseAuthorizationService {
             return;
         }
         throw new WeeklyExpenseForbiddenException("Actor is not assigned to this project.");
+    }
+
+    public void requireProjectsAllowed(String commandName, TrustedActorContext actor, List<String> projectIds) {
+        requireAllowed(commandName, actor);
+        if (projectIds == null || projectIds.isEmpty()
+            || !projectExistenceRepository.existingProjectIds(actor.tenantId(), projectIds).containsAll(projectIds)) {
+            throw new WeeklyExpenseForbiddenException("Project does not exist in this workspace.");
+        }
+        String role = actor.role() == null ? "" : actor.role().trim().toLowerCase(Locale.ROOT);
+        if ((isWorkspaceMode() && "workspace_user".equals(role) && WORKSPACE_COMMANDS.contains(commandName))
+            || TENANT_WIDE_PROJECT_ROLES.contains(role)) {
+            return;
+        }
+        for (String projectId : projectIds) {
+            if (!projectAccessRepository.hasProjectAccess(actor, projectId)) {
+                throw new WeeklyExpenseForbiddenException("Actor is not assigned to this project.");
+            }
+        }
     }
 
     private boolean isWorkspaceMode() {
