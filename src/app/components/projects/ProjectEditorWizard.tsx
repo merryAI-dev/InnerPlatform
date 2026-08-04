@@ -45,6 +45,7 @@ import {
   type ProjectCurrency,
   type ProjectFinancialYear,
   type ProjectFinancialInputFlags,
+  type ProjectPaymentExpectedMonths,
   type ProjectPhase,
   type ProjectRequestContractAnalysis,
   type ProjectStatus,
@@ -154,6 +155,7 @@ interface ProjectEditorWizardProps {
   members?: OrgMember[];
   requesterId?: string;
   departmentOptions?: string[];
+  settlementSystemOptions?: string[];
   topSlot?: ReactNode;
   showCheckoutEntry?: boolean;
   actions: ProjectEditorAction[];
@@ -602,6 +604,7 @@ export function ProjectEditorWizard({
   members = [],
   requesterId,
   departmentOptions,
+  settlementSystemOptions = [],
   topSlot,
   showCheckoutEntry = false,
   actions,
@@ -1069,6 +1072,14 @@ export function ProjectEditorWizard({
     setDraft((prev) => createProjectEditorWizardDraft({ ...prev, [key]: value }));
   };
 
+  const updateSettlementSystem = (value: string) => {
+    setDraft((prev) => createProjectEditorWizardDraft({
+      ...prev,
+      settlementSystem: (value.startsWith('OTHER:') ? 'OTHER' : value) as SettlementSystemCode,
+      settlementSystemOther: value.startsWith('OTHER:') ? value.slice('OTHER:'.length) : '',
+    }));
+  };
+
   const updateAmount = (key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount', rawValue: string) => {
     setDraft((prev) => createProjectEditorWizardDraft({
       ...prev,
@@ -1079,8 +1090,8 @@ export function ProjectEditorWizard({
 
   const updateFinancialYear = (
     index: number,
-    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
-    value: number | string | boolean | ProjectFinancialYear['paymentPlan'],
+    key: 'contractAmount' | 'salesVatAmount' | 'totalRevenueAmount' | 'totalActualCost' | 'supportAmount' | 'paymentPlan' | 'paymentExpectedMonths' | 'advanceInterimBelow70Reason' | 'isSettled' | 'confirmed',
+    value: number | string | boolean | ProjectFinancialYear['paymentPlan'] | ProjectFinancialYear['paymentExpectedMonths'],
   ) => {
     setDraft((prev) => {
       const financialYears = prev.financialYears.map((row, rowIndex) => (
@@ -1310,12 +1321,27 @@ export function ProjectEditorWizard({
         issues.push({ step: 'financial', label: '계약기간 전체 연도별 재무 확인' });
       }
       if (draft.settlementType === 'NONE') issues.push({ step: 'financial', label: '사업유형' });
+      if (settlementDetailsEnabled && draft.settlementSystem === 'OTHER') {
+        const customSystem = draft.settlementSystemOther.trim();
+        if (!customSystem) issues.push({ step: 'financial', label: '기타 정산 시스템 이름' });
+        if (customSystem.length > 100) issues.push({ step: 'financial', label: '기타 정산 시스템 이름은 100자 이하여야 합니다.' });
+      }
       (!hasMultiYearContract ? ['contract', 'interim', 'final'] as const : []).forEach((field) => {
         if (draft.paymentPlan[field] > 0 && !draft.paymentExpectedMonths[field]) {
           const label = field === 'contract' ? '선금/계약금 입금 예상월' : field === 'interim' ? '중도금 입금 예상월' : '잔금 입금 예상월';
           issues.push({ step: 'financial', label });
         }
       });
+      if (hasMultiYearContract) {
+        draft.financialYears.forEach((row) => {
+          (['contract', 'interim', 'final'] as const).forEach((field) => {
+            if ((row.paymentPlan?.[field] || 0) > 0 && !row.paymentExpectedMonths?.[field]) {
+              const label = field === 'contract' ? '선금/계약금' : field === 'interim' ? '중도금' : '잔금';
+              issues.push({ step: 'financial', label: `${row.year}년 ${label} 예상 입금 시점` });
+            }
+          });
+        });
+      }
       const missingAnnualAdvanceInterimReason = hasMultiYearContract && draft.financialYears.some((row) => {
         const paymentPlan = row.paymentPlan || { contract: 0, interim: 0, final: 0 };
         const paymentTotal = paymentPlan.contract + paymentPlan.interim + paymentPlan.final;
@@ -1895,12 +1921,8 @@ export function ProjectEditorWizard({
             </div>
           ))}
           <div>
-            <Label className="text-xs">입금 계획 설명</Label>
+            <Label className="text-xs">기타 메모</Label>
             <Textarea value={draft.paymentPlanDesc} onChange={(event) => update('paymentPlanDesc', event.target.value)} className="mt-1 min-h-[92px] bg-white text-sm" />
-          </div>
-          <div>
-            <Label className="text-xs">계약/재무 안내</Label>
-            <Textarea value={draft.settlementGuide} onChange={(event) => update('settlementGuide', event.target.value)} className="mt-1 min-h-[92px] bg-white text-sm" />
           </div>
         </div>
       ) : null}
@@ -2016,7 +2038,10 @@ export function ProjectEditorWizard({
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <Label className="text-xs">정산 시스템</Label>
-            <Select value={draft.settlementSystem} onValueChange={(value) => update('settlementSystem', value as SettlementSystemCode)}>
+            <Select
+              value={draft.settlementSystem === 'OTHER' && draft.settlementSystemOther.trim() ? `OTHER:${draft.settlementSystemOther.trim()}` : draft.settlementSystem}
+              onValueChange={updateSettlementSystem}
+            >
               <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {[
@@ -2025,8 +2050,23 @@ export function ProjectEditorWizard({
                 ].map((key) => (
                   <SelectItem key={key} value={key}>{SETTLEMENT_SYSTEM_LABELS[key]}</SelectItem>
                 ))}
+                {[...settlementSystemOptions, draft.settlementSystemOther]
+                  .map((value) => value.replace(/\s+/g, ' ').trim())
+                  .filter((value, index, values) => value && values.findIndex((candidate) => candidate.toLocaleLowerCase('ko-KR') === value.toLocaleLowerCase('ko-KR')) === index)
+                  .map((value) => (
+                  <SelectItem key={`OTHER:${value}`} value={`OTHER:${value}`}>{value}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {draft.settlementSystem === 'OTHER' ? (
+              <Input
+                value={draft.settlementSystemOther}
+                onChange={(event) => update('settlementSystemOther', event.target.value)}
+                placeholder="정산 시스템 이름 직접 입력"
+                aria-label="기타 정산 시스템 이름"
+                className="mt-2 h-9 text-sm"
+              />
+            ) : null}
           </div>
           <div>
             <Label className="text-xs">인건비 정산 기준</Label>
@@ -2243,6 +2283,14 @@ export function ProjectEditorWizard({
         update('paymentPlan', { ...paymentPlan, [field]: value });
       }
     };
+    const paymentExpectedMonths = financialYear?.paymentExpectedMonths || draft.paymentExpectedMonths;
+    const updatePaymentExpectedMonth = (field: keyof ProjectPaymentExpectedMonths, value: string) => {
+      if (financialYear && financialYearIndex !== undefined) {
+        updateFinancialYear(financialYearIndex, 'paymentExpectedMonths', { ...paymentExpectedMonths, [field]: value });
+      } else {
+        update('paymentExpectedMonths', { ...paymentExpectedMonths, [field]: value });
+      }
+    };
     const yearAdvanceInterimRatio = financialYear && financialYear.contractAmount > 0
       ? (paymentPlan.contract + paymentPlan.interim) / financialYear.contractAmount
       : null;
@@ -2257,26 +2305,29 @@ export function ProjectEditorWizard({
           <Label className="text-xs">선금/계약금 (원)</Label>
           <Input value={formatProjectAmountInput(paymentPlan.contract, true)} onChange={(event) => updatePaymentPlan('contract', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
           <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.contract, financialYear?.contractAmount || draft.contractAmount)}</p>
-          {!financialYear ? <><Label className="mt-3 block text-xs">입금 예상월{paymentPlan.contract > 0 ? ' *' : ''}</Label><Input type="month" value={draft.paymentExpectedMonths.contract} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, contract: event.target.value })} className="mt-1 h-9 text-sm" /></> : null}
+          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.contract > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}선금/계약금 예상 입금 시점`} aria-required={paymentPlan.contract > 0} value={paymentExpectedMonths.contract} onChange={(event) => updatePaymentExpectedMonth('contract', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">중도금 (원)</Label>
           <Input value={formatProjectAmountInput(paymentPlan.interim, true)} onChange={(event) => updatePaymentPlan('interim', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
           <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.interim, financialYear?.contractAmount || draft.contractAmount)}</p>
-          {!financialYear ? <><Label className="mt-3 block text-xs">입금 예상월{paymentPlan.interim > 0 ? ' *' : ''}</Label><Input type="month" value={draft.paymentExpectedMonths.interim} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, interim: event.target.value })} className="mt-1 h-9 text-sm" /></> : null}
+          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.interim > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}중도금 예상 입금 시점`} aria-required={paymentPlan.interim > 0} value={paymentExpectedMonths.interim} onChange={(event) => updatePaymentExpectedMonth('interim', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
         <div>
           <Label className="text-xs">잔금 (원)</Label>
           <Input value={formatProjectAmountInput(paymentPlan.final, true)} onChange={(event) => updatePaymentPlan('final', parseProjectAmountInput(event.target.value))} className="mt-1 h-9 text-sm" />
           <p className="mt-1 text-[10px] text-muted-foreground">{formatPaymentPlanAmount(paymentPlan.final, financialYear?.contractAmount || draft.contractAmount)}</p>
-          {!financialYear ? <><Label className="mt-3 block text-xs">입금 예상월{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" value={draft.paymentExpectedMonths.final} onChange={(event) => update('paymentExpectedMonths', { ...draft.paymentExpectedMonths, final: event.target.value })} className="mt-1 h-9 text-sm" /></> : null}
+          <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}잔금 예상 입금 시점`} aria-required={paymentPlan.final > 0} value={paymentExpectedMonths.final} onChange={(event) => updatePaymentExpectedMonth('final', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
       </div>
       {financialYear ? (
-        <label className="flex items-center gap-2 text-[12px] text-slate-700">
-          <Checkbox checked={financialYear.isSettled === true} onCheckedChange={(checked) => updateFinancialYear(financialYearIndex!, 'isSettled', checked === true)} />
-          {financialYear.year}년 계약/재무 정산 완료
-        </label>
+        <div>
+          <label className="flex items-center gap-2 text-[12px] text-slate-700">
+            <Checkbox checked={financialYear.isSettled === true} onCheckedChange={(checked) => updateFinancialYear(financialYearIndex!, 'isSettled', checked === true)} />
+            {financialYear.year}년 계약/재무 정산 완료
+          </label>
+          <p className="ml-6 mt-1 text-[11px] text-muted-foreground">해당 연도의 계약금 수납과 정산 업무가 모두 끝났음을 표시합니다. 현금흐름 월결산과는 별개입니다.</p>
+        </div>
       ) : null}
       {requiresYearAdvanceInterimReason ? (
         <div>
@@ -2306,20 +2357,11 @@ export function ProjectEditorWizard({
         </div>
       ) : null}
       {!financialYear ? <div>
-        <Label className="text-xs">입금 계획 설명</Label>
+        <Label className="text-xs">기타 메모</Label>
         <Textarea
           value={draft.paymentPlanDesc}
           onChange={(event) => update('paymentPlanDesc', event.target.value)}
           placeholder="예: 검수 완료 후 세금계산서 발행, 발행일로부터 14일 이내 입금"
-          className="mt-1 min-h-[92px] text-sm"
-        />
-      </div> : null}
-      {!financialYear ? <div>
-        <Label className="text-xs">계약/재무 안내</Label>
-        <Textarea
-          value={draft.settlementGuide}
-          onChange={(event) => update('settlementGuide', event.target.value)}
-          placeholder="예: 이나라도움 수령, 공급가액 기준, 선지급 후 정산"
           className="mt-1 min-h-[92px] text-sm"
         />
       </div> : null}
@@ -2479,7 +2521,7 @@ export function ProjectEditorWizard({
               <>
                 <ReviewRow label="통장 유형" value={ACCOUNT_TYPE_LABELS[draft.accountType]} />
                 <ReviewRow label="이자 반납 여부" value={draft.interestRefundPolicy ? INTEREST_REFUND_POLICY_LABELS[draft.interestRefundPolicy] : '-'} />
-                <ReviewRow label="정산 시스템" value={SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
+                <ReviewRow label="정산 시스템" value={draft.settlementSystem === 'OTHER' ? draft.settlementSystemOther : SETTLEMENT_SYSTEM_LABELS[draft.settlementSystem]} />
                 <ReviewRow label="인건비 정산 기준" value={LABOR_SETTLEMENT_BASIS_LABELS[draft.laborSettlementBasis]} />
               </>
             ) : null}
@@ -2488,7 +2530,7 @@ export function ProjectEditorWizard({
                 <ReviewRow
                   label="연도별 재무"
                   value={draft.financialYears.map((row) => (
-                    `${row.year}년 계약 ${fmtKRW(row.contractAmount)}원 · 매출VAT ${fmtKRW(row.salesVatAmount)}원 · 총수익 ${fmtKRW(row.totalRevenueAmount)}원 · 총실비 ${fmtKRW(row.totalActualCost)}원 · 지원금 ${fmtKRW(row.supportAmount)}원 · 선금 ${fmtKRW(row.paymentPlan?.contract || 0)}원 · 중도금 ${fmtKRW(row.paymentPlan?.interim || 0)}원 · 잔금 ${fmtKRW(row.paymentPlan?.final || 0)}원 · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''} · 수익률 ${(row.profitRate * 100).toFixed(2)}%${row.confirmed ? ' · 확인' : ' · 미확인'}`
+                    `${row.year}년 계약 ${fmtKRW(row.contractAmount)}원 · 매출VAT ${fmtKRW(row.salesVatAmount)}원 · 총수익 ${fmtKRW(row.totalRevenueAmount)}원 · 총실비 ${fmtKRW(row.totalActualCost)}원 · 지원금 ${fmtKRW(row.supportAmount)}원 · 선금 ${fmtKRW(row.paymentPlan?.contract || 0)}원 (${row.paymentExpectedMonths?.contract || '-'}) · 중도금 ${fmtKRW(row.paymentPlan?.interim || 0)}원 (${row.paymentExpectedMonths?.interim || '-'}) · 잔금 ${fmtKRW(row.paymentPlan?.final || 0)}원 (${row.paymentExpectedMonths?.final || '-'}) · 정산 ${row.isSettled ? '완료' : '미완료'}${row.advanceInterimBelow70Reason ? ` · 70% 미만 사유 ${row.advanceInterimBelow70Reason}` : ''} · 수익률 ${(row.profitRate * 100).toFixed(2)}%${row.confirmed ? ' · 확인' : ' · 미확인'}`
                   )).join('\n')}
                 />
                 <ReviewRow
@@ -2537,8 +2579,7 @@ export function ProjectEditorWizard({
             {!hasMultiYearContract ? <ReviewRow label="잔금 예상월" value={draft.paymentExpectedMonths.final} /> : null}
             <ReviewRow label="선금+중도금 비율" value={advanceInterimRatio === null ? '-' : `${(advanceInterimRatio * 100).toFixed(1)}%`} />
             {requiresAdvanceInterimReason ? <ReviewRow label="70% 미만 사유" value={draft.advanceInterimBelow70Reason} /> : null}
-            <ReviewRow label="입금 계획" value={draft.paymentPlanDesc} />
-            <ReviewRow label="계약/재무 안내" value={draft.settlementGuide} />
+            <ReviewRow label="기타 메모" value={draft.paymentPlanDesc} />
             {showProjectCheckout ? (
               <ReviewRow
                 label="종료사업 체크아웃"

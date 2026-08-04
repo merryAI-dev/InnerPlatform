@@ -58,6 +58,8 @@ function createProjectFromDraft(
     basis: draft.basis,
     accountType: draft.accountType,
     fundInputMode: draft.fundInputMode,
+    settlementSystem: draft.settlementSystem,
+    settlementSystemOther: draft.settlementSystemOther,
     settlementSheetPolicy: draft.settlementSheetPolicy,
     paymentPlan: draft.paymentPlan,
     paymentPlanDesc: draft.paymentPlanDesc,
@@ -97,7 +99,7 @@ function createProjectFromDraft(
 
 export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: ProjectWizardProps) {
   const navigate = useNavigate();
-  const { addProject, updateProject, upsertMember, members, currentUser } = useAppStore();
+  const { addProject, updateProject, upsertMember, members, projects, currentUser } = useAppStore();
   const { orgId } = useFirebase();
   const { options: departmentOptions } = useProjectDepartmentSettings();
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -217,6 +219,7 @@ export function ProjectWizard({ editProject, initialPhase = 'PROSPECT' }: Projec
       members={members}
       requesterId={currentUser?.uid}
       departmentOptions={departmentOptions}
+      settlementSystemOptions={projects.flatMap((project) => project.settlementSystem === 'OTHER' && project.settlementSystemOther && !project.trashedAt ? [project.settlementSystemOther] : [])}
       actions={editProject ? [
         { id: 'save', label: '수정 저장', icon: Save },
       ] : [

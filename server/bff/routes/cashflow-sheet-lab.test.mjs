@@ -554,6 +554,7 @@ function createApp({ context = {}, db = createDb(), googleSheetsService, routeOp
         matrix: buildMatrix(),
       })),
     },
+    preserveLegacySavedRange: true,
     ...routeOptions,
   });
   app.use((error, _req, res, _next) => {
@@ -1754,7 +1755,7 @@ describe('cashflow sheet lab route', () => {
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
-  it('pins and applies an explicit owner-draft source even when the shared project config is older', async () => {
+  it('pins the whole selected tab when refreshing a legacy saved range config', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -1780,15 +1781,11 @@ describe('cashflow sheet lab route', () => {
           matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
         })),
       },
-      routeOptions: { editLeasesEnabled: true, javaWeeklyClient },
+      routeOptions: { editLeasesEnabled: true, javaWeeklyClient, preserveLegacySavedRange: false },
     });
     const mirror = await request(app)
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
       .send({
-        value: 'spreadsheet-b',
-        sheetName: 'cashflow(사용내역 연동)',
-        startWeek: '26-1-1',
-        endWeek: '26-1-5',
         idempotencyKey: 'refresh-owner-draft-b',
       })
       .expect(200);
@@ -1797,17 +1794,10 @@ describe('cashflow sheet lab route', () => {
       .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
       .send({ expectedMirrorRevision: mirror.body.sourceRevision, idempotencyKey: 'stage-owner-draft-b' })
       .expect(200);
-    await request(app)
-      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
-      .set({
-        'x-edit-session-id': 'session-a',
-        'x-edit-lease-id': 'lease-a',
-        'x-edit-fence': '7',
-      })
-      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-owner-draft-b' })
-      .expect(200);
-
-    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(stage.body.stagedLineCount).toBeGreaterThan(0);
+    expect(mirror.body.cells).toHaveLength(1920);
+    expect(mirror.body.activeWeekRange).toMatchObject({ startWeek: '', endWeek: '' });
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
   });
 
   it('does not reserve an old staged apply when config changes during the final preflight', async () => {

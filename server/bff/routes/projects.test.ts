@@ -82,8 +82,8 @@ function registrationV2Payload(overrides: Record<string, unknown> = {}) {
     },
     registrationRequirementsVersion: 2,
     financialYears: [
-      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, finalPaymentExpectedWeek: '26-8-1', advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
-      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, finalPaymentExpectedWeek: '27-12-4', advanceInterimBelow70Reason: '', isSettled: false },
+      { year: 2026, contractAmount: 100_000, salesVatAmount: 10_000, totalRevenueAmount: 40_000, totalActualCost: 25_000, supportAmount: 0, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 50_000, interim: 20_000, final: 30_000 }, paymentExpectedMonths: { contract: '2026-02', interim: '2026-06', final: '2026-12' }, finalPaymentExpectedWeek: '26-8-1', advanceInterimBelow70Reason: '연차별 일정', isSettled: true },
+      { year: 2027, contractAmount: 200_000, salesVatAmount: 20_000, totalRevenueAmount: 80_000, totalActualCost: 50_000, supportAmount: 10_000, profitRate: 0.4, confirmed: true, paymentPlan: { contract: 100_000, interim: 40_000, final: 60_000 }, paymentExpectedMonths: { contract: '2027-02', interim: '2027-06', final: '2027-12' }, finalPaymentExpectedWeek: '27-12-4', advanceInterimBelow70Reason: '', isSettled: false },
     ],
     interestRefundPolicy: 'REFUND',
     finalPaymentExpectedWeek: '27-12-4',

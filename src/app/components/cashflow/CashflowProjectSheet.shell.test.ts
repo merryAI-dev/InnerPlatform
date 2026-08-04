@@ -382,7 +382,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("['CHANGED', '변경사항 반영 완료'");
     expect(source).toContain("['NO_CHANGES', '변경사항 없음'");
     expect(source).toContain('이번 주차의 처리 결과만 선택해 정산 상태를 업데이트합니다.');
-    expect(source).toContain('무시하고 반영');
+    expect(source).toContain(".sort((left, right) => left.localeCompare(right))");
+    expect(source).toContain('>}반영');
+    expect(source).not.toContain('무시하고 반영');
     expect(source).not.toContain('선택한 결과로 완료');
     expect(source).not.toContain('그 이후 15개 재무주차(총 16주·256칸)');
     expect(source).not.toContain('ZERO(0원)는 작성값이며 EMPTY(미입력)는 완료할 수 없습니다.');

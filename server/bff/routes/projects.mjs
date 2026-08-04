@@ -714,7 +714,7 @@ const REGISTRATION_ACCOUNT_TYPES = new Set(['DEDICATED', 'OPERATING', 'NONE', 'O
 const SETTLEMENT_SYSTEM_CODES = new Set([
   'E_NARA_DOUM', 'IRIS', 'RCMS', 'EZBARO', 'E_HIJO', 'EDUFINE',
   'HAPPYEUM', 'AGRIX', 'BOTAEM_E', 'SMTECH', 'KOCCA_PMS', 'NIPA',
-  'ACCOUNTANT', 'PRIVATE', 'NONE',
+  'ACCOUNTANT', 'PRIVATE', 'OTHER', 'NONE',
 ]);
 const LABOR_SETTLEMENT_BASES = new Set([
   'INCLUDE_ACTUAL_SALARY', 'EXCLUDE_ACTUAL_SALARY', 'FIXED_AMOUNT', 'NONE',
@@ -905,6 +905,40 @@ function normalizePaymentExpectedMonths(value) {
   };
 }
 
+function normalizeSettlementSystemOther(value) {
+  return readOptionalText(value).replace(/\s+/g, ' ');
+}
+
+function assertProjectPaymentExtensions(payload) {
+  const settlementSystem = readOptionalText(payload?.settlementSystem);
+  const settlementSystemOther = normalizeSettlementSystemOther(payload?.settlementSystemOther);
+  if (settlementSystem && !SETTLEMENT_SYSTEM_CODES.has(settlementSystem)) {
+    invalidRegistration('Project registration settlementSystem is invalid');
+  }
+  if (settlementSystem === 'OTHER' && !settlementSystemOther) {
+    invalidRegistration('Project registration settlementSystemOther is required');
+  }
+  if (settlementSystemOther.length > 100) {
+    invalidRegistration('Project registration settlementSystemOther is too long');
+  }
+  if (!Array.isArray(payload?.financialYears)) return;
+  for (const row of payload.financialYears) {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || row.paymentExpectedMonths === undefined) continue;
+    if (!row.paymentExpectedMonths || typeof row.paymentExpectedMonths !== 'object' || Array.isArray(row.paymentExpectedMonths)) {
+      invalidRegistration('Project registration financialYears paymentExpectedMonths is invalid');
+    }
+    for (const field of REGISTRATION_PAYMENT_FIELDS) {
+      const rawMonth = readOptionalText(row.paymentExpectedMonths[field]);
+      if (rawMonth && !normalizeExpectedMonth(rawMonth)) {
+        invalidRegistration(`Project registration financialYears.${row.year}.paymentExpectedMonths.${field} is invalid`);
+      }
+      if (registrationAmount(row.paymentPlan?.[field]) > 0 && !normalizeExpectedMonth(rawMonth)) {
+        invalidRegistration(`Project registration financialYears.${row.year}.paymentExpectedMonths.${field} is required`);
+      }
+    }
+  }
+}
+
 function normalizeLaborTransferPlan(_value) {
   return {
     mode: 'MONTHLY_WEEK_3',
@@ -1020,6 +1054,9 @@ function normalizeRegistrationFinancialYears(value) {
           interim: registrationAmount(row.paymentPlan.interim),
           final: registrationAmount(row.paymentPlan.final),
         },
+      } : {}),
+      ...(row?.paymentExpectedMonths && typeof row.paymentExpectedMonths === 'object' && !Array.isArray(row.paymentExpectedMonths) ? {
+        paymentExpectedMonths: normalizePaymentExpectedMonths(row.paymentExpectedMonths),
       } : {}),
       ...(Object.hasOwn(row || {}, 'advanceInterimBelow70Reason') ? {
         advanceInterimBelow70Reason: readOptionalText(row.advanceInterimBelow70Reason),
@@ -1162,6 +1199,7 @@ function assertRegistrationV2Requirements(payload, attachmentRefs, validateAttac
   if (settlementDetailsEnabled && settlementSystem && !SETTLEMENT_SYSTEM_CODES.has(settlementSystem)) {
     invalidRegistration('Project registration settlementSystem is invalid');
   }
+  assertProjectPaymentExtensions(payload);
   if (settlementDetailsEnabled && laborSettlementBasis && !LABOR_SETTLEMENT_BASES.has(laborSettlementBasis)) {
     invalidRegistration('Project registration laborSettlementBasis is invalid');
   }
@@ -1443,6 +1481,9 @@ export function buildProjectRegistrationCanonicalDocuments({
     basis,
     accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(readOptionalText(payload.accountType)),
     settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(payload.settlementSystem),
+    settlementSystemOther: settlementDetailsEnabled && normalizeSettlementSystemCode(payload.settlementSystem) === 'OTHER'
+      ? normalizeSettlementSystemOther(payload.settlementSystemOther)
+      : undefined,
     laborSettlementBasis: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeLaborSettlementBasis(payload.laborSettlementBasis),
@@ -1626,6 +1667,9 @@ function buildProjectRequestPayloadFromProject(project, existingPayload = {}) {
     basis: Number(pickValue('registrationRequirementsVersion')) === 2 || settlementDetailsEnabled ? basis : 'NONE',
     accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(pickText('accountType')),
     settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(pickText('settlementSystem')),
+    settlementSystemOther: settlementDetailsEnabled && normalizeSettlementSystemCode(pickText('settlementSystem')) === 'OTHER'
+      ? normalizeSettlementSystemOther(pickText('settlementSystemOther'))
+      : undefined,
     laborSettlementBasis: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeLaborSettlementBasis(pickText('laborSettlementBasis')),
@@ -1756,6 +1800,9 @@ export function buildProjectPatchFromChangeRequestPayload(payload = {}, currentP
     basis: registrationVersion === 2 || settlementDetailsEnabled ? basis : 'NONE',
     accountType: !settlementDetailsEnabled ? 'NONE' : normalizeAccountType(readOptionalText(payload.accountType)),
     settlementSystem: !settlementDetailsEnabled ? 'NONE' : normalizeSettlementSystemCode(payload.settlementSystem),
+    settlementSystemOther: settlementDetailsEnabled && normalizeSettlementSystemCode(payload.settlementSystem) === 'OTHER'
+      ? normalizeSettlementSystemOther(payload.settlementSystemOther)
+      : undefined,
     laborSettlementBasis: !settlementDetailsEnabled
       ? 'NONE'
       : normalizeLaborSettlementBasis(payload.laborSettlementBasis),
@@ -2841,6 +2888,21 @@ export function mountProjectRoutes(app, {
       );
     }
 
+    assertProjectPaymentExtensions(parsed);
+    const hasSettlementSystem = Object.hasOwn(parsed, 'settlementSystem');
+    const settlementSystem = hasSettlementSystem ? normalizeSettlementSystemCode(parsed.settlementSystem) : undefined;
+    const financialYears = Array.isArray(parsed.financialYears)
+      ? parsed.financialYears.map((row) => ({
+        ...row,
+        ...(row?.paymentExpectedMonths !== undefined ? {
+          paymentExpectedMonths: normalizePaymentExpectedMonths(row.paymentExpectedMonths),
+        } : {}),
+        ...(Object.hasOwn(row || {}, 'advanceInterimBelow70Reason') ? {
+          advanceInterimBelow70Reason: readOptionalText(row.advanceInterimBelow70Reason),
+        } : {}),
+      }))
+      : parsed.financialYears;
+
     const projectPayload = normalizeProjectRevenueFields({
       ...stripServerManagedFields(stripExpectedVersion(parsed)),
       id: parsed.id.trim(),
@@ -2848,6 +2910,13 @@ export function mountProjectRoutes(app, {
       orgId: tenantId,
       currency: normalizeProjectCurrency(parsed.currency),
       teamMembersDetailed: normalizeProjectTeamMembersDetailed(parsed.teamMembersDetailed),
+      ...(hasSettlementSystem ? {
+        settlementSystem,
+        settlementSystemOther: settlementSystem === 'OTHER'
+          ? normalizeSettlementSystemOther(parsed.settlementSystemOther)
+          : undefined,
+      } : {}),
+      ...(Array.isArray(financialYears) ? { financialYears } : {}),
     }, 'totalRevenueAmount');
 
     const shouldProvisionProjectDriveRoot = !!(

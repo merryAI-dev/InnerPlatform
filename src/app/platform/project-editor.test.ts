@@ -321,7 +321,7 @@ describe('project editor draft mapping', () => {
   it('exposes the exact PPT labels for settlement-none and other account options', () => {
     expect(ACCOUNT_TYPE_LABELS.OTHER).toBe('기타');
     expect(normalizeAccountType('OTHER')).toBe('OTHER');
-    expect(SETTLEMENT_SYSTEM_LABELS.NONE).toBe('정산없음');
+    expect(SETTLEMENT_SYSTEM_LABELS.NONE).toBe('시스템 미사용');
     expect(LABOR_SETTLEMENT_BASIS_LABELS).toMatchObject({
       INCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 포함 실급여',
       EXCLUDE_ACTUAL_SALARY: '4대보험, 퇴직금 제외 실급여',
@@ -332,7 +332,7 @@ describe('project editor draft mapping', () => {
 
   it('exposes the exact PPT page 30 settlement-system options while retaining legacy codes', () => {
     expect(PROJECT_SETTLEMENT_SYSTEM_CODES.map((code) => [code, SETTLEMENT_SYSTEM_LABELS[code]])).toEqual([
-      ['NONE', '정산없음'],
+      ['NONE', '시스템 미사용'],
       ['E_NARA_DOUM', 'e나라도움 (국고보조금통합관리시스템)'],
       ['BOTAEM_E', '보탬e(지방보조금관리시스템)'],
       ['RCMS', 'RCMS (실시간연구비관리시스템)'],
@@ -341,6 +341,7 @@ describe('project editor draft mapping', () => {
       ['KOCCA_PMS', 'KOCCA PMS'],
       ['NIPA', 'NIPA 사업관리시스템'],
       ['IRIS', 'IRIS(범부처통합연구지원시스템)'],
+      ['OTHER', '기타'],
     ]);
     expect(SETTLEMENT_SYSTEM_LABELS.ACCOUNTANT).toBe('회계사정산');
   });
@@ -511,6 +512,9 @@ describe('project editor draft mapping', () => {
         supportAmount: 5_000,
         profitRate: 0.91,
         confirmed: true,
+        paymentPlan: { contract: 50_000, interim: 0, final: 50_000 },
+        paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+        advanceInterimBelow70Reason: '  발주처 지급 조건  ',
       }],
       registrationConfirmations: {
         laborIncludesFourInsurance: true,
@@ -547,6 +551,10 @@ describe('project editor draft mapping', () => {
       presentationPptOriginal: 'https://docs.google.com/presentation/d/presentation/edit',
     });
     expect(payload.checkout?.evidenceDeletedAfterUsb).toBe(true);
+    expect(payload.financialYears?.[0]).toMatchObject({
+      paymentExpectedMonths: { contract: '2026-03', interim: '', final: '2026-12' },
+      advanceInterimBelow70Reason: '발주처 지급 조건',
+    });
     expect(payload.customerBusinessRegistrationDocument?.name).toBe('customer-registration.pdf');
     expect(payload.performanceCertificateDocument?.name).toBe('performance.pdf');
   });
@@ -626,7 +634,7 @@ describe('project editor draft mapping', () => {
       expect.arrayContaining([
         {
           key: 'paymentPlanDesc',
-          label: '입금 계획',
+          label: '기타 메모',
           before: '선금 50%, 잔금 50%',
           after: '선금 80%, 잔금 20%',
         },
@@ -842,5 +850,27 @@ describe('project editor draft mapping', () => {
 
     expect(patch.note).toBe('마고와 써니 참여율 보정 메모');
     expect(payload.note).toBe('마고와 써니 참여율 보정 메모');
+  });
+
+  it('preserves spaces while typing a custom settlement system and audits label changes', () => {
+    const customProject = {
+      ...baseProject,
+      settlementSystem: 'OTHER' as const,
+      settlementSystemOther: '기존 시스템',
+    };
+    const draft = createProjectEditorDraft({
+      ...buildProjectEditorDraftFromProject(customProject),
+      settlementSystem: 'OTHER',
+      settlementSystemOther: '새 시스템 ',
+    });
+
+    expect(draft.settlementSystemOther).toBe('새 시스템 ');
+    expect(buildProjectRequestPayloadFromDraft(draft).settlementSystemOther).toBe('새 시스템');
+    expect(buildProjectEditorReviewChanges(customProject, draft)).toEqual(expect.arrayContaining([{
+      key: 'settlementSystem',
+      label: '정산 시스템',
+      before: '기존 시스템',
+      after: '새 시스템',
+    }]));
   });
 });
