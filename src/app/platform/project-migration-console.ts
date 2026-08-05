@@ -165,7 +165,11 @@ export function buildMigrationAuditConsoleRecords(
         title: normalizeText(project.officialContractName || project.name) || '이름 없음',
         clientOrg: normalizeText(project.clientOrg),
         managerName: normalizeText(project.registeredByName || project.managerName),
-        requestedAt: normalizeText(request?.requestedAt || project.createdAt),
+        // The date a reviewer needs is when the request arrived. Falling back to the
+        // project's creation date showed a months-old date for a request filed today.
+        requestedAt: normalizeText(
+          request?.updatedAt || request?.requestedAt || project.registeredAt || project.createdAt,
+        ),
       };
     })
     .sort((left, right) => String(right.requestedAt).localeCompare(String(left.requestedAt)));

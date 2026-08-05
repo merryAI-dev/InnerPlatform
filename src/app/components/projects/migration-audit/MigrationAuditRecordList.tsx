@@ -18,8 +18,20 @@ function statusClass(status: MigrationAuditConsoleRecord['status']) {
   return 'border-amber-300 text-amber-800';
 }
 
-function formatDate(value: string) {
-  return value ? value.slice(0, 10).replace(/-/g, '.') : '-';
+// Several requests can arrive on the same day, so the reviewer needs the time too.
+function formatReceivedAt(value: string) {
+  if (!value) return '-';
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return value.slice(0, 10).replace(/-/g, '.');
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(at).replace(/\.\s*$/, '');
 }
 
 export function MigrationAuditRecordList({ records, onOpen, reviewStage = 'executive' }: MigrationAuditRecordListProps) {
@@ -42,7 +54,7 @@ export function MigrationAuditRecordList({ records, onOpen, reviewStage = 'execu
                 <th className="px-4 py-3">담당조직(CIC)</th>
                 <th className="px-4 py-3">프로젝트명</th>
                 <th className="px-4 py-3">등록자</th>
-                <th className="px-4 py-3">접수일</th>
+                <th className="px-4 py-3">접수일시</th>
                 {isManagementPlanning ? <th className="px-4 py-3">프로젝트 코드</th> : null}
                 <th className="px-4 py-3 text-right">문서</th>
               </tr>
@@ -57,7 +69,7 @@ export function MigrationAuditRecordList({ records, onOpen, reviewStage = 'execu
                     <p className="mt-1 truncate text-[11px] text-slate-500">{record.clientOrg || '계약 대상 미지정'}</p>
                   </td>
                   <td className="px-4 py-3 text-[12px] text-slate-700">{record.managerName || '-'}</td>
-                  <td className="px-4 py-3 text-[12px] text-slate-600">{formatDate(record.requestedAt)}</td>
+                  <td className="px-4 py-3 text-[12px] text-slate-600">{formatReceivedAt(record.requestedAt)}</td>
                   {isManagementPlanning ? <td className="px-4 py-3 text-[12px] font-medium text-slate-700">{getManagementPlanningReview(record.project).projectCode || '부여 대기'}</td> : null}
                   <td className="px-4 py-3 text-right">
                     <Button type="button" variant="outline" size="sm" className="h-8 rounded-none border-slate-400 text-[11px]" onClick={() => onOpen(record)}>
