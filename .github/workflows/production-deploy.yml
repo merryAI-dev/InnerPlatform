@@ -41,8 +41,8 @@ jobs:
       BFF_DEPLOY_ENV: live
       BFF_AUTH_MODE: firebase_required
       BFF_EDIT_LEASES_ENABLED: 'true'
-      BFF_WORKERS_ENABLED: 'false'
-      BFF_SCHEDULER_OWNER: disabled
+      BFF_WORKERS_ENABLED: 'true'
+      BFF_SCHEDULER_OWNER: vercel
       BFF_MAINTENANCE_READ_ONLY: 'false'
       BFF_ALLOWED_ORIGINS: https://myscube.myscguard.app
       JVM_WEEKLY_AUTH_MODE: strict
@@ -202,6 +202,9 @@ jobs:
             throw new Error(`production maintenance guard still active: ${mutation.response.status} ${JSON.stringify(mutation.body)}`);
           }
 
+          // Workers run from Vercel cron. An unauthenticated call must be rejected as
+          // unauthorized, which also proves CRON_SECRET reached the deployment: a missing
+          // secret would answer 503 worker_secret_missing instead.
           for (const path of [
             '/api/internal/workers/outbox/run',
             '/api/internal/workers/work-queue/run',
@@ -209,7 +212,7 @@ jobs:
             '/api/internal/workers/client-errors/run',
           ]) {
             const worker = await request(path);
-            if (worker.response.status !== 503 || worker.body.error !== 'worker_scheduler_disabled') {
+            if (worker.response.status !== 401 || worker.body.error !== 'unauthorized_worker') {
               throw new Error(`worker guard missing at ${path}: ${worker.response.status} ${JSON.stringify(worker.body)}`);
             }
           }

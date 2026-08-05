@@ -76,8 +76,8 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain('LIVE_FIREBASE_PROJECT_ID: inner-platform-live-20260316');
     expect(workflowText).toContain('BFF_DEPLOY_ENV: live');
     expect(workflowText).toContain("BFF_EDIT_LEASES_ENABLED: 'true'");
-    expect(workflowText).toContain("BFF_WORKERS_ENABLED: 'false'");
-    expect(workflowText).toContain('BFF_SCHEDULER_OWNER: disabled');
+    expect(workflowText).toContain("BFF_WORKERS_ENABLED: 'true'");
+    expect(workflowText).toContain('BFF_SCHEDULER_OWNER: vercel');
     expect(workflowText).toContain("BFF_MAINTENANCE_READ_ONLY: 'false'");
     expect(workflowText).toContain('--env FIREBASE_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
     expect(workflowText).toContain('--env BFF_FIREBASE_AUTH_PROJECT_ID="${LIVE_FIREBASE_PROJECT_ID}"');
@@ -99,7 +99,7 @@ describe('production deployment workflow safety', () => {
     expect(workflowText).toContain("'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET");
     expect(workflowText).toContain('deploy --prod --yes --skip-domain');
     expect(workflowText).toContain('/api/v1/__maintenance_probe__');
-    expect(workflowText).toContain('worker_scheduler_disabled');
+    expect(workflowText).toContain('unauthorized_worker');
     expect(workflowText).toContain('mutation.response.status !== 400');
     expect(workflowText).toContain("mutation.body.error === 'maintenance_read_only'");
     expect(workflowText.indexOf('Verify production surface before alias')).toBeLessThan(
