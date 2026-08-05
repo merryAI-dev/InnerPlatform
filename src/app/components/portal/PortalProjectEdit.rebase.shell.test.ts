@@ -39,8 +39,19 @@ describe('project info draft rebase contract', () => {
   it('blocks confirmation until the owner has chosen a value for every conflict', () => {
     expect(dialogSource).toContain('disabled={busy || unresolvedCount > 0}');
     expect(dialogSource).toContain('내가 입력한 값');
-    expect(dialogSource).toContain('최신 프로젝트 값');
+    expect(dialogSource).toContain('임시저장된 최근 값');
     expect(dialogSource).toContain('자동으로 반영되는 항목');
+  });
+
+  it('shows form wording and recognizable values instead of stored field names', () => {
+    expect(dialogSource).toContain("teamMembersDetailed: '참여인력'");
+    expect(dialogSource).toContain("customerBusinessRegistrationDocument: '고객사 사업자등록증'");
+    expect(dialogSource).toContain("finalPaymentNote: '잔금 관련 메모'");
+    expect(dialogSource).toContain("settlementSystemOther: '기타 정산 시스템 이름'");
+    // Attachments read as a file, amount maps as 선금/중도금/잔금 — never raw JSON.
+    expect(dialogSource).toContain("{ contract: '선금', interim: '중도금', final: '잔금' }");
+    expect(dialogSource).not.toContain('JSON.stringify(value)');
+    expect(dialogSource).toContain('입력하지 않음');
   });
 
   it('exposes rebase on the draft client with resolutions optional for preview', () => {

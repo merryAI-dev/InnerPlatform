@@ -1565,8 +1565,18 @@ export function createBffApp(options = {}) {
     res.locals.errorCode = errorCode;
 
     if (statusCode >= 500) {
+      // One greppable line carrying the route and requestId, so a failure reported from
+      // the browser can be matched to this log without scanning the whole stream.
       // eslint-disable-next-line no-console
-      console.error('[bff] unhandled error', error);
+      console.error('[bff] unhandled error', JSON.stringify({
+        method: req.method,
+        path: req.originalUrl || req.url,
+        requestId: req.requestId || req.context?.requestId || null,
+        tenantId: req.context?.tenantId || null,
+        name: error?.name || null,
+        message: error?.message || String(error),
+        code: error?.code || null,
+      }), error?.stack || error);
     }
 
     res.status(statusCode).json({

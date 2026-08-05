@@ -70,6 +70,33 @@ describe('mergeProjectInfoDraftFields', () => {
     expect(result.merged.paymentPlan).toEqual({ contract: 500, interim: 0, final: 0 });
   });
 
+  it('treats missing, null and empty text as the same "not entered" value', () => {
+    const result = mergeProjectInfoDraftFields({
+      base: { finalPaymentNote: '', settlementSystemOther: null },
+      mine: { finalPaymentNote: null, settlementSystemOther: '' },
+      theirs: { finalPaymentNote: undefined, settlementSystemOther: undefined },
+    });
+    expect(result.conflicts).toEqual([]);
+    expect(result.autoMerged).toEqual([]);
+  });
+
+  it('ignores optional keys one side simply omits inside a map', () => {
+    const attachment = {
+      path: 'orgs/mysc/drafts/att-1.pdf',
+      name: '사업자등록증.pdf',
+      size: 2215244,
+      contentType: 'application/pdf',
+    };
+    const result = mergeProjectInfoDraftFields({
+      base: { contractDocument: attachment },
+      mine: { contractDocument: { ...attachment, downloadURL: '' } },
+      theirs: { contractDocument: { ...attachment, visibility: 'PRIVATE', documentKind: 'contract' } },
+    });
+    // The owner never touched the file, so storage bookkeeping is adopted silently.
+    expect(result.conflicts).toEqual([]);
+    expect(result.autoMerged.map((entry) => entry.field)).toEqual(['contractDocument']);
+  });
+
   it('does not invent a conflict when Firestore returns the same map in another key order', () => {
     const result = mergeProjectInfoDraftFields({
       base: { paymentPlan: { contract: 0, interim: 0, final: 0 } },
