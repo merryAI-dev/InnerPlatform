@@ -31,12 +31,15 @@ const IMPORT_HEADERS = {
 const FORBIDDEN_HEADERS = ['성별', '생년월일(양력)', '생년월일(음력)', '생년월일'] as const;
 
 type FieldKey = keyof typeof IMPORT_HEADERS;
+/** Fields written to Firestore: the roster columns plus the derived Korean-name field. */
+type MemberFieldKey = FieldKey | 'nameKo';
 
 /** firebase-admin은 CJS라 런타임 값은 default에 담겨 온다. */
 type FirebaseAdmin = typeof import('firebase-admin');
 type FirestoreDb = import('firebase-admin').firestore.Firestore;
 
-const FIELD_LABELS: Record<FieldKey, string> = {
+const FIELD_LABELS: Record<MemberFieldKey, string> = {
+  nameKo: '이름(한글)',
   name: '이름',
   nickname: '별명',
   email: '이메일',
@@ -67,7 +70,7 @@ interface PlanEntry {
   action: PlanAction;
   row: RosterRow;
   docId: string | null;
-  changedFields: FieldKey[];
+  changedFields: MemberFieldKey[];
   note: string;
 }
 
@@ -418,11 +421,11 @@ function buildPlan(rows: RosterRow[], existing: Map<string, ExistingMember[]>): 
 
     const desired = toMemberFields(row);
     if (matches.length === 0) {
-      return { action: 'CREATE', row, docId: buildMemberDocId(email), changedFields: Object.keys(desired) as FieldKey[], note: '신규 등록' };
+      return { action: 'CREATE', row, docId: buildMemberDocId(email), changedFields: Object.keys(desired) as MemberFieldKey[], note: '신규 등록' };
     }
 
     const target = matches[0];
-    const changedFields = (Object.keys(desired) as FieldKey[]).filter(
+    const changedFields = (Object.keys(desired) as MemberFieldKey[]).filter(
       (key) => String(target.data[key] ?? '') !== String(desired[key] ?? ''),
     );
     return {
@@ -436,10 +439,12 @@ function buildPlan(rows: RosterRow[], existing: Map<string, ExistingMember[]>): 
 }
 
 /** Firestore에 저장할 필드. 개인정보 항목은 여기에 포함되지 않는다. */
-function toMemberFields(row: RosterRow): Partial<Record<FieldKey, string>> {
-  const fields: Partial<Record<FieldKey, string>> = {
-    // The ledger stores the display name in one form, 이름(별명), so every screen reads the
-    // same thing. Google account names arrive in mixed forms and must not decide this.
+function toMemberFields(row: RosterRow): Partial<Record<MemberFieldKey, string>> {
+  const fields: Partial<Record<MemberFieldKey, string>> = {
+    // Screens compose the display from nameKo and nickname, which only this import writes.
+    // `name` stays in step for anything still reading the combined string, but sign-in
+    // paths overwrite it, so it must not be the field screens depend on.
+    nameKo: row.name,
     name: row.nickname ? `${row.name}(${row.nickname})` : row.name,
     email: normalizeEmail(row.email),
   };
@@ -483,7 +488,7 @@ function reportPlan(plan: PlanEntry[]): void {
 
   const changed = plan.filter((entry) => entry.action === 'UPDATE');
   if (changed.length > 0) {
-    const fieldCounts = new Map<FieldKey, number>();
+    const fieldCounts = new Map<MemberFieldKey, number>();
     for (const entry of changed) {
       for (const key of entry.changedFields) fieldCounts.set(key, (fieldCounts.get(key) || 0) + 1);
     }

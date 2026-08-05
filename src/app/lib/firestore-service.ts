@@ -225,6 +225,8 @@ export function buildMemberDirectoryList(docs: MemberDirectoryDocInput[]): OrgMe
     return {
       uid: String(merged.uid || '').trim(),
       name: String(merged.name || ''),
+      nameKo: typeof merged.nameKo === 'string' && merged.nameKo.trim() ? merged.nameKo.trim() : undefined,
+      nickname: typeof merged.nickname === 'string' && merged.nickname.trim() ? merged.nickname.trim() : undefined,
       email: String(merged.email || ''),
       role: (merged.role || 'pm') as OrgMember['role'],
       status: typeof merged.status === 'string' ? merged.status.trim().toUpperCase() : undefined,

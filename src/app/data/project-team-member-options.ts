@@ -54,16 +54,17 @@ export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeam
     const status = String(member.status || '').trim().toUpperCase();
     if (status === 'INACTIVE' || status === 'DELETED') return;
     const parsed = splitMemberDisplayName(member.name || '');
-    if (!String(member.uid || '').trim() || !parsed.name) return;
-    const canonical = findProjectTeamMemberOption(parsed.name);
-    const nickname = parsed.nickname || canonical?.nickname || '';
-    const key = parsed.name.toLowerCase();
+    const displayName = String(member.nameKo || '').trim() || parsed.name;
+    if (!String(member.uid || '').trim() || !displayName) return;
+    const canonical = findProjectTeamMemberOption(displayName);
+    const nickname = String(member.nickname || '').trim() || parsed.nickname || canonical?.nickname || '';
+    const key = displayName.toLowerCase();
     if (options.has(key)) return;
     options.set(key, {
-      value: parsed.name,
-      name: parsed.name,
+      value: displayName,
+      name: displayName,
       nickname,
-      label: nickname ? `${parsed.name} (${nickname})` : parsed.name,
+      label: nickname ? `${displayName} (${nickname})` : displayName,
     });
   });
 
@@ -95,9 +96,14 @@ export function buildOrgMemberPickerOptions(members: OrgMember[]): OrgMemberPick
     const status = String(member.status || '').trim().toUpperCase();
     if (status === 'INACTIVE' || status === 'DELETED') return;
     const email = String(member.email || '').trim();
+    // nameKo and nickname belong to the roster. The combined `name` string is still written
+    // by sign-in paths, so it is only parsed when the structured fields are absent.
     const parsed = splitMemberDisplayName(member.name || '');
-    const name = parsed.name || email || uid;
-    const nickname = parsed.nickname || findProjectTeamMemberOption(name)?.nickname || '';
+    const name = String(member.nameKo || '').trim() || parsed.name || email || uid;
+    const nickname = String(member.nickname || '').trim()
+      || parsed.nickname
+      || findProjectTeamMemberOption(name)?.nickname
+      || '';
     byUid.set(uid, {
       uid,
       name,

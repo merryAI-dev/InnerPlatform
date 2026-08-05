@@ -580,7 +580,15 @@ export interface CrossVerifyGroup {
 
 export interface OrgMember {
   uid: string;
+  /**
+   * Legacy combined display string, historically '이름(별명)'. Several sign-in paths still
+   * write this field, so screens should prefer nameKo and nickname when they are present.
+   */
   name: string;
+  /** Owned by the employee roster import. */
+  nameKo?: string;
+  /** Owned by the employee roster import. */
+  nickname?: string;
   email: string;
   role: UserRole;
   status?: string;
