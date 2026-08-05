@@ -62,7 +62,11 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('const hasUnlinkedStoredOwner');
     expect(source).toContain('구성원 원장에서 선택');
     expect(source).not.toContain('<SelectItem value="none">선택 안 함</SelectItem>');
-    expect(source).not.toContain('uid: draft.registeredById');
+    // The stored value is offered back explicitly, labelled, so it is never silently lost.
+    expect(source).toContain('withSavedOrgMemberOption(ledgerMemberOptions');
+    expect(source).toContain('· 기존 선택');
+    // Linkage is still judged against the ledger, so the unlinked warning keeps firing.
+    expect(source).toContain('ledgerMemberOptions.find((member) => member.uid === draft.registeredById)');
     expect(source).toContain("onSelect({ memberName: '', memberNickname: '' })");
     expect(source).toContain('currentTeamMemberOptionExists');
     expect(source).toContain('member.memberNickname ? `${member.memberName} (${member.memberNickname})` : member.memberName');
@@ -71,7 +75,7 @@ describe('ProjectEditorWizard dropdown contract', () => {
   it('uses a member select for project owner instead of free text manager input', () => {
     expect(source).toContain('사업 담당자');
     expect(source).toContain('registeredById');
-    expect(source).toContain('registeredByName: member.name || member.email || member.uid');
+    expect(source).toContain('registeredByName: member.label.replace(');
     expect(source).not.toContain('<Input value={draft.managerName}');
   });
 
@@ -82,20 +86,22 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toContain('requesterId?: string');
     expect(source).toContain('member.uid !== draft.registeredById && member.uid !== requesterId');
     expect(portalRegisterSource).toContain('requesterId={actor.uid}');
-    expect(source).toContain('requesterId, ownerOptions');
+    expect(source).toContain('requesterId, ledgerMemberOptions');
     expect(source).toContain('const isSelfExecutiveApprover = Boolean(');
     expect(source).toContain('사업 담당자와 최종 결재자는 달라야 합니다.');
   });
 
-  it('offers only active members as project owners and designated executive approvers', () => {
-    const ownerOptionsBlock = source.slice(
-      source.indexOf('const ownerOptions = useMemo'),
-      source.indexOf('const selectedOwner = useMemo'),
+  it('drops only members marked inactive, so members without a status still appear', () => {
+    // Requiring status to equal ACTIVE hid the 15 members whose document carries no status
+    // field at all, which is what QA reported as missing people.
+    const optionsSource = readFileSync(
+      resolve(import.meta.dirname, '../../data/project-team-member-options.ts'),
+      'utf8',
     );
-
-    expect(ownerOptionsBlock).toContain("String(member.status || '').trim().toUpperCase() === 'ACTIVE'");
+    expect(optionsSource).toContain("if (status === 'INACTIVE' || status === 'DELETED') return;");
+    expect(optionsSource).not.toContain("=== 'ACTIVE'");
+    expect(source).toContain('buildOrgMemberPickerOptions(members)');
     expect(source).toContain('const executiveApproverOptions = useMemo');
-    expect(source).toContain('requesterId, ownerOptions');
   });
 
   it('uses a searchable team member picker for registration and edit flows', () => {

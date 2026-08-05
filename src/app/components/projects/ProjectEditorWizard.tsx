@@ -106,6 +106,11 @@ import {
   PROJECT_TEAM_MEMBER_ROLES,
   RETIRED_PROJECT_TEAM_MEMBER_ROLES,
 } from '../../platform/project-team-members';
+import { MemberPicker } from '../ui/member-picker';
+import {
+  buildOrgMemberPickerOptions,
+  withSavedOrgMemberOption,
+} from '../../data/project-team-member-options';
 import { shouldResetProjectEditorDraft } from './project-editor-reset';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -998,28 +1003,35 @@ export function ProjectEditorWizard({
   const teamMemberOptionMap = useMemo(() => Object.fromEntries(
     teamMemberOptions.map((option) => [option.value, option]),
   ) as Record<string, ProjectTeamMemberOption>, [teamMemberOptions]);
+  // The ledger list decides whether a stored value is still linked, so the "not in the
+  // member ledger" warning keeps working. The picker lists carry the stored value on top
+  // of it so opening an old project never silently drops its owner or approver.
+  const ledgerMemberOptions = useMemo(() => buildOrgMemberPickerOptions(members), [members]);
   const ownerOptions = useMemo(
-    () => [...members]
-      .filter((member) => (
-        String(member.uid || '').trim()
-        && String(member.status || '').trim().toUpperCase() === 'ACTIVE'
-      ))
-      .sort((left, right) => String(left.name || left.email || left.uid).localeCompare(String(right.name || right.email || right.uid), 'ko')),
-    [members],
+    () => withSavedOrgMemberOption(ledgerMemberOptions, {
+      uid: draft.registeredById,
+      name: draft.registeredByName,
+      email: draft.registeredByEmail,
+    }),
+    [draft.registeredByEmail, draft.registeredById, draft.registeredByName, ledgerMemberOptions],
   );
   const executiveApproverOptions = useMemo(
-    () => ownerOptions.filter((member) => (
+    () => withSavedOrgMemberOption(ledgerMemberOptions, {
+      uid: draft.executiveApproverId,
+      name: draft.executiveApproverName,
+      email: draft.executiveApproverEmail,
+    }).filter((member) => (
       member.uid !== draft.registeredById && member.uid !== requesterId
     )),
-    [draft.registeredById, requesterId, ownerOptions],
+    [draft.executiveApproverEmail, draft.executiveApproverId, draft.executiveApproverName, draft.registeredById, requesterId, ledgerMemberOptions],
   );
   const selectedOwner = useMemo(
-    () => ownerOptions.find((member) => member.uid === draft.registeredById) || null,
-    [draft.registeredById, ownerOptions],
+    () => ledgerMemberOptions.find((member) => member.uid === draft.registeredById) || null,
+    [draft.registeredById, ledgerMemberOptions],
   );
   const linkedExecutiveApprover = useMemo(
-    () => ownerOptions.find((member) => member.uid === draft.executiveApproverId) || null,
-    [draft.executiveApproverId, ownerOptions],
+    () => ledgerMemberOptions.find((member) => member.uid === draft.executiveApproverId) || null,
+    [draft.executiveApproverId, ledgerMemberOptions],
   );
   const selectedExecutiveApprover = useMemo(
     () => executiveApproverOptions.find((member) => member.uid === draft.executiveApproverId) || null,
@@ -2137,30 +2149,24 @@ export function ProjectEditorWizard({
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <Label className="text-xs">사업 담당자 *</Label>
-          <Select value={selectedOwner?.uid} onValueChange={(value) => {
-            const member = ownerOptions.find((item) => item.uid === value);
-            if (!member) return;
-            setDraft((prev) => createProjectEditorDraft({
-              ...prev,
-              registeredById: member.uid,
-              registeredByName: member.name || member.email || member.uid,
-              registeredByEmail: member.email || '',
-              managerId: member.uid,
-              managerName: member.name || member.email || member.uid,
-            }));
-          }} disabled={ownerOptions.length === 0}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="구성원 원장에서 선택" /></SelectTrigger>
-            <SelectContent>
-              {ownerOptions.map((member) => (
-                <SelectItem key={member.uid} value={member.uid}>
-                  {member.email ? `${member.name || member.uid} (${member.email})` : (member.name || member.uid)}
-                </SelectItem>
-              ))}
-              {ownerOptions.length === 0 ? (
-                <SelectItem value="__no_org_members__" disabled>구성원 원장을 불러오는 중입니다</SelectItem>
-              ) : null}
-            </SelectContent>
-          </Select>
+          <MemberPicker
+            className="mt-1 h-9 text-sm"
+            options={ownerOptions}
+            value={draft.registeredById}
+            placeholder="구성원 원장에서 선택"
+            onChange={(value) => {
+              const member = ownerOptions.find((item) => item.uid === value);
+              if (!member) return;
+              setDraft((prev) => createProjectEditorDraft({
+                ...prev,
+                registeredById: member.uid,
+                registeredByName: member.label.replace(' · 기존 선택', ''),
+                registeredByEmail: member.email,
+                managerId: member.uid,
+                managerName: member.label.replace(' · 기존 선택', ''),
+              }));
+            }}
+          />
           <p className="mt-1 text-[11px] text-muted-foreground">
             구성원 원장(orgs/{'{'}orgId{'}'}/members)의 UID를 저장합니다. 프로젝트 현황과 실무자 포털 노출은 이 UID 기준으로 연결됩니다.
           </p>
@@ -2172,28 +2178,22 @@ export function ProjectEditorWizard({
         </div>
         <div>
           <Label className="text-xs">최종 결재자 지정 (사업총괄) *</Label>
-          <Select value={selectedExecutiveApprover?.uid} onValueChange={(value) => {
-            const member = executiveApproverOptions.find((item) => item.uid === value);
-            if (!member) return;
-            setDraft((prev) => createProjectEditorDraft({
-              ...prev,
-              executiveApproverId: member.uid,
-              executiveApproverName: member.name || member.email || member.uid,
-              executiveApproverEmail: member.email || '',
-            }));
-          }} disabled={executiveApproverOptions.length === 0}>
-            <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="구성원 원장에서 선택" /></SelectTrigger>
-            <SelectContent>
-              {executiveApproverOptions.map((member) => (
-                <SelectItem key={member.uid} value={member.uid}>
-                  {member.email ? `${member.name || member.uid} (${member.email})` : (member.name || member.uid)}
-                </SelectItem>
-              ))}
-              {executiveApproverOptions.length === 0 ? (
-                <SelectItem value="__no_org_members__" disabled>구성원 원장을 불러오는 중입니다</SelectItem>
-              ) : null}
-            </SelectContent>
-          </Select>
+          <MemberPicker
+            className="mt-1 h-9 text-sm"
+            options={executiveApproverOptions}
+            value={draft.executiveApproverId}
+            placeholder="구성원 원장에서 선택"
+            onChange={(value) => {
+              const member = executiveApproverOptions.find((item) => item.uid === value);
+              if (!member) return;
+              setDraft((prev) => createProjectEditorDraft({
+                ...prev,
+                executiveApproverId: member.uid,
+                executiveApproverName: member.label.replace(' · 기존 선택', ''),
+                executiveApproverEmail: member.email,
+              }));
+            }}
+          />
           <p className="mt-1 text-[11px] text-muted-foreground">
             선택한 구성원이 조직장 승인 결재선의 대기 결재자로 표시됩니다.
           </p>
