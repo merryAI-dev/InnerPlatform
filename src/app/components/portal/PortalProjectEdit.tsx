@@ -262,6 +262,8 @@ function ProjectInfoEditor({
   } | null>(null);
   const [rebaseBusy, setRebaseBusy] = useState(false);
   const rebasedVersionRef = useRef(0);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [resubmitComment, setResubmitComment] = useState('');
   const revisionRef = useRef(0);
   const recordLoadedRef = useRef(false);
@@ -287,6 +289,11 @@ function ProjectInfoEditor({
   const canManagementPlanningResubmit = managementPlanningReview.status === 'REVISION_REJECTED';
   const canResubmit = canExecutiveResubmit || canManagementPlanningResubmit;
   const executiveBanner = useMemo(() => resolveExecutiveBanner(project), [project]);
+  // Only a request still awaiting a decision can be pulled back, and only by its owner.
+  const canWithdrawRequest = project.executiveReviewStatus === 'PENDING'
+    && record?.status === 'SUBMITTED'
+    && lease.canEdit
+    && !submitted;
   const reviewFeedback = useMemo(() => buildPortalProjectReviewFeedback(project, requestDoc), [project, requestDoc]);
   const initialDraft = useMemo(
     () => (record ? editorDraftFromPrivate(record) : canonicalDraft),
@@ -483,6 +490,23 @@ function ProjectInfoEditor({
     }
   };
 
+  const withdrawRequest = async () => {
+    setWithdrawBusy(true);
+    try {
+      const result = await enqueueMutation(() => withOwnership((ownership) => draftClient.withdraw(ownership)));
+      revisionRef.current = result.draft.draftRevision;
+      rebasedVersionRef.current = result.canonicalVersion;
+      setRecord(result.draft);
+      recordLoadedRef.current = true;
+      setWithdrawOpen(false);
+      toast.success('수정 요청을 회수했습니다. 이어서 수정할 수 있습니다.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '수정 요청을 회수하지 못했습니다.');
+    } finally {
+      setWithdrawBusy(false);
+    }
+  };
+
   const applyRebase = async (resolutions: Record<string, ProjectInfoRebaseResolution>) => {
     if (!rebaseState) return;
     const actionId = rebaseState.pendingActionId;
@@ -565,6 +589,21 @@ function ProjectInfoEditor({
             <h2 className="mt-1 text-base font-semibold">{executiveBanner.title}</h2>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{executiveBanner.description}</p>
             {canExecutiveResubmit ? resubmitCommentField : null}
+            {canWithdrawRequest ? (
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setWithdrawOpen(true)}
+                  disabled={withdrawBusy || !!busyActionId}
+                >
+                  수정 요청 회수
+                </Button>
+                <p className="mt-1.5 text-[11px] leading-5 opacity-80">
+                  승인 대기열에서 요청을 빼고 이어서 수정합니다. 조직장이 이미 처리했다면 회수할 수 없습니다.
+                </p>
+              </div>
+            ) : null}
           </div>
           {busyActionId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         </div>
@@ -652,6 +691,26 @@ function ProjectInfoEditor({
         onReacquire={() => { void startEditing(); }}
         onTakeover={() => { void lease.takeover(); }}
       />
+      <AlertDialog open={withdrawOpen} onOpenChange={(open) => { if (!withdrawBusy) setWithdrawOpen(open); }}>
+        <AlertDialogContent className="max-w-md border border-slate-200 bg-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg text-slate-950">수정 요청을 회수할까요?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-slate-600">
+              요청이 승인 대기열에서 빠지고, 프로젝트 검토 상태는 요청 이전으로 되돌아갑니다.
+              입력한 내용은 그대로 남아 이어서 수정할 수 있습니다. 다시 제출하려면 최종 저장을 눌러주세요.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={withdrawBusy}>닫기</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={withdrawBusy}
+              onClick={(event) => { event.preventDefault(); void withdrawRequest(); }}
+            >
+              {withdrawBusy ? '회수 중...' : '회수하고 이어서 수정'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <ProjectInfoRebaseDialog
         open={rebaseState !== null}
         conflicts={rebaseState?.conflicts || []}

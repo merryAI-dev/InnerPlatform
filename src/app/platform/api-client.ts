@@ -418,6 +418,15 @@ export class PlatformApiClient {
               },
             });
           }
+          // The browser console is where operators copy failures from, so print the
+          // fields needed to find the matching server log instead of a bare message.
+          // eslint-disable-next-line no-console
+          console.error(`[bff] ${method} ${path} → ${response.status}`, {
+            code: responseCode || '(none)',
+            message: responseMessage || '(none)',
+            requestId: requestId || clientRequestId || '(none)',
+            tenantId: options.tenantId,
+          });
           throw new PlatformApiError(
             // 서버가 문구를 보냈다면 resolveApiErrorMessage 가 body.message 를 먼저 쓴다.
             // 이 문구는 응답 본문이 비어 있을 때(게이트웨이 오류 등)만 사용자에게 보인다.

@@ -6,6 +6,7 @@ import {
   createHttpError,
   encryptAuditEmail,
   readOptionalText,
+  stripUndefinedDeep,
 } from '../bff-utils.mjs';
 import {
   assertEditLeaseActorAccessInTransaction,
@@ -275,11 +276,15 @@ function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === 'object') {
     return Object.keys(value).sort().reduce((sorted, key) => {
+      // An optional field the other side simply omits is not a change the owner made.
+      if (value[key] === undefined || value[key] === null || value[key] === '') return sorted;
       sorted[key] = stableValue(value[key]);
       return sorted;
     }, {});
   }
-  return value ?? null;
+  // "not set", "cleared" and "empty text" mean the same thing to the person editing.
+  if (value === undefined || value === null || value === '') return null;
+  return value;
 }
 
 function sameFieldValue(left, right) {
@@ -324,6 +329,36 @@ export function mergeProjectInfoDraftFields({ base, mine, theirs }) {
     });
   });
   return { merged, autoMerged, conflicts };
+}
+
+// Submitting a change request moves the project to PENDING and clears the recorded
+// decision. Withdrawing puts back the last real decision so the project does not sit
+// in "awaiting approval" with no request behind it.
+export function restoreExecutiveReviewAfterWithdraw(project) {
+  const history = Array.isArray(project?.executiveReviewHistory) ? project.executiveReviewHistory : [];
+  const lastDecision = history
+    .slice()
+    .reverse()
+    .find((entry) => {
+      const status = readOptionalText(entry?.status);
+      return status && status !== 'PENDING';
+    });
+  if (!lastDecision) {
+    return {
+      executiveReviewStatus: 'PENDING',
+      executiveReviewedAt: null,
+      executiveReviewedById: null,
+      executiveReviewedByName: null,
+      executiveReviewComment: null,
+    };
+  }
+  return {
+    executiveReviewStatus: readOptionalText(lastDecision.status),
+    executiveReviewedAt: readOptionalText(lastDecision.reviewedAt) || null,
+    executiveReviewedById: readOptionalText(lastDecision.reviewedById) || null,
+    executiveReviewedByName: readOptionalText(lastDecision.reviewedByName) || null,
+    executiveReviewComment: readOptionalText(lastDecision.reviewComment) || null,
+  };
 }
 
 function assertRevision(draft, expected) {
@@ -654,6 +689,111 @@ export function createProjectInfoDraftService({
       });
     },
 
+    async withdraw(input) {
+      const current = context(input);
+      const method = 'POST';
+      const path = `/api/v1/project-info-drafts/${current.projectId}/withdraw`;
+      const fingerprint = buildRequestFingerprint({
+        method, path,
+        body: {
+          actorId: current.actorId, sessionId: current.sessionId,
+          leaseId: current.leaseId, fence: current.fence,
+        },
+      });
+      return db.runTransaction(async (tx) => {
+        const nowDate = clockDate(now);
+        const timestamp = nowDate.toISOString();
+        const { actorRole, projectRef, project, draftRef, draft } = await ownedDraft(tx, current);
+        const requestRef = refs(current).request;
+        const requestSnap = await tx.get(requestRef);
+        const lock = await checkIdempotency(tx, current, fingerprint, nowDate);
+        if (lock.mode === 'replay') return { status: lock.status, body: lock.body, replayed: true };
+        const lockError = idempotencyError(lock);
+        if (lockError) throw lockError;
+        await assertLease(tx, current, nowDate);
+        const request = requestSnap.exists ? (requestSnap.data() || {}) : null;
+        if (!request || readOptionalText(request.requestKind) !== 'CHANGE') {
+          throw createHttpError(409, 'No change request to withdraw', 'request_not_withdrawable');
+        }
+        // A decided request is history; only one still awaiting a decision can be pulled back.
+        if (readOptionalText(request.status) !== 'PENDING') {
+          throw createHttpError(
+            409,
+            `Change request is already ${readOptionalText(request.status) || 'resolved'}`,
+            'request_not_withdrawable',
+          );
+        }
+        if (readOptionalText(request.requestedBy) !== current.actorId) {
+          throw createHttpError(403, 'Only the requester can withdraw this change request', 'request_owner_mismatch');
+        }
+        const actualVersion = Number.isInteger(project.version) && project.version > 0 ? project.version : 1;
+        const nextVersion = actualVersion + 1;
+        const restoredReview = restoreExecutiveReviewAfterWithdraw(project);
+        const nextProject = stripUndefinedDeep({
+          ...project,
+          ...restoredReview,
+          executiveReviewHistory: [
+            ...(Array.isArray(project.executiveReviewHistory) ? project.executiveReviewHistory : []),
+            {
+              status: restoredReview.executiveReviewStatus,
+              previousStatus: 'PENDING',
+              reviewedAt: timestamp,
+              reviewedById: current.actorId,
+              reviewedByName: current.actorDisplayName || null,
+              reviewComment: '요청자가 수정 요청을 회수했습니다.',
+            },
+          ],
+          version: nextVersion,
+          updatedBy: current.actorId,
+          updatedAt: timestamp,
+        });
+        const withdrawnRequest = stripUndefinedDeep({
+          ...request,
+          status: 'WITHDRAWN',
+          withdrawnAt: timestamp,
+          withdrawnBy: current.actorId,
+          withdrawnByName: current.actorDisplayName || null,
+          updatedAt: timestamp,
+        });
+        // Hand the submitted payload back to the owner, rebased onto the restored project
+        // so the very next submit does not trip the canonical version gate again.
+        const restoredDraft = stripUndefinedDeep({
+          ...draft,
+          status: 'ACTIVE',
+          payload: request.payload && typeof request.payload === 'object' ? request.payload : draft.payload,
+          baseSnapshot: buildProjectInfoDraftSeed({ ...nextProject, id: current.projectId }, {}),
+          baseCanonicalVersion: nextVersion,
+          draftRevision: (Number.isInteger(draft.draftRevision) ? draft.draftRevision : 0) + 1,
+          attachmentRefs: resumableDraftAttachments(current.tenantId, current.draftDocumentId, request),
+          submittedAt: null,
+          submittedProjectRequestId: null,
+          submittedProjectVersion: null,
+          submittedOutboxId: null,
+          updatedAt: timestamp,
+        });
+        assertDraftSize(restoredDraft);
+        await auditChainService.appendManyInTransaction(tx, [
+          auditEntry(current, actorRole, 'PROJECT_INFO_DRAFT_WITHDRAW', restoredDraft.draftRevision, timestamp, {
+            fence: current.fence,
+            projectRequestId: readOptionalText(request.id) || null,
+            restoredExecutiveReviewStatus: restoredReview.executiveReviewStatus,
+            canonicalVersion: nextVersion,
+          }),
+        ]);
+        tx.set(projectRef, nextProject);
+        tx.set(requestRef, withdrawnRequest);
+        tx.set(draftRef, restoredDraft);
+        const body = {
+          withdrawn: true,
+          draft: draftContract(restoredDraft),
+          canonicalVersion: nextVersion,
+          executiveReviewStatus: restoredReview.executiveReviewStatus,
+        };
+        completeIdempotency(tx, current, lock, { method, path, status: 200, body }, nowDate);
+        return { status: 200, body, replayed: false };
+      });
+    },
+
     async rebase(input) {
       const current = context(input);
       const expectedDraftRevision = Number(input?.expectedDraftRevision);
@@ -717,14 +857,16 @@ export function createProjectInfoDraftService({
         conflicts.forEach((conflict) => {
           merged[conflict.field] = resolutions[conflict.field] === 'THEIRS' ? conflict.theirs : conflict.mine;
         });
-        const nextDraft = {
+        // `merged` and `theirs` are computed rather than literal, so an absent optional
+        // field can arrive here as undefined, which Firestore rejects on write.
+        const nextDraft = stripUndefinedDeep({
           ...draft,
           payload: merged,
           baseSnapshot: theirs,
           baseCanonicalVersion: actualVersion,
           draftRevision: expectedDraftRevision + 1,
           updatedAt: timestamp,
-        };
+        });
         assertDraftSize(nextDraft);
         await auditChainService.appendManyInTransaction(tx, [
           auditEntry(current, actorRole, 'PROJECT_INFO_DRAFT_REBASE', nextDraft.draftRevision, timestamp, {
@@ -1380,6 +1522,14 @@ export function mountProjectInfoDraftRoutes(app, {
       projectId: routeProjectId(req),
       documentKind: requiredText(req.params?.documentKind, 'documentKind'),
       ...parsed,
+    }));
+  }));
+
+  app.post('/api/v1/project-info-drafts/:projectId/withdraw', asyncHandler(async (req, res) => {
+    assertActorRoleAllowed(req, PROJECT_REQUEST_ROUTE_ROLES, 'withdraw a project change request');
+    parseWithSchema(projectInfoDraftOpenSchema, req.body);
+    sendOutcome(res, await projectInfoDraftService.withdraw({
+      ...await routeContext(req, piiProtector), ...routeOwnership(req), projectId: routeProjectId(req),
     }));
   }));
 

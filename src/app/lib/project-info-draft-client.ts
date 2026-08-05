@@ -295,6 +295,21 @@ export function createProjectInfoDraftClient(options: {
       return parseDraftBody(response.data, projectId);
     },
 
+    // Pulls a still-pending change request back and reactivates the draft that made it.
+    async withdraw(ownership: { leaseId: string; fence: number }) {
+      const response = await client.post<unknown>(`${path}/withdraw`, {
+        ...request,
+        headers: ownershipHeaders(sessionId, ownership),
+        body: {},
+      });
+      const body = object(response.data, 'project information withdraw');
+      return {
+        draft: parseDraft(body.draft, projectId),
+        canonicalVersion: Number(body.canonicalVersion) || 0,
+        executiveReviewStatus: String(body.executiveReviewStatus ?? ''),
+      };
+    },
+
     // Without `resolutions` this previews the merge and writes nothing.
     async rebase(
       ownership: { leaseId: string; fence: number },
