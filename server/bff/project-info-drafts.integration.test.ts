@@ -243,7 +243,7 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
     expect(drafts.docs[0].data()).not.toHaveProperty('payload');
   });
 
-  it('relocates same-kind private attachments through outbox and leaves version conflicts private', async () => {
+  it('publishes same-kind private attachments while saving and leaves version conflicts private', async () => {
     const acquired = await acquire();
     const baseHeaders = mutationHeaders(acquired.body, 'draft-open-b');
     const opened = await api.post('/api/v1/project-info-drafts/project-a/open').set(baseHeaders).send({});
@@ -273,13 +273,14 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .set({ 'x-worker-secret': 'project-info-worker-secret' })
       .send({ limit: 10 });
     expect(worker.status).toBe(200);
-    expect(worker.body.succeeded).toBe(1);
+    // Saving already moved the file, so the queue entry is closed and the worker is a no-op.
+    expect(worker.body.succeeded).toBe(0);
     expect(relocated).toHaveLength(1);
     expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).data())
       .toMatchObject({ proposedSnapshot: { contractDocument: { path: relocated[0] } } });
   });
 
-  it('publishes inherited private attachments from the newest submission when the older outbox event is stale', async () => {
+  it('does not copy an attachment twice when a resubmit inherits the published file', async () => {
     const firstLease = await acquire('lease-acquire-race-v1');
     const firstHeaders = mutationHeaders(firstLease.body, 'draft-open-race-v1');
     const firstDraft = await api.post('/api/v1/project-info-drafts/project-a/open').set(firstHeaders).send({});
@@ -306,27 +307,23 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .send({ expectedDraftRevision: 0, expectedVersion: 4 });
     expect(secondSubmit.status).toBe(200);
 
-    const secondOutbox = await db.doc('outbox/project-info-outbox-2').get();
-    expect(secondOutbox.data()?.payload?.attachmentRefs).toEqual([
-      expect.objectContaining({
-        documentKind: 'contract',
-        path: uploaded.body.attachment.path,
-      }),
-    ]);
     const worker = await api.post('/api/internal/workers/outbox/run')
       .set({ 'x-worker-secret': 'project-info-worker-secret' })
       .send({ limit: 10 });
 
     expect(worker.status).toBe(200);
-    expect(worker.body).toMatchObject({ succeeded: 2, failed: 0 });
+    expect(worker.body).toMatchObject({ failed: 0 });
+    // The first save moved the file; the resubmit inherits the published path and must not
+    // copy it again, so storage is touched exactly once across both submissions.
     expect(storage.relocateDraftAttachments).toHaveBeenCalledOnce();
     expect(relocated).toHaveLength(1);
     expect((await db.doc(`orgs/${tenantId}/project_requests/change-project-a`).get()).data())
       .toMatchObject({
         requestVersion: 2,
         submittedOutboxId: 'project-info-outbox-2',
+        // The resubmit carries the already published file forward. There is nothing left
+        // to move, so it records no new publication of its own.
         proposedSnapshot: { contractDocument: { path: relocated[0] } },
-        attachmentsPublishedAt: expect.any(String),
       });
   });
 
