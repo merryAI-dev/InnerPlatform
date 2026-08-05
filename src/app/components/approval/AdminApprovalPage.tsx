@@ -10,7 +10,7 @@ export function AdminApprovalPage() {
   const { projects } = useAppStore();
   const pendingProjectReviews = useMemo(
     () => projects.filter((project) => (
-      (project.executiveReviewStatus || (project.registrationSource === 'pm_portal' ? 'PENDING' : 'APPROVED')) === 'PENDING'
+      (project.executiveReviewStatus || 'PENDING') === 'PENDING'
     )),
     [projects],
   );

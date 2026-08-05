@@ -86,7 +86,9 @@ export function deriveMigrationAuditStatus(
   if (project.executiveReviewStatus) return project.executiveReviewStatus;
   if (request?.status === 'REJECTED') return 'REVISION_REJECTED';
   if (request?.status === 'APPROVED') return 'APPROVED';
-  return project.registrationSource === 'pm_portal' ? 'PENDING' : 'APPROVED';
+  // Nobody recorded a decision on this project. Treating that as approved hid 16 migrated
+  // projects from the queue, so an unreviewed project is shown as awaiting review instead.
+  return 'PENDING';
 }
 
 export function getMigrationAuditStatusLabel(status: MigrationAuditConsoleStatus): string {
