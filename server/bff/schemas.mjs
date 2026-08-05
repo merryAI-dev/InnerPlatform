@@ -53,7 +53,7 @@ export const projectInfoDraftAttachmentSchema = projectRegistrationDraftAttachme
 export const projectInfoDraftRebaseSchema = z.object({
   expectedDraftRevision: z.number().int().nonnegative(),
   // Absent means "preview only": report the merge outcome without writing.
-  resolutions: z.record(z.enum(['MINE', 'THEIRS'])).optional(),
+  resolutions: z.record(z.string().min(1), z.enum(['MINE', 'THEIRS'])).optional(),
 }).strict();
 
 export const projectInfoDraftSubmitSchema = z.object({
