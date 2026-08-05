@@ -360,7 +360,10 @@ async function upsertMemberFromFirebase(
 
   const merged = omitUndefinedFields<MemberDoc>({
     uid: firebaseUser.uid,
-    name: firebaseUser.displayName || existing?.name || '사용자',
+    // The member ledger owns the display name. Google account names arrive in whatever
+    // form each person set them ('Jeongtae KIM (Able)'), and letting a sign-in overwrite
+    // the ledger undid the roster's 이름(별명) normalisation every time someone logged in.
+    name: existing?.name || firebaseUser.displayName || '사용자',
     email: normalizedEmail,
     role: resolveEffectiveAuthRole({
       memberRole: existing?.role,

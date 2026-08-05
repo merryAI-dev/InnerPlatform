@@ -6,6 +6,15 @@ import { buildSafeFirstLoginMember } from './auth-store';
 const authStoreSource = readFileSync(resolve(import.meta.dirname, 'auth-store.tsx'), 'utf8');
 
 describe('first-login member bootstrap', () => {
+  it('lets the member ledger keep its display name when someone signs in again', () => {
+    // Google account names arrive in whatever form each person set them, so a sign-in
+    // must not overwrite the ledger's 이름(별명) value. A first login still falls back to
+    // the account name because the ledger has nothing yet.
+    expect(authStoreSource).toContain("name: existing?.name || firebaseUser.displayName || '사용자',");
+    expect(authStoreSource).not.toContain("name: firebaseUser.displayName || existing?.name");
+    expect(authStoreSource).toContain("name: firebaseUser.displayName || '사용자',");
+  });
+
   it('creates only an unassigned PM profile that cannot self-elevate', () => {
     const member = buildSafeFirstLoginMember({
       uid: 'new-user',
