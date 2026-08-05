@@ -7,6 +7,7 @@ import {
   deriveMigrationAuditStatus,
   filterMigrationAuditConsoleRecords,
   findMigrationAuditRecord,
+  getMigrationAuditStatusLabel,
   isMigrationAuditPmRegistration,
   isSameMigrationAuditCic,
   normalizeCicLabel,
@@ -133,7 +134,17 @@ describe('project-migration-console', () => {
     expect(records.map((record) => record.id)).toEqual(['p-1', 'p-2', 'p-3']);
     expect(records[0].status).toBe('APPROVED');
     expect(records[1].status).toBe('REVISION_REJECTED');
-    expect(records[2].status).toBe('APPROVED');
+    // p-3 carries no recorded decision. It is awaiting review, not approved.
+    expect(records[2].status).toBe('PENDING');
+  });
+
+  it('surfaces a migrated project that carries no recorded review decision', () => {
+    const records = buildMigrationAuditConsoleRecords(
+      [makeProject({ id: 'p-migrated', registrationSource: 'manual', name: '이관된 사업', cic: 'CIC-A' })],
+      [],
+    );
+    expect(records[0].status).toBe('PENDING');
+    expect(getMigrationAuditStatusLabel(records[0].status)).toBe('검토 대기');
   });
 
   it('treats linked pending project request as pending even when registrationSource is missing', () => {
@@ -294,8 +305,9 @@ describe('project-migration-console', () => {
     );
 
     const summary = summarizeMigrationAuditConsole(records);
-    expect(summary.pending).toBe(1);
-    expect(summary.approved).toBe(2);
+    // A project with no recorded decision now counts as awaiting review.
+    expect(summary.pending).toBe(2);
+    expect(summary.approved).toBe(1);
     expect(summary.rejected).toBe(1);
     expect(summary.discarded).toBe(1);
     expect(summary.total).toBe(5);
