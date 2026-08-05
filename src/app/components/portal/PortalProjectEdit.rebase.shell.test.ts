@@ -26,6 +26,10 @@ describe('project info draft rebase contract', () => {
     expect(editSource).toContain("body?.error === 'canonical_version_conflict'");
     expect(editSource).toContain('function isCanonicalVersionConflict');
     expect(editSource).toContain('if (isCanonicalVersionConflict(error)) {');
+    // A conflict means the submit did not go through, so it must stay a failure for the
+    // caller; swallowing it made the wizard clear the autosave and the unsaved guard.
+    expect(editSource).toContain('        throw error;');
+    expect(editSource).not.toContain('내가 입력하지 않은 항목이라 최근 값을 그대로 가져옵니다.\n          return;');
     expect(editSource).toContain('<ProjectInfoRebaseDialog');
     expect(editSource).toContain('const applyRebase = async');
   });

@@ -290,9 +290,10 @@ function ProjectInfoEditor({
   const canManagementPlanningResubmit = managementPlanningReview.status === 'REVISION_REJECTED';
   const canResubmit = canExecutiveResubmit || canManagementPlanningResubmit;
   const executiveBanner = useMemo(() => resolveExecutiveBanner(project), [project]);
-  // Only a request still awaiting a decision can be pulled back, and only by its owner.
+  // A submit clears the local draft record, so its status is never 'SUBMITTED' here.
+  // Show the action whenever the project is awaiting a decision; the server rejects it
+  // with request_not_withdrawable if there is nothing pending to pull back.
   const canWithdrawRequest = project.executiveReviewStatus === 'PENDING'
-    && record?.status === 'SUBMITTED'
     && lease.canEdit
     && !submitted;
   const reviewFeedback = useMemo(() => buildPortalProjectReviewFeedback(project, requestDoc), [project, requestDoc]);
@@ -476,13 +477,14 @@ function ProjectInfoEditor({
             autoMerged: preview.autoMerged,
             pendingActionId: actionId,
           });
-          return;
         } catch (rebaseError) {
           toast.error(rebaseError instanceof Error
             ? rebaseError.message
             : '프로젝트 변경 내역을 불러오지 못했습니다.');
-          return;
         }
+        // The submit did not go through. Rethrow so the caller keeps treating this as a
+        // failure and leaves the local autosave and the unsaved-changes guard in place.
+        throw error;
       }
       toast.error(error instanceof Error ? error.message : '저장에 실패했습니다. 다시 시도해주세요.');
       throw error;
