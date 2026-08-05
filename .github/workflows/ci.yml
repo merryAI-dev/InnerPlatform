@@ -24,6 +24,11 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # vite strips types without checking them, so this is what catches an
+      # undefined identifier before it reaches production as a runtime crash.
+      - name: Typecheck (no new errors)
+        run: npm run typecheck
+
       - name: RBAC policy verify
         run: npm run policy:verify
 

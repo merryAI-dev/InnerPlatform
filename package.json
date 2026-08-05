@@ -65,7 +65,9 @@
     "etl:build:staging-json": "npx tsx scripts/etl/build-staging-json.ts",
     "etl:sync:staging": "npx tsx scripts/etl/sync-staging-to-firestore.ts",
     "prepare": "husky",
-    "policy:jvm-roles:write": "node scripts/extract_jvm_command_roles.mjs --write"
+    "policy:jvm-roles:write": "node scripts/extract_jvm_command_roles.mjs --write",
+    "typecheck": "node scripts/verify-typecheck-baseline.mjs",
+    "typecheck:baseline": "node scripts/verify-typecheck-baseline.mjs --update"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
