@@ -488,11 +488,19 @@ export function createProjectInfoSubmittedOutboxHandler({
     const currentBeforeRelocation = await db.runTransaction(deliveryIsCurrent);
     if (!currentBeforeRelocation) return;
 
-    const relocated = await draftStorageService.relocateDraftAttachments({ tenantId, projectId, draftId: sourceDraftId, attachmentRefs });
-    if (!Array.isArray(relocated) || relocated.length !== attachmentRefs.length) {
+    const prefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    // A resubmit inherits whatever the previous submission already published, so only the
+    // files still sitting in the owner's private folder are moved. Copying an already
+    // published file would fail because its path is outside the draft prefix.
+    const published = attachmentRefs.filter((ref) => readOptionalText(ref?.path).startsWith(prefix));
+    const pending = attachmentRefs.filter((ref) => !readOptionalText(ref?.path).startsWith(prefix));
+    const moved = pending.length > 0
+      ? await draftStorageService.relocateDraftAttachments({ tenantId, projectId, draftId: sourceDraftId, attachmentRefs: pending })
+      : [];
+    if (!Array.isArray(moved) || moved.length !== pending.length) {
       throw new Error('Project information attachment relocation returned an incomplete result');
     }
-    const prefix = `orgs/${tenantId}/project-registration-documents/${projectId}/`;
+    const relocated = [...published, ...moved];
     if (relocated.some((attachment) => {
       const path = readOptionalText(attachment?.path);
       const objectName = path.startsWith(prefix) ? path.slice(prefix.length) : '';
@@ -525,6 +533,9 @@ export function createProjectInfoDraftService({
   idempotencyService,
   draftStorageService,
   rbacPolicy,
+  // Moves the submitted files to the shared folder as part of saving, so the approver can
+  // open them immediately instead of waiting for the background queue.
+  publishSubmittedAttachments = null,
 } = {}) {
   if (!db?.runTransaction) throw new Error('Firestore is required for project information drafts');
   if (!auditChainService?.appendManyInTransaction) throw new Error('Atomic audit chain service is required');
@@ -1286,7 +1297,7 @@ export function createProjectInfoDraftService({
         createdAt: clockDate(now).toISOString(),
       });
       const outboxRef = db.doc(`outbox/${documentId(eventTemplate.id, 'outboxId')}`);
-      return db.runTransaction(async (tx) => {
+      const outcome = await db.runTransaction(async (tx) => {
         const nowDate = clockDate(now);
         const timestamp = nowDate.toISOString();
         const { actorRole, projectRef, project, draftRef, draft } = await ownedDraft(tx, current);
@@ -1398,8 +1409,30 @@ export function createProjectInfoDraftService({
         tx.set(refs(current).lease, releasedLease);
         tx.create(outboxRef, outboxEvent);
         completeIdempotency(tx, current, lock, { method, path, status: 200, body, ttlSeconds: 86_400 }, nowDate);
-        return { status: 200, body, replayed: false };
+        return { status: 200, body, replayed: false, outboxEvent };
       });
+
+      const { outboxEvent: submittedEvent, ...response } = outcome;
+      if (!outcome.replayed && submittedEvent && typeof publishSubmittedAttachments === 'function') {
+        try {
+          await publishSubmittedAttachments(submittedEvent);
+          // Close the queue entry so the worker does not repeat work already done here.
+          const doneAt = clockDate(now).toISOString();
+          await outboxRef.set({
+            status: 'DONE', processedAt: doneAt, updatedAt: doneAt, lastError: null,
+          }, { merge: true });
+        } catch (error) {
+          // Saving already succeeded. Leave the queue entry pending so the worker retries,
+          // and record why the immediate move failed.
+          // eslint-disable-next-line no-console
+          console.error('[bff] project info attachment publish failed', JSON.stringify({
+            projectId: current.projectId,
+            outboxId: submittedEvent.id,
+            message: error?.message || String(error),
+          }));
+        }
+      }
+      return response;
     },
   };
 }
