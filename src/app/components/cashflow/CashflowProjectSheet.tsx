@@ -89,6 +89,8 @@ import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from './CashflowFormulaMismatchDialog';
 import { CashflowCanonicalSummary } from './CashflowCanonicalSummary';
 import { AxrMonthCloseQaPanel } from './AxrMonthCloseQaPanel';
+import { MemberPicker } from '../ui/member-picker';
+import { buildOrgMemberPickerOptions } from '../../data/project-team-member-options';
 import { loadCashflowActivitySourcesSequentially } from './cashflow-activity-loader';
 
 const CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032] as const;
@@ -437,15 +439,12 @@ export function CashflowProjectSheet({
       && (lateSheetDiffWeek === 'ALL' || String(change.weekNo) === lateSheetDiffWeek)
       && (!query || `${change.yearMonth} ${change.weekNo} ${change.mode} ${label} ${change.lineId}`.toLocaleLowerCase('ko-KR').includes(query));
   });
-  const executiveApproverOptions = useMemo(() => (members || [])
+  const executiveApproverOptions = useMemo(() => buildOrgMemberPickerOptions(members || [])
     .filter((member) => (
-      Boolean(String(member.uid || '').trim())
-      && String(member.status || '').trim().toUpperCase() === 'ACTIVE'
-      && member.uid !== user?.uid
+      member.uid !== user?.uid
       && member.uid !== project?.registeredById
       && member.uid !== project?.managerId
-    ))
-    .sort((left, right) => String(left.name || left.email).localeCompare(String(right.name || right.email), 'ko-KR')),
+    )),
   [members, project?.managerId, project?.registeredById, user?.uid]);
 
   useEffect(() => {
@@ -2749,22 +2748,14 @@ export function CashflowProjectSheet({
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                       <div className="min-w-0 flex-1">
                         <label className="mb-1 block text-[12px] font-semibold text-slate-800">조직장 선택</label>
-                        <Select
+                        <MemberPicker
+                          className="h-8 border-slate-300 bg-white text-[12px]"
+                          options={executiveApproverOptions}
                           value={selectedExecutiveApproverId}
-                          onValueChange={setSelectedExecutiveApproverId}
+                          onChange={setSelectedExecutiveApproverId}
+                          placeholder="월 결산 승인 조직장을 선택하세요"
                           disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
-                        >
-                          <SelectTrigger className="h-8 border-slate-300 bg-white text-[12px]">
-                            <SelectValue placeholder="월 결산 승인 조직장을 선택하세요" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {executiveApproverOptions.map((member) => (
-                              <SelectItem key={member.uid} value={member.uid}>
-                                {member.name || member.email}{member.email ? ` · ${member.email}` : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                       <Button
                         type="button"

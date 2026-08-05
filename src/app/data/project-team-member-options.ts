@@ -39,7 +39,7 @@ export function findProjectTeamMemberOption(value: string): ProjectTeamMemberOpt
   return PROJECT_TEAM_MEMBER_SEARCH_MAP.get(normalized);
 }
 
-function splitMemberDisplayName(value: string): { name: string; nickname: string } {
+export function splitMemberDisplayName(value: string): { name: string; nickname: string } {
   const normalized = String(value || '').trim();
   const match = normalized.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
   if (!match) return { name: normalized, nickname: '' };
@@ -70,4 +70,63 @@ export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeam
   const liveOptions = [...options.values()]
     .sort((left, right) => left.label.localeCompare(right.label, 'ko'));
   return liveOptions.length ? liveOptions : PROJECT_TEAM_MEMBER_OPTIONS;
+}
+
+export interface OrgMemberPickerOption {
+  uid: string;
+  name: string;
+  nickname: string;
+  email: string;
+  label: string;
+  searchText: string;
+}
+
+/**
+ * Options for the pickers that choose a person (PM, 최종 결재자, 월 결산 조직장).
+ *
+ * Only an explicit INACTIVE or DELETED status removes someone. Requiring status to equal
+ * ACTIVE hid the 15 members whose document carries no status field at all.
+ */
+export function buildOrgMemberPickerOptions(members: OrgMember[]): OrgMemberPickerOption[] {
+  const byUid = new Map<string, OrgMemberPickerOption>();
+  members.forEach((member) => {
+    const uid = String(member.uid || '').trim();
+    if (!uid || byUid.has(uid)) return;
+    const status = String(member.status || '').trim().toUpperCase();
+    if (status === 'INACTIVE' || status === 'DELETED') return;
+    const email = String(member.email || '').trim();
+    const parsed = splitMemberDisplayName(member.name || '');
+    const name = parsed.name || email || uid;
+    const nickname = parsed.nickname || findProjectTeamMemberOption(name)?.nickname || '';
+    byUid.set(uid, {
+      uid,
+      name,
+      nickname,
+      email,
+      label: nickname ? `${name} (${nickname})` : name,
+      searchText: [name, nickname, email].filter(Boolean).join(' ').toLowerCase(),
+    });
+  });
+  return [...byUid.values()].sort((left, right) => left.label.localeCompare(right.label, 'ko'));
+}
+
+/**
+ * Keeps a value that was saved earlier selectable even when that person no longer appears
+ * in the current list, so opening an old project cannot silently drop its PM or approver.
+ */
+export function withSavedOrgMemberOption(
+  options: OrgMemberPickerOption[],
+  saved: { uid?: string | null; name?: string | null; email?: string | null },
+): OrgMemberPickerOption[] {
+  const uid = String(saved?.uid || '').trim();
+  if (!uid || options.some((option) => option.uid === uid)) return options;
+  const parsed = splitMemberDisplayName(String(saved?.name || ''));
+  const email = String(saved?.email || '').trim();
+  const name = parsed.name || email || uid;
+  const nickname = parsed.nickname || findProjectTeamMemberOption(name)?.nickname || '';
+  const label = nickname ? `${name} (${nickname})` : name;
+  return [
+    { uid, name, nickname, email, label: `${label} · 기존 선택`, searchText: [name, nickname, email].filter(Boolean).join(' ').toLowerCase() },
+    ...options,
+  ];
 }
