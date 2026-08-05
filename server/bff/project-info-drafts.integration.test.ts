@@ -321,8 +321,9 @@ describeIfEmulator('project information private drafts (Firestore emulator)', ()
       .toMatchObject({
         requestVersion: 2,
         submittedOutboxId: 'project-info-outbox-2',
+        // The resubmit carries the already published file forward. There is nothing left
+        // to move, so it records no new publication of its own.
         proposedSnapshot: { contractDocument: { path: relocated[0] } },
-        attachmentsPublishedAt: expect.any(String),
       });
   });
 
