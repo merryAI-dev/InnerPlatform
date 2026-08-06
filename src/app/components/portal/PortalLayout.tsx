@@ -70,7 +70,11 @@ import { normalizeProjectFundInputMode } from '../../data/types';
 import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { buildPortalShellCommandItems, buildPortalShellNotificationItems } from '../../platform/portal-shell-actions';
 import { shouldShowShellRoute, useShellLabEnabled } from '../../platform/shell-lab-visibility';
-import { resolvePortalProjectCandidates, runPortalProjectSwitch } from '../../platform/portal-project-selection';
+import {
+  resolvePortalProjectCandidates,
+  resolvePortalRouteProjectId,
+  runPortalProjectSwitch,
+} from '../../platform/portal-project-selection';
 
 // ═══════════════════════════════════════════════════════════════
 // PortalLayout — 사용자(PM) 전용 레이아웃
@@ -242,12 +246,27 @@ function PortalContent() {
     }));
   }, [candidateProjects.searchProjects]);
 
+  const routeProjectId = useMemo(
+    () => resolvePortalRouteProjectId(location.pathname),
+    [location.pathname],
+  );
+
   const currentProject = useMemo(() => {
+    if (routeProjectId) {
+      const routeProject = candidateProjects.searchProjects.find((project) => project.id === routeProjectId);
+      if (routeProject) return routeProject;
+    }
     if (activeProjectId) {
       return candidateProjects.searchProjects.find((project) => project.id === activeProjectId) || myProject;
     }
     return myProject || candidateProjects.priorityProjects[0] || candidateProjects.searchProjects[0] || null;
-  }, [activeProjectId, candidateProjects.priorityProjects, candidateProjects.searchProjects, myProject]);
+  }, [activeProjectId, candidateProjects.priorityProjects, candidateProjects.searchProjects, myProject, routeProjectId]);
+
+  useEffect(() => {
+    if (!routeProjectId || routeProjectId === activeProjectId) return;
+    if (!candidateProjects.searchProjects.some((project) => project.id === routeProjectId)) return;
+    void setSessionActiveProject(routeProjectId);
+  }, [activeProjectId, candidateProjects.searchProjects, routeProjectId, setSessionActiveProject]);
 
   const selectedProjectOptionValue = useMemo(() => {
     if (!currentProject?.id) return '';

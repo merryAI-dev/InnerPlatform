@@ -119,6 +119,8 @@ describe('PortalLayout shell actions', () => {
 
   it('checks the dirty guard before changing project state or the canonical URL', () => {
     expect(portalLayoutSource).toContain('runPortalProjectSwitch');
+    expect(portalLayoutSource).toContain('resolvePortalRouteProjectId(location.pathname)');
+    expect(portalLayoutSource).toContain('setSessionActiveProject(routeProjectId)');
     expect(portalLayoutSource).toContain('isNavigationBlocked: (attempt) => Boolean(navigationHandlerRef.current?.(attempt))');
     expect(portalLayoutSource).not.toContain('setSessionActiveProject(projectId).then');
   });
