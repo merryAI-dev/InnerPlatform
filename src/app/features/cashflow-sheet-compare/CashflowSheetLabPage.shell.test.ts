@@ -43,6 +43,47 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('../../data/portal-store');
   });
 
+  it('drives every request from one project resolved by route and session together', () => {
+    expect(pageSource).toContain('resolvePortalProjectContextSync');
+    expect(pageSource).toContain('sessionProjectId: portalProjectId');
+    expect(pageSource).toContain('previousSessionProjectId: syncedSessionProjectIdRef.current');
+    expect(pageSource).toContain('const projectId = projectContextSync.projectId;');
+    expect(pageSource).toContain("projectContextAction === 'canonicalize-path'");
+    expect(pageSource).toContain("projectContextAction !== 'adopt-route'");
+    expect(pageSource).toContain('setSessionActiveProject(projectId)');
+    // route projectId만 신뢰하던 로컬 상태는 상단 프로젝트 전환을 따라가지 못했다.
+    expect(pageSource).not.toContain('projectIdInput');
+    expect(pageSource).not.toContain('setProjectIdInput');
+    expect(pageSource).not.toContain('initialProjectId');
+  });
+
+  it('never carries a previous project apply recovery or sheet draft into the next project', () => {
+    const recoveryReset = pageSource.slice(
+      pageSource.indexOf('이전 프로젝트의 반영 복구 상태를'),
+      pageSource.indexOf('}, [projectId]);', pageSource.indexOf('이전 프로젝트의 반영 복구 상태를')),
+    );
+    expect(recoveryReset).toContain('setClosedMonthStage(null);');
+    expect(recoveryReset).toContain('setClosedMonthWarning([]);');
+    expect(recoveryReset).toContain("setClosedMonthChangeReason('');");
+    expect(recoveryReset).toContain('setClosedMonthFormulaAccepted(false);');
+    expect(recoveryReset).toContain('setClosedMonthPendingApprovalAccepted(false);');
+    expect(recoveryReset).toContain('setPendingApprovalStage(null);');
+    expect(recoveryReset).toContain('setFormulaMismatchPrompt(null);');
+    expect(recoveryReset).toContain('setApplyResumeRequired(false);');
+
+    const draftReset = pageSource.slice(
+      pageSource.indexOf('이전 시트 draft를 남기지 않는다'),
+      pageSource.indexOf('}, [projectId, sourceYear]);'),
+    );
+    expect(draftReset).toContain('setSavedConfig(null);');
+    expect(draftReset).toContain("setSheetLink('');");
+    expect(draftReset).toContain('setMirror(null);');
+    expect(draftReset).toContain("setReviewedSourceKey('');");
+    expect(draftReset).toContain('setReflectResult(null);');
+    // 시트 draft 정리는 BFF 토큰 유무와 무관하게 프로젝트 전환마다 실행돼야 한다.
+    expect(draftReset).not.toContain('actor.idToken');
+  });
+
   it('uses the lab BFF client without exposing legacy cashflow write actions', () => {
     expect(pageSource).not.toContain('getCashflowSheetLabMirrorViaBff');
     expect(pageSource).toContain('refreshCashflowSheetLabMirrorViaBff');

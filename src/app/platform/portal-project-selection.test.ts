@@ -3,6 +3,7 @@ import type { Project } from '../data/types';
 import {
   resolveActivePortalProjectId,
   resolvePortalProjectCandidates,
+  resolvePortalProjectContextSync,
   resolvePortalProjectResourceId,
   resolvePortalProjectResourcePath,
   resolvePortalProjectSelectPath,
@@ -134,6 +135,101 @@ describe('portal project selection helpers', () => {
     expect(resolvePortalProjectResourcePath('/portal/budget?month=2026-07', 'new-project')).toBe(
       '/portal/budget?month=2026-07',
     );
+  });
+
+  it('canonicalizes a bare project resource path to the session project', () => {
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: '',
+      sessionProjectId: 'p-managed',
+      previousSessionProjectId: '',
+      fallbackProjectId: 'p-recent',
+      currentPath: '/portal/cashflow/sheets-lab',
+    })).toEqual({
+      projectId: 'p-managed',
+      action: 'canonicalize-path',
+      path: '/portal/cashflow/p-managed/sheets-lab',
+    });
+
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: '',
+      sessionProjectId: '',
+      previousSessionProjectId: '',
+      fallbackProjectId: 'p-recent',
+      currentPath: '/portal/cashflow/sheets-lab?step=2',
+    })).toEqual({
+      projectId: 'p-recent',
+      action: 'canonicalize-path',
+      path: '/portal/cashflow/p-recent/sheets-lab?step=2',
+    });
+
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: '',
+      sessionProjectId: '',
+      previousSessionProjectId: '',
+      fallbackProjectId: '',
+      currentPath: '/portal/cashflow/sheets-lab',
+    })).toEqual({ projectId: '', action: 'idle', path: '' });
+  });
+
+  it('keeps the route project while the session project is still resolving or already matches', () => {
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: 'p-assigned',
+      sessionProjectId: '',
+      previousSessionProjectId: '',
+      fallbackProjectId: 'p-recent',
+      currentPath: '/portal/cashflow/p-assigned/sheets-lab',
+    })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
+
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: 'p-assigned',
+      sessionProjectId: 'p-assigned',
+      previousSessionProjectId: 'p-assigned',
+      fallbackProjectId: '',
+      currentPath: '/portal/cashflow/p-assigned/sheets-lab',
+    })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
+  });
+
+  it('adopts a deep-linked route project into the session instead of silently redirecting', () => {
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: 'p-assigned',
+      sessionProjectId: 'p-managed',
+      previousSessionProjectId: '',
+      fallbackProjectId: '',
+      currentPath: '/portal/cashflow/p-assigned/sheets-lab',
+    })).toEqual({ projectId: 'p-assigned', action: 'adopt-route', path: '' });
+  });
+
+  it('realigns the route when the top project selector switches the session project', () => {
+    expect(resolvePortalProjectContextSync({
+      routeProjectId: 'p-assigned',
+      sessionProjectId: 'p-managed',
+      previousSessionProjectId: 'p-assigned',
+      fallbackProjectId: 'p-assigned',
+      currentPath: '/portal/cashflow/p-assigned/sheets-lab#review',
+    })).toEqual({
+      projectId: 'p-managed',
+      action: 'canonicalize-path',
+      path: '/portal/cashflow/p-managed/sheets-lab#review',
+    });
+  });
+
+  it('settles on one project after a session switch is applied to the route', () => {
+    const switched = resolvePortalProjectContextSync({
+      routeProjectId: 'p-assigned',
+      sessionProjectId: 'p-managed',
+      previousSessionProjectId: 'p-assigned',
+      fallbackProjectId: '',
+      currentPath: '/portal/cashflow/p-assigned/sheets-lab',
+    });
+    const settled = resolvePortalProjectContextSync({
+      routeProjectId: 'p-managed',
+      sessionProjectId: 'p-managed',
+      previousSessionProjectId: 'p-managed',
+      fallbackProjectId: '',
+      currentPath: switched.path,
+    });
+
+    expect(settled).toEqual({ projectId: 'p-managed', action: 'idle', path: '' });
   });
 
   it('runs the dirty guard before state mutation and navigation', async () => {

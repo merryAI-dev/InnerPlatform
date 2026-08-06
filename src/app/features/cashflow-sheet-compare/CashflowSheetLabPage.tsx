@@ -34,7 +34,7 @@ import {
 } from '../../components/ui/dialog';
 import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
-import { resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
+import { resolvePortalProjectContextSync, resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
 import { CashflowFormulaMismatchDialog } from '../../components/cashflow/CashflowFormulaMismatchDialog';
 
@@ -226,7 +226,7 @@ export function CashflowSheetLabPage({
   projectIdOverride?: string;
 } = {}) {
   const { user: authUser, loginWithGoogle } = useAuth();
-  const { activeProjectId, myProject } = usePortalStore();
+  const { activeProjectId, myProject, setSessionActiveProject } = usePortalStore();
   const { orgId } = useFirebase();
   const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
   const routeProjectId = routeProjectIdParam?.trim() || '';
@@ -234,17 +234,14 @@ export function CashflowSheetLabPage({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const portalProjectId = activeProjectId || myProject?.id || '';
-  const initialProjectId = useMemo(() => (
-    routeProjectId
-    || projectIdOverride?.trim()
+  const fallbackProjectId = useMemo(() => (
+    projectIdOverride?.trim()
     || searchParams.get('projectId')?.trim()
-    || portalProjectId
     || authUser?.projectId
     || authUser?.projectIds?.[0]
     || readRecentPortalProjectIds()[0]
     || ''
-  ), [authUser?.projectId, authUser?.projectIds, portalProjectId, projectIdOverride, routeProjectId, searchParams]);
-  const [projectIdInput, setProjectIdInput] = useState(initialProjectId);
+  ), [authUser?.projectId, authUser?.projectIds, projectIdOverride, searchParams]);
   const projectYears = useMemo(() => {
     const startYear = /^\d{4}-/.test(myProject?.contractStart || '') ? Number(myProject?.contractStart.slice(0, 4)) : Number.NaN;
     const endYear = /^\d{4}-/.test(myProject?.contractEnd || '') ? Number(myProject?.contractEnd.slice(0, 4)) : Number.NaN;
@@ -305,9 +302,19 @@ export function CashflowSheetLabPage({
   const configLoadGenerationRef = useRef(0);
   const refreshButtonRef = useRef<HTMLButtonElement>(null);
   const stageButtonRef = useRef<HTMLButtonElement>(null);
-  const projectId = projectIdInput.trim();
-  const tutorialStorageKey = projectId ? `cashflow-sheet-tutorial:${projectId}` : '';
+  const syncedSessionProjectIdRef = useRef('');
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
+  const projectContextSync = resolvePortalProjectContextSync({
+    routeProjectId,
+    sessionProjectId: portalProjectId,
+    previousSessionProjectId: syncedSessionProjectIdRef.current,
+    fallbackProjectId,
+    currentPath,
+  });
+  const projectId = projectContextSync.projectId;
+  const projectContextAction = projectContextSync.action;
+  const projectContextPath = projectContextSync.path;
+  const tutorialStorageKey = projectId ? `cashflow-sheet-tutorial:${projectId}` : '';
   const spreadsheetId = useMemo(() => extractSpreadsheetIdFromSheetInput(sheetLink), [sheetLink]);
   const hasSheetDraft = Boolean(sheetLink.trim() || sheetName.trim());
   const sourceKey = useMemo(() => buildSourceKey({
@@ -444,31 +451,43 @@ export function CashflowSheetLabPage({
     }
   }
 
+  // URL route projectId와 상단 선택 프로젝트를 항상 한 프로젝트로 맞춘다.
   useEffect(() => {
-    if (projectIdInput || !initialProjectId) return;
-    setProjectIdInput(initialProjectId);
-  }, [initialProjectId, projectIdInput]);
-
-  useEffect(() => {
-    if (!routeProjectId || routeProjectId === projectIdInput) return;
-    setProjectIdInput(routeProjectId);
-  }, [projectIdInput, routeProjectId]);
-
-  useEffect(() => {
-    if (routeProjectId) return;
-    const nextProjectId = projectIdOverride?.trim();
-    if (!nextProjectId || nextProjectId === projectIdInput) return;
-    setProjectIdInput(nextProjectId);
-  }, [projectIdInput, projectIdOverride, routeProjectId]);
-
-  useEffect(() => {
-    if (projectIdInput || !portalProjectId) return;
-    setProjectIdInput(portalProjectId);
-  }, [portalProjectId, projectIdInput]);
+    syncedSessionProjectIdRef.current = portalProjectId;
+    if (projectContextAction === 'canonicalize-path') {
+      if (projectContextPath && projectContextPath !== currentPath) {
+        navigate(projectContextPath, { replace: true });
+      }
+      return;
+    }
+    if (projectContextAction !== 'adopt-route') return;
+    let cancelled = false;
+    void (async () => {
+      const adopted = await setSessionActiveProject(projectId);
+      if (cancelled || adopted) return;
+      const sessionPath = resolvePortalProjectResourcePath(currentPath, portalProjectId);
+      if (sessionPath !== currentPath) navigate(sessionPath, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPath, navigate, portalProjectId, projectContextAction, projectContextPath, projectId, setSessionActiveProject]);
 
   useEffect(() => {
     if (!projectId) return;
     rememberRecentPortalProject(projectId);
+  }, [projectId]);
+
+  // 프로젝트가 바뀌면 이전 프로젝트의 반영 복구 상태를 새 프로젝트로 이어받지 않는다.
+  useEffect(() => {
+    setClosedMonthStage(null);
+    setClosedMonthWarning([]);
+    setClosedMonthChangeReason('');
+    setClosedMonthFormulaAccepted(false);
+    setClosedMonthPendingApprovalAccepted(false);
+    setPendingApprovalStage(null);
+    setFormulaMismatchPrompt(null);
+    setApplyResumeRequired(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -505,11 +524,6 @@ export function CashflowSheetLabPage({
     if (projectYears.includes(sourceYear)) return;
     setSourceYear(projectYears[0] || 2026);
   }, [projectYears, sourceYear]);
-
-  useEffect(() => {
-    if (routeProjectId || !projectId) return;
-    navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true });
-  }, [currentPath, navigate, projectId, routeProjectId]);
 
   useEffect(() => {
     if (!tutorialStorageKey) return;
@@ -598,8 +612,8 @@ export function CashflowSheetLabPage({
     }
   }
 
+  // 프로젝트나 연동 연도가 바뀌면 이전 시트 draft를 남기지 않는다.
   useEffect(() => {
-    if (!projectId || !actor.idToken) return;
     configLoadGenerationRef.current += 1;
     setSavedConfig(null);
     setSavedConfigs([]);
@@ -610,6 +624,10 @@ export function CashflowSheetLabPage({
     setReflectResult(null);
     setStatusMessage('');
     setErrorMessage('');
+  }, [projectId, sourceYear]);
+
+  useEffect(() => {
+    if (!projectId || !actor.idToken) return;
     void handleLoadShareAccount({ forceHydrate: true });
   }, [actor.idToken, projectId, sourceYear]);
 
