@@ -2647,6 +2647,13 @@ async function executeCashflowSheetOperation({
       }
       const checkpoint = await reconcile(mutationError);
       if (checkpoint) return checkpoint;
+      if (mutationError?.mutationOutcome === 'uncertain') {
+        throw cashflowSheetOperationUncertainError(operationKey, {
+          outcome: 'NOT_FOUND_AFTER_UNCERTAIN_MUTATION',
+          mutationErrorCode: readOptionalText(mutationError?.code) || null,
+          expected,
+        });
+      }
       if (attempt === 1) {
         throw cashflowSheetOperationUncertainError(operationKey, {
           outcome: 'NOT_FOUND_AFTER_RETRY',

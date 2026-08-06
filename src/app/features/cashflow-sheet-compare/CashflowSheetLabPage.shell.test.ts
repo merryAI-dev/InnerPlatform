@@ -69,6 +69,7 @@ describe('CashflowSheetLabPage shell', () => {
     expect(recoveryReset).toContain('setPendingApprovalStage(null);');
     expect(recoveryReset).toContain('setFormulaMismatchPrompt(null);');
     expect(recoveryReset).toContain('setApplyResumeRequired(false);');
+    expect(recoveryReset).toContain("setApplyStatusState('checking');");
 
     const draftReset = pageSource.slice(
       pageSource.indexOf('이전 시트 draft를 남기지 않는다'),
@@ -122,6 +123,14 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).toContain('void handleLoadShareAccount();');
     expect(pageSource).toContain('canRefresh');
     expect(pageSource).toContain('canOverwrite');
+    expect(pageSource).toContain("applyStatusState === 'ready'");
+    expect(pageSource).toContain("applyStatusState === 'error'");
+    expect(pageSource).toContain('applyResumeRequired && !stagedOverride');
+    expect(pageSource).toContain('!stagedOverride && !spreadsheetId');
+    expect(pageSource).toContain('반영 상태 다시 확인');
+    expect(pageSource).toContain("getErrorCode(error) === 'cashflow_sheet_apply_in_progress'");
+    expect(pageSource).toContain("setApplyStatusState('checking');");
+    expect(pageSource).toContain('setApplyStatusRetry((current) => current + 1);');
     expect(pageSource).toContain('reflectResult');
     expect(pageSource).toContain('buildSourceKey');
     expect(pageSource).toContain('reviewedSourceKey === sourceKey');

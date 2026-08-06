@@ -4249,6 +4249,60 @@ describe('cashflow sheet lab route', () => {
       .toMatchObject({ status: 'APPLIED' });
   });
 
+  it('does not resend a mutation that may still be running when operation status is not found yet', async () => {
+    let sourceRevision;
+    let expectedTargetRevision;
+    let statusReads = 0;
+    const resultingTargetRevision = `sha256:${'2'.repeat(64)}`;
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async () => {
+        throw Object.assign(new Error('JVM response deadline exceeded'), {
+          statusCode: 503,
+          code: 'jvm_weekly_api_unreachable',
+          mutationOutcome: 'uncertain',
+        });
+      }),
+      getCashflowSheetOperationStatus: vi.fn(async (input) => {
+        if (statusReads++ === 0) return javaOperationNotFound(input);
+        return javaOperationApplied(input, {
+          sourceRevision,
+          expectedTargetRevision,
+          resultingTargetRevision,
+          appliedMonths: ['2026-01'],
+        });
+      }),
+    };
+    const staged = await stageJanuaryApply(javaWeeklyClient, 'in-flight-not-found');
+    sourceRevision = staged.mirror.body.sourceRevision;
+    expectedTargetRevision = staged.mirror.body.targetRevisionAtFetch;
+    const payload = {
+      stageRunId: staged.stage.body.runId,
+      idempotencyKey: 'apply-in-flight-not-found',
+    };
+
+    await request(staged.app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(payload)
+      .expect(503)
+      .expect((response) => expect(response.body.code).toBe('cashflow_sheet_operation_uncertain'));
+
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.getCashflowSheetOperationStatus).toHaveBeenCalledTimes(1);
+    expect(staged.db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${staged.stage.body.runId}`))
+      .toMatchObject({ status: 'APPLYING' });
+
+    await request(staged.app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send(payload)
+      .expect(200)
+      .expect((response) => expect(response.body.resultingTargetRevision).toBe(resultingTargetRevision));
+
+    expect(javaWeeklyClient.applyCashflowSheetLab).toHaveBeenCalledTimes(1);
+    expect(javaWeeklyClient.getCashflowSheetOperationStatus).toHaveBeenCalledTimes(2);
+    expect(staged.db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${staged.stage.body.runId}`))
+      .toMatchObject({ status: 'APPLIED' });
+  });
+
   it('replays the applied response when two requests finish the same staged run together', async () => {
     let releaseBoth;
     let callCount = 0;
