@@ -115,7 +115,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('fetchCashflowSnapshotViaBff');
     expect(source).not.toContain('loadCashflowComparison');
     expect(source).not.toContain('cashflowSnapshot');
-    expect(source).toContain('monthCloseResult.dashboard.comparison');
+    expect(source).toContain('month?.comparison?.weeks');
     expect(source).toContain('projectionSummary?.projectionSalesAndVatTotal');
     expect(source).toContain('dashboard?.projectionActualSummary');
     expect(source).toContain('CashflowCanonicalSummary');
@@ -148,15 +148,14 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toMatch(/\}, \[orgId, projectId, resolveBffActor, selectedYear, user\?\.uid, yearMonth\]\);/);
   });
 
-  it('renders the pinned sheet formula results instead of recomputing summary cells in the browser', () => {
-    expect(source).toContain('cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks');
-    expect(source).toContain('monthCloseResult?.dashboard?.sheetCalculationChecks');
-    expect(source).toContain('closedMonthStatus?.sheetCalculationChecks');
-    expect(source).toContain('const check = monthIsClosed');
-    expect(source).toContain('check?.reported?.depositTotal');
-    expect(source).toContain('check?.reported?.withdrawalTotal');
-    expect(source).toContain('check?.reported?.balance');
-    expect(source).toContain('getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
+  it('renders JVM canonical formula results instead of the pinned Sheet formulas', () => {
+    expect(source).toContain('function getCanonicalDerivedAmount');
+    expect(source).toContain("monthCloseResult?.dashboard?.canonical?.months");
+    expect(source).toContain('check?.totalIn');
+    expect(source).toContain('check?.totalOut');
+    expect(source).toContain('check?.net');
+    expect(source).toContain('getCanonicalDerivedAmount(mode, week.yearMonth, week.weekNo, kind)');
+    expect(source).not.toContain('function getPinnedDerivedAmount');
   });
 
   it('drops the inbox card but keeps the issue count badge', () => {
@@ -596,7 +595,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
     expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
     expect(source).toContain('const renderAnnualSummaryCell');
-    expect(source).toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
+    expect(source).not.toContain('cashflowSheetMirror?.sheetFacts?.annualCashflowTotals');
     expect(source).toContain('annualYears.some((year) => !annualTotalFor(year, mode))');
     expect(source).toContain('Total');
     expect(source).toContain('const visibleWeeks = annualWeeks');
@@ -620,7 +619,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('visibleComparisonAnnualYears');
     expect(source).toContain('comparisonWeeks.reduce');
     expect(source).not.toContain('const cashflowTotalPeriodLabel = `${previousAnnualYears[0] || selectedYear}년 ~ ${followingAnnualYears.at(-1) || selectedYear}년`');
-    expect(source).toContain('const mirroredAnnualTotals = useMemo');
+    expect(source).not.toContain('const mirroredAnnualTotals = useMemo');
     expect(source).toContain('const annualTotalFor = (year: number');
     expect(source).not.toContain("const totalProjection = projectLineTotalFor('projection', lineId)");
     expect(source).not.toContain("const totalActual = projectLineTotalFor('actual', lineId)");
@@ -630,8 +629,8 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('followingComparisonAnnualYears.includes(cell.year)');
     expect(source).toContain('row.totalCell.difference');
     expect(source).toContain('difference: hasValue ? projection - actual : null');
-    expect(source).toContain("pinned.state === 'VALUE' || pinned.state === 'ZERO'");
-    expect(source).toContain("cell?.cellState === 'VALUE' || cell?.cellState === 'ZERO'");
+    expect(source).not.toContain("pinned.state === 'VALUE' || pinned.state === 'ZERO'");
+    expect(source).toContain('monthCloseResult?.dashboard?.canonical?.months?.find');
     expect(source).toContain('const columnCount = visibleComparisonAnnualYears.length + visibleComparisonWeeks.length + 1');
   });
 

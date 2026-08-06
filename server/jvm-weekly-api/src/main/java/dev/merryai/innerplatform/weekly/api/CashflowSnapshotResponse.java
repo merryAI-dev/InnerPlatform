@@ -6,6 +6,7 @@ import java.util.Map;
 
 public record CashflowSnapshotResponse(
     String projectId,
+    String targetRevision,
     List<ProjectionLine> projection,
     List<ActualLine> actual,
     ReadModel readModel

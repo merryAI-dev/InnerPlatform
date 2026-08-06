@@ -409,6 +409,7 @@ class WeeklyExpenseControllerTest {
 
         mockMvc.perform(asActor(get("/api/v1/cashflow/project-a"), "tenant-a", "viewer-a", "viewer"))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.targetRevision").isString())
             .andExpect(jsonPath("$.actual[0].sheetKey").value("default"))
             .andExpect(jsonPath("$.actual[0].amount").value(1200000))
             .andExpect(jsonPath("$.readModel.months[0].yearMonth").value("2026-06"))
