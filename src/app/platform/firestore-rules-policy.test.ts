@@ -129,25 +129,16 @@ describe('firestore rules policy alignment', () => {
     }
   });
 
-  it('pm needs project assignment for access', () => {
-    expect(canAccessProject({
-      actorRole: 'pm', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'],
-    })).toBe(true);
-    expect(canAccessProject({
-      actorRole: 'pm', permission: 'project:read', targetProjectId: 'p2', assignedProjectIds: ['p1'],
-    })).toBe(false);
-  });
-
-  it('viewer needs assignment and can read/write assigned projects', () => {
-    expect(canAccessProject({
-      actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'],
-    })).toBe(true);
-    expect(canAccessProject({
-      actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'],
-    })).toBe(true);
-    expect(canAccessProject({
-      actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p2', assignedProjectIds: ['p1'],
-    })).toBe(false);
+  it('lets pm and viewer reach a project they were never assigned to', () => {
+    // Access is no longer gated by assignment; every member works across all projects.
+    for (const actorRole of ['pm', 'viewer'] as const) {
+      expect(canAccessProject({
+        actorRole, permission: 'project:read', targetProjectId: 'p2', assignedProjectIds: ['p1'],
+      })).toBe(true);
+      expect(canAccessProject({
+        actorRole, permission: 'project:write', targetProjectId: 'p2', assignedProjectIds: [],
+      })).toBe(true);
+    }
   });
 
   // ── canAccessTenant: cross-tenant ──

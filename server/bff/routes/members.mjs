@@ -79,7 +79,8 @@ export function buildMemberPermissionOverview(entry, projects) {
   const actorId = String(entry.authUid || entry.canonicalMember?.uid || member.uid || '').trim();
   const role = normalizeRole(entry.effectiveRole);
   const isActive = !entry.authDisabled && String(member.status || '').trim().toUpperCase() === 'ACTIVE';
-  const crossProject = role === 'admin' || role === 'finance';
+  // Every member works across all projects; see CROSS_PROJECT_ROLES in src/app/platform/rbac.ts.
+  const crossProject = true;
   const organizationHeadProjects = projects.filter((project) => actorId && project.executiveApproverId === actorId);
   const accessibleProjects = projects.filter((project) => (
     crossProject

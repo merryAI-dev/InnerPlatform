@@ -61,20 +61,15 @@ describe('rbac helpers', () => {
     expect(canAccessTenant({ actorRole: 'admin', actorTenantId: 't1', targetTenantId: 't2' })).toBe(true);
   });
 
-  it('checks project-scoped access based on role and assignment', () => {
-    // Admin can access any project without assignment
-    expect(canAccessProject({ actorRole: 'admin', permission: 'project:read', targetProjectId: 'p1' })).toBe(true);
-    expect(canAccessProject({ actorRole: 'finance', permission: 'project:write', targetProjectId: 'p1' })).toBe(true);
-
-    // PM needs assignment
-    expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1', 'p2'] })).toBe(true);
-    expect(canAccessProject({ actorRole: 'pm', permission: 'project:write', targetProjectId: 'p3', assignedProjectIds: ['p1', 'p2'] })).toBe(false);
-
-    // Viewer can write with assignment
-    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:write', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(true);
-
-    // Viewer can read with assignment
-    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p1', assignedProjectIds: ['p1'] })).toBe(true);
-    expect(canAccessProject({ actorRole: 'viewer', permission: 'project:read', targetProjectId: 'p2', assignedProjectIds: ['p1'] })).toBe(false);
+  it('gives every role access to every project, assigned or not', () => {
+    // The organisation works across all projects, so assignment no longer gates access.
+    for (const actorRole of ['admin', 'finance', 'pm', 'viewer'] as const) {
+      expect(canAccessProject({ actorRole, permission: 'project:read', targetProjectId: 'p1' })).toBe(true);
+      expect(canAccessProject({ actorRole, permission: 'project:write', targetProjectId: 'p1' })).toBe(true);
+      expect(canAccessProject({
+        actorRole, permission: 'project:write', targetProjectId: 'p3', assignedProjectIds: ['p1', 'p2'],
+      })).toBe(true);
+    }
   });
+
 });

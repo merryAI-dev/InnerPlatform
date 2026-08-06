@@ -142,7 +142,15 @@ export function hasPermission(
 
 export type ProjectScopedPermission = 'project:read' | 'project:write' | 'project:evidence_drive:write';
 
-const CROSS_PROJECT_ROLES: PlatformRole[] = ['admin', 'finance'];
+/**
+ * Roles that reach every project without being assigned to it one by one.
+ *
+ * The organisation decided every member works across all projects, so this is the full
+ * role list. Narrowing access again means shortening this list — and the matching sets in
+ * server/bff/edit-lease.mjs, server/bff/routes/project-info-drafts.mjs and
+ * server/bff/routes/members.mjs, which cannot import from the app bundle.
+ */
+const CROSS_PROJECT_ROLES: PlatformRole[] = ['admin', 'finance', 'pm', 'viewer'];
 
 export function canAccessProject(options: {
   actorRole: PlatformRole;
