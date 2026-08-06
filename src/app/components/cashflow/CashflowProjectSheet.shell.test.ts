@@ -284,7 +284,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('handleRefreshSheetMirror');
     expect(source).toContain('refreshCashflowSheetLabMirrorViaBff');
     expect(source).toContain('stageCashflowSheetLabViaBff');
-    expect(source).toContain('handleStagePinnedSheetValues(false, cashflowSheetMirror)');
+    expect(source).not.toContain('handleStagePinnedSheetValues(false, cashflowSheetMirror)');
     expect(source).toContain('시트값 불러오기');
     expect(source).toContain('시트 값 불러오기');
     expect(source).toContain('fetchCashflowActivityViaBff');
@@ -299,20 +299,28 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('checkCashflowSheetChangesViaBff');
     expect(source).toContain("status: 'CHECKING'");
     expect(source).toContain('setCashflowSheetChangeCheck(result)');
-    expect(source).toContain("['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm]");
-    expect(source).toContain("['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore]");
-    expect(source).toContain("['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore]");
-    expect(source).toContain('시트 변경 확인 불가');
+    expect(source).toContain('const sheetChangeCount = [');
+    expect(source).toContain('cashflowSheetChangeCheck?.comparisons.jvmToFirestore');
+    expect(source).toContain('변경 ${sheetChangeCount.toLocaleString()}건');
+    expect(source).toContain('onClick={handleOpenSheetReviewDialog}');
+    expect(source).toMatch(/const handleOpenSheetReviewDialog = useCallback\(\(\) => \{\s*setSheetReviewDialogOpen\(true\);\s*\}, \[\]\);/);
+    expect(source).not.toContain("['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm]");
+    expect(source).not.toContain("['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore]");
+    expect(source).not.toContain("['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore]");
+    expect(source).not.toContain('시트 변경 확인 불가');
     expect(source).toContain('시트 이동');
     expect(source).toContain('href={configuredSheetUrl}');
     expect(source).toContain('target="_blank"');
     expect(source).toContain('rel="noopener noreferrer"');
+    expect(source).not.toContain('pendingAutoStageRevision');
+    expect(source).not.toContain('setPendingAutoStageRevision');
 
     const checkFlow = source.slice(
       source.indexOf('const checkSheetChanges = async'),
       source.indexOf('void checkSheetChanges();'),
     );
     expect(checkFlow).not.toContain('applyCashflowSheetLabViaBff');
+    expect(source).toMatch(/expectedMirrorRevision: sourceMirror\.sourceRevision,\s*yearMonth,\s*\.\.\.\(replaceAllActualSources/);
     expect(checkFlow).not.toContain('refreshCashflowSheetLabMirrorViaBff');
   });
 
@@ -323,7 +331,7 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain('aria-busy={sheetRefreshLoading}');
     expect(source).not.toContain('setSheetRefreshResult');
     expect(source).not.toContain('setSheetStageDialog');
-    expect(source).toContain('handingOffToAutoStage');
+    expect(source).not.toContain('handingOffToAutoStage');
   });
 
   it('reuses the staged run when a closed-month change needs a reason', () => {

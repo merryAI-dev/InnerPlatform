@@ -21,14 +21,14 @@ describe('project-team-member-options', () => {
 
   it('includes deployed PM identities missing from the previous static picker', () => {
     expect(PROJECT_TEAM_MEMBER_OPTIONS.map((option) => option.label)).toEqual(
-      expect.arrayContaining(['박지연 (느티)', '김소영 (소이)', '최새롬 (노리)']),
+      expect.arrayContaining(['박지연(느티)', '김소영(소이)', '최새롬(노리)']),
     );
   });
 
   it('finds options by legal name, nickname, or display label', () => {
     expect(findProjectTeamMemberOption('박지연')?.nickname).toBe('느티');
     expect(findProjectTeamMemberOption('느티')?.name).toBe('박지연');
-    expect(findProjectTeamMemberOption('김소영 (소이)')?.name).toBe('김소영');
+    expect(findProjectTeamMemberOption('김소영(소이)')?.name).toBe('김소영');
   });
 
   it('builds the picker from the live member directory and excludes inactive records', () => {
@@ -39,8 +39,8 @@ describe('project-team-member-options', () => {
     ]);
 
     expect(options).toEqual([
-      expect.objectContaining({ name: '변민욱', nickname: '보람', label: '변민욱 (보람)' }),
-      expect.objectContaining({ name: '신규구성원', nickname: '새별', label: '신규구성원 (새별)' }),
+      expect.objectContaining({ name: '변민욱', nickname: '보람', label: '변민욱(보람)' }),
+      expect.objectContaining({ name: '신규구성원', nickname: '새별', label: '신규구성원(새별)' }),
     ]);
     expect(options.map((option) => option.name)).not.toContain('퇴사자');
     expect(options.map((option) => option.name)).not.toContain('박지연');
