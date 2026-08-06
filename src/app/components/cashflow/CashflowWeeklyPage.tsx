@@ -15,15 +15,47 @@ import {
   fetchCashflowSettlementStatusesBatchViaBff,
   transitionCashflowSettlementStatusViaBff,
   type CashflowSettlementPeriod,
+  type CashflowSettlementStatus,
   type CashflowSettlementStatusItem,
   type CashflowSettlementStatusesResult,
 } from '../../lib/platform-bff-client';
 import { getMonthMondayWeeks } from '../../platform/cashflow-weeks';
 import { getProjectRegistrationCicOptions, normalizeProjectDepartment } from '../../platform/project-cic';
 import { useCashflowProjectionActualSummaries } from './useCashflowProjectionActualSummaries';
+import type { OrgMember, Project } from '../../data/types';
 
 export function filterCashflowProjectsByDepartment<T extends { department?: unknown }>(projects: T[], department: string): T[] {
   return projects.filter((project) => department === 'ALL' || normalizeProjectDepartment(project.department) === department);
+}
+
+type SettlementStatusFilter = 'ALL' | CashflowSettlementStatus;
+
+export function formatCashflowProjectOwner(project: Pick<Project, 'executiveApproverId' | 'executiveApproverName' | 'managerName'>, members: Array<Pick<OrgMember, 'uid' | 'name' | 'nameKo'>>) {
+  const rosterOwner = members.find((member) => member.uid === project.executiveApproverId);
+  const ownerName = String(rosterOwner?.nameKo || rosterOwner?.name || project.executiveApproverName || '').trim();
+  const managerName = String(project.managerName || '').trim();
+  return [...new Set([ownerName, managerName].filter(Boolean))].join(' · ') || '-';
+}
+
+export function filterCashflowProjectsBySettlementStatus<T extends { id: string; department?: unknown }>(
+  projects: T[],
+  department: string,
+  statuses: Record<string, CashflowSettlementStatusesResult>,
+  statusErrors: Record<string, string>,
+  statusesLoading: boolean,
+  weekNos: number[],
+  monthStatusFilter: SettlementStatusFilter,
+  weekStatusFilter: SettlementStatusFilter,
+): T[] {
+  return filterCashflowProjectsByDepartment(projects, department).filter((project) => {
+    const projectStatuses = statuses[project.id];
+    if (statusErrors[project.id] || (statusesLoading && !projectStatuses)) return true;
+    const matches = (period: CashflowSettlementPeriod, filter: SettlementStatusFilter) => (
+      filter === 'ALL' || (statusItem(projectStatuses, period)?.status || 'WAITING_FOR_UPDATE') === filter
+    );
+    return matches('MONTH', monthStatusFilter)
+      && (weekStatusFilter === 'ALL' || weekNos.some((weekNo) => matches(`WEEK_${weekNo}` as CashflowSettlementPeriod, weekStatusFilter)));
+  });
 }
 
 function statusItem(result: CashflowSettlementStatusesResult | undefined, period: CashflowSettlementPeriod) {
@@ -65,6 +97,33 @@ function SettlementStatusButton({
   );
 }
 
+function SettlementStatusFilterSelect({
+  label,
+  period,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  period: CashflowSettlementPeriod;
+  value: SettlementStatusFilter;
+  onValueChange: (value: SettlementStatusFilter) => void;
+}) {
+  return (
+    <div className="w-[140px]">
+      <Label className="mb-1.5 block text-[11px] font-semibold text-slate-600">{label}</Label>
+      <Select value={value} onValueChange={(next) => onValueChange(next as SettlementStatusFilter)}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="ALL">전체 상태</SelectItem>
+          <SelectItem value="WAITING_FOR_UPDATE">{period === 'MONTH' ? '결산 전' : '주정산 이전'}</SelectItem>
+          <SelectItem value="PENDING_APPROVAL">조직장 승인 필요</SelectItem>
+          <SelectItem value="COMPLETED">승인 완료</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function PeriodAmounts({
   summary,
   period,
@@ -90,7 +149,7 @@ function PeriodAmounts({
 
 export function CashflowWeeklyPage() {
   const navigate = useNavigate();
-  const { projects } = useAppStore();
+  const { projects, members } = useAppStore();
   const { user } = useAuth();
   const { orgId } = useFirebase();
   const { yearMonth, isLoading, goPrevMonth, goNextMonth } = useCashflowWeeks();
@@ -100,23 +159,35 @@ export function CashflowWeeklyPage() {
   const [statusesLoading, setStatusesLoading] = useState(false);
   const [actionKey, setActionKey] = useState('');
   const [deptFilter, setDeptFilter] = useState('ALL');
+  const [monthStatusFilter, setMonthStatusFilter] = useState<SettlementStatusFilter>('ALL');
+  const [weekStatusFilter, setWeekStatusFilter] = useState<SettlementStatusFilter>('ALL');
   const departments = useMemo(() => Array.from(new Set([
     ...getProjectRegistrationCicOptions(),
     ...projects.map((project) => normalizeProjectDepartment(project.department)).filter(Boolean),
   ])).sort((left, right) => left.localeCompare(right, 'ko')), [projects]);
-  const filteredProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
+  const departmentProjects = useMemo(() => filterCashflowProjectsByDepartment(projects, deptFilter), [deptFilter, projects]);
+  const filteredProjects = useMemo(() => filterCashflowProjectsBySettlementStatus(
+    projects,
+    deptFilter,
+    statuses,
+    statusErrors,
+    statusesLoading,
+    monthWeeks.map((week) => week.weekNo),
+    monthStatusFilter,
+    weekStatusFilter,
+  ), [deptFilter, monthStatusFilter, monthWeeks, projects, statusErrors, statuses, statusesLoading, weekStatusFilter]);
   const projectIds = useMemo(() => filteredProjects.map((project) => project.id), [filteredProjects]);
   const projectionActual = useCashflowProjectionActualSummaries({ tenantId: orgId, actor: user, projectIds, yearMonth });
 
   useEffect(() => {
-    if (!user?.idToken || filteredProjects.length === 0) {
+    if (!user?.idToken || departmentProjects.length === 0) {
       setStatuses({});
       setStatusErrors({});
       setStatusesLoading(false);
       return;
     }
     let active = true;
-    const projectIds = filteredProjects.map((project) => project.id);
+    const projectIds = departmentProjects.map((project) => project.id);
     const batches = Array.from(
       { length: Math.ceil(projectIds.length / 100) },
       (_, index) => projectIds.slice(index * 100, (index + 1) * 100),
@@ -137,7 +208,7 @@ export function CashflowWeeklyPage() {
     void load(true);
     const interval = window.setInterval(() => void load(false), 15_000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [filteredProjects, orgId, user, yearMonth]);
+  }, [departmentProjects, orgId, user, yearMonth]);
 
   async function transition(projectId: string, period: CashflowSettlementPeriod, action: 'SUBMIT' | 'APPROVE') {
     if (!user?.idToken) return;
@@ -189,6 +260,8 @@ export function CashflowWeeklyPage() {
             </SelectContent>
           </Select>
         </div>
+        <SettlementStatusFilterSelect label="월결산 상태" period="MONTH" value={monthStatusFilter} onValueChange={setMonthStatusFilter} />
+        <SettlementStatusFilterSelect label="주정산 상태" period="WEEK_1" value={weekStatusFilter} onValueChange={setWeekStatusFilter} />
         <span className="pb-2 text-[11px] text-muted-foreground">{filteredProjects.length}개 프로젝트</span>
       </div>
 
@@ -220,7 +293,7 @@ export function CashflowWeeklyPage() {
                         <p className="truncate font-semibold">{project.name}</p>
                         <p className="truncate text-[10px] text-muted-foreground">{project.department} · {project.clientOrg}</p>
                       </td>
-                      <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{project.managerName}</td>
+                      <td className="sticky left-[220px] z-20 bg-white px-3 py-3 font-medium">{formatCashflowProjectOwner(project, members)}</td>
                       <td className="px-3 py-3 text-center">
                         {statusErrors[project.id] || (statusesLoading && !projectStatuses) ? <span className="text-muted-foreground">확인 중…</span> : (
                           <SettlementStatusButton
