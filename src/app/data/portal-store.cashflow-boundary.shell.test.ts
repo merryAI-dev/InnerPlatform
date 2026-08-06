@@ -15,6 +15,10 @@ const bankApply = source.slice(
   source.indexOf('const applyBankStatementRowsToExpenseSheet ='),
   source.indexOf('const refreshBankStatementRows ='),
 );
+const bankRefresh = source.slice(
+  source.indexOf('const refreshBankStatementRows ='),
+  source.indexOf('const upsertExpenseIntakeItems ='),
+);
 const weeklyStatus = source.slice(
   source.indexOf('const upsertWeeklySubmissionStatus ='),
   source.indexOf('const createProjectRequest ='),
@@ -41,6 +45,13 @@ describe('portal store cashflow mutation boundary', () => {
     expect(bankApply).toContain('applyBankStatementItemsViaBff');
     expect(bankApply).toContain('finalize: true');
     expect(bankApply).not.toContain('setDoc(');
+  });
+
+  it('drops bank statement results that finish after the project changes', () => {
+    expect(source).toContain("setBankStatementRows(null);\n    setBankStatementProjectId('');\n  }, [currentProjectId]);");
+    expect(source).toContain('bankStatementProjectId');
+    expect(source).toContain('setBankStatementProjectId(projectId);');
+    expect(bankRefresh).toContain('if (currentProjectIdRef.current !== projectId) return;');
   });
 
   it('sends weekly status intent to the BFF without a direct Firestore mutation', () => {

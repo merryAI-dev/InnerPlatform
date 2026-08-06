@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, BookOpen, CheckCircle2, ChevronLeft, ChevronRight, Copy, HelpCircle, Loader2, RefreshCw, Save, UserPlus } from 'lucide-react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { useAuth } from '../../data/auth-store';
 import { usePortalStore } from '../../data/portal-store';
 import { CASHFLOW_SHEET_LINE_LABELS, type CashflowSheetLineId } from '../../data/types';
@@ -32,7 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog';
-import { readRecentPortalProjectIds, rememberRecentPortalProject } from '../../platform/portal-recent-projects';
+import { rememberRecentPortalProject } from '../../platform/portal-recent-projects';
 import { recordDevtoolsLog } from '../../platform/devtools-transaction-log';
 import { resolvePortalProjectContextSync, resolvePortalProjectResourcePath } from '../../platform/portal-project-selection';
 import { CashflowSheetSyncOverlay, type CashflowSheetSyncOperation } from '../../components/cashflow/CashflowSheetSyncOverlay';
@@ -220,28 +220,15 @@ function HelpMemo({ children }: { children: ReactNode }) {
   );
 }
 
-export function CashflowSheetLabPage({
-  projectIdOverride,
-}: {
-  projectIdOverride?: string;
-} = {}) {
+export function CashflowSheetLabPage() {
   const { user: authUser, loginWithGoogle } = useAuth();
-  const { activeProjectId, myProject, setSessionActiveProject } = usePortalStore();
+  const { activeProjectId, myProject } = usePortalStore();
   const { orgId } = useFirebase();
   const { projectId: routeProjectIdParam } = useParams<{ projectId: string }>();
   const routeProjectId = routeProjectIdParam?.trim() || '';
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const portalProjectId = activeProjectId || myProject?.id || '';
-  const fallbackProjectId = useMemo(() => (
-    projectIdOverride?.trim()
-    || searchParams.get('projectId')?.trim()
-    || authUser?.projectId
-    || authUser?.projectIds?.[0]
-    || readRecentPortalProjectIds()[0]
-    || ''
-  ), [authUser?.projectId, authUser?.projectIds, projectIdOverride, searchParams]);
   const projectYears = useMemo(() => {
     const startYear = /^\d{4}-/.test(myProject?.contractStart || '') ? Number(myProject?.contractStart.slice(0, 4)) : Number.NaN;
     const endYear = /^\d{4}-/.test(myProject?.contractEnd || '') ? Number(myProject?.contractEnd.slice(0, 4)) : Number.NaN;
@@ -302,13 +289,10 @@ export function CashflowSheetLabPage({
   const configLoadGenerationRef = useRef(0);
   const refreshButtonRef = useRef<HTMLButtonElement>(null);
   const stageButtonRef = useRef<HTMLButtonElement>(null);
-  const syncedSessionProjectIdRef = useRef('');
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
   const projectContextSync = resolvePortalProjectContextSync({
     routeProjectId,
     sessionProjectId: portalProjectId,
-    previousSessionProjectId: syncedSessionProjectIdRef.current,
-    fallbackProjectId,
     currentPath,
   });
   const projectId = projectContextSync.projectId;
@@ -453,25 +437,12 @@ export function CashflowSheetLabPage({
 
   // URL route projectId와 상단 선택 프로젝트를 항상 한 프로젝트로 맞춘다.
   useEffect(() => {
-    syncedSessionProjectIdRef.current = portalProjectId;
     if (projectContextAction === 'canonicalize-path') {
       if (projectContextPath && projectContextPath !== currentPath) {
         navigate(projectContextPath, { replace: true });
       }
-      return;
     }
-    if (projectContextAction !== 'adopt-route') return;
-    let cancelled = false;
-    void (async () => {
-      const adopted = await setSessionActiveProject(projectId);
-      if (cancelled || adopted) return;
-      const sessionPath = resolvePortalProjectResourcePath(currentPath, portalProjectId);
-      if (sessionPath !== currentPath) navigate(sessionPath, { replace: true });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentPath, navigate, portalProjectId, projectContextAction, projectContextPath, projectId, setSessionActiveProject]);
+  }, [currentPath, navigate, projectContextAction, projectContextPath]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -509,7 +480,7 @@ export function CashflowSheetLabPage({
         setClosedMonthFormulaAccepted(result.applyInput?.acceptFormulaMismatches === true);
         setClosedMonthPendingApprovalAccepted(result.applyInput?.acceptPendingApprovalDifferences === true);
         setApplyResumeRequired(true);
-        setErrorMessage('이전에 완료 응답을 받지 못한 시트 반영이 있습니다. 같은 검토본으로 이어서 완료해 주세요.');
+        setErrorMessage('이전 시트 반영이 아직 완료 상태로 확인되지 않았습니다. 반영 상태를 확인해 주세요.');
       } catch {
         // 복구 상태 조회 실패는 시트 설정 화면 진입 자체를 막지 않는다.
       }
@@ -956,6 +927,11 @@ export function CashflowSheetLabPage({
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
         setClosedMonthPendingApprovalAccepted(acceptPendingApprovalDifferences);
       } else if (activeStep === 'apply' && staged && isCashflowSheetApplyResultUncertain(error)) {
+        if (applyResumeRequired) {
+          closeClosedMonthDialog();
+          setErrorMessage('서버가 반영 결과를 확인하고 있습니다. 잠시 후 시트 값을 다시 불러와 확인해 주세요.');
+          return;
+        }
         setClosedMonthStage(staged);
         setClosedMonthChangeReason(stagedOverride ? monthCloseChangeReason.trim() : '');
         setClosedMonthFormulaAccepted(acceptFormulaMismatches);
@@ -963,6 +939,9 @@ export function CashflowSheetLabPage({
         setApplyResumeRequired(true);
         setErrorMessage(`${formatError(error)} 같은 검토본으로 이어서 완료할 수 있습니다.`);
       } else {
+        if (activeStep === 'apply' && ['cashflow_sheet_config_changed', 'cashflow_sheet_mirror_stale', 'cashflow_sheet_mirror_revision_conflict'].includes(getErrorCode(error))) {
+          closeClosedMonthDialog();
+        }
         setErrorMessage(formatError(error));
       }
     } finally {
@@ -1259,15 +1238,15 @@ export function CashflowSheetLabPage({
       <Dialog
         open={Boolean(closedMonthStage)}
         onOpenChange={(open) => {
-          if (!open && !applyResumeRequired) closeClosedMonthDialog();
+          if (!open) closeClosedMonthDialog();
         }}
       >
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[760px] gap-4 overflow-y-auto rounded-xl p-5">
           <DialogHeader className="space-y-1 text-left">
-            <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 결과 다시 확인' : '결산 후 값이 달라요'}</DialogTitle>
+            <DialogTitle className="text-[17px]">{applyResumeRequired ? '시트 반영 상태 확인 필요' : '결산 후 값이 달라요'}</DialogTitle>
             <DialogDescription className="text-[12px] leading-relaxed text-slate-600">
               {applyResumeRequired
-                ? '시트 값을 MYSCube 현금흐름 관리시트에 반영하는 중 연결이 끊겼습니다. 시트 값을 새로 불러오거나 중복 저장하지 않고, 기존 검토본의 반영 결과를 다시 확인한 뒤 남은 저장만 이어갑니다.'
+                ? '이전 반영이 완료됐는지 서버에서 확인합니다. 완료된 값은 다시 저장하지 않으며, 확인이 오래 걸리면 창을 닫고 잠시 후 다시 시도해 주세요.'
                 : '월 결산 이후 변경입니다. 사유를 남기면 변경 이력과 경고 횟수에 함께 기록됩니다. 그래도 반영할까요?'}
             </DialogDescription>
           </DialogHeader>
@@ -1326,7 +1305,7 @@ export function CashflowSheetLabPage({
                 closedMonthPendingApprovalAccepted,
               )}
             >
-              {applyResumeRequired ? '반영 상태 확인 및 이어서 완료' : '사유와 함께 반영'}
+              {applyResumeRequired ? '반영 상태 확인' : '사유와 함께 반영'}
             </Button>
           </DialogFooter>
         </DialogContent>

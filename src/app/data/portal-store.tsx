@@ -504,6 +504,7 @@ interface PortalState {
   activeExpenseSheetId: string;
   expenseSheetRows: ImportRow[] | null;
   bankStatementRows: BankStatementSheet | null;
+  bankStatementProjectId: string;
   budgetPlanRows: BudgetPlanRow[] | null;
   budgetCodeBook: BudgetCodeEntry[];
   budgetTreeV2: BudgetTreeV2 | null;
@@ -721,6 +722,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   const [activeExpenseSheetId, setActiveExpenseSheetIdState] = useState('default');
   const [expenseSheetRows, setExpenseSheetRows] = useState<ImportRow[] | null>(null);
   const [bankStatementRows, setBankStatementRows] = useState<BankStatementSheet | null>(null);
+  const [bankStatementProjectId, setBankStatementProjectId] = useState('');
   const [budgetPlanRows, setBudgetPlanRows] = useState<BudgetPlanRow[] | null>(null);
   const [budgetCodeBook, setBudgetCodeBook] = useState<BudgetCodeEntry[]>(
     normalizeBudgetCodeBook(BUDGET_CODE_BOOK as unknown as BudgetCodeEntry[]),
@@ -806,6 +808,8 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     return projects.find((project) => project.id === activeProjectId) || null;
   }, [activeProjectId, projects]);
   const currentProjectId = activeProjectId;
+  const currentProjectIdRef = useRef(currentProjectId);
+  currentProjectIdRef.current = currentProjectId;
   const { allowRealtimeListeners: livePortalMode } = useFirestoreAccessPolicy(portalUser?.role || authUser?.role);
   const hasHydratedPortalSession = Boolean(
     isAuthenticated && authUser?.uid && portalUser?.id === authUser.uid,
@@ -1117,6 +1121,11 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       projectCatalogUnsubsRef.current = [];
     };
   }, [authLoading, isMemberLoading, isAuthenticated, authUser?.uid, hasHydratedPortalSession, firestoreEnabled, db, orgId, isDevHarnessUser, assignedProjectIdsKey, livePortalMode]);
+
+  useEffect(() => {
+    setBankStatementRows(null);
+    setBankStatementProjectId('');
+  }, [currentProjectId]);
 
   useEffect(() => {
     projectScopeUnsubsRef.current.forEach((unsub) => unsub());
@@ -1618,6 +1627,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
           status: row?.status === 'applied' ? 'applied' as const : 'staged' as const,
         }));
         setBankStatementRows({ columns, rows });
+        setBankStatementProjectId(currentProjectId);
       });
     };
     const handleBankStatementError = (err: unknown) => {
@@ -1637,6 +1647,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         },
       });
       ifActive(() => setBankStatementRows(null));
+      ifActive(() => setBankStatementProjectId(''));
     };
     const handleBudgetPlanResult = (snap: { exists(): boolean; data(): unknown }) => {
       ifActive(() => {
@@ -2704,6 +2715,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     const sanitizedSheet: BankStatementSheet = { columns: sanitizedColumns, rows: sanitizedRows as BankStatementRow[] };
     if (isDevHarnessUser) {
       setBankStatementRows(sanitizedSheet);
+      setBankStatementProjectId(currentProjectId);
       return;
     }
     if (!currentProjectId || !authUser || !isPlatformApiEnabled()) {
@@ -2733,6 +2745,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         payload: { ...opened.draft.payload, bankStatement: sanitizedSheet },
       });
       setBankStatementRows(sanitizedSheet);
+      setBankStatementProjectId(currentProjectId);
       return;
     }
     const idempotencyKey = `bank-import:${currentProjectId}:${Date.now()}`;
@@ -2766,6 +2779,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
         tempId: importedIdBySourceKey.get(row.tempId) || row.tempId,
       })),
     });
+    setBankStatementProjectId(currentProjectId);
   }, [authUser, currentProjectId, isDevHarnessUser, orgId]);
 
   const applyBankStatementRowsToExpenseSheet = useCallback(async (sheet: BankStatementSheet & { selectedRowIds?: string[] }, options?: BankStatementApplyOptions) => {
@@ -2819,6 +2833,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     if (isDevHarnessUser) {
       await saveExpenseSheetRows(mergedExpenseRows, options);
       setBankStatementRows(nextBankSheet);
+      setBankStatementProjectId(currentProjectId);
       expenseIntakeItemsRef.current = reconciledIntakeItems;
       setExpenseIntakeItems(reconciledIntakeItems);
       return { appliedCount: importRows.length };
@@ -2917,14 +2932,18 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     expenseIntakeItemsRef.current = reconciledIntakeItems;
     setExpenseIntakeItems(reconciledIntakeItems);
     setBankStatementRows(nextBankSheet);
+    setBankStatementProjectId(currentProjectId);
     return { appliedCount: applied.appliedLineCount };
   }, [authUser, bankStatementRows, currentProjectId, isDevHarnessUser, orgId, portalUser?.name, saveExpenseSheetRows]);
 
   const refreshBankStatementRows = useCallback(async () => {
     if (isDevHarnessUser || !db || !currentProjectId) return;
-    const snap = await getDoc(doc(db, `${getOrgDocumentPath(orgId, 'projects', currentProjectId)}/bank_statements/default`));
+    const projectId = currentProjectId;
+    const snap = await getDoc(doc(db, `${getOrgDocumentPath(orgId, 'projects', projectId)}/bank_statements/default`));
+    if (currentProjectIdRef.current !== projectId) return;
     if (!snap.exists()) {
       setBankStatementRows(null);
+      setBankStatementProjectId('');
       return;
     }
     const data = snap.data() as { columns?: string[]; rows?: BankStatementRow[] };
@@ -2932,6 +2951,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       columns: Array.isArray(data.columns) ? data.columns : [],
       rows: Array.isArray(data.rows) ? data.rows : [],
     }));
+    setBankStatementProjectId(projectId);
   }, [currentProjectId, db, isDevHarnessUser, orgId]);
 
   const upsertExpenseIntakeItems = useCallback(async (items: BankImportIntakeItem[]) => {
@@ -3758,6 +3778,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
     activeExpenseSheetId,
     expenseSheetRows,
     bankStatementRows,
+    bankStatementProjectId,
     budgetPlanRows,
     budgetCodeBook,
     budgetTreeV2,

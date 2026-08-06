@@ -156,11 +156,7 @@ describe('portal project selection helpers', () => {
       previousSessionProjectId: '',
       fallbackProjectId: 'p-recent',
       currentPath: '/portal/cashflow/sheets-lab?step=2',
-    })).toEqual({
-      projectId: 'p-recent',
-      action: 'canonicalize-path',
-      path: '/portal/cashflow/p-recent/sheets-lab?step=2',
-    });
+    })).toEqual({ projectId: '', action: 'idle', path: '' });
 
     expect(resolvePortalProjectContextSync({
       routeProjectId: '',
@@ -171,14 +167,14 @@ describe('portal project selection helpers', () => {
     })).toEqual({ projectId: '', action: 'idle', path: '' });
   });
 
-  it('keeps the route project while the session project is still resolving or already matches', () => {
+  it('waits for the session project instead of using a sticky route project', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
       sessionProjectId: '',
       previousSessionProjectId: '',
       fallbackProjectId: 'p-recent',
       currentPath: '/portal/cashflow/p-assigned/sheets-lab',
-    })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
+    })).toEqual({ projectId: '', action: 'idle', path: '' });
 
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
@@ -189,14 +185,18 @@ describe('portal project selection helpers', () => {
     })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
   });
 
-  it('adopts a deep-linked route project into the session instead of silently redirecting', () => {
+  it('keeps the session project authoritative over a deep-linked route project', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
       sessionProjectId: 'p-managed',
       previousSessionProjectId: '',
       fallbackProjectId: '',
       currentPath: '/portal/cashflow/p-assigned/sheets-lab',
-    })).toEqual({ projectId: 'p-assigned', action: 'adopt-route', path: '' });
+    })).toEqual({
+      projectId: 'p-managed',
+      action: 'canonicalize-path',
+      path: '/portal/cashflow/p-managed/sheets-lab',
+    });
   });
 
   it('realigns the route when the top project selector switches the session project', () => {

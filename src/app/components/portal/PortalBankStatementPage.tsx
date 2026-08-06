@@ -277,6 +277,7 @@ export function PortalBankStatementPage() {
     portalUser,
     myProject,
     bankStatementRows,
+    bankStatementProjectId,
     expenseSheets,
     expenseSheetRows,
     budgetCodeBook,
@@ -286,8 +287,8 @@ export function PortalBankStatementPage() {
     refreshBankStatementRows,
   } = usePortalStore();
   const { orgId } = useFirebase();
-  const [columns, setColumns] = useState<string[]>(bankStatementRows?.columns || []);
-  const [rows, setRows] = useState<BankStatementRow[]>(bankStatementRows?.rows || []);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [rows, setRows] = useState<BankStatementRow[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -306,11 +307,14 @@ export function PortalBankStatementPage() {
   const wizardDraftsRef = useRef<Record<string, WizardDraft>>({});
   const wizardGridDraggingRef = useRef(false);
   const loadedProjectIdRef = useRef('');
+  const currentProjectIdRef = useRef('');
   const loadedPrivateDraftKeyRef = useRef('');
   const privateDraftLoadRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
 
   const projectName = myProject?.name || '내 사업';
   const projectId = activeProjectId || myProject?.id || '';
+  currentProjectIdRef.current = projectId;
+  const scopedBankStatementRows = bankStatementProjectId === projectId ? bankStatementRows : null;
   const bffActor = useMemo(() => ({
     uid: authUser?.uid || portalUser?.id || 'portal-user',
     email: authUser?.email || portalUser?.email || '',
@@ -345,6 +349,7 @@ export function PortalBankStatementPage() {
     if (privateDraftLoadRef.current?.key === key) return privateDraftLoadRef.current.promise;
     const promise = (async () => {
       const opened = await cashflowPrivateDraftClient.open(ownership, { baseSnapshot: {}, payload: {} });
+      if (currentProjectIdRef.current !== projectId) return;
       const bankStatement = opened.draft.payload.bankStatement;
       if (bankStatement && typeof bankStatement === 'object' && !Array.isArray(bankStatement)) {
         const snapshot = bankStatement as { columns?: unknown; rows?: unknown };
@@ -488,13 +493,13 @@ export function PortalBankStatementPage() {
   }, [projectId]);
 
   useEffect(() => {
-    if (dirty || !bankStatementRows) return;
-    const nextColumns = bankStatementRows.columns || [];
-    const nextRows = bankStatementRows.rows || [];
+    if (dirty || !scopedBankStatementRows) return;
+    const nextColumns = scopedBankStatementRows.columns || [];
+    const nextRows = scopedBankStatementRows.rows || [];
     setColumns(nextColumns);
     setRows(nextRows);
     setSelectedRowIds(new Set());
-  }, [bankStatementRows, dirty]);
+  }, [dirty, scopedBankStatementRows]);
 
   useEffect(() => {
     wizardDraftsRef.current = wizardDrafts;

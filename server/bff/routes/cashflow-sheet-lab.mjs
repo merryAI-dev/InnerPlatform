@@ -2996,13 +2996,33 @@ async function applyStagedCashflowSheetLab({
     ? stageRun.openingBalanceCells
     : [];
 
-  const mirror = await readCashflowSheetMirror(db, tenantId, projectId);
-  assertFreshCashflowSheetMirror(mirror);
-  if (
-    readOptionalText(mirror?.configRevision) !== readOptionalText(stageRun.configRevision)
-    || readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
-  ) {
-    throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
+  let mirror;
+  try {
+    mirror = await readCashflowSheetMirror(db, tenantId, projectId);
+    assertFreshCashflowSheetMirror(mirror);
+    if (
+      readOptionalText(mirror?.configRevision) !== readOptionalText(stageRun.configRevision)
+      || readOptionalText(mirror?.sourceRevision) !== readOptionalText(stageRun.sourceRevision)
+    ) {
+      throw createHttpError(409, '검토 후 시트 고정본이 변경되었습니다. 다시 검토해 주세요.', 'cashflow_sheet_mirror_revision_conflict');
+    }
+  } catch (error) {
+    const code = readOptionalText(error?.code);
+    if (
+      resuming
+      && Object.keys(stageRun.applyOperations || {}).length === 0
+      && ['cashflow_sheet_config_changed', 'cashflow_sheet_mirror_stale', 'cashflow_sheet_mirror_revision_conflict'].includes(code)
+    ) {
+      await restoreCashflowSheetApplyReady({
+        db,
+        runRef: db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`),
+        publicationRef: db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`),
+        idempotencyKey: stageRun.appliedIdempotencyKey,
+        applyRequestHash: stageRun.applyRequestHash,
+        error,
+      });
+    }
+    throw error;
   }
   if (!resuming) {
     const currentTargetSnapshot = await readCashflowWeeksSnapshot(db, tenantId, projectId);

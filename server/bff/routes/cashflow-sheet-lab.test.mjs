@@ -2727,6 +2727,59 @@ describe('cashflow sheet lab route', () => {
     expect(db.__getDocumentsByPrefix('orgs/tenant-a/cashflow_change_candidates/')).toHaveLength(0);
   });
 
+  it('releases a resume lock when its fixed mirror changed before any JVM operation', async () => {
+    const { app, db, stage } = await stageJanuaryApply({
+      applyCashflowSheetLab: vi.fn(async (input) => javaApplyResponse(input, 'sha256:test')),
+    }, 'resume-stale');
+    const run = db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`);
+    const applyRequestHash = createHash('sha256').update(JSON.stringify({
+      stagedRunId: stage.body.runId,
+      applyRiskCandidates: false,
+    })).digest('hex');
+    Object.assign(run, {
+      status: 'APPLYING',
+      appliedIdempotencyKey: 'interrupted-apply',
+      applyRequestHash,
+      applyOperations: {},
+    });
+    await db.doc('orgs/tenant-a/cashflow_sheet_publications/project-a').set({
+      status: 'APPLYING',
+      stagedRunId: stage.body.runId,
+    });
+    db.__getDocument('orgs/tenant-a/cashflow_sheet_mirrors/project-a').sourceRevision = `sha256:${'9'.repeat(64)}`;
+
+    const resume = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'resume-stale-retry' });
+    expect(resume.status).toBe(409);
+    expect(resume.body.code).toBe('cashflow_sheet_mirror_revision_conflict');
+
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`))
+      .toMatchObject({ status: 'READY', applyFailure: { code: 'cashflow_sheet_mirror_revision_conflict' } });
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toMatchObject({ status: 'READY' });
+    await request(app)
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/apply-status')
+      .expect(200)
+      .expect((response) => expect(response.body.status).toBe('IDLE'));
+
+    const uncertainRun = db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`);
+    Object.assign(uncertainRun, {
+      status: 'APPLYING',
+      appliedIdempotencyKey: 'uncertain-apply',
+      applyRequestHash,
+      applyOperations: { month: { status: 'UNCERTAIN' } },
+    });
+    await db.doc('orgs/tenant-a/cashflow_sheet_publications/project-a').set({
+      status: 'APPLYING',
+      stagedRunId: stage.body.runId,
+    });
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'uncertain-retry' })
+      .expect(409);
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('APPLYING');
+  });
+
   it('replays stage idempotently without duplicating candidates', async () => {
     const db = createDb({
       project: {
