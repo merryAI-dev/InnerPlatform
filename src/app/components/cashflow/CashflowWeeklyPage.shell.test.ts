@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { filterCashflowProjectsByDepartment } from './CashflowWeeklyPage';
+import {
+  filterCashflowProjectsByDepartment,
+  filterCashflowProjectsBySettlementStatus,
+  formatCashflowProjectOwner,
+} from './CashflowWeeklyPage';
 
 const source = readFileSync(resolve(import.meta.dirname, 'CashflowWeeklyPage.tsx'), 'utf8');
 
@@ -57,6 +61,50 @@ describe('CashflowWeeklyPage settlement status surface', () => {
     expect(filterCashflowProjectsByDepartment(projects, 'AXR팀').map(({ id }) => id)).toEqual(['axr']);
     expect(filterCashflowProjectsByDepartment(projects, 'CIC2').map(({ id }) => id)).toEqual(['cic']);
     expect(filterCashflowProjectsByDepartment(projects, '없는 조직')).toEqual([]);
+  });
+
+  it('resolves the executive owner from the roster before the saved manager without duplicates', () => {
+    expect(formatCashflowProjectOwner({ executiveApproverId: 'owner-1', executiveApproverName: '저장 책임자', managerName: '기존 담당자' }, [
+      { uid: 'owner-1', name: '원장 책임자', nameKo: '원장 책임자' },
+    ])).toBe('원장 책임자 · 기존 담당자');
+    expect(formatCashflowProjectOwner({ executiveApproverId: 'missing', executiveApproverName: '스냅샷 책임자', managerName: '스냅샷 책임자' }, [])).toBe('스냅샷 책임자');
+  });
+
+  it('ANDs department and month status filters while accepting any matching selected-month week', () => {
+    const statuses = {
+      match: { projectId: 'match', yearMonth: '2026-08', items: [
+        { period: 'MONTH' as const, status: 'COMPLETED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+        { period: 'WEEK_2' as const, status: 'PENDING_APPROVAL' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+      ] },
+      wrongMonth: { projectId: 'wrongMonth', yearMonth: '2026-08', items: [
+        { period: 'MONTH' as const, status: 'WAITING_FOR_UPDATE' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+        { period: 'WEEK_2' as const, status: 'PENDING_APPROVAL' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+      ] },
+      wrongWeek: { projectId: 'wrongWeek', yearMonth: '2026-08', items: [
+        { period: 'MONTH' as const, status: 'COMPLETED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+        { period: 'WEEK_1' as const, status: 'COMPLETED' as const, submittedAt: '', submittedBy: '', approvedAt: '', approvedBy: '', revision: 1 },
+      ] },
+    };
+    const projects = [
+      { id: 'match', department: 'AXR팀' },
+      { id: 'wrongMonth', department: 'AXR팀' },
+      { id: 'wrongWeek', department: 'AXR팀' },
+      { id: 'otherDepartment', department: 'CIC2' },
+      { id: 'partialError', department: 'AXR팀' },
+      { id: 'loadingOnly', department: 'AXR팀' },
+    ];
+
+    expect(filterCashflowProjectsBySettlementStatus(projects, 'AXR팀', statuses, { partialError: 'STATUS_UNAVAILABLE' }, false, [1, 2, 3, 4, 5], 'COMPLETED', 'PENDING_APPROVAL').map(({ id }) => id))
+      .toEqual(['match', 'partialError']);
+    expect(filterCashflowProjectsBySettlementStatus(projects, 'AXR팀', statuses, {}, true, [1, 2, 3, 4, 5], 'COMPLETED', 'PENDING_APPROVAL').map(({ id }) => id))
+      .toEqual(['match', 'partialError', 'loadingOnly']);
+    expect(filterCashflowProjectsBySettlementStatus([{ id: 'unset', department: 'AXR팀' }], 'AXR팀', {}, {}, false, [1], 'WAITING_FOR_UPDATE', 'WAITING_FOR_UPDATE').map(({ id }) => id))
+      .toEqual(['unset']);
+  });
+
+  it('keeps the status filter labels aligned with their settlement period', () => {
+    expect(source).toContain("period === 'MONTH' ? '결산 전' : '주정산 이전'");
+    expect(source).toContain('조직장 승인 필요');
   });
 
   it('routes detailed work to the project cashflow screen', () => {
