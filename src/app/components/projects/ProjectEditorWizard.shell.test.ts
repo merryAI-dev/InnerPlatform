@@ -9,6 +9,27 @@ const portalEditSource = readFileSync(resolve(import.meta.dirname, '../portal/Po
 const contractDocumentPolicySource = readFileSync(resolve(import.meta.dirname, '../../platform/project-contract-document-policy.ts'), 'utf8');
 
 describe('ProjectEditorWizard dropdown contract', () => {
+  it('lists the seven registration documents as one table and keeps every per-slot detail', () => {
+    expect(source).toContain('<th scope="col" className="w-10 px-3 py-2 font-medium">#</th>');
+    expect(source).toContain('첨부 상태');
+    // Stacked cards hid whether a slot was still missing; each row now states it.
+    expect(source).toContain("deferred ? '이후 제출(예외 처리)' : '미첨부'");
+    expect(source).toContain('const unmet = isLinkSlot ? false');
+    // Details that only existed inside the old card must survive in the row below.
+    expect(source).toContain('const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary)');
+    expect(source).toContain('분석 요약');
+    expect(source).toContain('기존 계약서는 관리자 화면에서만 제거할 수 있습니다.');
+  });
+
+  it('lets an upload in flight be cancelled and takes back one that already landed', () => {
+    expect(source).toContain('const cancelProjectDocumentUpload');
+    expect(source).toContain('업로드 취소');
+    expect(source).toContain('documentUploadRunRef');
+    // The request cannot be recalled, so a late success is undone rather than left behind.
+    expect(source).toContain('if (documentUploadRunRef.current[kind] !== runId) {');
+    expect(source).toContain('await onRemoveProjectDocument?.(kind);');
+  });
+
   it('requires documents 1-2, allows document 3 to be deferred, and keeps documents 4-7 optional', () => {
     expect(source).toContain("label: '계약서 *'");
     expect(source).toContain('모두 싸인으로 진행하셨나요? *');
@@ -374,7 +395,8 @@ describe('ProjectEditorWizard dropdown contract', () => {
     expect(source).toMatch(/number: 5,\s+label: '제안서\(구글드라이브 링크\)'/);
     expect(source).toMatch(/number: 6,\s+label: '발표자료\(구글드라이브 링크\)'/);
     expect(source).toContain('{usesRegistrationV2 ? (');
-    expect(source).toContain('slot.number === 1 || onProjectDocumentFileUpload');
+    // The seven slots render as one table instead of stacked cards.
+    expect(source).toContain('renderRegistrationDocumentTable');
     expect(source).toContain('{slot.description}');
     expect(source).toContain('isValidDriveUrl(draft.registrationConfirmations.proposalPptOriginal)');
     expect(source).toMatch(/number: 7,\s+label: 'RFP'/);
