@@ -10,8 +10,11 @@ describe('first-login member bootstrap', () => {
     // Google account names arrive in whatever form each person set them, so a sign-in
     // must not overwrite the ledger's 이름(별명) value. A first login still falls back to
     // the account name because the ledger has nothing yet.
-    expect(authStoreSource).toContain("name: existing?.name || firebaseUser.displayName || '사용자',");
+    // A sign-in writes no name at all; the field is only seeded when the ledger has none.
+    expect(authStoreSource).toContain("...(existing?.name ? {} : { name: firebaseUser.displayName || '사용자' }),");
+    expect(authStoreSource).not.toContain("name: existing?.name || firebaseUser.displayName");
     expect(authStoreSource).not.toContain("name: firebaseUser.displayName || existing?.name");
+    // First-login creation still needs a value, since the ledger has nothing yet.
     expect(authStoreSource).toContain("name: firebaseUser.displayName || '사용자',");
   });
 

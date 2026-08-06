@@ -358,12 +358,13 @@ async function upsertMemberFromFirebase(
     access.normalizedProjectId || existing?.projectId,
   ) || '';
 
-  const merged = omitUndefinedFields<MemberDoc>({
+  // A sign-in patches an existing document, so `name` may legitimately be absent here.
+  const merged = omitUndefinedFields<Partial<MemberDoc> & { uid: string }>({
     uid: firebaseUser.uid,
-    // The member ledger owns the display name. Google account names arrive in whatever
-    // form each person set them ('Jeongtae KIM (Able)'), and letting a sign-in overwrite
-    // the ledger undid the roster's 이름(별명) normalisation every time someone logged in.
-    name: existing?.name || firebaseUser.displayName || '사용자',
+    // Signing in does not write the display name at all. The ledger owns it, and Google
+    // account names arrive in whatever form each person set them ('Jeongtae KIM (Able)').
+    // The field is only seeded when the ledger has nothing yet.
+    ...(existing?.name ? {} : { name: firebaseUser.displayName || '사용자' }),
     email: normalizedEmail,
     role: resolveEffectiveAuthRole({
       memberRole: existing?.role,
@@ -387,7 +388,9 @@ async function upsertMemberFromFirebase(
   if (department) merged.department = department;
 
   await setDoc(memberRef, merged, { merge: true });
-  return merged;
+  // Only the patch is written. The caller still needs a whole record, so the ledger's
+  // existing name is filled back in here rather than being written to Firestore.
+  return { ...merged, name: merged.name ?? existing?.name ?? '' } as MemberDoc;
 }
 
 const _g = globalThis as any;
