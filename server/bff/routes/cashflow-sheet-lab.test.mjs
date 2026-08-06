@@ -4,7 +4,10 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { mountCashflowSheetLabRoutes } from './cashflow-sheet-lab.mjs';
+import {
+  assertJavaCashflowMatchesFirestore,
+  mountCashflowSheetLabRoutes,
+} from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
 import { stableStringify } from '../utils.mjs';
 
@@ -615,6 +618,37 @@ function createDisabledApp() {
 }
 
 describe('cashflow sheet lab route', () => {
+  it('fails closed when the JVM canonical snapshot differs from Firestore before or after apply', () => {
+    const firestoreSnapshot = {
+      weeks: [{
+        yearMonth: '2026-08',
+        weekNo: 2,
+        projection: { SALES_IN: 100 },
+        actual: { DIRECT_COST_OUT: 30 },
+      }],
+    };
+    const matchingJvmSnapshot = {
+      projectId: 'project-a',
+      projection: [{ yearMonth: '2026-08', weekNo: 2, cashflowLine: 'SALES_IN', amount: 100 }],
+      actual: [
+        { sheetKey: 'bank', yearMonth: '2026-08', weekNo: 2, cashflowLine: 'DIRECT_COST_OUT', amount: 10 },
+        { sheetKey: 'cashflow-sheet-lab', yearMonth: '2026-08', weekNo: 2, cashflowLine: 'DIRECT_COST_OUT', amount: 20 },
+      ],
+    };
+    expect(() => assertJavaCashflowMatchesFirestore(matchingJvmSnapshot, firestoreSnapshot)).not.toThrow();
+    expect(() => assertJavaCashflowMatchesFirestore({
+      ...matchingJvmSnapshot,
+      projection: [{ yearMonth: '2026-08', weekNo: 2, cashflowLine: 'SALES_IN', amount: 101 }],
+    }, firestoreSnapshot)).toThrow(expect.objectContaining({ code: 'jvm_cashflow_canonical_mismatch' }));
+    expect(() => assertJavaCashflowMatchesFirestore({
+      projectId: 'project-a',
+      projection: [{ yearMonth: '2026-08', weekNo: 2, cashflowLine: 'UNKNOWN_LINE', amount: 1 }],
+      actual: [],
+    }, {
+      weeks: [{ yearMonth: '2026-08', weekNo: 2, projection: { UNKNOWN_LINE: 1 }, actual: {} }],
+    })).toThrow(expect.objectContaining({ code: 'jvm_cashflow_snapshot_invalid' }));
+  });
+
   it('returns 404 when the deployment surface disables sheet lab', async () => {
     await request(createDisabledApp())
       .get('/api/v1/projects/project-a/cashflow-sheet-lab/config')
@@ -622,6 +656,165 @@ describe('cashflow sheet lab route', () => {
       .expect((response) => {
         expect(response.body.code).toBe('cashflow_sheet_lab_not_available');
       });
+  });
+
+  it('returns the Google Sheet versus JVM canonical change summary without applying', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        cashflowSheetLab: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetBatch: vi.fn(),
+      applyCashflowSheetLab: vi.fn(),
+      applyCashflowSheetAnnualTotal: vi.fn(),
+      getCashflowSheetOperationStatus: vi.fn(),
+      getCashflowSnapshot: vi.fn(async () => ({
+        projectId: 'project-a',
+        projection: [],
+        actual: [],
+      })),
+    };
+    const app = createApp({
+      db,
+      routeOptions: { javaWeeklyClient },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toEqual({
+      status: 'CHANGED',
+      pendingChangeCount: 1920,
+      projectionChangeCount: 960,
+      actualChangeCount: 960,
+      sourceRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      targetRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      checkedAt: expect.stringMatching(/^2026-|^20\d{2}-/),
+    });
+    expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.getCashflowSheetOperationStatus).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.getCashflowSnapshot).toHaveBeenCalledOnce();
+    expect(javaWeeklyClient.getCashflowSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+    }));
+  });
+
+  it('returns UNAVAILABLE instead of diffing against stale Firestore data when JVM canonical differs', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        cashflowSheetLab: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      weeks: [{
+        id: 'project-a-2026-01-w1',
+        projectId: 'project-a',
+        yearMonth: '2026-01',
+        weekNo: 1,
+        projection: { SALES_IN: 1 },
+        actual: {},
+      }],
+    });
+    const javaWeeklyClient = {
+      applyCashflowSheetBatch: vi.fn(),
+      applyCashflowSheetLab: vi.fn(),
+      applyCashflowSheetAnnualTotal: vi.fn(),
+      getCashflowSheetOperationStatus: vi.fn(),
+      getCashflowSnapshot: vi.fn(async () => ({ projectId: 'project-a', projection: [], actual: [] })),
+    };
+
+    const response = await request(createApp({ db, routeOptions: { javaWeeklyClient } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toEqual({
+      status: 'UNAVAILABLE',
+      pendingChangeCount: 0,
+      projectionChangeCount: 0,
+      actualChangeCount: 0,
+      sourceRevision: '',
+      targetRevision: '',
+      checkedAt: expect.stringMatching(/^20\d{2}-/),
+    });
+    expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).not.toHaveBeenCalled();
+  });
+
+  it('returns SYNCED with zero pending changes when the fresh sheet already matches JVM canonical', async () => {
+    const yearMonths = Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`);
+    const weeks = matchingCanonicalWeeks(1920, yearMonths);
+    const javaWeeklyClient = {
+      applyCashflowSheetBatch: vi.fn(),
+      applyCashflowSheetLab: vi.fn(),
+      applyCashflowSheetAnnualTotal: vi.fn(),
+      getCashflowSheetOperationStatus: vi.fn(),
+      getCashflowSnapshot: vi.fn(async () => ({
+        projectId: 'project-a',
+        projection: weeks.flatMap((week) => Object.entries(week.projection || {}).map(([cashflowLine, amount]) => ({
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          cashflowLine,
+          amount,
+        }))),
+        actual: weeks.flatMap((week) => Object.entries(week.actual || {}).map(([cashflowLine, amount]) => ({
+          sheetKey: 'cashflow-sheet-lab',
+          yearMonth: week.yearMonth,
+          weekNo: week.weekNo,
+          cashflowLine,
+          amount,
+        }))),
+      })),
+    };
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        cashflowSheetLab: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      weeks,
+    });
+
+    const response = await request(createApp({ db, routeOptions: { javaWeeklyClient } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toEqual({
+      status: 'SYNCED',
+      pendingChangeCount: 0,
+      projectionChangeCount: 0,
+      actualChangeCount: 0,
+      sourceRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      targetRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      checkedAt: expect.stringMatching(/^20\d{2}-/),
+    });
+    expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).not.toHaveBeenCalled();
   });
 
   it('reads Google Sheets only on explicit mirror refresh and pins the result', async () => {

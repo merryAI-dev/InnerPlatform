@@ -636,6 +636,16 @@ export interface CashflowSheetLabShareAccountResult {
   };
 }
 
+export interface CashflowSheetChangeCheckResult {
+  status: 'CHECKING' | 'SYNCED' | 'CHANGED' | 'UNAVAILABLE';
+  pendingChangeCount: number;
+  projectionChangeCount: number;
+  actualChangeCount: number;
+  sourceRevision: string;
+  targetRevision: string;
+  checkedAt: string;
+}
+
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;
 
 let sameOriginBffClient: PlatformApiClient | undefined;
@@ -896,6 +906,27 @@ export async function getCashflowSheetLabShareAccountViaBff(params: {
       tenantId: params.tenantId,
       actor: toRequestActor(params.actor),
       timeoutMs: 15000,
+      retries: 0,
+    },
+  );
+  return response.data;
+}
+
+export async function checkCashflowSheetChangesViaBff(params: {
+  tenantId: string;
+  actor: ActorLike;
+  projectId: string;
+  sourceYear: number;
+  client?: PlatformApiClientLike;
+}): Promise<CashflowSheetChangeCheckResult> {
+  const apiClient = params.client || createSameOriginBffClient();
+  const response = await apiClient.post<CashflowSheetChangeCheckResult>(
+    `/api/v1/projects/${encodeURIComponent(params.projectId)}/cashflow-sheet-lab/changes/check`,
+    {
+      tenantId: params.tenantId,
+      actor: toRequestActor(params.actor),
+      body: { sourceYear: params.sourceYear },
+      timeoutMs: 30000,
       retries: 0,
     },
   );

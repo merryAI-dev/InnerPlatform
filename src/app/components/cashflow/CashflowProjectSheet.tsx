@@ -60,6 +60,7 @@ import type { CashflowOpsTone } from './cashflow-ops-summary';
 import {
   applyCashflowSheetLabViaBff,
   cashflowFormulaMismatchesFromError,
+  checkCashflowSheetChangesViaBff,
   getCashflowSheetLabApplyStatusViaBff,
   getCashflowSheetLabMirrorViaBff,
   getCashflowSheetLabShareAccountViaBff,
@@ -67,6 +68,7 @@ import {
   refreshCashflowSheetLabMirrorViaBff,
   stageCashflowSheetLabViaBff,
   type CashflowSheetLabMirrorResult,
+  type CashflowSheetChangeCheckResult,
   type CashflowSheetLabShareAccountResult,
   type CashflowSheetLabStageResult,
   type CashflowFormulaMismatch,
@@ -378,6 +380,10 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
+  const [cashflowSheetChangeCheck, setCashflowSheetChangeCheck] = useState<{
+    status: CashflowSheetChangeCheckResult['status'];
+    pendingChangeCount: number | null;
+  } | null>(null);
   const [cashflowSystemAccountEmail, setCashflowSystemAccountEmail] = useState('');
   const [cashflowSystemAccountError, setCashflowSystemAccountError] = useState(false);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
@@ -564,6 +570,60 @@ export function CashflowProjectSheet({
       cancelled = true;
     };
   }, [orgId, projectId, resolveBffActor, selectedYear, user?.uid]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCashflowSheetChangeCheck(null);
+    if (!cashflowSheetConfigLoaded || !cashflowSheetConfig?.value || !projectId || !orgId || !user?.uid) {
+      return () => { cancelled = true; };
+    }
+
+    setCashflowSheetChangeCheck({ status: 'CHECKING', pendingChangeCount: null });
+    const checkSheetChanges = async (): Promise<void> => {
+      try {
+        let actor = await resolveBffActor();
+        if (!actor?.idToken) throw new Error('Cashflow sheet change check requires authentication.');
+        let result: CashflowSheetChangeCheckResult;
+        try {
+          result = await checkCashflowSheetChangesViaBff({
+            tenantId: orgId,
+            actor,
+            projectId,
+            sourceYear: cashflowSheetConfig.sourceYear || selectedYear,
+          });
+        } catch (error) {
+          if (!isBffAuthRejection(error)) throw error;
+          actor = await resolveBffActor({ forceRefresh: true });
+          if (!actor?.idToken) throw error;
+          result = await checkCashflowSheetChangesViaBff({
+            tenantId: orgId,
+            actor,
+            projectId,
+            sourceYear: cashflowSheetConfig.sourceYear || selectedYear,
+          });
+        }
+        if (!cancelled) {
+          setCashflowSheetChangeCheck({
+            status: result.status,
+            pendingChangeCount: result.status === 'CHANGED' ? result.pendingChangeCount : null,
+          });
+        }
+      } catch {
+        if (!cancelled) setCashflowSheetChangeCheck({ status: 'UNAVAILABLE', pendingChangeCount: null });
+      }
+    };
+    void checkSheetChanges();
+    return () => { cancelled = true; };
+  }, [
+    cashflowSheetConfig?.sourceYear,
+    cashflowSheetConfig?.value,
+    cashflowSheetConfigLoaded,
+    orgId,
+    projectId,
+    resolveBffActor,
+    selectedYear,
+    user?.uid,
+  ]);
 
   useEffect(() => {
     if (!cashflowSheetConfigLoaded || cashflowSheetConfig || !projectId || typeof window === 'undefined') return;
@@ -1789,6 +1849,22 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
+  const sheetChangeBadgeLabel = cashflowSheetChangeCheck?.status === 'CHECKING'
+    ? '시트 변경 확인 중'
+    : cashflowSheetChangeCheck?.status === 'SYNCED'
+      ? '시트와 동기화됨'
+      : cashflowSheetChangeCheck?.status === 'CHANGED'
+        ? `이전 대비 변동 사항 ${(cashflowSheetChangeCheck.pendingChangeCount || 0).toLocaleString()}건 · 새로 반영이 필요합니다`
+        : cashflowSheetChangeCheck?.status === 'UNAVAILABLE'
+          ? '시트 변경 확인 불가'
+          : '';
+  const sheetChangeBadgeClass = cashflowSheetChangeCheck?.status === 'SYNCED'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : cashflowSheetChangeCheck?.status === 'CHANGED'
+      ? 'border-yellow-300 bg-yellow-50 text-yellow-900'
+      : cashflowSheetChangeCheck?.status === 'UNAVAILABLE'
+        ? 'border-red-200 bg-red-50 text-red-800'
+        : 'border-slate-200 bg-slate-50 text-slate-600';
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
   const sheetMirrorCapturedAt = formatSheetAppliedAt(cashflowSheetMirror?.capturedAt)
     || cashflowSheetMirror?.capturedAt
@@ -2609,7 +2685,7 @@ export function CashflowProjectSheet({
       <Card className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <CardContent className="space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <ClipboardList className="h-4 w-4 shrink-0 text-primary" />
               <div className="truncate text-[16px] font-bold tracking-[-0.01em] text-card-foreground">{dashboardTitle}</div>
               <Button
@@ -2623,6 +2699,27 @@ export function CashflowProjectSheet({
               >
                 {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
               </Button>
+              {cashflowSheetConfig && sheetChangeBadgeLabel ? (
+                <Badge
+                  role="status"
+                  className={`h-7 rounded-md border px-2.5 text-[12px] font-semibold shadow-none ${sheetChangeBadgeClass}`}
+                >
+                  {cashflowSheetChangeCheck?.status === 'CHECKING' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  {sheetChangeBadgeLabel}
+                </Badge>
+              ) : null}
+              {cashflowSheetConfig ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 shrink-0 px-2 text-[12px] font-semibold text-[#17324D]"
+                  onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
+                >
+                  <FileSpreadsheet className="mr-1 h-3 w-3" />
+                  시트 이동
+                </Button>
+              ) : null}
               {cashflowSheetConfig ? (
                 <Button
                   type="button"

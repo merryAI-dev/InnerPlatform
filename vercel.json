@@ -10,7 +10,7 @@
   },
   "functions": {
     "api/bff.js": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -25,6 +25,10 @@
     {
       "path": "/api/internal/workers/payroll/run",
       "schedule": "45 2 * * *"
+    },
+    {
+      "path": "/api/internal/workers/cashflow-sheet-sync/run",
+      "schedule": "30 0 * * 4"
     }
   ],
   "redirects": [
@@ -124,6 +128,10 @@
     {
       "source": "/api/internal/workers/payroll/run",
       "destination": "/api/bff?__path=/api/internal/workers/payroll/run"
+    },
+    {
+      "source": "/api/internal/workers/cashflow-sheet-sync/run",
+      "destination": "/api/bff?__path=/api/internal/workers/cashflow-sheet-sync/run"
     },
     {
       "source": "/api/internal/workers/client-errors/run",
