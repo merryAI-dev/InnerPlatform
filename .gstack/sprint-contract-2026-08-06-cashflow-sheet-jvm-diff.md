@@ -4,7 +4,7 @@
 **상태:** APPROVED
 
 ## Objective
-연결된 Google Sheet의 canonical 현금흐름 셀과 JVM `cashflow_weeks`를 동일한 기준으로 비교한다. 미반영 변경은 프로젝트 화면에 건수로 표시하고, 매주 목요일 09:30 Asia/Seoul에 연결된 프로젝트를 자동 동기화한다. 반영 성공은 JVM post-write read가 고정 snapshot과 일치할 때만 확정한다.
+연결된 Google Sheet의 canonical 현금흐름 셀과 JVM `cashflow_weeks`를 동일한 기준으로 비교한다. 미반영 변경은 프로젝트 화면에 건수로 표시하고, 매주 목요일 18:00 Asia/Seoul에 연결된 프로젝트를 자동 동기화한다. 반영 성공은 JVM post-write read가 고정 snapshot과 일치할 때만 확정한다.
 
 ## 불변조건
 - `SYNCED`는 Sheet snapshot과 JVM canonical cells가 동일할 때만 반환한다.
@@ -24,7 +24,7 @@
 키는 `sourceYear + yearMonth + weekNo + mode + cashflowLine`이다. `cellState` 또는 `amount`가 다르면 1건이다. 서식, 메모, 동일 effective value의 수식 변경, 합계/잔액 행, 연결 범위 밖 셀은 제외한다.
 
 ## 목요일 자동 동기화
-- Vercel cron: `30 0 * * 4` (목요일 09:30 Asia/Seoul)
+- Vercel cron: `0 9 * * 4` (목요일 18:00 Asia/Seoul)
 - 대상: 시트 연결 설정이 있는 프로젝트
 - 프로젝트별: snapshot 보존 -> diff -> 변경이 있을 때만 기존 apply -> JVM read-back
 - no-op 프로젝트는 쓰지 않는다.
@@ -57,7 +57,7 @@
 - apply 후 셀 1개라도 다르면 성공하지 않는다.
 - stale source revision, 부분 저장, read-back 실패는 실패한다.
 - 같은 idempotency key는 중복 쓰기 없이 replay된다.
-- cron은 목요일 09:30 KST에만 실행 대상을 만든다.
+- cron은 목요일 18:00 KST에만 실행 대상을 만든다.
 - 연결 없는 프로젝트, no-op 프로젝트는 apply하지 않는다.
 - 프로젝트 A 실패 후 프로젝트 B는 계속 처리한다.
 - cron 인증 실패는 401/403이며 어떤 프로젝트도 변경하지 않는다.
