@@ -46,11 +46,10 @@ describe('CashflowSheetLabPage shell', () => {
   it('drives every request from one project resolved by route and session together', () => {
     expect(pageSource).toContain('resolvePortalProjectContextSync');
     expect(pageSource).toContain('sessionProjectId: portalProjectId');
-    expect(pageSource).toContain('previousSessionProjectId: syncedSessionProjectIdRef.current');
     expect(pageSource).toContain('const projectId = projectContextSync.projectId;');
     expect(pageSource).toContain("projectContextAction === 'canonicalize-path'");
-    expect(pageSource).toContain("projectContextAction !== 'adopt-route'");
-    expect(pageSource).toContain('setSessionActiveProject(projectId)');
+    expect(pageSource).not.toContain('adopt-route');
+    expect(pageSource).not.toContain('setSessionActiveProject(projectId)');
     // route projectId만 신뢰하던 로컬 상태는 상단 프로젝트 전환을 따라가지 못했다.
     expect(pageSource).not.toContain('projectIdInput');
     expect(pageSource).not.toContain('setProjectIdInput');
@@ -185,7 +184,8 @@ describe('CashflowSheetLabPage shell', () => {
     expect(pageSource).not.toContain('시트 고정본 ·');
     expect(pageSource).not.toContain('검토 범위');
     expect(pageSource).toContain('시트 값으로 덮어쓰기');
-    expect(pageSource).toContain('!open && !applyResumeRequired');
+    expect(pageSource).toContain('if (!open) closeClosedMonthDialog()');
+    expect(pageSource).not.toContain('반영 상태 확인 및 이어서 완료');
     expect(pageSource).toContain('!applyResumeRequired && (');
     expect(pageSource).not.toContain('변경 내용 검토');
     expect(pageSource).not.toContain('전체 MYSCube에 저장할까요?');

@@ -152,7 +152,7 @@ export function resolvePortalProjectResourcePath(requestedPath: string, projectI
   return normalizedPath;
 }
 
-export type PortalProjectContextAction = 'idle' | 'adopt-route' | 'canonicalize-path';
+export type PortalProjectContextAction = 'idle' | 'canonicalize-path';
 
 export interface PortalProjectContextSync {
   projectId: string;
@@ -162,8 +162,7 @@ export interface PortalProjectContextSync {
 
 /**
  * 프로젝트 단위 화면에서 URL route projectId와 세션 선택 프로젝트가 어긋났을 때
- * 어느 쪽을 기준으로 맞출지 결정한다. 상단 선택기를 바꾼 경우에는 URL을,
- * 딥링크·뒤로가기로 들어온 경우에는 세션 선택을 다시 맞춘다.
+ * 상단 선택 프로젝트를 기준으로 URL을 맞춘다.
  */
 export function resolvePortalProjectContextSync(input: {
   routeProjectId?: string | null;
@@ -174,32 +173,13 @@ export function resolvePortalProjectContextSync(input: {
 }): PortalProjectContextSync {
   const routeProjectId = normalizedId(input.routeProjectId);
   const sessionProjectId = normalizedId(input.sessionProjectId);
-  const previousSessionProjectId = normalizedId(input.previousSessionProjectId);
-  const fallbackProjectId = normalizedId(input.fallbackProjectId);
-
-  if (!routeProjectId) {
-    const targetProjectId = sessionProjectId || fallbackProjectId;
-    if (!targetProjectId) return { projectId: '', action: 'idle', path: '' };
-    return {
-      projectId: targetProjectId,
-      action: 'canonicalize-path',
-      path: resolvePortalProjectResourcePath(input.currentPath, targetProjectId),
-    };
-  }
-
-  if (!sessionProjectId || routeProjectId === sessionProjectId) {
-    return { projectId: routeProjectId, action: 'idle', path: '' };
-  }
-
-  if (previousSessionProjectId && previousSessionProjectId !== sessionProjectId) {
-    return {
-      projectId: sessionProjectId,
-      action: 'canonicalize-path',
-      path: resolvePortalProjectResourcePath(input.currentPath, sessionProjectId),
-    };
-  }
-
-  return { projectId: routeProjectId, action: 'adopt-route', path: '' };
+  if (!sessionProjectId) return { projectId: '', action: 'idle', path: '' };
+  if (routeProjectId === sessionProjectId) return { projectId: sessionProjectId, action: 'idle', path: '' };
+  return {
+    projectId: sessionProjectId,
+    action: 'canonicalize-path',
+    path: resolvePortalProjectResourcePath(input.currentPath, sessionProjectId),
+  };
 }
 
 export async function runPortalProjectSwitch(input: {
