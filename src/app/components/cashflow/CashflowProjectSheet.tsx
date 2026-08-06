@@ -1863,13 +1863,14 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
-  const availableSheetComparisons: Array<[string, CashflowSheetChangeCheckResult['comparisons']['sheetToJvm']]> = cashflowSheetChangeCheck
+  const sheetComparisonEntries: Array<[string, CashflowSheetChangeCheckResult['comparisons']['sheetToJvm']]> = cashflowSheetChangeCheck
     ? [
       ['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm],
       ['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore],
       ['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore],
-    ].filter(([, comparison]) => comparison.status === 'AVAILABLE')
+    ]
     : [];
+  const availableSheetComparisons = sheetComparisonEntries.filter(([, comparison]) => comparison.status === 'AVAILABLE');
   const availableSheetComparisonLabel = availableSheetComparisons
     .map(([label, comparison]) => `${label} ${(comparison.changeCount ?? 0).toLocaleString()}건`)
     .join(' · ');
