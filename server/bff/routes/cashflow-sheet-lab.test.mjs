@@ -1196,6 +1196,45 @@ describe('cashflow sheet lab route', () => {
     expect(performanceEvents.every((event) => event.requestId === 'req-1')).toBe(true);
   });
 
+  it('selects the linked tab before the single sheet values fetch', async () => {
+    const performanceEvents = [];
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: { value: 'spreadsheet-a' },
+      },
+    });
+    const availableSheets = [
+      { sheetId: 1, title: '요약', index: 0 },
+      { sheetId: 2, title: 'cashflow(사용내역 연동)', index: 1 },
+    ];
+    const previewSpreadsheet = vi.fn(async ({ selectSheet }) => ({
+      spreadsheetId: 'spreadsheet-a',
+      spreadsheetTitle: 'Cashflow workbook',
+      selectedSheetName: selectSheet(availableSheets).title,
+      availableSheets,
+      matrix: buildMatrix(),
+    }));
+    const app = createApp({
+      db,
+      googleSheetsService: { previewSpreadsheet },
+      routeOptions: { performanceLogger: (event) => performanceEvents.push(event) },
+    });
+
+    const refreshed = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: 'mirror-single-fetch-001' })
+      .expect(200);
+
+    expect(refreshed.body).toMatchObject({
+      status: 'FRESH',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+    });
+    expect(previewSpreadsheet).toHaveBeenCalledTimes(1);
+    expect(performanceEvents.filter((event) => event.phase === 'sheet_parse_validate')).toHaveLength(1);
+    expect(performanceEvents.filter((event) => event.phase === 'mirror_publish')).toHaveLength(1);
+  });
+
   it('stores weekly values and annual totals without requiring a missing future year', async () => {
     const db = createDb({
       project: {

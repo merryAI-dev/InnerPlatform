@@ -3978,24 +3978,15 @@ function createSheetPreviewLoader({ googleSheetsService, cacheTtlMs = DEFAULT_SH
       return { ...value, cacheStatus: 'in_flight_join' };
     }
 
-    async function requestPreview(sheetName) {
-      return googleSheetsService.previewSpreadsheet({
-        value: params.value,
-        sheetName,
-        rangeA1: CASHFLOW_SHEET_LAB_READ_RANGE,
-      });
-    }
-
     const request = (async () => {
       const authMode = 'service_account';
-      const first = await requestPreview(params.sheetName);
-      if (params.sheetName || isCashflowUsageLinkedSheetName(first.selectedSheetName)) {
-        return { ...first, authMode };
-      }
-      const linkedSheet = findCashflowUsageLinkedSheet(first.availableSheets);
-      if (!linkedSheet) return { ...first, authMode };
-      const linkedPreview = await requestPreview(linkedSheet.title);
-      return { ...linkedPreview, authMode };
+      const preview = await googleSheetsService.previewSpreadsheet({
+        value: params.value,
+        sheetName: params.sheetName,
+        rangeA1: CASHFLOW_SHEET_LAB_READ_RANGE,
+        ...(!params.sheetName ? { selectSheet: findCashflowUsageLinkedSheet } : {}),
+      });
+      return { ...preview, authMode };
     })();
     inFlight.set(key, request);
     try {

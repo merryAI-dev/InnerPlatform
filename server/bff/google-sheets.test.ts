@@ -60,6 +60,35 @@ describe('google-sheets helpers', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('selects a preferred sheet before fetching values', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        properties: { title: '캐시플로 시트' },
+        sheets: [
+          { properties: { sheetId: 0, title: '요약', index: 0 } },
+          { properties: { sheetId: 1, title: 'cashflow(사용내역 연동)', index: 1 } },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ values: [['연동값']] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+    const service = createGoogleSheetsService({
+      fetchImpl,
+      authHeadersFactory: async () => ({ authorization: 'Bearer test-token' }),
+    });
+
+    const preview = await service.previewSpreadsheet({
+      value: 'https://docs.google.com/spreadsheets/d/1abcDEFghiJKlmnOPQ_rst-123/edit#gid=0',
+      selectSheet: (sheets) => sheets.find((sheet) => sheet.title.includes('사용내역 연동')),
+    });
+
+    expect(preview.selectedSheetName).toBe('cashflow(사용내역 연동)');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[1]?.[0]).toContain(encodeURIComponent("'cashflow(사용내역 연동)'"));
+  });
+
   it('prefers caller google access token over service account auth', async () => {
     const fetchImpl = vi
       .fn()
