@@ -295,6 +295,23 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('setInterval');
   });
 
+  it('checks linked sheet changes on entry without applying them', () => {
+    expect(source).toContain('checkCashflowSheetChangesViaBff');
+    expect(source).toContain("setCashflowSheetChangeCheck({ status: 'CHECKING', pendingChangeCount: null })");
+    expect(source).toContain("result.status === 'CHANGED' ? result.pendingChangeCount : null");
+    expect(source).toContain('이전 대비 변동 사항 ${(cashflowSheetChangeCheck.pendingChangeCount || 0).toLocaleString()}건 · 새로 반영이 필요합니다');
+    expect(source).toContain('시트와 동기화됨');
+    expect(source).toContain('시트 변경 확인 불가');
+    expect(source).toContain('시트 이동');
+
+    const checkFlow = source.slice(
+      source.indexOf('const checkSheetChanges = async'),
+      source.indexOf('void checkSheetChanges();'),
+    );
+    expect(checkFlow).not.toContain('applyCashflowSheetLabViaBff');
+    expect(checkFlow).not.toContain('refreshCashflowSheetLabMirrorViaBff');
+  });
+
   it('keeps the sheet refresh loading state open until the successful response is processed', () => {
     expect(source).toContain('CashflowSheetSyncOverlay');
     expect(source).toContain('{sheetRefreshLoading ? <CashflowSheetSyncOverlay operation="refresh" /> : null}');

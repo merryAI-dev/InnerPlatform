@@ -29,6 +29,7 @@ import {
 import {
   runPayrollWorker,
 } from './payroll-worker.mjs';
+import { runCashflowSheetSyncWorker } from './cashflow-sheet-sync-worker.mjs';
 import {
   resolveAffectedViews,
   resolveRelationRules,
@@ -125,6 +126,16 @@ import {
 } from './routes/cashflow-edit-drafts.mjs';
 import { createHttpError, resolveErrorResponse } from './bff-utils.mjs';
 
+function formatSeoulDate(value) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
 
 function parseLimit(raw, fallback = 50, max = 200) {
   const n = Number.parseInt(String(raw ?? ''), 10);
@@ -715,6 +726,7 @@ export function createBffApp(options = {}) {
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
+  let cashflowSheetSyncProject = null;
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
@@ -1012,6 +1024,37 @@ export function createBffApp(options = {}) {
   });
   app.get('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
   app.post('/api/internal/workers/payroll/run', runPayrollWorkerRoute);
+
+  const executeCashflowSheetSyncWorker = options.cashflowSheetSyncWorker
+    || ((workerOptions) => runCashflowSheetSyncWorker(db, workerOptions));
+  const runCashflowSheetSyncWorkerRoute = asyncHandler(async (req, res) => {
+    assertInternalWorkerAuthorized(req);
+    const tenantId = readOptionalText(req.body?.tenantId ?? req.query?.tenantId) || 'mysc';
+    const runId = `cashflow-sheet-sync:${formatSeoulDate(now())}`;
+    const result = await executeCashflowSheetSyncWorker({
+      tenantId,
+      concurrency: 4,
+      runId,
+      syncProject: ({ tenantId: projectTenantId, projectId: cashflowProjectId, runId: projectRunId }) => {
+        if (typeof cashflowSheetSyncProject !== 'function') {
+          throw createHttpError(503, 'Cashflow sheet sync is not configured.', 'cashflow_sheet_sync_unconfigured');
+        }
+        return cashflowSheetSyncProject({
+          tenantId: projectTenantId,
+          projectId: cashflowProjectId,
+          runId: projectRunId,
+          apply: true,
+        });
+      },
+    });
+    res.status(200).json({
+      worker: 'cashflow_sheet_sync',
+      projectId,
+      ...result,
+    });
+  });
+  app.get('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
+  app.post('/api/internal/workers/cashflow-sheet-sync/run', runCashflowSheetSyncWorkerRoute);
 
   const runClientErrorSlackWorkerRoute = asyncHandler(async (req, res) => {
     assertInternalWorkerAuthorized(req);
@@ -1504,12 +1547,13 @@ export function createBffApp(options = {}) {
     now,
     legacyCashflowWritesEnabled: options.legacyCashflowWritesEnabled,
   });
-  mountCashflowSheetLabRoutes(app, {
+  const cashflowSheetLabRoutes = mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService,
-    editLeasesEnabled,
-    editLeaseService,
+    env,
+    javaWeeklyClient: options.javaWeeklyClient,
   });
+  cashflowSheetSyncProject = cashflowSheetLabRoutes?.syncProject || null;
   mountCashflowLaborRiskRoutes(app, {
     db,
     now,

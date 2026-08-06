@@ -923,6 +923,84 @@ async function readCashflowWeeksSnapshot(db, tenantId, projectId) {
   };
 }
 
+function canonicalCellEntriesFromWeeks(weeks = []) {
+  const entries = [];
+  for (const week of weeks) {
+    const yearMonth = readOptionalText(week?.yearMonth);
+    const weekNo = Number(week?.weekNo);
+    for (const mode of ['projection', 'actual']) {
+      const amounts = week?.[mode] && typeof week[mode] === 'object' ? week[mode] : {};
+      for (const [cashflowLine, rawAmount] of Object.entries(amounts)) {
+        const amount = Number(rawAmount);
+        if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+          || !Number.isSafeInteger(weekNo) || weekNo < 1 || weekNo > 5
+          || !CASHFLOW_LINE_ORDER.has(readOptionalText(cashflowLine)) || !Number.isSafeInteger(amount)) {
+          throw createHttpError(502, 'Canonical cashflow snapshot is invalid.', 'cashflow_canonical_snapshot_invalid');
+        }
+        entries.push({ yearMonth, weekNo, mode, cashflowLine, state: amount === 0 ? 'ZERO' : 'VALUE', amount });
+      }
+    }
+  }
+  return entries.sort((left, right) => (
+    left.yearMonth.localeCompare(right.yearMonth)
+    || left.weekNo - right.weekNo
+    || left.mode.localeCompare(right.mode)
+    || left.cashflowLine.localeCompare(right.cashflowLine)
+  ));
+}
+
+function canonicalWeeksFromJavaSnapshot(snapshot = {}) {
+  if (Array.isArray(snapshot?.readModel?.months)) {
+    return snapshot.readModel.months.flatMap((month) => ['projection', 'actual'].flatMap((mode) => (
+      Array.isArray(month?.[mode]?.weeks) ? month[mode].weeks : []
+    ).map((week) => ({
+      yearMonth: month.yearMonth,
+      weekNo: week.weekNo,
+      [mode]: week.amounts || {},
+    }))));
+  }
+  if (!Array.isArray(snapshot?.projection) || !Array.isArray(snapshot?.actual)) {
+    throw createHttpError(502, 'JVM cashflow snapshot is invalid.', 'jvm_cashflow_snapshot_invalid');
+  }
+  const byWeek = new Map();
+  const addLine = (mode, line) => {
+    const yearMonth = readOptionalText(line?.yearMonth);
+    const weekNo = Number(line?.weekNo);
+    const cashflowLine = readOptionalText(line?.cashflowLine);
+    const amount = Number(line?.amount);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(yearMonth)
+      || !Number.isSafeInteger(weekNo) || weekNo < 1 || weekNo > 5
+      || !CASHFLOW_LINE_ORDER.has(cashflowLine) || !Number.isSafeInteger(amount)) {
+      throw createHttpError(502, 'JVM cashflow snapshot is invalid.', 'jvm_cashflow_snapshot_invalid');
+    }
+    const key = `${yearMonth}:${weekNo}`;
+    const week = byWeek.get(key) || { yearMonth, weekNo, projection: {}, actual: {} };
+    if (mode === 'actual') {
+      week.actual[cashflowLine] = (week.actual[cashflowLine] || 0) + amount;
+    } else if (Object.hasOwn(week.projection, cashflowLine)) {
+      throw createHttpError(502, 'JVM projection snapshot contains duplicate cells.', 'jvm_cashflow_snapshot_invalid');
+    } else {
+      week.projection[cashflowLine] = amount;
+    }
+    byWeek.set(key, week);
+  };
+  snapshot.projection.forEach((line) => addLine('projection', line));
+  snapshot.actual.forEach((line) => addLine('actual', line));
+  return [...byWeek.values()];
+}
+
+export function assertJavaCashflowMatchesFirestore(javaSnapshot, firestoreSnapshot) {
+  const javaCells = canonicalCellEntriesFromWeeks(canonicalWeeksFromJavaSnapshot(javaSnapshot));
+  const firestoreCells = canonicalCellEntriesFromWeeks(firestoreSnapshot?.weeks || []);
+  if (stableHash(javaCells) !== stableHash(firestoreCells)) {
+    throw createHttpError(
+      503,
+      'JVM and Firestore cashflow snapshots do not match.',
+      'jvm_cashflow_canonical_mismatch',
+    );
+  }
+}
+
 async function readCashflowSheetMirror(db, tenantId, projectId) {
   if (!db) {
     throw createHttpError(503, '불러온 시트 값을 읽을 수 없습니다. 담당자에게 문의해 주세요.', 'firestore_unconfigured');
@@ -3782,8 +3860,7 @@ export function mountCashflowSheetLabRoutes(app, {
     }));
   }));
 
-  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {
-    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+  const executeCashflowSheetMirrorRefresh = async (req) => {
     const trace = createCashflowPerformanceTrace({
       requestId: req.context?.requestId || req.requestId,
       operation: 'cashflow.sheet_mirror.refresh',
@@ -3840,8 +3917,7 @@ export function mountCashflowSheetLabRoutes(app, {
       }),
     );
     if (refreshRun.replay) {
-      res.status(200).json(refreshRun.replay);
-      return;
+      return refreshRun.replay;
     }
     if (readOptionalText(previousMirror?.lastRefreshIdempotencyKey) === parsed.idempotencyKey) {
       const completedMirror = await completeCashflowSheetRefreshRun({
@@ -3854,8 +3930,7 @@ export function mountCashflowSheetLabRoutes(app, {
         response: previousMirror,
         completedAt: attemptedAt,
       });
-      res.status(200).json(completedMirror);
-      return;
+      return completedMirror;
     }
 
     logCashflowSheetLab('mirror.refresh.start', req, {
@@ -3945,7 +4020,7 @@ export function mountCashflowSheetLabRoutes(app, {
         targetRevisionAtFetch: completedMirror.targetRevisionAtFetch,
         ...completedMirror.summary,
       });
-      res.status(200).json(completedMirror);
+      return completedMirror;
     } catch (error) {
       const normalized = normalizeRouteError(error);
       const diagnostics = Array.isArray(normalized?.diagnostics) ? normalized.diagnostics : [];
@@ -3995,7 +4070,200 @@ export function mountCashflowSheetLabRoutes(app, {
         mirrorStatus: completedMirror.status,
         ...routeErrorDetails(normalized),
       }, 'warn');
-      res.status(200).json(completedMirror);
+      return completedMirror;
+    }
+  };
+
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/mirror/refresh', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    res.status(200).json(await executeCashflowSheetMirrorRefresh(req));
+  }));
+
+  const syncCashflowSheetProject = async ({
+    tenantId,
+    projectId,
+    runId,
+    context,
+    apply = false,
+  } = {}) => {
+    if (!authoritativeJavaClient) {
+      throw createHttpError(503, 'JVM cashflow API is not configured.', 'jvm_weekly_api_unconfigured');
+    }
+    const project = await readProjectDocument(db, tenantId, projectId);
+    const configs = readCashflowSheetLabConfigs(project);
+    if (configs.length === 0) {
+      throw createHttpError(400, 'Cashflow sheet URL is not configured.', 'cashflow_sheet_config_required');
+    }
+    const actorContext = context || {
+      tenantId,
+      actorId: 'cashflow-sheet-sync',
+      actorRole: 'admin',
+      actorEmail: 'cashflow-sheet-sync@mysc.co.kr',
+      requestId: runId,
+    };
+    const requestLike = (sourceYear, operation) => ({
+      context: actorContext,
+      requestId: actorContext.requestId,
+      params: { projectId },
+      body: {
+        sourceYear,
+        idempotencyKey: `${runId}:${projectId}:${operation}:${sourceYear}`,
+      },
+    });
+    let pendingChangeCount = 0;
+    let projectionChangeCount = 0;
+    let actualChangeCount = 0;
+    let appliedCount = 0;
+    let blocked = false;
+    let sourceRevision = '';
+    let targetRevision = '';
+
+    for (const config of configs) {
+      const sourceYear = config.sourceYear;
+      const mirror = await executeCashflowSheetMirrorRefresh(requestLike(sourceYear, 'refresh'));
+      if (readOptionalText(mirror?.status) !== 'FRESH') {
+        const refreshError = mirror?.lastRefreshError || {};
+        throw createHttpError(
+          Number(refreshError.statusCode) || 503,
+          readOptionalText(refreshError.message) || 'Cashflow sheet refresh failed.',
+          readOptionalText(refreshError.code) || 'cashflow_sheet_refresh_failed',
+        );
+      }
+      const beforeReadback = await authoritativeJavaClient.getCashflowSnapshot({
+        context: actorContext,
+        projectId,
+      });
+      if (readOptionalText(beforeReadback?.projectId) !== projectId) {
+        throw createHttpError(502, 'JVM cashflow readback project mismatch.', 'jvm_cashflow_readback_mismatch');
+      }
+      assertJavaCashflowMatchesFirestore(
+        beforeReadback,
+        await readCashflowWeeksSnapshot(db, tenantId, projectId),
+      );
+      const stage = await stagePinnedCashflowSheetLab({
+        db,
+        tenantId,
+        projectId,
+        parsed: {
+          expectedMirrorRevision: mirror.sourceRevision,
+          idempotencyKey: `${runId}:${projectId}:stage:${sourceYear}`,
+        },
+        context: actorContext,
+      });
+      pendingChangeCount += Math.max(0, Number(stage.stagedLineCount) || 0);
+      projectionChangeCount += Math.max(0, Number(stage.projectionLineCount) || 0);
+      actualChangeCount += Math.max(0, Number(stage.actualLineCount) || 0);
+      sourceRevision = readOptionalText(stage.sourceRevision);
+      targetRevision = readOptionalText(stage.targetRevisionAtFetch);
+
+      if (!apply || stage.status === 'NO_CHANGES') continue;
+      if (stage.status !== 'READY') {
+        blocked = true;
+        continue;
+      }
+      if (!javaWeeklyClient) assertCashflowMutationRuntime({}, env);
+      await applyStagedCashflowSheetLab({
+        db,
+        tenantId,
+        projectId,
+        parsed: {
+          stageRunId: stage.runId,
+          idempotencyKey: `${runId}:${projectId}:apply:${sourceYear}`,
+        },
+        context: actorContext,
+        javaWeeklyClient: authoritativeJavaClient,
+        editSession: null,
+        resolveEditSession: null,
+        idempotencyKey: `${runId}:${projectId}:apply:${sourceYear}`,
+      });
+      const afterReadback = await authoritativeJavaClient.getCashflowSnapshot({
+        context: actorContext,
+        projectId,
+      });
+      if (readOptionalText(afterReadback?.projectId) !== projectId) {
+        throw createHttpError(502, 'JVM cashflow readback project mismatch.', 'jvm_cashflow_readback_mismatch');
+      }
+      assertJavaCashflowMatchesFirestore(
+        afterReadback,
+        await readCashflowWeeksSnapshot(db, tenantId, projectId),
+      );
+      const verificationMirror = await executeCashflowSheetMirrorRefresh(
+        requestLike(sourceYear, 'verify-refresh'),
+      );
+      if (readOptionalText(verificationMirror?.status) !== 'FRESH') {
+        throw createHttpError(503, 'Post-apply sheet refresh failed.', 'cashflow_sheet_post_apply_refresh_failed');
+      }
+      const verificationStage = await stagePinnedCashflowSheetLab({
+        db,
+        tenantId,
+        projectId,
+        parsed: {
+          expectedMirrorRevision: verificationMirror.sourceRevision,
+          idempotencyKey: `${runId}:${projectId}:verify-stage:${sourceYear}`,
+        },
+        context: actorContext,
+      });
+      if (verificationStage.status !== 'NO_CHANGES') {
+        throw createHttpError(
+          503,
+          'Post-apply JVM readback does not match the pinned sheet.',
+          'cashflow_sheet_post_apply_mismatch',
+        );
+      }
+      sourceRevision = readOptionalText(verificationStage.sourceRevision);
+      targetRevision = readOptionalText(verificationStage.targetRevisionAtFetch);
+      appliedCount += 1;
+    }
+
+    return {
+      status: pendingChangeCount === 0 ? 'SYNCED' : blocked ? 'BLOCKED' : apply ? 'APPLIED' : 'CHANGED',
+      changedCount: pendingChangeCount,
+      pendingChangeCount,
+      projectionChangeCount,
+      actualChangeCount,
+      appliedCount,
+      sourceRevision,
+      targetRevision,
+      checkedAt: new Date().toISOString(),
+    };
+  };
+
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/changes/check', asyncHandler(async (req, res) => {
+    assertCashflowSheetLabAccess(req, workspaceEmailDomain);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const checkedAt = new Date().toISOString();
+    try {
+      const result = await syncCashflowSheetProject({
+        tenantId,
+        projectId,
+        runId: `cashflow-sheet-check:${req.context.requestId}`,
+        context: req.context,
+        apply: false,
+      });
+      res.status(200).json({
+        status: result.pendingChangeCount > 0 ? 'CHANGED' : 'SYNCED',
+        pendingChangeCount: result.pendingChangeCount,
+        projectionChangeCount: result.projectionChangeCount,
+        actualChangeCount: result.actualChangeCount,
+        sourceRevision: result.sourceRevision,
+        targetRevision: result.targetRevision,
+        checkedAt: result.checkedAt,
+      });
+    } catch (error) {
+      logCashflowSheetLab('changes.check.unavailable', req, {
+        projectId,
+        ...routeErrorDetails(normalizeRouteError(error)),
+      }, 'warn');
+      res.status(200).json({
+        status: 'UNAVAILABLE',
+        pendingChangeCount: 0,
+        projectionChangeCount: 0,
+        actualChangeCount: 0,
+        sourceRevision: '',
+        targetRevision: '',
+        checkedAt,
+      });
     }
   }));
 
@@ -4163,4 +4431,6 @@ export function mountCashflowSheetLabRoutes(app, {
       throw normalizeRouteError(error);
     }
   }));
+
+  return { syncProject: syncCashflowSheetProject };
 }
