@@ -6,6 +6,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertJavaCashflowMatchesFirestore,
+  classifyCashflowComparisons,
   mountCashflowSheetLabRoutes,
 } from './cashflow-sheet-lab.mjs';
 import { GoogleSheetsServiceError } from '../google-sheets.mjs';
@@ -618,6 +619,29 @@ function createDisabledApp() {
 }
 
 describe('cashflow sheet lab route', () => {
+  it.each([
+    [0, 0, 0, 'ALL_SYNCED'],
+    [0, 1, 1, 'FIRESTORE_DIFFERS'],
+    [1, 0, 1, 'JVM_DIFFERS'],
+    [1, 1, 0, 'SHEET_DIFFERS'],
+    [1, 2, 3, 'THREE_WAY_DIFFERENT'],
+  ])('classifies independent Sheet/JVM/Firestore comparisons (%s, %s, %s)', (sheetToJvm, sheetToFirestore, jvmToFirestore, expected) => {
+    const available = (changeCount) => ({ status: 'AVAILABLE', changeCount });
+    expect(classifyCashflowComparisons({
+      sheetToJvm: available(sheetToJvm),
+      sheetToFirestore: available(sheetToFirestore),
+      jvmToFirestore: available(jvmToFirestore),
+    })).toBe(expected);
+  });
+
+  it('keeps an unavailable pair partial instead of replacing it with zero', () => {
+    expect(classifyCashflowComparisons({
+      sheetToJvm: { status: 'UNAVAILABLE', changeCount: null },
+      sheetToFirestore: { status: 'AVAILABLE', changeCount: 4 },
+      jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null },
+    })).toBe('PARTIAL');
+  });
+
   it('fails closed when the JVM canonical snapshot differs from Firestore before or after apply', () => {
     const firestoreSnapshot = {
       weeks: [{
@@ -693,12 +717,14 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(response.body).toEqual({
-      status: 'CHANGED',
-      pendingChangeCount: 1920,
-      projectionChangeCount: 960,
-      actualChangeCount: 960,
-      sourceRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      targetRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      status: 'COMPARED',
+      classification: 'SHEET_DIFFERS',
+      sheet: { status: 'AVAILABLE', revisions: [expect.stringMatching(/^sha256:[a-f0-9]{64}$/)] },
+      comparisons: {
+        sheetToJvm: { status: 'AVAILABLE', changeCount: 1920, projectionChangeCount: 960, actualChangeCount: 960 },
+        sheetToFirestore: { status: 'AVAILABLE', changeCount: 1920, projectionChangeCount: 960, actualChangeCount: 960 },
+        jvmToFirestore: { status: 'AVAILABLE', changeCount: 0, projectionChangeCount: 0, actualChangeCount: 0 },
+      },
       checkedAt: expect.stringMatching(/^2026-|^20\d{2}-/),
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
@@ -711,7 +737,7 @@ describe('cashflow sheet lab route', () => {
     }));
   });
 
-  it('returns UNAVAILABLE instead of diffing against stale Firestore data when JVM canonical differs', async () => {
+  it('reports JVM and Firestore drift without blocking the Sheet comparison', async () => {
     const db = createDb({
       project: {
         id: 'project-a',
@@ -745,18 +771,113 @@ describe('cashflow sheet lab route', () => {
       .send({})
       .expect(200);
 
-    expect(response.body).toEqual({
-      status: 'UNAVAILABLE',
-      pendingChangeCount: 0,
-      projectionChangeCount: 0,
-      actualChangeCount: 0,
-      sourceRevision: '',
-      targetRevision: '',
-      checkedAt: expect.stringMatching(/^20\d{2}-/),
+    expect(response.body).toMatchObject({
+      status: 'COMPARED',
+      classification: 'THREE_WAY_DIFFERENT',
+      sheet: { status: 'AVAILABLE' },
+      comparisons: {
+        sheetToJvm: { status: 'AVAILABLE', changeCount: 1920 },
+        sheetToFirestore: { status: 'AVAILABLE', changeCount: 1920 },
+        jvmToFirestore: { status: 'AVAILABLE', changeCount: 1 },
+      },
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).not.toHaveBeenCalled();
+  });
+
+  it('keeps the JVM versus Firestore comparison when Google Sheet refresh fails', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        cashflowSheetLab: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      weeks: [{ id: 'w1', projectId: 'project-a', yearMonth: '2026-01', weekNo: 1, projection: { SALES_IN: 1 }, actual: {} }],
+    });
+    const response = await request(createApp({
+      db,
+      googleSheetsService: {
+        previewSpreadsheet: vi.fn(async () => { throw new GoogleSheetsServiceError('unavailable', { statusCode: 503 }); }),
+      },
+      routeOptions: {
+        javaWeeklyClient: {
+          getCashflowSnapshot: vi.fn(async () => ({ projectId: 'project-a', projection: [], actual: [] })),
+        },
+      },
+    }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'PARTIAL',
+      classification: 'PARTIAL',
+      sheet: { status: 'UNAVAILABLE' },
+      comparisons: {
+        sheetToJvm: { status: 'UNAVAILABLE', changeCount: null },
+        sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null },
+        jvmToFirestore: { status: 'AVAILABLE', changeCount: 1 },
+      },
+    });
+  });
+
+  it('keeps Sheet versus Firestore available when the JVM snapshot is invalid', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a', contractStart: '2026-01-01', contractEnd: '2026-12-31',
+        cashflowSheetLab: { sourceYear: 2026, value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit', sheetName: 'cashflow(사용내역 연동)' },
+      },
+    });
+    const response = await request(createApp({ db, routeOptions: { javaWeeklyClient: {
+      getCashflowSnapshot: vi.fn(async () => ({
+        projectId: 'project-a',
+        projection: [{ yearMonth: '2026-01', weekNo: 1, cashflowLine: 'UNKNOWN', amount: 1 }],
+        actual: [],
+      })),
+    } } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'PARTIAL',
+      comparisons: {
+        sheetToJvm: { status: 'UNAVAILABLE', changeCount: null },
+        sheetToFirestore: { status: 'AVAILABLE', changeCount: 1920 },
+        jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null },
+      },
+    });
+  });
+
+  it('keeps Sheet versus JVM available when the Firestore snapshot is invalid', async () => {
+    const db = createDb({
+      project: {
+        id: 'project-a', contractStart: '2026-01-01', contractEnd: '2026-12-31',
+        cashflowSheetLab: { sourceYear: 2026, value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit', sheetName: 'cashflow(사용내역 연동)' },
+      },
+      weeks: [{ id: 'bad', projectId: 'project-a', yearMonth: '2026-01', weekNo: 1, projection: { UNKNOWN: 1 }, actual: {} }],
+    });
+    const response = await request(createApp({ db, routeOptions: { javaWeeklyClient: {
+      getCashflowSnapshot: vi.fn(async () => ({ projectId: 'project-a', projection: [], actual: [] })),
+    } } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'PARTIAL',
+      comparisons: {
+        sheetToJvm: { status: 'AVAILABLE', changeCount: 1920 },
+        sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null },
+        jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null },
+      },
+    });
   });
 
   it('returns SYNCED with zero pending changes when the fresh sheet already matches JVM canonical', async () => {
@@ -804,17 +925,75 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
 
     expect(response.body).toEqual({
-      status: 'SYNCED',
-      pendingChangeCount: 0,
-      projectionChangeCount: 0,
-      actualChangeCount: 0,
-      sourceRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-      targetRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      status: 'COMPARED',
+      classification: 'ALL_SYNCED',
+      sheet: { status: 'AVAILABLE', revisions: [expect.stringMatching(/^sha256:[a-f0-9]{64}$/)] },
+      comparisons: {
+        sheetToJvm: { status: 'AVAILABLE', changeCount: 0, projectionChangeCount: 0, actualChangeCount: 0 },
+        sheetToFirestore: { status: 'AVAILABLE', changeCount: 0, projectionChangeCount: 0, actualChangeCount: 0 },
+        jvmToFirestore: { status: 'AVAILABLE', changeCount: 0, projectionChangeCount: 0, actualChangeCount: 0 },
+      },
       checkedAt: expect.stringMatching(/^20\d{2}-/),
     });
     expect(javaWeeklyClient.applyCashflowSheetBatch).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
     expect(javaWeeklyClient.applyCashflowSheetAnnualTotal).not.toHaveBeenCalled();
+  });
+
+  it('compares Sheet Actual against its source ledger while JVM and Firestore compare aggregates', async () => {
+    const yearMonths = Array.from({ length: 12 }, (_unused, index) => `2026-${String(index + 1).padStart(2, '0')}`);
+    const weeks = matchingCanonicalWeeks(1920, yearMonths);
+    const firstWeek = weeks[0];
+    const [lineId] = Object.keys(firstWeek.actual);
+    const sheetAmount = firstWeek.actual[lineId];
+    firstWeek.weeklyExpenseActualBySheet = {
+      'cashflow-sheet-lab': { ...firstWeek.actual },
+      bank: { [lineId]: 10 },
+    };
+    firstWeek.actual[lineId] = sheetAmount + 10;
+    const javaWeeklyClient = {
+      getCashflowSnapshot: vi.fn(async () => ({
+        projectId: 'project-a',
+        projection: weeks.flatMap((week) => Object.entries(week.projection || {}).map(([cashflowLine, amount]) => ({
+          yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine, amount,
+        }))),
+        actual: weeks.flatMap((week) => Object.entries(week.actual || {}).flatMap(([cashflowLine, amount]) => (
+          week === firstWeek && cashflowLine === lineId
+            ? [
+              { sheetKey: 'cashflow-sheet-lab', yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine, amount: sheetAmount },
+              { sheetKey: 'bank', yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine, amount: 10 },
+            ]
+            : [{ sheetKey: 'cashflow-sheet-lab', yearMonth: week.yearMonth, weekNo: week.weekNo, cashflowLine, amount }]
+        ))),
+      })),
+    };
+    const db = createDb({
+      project: {
+        id: 'project-a',
+        contractStart: '2026-01-01',
+        contractEnd: '2026-12-31',
+        cashflowSheetLab: {
+          sourceYear: 2026,
+          value: 'https://docs.google.com/spreadsheets/d/spreadsheet-a/edit',
+          sheetName: 'cashflow(사용내역 연동)',
+        },
+      },
+      weeks,
+    });
+
+    const response = await request(createApp({ db, routeOptions: { javaWeeklyClient } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/changes/check')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      classification: 'ALL_SYNCED',
+      comparisons: {
+        sheetToJvm: { changeCount: 0 },
+        sheetToFirestore: { changeCount: 0 },
+        jvmToFirestore: { changeCount: 0 },
+      },
+    });
   });
 
   it('reads Google Sheets only on explicit mirror refresh and pins the result', async () => {

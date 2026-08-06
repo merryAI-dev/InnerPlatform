@@ -380,10 +380,7 @@ export function CashflowProjectSheet({
     lastActualLineCount?: number;
   } | null>(null);
   const [cashflowSheetConfigLoaded, setCashflowSheetConfigLoaded] = useState(false);
-  const [cashflowSheetChangeCheck, setCashflowSheetChangeCheck] = useState<{
-    status: CashflowSheetChangeCheckResult['status'];
-    pendingChangeCount: number | null;
-  } | null>(null);
+  const [cashflowSheetChangeCheck, setCashflowSheetChangeCheck] = useState<CashflowSheetChangeCheckResult | null>(null);
   const [cashflowSystemAccountEmail, setCashflowSystemAccountEmail] = useState('');
   const [cashflowSystemAccountError, setCashflowSystemAccountError] = useState(false);
   const [cashflowSheetMirror, setCashflowSheetMirror] = useState<CashflowSheetLabMirrorResult | null>(null);
@@ -578,7 +575,17 @@ export function CashflowProjectSheet({
       return () => { cancelled = true; };
     }
 
-    setCashflowSheetChangeCheck({ status: 'CHECKING', pendingChangeCount: null });
+    setCashflowSheetChangeCheck({
+      status: 'CHECKING',
+      classification: 'PARTIAL',
+      checkedAt: '',
+      sheet: { status: 'AVAILABLE' },
+      comparisons: {
+        sheetToJvm: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+        sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+        jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+      },
+    });
     const checkSheetChanges = async (): Promise<void> => {
       try {
         let actor = await resolveBffActor();
@@ -603,13 +610,20 @@ export function CashflowProjectSheet({
           });
         }
         if (!cancelled) {
-          setCashflowSheetChangeCheck({
-            status: result.status,
-            pendingChangeCount: result.status === 'CHANGED' ? result.pendingChangeCount : null,
-          });
+          setCashflowSheetChangeCheck(result);
         }
       } catch {
-        if (!cancelled) setCashflowSheetChangeCheck({ status: 'UNAVAILABLE', pendingChangeCount: null });
+        if (!cancelled) setCashflowSheetChangeCheck({
+          status: 'UNAVAILABLE',
+          classification: 'PARTIAL',
+          checkedAt: '',
+          sheet: { status: 'UNAVAILABLE' },
+          comparisons: {
+            sheetToJvm: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+            sheetToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+            jvmToFirestore: { status: 'UNAVAILABLE', changeCount: null, projectionChangeCount: null, actualChangeCount: null },
+          },
+        });
       }
     };
     void checkSheetChanges();
@@ -1849,23 +1863,42 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
+  const sheetComparisonEntries: Array<[string, CashflowSheetChangeCheckResult['comparisons']['sheetToJvm']]> = cashflowSheetChangeCheck
+    ? [
+      ['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm],
+      ['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore],
+      ['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore],
+    ]
+    : [];
+  const availableSheetComparisons = sheetComparisonEntries.filter(([, comparison]) => comparison.status === 'AVAILABLE');
+  const availableSheetComparisonLabel = availableSheetComparisons
+    .map(([label, comparison]) => `${label} ${(comparison.changeCount ?? 0).toLocaleString()}건`)
+    .join(' · ');
   const sheetChangeBadgeLabel = cashflowSheetChangeCheck?.status === 'CHECKING'
     ? '시트 변경 확인 중'
-    : cashflowSheetChangeCheck?.status === 'SYNCED'
-      ? '시트와 동기화됨'
-      : cashflowSheetChangeCheck?.status === 'CHANGED'
-        ? `이전 대비 변동 사항 ${(cashflowSheetChangeCheck.pendingChangeCount || 0).toLocaleString()}건 · 새로 반영이 필요합니다`
-        : cashflowSheetChangeCheck?.status === 'UNAVAILABLE'
-          ? '시트 변경 확인 불가'
-          : '';
-  const sheetChangeBadgeClass = cashflowSheetChangeCheck?.status === 'SYNCED'
+    : cashflowSheetChangeCheck?.sheet.status === 'UNAVAILABLE'
+          ? ['시트 변경 확인 불가', availableSheetComparisonLabel].filter(Boolean).join(' · ')
+          : availableSheetComparisons.length > 0
+            ? availableSheetComparisonLabel
+            : '비교 가능한 저장값이 없습니다';
+  const sheetChangeBadgeClass = cashflowSheetChangeCheck?.classification === 'ALL_SYNCED'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    : cashflowSheetChangeCheck?.status === 'CHANGED'
+    : cashflowSheetChangeCheck?.status === 'COMPARED'
       ? 'border-yellow-300 bg-yellow-50 text-yellow-900'
-      : cashflowSheetChangeCheck?.status === 'UNAVAILABLE'
+      : cashflowSheetChangeCheck?.sheet.status === 'UNAVAILABLE'
         ? 'border-red-200 bg-red-50 text-red-800'
         : 'border-slate-200 bg-slate-50 text-slate-600';
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
+  const configuredSheetUrl = (() => {
+    try {
+      const url = new URL(cashflowSheetConfig?.value || '');
+      return url.protocol === 'https:' && url.hostname === 'docs.google.com' && url.pathname.startsWith('/spreadsheets/')
+        ? url.toString()
+        : '';
+    } catch {
+      return '';
+    }
+  })();
   const sheetMirrorCapturedAt = formatSheetAppliedAt(cashflowSheetMirror?.capturedAt)
     || cashflowSheetMirror?.capturedAt
     || '';
@@ -2708,17 +2741,16 @@ export function CashflowProjectSheet({
                   {sheetChangeBadgeLabel}
                 </Badge>
               ) : null}
-              {cashflowSheetConfig ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 shrink-0 px-2 text-[12px] font-semibold text-[#17324D]"
-                  onClick={() => navigate(`/portal/cashflow/${encodeURIComponent(projectId)}/sheets-lab`)}
+              {configuredSheetUrl ? (
+                <a
+                  className="inline-flex h-7 shrink-0 items-center rounded-md px-2 text-[12px] font-semibold text-[#17324D] hover:bg-accent"
+                  href={configuredSheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   <FileSpreadsheet className="mr-1 h-3 w-3" />
                   시트 이동
-                </Button>
+                </a>
               ) : null}
               {cashflowSheetConfig ? (
                 <Button

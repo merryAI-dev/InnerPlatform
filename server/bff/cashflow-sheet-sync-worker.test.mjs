@@ -36,8 +36,8 @@ describe('cashflow sheet sync worker', () => {
       active -= 1;
       if (projectId === 'project-b') throw Object.assign(new Error('sheet denied'), { code: 'sheet_denied' });
       return projectId === 'project-a'
-        ? { changedCount: 0, appliedCount: 0, status: 'NO_CHANGES' }
-        : { changedCount: 3, appliedCount: 1, status: 'APPLIED' };
+        ? { classification: 'ALL_SYNCED', comparisons: { sheetToJvm: { changeCount: 0 } } }
+        : { classification: 'SHEET_DIFFERS', comparisons: { sheetToJvm: { changeCount: 3 } } };
     });
 
     const result = await runCashflowSheetSyncWorker(db, {
@@ -56,10 +56,11 @@ describe('cashflow sheet sync worker', () => {
       succeededProjects: 2,
       failedProjects: 1,
       changedCount: 3,
-      appliedCount: 1,
+      appliedCount: 0,
       noChangeProjects: 1,
       failures: [{ projectId: 'project-b', code: 'sheet_denied' }],
     });
+    expect(syncProject.mock.calls.every(([input]) => !Object.hasOwn(input, 'apply'))).toBe(true);
     expect(result.discoveredProjects).toBe(result.processedProjects);
   });
 

@@ -726,7 +726,7 @@ export function createBffApp(options = {}) {
   const driveService = options.driveService || createGoogleDriveService();
   const googleSheetsService = options.googleSheetsService || createGoogleSheetsService();
   const googleSheetMigrationAiService = options.googleSheetMigrationAiService || createGoogleSheetMigrationAiService();
-  let cashflowSheetSyncProject = null;
+  let cashflowSheetCompareProject = null;
   const projectRequestContractAiService = options.projectRequestContractAiService || createProjectRequestContractAiService();
   const projectRequestContractStorageService = options.projectRequestContractStorageService || createProjectRequestContractStorageService({ projectId });
   const projectRegistrationDraftStorageService = options.projectRegistrationDraftStorageService
@@ -1036,14 +1036,13 @@ export function createBffApp(options = {}) {
       concurrency: 4,
       runId,
       syncProject: ({ tenantId: projectTenantId, projectId: cashflowProjectId, runId: projectRunId }) => {
-        if (typeof cashflowSheetSyncProject !== 'function') {
-          throw createHttpError(503, 'Cashflow sheet sync is not configured.', 'cashflow_sheet_sync_unconfigured');
+        if (typeof cashflowSheetCompareProject !== 'function') {
+          throw createHttpError(503, 'Cashflow sheet comparison is not configured.', 'cashflow_sheet_comparison_unconfigured');
         }
-        return cashflowSheetSyncProject({
+        return cashflowSheetCompareProject({
           tenantId: projectTenantId,
           projectId: cashflowProjectId,
           runId: projectRunId,
-          apply: true,
         });
       },
     });
@@ -1553,7 +1552,7 @@ export function createBffApp(options = {}) {
     env,
     javaWeeklyClient: options.javaWeeklyClient,
   });
-  cashflowSheetSyncProject = cashflowSheetLabRoutes?.syncProject || null;
+  cashflowSheetCompareProject = cashflowSheetLabRoutes?.compareProject || null;
   mountCashflowLaborRiskRoutes(app, {
     db,
     now,

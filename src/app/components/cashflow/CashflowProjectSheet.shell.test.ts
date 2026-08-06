@@ -297,12 +297,16 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('checks linked sheet changes on entry without applying them', () => {
     expect(source).toContain('checkCashflowSheetChangesViaBff');
-    expect(source).toContain("setCashflowSheetChangeCheck({ status: 'CHECKING', pendingChangeCount: null })");
-    expect(source).toContain("result.status === 'CHANGED' ? result.pendingChangeCount : null");
-    expect(source).toContain('이전 대비 변동 사항 ${(cashflowSheetChangeCheck.pendingChangeCount || 0).toLocaleString()}건 · 새로 반영이 필요합니다');
-    expect(source).toContain('시트와 동기화됨');
+    expect(source).toContain("status: 'CHECKING'");
+    expect(source).toContain('setCashflowSheetChangeCheck(result)');
+    expect(source).toContain("['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm]");
+    expect(source).toContain("['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore]");
+    expect(source).toContain("['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore]");
     expect(source).toContain('시트 변경 확인 불가');
     expect(source).toContain('시트 이동');
+    expect(source).toContain('href={configuredSheetUrl}');
+    expect(source).toContain('target="_blank"');
+    expect(source).toContain('rel="noopener noreferrer"');
 
     const checkFlow = source.slice(
       source.indexOf('const checkSheetChanges = async'),

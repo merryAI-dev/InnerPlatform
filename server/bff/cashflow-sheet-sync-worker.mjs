@@ -74,9 +74,9 @@ export async function runCashflowSheetSyncWorker(db, {
       failures.push(failureSummary(projects[index].id, result.reason));
       return;
     }
-    changedCount += Math.max(0, Number(result.value?.changedCount) || 0);
+    changedCount += Math.max(0, Number(result.value?.comparisons?.sheetToJvm?.changeCount) || 0);
     appliedCount += Math.max(0, Number(result.value?.appliedCount) || 0);
-    if (['SYNCED', 'NO_CHANGES'].includes(readOptionalText(result.value?.status))) noChangeProjects += 1;
+    if (readOptionalText(result.value?.classification) === 'ALL_SYNCED') noChangeProjects += 1;
   });
 
   return {

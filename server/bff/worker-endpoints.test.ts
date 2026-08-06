@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import request from 'supertest';
 import { createBffApp } from './app.mjs';
 
@@ -33,6 +34,17 @@ function createTestApp(options: Parameters<typeof createBffApp>[0] = {}) {
 }
 
 describe('internal worker endpoints (cron)', () => {
+  it('wires the Thursday cashflow worker to comparison without automatic apply', () => {
+    const source = readFileSync(new URL('./app.mjs', import.meta.url), 'utf8');
+    const route = source.slice(
+      source.indexOf('const runCashflowSheetSyncWorkerRoute'),
+      source.indexOf("app.get('/api/internal/workers/cashflow-sheet-sync/run'"),
+    );
+    expect(route).toContain('cashflowSheetCompareProject');
+    expect(route).not.toContain('cashflowSheetSyncProject');
+    expect(route).not.toContain('apply: true');
+  });
+
   it('keeps the Live maintenance probe open while workers stay disabled', async () => {
     const app = createTestApp({
       projectId: LIVE_PROJECT_ID,
