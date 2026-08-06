@@ -637,13 +637,17 @@ export interface CashflowSheetLabShareAccountResult {
 }
 
 export interface CashflowSheetChangeCheckResult {
-  status: 'CHECKING' | 'SYNCED' | 'CHANGED' | 'UNAVAILABLE';
-  pendingChangeCount: number;
-  projectionChangeCount: number;
-  actualChangeCount: number;
-  sourceRevision: string;
-  targetRevision: string;
+  status: 'CHECKING' | 'COMPARED' | 'PARTIAL' | 'UNAVAILABLE';
+  classification: 'ALL_SYNCED' | 'FIRESTORE_DIFFERS' | 'JVM_DIFFERS' | 'SHEET_DIFFERS' | 'THREE_WAY_DIFFERENT' | 'PARTIAL';
   checkedAt: string;
+  sheet: { status: 'AVAILABLE' | 'UNAVAILABLE'; revisions?: string[] };
+  comparisons: Record<'sheetToJvm' | 'sheetToFirestore' | 'jvmToFirestore', {
+    status: 'AVAILABLE' | 'UNAVAILABLE';
+    changeCount: number | null;
+    projectionChangeCount: number | null;
+    actualChangeCount: number | null;
+    code?: string;
+  }>;
 }
 
 export const extractSpreadsheetIdFromSheetInput = extractSpreadsheetId;

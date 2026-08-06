@@ -1,97 +1,95 @@
-# Sprint Contract: Google Sheet–JVM 변동 감지 및 목요일 자동 동기화
+# Sprint Contract: Cashflow 3-Way Drift Detection
+
+**SPP:** Specification–Policy–Proof
 **날짜:** 2026-08-06
-**예상 소요:** 4~6시간 + CI/배포 검증
 **상태:** APPROVED
+**대체 대상:** Google Sheet–JVM 변동 감지 및 목요일 자동 동기화 계약
 
-## Objective
-연결된 Google Sheet의 canonical 현금흐름 셀과 JVM `cashflow_weeks`를 동일한 기준으로 비교한다. 미반영 변경은 프로젝트 화면에 건수로 표시하고, 매주 목요일 18:00 Asia/Seoul에 연결된 프로젝트를 자동 동기화한다. 반영 성공은 JVM post-write read가 고정 snapshot과 일치할 때만 확정한다.
+## S — Specification
 
-## 불변조건
-- `SYNCED`는 Sheet snapshot과 JVM canonical cells가 동일할 때만 반환한다.
-- `EMPTY`, `ZERO`, `VALUE`는 서로 다른 상태다.
-- 확인 요청은 JVM을 변경하지 않는다.
-- 자동/수동 apply 모두 `snapshot -> apply -> JVM read-back` 순서를 지킨다.
-- 한 프로젝트의 실패는 다른 프로젝트 동기화를 중단하지 않는다.
-- 결산 잠금, 승인 확인, stale revision 충돌을 자동으로 우회하지 않는다.
+Google Sheet(S), JVM(J), Firestore(F)의 canonical 현금흐름 값을 독립적으로 비교한다. 값이 다르다는 이유만으로 특정 저장소를 오류로 단정하거나 자동 반영하지 않는다.
 
-## 상태 계약
-- `CHECKING`: 외부 시트 또는 JVM 비교 진행 중
-- `SYNCED`: canonical diff 0건
-- `CHANGED`: canonical diff 1건 이상
-- `UNAVAILABLE`: Sheet/JVM 조회 또는 비교 실패. 0건으로 대체하지 않는다.
+비교 키는 `sourceYear + yearMonth + weekNo + mode + cashflowLine`이며 `Projection`, `Actual`, `EMPTY`, `ZERO`, `VALUE`, 실제 금액을 비교한다. 서식, 메모, 합계·잔액 행, effective value가 같은 수식 변경, 연결 범위 밖 셀은 제외한다.
 
-## 변경 건수
-키는 `sourceYear + yearMonth + weekNo + mode + cashflowLine`이다. `cellState` 또는 `amount`가 다르면 1건이다. 서식, 메모, 동일 effective value의 수식 변경, 합계/잔액 행, 연결 범위 밖 셀은 제외한다.
+### 상태 분류
 
-## 목요일 자동 동기화
-- Vercel cron: `0 9 * * 4` (목요일 18:00 Asia/Seoul)
-- 대상: 시트 연결 설정이 있는 프로젝트
-- 프로젝트별: snapshot 보존 -> diff -> 변경이 있을 때만 기존 apply -> JVM read-back
-- no-op 프로젝트는 쓰지 않는다.
-- idempotency key는 해당 KST 실행 회차와 projectId로 고정한다.
-- 중복 실행은 같은 결과를 재사용하며 동시 실행으로 두 번 적용하지 않는다.
-- 잠긴 범위 또는 확인이 필요한 변경은 실패/보류로 기록하고 강제 반영하지 않는다.
+| 관찰 결과 | classification |
+|---|---|
+| S=J=F | `ALL_SYNCED` |
+| S=J≠F | `FIRESTORE_DIFFERS` |
+| S=F≠J | `JVM_DIFFERS` |
+| J=F≠S | `SHEET_DIFFERS` |
+| S≠J≠F | `THREE_WAY_DIFFERENT` |
+| 일부 조회 실패 | `PARTIAL` |
 
-## 서버 응답 계약
-```json
-{
-  "status": "CHANGED",
-  "pendingChangeCount": 31,
-  "projectionChangeCount": 18,
-  "actualChangeCount": 13,
-  "sourceRevision": "sha256:...",
-  "targetRevision": "sha256:...",
-  "checkedAt": "2026-08-06T02:30:00.000Z"
-}
-```
+분류는 원인을 추측하지 않고 관찰된 차이만 설명한다. API는 `sheetToJvm`, `sheetToFirestore`, `jvmToFirestore` 각각의 availability와 전체/Projection/Actual 변경 건수를 반환한다. 한 저장소를 읽지 못하면 그 저장소가 포함된 비교만 `UNAVAILABLE`로 표시한다.
 
-## Unit test 성공 기준
-- 동일 cell 집합은 0건이다.
-- `EMPTY <-> ZERO`, `ZERO <-> VALUE`, `EMPTY <-> VALUE`, 금액 변경은 각각 1건이다.
-- 수식만 바뀌고 effective value가 같으면 0건이다.
-- Projection/Actual 건수의 합은 총 건수와 같다.
-- 중복 canonical key와 알 수 없는 line은 성공으로 숨기지 않는다.
-- Sheet API/JVM 실패는 `UNAVAILABLE`이다.
-- legacy 12개 line의 누락 4개를 0으로 만들지 않는다.
-- Projection을 Actual로 fallback하지 않는다.
-- apply 후 셀 1개라도 다르면 성공하지 않는다.
-- stale source revision, 부분 저장, read-back 실패는 실패한다.
-- 같은 idempotency key는 중복 쓰기 없이 replay된다.
-- cron은 목요일 18:00 KST에만 실행 대상을 만든다.
-- 연결 없는 프로젝트, no-op 프로젝트는 apply하지 않는다.
-- 프로젝트 A 실패 후 프로젝트 B는 계속 처리한다.
-- cron 인증 실패는 401/403이며 어떤 프로젝트도 변경하지 않는다.
-- 프론트는 `CHANGED/N`을 `이전 대비 변동 사항 N건 · 새로 반영이 필요합니다`로 표시한다.
-- 작은 `시트 이동` 버튼은 기존 시트 설정 화면으로 이동한다.
-- 상태 확인만으로 apply가 호출되지 않는다.
+### UI
 
-## 통합 성공 기준
-- QA fixture `Sheet Projection 249,199,960 / JVM 218,236,560`은 `CHANGED`이고 차액을 숨기지 않는다.
-- 정상 apply 후 JVM Projection은 249,199,960이고 diff는 0건이다.
-- 31건 중 30건만 저장되면 apply는 실패한다.
-- 자동 동기화 run은 프로젝트별 결과와 revision을 감사 기록에 남긴다.
+- `시트 이동`은 프로젝트에 등록된 Google Sheet URL을 새 탭으로 연다.
+- `시트 ↔ JVM`, `시트 ↔ 저장값`, `JVM ↔ 저장값`별 변경 건수를 표시한다.
+- 조회 실패를 `0건`으로 표시하지 않는다.
+- 사용자 화면을 강제로 새로고침하지 않는다.
 
-## 실패 기준
-- 마지막 refresh 성공만으로 `SYNCED/FRESH`를 표시한다.
-- 프론트가 자체 diff를 계산한다.
-- API/JVM 실패를 0건으로 표시한다.
-- apply 후 read-back 없이 성공 처리한다.
-- 자동 동기화가 잠금/승인 정책을 우회한다.
-- 사용자 화면을 강제 refresh한다.
-- 테스트를 skip하거나 실제 크기보다 축소된 예제로만 검증한다.
+## P — Policy
 
-## 범위 밖
-- 실시간 polling
-- Google Sheet 편집
-- 계산 공식 변경
-- 결산 상태 모델 재설계
-- AXR–CMK QA 연결 교체
+- 변동 확인은 read-only다.
+- JVM과 Firestore가 달라도 조회를 차단하지 않는다.
+- 어떤 값이 정답인지 시스템이 자동 결정하지 않는다.
+- 목요일 18시 worker는 비교와 감사 기록만 수행하며 canonical 값을 쓰지 않는다.
+- 기존 명시적 `반영` 버튼만 쓰기 경로로 유지한다.
+- 수동 반영은 `고정 Sheet snapshot → 잠금·승인·revision 검증 → JVM 반영 → JVM read-back` 순서를 지킨다.
+- 이번 스프린트에서 Firestore 불일치를 자동 복구하지 않는다.
+- Google Sheet 자체를 읽지 못했을 때만 `시트 변경 확인 불가`를 표시한다.
 
-## 검증 명령
+## P — Proof
+
+### Unit
+
+- `S=J=F`, `S=J≠F`, `S=F≠J`, `J=F≠S`, `S≠J≠F`를 모두 검증한다.
+- `EMPTY ↔ ZERO ↔ VALUE` 전이를 각각 1건으로 계산한다.
+- JVM 또는 Firestore 한쪽 실패 시 가능한 다른 비교를 유지한다.
+- 중복 key와 알 수 없는 line을 0건으로 숨기지 않는다.
+- 확인 endpoint와 목요일 worker에서 apply/canonical write 호출이 0회다.
+
+### Integration
+
+- AXR fixture의 `Projection 249,199,960원 / 218,236,560원` 차이를 숨기지 않는다.
+- JVM과 Firestore가 달라도 Sheet 비교 API가 성공한다.
+- 반복 확인 요청이 canonical 데이터를 바꾸지 않는다.
+- 수동 반영은 JVM read-back이 일치해야만 성공한다.
+
+### Browser
+
+- 실제 등록 Sheet가 새 탭으로 열리고 Sheet Lab으로 이동하지 않는다.
+- 로딩 중 오류 문구를 표시하지 않는다.
+- 부분 실패 시 확인 가능한 비교는 계속 표시한다.
+- 자동 또는 강제 refresh가 발생하지 않는다.
+
+### Regression commands
+
 ```bash
 npx vitest run src/app/components/cashflow/CashflowProjectSheet.shell.test.ts src/app/lib/sheets-cashflow-readonly-client.test.ts
-node --test server/bff/cashflow-sheet-snapshot.test.mjs server/bff/routes/cashflow-sheet-lab.test.mjs server/bff/worker-endpoints.test.ts server/bff/scheduler-config.test.ts
+npx vitest run server/bff/cashflow-sheet-snapshot.test.mjs server/bff/routes/cashflow-sheet-lab.test.mjs server/bff/worker-endpoints.test.ts server/bff/scheduler-config.test.ts
 npm test
 npm run bff:test:integration
 npm run build
 ```
+
+## 실패 판정
+
+- JVM/Firestore 불일치가 Sheet 비교를 차단한다.
+- 조회 실패를 변동 0건으로 표시한다.
+- cron이 apply 또는 canonical write를 호출한다.
+- 프론트가 자체 금액 diff를 계산한다.
+- `시트 이동`이 Sheet Lab을 연다.
+- 실제 AXR 데이터 경로 없이 mock 테스트만 통과한다.
+
+## 범위 밖
+
+- 자동 동기화 및 자동 복구
+- 정답 저장소 자동 선정
+- 결산 상태 모델 변경
+- Google Sheet 직접 수정
+- 실시간 polling
+- 새로운 비교 프레임워크나 의존성 추가

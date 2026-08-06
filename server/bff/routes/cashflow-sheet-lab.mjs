@@ -989,6 +989,19 @@ function canonicalWeeksFromJavaSnapshot(snapshot = {}) {
   return [...byWeek.values()];
 }
 
+function canonicalSheetSourceWeeksFromJavaSnapshot(snapshot = {}) {
+  if (!Array.isArray(snapshot?.projection) || !Array.isArray(snapshot?.actual)) {
+    return canonicalWeeksFromJavaSnapshot(snapshot);
+  }
+  const hasActualProvenance = snapshot.actual.some((line) => readOptionalText(line?.sheetKey));
+  return canonicalWeeksFromJavaSnapshot({
+    ...snapshot,
+    actual: hasActualProvenance
+      ? snapshot.actual.filter((line) => readOptionalText(line?.sheetKey) === CASHFLOW_SHEET_SOURCE_KEY)
+      : snapshot.actual,
+  });
+}
+
 export function assertJavaCashflowMatchesFirestore(javaSnapshot, firestoreSnapshot) {
   const javaCells = canonicalCellEntriesFromWeeks(canonicalWeeksFromJavaSnapshot(javaSnapshot));
   const firestoreCells = canonicalCellEntriesFromWeeks(firestoreSnapshot?.weeks || []);
@@ -999,6 +1012,125 @@ export function assertJavaCashflowMatchesFirestore(javaSnapshot, firestoreSnapsh
       'jvm_cashflow_canonical_mismatch',
     );
   }
+}
+
+function canonicalCellKey(cell) {
+  return `${cell.sourceYear}:${cell.yearMonth}:${cell.weekNo}:${cell.mode}:${cell.cashflowLine}`;
+}
+
+function canonicalCellsFromMirror(mirrors = []) {
+  const cells = mirrors.flatMap((mirror) => (mirror?.cells || []).map((cell) => ({
+    sourceYear: Number(readOptionalText(cell?.yearMonth).slice(0, 4)),
+    yearMonth: readOptionalText(cell?.yearMonth),
+    weekNo: Number(cell?.weekNo),
+    mode: readOptionalText(cell?.mode),
+    cashflowLine: readOptionalText(cell?.lineId),
+    state: readOptionalText(cell?.state),
+    ...(['VALUE', 'ZERO'].includes(readOptionalText(cell?.state)) ? { amount: Number(cell?.amount) } : {}),
+  })));
+  const index = new Map();
+  for (const cell of cells) {
+    if (!Number.isSafeInteger(cell.sourceYear)
+      || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(cell.yearMonth)
+      || !Number.isSafeInteger(cell.weekNo) || cell.weekNo < 1 || cell.weekNo > 5
+      || !CASHFLOW_MODES.includes(cell.mode)
+      || !CASHFLOW_LINE_ORDER.has(cell.cashflowLine)
+      || !['EMPTY', 'ZERO', 'VALUE'].includes(cell.state)
+      || (cell.state !== 'EMPTY' && !Number.isSafeInteger(cell.amount))) {
+      throw createHttpError(502, 'Sheet cashflow snapshot is invalid.', 'cashflow_sheet_snapshot_invalid');
+    }
+    const key = canonicalCellKey(cell);
+    if (index.has(key)) {
+      throw createHttpError(502, 'Sheet cashflow snapshot contains duplicate cells.', 'cashflow_sheet_snapshot_invalid');
+    }
+    index.set(key, cell);
+  }
+  return index;
+}
+
+function canonicalCellsFromSnapshot(snapshot, allowedKeys) {
+  const entries = canonicalCellEntriesFromWeeks(snapshot?.weeks || []).map((cell) => ({
+    ...cell,
+    sourceYear: Number(cell.yearMonth.slice(0, 4)),
+  }));
+  const index = new Map(entries.map((cell) => [canonicalCellKey(cell), cell]));
+  return new Map([...allowedKeys].map((key) => [key, index.get(key) || { state: 'EMPTY' }]));
+}
+
+function canonicalSheetSourceCellsFromSnapshot(snapshot, sheetCells) {
+  const amounts = buildSnapshotAmountIndex(snapshot);
+  return new Map([...sheetCells].map(([key, sheetCell]) => {
+    const mapping = {
+      mode: sheetCell.mode,
+      yearMonth: sheetCell.yearMonth,
+      weekNo: sheetCell.weekNo,
+      lineId: sheetCell.cashflowLine,
+    };
+    const hasValue = hasIndexedSnapshotAmount(amounts, mapping);
+    const amount = hasValue ? normalizeAppliedAmount(readIndexedSnapshotAmount(amounts, mapping)) : null;
+    return [key, hasValue ? { ...sheetCell, state: amount === 0 ? 'ZERO' : 'VALUE', amount } : { state: 'EMPTY' }];
+  }));
+}
+
+function canonicalAggregateCellIndex(snapshot) {
+  return new Map(canonicalCellEntriesFromWeeks(snapshot?.weeks || []).map((cell) => {
+    const normalized = { ...cell, sourceYear: Number(cell.yearMonth.slice(0, 4)) };
+    return [canonicalCellKey(normalized), normalized];
+  }));
+}
+
+function compareCanonicalCellIndexes(left, right) {
+  return compareCanonicalCells(left, right, new Set([...left.keys(), ...right.keys()]));
+}
+
+function compareCanonicalCells(left, right, keys) {
+  let projectionChangeCount = 0;
+  let actualChangeCount = 0;
+  for (const key of keys) {
+    const leftCell = left.get(key) || { state: 'EMPTY' };
+    const rightCell = right.get(key) || { state: 'EMPTY' };
+    if (leftCell.state === rightCell.state
+      && (leftCell.state === 'EMPTY' || leftCell.amount === rightCell.amount)) continue;
+    if (key.includes(':projection:')) projectionChangeCount += 1;
+    else actualChangeCount += 1;
+  }
+  return {
+    status: 'AVAILABLE',
+    changeCount: projectionChangeCount + actualChangeCount,
+    projectionChangeCount,
+    actualChangeCount,
+  };
+}
+
+function unavailableComparison(error) {
+  return {
+    status: 'UNAVAILABLE',
+    changeCount: null,
+    projectionChangeCount: null,
+    actualChangeCount: null,
+    code: readOptionalText(error?.code) || 'cashflow_comparison_unavailable',
+  };
+}
+
+function attemptComparison(compare, error) {
+  try {
+    return compare();
+  } catch (comparisonError) {
+    return unavailableComparison(comparisonError || error);
+  }
+}
+
+export function classifyCashflowComparisons(comparisons) {
+  const values = Object.values(comparisons);
+  if (values.some((value) => value.status !== 'AVAILABLE')) return 'PARTIAL';
+  const sj = comparisons.sheetToJvm.changeCount === 0;
+  const sf = comparisons.sheetToFirestore.changeCount === 0;
+  const jf = comparisons.jvmToFirestore.changeCount === 0;
+  if (sj && sf && jf) return 'ALL_SYNCED';
+  if (sj && !sf && !jf) return 'FIRESTORE_DIFFERS';
+  if (sf && !sj && !jf) return 'JVM_DIFFERS';
+  if (jf && !sj && !sf) return 'SHEET_DIFFERS';
+  return 'THREE_WAY_DIFFERENT';
 }
 
 async function readCashflowSheetMirror(db, tenantId, projectId) {
@@ -4079,6 +4211,115 @@ export function mountCashflowSheetLabRoutes(app, {
     res.status(200).json(await executeCashflowSheetMirrorRefresh(req));
   }));
 
+  const compareCashflowSheetProject = async ({ tenantId, projectId, runId, context } = {}) => {
+    const project = await readProjectDocument(db, tenantId, projectId);
+    const configs = readCashflowSheetLabConfigs(project);
+    if (configs.length === 0) {
+      throw createHttpError(400, 'Cashflow sheet URL is not configured.', 'cashflow_sheet_config_required');
+    }
+    const actorContext = context || {
+      tenantId,
+      actorId: 'cashflow-sheet-observer',
+      actorRole: 'admin',
+      actorEmail: 'cashflow-sheet-observer@mysc.co.kr',
+      requestId: runId,
+    };
+    const sheetPromise = (async () => {
+      const mirrors = [];
+      for (const config of configs) {
+        const mirror = await executeCashflowSheetMirrorRefresh({
+          context: actorContext,
+          requestId: actorContext.requestId,
+          params: { projectId },
+          body: {
+            sourceYear: config.sourceYear,
+            idempotencyKey: `${runId}:${projectId}:observe:${config.sourceYear}`,
+          },
+        });
+        if (readOptionalText(mirror?.status) !== 'FRESH') {
+          const refreshError = mirror?.lastRefreshError || {};
+          throw createHttpError(
+            Number(refreshError.statusCode) || 503,
+            readOptionalText(refreshError.message) || 'Cashflow sheet refresh failed.',
+            readOptionalText(refreshError.code) || 'cashflow_sheet_refresh_failed',
+          );
+        }
+        mirrors.push(mirror);
+      }
+      return { mirrors, cells: canonicalCellsFromMirror(mirrors) };
+    })();
+    const [sheetResult, javaResult, firestoreResult] = await Promise.allSettled([
+      sheetPromise,
+      authoritativeJavaClient
+        ? authoritativeJavaClient.getCashflowSnapshot({ context: actorContext, projectId })
+        : Promise.reject(createHttpError(503, 'JVM cashflow API is not configured.', 'jvm_weekly_api_unconfigured')),
+      readCashflowWeeksSnapshot(db, tenantId, projectId),
+    ]);
+    let sheetCells;
+    let javaAggregateCells;
+    let firestoreAggregateCells;
+    let javaSnapshot;
+    let javaSheetSourceSnapshot;
+    let firestoreSnapshot;
+    const sheetError = sheetResult.status === 'rejected' ? sheetResult.reason : null;
+    let javaError = javaResult.status === 'rejected' ? javaResult.reason : null;
+    let firestoreError = firestoreResult.status === 'rejected' ? firestoreResult.reason : null;
+    if (sheetResult.status === 'fulfilled') sheetCells = sheetResult.value.cells;
+    try {
+      if (javaError) throw javaError;
+      if (readOptionalText(javaResult.value?.projectId) !== projectId) {
+        throw createHttpError(502, 'JVM cashflow readback project mismatch.', 'jvm_cashflow_readback_mismatch');
+      }
+      javaSnapshot = { weeks: canonicalWeeksFromJavaSnapshot(javaResult.value) };
+      javaSheetSourceSnapshot = { weeks: canonicalSheetSourceWeeksFromJavaSnapshot(javaResult.value) };
+      javaAggregateCells = canonicalAggregateCellIndex(javaSnapshot);
+    } catch (error) {
+      javaError = error;
+      javaSnapshot = undefined;
+      javaSheetSourceSnapshot = undefined;
+      javaAggregateCells = undefined;
+    }
+    try {
+      if (firestoreError) throw firestoreError;
+      firestoreSnapshot = firestoreResult.value;
+      firestoreAggregateCells = canonicalAggregateCellIndex(firestoreSnapshot);
+    } catch (error) {
+      firestoreError = error;
+      firestoreSnapshot = undefined;
+      firestoreAggregateCells = undefined;
+    }
+    const comparisons = {
+      sheetToJvm: sheetCells && javaSheetSourceSnapshot
+        ? attemptComparison(
+          () => compareCanonicalCells(sheetCells, canonicalCellsFromSnapshot(javaSheetSourceSnapshot, sheetCells.keys()), sheetCells.keys()),
+          javaError,
+        )
+        : unavailableComparison(sheetError || javaError),
+      sheetToFirestore: sheetCells && firestoreSnapshot
+        ? attemptComparison(
+          () => compareCanonicalCells(sheetCells, canonicalSheetSourceCellsFromSnapshot(firestoreSnapshot, sheetCells), sheetCells.keys()),
+          firestoreError,
+        )
+        : unavailableComparison(sheetError || firestoreError),
+      jvmToFirestore: javaAggregateCells && firestoreAggregateCells
+        ? attemptComparison(() => compareCanonicalCellIndexes(javaAggregateCells, firestoreAggregateCells), javaError || firestoreError)
+        : unavailableComparison(javaError || firestoreError),
+    };
+    const classification = classifyCashflowComparisons(comparisons);
+    return {
+      status: classification === 'PARTIAL' ? 'PARTIAL' : 'COMPARED',
+      classification,
+      checkedAt: new Date().toISOString(),
+      sheet: {
+        status: sheetCells ? 'AVAILABLE' : 'UNAVAILABLE',
+        revisions: sheetResult.status === 'fulfilled'
+          ? sheetResult.value.mirrors.map((mirror) => readOptionalText(mirror.sourceRevision)).filter(Boolean)
+          : [],
+      },
+      comparisons,
+    };
+  };
+
   const syncCashflowSheetProject = async ({
     tenantId,
     projectId,
@@ -4234,22 +4475,13 @@ export function mountCashflowSheetLabRoutes(app, {
     const { projectId } = req.params;
     const checkedAt = new Date().toISOString();
     try {
-      const result = await syncCashflowSheetProject({
+      const result = await compareCashflowSheetProject({
         tenantId,
         projectId,
         runId: `cashflow-sheet-check:${req.context.requestId}`,
         context: req.context,
-        apply: false,
       });
-      res.status(200).json({
-        status: result.pendingChangeCount > 0 ? 'CHANGED' : 'SYNCED',
-        pendingChangeCount: result.pendingChangeCount,
-        projectionChangeCount: result.projectionChangeCount,
-        actualChangeCount: result.actualChangeCount,
-        sourceRevision: result.sourceRevision,
-        targetRevision: result.targetRevision,
-        checkedAt: result.checkedAt,
-      });
+      res.status(200).json(result);
     } catch (error) {
       logCashflowSheetLab('changes.check.unavailable', req, {
         projectId,
@@ -4257,11 +4489,13 @@ export function mountCashflowSheetLabRoutes(app, {
       }, 'warn');
       res.status(200).json({
         status: 'UNAVAILABLE',
-        pendingChangeCount: 0,
-        projectionChangeCount: 0,
-        actualChangeCount: 0,
-        sourceRevision: '',
-        targetRevision: '',
+        classification: 'PARTIAL',
+        sheet: { status: 'UNAVAILABLE' },
+        comparisons: {
+          sheetToJvm: unavailableComparison(error),
+          sheetToFirestore: unavailableComparison(error),
+          jvmToFirestore: unavailableComparison(error),
+        },
         checkedAt,
       });
     }
@@ -4432,5 +4666,5 @@ export function mountCashflowSheetLabRoutes(app, {
     }
   }));
 
-  return { syncProject: syncCashflowSheetProject };
+  return { compareProject: compareCashflowSheetProject, syncProject: syncCashflowSheetProject };
 }
