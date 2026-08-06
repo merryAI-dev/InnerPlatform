@@ -209,7 +209,9 @@ export function buildDeepSyncPlan({
   const canonicalPatch = {
     ...base,
     uid: canonicalUid,
-    name: displayName,
+    // The member ledger owns the display name. A role change must not rewrite it with the
+    // Google account name, so it is only seeded when the ledger has nothing yet.
+    ...(readOptionalText(base.name) ? {} : { name: displayName }),
     email,
     role: normalizedRole,
     tenantId,
@@ -229,7 +231,7 @@ export function buildDeepSyncPlan({
         ...member.data,
         uid: member.uid || member.docId,
         canonicalUid,
-        name: displayName,
+        ...(readOptionalText(member.data?.name) ? {} : { name: displayName }),
         email,
         role: normalizedRole,
         tenantId,
