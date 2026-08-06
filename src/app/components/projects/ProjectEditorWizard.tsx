@@ -1879,6 +1879,9 @@ export function ProjectEditorWizard({
             placeholder="0"
             className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasSalesVatAmountInput ? `${fmtKRW(draft.salesVatAmount)}원` : '미입력'}
+          </p>
         </div>
         <div>
           <Label className="text-xs">총수익</Label>
@@ -1890,6 +1893,9 @@ export function ProjectEditorWizard({
             placeholder="0"
             className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasTotalRevenueAmountInput ? `${fmtKRW(draft.totalRevenueAmount)}원` : '미입력'}
+          </p>
         </div>
         <div>
           <Label className="text-xs">총실비(원가)</Label>
@@ -1901,6 +1907,9 @@ export function ProjectEditorWizard({
             placeholder="0"
             className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasTotalActualCostInput ? `${fmtKRW(draft.totalActualCost)}원` : '미입력'}
+          </p>
         </div>
         <div>
           <Label className="text-xs">총지원금</Label>
@@ -1912,6 +1921,9 @@ export function ProjectEditorWizard({
             placeholder="0"
             className={cn('mt-1 h-9 text-sm', usesRegistrationV2 && hasMultiYearContract && 'bg-muted/40')}
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {hasSupportAmountInput ? `${fmtKRW(draft.supportAmount)}원` : '미입력'}
+          </p>
         </div>
         <div>
           <Label className="text-xs">총수익률</Label>
@@ -2345,6 +2357,9 @@ export function ProjectEditorWizard({
       && paymentPlan.contract + paymentPlan.interim + paymentPlan.final > 0
       && yearAdvanceInterimRatio !== null
       && yearAdvanceInterimRatio < 0.7;
+    const planTotal = paymentPlan.contract + paymentPlan.interim + paymentPlan.final;
+    const planBase = financialYear?.contractAmount || draft.contractAmount;
+    const planGap = planBase - planTotal;
     return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-3">
@@ -2367,6 +2382,26 @@ export function ProjectEditorWizard({
           <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}잔금 예상 입금 시점`} aria-required={paymentPlan.final > 0} value={paymentExpectedMonths.final} onChange={(event) => updatePaymentExpectedMonth('final', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
       </div>
+      {planBase > 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px]">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-600">{financialYear ? `${financialYear.year}년 ` : ''}입금 계획 합계</span>
+            <span className="font-semibold tabular-nums text-slate-900">{fmtKRW(planTotal)}원</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span className="text-slate-600">계약금액</span>
+            <span className="tabular-nums text-slate-700">{fmtKRW(planBase)}원</span>
+          </div>
+          {/* The three amounts had to be added up by eye to see whether they matched the contract. */}
+          <div className={`mt-2 border-t border-slate-200 pt-2 ${planGap === 0 ? 'text-slate-600' : 'text-red-700'}`}>
+            {planGap === 0
+              ? '계약금액과 일치합니다.'
+              : planGap > 0
+                ? `계약금액보다 ${fmtKRW(planGap)}원 적습니다.`
+                : `계약금액보다 ${fmtKRW(Math.abs(planGap))}원 많습니다.`}
+          </div>
+        </div>
+      ) : null}
       {requiresYearAdvanceInterimReason ? (
         <div>
           <Label className="text-xs">{financialYear.year}년 선금·중도금 합계 70% 미만 사유 *</Label>
@@ -2379,8 +2414,9 @@ export function ProjectEditorWizard({
         </div>
       ) : null}
       {!financialYear && advanceInterimRatio !== null && paymentPlanTotal > 0 ? (
-        <div className={`rounded-lg border px-3 py-2 text-[12px] ${requiresAdvanceInterimReason ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+        <div className={`rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] ${requiresAdvanceInterimReason ? 'text-red-700' : 'text-slate-700'}`}>
           선금+중도금 비율 {(advanceInterimRatio * 100).toFixed(1)}%
+          {requiresAdvanceInterimReason ? ' · 70% 미만이라 사유가 필요합니다.' : ''}
         </div>
       ) : null}
       {!financialYear && requiresAdvanceInterimReason ? (
