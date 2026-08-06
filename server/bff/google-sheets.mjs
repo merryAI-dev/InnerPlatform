@@ -280,7 +280,7 @@ export function createGoogleSheetsService(options = {}) {
     };
   }
 
-  async function previewSpreadsheet({ value, sheetName, accessToken, rangeA1 }) {
+  async function previewSpreadsheet({ value, sheetName, accessToken, rangeA1, selectSheet }) {
     const spreadsheetId = extractSpreadsheetId(value);
     if (!spreadsheetId) {
       throw new GoogleSheetsServiceError(
@@ -301,6 +301,8 @@ export function createGoogleSheetsService(options = {}) {
           { statusCode: 404, code: 'sheet_tab_not_found' },
         );
       }
+    } else if (typeof selectSheet === 'function') {
+      selectedSheet = selectSheet(meta.availableSheets) || null;
     } else if (gid != null) {
       selectedSheet = meta.availableSheets.find((sheet) => sheet.sheetId === gid) || null;
     }
