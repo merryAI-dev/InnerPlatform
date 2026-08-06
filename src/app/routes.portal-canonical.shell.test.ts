@@ -31,7 +31,9 @@ describe('portal canonical edit resource routes', () => {
     expect(cashflowSource).toContain('<Navigate to={resolvePortalProjectResourcePath(currentPath, projectId)} replace />');
     expect(sheetLabSource).toContain('useParams');
     expect(sheetLabSource).toContain('routeProjectId');
-    expect(sheetLabSource).toContain("navigate(resolvePortalProjectResourcePath(currentPath, projectId), { replace: true })");
+    // 시트 연동 화면은 route projectId와 상단 선택 프로젝트를 한 프로젝트로 맞춘 뒤 URL을 정규화한다.
+    expect(sheetLabSource).toContain('resolvePortalProjectContextSync');
+    expect(sheetLabSource).toContain('navigate(projectContextPath, { replace: true })');
   });
 
   it('remounts the finance screen when the project resource changes', () => {
