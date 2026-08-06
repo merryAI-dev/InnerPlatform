@@ -941,6 +941,7 @@ class WeeklyExpenseControllerTest {
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.code").value("cashflow_month_amendment_backend_unavailable"));
 
+        verify(weeklyExpensePersistence, times(2)).runCommandTransaction(any());
         assertThat(projectionRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-sheet-lab", "project-sheet-lab")).isEmpty();
     }

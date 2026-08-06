@@ -374,6 +374,7 @@ export function createJavaWeeklyClient({
     } catch (error) {
       if (!error?.transportFailure) throw error;
       if (callerDeadlineReached()) throw callerDeadlineError(1, error.mutationOutcome);
+      if (mutation && error.mutationOutcome === 'uncertain') throw error;
       if (!retryAllowed) throw error;
       trace.emit('retry_scheduled', {
         attempt: 2,

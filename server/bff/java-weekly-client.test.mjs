@@ -447,7 +447,7 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it('retries a transient JVM transport failure with the same request body', async () => {
+  it('does not retry a sent mutation after a transient JVM transport failure', async () => {
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockResolvedValueOnce({
@@ -457,18 +457,17 @@ describe('Java weekly cashflow client', () => {
       });
     const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
 
-    await client.applyCashflowSheetLab({
+    await expect(client.applyCashflowSheetLab({
       context,
       projectId: 'project-a',
       idempotencyKey: 'apply-retry-1',
       ...monthlyContract,
-    });
+    })).rejects.toMatchObject({ mutationOutcome: 'uncertain', attempt: 1 });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls[1][1].body).toBe(fetchImpl.mock.calls[0][1].body);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('separates auth, TTFB, body read, and retry timing without logging request data', async () => {
+  it('records an uncertain mutation attempt without logging request data', async () => {
     const events = [];
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -483,24 +482,24 @@ describe('Java weekly cashflow client', () => {
       performanceLogger: (event) => events.push(event),
     });
 
-    await client.applyCashflowSheetLab({
+    await expect(client.applyCashflowSheetLab({
       context: { ...context, requestId: 'req-performance-1' },
       projectId: 'project-a',
       idempotencyKey: 'apply-performance-1',
       ...monthlyContract,
-    });
+    })).rejects.toMatchObject({ mutationOutcome: 'uncertain', attempt: 1 });
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(events.every((event) => event.requestId === 'req-performance-1')).toBe(true);
-    expect(events.filter((event) => event.phase === 'attempt_start').map((event) => event.attempt)).toEqual([1, 2]);
+    expect(events.filter((event) => event.phase === 'attempt_start').map((event) => event.attempt)).toEqual([1]);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ phase: 'auth_headers', attempt: 1, outcome: 'ok' }),
       expect.objectContaining({ phase: 'upstream_ttfb', attempt: 1, outcome: 'error' }),
-      expect.objectContaining({ phase: 'retry_scheduled', attempt: 2, retryable: true }),
-      expect.objectContaining({ phase: 'upstream_ttfb', attempt: 2, outcome: 'ok' }),
-      expect.objectContaining({ phase: 'body_read', attempt: 2, outcome: 'ok', statusCode: 200 }),
-      expect.objectContaining({ phase: 'attempt_complete', attempt: 2, outcome: 'ok', statusCode: 200 }),
+      expect.objectContaining({ phase: 'attempt_complete', attempt: 1, outcome: 'error' }),
+    ]));
+    expect(events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ phase: 'retry_scheduled' }),
     ]));
     const serialized = JSON.stringify(events);
     expect(serialized).not.toContain('project-a');
@@ -509,7 +508,7 @@ describe('Java weekly cashflow client', () => {
     expect(serialized).not.toContain('service-token');
   });
 
-  it('starts the retry before a slow performance logger runs', async () => {
+  it('reports a failed mutation asynchronously without retrying it', async () => {
     let loggerRan = false;
     const fetchImpl = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -533,9 +532,9 @@ describe('Java weekly cashflow client', () => {
       projectId: 'project-a',
       idempotencyKey: 'apply-slow-logger',
       ...monthlyContract,
-    })).resolves.toMatchObject({ ok: true });
+    })).rejects.toMatchObject({ mutationOutcome: 'uncertain', attempt: 1 });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(loggerRan).toBe(false);
     await new Promise((resolve) => setImmediate(resolve));
     expect(loggerRan).toBe(true);
@@ -588,12 +587,12 @@ describe('Java weekly cashflow client', () => {
     })).rejects.toMatchObject({
       statusCode: 503,
       code: 'jvm_weekly_api_unreachable',
-      attempt: 2,
+      attempt: 1,
       retryable: true,
       mutationOutcome: 'uncertain',
       elapsedMs: expect.any(Number),
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('aborts a hanging JVM request before the frontend timeout and returns the stable unreachable code', async () => {
@@ -614,11 +613,11 @@ describe('Java weekly cashflow client', () => {
     })).rejects.toMatchObject({
       statusCode: 503,
       code: 'jvm_weekly_api_unreachable',
-      attempt: 2,
+      attempt: 1,
       retryable: true,
       mutationOutcome: 'uncertain',
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl.mock.calls.every(([, init]) => init.signal instanceof AbortSignal)).toBe(true);
   });
 
@@ -677,7 +676,30 @@ describe('Java weekly cashflow client', () => {
     expect(fetchImpl.mock.calls.every(([url]) => String(url).includes('metadata.google.internal'))).toBe(true);
   });
 
-  it('caps the configured timeout so two attempts stay within the 24-second total budget', async () => {
+  it('does not resend an annual mutation after a transport failure', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const client = createJavaWeeklyClient({ env: liveEnv(), fetchImpl });
+
+    await expect(client.applyCashflowSheetAnnualTotal({
+      context,
+      projectId: 'project-a',
+      idempotencyKey: 'annual-unreachable-1',
+      sourceRevision: 'source-a',
+      year: 2026,
+      expectedRevision: 0,
+      cells: [],
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'jvm_weekly_api_unreachable',
+      attempt: 1,
+      mutationOutcome: 'uncertain',
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps an in-flight mutation at one configured attempt', async () => {
     vi.useFakeTimers();
     try {
       const fetchImpl = vi.fn(async (_url, init) => new Promise((_resolve, reject) => {
@@ -697,9 +719,9 @@ describe('Java weekly cashflow client', () => {
       const assertion = expect(requestPromise)
         .rejects.toMatchObject({ statusCode: 503, code: 'jvm_weekly_api_unreachable' });
 
-      await vi.advanceTimersByTimeAsync(24_001);
+      await vi.advanceTimersByTimeAsync(12_001);
       await assertion;
-      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

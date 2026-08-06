@@ -264,6 +264,8 @@ export function CashflowSheetLabPage() {
     && closedMonthStage?.closedMonthDifferenceCount === closedMonthChangeRows.length
     && closedMonthWarning.every((month) => !month.truncatedChangeCount);
   const [applyResumeRequired, setApplyResumeRequired] = useState(false);
+  const [applyStatusState, setApplyStatusState] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [applyStatusRetry, setApplyStatusRetry] = useState(0);
   const [closedMonthChangeReason, setClosedMonthChangeReason] = useState('');
   const [closedMonthFormulaAccepted, setClosedMonthFormulaAccepted] = useState(false);
   const [closedMonthPendingApprovalAccepted, setClosedMonthPendingApprovalAccepted] = useState(false);
@@ -459,11 +461,13 @@ export function CashflowSheetLabPage() {
     setPendingApprovalStage(null);
     setFormulaMismatchPrompt(null);
     setApplyResumeRequired(false);
+    setApplyStatusState('checking');
   }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
     if (!projectId || !actor.idToken) return () => { cancelled = true; };
+    setApplyStatusState('checking');
     const loadApplyStatus = async (): Promise<void> => {
       try {
         const result = await runWithBffAuthRetry('apply.status', (requestActor) => (
@@ -473,7 +477,14 @@ export function CashflowSheetLabPage() {
             projectId,
           })
         ));
-        if (cancelled || result?.status !== 'APPLYING' || !result.stagedRun) return;
+        if (cancelled) return;
+        if (!result) {
+          setApplyStatusState('error');
+          setErrorMessage('기존 시트 반영 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+          return;
+        }
+        setApplyStatusState('ready');
+        if (result?.status !== 'APPLYING' || !result.stagedRun) return;
         setClosedMonthStage(result.stagedRun);
         setClosedMonthWarning(result.stagedRun.closedMonthDifferences || []);
         setClosedMonthChangeReason(result.applyInput?.closedMonthChangeReason || '');
@@ -481,15 +492,17 @@ export function CashflowSheetLabPage() {
         setClosedMonthPendingApprovalAccepted(result.applyInput?.acceptPendingApprovalDifferences === true);
         setApplyResumeRequired(true);
         setErrorMessage('이전 시트 반영이 아직 완료 상태로 확인되지 않았습니다. 반영 상태를 확인해 주세요.');
-      } catch {
-        // 복구 상태 조회 실패는 시트 설정 화면 진입 자체를 막지 않는다.
+      } catch (error) {
+        if (cancelled) return;
+        setApplyStatusState('error');
+        setErrorMessage(`기존 시트 반영 상태를 확인하지 못했습니다. ${formatError(error)}`);
       }
     };
     void loadApplyStatus();
     return () => {
       cancelled = true;
     };
-  }, [actor.idToken, orgId, projectId]);
+  }, [actor.idToken, applyStatusRetry, orgId, projectId]);
 
   useEffect(() => {
     if (projectYears.includes(sourceYear)) return;
@@ -722,7 +735,9 @@ export function CashflowSheetLabPage() {
     if (
       !projectId
       || loading
-      || !spreadsheetId
+      || applyStatusState !== 'ready'
+      || (applyResumeRequired && !stagedOverride)
+      || (!stagedOverride && !spreadsheetId)
       || (!stagedOverride && (mirror?.status !== 'FRESH' || !mirror.sourceRevision || reviewedSourceKey !== sourceKey))
     ) return;
     const startedAt = Date.now();
@@ -903,6 +918,13 @@ export function CashflowSheetLabPage() {
         totalDurationMs: Date.now() - startedAt,
         ...errorDiagnostics(error),
       }, 'warn');
+      if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_sheet_apply_in_progress') {
+        closeClosedMonthDialog();
+        setApplyStatusState('checking');
+        setApplyStatusRetry((current) => current + 1);
+        setErrorMessage('진행 중인 시트 반영 작업을 확인하고 있습니다.');
+        return;
+      }
       if (activeStep === 'apply' && getErrorCode(error) === 'cashflow_formula_mismatch_confirmation_required' && staged) {
         const issues = cashflowFormulaMismatchesFromError(error);
         if (issues.length > 0) {
@@ -953,7 +975,15 @@ export function CashflowSheetLabPage() {
   const canRefresh = Boolean(projectId && spreadsheetId && isCurrentSheetConfigSaved && !loading);
   const canSaveConfig = Boolean(projectId && spreadsheetId && !loading);
   const hasCurrentFreshMirror = Boolean(mirror?.status === 'FRESH' && mirror.sourceRevision && reviewedSourceKey === sourceKey);
-  const canOverwrite = Boolean(projectId && spreadsheetId && hasCurrentFreshMirror && !reflectResult && !loading);
+  const canOverwrite = Boolean(
+    projectId
+    && spreadsheetId
+    && hasCurrentFreshMirror
+    && !reflectResult
+    && !loading
+    && applyStatusState === 'ready'
+    && !applyResumeRequired
+  );
   const hasSavedConfig = Boolean(savedConfig?.value);
   const currentStep = reflectResult || hasCurrentFreshMirror ? 3 : isCurrentSheetConfigSaved ? 2 : 1;
   const stepNumberClass = (step: number) =>
@@ -1145,11 +1175,18 @@ export function CashflowSheetLabPage() {
                     ref={stageButtonRef}
                     type="button"
                     className="h-10 gap-1.5 rounded-none px-4 text-[13px]"
-                    disabled={!canOverwrite}
-                    onClick={() => void handleOverwriteSheetValues()}
+                    disabled={applyStatusState === 'error' ? loading : !canOverwrite}
+                    onClick={() => {
+                      if (applyStatusState === 'error') {
+                        setErrorMessage('');
+                        setApplyStatusRetry((current) => current + 1);
+                        return;
+                      }
+                      void handleOverwriteSheetValues();
+                    }}
                   >
                     {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    시트 값으로 덮어쓰기
+                    {applyStatusState === 'error' ? '반영 상태 다시 확인' : '시트 값으로 덮어쓰기'}
                   </Button>
                 </div>
               )}
