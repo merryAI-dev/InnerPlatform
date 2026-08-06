@@ -28,7 +28,7 @@
     },
     {
       "path": "/api/internal/workers/cashflow-sheet-sync/run",
-      "schedule": "30 0 * * 4"
+      "schedule": "0 9 * * 4"
     }
   ],
   "redirects": [
