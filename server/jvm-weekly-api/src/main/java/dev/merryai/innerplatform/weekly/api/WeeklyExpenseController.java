@@ -327,6 +327,7 @@ public class WeeklyExpenseController {
             .toList();
         return new CashflowSnapshotResponse(
             projectId,
+            source.targetRevision(),
             projection,
             actual,
             buildCashflowReadModel(projection, actual)

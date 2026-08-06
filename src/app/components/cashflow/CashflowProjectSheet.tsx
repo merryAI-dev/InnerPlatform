@@ -1718,9 +1718,6 @@ export function CashflowProjectSheet({
       || `w${weekNo}`;
   }
 
-  const mirroredAnnualTotals = useMemo(() => new Map((cashflowSheetMirror?.sheetFacts?.annualCashflowTotals || [])
-    .filter((row) => Number.isSafeInteger(row.year))
-    .map((row) => [row.year, row])), [cashflowSheetMirror?.sheetFacts?.annualCashflowTotals]);
   const annualYears = useMemo(() => {
     return CASHFLOW_STANDARD_ANNUAL_YEARS.filter((year) => year !== selectedYear);
   }, [selectedYear]);
@@ -1743,10 +1740,6 @@ export function CashflowProjectSheet({
     mode,
   );
   const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
-    const pinned = monthCloseResult?.status === 'OPEN'
-      ? mirroredAnnualTotals.get(year)?.[mode] || null
-      : null;
-    if (pinned) return pinned;
     const canonical = canonicalAnnualTotalFor(year, mode);
     if (canonical) return canonical;
     const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
@@ -1763,15 +1756,9 @@ export function CashflowProjectSheet({
         net: totalIn - totalOut,
       };
     }
-    return mirroredAnnualTotals.get(year)?.[mode] || null;
+    return null;
   };
-  const sheetGrandTotalFor = (mode: 'projection' | 'actual') => cashflowSheetMirror?.sheetFacts?.cashflowGrandTotalsBySourceYear
-    ?.find((total) => total.sourceYear === selectedYear)?.[mode] || null;
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
-    const sheetGrandTotal = sheetGrandTotalFor(mode);
-    if (Object.prototype.hasOwnProperty.call(sheetGrandTotal?.lineAmounts || {}, lineId)) {
-      return Number(sheetGrandTotal?.lineAmounts[lineId] || 0);
-    }
     const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
       rowTotals?: Record<CashflowSheetLineId, number>;
       lineAmounts?: Record<CashflowSheetLineId, number>;
@@ -1840,7 +1827,7 @@ export function CashflowProjectSheet({
       rows,
       changedRows: rows.filter((row) => row.changed),
     };
-  }, [cashflowSheetMirror, mirroredAnnualTotals, monthCloseResult, selectedYear, visibleComparisonAnnualYears, visibleComparisonWeeks, yearMonth]);
+  }, [monthCloseResult, selectedYear, visibleComparisonAnnualYears, visibleComparisonWeeks, yearMonth]);
 
   const cashflowTotalPeriodLabel = comparisonScope.periodLabel;
   const sheetRangeLabel = cashflowSheetConfig
@@ -1916,44 +1903,6 @@ export function CashflowProjectSheet({
     weekNo: number;
     lineId: CashflowSheetLineId;
   }): { amount: number; hasValue: boolean; mismatch: boolean } {
-    const monthIsClosed = (
-      monthCloseResult?.yearMonth === params.targetYearMonth
-      && ['CLOSED', 'REOPEN_REQUESTED'].includes(monthCloseResult.status)
-    ) || monthCloseResult?.dashboard?.monthCloseStatuses?.some((month) => (
-      month.yearMonth === params.targetYearMonth && ['CLOSED', 'REOPEN_REQUESTED'].includes(month.status)
-    ));
-    const pinned = !monthIsClosed && cashflowSheetMirror?.status === 'FRESH'
-      ? cashflowSheetMirror.cells?.find((candidate) => (
-        candidate.mode === params.mode
-        && candidate.yearMonth === params.targetYearMonth
-        && candidate.weekNo === params.weekNo
-        && candidate.lineId === params.lineId
-      ))
-      : null;
-    if (pinned) {
-      const hasValue = pinned.state === 'VALUE' || pinned.state === 'ZERO';
-      return {
-        amount: hasValue ? Number(pinned.amount || 0) : 0,
-        hasValue,
-        mismatch: false,
-      };
-    }
-    if (params.targetYearMonth === yearMonth && monthCloseResult?.dashboard) {
-      const cell = monthCloseResult.dashboard.cells?.find((candidate) => (
-        candidate.mode === params.mode
-        && candidate.weekNo === params.weekNo
-        && candidate.cashflowLine === params.lineId
-      ));
-      const comparisonLine = monthCloseResult.dashboard.comparison?.weeks
-        ?.find((candidate) => candidate.weekNo === params.weekNo)
-        ?.lines?.find((candidate) => candidate.lineId === params.lineId);
-      const hasValue = cell?.cellState === 'VALUE' || cell?.cellState === 'ZERO';
-      return {
-        amount: hasValue ? Number(cell?.amount || 0) : 0,
-        hasValue,
-        mismatch: comparisonLine?.mismatch === true,
-      };
-    }
     const month = monthCloseResult?.dashboard?.canonical?.months?.find((candidate) => candidate.yearMonth === params.targetYearMonth);
     const week = month?.[params.mode]?.weeks?.find((candidate) => candidate.weekNo === params.weekNo);
     const comparisonLine = month?.comparison?.weeks
@@ -1976,37 +1925,20 @@ export function CashflowProjectSheet({
     return getServerReadCell(params).amount;
   }
 
-  function getPinnedDerivedAmount(
+  function getCanonicalDerivedAmount(
     mode: 'projection' | 'actual',
     targetYearMonth: string,
     weekNo: number,
     kind: 'totalIn' | 'totalOut' | 'net',
   ): number | null {
-    const selectedMonthIsClosed = (
-      monthCloseResult?.yearMonth === targetYearMonth
-      && ['CLOSED', 'REOPEN_REQUESTED'].includes(monthCloseResult.status)
-    );
-    const closedMonthStatus = monthCloseResult?.dashboard?.monthCloseStatuses?.find((month) => (
-      month.yearMonth === targetYearMonth && ['CLOSED', 'REOPEN_REQUESTED'].includes(month.status)
-    ));
-    const monthIsClosed = selectedMonthIsClosed || Boolean(closedMonthStatus);
-    const frozenChecks = selectedMonthIsClosed
-      ? monthCloseResult?.dashboard?.sheetCalculationChecks
-      : closedMonthStatus?.sheetCalculationChecks;
-    const check = monthIsClosed
-      ? frozenChecks?.find((candidate) => (
-        candidate.mode === mode && candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo
-      ))
-      : cashflowSheetMirror?.status === 'FRESH'
-        ? cashflowSheetMirror.sheetFacts?.weeklyCalculationChecks?.find((candidate) => (
-          candidate.mode === mode && candidate.yearMonth === targetYearMonth && candidate.weekNo === weekNo
-        ))
-        : null;
+    const check = monthCloseResult?.dashboard?.canonical?.months
+      ?.find((month) => month.yearMonth === targetYearMonth)?.[mode]?.weeks
+      ?.find((week) => week.weekNo === weekNo);
     const value = kind === 'totalIn'
-      ? check?.reported?.depositTotal
+      ? check?.totalIn
       : kind === 'totalOut'
-        ? check?.reported?.withdrawalTotal
-        : check?.reported?.balance;
+        ? check?.totalOut
+        : check?.net;
     return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
   }
 
@@ -2197,14 +2129,6 @@ export function CashflowProjectSheet({
       actual: readServerSummary('actual'),
     };
     const projectTotalsFor = (mode: 'projection' | 'actual') => {
-      const sheetGrandTotal = sheetGrandTotalFor(mode);
-      if (sheetGrandTotal) {
-        return {
-          totalIn: Number(sheetGrandTotal.totalIn || 0),
-          totalOut: Number(sheetGrandTotal.totalOut || 0),
-          net: Number(sheetGrandTotal.net || 0),
-        };
-      }
       if (annualYears.some((year) => !annualTotalFor(year, mode))) {
         return { totalIn: null, totalOut: null, net: null };
       }
@@ -2301,7 +2225,7 @@ export function CashflowProjectSheet({
           {previousAnnualYears.map((year) => renderAnnualSummaryCell(mode, kind, year, emphasis, rowTone))}
           {visibleWeeks.map((week, index) => renderSummaryCell({
             keyName: `${mode}-${kind}-${week.yearMonth}-${week.weekNo}`,
-            value: getPinnedDerivedAmount(mode, week.yearMonth, week.weekNo, kind) ?? (derived[mode].weekTotals[index]?.[kind] || 0),
+            value: getCanonicalDerivedAmount(mode, week.yearMonth, week.weekNo, kind) ?? (derived[mode].weekTotals[index]?.[kind] || 0),
             mode,
             isThisWeek: todayYearMonth === week.yearMonth && todayIso >= week.weekStart && todayIso <= week.weekEnd,
             monthCloseStatus: monthCloseStatusByMonth.get(week.yearMonth),

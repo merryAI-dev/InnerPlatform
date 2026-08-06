@@ -6,6 +6,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertJavaCashflowMatchesFirestore,
+  assertJavaCashflowReadbackMatchesAppliedMonths,
   classifyCashflowComparisons,
   mountCashflowSheetLabRoutes,
 } from './cashflow-sheet-lab.mjs';
@@ -235,6 +236,22 @@ function javaBatchApplyResponse(request, resultingTargetRevision) {
     settledWeekChanges: [],
     durationMs: 12,
     auditId: 'audit-batch',
+  };
+}
+
+function completeStagedMonth(yearMonth = '2026-01') {
+  return {
+    yearMonth,
+    apply: true,
+    cells: ['projection', 'actual'].flatMap((mode) => Array.from({ length: 5 }, (_unused, weekIndex) => (
+      CASHFLOW_LINE_IDS.map((cashflowLine) => ({
+        yearMonth,
+        mode,
+        weekNo: weekIndex + 1,
+        cashflowLine,
+        cellState: 'EMPTY',
+      }))
+    )).flat()),
   };
 }
 
@@ -541,6 +558,63 @@ function createApp({ context = {}, db = createDb(), googleSheetsService, routeOp
       weeklyCheckCount: 0,
     }));
   }
+  if (routeOptions.javaWeeklyClient && !routeOptions.javaWeeklyClient.getCashflowSnapshot) {
+    const snapshot = { projectId: 'project-a', targetRevision: '', projection: [], actual: [] };
+    const appliedRequests = [];
+    const remember = (result) => {
+      snapshot.projectId = result.projectId;
+      snapshot.targetRevision = result.resultingTargetRevision;
+      const monthResults = Array.isArray(result.months) ? result.months : [result];
+      for (const month of monthResults) {
+        snapshot.projection = snapshot.projection
+          .filter((line) => line.yearMonth !== month.yearMonth)
+          .concat(month.projection || []);
+        snapshot.actual = snapshot.actual
+          .filter((line) => line.yearMonth !== month.yearMonth || line.sheetKey !== 'cashflow-sheet-lab')
+          .concat(month.actual || []);
+      }
+      return result;
+    };
+    for (const method of ['applyCashflowSheetLab', 'applyCashflowSheetBatch']) {
+      if (!routeOptions.javaWeeklyClient[method]) continue;
+      const apply = routeOptions.javaWeeklyClient[method];
+      if (vi.isMockFunction(apply)) {
+        const implementation = apply.getMockImplementation();
+        apply.mockImplementation(async (...args) => {
+          appliedRequests.push(args[0]);
+          return remember(await implementation(...args));
+        });
+      } else {
+        routeOptions.javaWeeklyClient[method] = async (...args) => {
+          appliedRequests.push(args[0]);
+          return remember(await apply(...args));
+        };
+      }
+    }
+    if (routeOptions.javaWeeklyClient.getCashflowSheetOperationStatus) {
+      const readStatus = routeOptions.javaWeeklyClient.getCashflowSheetOperationStatus;
+      const implementation = vi.isMockFunction(readStatus) ? readStatus.getMockImplementation() : readStatus;
+      const wrapped = async (...args) => {
+        const result = await implementation(...args);
+        if (result?.status === 'APPLIED') snapshot.targetRevision = result.resultingTargetRevision;
+        return result;
+      };
+      if (vi.isMockFunction(readStatus)) readStatus.mockImplementation(wrapped);
+      else routeOptions.javaWeeklyClient.getCashflowSheetOperationStatus = wrapped;
+    }
+    routeOptions.javaWeeklyClient.getCashflowSnapshot = vi.fn(async () => {
+      if (snapshot.projection.length === 0 && snapshot.actual.length === 0 && appliedRequests.length > 0) {
+        const request = appliedRequests.at(-1);
+        const months = Array.isArray(request.months) ? request.months : [request];
+        for (const month of months.filter((candidate) => candidate.apply !== false)) {
+          const response = javaApplyResponse({ ...request, ...month }, snapshot.targetRevision);
+          snapshot.projection.push(...response.projection);
+          snapshot.actual.push(...response.actual);
+        }
+      }
+      return { ...snapshot };
+    });
+  }
   mountCashflowSheetLabRoutes(app, {
     db,
     googleSheetsService: googleSheetsService || {
@@ -619,6 +693,64 @@ function createDisabledApp() {
 }
 
 describe('cashflow sheet lab route', () => {
+  it('accepts a complete JVM canonical readback while preserving EMPTY, ZERO, and VALUE', () => {
+    const revision = `sha256:${'a'.repeat(64)}`;
+    const month = completeStagedMonth();
+    month.cells.find((cell) => cell.mode === 'projection' && cell.weekNo === 1).cellState = 'ZERO';
+    month.cells.find((cell) => cell.mode === 'projection' && cell.weekNo === 1).amount = 0;
+    month.cells.find((cell) => cell.mode === 'actual' && cell.weekNo === 2).cellState = 'VALUE';
+    month.cells.find((cell) => cell.mode === 'actual' && cell.weekNo === 2).amount = 1234;
+    const projectionCell = month.cells.find((cell) => cell.cellState === 'ZERO');
+    const actualCell = month.cells.find((cell) => cell.cellState === 'VALUE');
+
+    expect(assertJavaCashflowReadbackMatchesAppliedMonths({
+      projectId: 'project-a',
+      targetRevision: revision,
+      projection: [{
+        yearMonth: projectionCell.yearMonth,
+        weekNo: projectionCell.weekNo,
+        cashflowLine: projectionCell.cashflowLine,
+        amount: 0,
+      }],
+      actual: [{
+        sheetKey: 'cashflow-sheet-lab',
+        yearMonth: actualCell.yearMonth,
+        weekNo: actualCell.weekNo,
+        cashflowLine: actualCell.cashflowLine,
+        amount: 1234,
+      }],
+    }, [month], { projectId: 'project-a', resultingTargetRevision: revision })).toBe(160);
+  });
+
+  it.each([
+    ['revision', (snapshot) => { snapshot.targetRevision = `sha256:${'b'.repeat(64)}`; }, 'cashflow_jvm_readback_revision_mismatch'],
+    ['missing ZERO', (snapshot) => { snapshot.projection = []; }, 'cashflow_jvm_readback_mismatch'],
+    ['wrong VALUE', (snapshot) => { snapshot.actual[0].amount += 1; }, 'cashflow_jvm_readback_mismatch'],
+    ['unknown line', (snapshot) => { snapshot.actual[0].cashflowLine = 'UNKNOWN'; }, 'jvm_cashflow_snapshot_invalid'],
+    ['duplicate projection', (snapshot) => { snapshot.projection.push({ ...snapshot.projection[0] }); }, 'jvm_cashflow_snapshot_invalid'],
+  ])('rejects a JVM canonical readback with %s mismatch', (_label, mutate, expectedCode) => {
+    const revision = `sha256:${'a'.repeat(64)}`;
+    const month = completeStagedMonth();
+    const projectionCell = month.cells[0];
+    projectionCell.cellState = 'ZERO';
+    projectionCell.amount = 0;
+    const actualCell = month.cells.find((cell) => cell.mode === 'actual');
+    actualCell.cellState = 'VALUE';
+    actualCell.amount = 1234;
+    const snapshot = {
+      projectId: 'project-a',
+      targetRevision: revision,
+      projection: [{ yearMonth: '2026-01', weekNo: 1, cashflowLine: projectionCell.cashflowLine, amount: 0 }],
+      actual: [{ sheetKey: 'cashflow-sheet-lab', yearMonth: '2026-01', weekNo: 1, cashflowLine: actualCell.cashflowLine, amount: 1234 }],
+    };
+    mutate(snapshot);
+    expect(() => assertJavaCashflowReadbackMatchesAppliedMonths(
+      snapshot,
+      [month],
+      { projectId: 'project-a', resultingTargetRevision: revision },
+    )).toThrow(expect.objectContaining({ code: expectedCode }));
+  });
+
   it.each([
     [0, 0, 0, 'ALL_SYNCED'],
     [0, 1, 1, 'FIRESTORE_DIFFERS'],

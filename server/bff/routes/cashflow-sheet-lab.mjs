@@ -1014,6 +1014,60 @@ export function assertJavaCashflowMatchesFirestore(javaSnapshot, firestoreSnapsh
   }
 }
 
+export function assertJavaCashflowReadbackMatchesAppliedMonths(
+  javaSnapshot,
+  stagedMonths,
+  { projectId, resultingTargetRevision } = {},
+) {
+  if (
+    readOptionalText(javaSnapshot?.projectId) !== readOptionalText(projectId)
+    || !/^sha256:[a-f0-9]{64}$/.test(readOptionalText(resultingTargetRevision))
+    || readOptionalText(javaSnapshot?.targetRevision) !== readOptionalText(resultingTargetRevision)
+  ) {
+    throw createHttpError(502, 'JVM canonical revision does not match the applied revision.', 'cashflow_jvm_readback_revision_mismatch');
+  }
+  const expected = new Map();
+  for (const month of stagedMonths || []) {
+    for (const cell of month?.cells || []) {
+      const normalized = {
+        sourceYear: Number(readOptionalText(month?.yearMonth).slice(0, 4)),
+        yearMonth: readOptionalText(month?.yearMonth),
+        weekNo: Number(cell?.weekNo),
+        mode: readOptionalText(cell?.mode),
+        cashflowLine: readOptionalText(cell?.cashflowLine),
+        state: readOptionalText(cell?.cellState),
+        ...(['VALUE', 'ZERO'].includes(readOptionalText(cell?.cellState)) ? { amount: Number(cell?.amount) } : {}),
+      };
+      const key = canonicalCellKey(normalized);
+      if (
+        !Number.isSafeInteger(normalized.sourceYear)
+        || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(normalized.yearMonth)
+        || !Number.isSafeInteger(normalized.weekNo) || normalized.weekNo < 1 || normalized.weekNo > 5
+        || !CASHFLOW_MODES.includes(normalized.mode)
+        || !CASHFLOW_LINE_ORDER.has(normalized.cashflowLine)
+        || !['EMPTY', 'ZERO', 'VALUE'].includes(normalized.state)
+        || (normalized.state !== 'EMPTY' && !Number.isSafeInteger(normalized.amount))
+        || expected.has(key)
+      ) {
+        throw createHttpError(502, 'Staged cashflow readback contract is invalid.', 'cashflow_jvm_readback_contract_invalid');
+      }
+      expected.set(key, normalized);
+    }
+  }
+  const expectedCellCount = (stagedMonths || []).length * CASHFLOW_MODES.length * 5 * CASHFLOW_ALL_LINES.length;
+  if (expected.size !== expectedCellCount) {
+    throw createHttpError(502, 'Staged cashflow readback contract is incomplete.', 'cashflow_jvm_readback_contract_invalid');
+  }
+  const actual = canonicalCellsFromSnapshot(
+    { weeks: canonicalSheetSourceWeeksFromJavaSnapshot(javaSnapshot) },
+    expected.keys(),
+  );
+  if (compareCanonicalCells(expected, actual, expected.keys()).changeCount !== 0) {
+    throw createHttpError(502, 'JVM canonical readback does not match the staged sheet.', 'cashflow_jvm_readback_mismatch');
+  }
+  return expected.size;
+}
+
 function canonicalCellKey(cell) {
   return `${cell.sourceYear}:${cell.yearMonth}:${cell.weekNo}:${cell.mode}:${cell.cashflowLine}`;
 }
@@ -3408,6 +3462,27 @@ async function applyStagedCashflowSheetLab({
   }
 
   const appliedMonthSnapshots = stagedMonths.filter((month) => month.apply);
+  let canonicalReadbackVerifiedCellCount = 0;
+  if (appliedMonthSnapshots.length > 0) {
+    let canonicalReadback;
+    try {
+      canonicalReadback = await javaWeeklyClient.getCashflowSnapshot({ context, projectId });
+      canonicalReadbackVerifiedCellCount = assertJavaCashflowReadbackMatchesAppliedMonths(
+        canonicalReadback,
+        appliedMonthSnapshots,
+        { projectId, resultingTargetRevision: targetRevision },
+      );
+    } catch (error) {
+      throw Object.assign(createHttpError(
+        503,
+        'JVM 저장 후 canonical 값을 확인하지 못했습니다. 같은 요청으로 다시 확인해 주세요.',
+        'cashflow_sheet_canonical_readback_uncertain',
+      ), {
+        cause: error,
+        details: { readbackCode: readOptionalText(error?.code) || 'cashflow_jvm_readback_failed' },
+      });
+    }
+  }
   const appliedCells = [
     ...appliedMonthSnapshots.flatMap((month) => month.cells),
     ...stagedYears.flatMap((year) => year.cells),
@@ -3439,6 +3514,7 @@ async function applyStagedCashflowSheetLab({
       role: readOptionalText(context?.actorRole) || 'workspace_user',
     },
     verifiedLineCount,
+    canonicalReadbackVerifiedCellCount,
     formulaValidation: verifiedFormulaValidation,
     firebaseResult: {
       ok: true,
@@ -3458,6 +3534,7 @@ async function applyStagedCashflowSheetLab({
         auditId: readOptionalText(result.auditId) || undefined,
       })),
       verifiedLineCount,
+      canonicalReadbackVerifiedCellCount,
     },
   };
   const runCompletionPatch = {
