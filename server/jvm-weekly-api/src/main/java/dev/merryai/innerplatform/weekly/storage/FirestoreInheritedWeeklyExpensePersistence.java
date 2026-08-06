@@ -1516,6 +1516,16 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         CompleteCashflowWeeklyUpdateRequest request
     ) {
         requireValidatedCashflowWriteScope(actor.tenantId(), projectId);
+        Map<String, Object> project = data(get(db.document(
+            "orgs/" + actor.tenantId() + "/projects/" + projectId
+        )));
+        if (text(project.get("executiveApproverId"), "").isBlank()) {
+            throw new WeeklyExpenseEditLeaseException(
+                409,
+                "cashflow_weekly_approver_required",
+                "주간 정산 전에 조직장을 먼저 선택·확정해 주세요."
+            );
+        }
         requireYearMonth(request.yearMonth());
         if (request.weekNo() < 1 || request.weekNo() > CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT) {
             throw new IllegalArgumentException("Cashflow weekNo must be between 1 and 5.");

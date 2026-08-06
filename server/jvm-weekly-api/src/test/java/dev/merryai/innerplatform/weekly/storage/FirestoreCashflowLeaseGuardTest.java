@@ -213,6 +213,34 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void rejectsWeeklyCompletionUntilExecutiveApproverIsConfirmed() {
+        Fixture fixture = fixture(activeMember(), Map.of());
+        putCompleteProjectionWindow(fixture, "2026-08", 2);
+        fixture.documents.put("orgs/tenant-a/projects/project-a", Map.of(
+            "id", "project-a",
+            "tenantId", "tenant-a"
+        ));
+
+        Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).completeCashflowWeeklyUpdate(
+            ACTOR,
+            "project-a",
+            new CompleteCashflowWeeklyUpdateRequest(
+                "approver-required", "2026-08", 2, "2026-08-04T01:21:00Z", "NO_CHANGES"
+            )
+        )));
+
+        assertThat(failure).isInstanceOfSatisfying(WeeklyExpenseEditLeaseException.class, error -> {
+            assertThat(error.statusCode()).isEqualTo(409);
+            assertThat(error.code()).isEqualTo("cashflow_weekly_approver_required");
+        });
+        assertThat(fixture.documents)
+            .doesNotContainKey("orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-08-w2")
+            .doesNotContainKey("orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-08");
+    }
+
+    @Test
     void writesCanonicalJanuaryAndAugustWeeklySettlementKeys() {
         Fixture january = fixture(activeMember(), Map.of());
         Fixture august = fixture(activeMember(), Map.of());
@@ -4627,7 +4655,8 @@ class FirestoreCashflowLeaseGuardTest {
         if (projectExists) {
             docs.put("orgs/tenant-a/projects/project-a", Map.of(
                 "id", "project-a",
-                "tenantId", "tenant-a"
+                "tenantId", "tenant-a",
+                "executiveApproverId", "manager-1"
             ));
         }
 
