@@ -412,7 +412,6 @@ export function CashflowProjectSheet({
   const [reopenAction, setReopenAction] = useState<'request' | 'approve' | 'reject' | null>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
-  const [pendingAutoStageRevision, setPendingAutoStageRevision] = useState('');
   const [sheetReviewDialogOpen, setSheetReviewDialogOpen] = useState(false);
   const [lateSheetApply, setLateSheetApply] = useState<CashflowSheetLabStageResult | null>(null);
   const [sheetApplyResumeRequired, setSheetApplyResumeRequired] = useState(false);
@@ -654,7 +653,6 @@ export function CashflowProjectSheet({
   useEffect(() => {
     let cancelled = false;
     setCashflowSheetMirror(null);
-    setPendingAutoStageRevision('');
     if (!projectId || !orgId || !user?.uid) return () => { cancelled = true; };
 
     const readMirror = (actor: NonNullable<Awaited<ReturnType<typeof resolveBffActor>>>) => (
@@ -1372,7 +1370,6 @@ export function CashflowProjectSheet({
         idempotencyKey: refreshIdempotencyKey,
       })
     );
-    let handingOffToAutoStage = false;
     const rememberMirror = (mirror: CashflowSheetLabMirrorResult) => {
       setCashflowSheetMirror((current) => mirror.status === 'STALE' && current?.sourceRevision
         ? {
@@ -1385,8 +1382,6 @@ export function CashflowProjectSheet({
           }
         : mirror);
       if (mirror.status === 'FRESH' && mirror.sourceRevision) {
-        handingOffToAutoStage = true;
-        setPendingAutoStageRevision(mirror.sourceRevision);
         void loadCashflowEvents();
         toast.success('시트값을 불러왔습니다. MYSCube 시트 반영 전 금액을 확인합니다.');
       } else if (mirror.status === 'STALE') {
@@ -1458,7 +1453,7 @@ export function CashflowProjectSheet({
       });
       toast.error(resolveApiErrorMessage(error, '시트값을 불러오지 못했습니다.'));
     } finally {
-      if (!handingOffToAutoStage) setSheetRefreshLoading(false);
+      setSheetRefreshLoading(false);
     }
   }, [cashflowSheetConfig, loadCashflowEvents, orgId, projectId, resolveBffActor, selectedYear, yearMonth]);
 
@@ -1652,7 +1647,8 @@ export function CashflowProjectSheet({
       actor,
       projectId,
       expectedMirrorRevision: sourceMirror.sourceRevision,
-      ...(replaceAllActualSources ? { yearMonth, replaceAllActualSources: true } : {}),
+      yearMonth,
+      ...(replaceAllActualSources ? { replaceAllActualSources: true } : {}),
       idempotencyKey: stageIdempotencyKey,
     });
     const applyStageResult = async (result: CashflowSheetLabStageResult) => {
@@ -1699,19 +1695,9 @@ export function CashflowProjectSheet({
     }
   }, [cashflowSheetMirror, handleApplyStagedSheetValues, orgId, projectId, resolveBffActor, yearMonth]);
 
-  useEffect(() => {
-    if (!pendingAutoStageRevision || cashflowSheetMirror?.sourceRevision !== pendingAutoStageRevision) return;
-    setPendingAutoStageRevision('');
-    void handleStagePinnedSheetValues(false, cashflowSheetMirror);
-  }, [cashflowSheetMirror, handleStagePinnedSheetValues, pendingAutoStageRevision]);
-
   const handleOpenSheetReviewDialog = useCallback(() => {
-    if (cashflowSheetMirror?.status !== 'FRESH' || !cashflowSheetMirror.sourceRevision) {
-      toast.info('먼저 시트값 불러오기를 눌러 최신값을 고정해 주세요.');
-      return;
-    }
     setSheetReviewDialogOpen(true);
-  }, [cashflowSheetMirror]);
+  }, []);
 
   const handleOpenSheetOnboarding = useCallback(() => {
     setSheetReviewDialogOpen(true);
@@ -1863,31 +1849,11 @@ export function CashflowProjectSheet({
   const sheetIdentityLabel = cashflowSheetConfig
     ? cashflowSheetConfig.spreadsheetTitle || cashflowSheetConfig.spreadsheetId || 'Google Sheet'
     : '시트 연결 필요';
-  const sheetComparisonEntries: Array<[string, CashflowSheetChangeCheckResult['comparisons']['sheetToJvm']]> = cashflowSheetChangeCheck
-    ? [
-      ['시트↔JVM', cashflowSheetChangeCheck.comparisons.sheetToJvm],
-      ['시트↔저장값', cashflowSheetChangeCheck.comparisons.sheetToFirestore],
-      ['JVM↔저장값', cashflowSheetChangeCheck.comparisons.jvmToFirestore],
-    ]
-    : [];
-  const availableSheetComparisons = sheetComparisonEntries.filter(([, comparison]) => comparison.status === 'AVAILABLE');
-  const availableSheetComparisonLabel = availableSheetComparisons
-    .map(([label, comparison]) => `${label} ${(comparison.changeCount ?? 0).toLocaleString()}건`)
-    .join(' · ');
-  const sheetChangeBadgeLabel = cashflowSheetChangeCheck?.status === 'CHECKING'
-    ? '시트 변경 확인 중'
-    : cashflowSheetChangeCheck?.sheet.status === 'UNAVAILABLE'
-          ? ['시트 변경 확인 불가', availableSheetComparisonLabel].filter(Boolean).join(' · ')
-          : availableSheetComparisons.length > 0
-            ? availableSheetComparisonLabel
-            : '비교 가능한 저장값이 없습니다';
-  const sheetChangeBadgeClass = cashflowSheetChangeCheck?.classification === 'ALL_SYNCED'
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    : cashflowSheetChangeCheck?.status === 'COMPARED'
-      ? 'border-yellow-300 bg-yellow-50 text-yellow-900'
-      : cashflowSheetChangeCheck?.sheet.status === 'UNAVAILABLE'
-        ? 'border-red-200 bg-red-50 text-red-800'
-        : 'border-slate-200 bg-slate-50 text-slate-600';
+  const sheetChangeCount = [
+    cashflowSheetChangeCheck?.comparisons.jvmToFirestore,
+    cashflowSheetChangeCheck?.comparisons.sheetToFirestore,
+    cashflowSheetChangeCheck?.comparisons.sheetToJvm,
+  ].find((comparison) => comparison?.status === 'AVAILABLE' && Number(comparison.changeCount) > 0)?.changeCount || 0;
   const sheetMirrorStatus = cashflowSheetMirror?.status || 'EMPTY';
   const configuredSheetUrl = (() => {
     try {
@@ -2732,14 +2698,16 @@ export function CashflowProjectSheet({
               >
                 {cashflowSheetConfig ? '시트 설정' : '시트 연결'}
               </Button>
-              {cashflowSheetConfig && sheetChangeBadgeLabel ? (
-                <Badge
-                  role="status"
-                  className={`h-7 rounded-md border px-2.5 text-[12px] font-semibold shadow-none ${sheetChangeBadgeClass}`}
+              {cashflowSheetConfig && sheetChangeCount > 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0 rounded-md border-yellow-300 bg-yellow-50 px-2.5 text-[12px] font-semibold text-yellow-900 hover:bg-yellow-100"
+                  onClick={handleOpenSheetReviewDialog}
                 >
-                  {cashflowSheetChangeCheck?.status === 'CHECKING' ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                  {sheetChangeBadgeLabel}
-                </Badge>
+                  {`변경 ${sheetChangeCount.toLocaleString()}건`}
+                </Button>
               ) : null}
               {configuredSheetUrl ? (
                 <a

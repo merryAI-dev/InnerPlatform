@@ -1,5 +1,9 @@
 import { EMPLOYEES } from './participation-data';
-import type { OrgMember } from './types';
+import type { OrgMember, Project } from './types';
+
+function memberLabel(name: string, nickname: string): string {
+  return nickname ? `${name}(${nickname})` : name;
+}
 
 export interface ProjectTeamMemberOption {
   value: string;
@@ -16,7 +20,7 @@ export const PROJECT_TEAM_MEMBER_OPTIONS: ProjectTeamMemberOption[] = EMPLOYEES
       value: name,
       name,
       nickname: displayNickname,
-      label: displayNickname ? `${name} (${displayNickname})` : name,
+      label: memberLabel(name, displayNickname),
     };
   });
 
@@ -64,7 +68,7 @@ export function buildProjectTeamMemberOptions(members: OrgMember[]): ProjectTeam
       value: displayName,
       name: displayName,
       nickname,
-      label: nickname ? `${displayName} (${nickname})` : displayName,
+      label: memberLabel(displayName, nickname),
     });
   });
 
@@ -109,7 +113,7 @@ export function buildOrgMemberPickerOptions(members: OrgMember[]): OrgMemberPick
       name,
       nickname,
       email,
-      label: nickname ? `${name} (${nickname})` : name,
+      label: memberLabel(name, nickname),
       searchText: [name, nickname, email].filter(Boolean).join(' ').toLowerCase(),
     });
   });
@@ -130,9 +134,21 @@ export function withSavedOrgMemberOption(
   const email = String(saved?.email || '').trim();
   const name = parsed.name || email || uid;
   const nickname = parsed.nickname || findProjectTeamMemberOption(name)?.nickname || '';
-  const label = nickname ? `${name} (${nickname})` : name;
+  const label = memberLabel(name, nickname);
   return [
     { uid, name, nickname, email, label: `${label} · 기존 선택`, searchText: [name, nickname, email].filter(Boolean).join(' ').toLowerCase() },
     ...options,
   ];
+}
+
+export function regularizeProjectOwnerNames(project: Project, members: OrgMember[]): Project {
+  const labels = new Map(buildOrgMemberPickerOptions(members).map((member) => [member.uid, member.label]));
+  const registeredByName = labels.get(String(project.registeredById || '').trim());
+  const managerName = labels.get(String(project.managerId || project.registeredById || '').trim());
+  if (!registeredByName && !managerName) return project;
+  return {
+    ...project,
+    ...(registeredByName ? { registeredByName } : {}),
+    ...(managerName ? { managerName } : {}),
+  };
 }

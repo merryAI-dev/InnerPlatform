@@ -3,6 +3,7 @@ import type { OrgMember } from './types';
 import {
   buildOrgMemberPickerOptions,
   buildProjectTeamMemberOptions,
+  regularizeProjectOwnerNames,
 } from './project-team-member-options';
 
 function member(overrides: Partial<OrgMember>): OrgMember {
@@ -24,7 +25,7 @@ describe('display name comes from the roster fields', () => {
     const [option] = buildOrgMemberPickerOptions([
       member({ name: 'Jeongtae KIM (Able)', nameKo: '김정태', nickname: '에이블' }),
     ]);
-    expect(option.label).toBe('김정태 (에이블)');
+    expect(option.label).toBe('김정태(에이블)');
     expect(option.name).toBe('김정태');
     expect(option.nickname).toBe('에이블');
   });
@@ -41,14 +42,14 @@ describe('display name comes from the roster fields', () => {
     const [option] = buildOrgMemberPickerOptions([
       member({ name: '하송희(솔)' }),
     ]);
-    expect(option.label).toBe('하송희 (솔)');
+    expect(option.label).toBe('하송희(솔)');
   });
 
   it('applies the same rule to the team member picker', () => {
     const options = buildProjectTeamMemberOptions([
       member({ uid: 'u1', name: 'Inhyo Ko (베리)', nameKo: '고인효', nickname: '베리' }),
     ]);
-    expect(options[0].label).toBe('고인효 (베리)');
+    expect(options[0].label).toBe('고인효(베리)');
     expect(options[0].value).toBe('고인효');
   });
 
@@ -58,6 +59,22 @@ describe('display name comes from the roster fields', () => {
       member({ uid: 'u2', name: '김정태(에이블)', nameKo: '김정태', nickname: '에이블' }),
     ]);
     expect(options).toHaveLength(1);
-    expect(options[0].label).toBe('김정태 (에이블)');
+    expect(options[0].label).toBe('김정태(에이블)');
+  });
+
+  it('regularizes every project owner display from the roster UID', () => {
+    const project = regularizeProjectOwnerNames({
+      id: 'p1',
+      name: '프로젝트',
+      registeredById: 'u1',
+      registeredByName: 'Berry',
+      managerId: 'u1',
+      managerName: 'Berry',
+    } as never, [
+      member({ uid: 'u1', name: 'Inhyo Ko', nameKo: '고인효', nickname: '베리' }),
+    ]);
+
+    expect(project.registeredByName).toBe('고인효(베리)');
+    expect(project.managerName).toBe('고인효(베리)');
   });
 });

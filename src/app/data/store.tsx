@@ -58,6 +58,7 @@ import {
 } from '../lib/platform-bff-client';
 import { reportError } from '../platform/observability';
 import { normalizeProjectRevenueFields } from '../platform/project-financials';
+import { regularizeProjectOwnerNames } from './project-team-member-options';
 
 interface EtlStagingUiPayload {
   projects?: Project[];
@@ -776,17 +777,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return evidences.filter((e) => e.transactionId === txId);
   }, [evidences]);
 
+  const displayProjects = useMemo(
+    () => projects.map((project) => regularizeProjectOwnerNames(project, members)),
+    [members, projects],
+  );
+
   const getProjectById = useCallback((id: string) => {
-    return projects.find((p) => p.id === id);
-  }, [projects]);
+    return displayProjects.find((p) => p.id === id);
+  }, [displayProjects]);
 
   const getLedgerById = useCallback((id: string) => {
     return ledgers.find((l) => l.id === id);
   }, [ledgers]);
 
   const activeProjects = useMemo(
-    () => projects.filter((project) => !project.trashedAt),
-    [projects],
+    () => displayProjects.filter((project) => !project.trashedAt),
+    [displayProjects],
   );
 
   const value: AppState & AppActions = {
@@ -795,7 +801,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     members,
     templates: LEDGER_TEMPLATES,
     projects: activeProjects,
-    allProjects: projects,
+    allProjects: displayProjects,
     ledgers,
     transactions,
     comments,
