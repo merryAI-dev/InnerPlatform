@@ -677,6 +677,12 @@ export function ProjectEditorWizard({
   const taxInvoiceUploadInputRef = useRef<HTMLInputElement | null>(null);
   const finalSettlementReportUploadInputRef = useRef<HTMLInputElement | null>(null);
   const retryDocumentFileRef = useRef<Partial<Record<ProjectRequestDocumentKind, File>>>({});
+  /**
+   * Bumped when an upload is cancelled. The request itself cannot be recalled, so a run
+   * whose token no longer matches stops applying its result and undoes the attachment if
+   * it had already reached the server.
+   */
+  const documentUploadRunRef = useRef<Partial<Record<ProjectRequestDocumentKind, number>>>({});
   const submitInFlightRef = useRef(false);
   const exitInFlightRef = useRef(false);
   const leaveApprovedRef = useRef(false);
@@ -1188,10 +1194,19 @@ export function ProjectEditorWizard({
     input?: HTMLInputElement,
   ) => {
     retryDocumentFileRef.current[kind] = file;
+    const runId = (documentUploadRunRef.current[kind] || 0) + 1;
+    documentUploadRunRef.current[kind] = runId;
     setDocumentUploadState((prev) => ({ ...prev, [kind]: 'extracting' }));
     setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
     try {
       const processed = await uploadProjectDocument(kind, file);
+      if (documentUploadRunRef.current[kind] !== runId) {
+        // Cancelled while the upload was in flight. It still reached the server, so take it
+        // back rather than leaving a file the screen does not show.
+        if (input) input.value = '';
+        try { await onRemoveProjectDocument?.(kind); } catch { /* already cancelled; nothing to report */ }
+        return;
+      }
       setDraft((prev) => {
         if (kind === 'contract') {
           const nextDraft = createProjectEditorWizardDraft({
@@ -1222,12 +1237,23 @@ export function ProjectEditorWizard({
       delete retryDocumentFileRef.current[kind];
       if (input) input.value = '';
     } catch (error) {
+      if (documentUploadRunRef.current[kind] !== runId) return;
       console.error(`[ProjectEditorWizard] ${kind} upload failed:`, error);
       const message = error instanceof Error ? error.message : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드에 실패했습니다.`;
       setDocumentUploadState((prev) => ({ ...prev, [kind]: 'error' }));
       setDocumentUploadError((prev) => ({ ...prev, [kind]: message }));
       toast.error(message);
     }
+  };
+
+  const cancelProjectDocumentUpload = (kind: ProjectRequestDocumentKind) => {
+    documentUploadRunRef.current[kind] = (documentUploadRunRef.current[kind] || 0) + 1;
+    delete retryDocumentFileRef.current[kind];
+    const input = getDocumentInputRef(kind).current;
+    if (input) input.value = '';
+    setDocumentUploadState((prev) => ({ ...prev, [kind]: 'idle' }));
+    setDocumentUploadError((prev) => ({ ...prev, [kind]: '' }));
+    toast.info(`${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드를 취소했습니다.`);
   };
 
   const handleProjectDocumentSelect = async (kind: ProjectRequestDocumentKind, event: ChangeEvent<HTMLInputElement>) => {
@@ -1586,6 +1612,8 @@ export function ProjectEditorWizard({
       description?: string;
       embedded?: boolean;
       disabled?: boolean;
+      /** Renders only the upload/replace and remove controls, for use inside a table row. */
+      rowAction?: boolean;
     } = {},
   ) => {
     const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
@@ -1610,6 +1638,86 @@ export function ProjectEditorWizard({
           : kind === 'rfp_request_evidence'
             ? 'RFP 또는 요청 메일 원본을 PDF, DOCX, EML, MSG 중 하나로 올려주세요.'
             : 'PDF를 올리면 검토용 첨부로 저장합니다.');
+
+    const uploadButton = (
+      <>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={getProjectDocumentUploadAccept(kind)}
+          className="hidden"
+          onChange={(event) => handleProjectDocumentSelect(kind, event)}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size={options.rowAction ? 'sm' : 'default'}
+          className={options.rowAction ? 'h-8 gap-1.5 px-2 text-[11px]' : 'w-full gap-2 lg:w-auto'}
+          disabled={uploadState === 'extracting' || options.disabled}
+          onClick={() => {
+            const retryFile = retryDocumentFileRef.current[kind];
+            if (retryFile) void processProjectDocument(kind, retryFile, inputRef.current || undefined);
+            else inputRef.current?.click();
+          }}
+        >
+          {uploadState === 'extracting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {retryDocumentFileRef.current[kind]
+            ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 다시 시도`
+            : document
+              ? `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 교체`
+              : `${PROJECT_DOCUMENT_BUTTON_LABELS[kind]} 업로드`}
+        </Button>
+      </>
+    );
+
+    if (options.rowAction) {
+      return (
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {documentDownloadURL ? (
+            <Button asChild type="button" variant="outline" size="sm" className="h-8 px-2 text-[11px]">
+              <a href={documentDownloadURL} target="_blank" rel="noreferrer">원문 보기</a>
+            </Button>
+          ) : document && previewState && onLoadDocumentPreview ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 px-2 text-[11px]"
+              disabled={previewState.status === 'loading'}
+              onClick={() => void onLoadDocumentPreview(kind)}
+            >
+              {previewState.status === 'loading' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+              {previewState.status === 'error' ? '다시 불러오기' : previewState.status === 'loading' ? '불러오는 중' : '원문 불러오기'}
+            </Button>
+          ) : null}
+          {uploadState === 'extracting' ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-[11px]"
+              onClick={() => cancelProjectDocumentUpload(kind)}
+            >
+              업로드 취소
+            </Button>
+          ) : null}
+          {uploadButton}
+          {canRemove ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-[11px] text-rose-600"
+              disabled={uploadState === 'extracting'}
+              onClick={remove}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              {removeLabel}
+            </Button>
+          ) : null}
+        </div>
+      );
+    }
 
     return (
       <div
@@ -1723,6 +1831,143 @@ export function ProjectEditorWizard({
     );
   };
 
+  /**
+   * The seven registration documents as one scannable list.
+   *
+   * As stacked cards each slot rendered a different shape — one carried a contract
+   * analysis, another a checkbox, two a URL field — so telling at a glance which
+   * documents were still missing meant scrolling and remembering. The row states what a
+   * reviewer needs (number, document, what is attached, whether it is required) and any
+   * slot-specific control opens underneath it.
+   */
+  const renderRegistrationDocumentTable = () => {
+    const requirementOf = (slotNumber: number) => (
+      slotNumber <= 2 ? { label: '필수', tone: 'text-red-700' }
+        : slotNumber === 3 ? { label: '필수', tone: 'text-red-700' }
+          : { label: '선택', tone: 'text-slate-500' }
+    );
+
+    return (
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[640px] text-left text-[12px]">
+          <thead className="border-b border-slate-200 text-[11px] text-muted-foreground">
+            <tr>
+              <th scope="col" className="w-10 px-3 py-2 font-medium">#</th>
+              <th scope="col" className="px-3 py-2 font-medium">서류</th>
+              <th scope="col" className="px-3 py-2 font-medium">첨부 상태</th>
+              <th scope="col" className="w-16 px-3 py-2 font-medium">구분</th>
+              <th scope="col" className="w-px px-3 py-2 text-right font-medium">액션</th>
+            </tr>
+          </thead>
+          <tbody>
+            {REGISTRATION_DOCUMENT_SLOTS.map((slot) => {
+              const kind = slot.kinds[0];
+              const requirement = requirementOf(slot.number);
+              const isLinkSlot = slot.number === 5 || slot.number === 6;
+              const linkValue = slot.number === 5
+                ? draft.registrationConfirmations.proposalPptOriginal
+                : draft.registrationConfirmations.presentationPptOriginal;
+              const document = draft[PROJECT_DOCUMENT_FIELD[kind]] as FileAttachment | null;
+              const deferred = slot.number === 3 && draft.quoteSubmissionDeferred;
+              const status = isLinkSlot
+                ? (linkValue ? '링크 입력됨' : '미입력')
+                : document ? `${document.name} · ${(document.size / 1024 / 1024).toFixed(2)} MB`
+                  : deferred ? '이후 제출(예외 처리)' : '미첨부';
+              const unmet = isLinkSlot ? false : !document && !deferred && slot.number <= 3;
+              const uploadError = documentUploadError[kind];
+              const previewState = documentPreviewStates?.[kind];
+              const previewError = previewState?.status === 'error'
+                ? (previewState.error || '첨부 파일을 불러오지 못했습니다.')
+                : '';
+              const contractLocked = kind === 'contract'
+                && contractDocumentEditPolicy.isExistingContractDocumentLocked;
+              const contractSummary = kind === 'contract' ? draft.contractAnalysis?.summary : '';
+              const hasDetail = Boolean(uploadError || previewError || contractLocked || contractSummary);
+
+              return (
+                <Fragment key={slot.number}>
+                  <tr className="border-b border-slate-100 align-top">
+                    <td className="px-3 py-3">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#001e46] text-[11px] font-semibold text-white">
+                        {slot.number}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <p className="font-medium text-slate-900">{slot.label}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">{slot.description}</p>
+                    </td>
+                    <td className={cn('px-3 py-3', unmet ? 'text-red-700' : 'text-slate-700')}>
+                      <span className="break-all">{status}</span>
+                    </td>
+                    <td className={cn('px-3 py-3', requirement.tone)}>{requirement.label}</td>
+                    <td className="px-3 py-3 text-right">
+                      {isLinkSlot ? null : renderProjectDocumentUpload(kind, {
+                        slotNumber: slot.number,
+                        label: slot.label,
+                        description: slot.description,
+                        rowAction: true,
+                      })}
+                    </td>
+                  </tr>
+                  {isLinkSlot ? (
+                    <tr className="border-b border-slate-100">
+                      <td />
+                      <td colSpan={4} className="px-3 pb-3">
+                        <Input
+                          type="url"
+                          aria-label={slot.label}
+                          value={linkValue}
+                          onChange={(event) => update('registrationConfirmations', {
+                            ...draft.registrationConfirmations,
+                            [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
+                          })}
+                          placeholder="https://drive.google.com/..."
+                          className="h-9 text-sm"
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
+                  {hasDetail ? (
+                    <tr className="border-b border-slate-100">
+                      <td />
+                      <td colSpan={4} className="px-3 pb-3">
+                        {uploadError ? <p className="text-[11px] text-red-700" role="alert">{uploadError}</p> : null}
+                        {previewError ? <p className="text-[11px] text-red-700" role="alert">{previewError}</p> : null}
+                        {contractLocked ? (
+                          <p className="text-[11px] text-muted-foreground">기존 계약서는 관리자 화면에서만 제거할 수 있습니다.</p>
+                        ) : null}
+                        {contractSummary ? (
+                          <p className="mt-1 text-[11px] leading-5 text-slate-700">
+                            <span className="font-semibold text-[#001e46]">분석 요약</span>
+                            <span className="ml-2">{contractSummary}</span>
+                          </p>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ) : null}
+                  {slot.number === 3 ? (
+                    <tr className="border-b border-slate-100">
+                      <td />
+                      <td colSpan={4} className="px-3 pb-3">
+                        <label className="flex items-center gap-2 text-[12px] text-slate-700">
+                          <Checkbox
+                            checked={draft.quoteSubmissionDeferred === true}
+                            onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)}
+                          />
+                          산출내역서(견적서) 이후 제출(예외 처리)
+                        </label>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   const renderRegistrationDocumentSlot = (slot: RegistrationDocumentSlot) => {
     return renderProjectDocumentUpload(slot.kinds[0], {
       slotNumber: slot.number,
@@ -1743,53 +1988,26 @@ export function ProjectEditorWizard({
                   1~2번은 필수, 3번은 첨부 또는 이후 제출로 진행할 수 있으며 4~7번은 선택입니다.
                 </p>
               </div>
-              {REGISTRATION_DOCUMENT_SLOTS.map((slot) => (
-                <Fragment key={slot.number}>
-                  {slot.number === 5 || slot.number === 6 ? (
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <Label className="text-xs">{slot.number}. {slot.label}</Label>
-                      <p className="mt-1 text-[11px] text-muted-foreground">{slot.description}</p>
-                      <Input
-                        type="url"
-                        value={slot.number === 5
-                          ? draft.registrationConfirmations.proposalPptOriginal
-                          : draft.registrationConfirmations.presentationPptOriginal}
-                        onChange={(event) => update('registrationConfirmations', {
-                          ...draft.registrationConfirmations,
-                          [slot.number === 5 ? 'proposalPptOriginal' : 'presentationPptOriginal']: event.target.value,
-                        })}
-                        placeholder="https://drive.google.com/..."
-                        className="mt-2 h-9 text-sm"
-                      />
-                    </div>
-                  ) : slot.number === 1 || onProjectDocumentFileUpload ? renderRegistrationDocumentSlot(slot) : null}
-                  {slot.number === 1 ? (
-                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
-                      <p className="mb-2 font-medium">모두 싸인으로 진행하셨나요? *</p>
-                      <div className="flex gap-4">
-                        {[true, false].map((value) => (
-                          <label key={String(value)} className="flex items-center gap-2">
-                            <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
-                            {value ? '예' : '아니오'}
-                          </label>
-                        ))}
-                      </div>
-                      {draft.registrationConfirmations.modusignContractUsed === false ? (
-                        <label className="mt-3 flex items-center gap-2">
-                          <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
-                          계약서를 써니(사업지원팀)에게 제출했습니다.
-                        </label>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {slot.number === 3 ? (
-                    <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
-                      <Checkbox checked={draft.quoteSubmissionDeferred} onCheckedChange={(checked) => update('quoteSubmissionDeferred', checked === true)} />
-                      산출내역서(견적서) 이후 제출(예외 처리)
+              {renderRegistrationDocumentTable()}
+              {/* Contract-specific confirmations stay below the list; they belong to slot 1
+                  but are questions about the contract rather than an attachment. */}
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+                <p className="mb-2 font-medium">모두 싸인으로 진행하셨나요? *</p>
+                <div className="flex gap-4">
+                  {[true, false].map((value) => (
+                    <label key={String(value)} className="flex items-center gap-2">
+                      <input type="radio" checked={draft.registrationConfirmations.modusignContractUsed === value} onChange={() => update('registrationConfirmations', { ...draft.registrationConfirmations, modusignContractUsed: value, originalContractSubmitted: value ? null : draft.registrationConfirmations.originalContractSubmitted })} />
+                      {value ? '예' : '아니오'}
                     </label>
-                  ) : null}
-                </Fragment>
-              ))}
+                  ))}
+                </div>
+                {draft.registrationConfirmations.modusignContractUsed === false ? (
+                  <label className="mt-3 flex items-center gap-2">
+                    <Checkbox checked={draft.registrationConfirmations.originalContractSubmitted === true} onCheckedChange={(checked) => update('registrationConfirmations', { ...draft.registrationConfirmations, originalContractSubmitted: checked === true })} />
+                    계약서를 써니(사업지원팀)에게 제출했습니다.
+                  </label>
+                ) : null}
+              </div>
             </>
           ) : registrationDocumentKinds.map((kind) => renderProjectDocumentUpload(kind))}
         </div>
@@ -2357,9 +2575,6 @@ export function ProjectEditorWizard({
       && paymentPlan.contract + paymentPlan.interim + paymentPlan.final > 0
       && yearAdvanceInterimRatio !== null
       && yearAdvanceInterimRatio < 0.7;
-    const planTotal = paymentPlan.contract + paymentPlan.interim + paymentPlan.final;
-    const planBase = financialYear?.contractAmount || draft.contractAmount;
-    const planGap = planBase - planTotal;
     return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-3">
@@ -2382,26 +2597,6 @@ export function ProjectEditorWizard({
           <Label className="mt-3 block text-xs">예상 입금 시점{paymentPlan.final > 0 ? ' *' : ''}</Label><Input type="month" aria-label={`${financialYear ? `${financialYear.year}년 ` : ''}잔금 예상 입금 시점`} aria-required={paymentPlan.final > 0} value={paymentExpectedMonths.final} onChange={(event) => updatePaymentExpectedMonth('final', event.target.value)} className="mt-1 h-9 text-sm" />
         </div>
       </div>
-      {planBase > 0 ? (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-[12px]">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-slate-600">{financialYear ? `${financialYear.year}년 ` : ''}입금 계획 합계</span>
-            <span className="font-semibold tabular-nums text-slate-900">{fmtKRW(planTotal)}원</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between gap-3">
-            <span className="text-slate-600">계약금액</span>
-            <span className="tabular-nums text-slate-700">{fmtKRW(planBase)}원</span>
-          </div>
-          {/* The three amounts had to be added up by eye to see whether they matched the contract. */}
-          <div className={`mt-2 border-t border-slate-200 pt-2 ${planGap === 0 ? 'text-slate-600' : 'text-red-700'}`}>
-            {planGap === 0
-              ? '계약금액과 일치합니다.'
-              : planGap > 0
-                ? `계약금액보다 ${fmtKRW(planGap)}원 적습니다.`
-                : `계약금액보다 ${fmtKRW(Math.abs(planGap))}원 많습니다.`}
-          </div>
-        </div>
-      ) : null}
       {requiresYearAdvanceInterimReason ? (
         <div>
           <Label className="text-xs">{financialYear.year}년 선금·중도금 합계 70% 미만 사유 *</Label>
