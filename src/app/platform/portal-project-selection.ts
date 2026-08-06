@@ -125,6 +125,17 @@ export function resolvePortalProjectResourceId(
   return [routeProjectId, ...fallbackProjectIds].map(normalizedId).find(Boolean) || '';
 }
 
+export function resolvePortalRouteProjectId(pathname?: string | null): string {
+  const normalizedPath = typeof pathname === 'string' ? pathname.trim() : '';
+  const match = normalizedPath.match(/^\/portal\/(?:cashflow\/([^/]+)(?:\/sheets-lab)?|edit-project\/([^/]+))\/?$/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1] || match[2] || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 export function resolvePortalProjectResourcePath(requestedPath: string, projectId: string): string {
   const normalizedProjectId = normalizedId(projectId);
   const normalizedPath = typeof requestedPath === 'string' ? requestedPath.trim() : '';
@@ -161,8 +172,8 @@ export interface PortalProjectContextSync {
 }
 
 /**
- * 프로젝트 단위 화면에서 URL route projectId와 세션 선택 프로젝트가 어긋났을 때
- * 상단 선택 프로젝트를 기준으로 URL을 맞춘다.
+ * 프로젝트 단위 URL은 새로고침과 직접 진입에서도 같은 프로젝트를 열어야 한다.
+ * URL에 프로젝트가 없을 때만 세션 선택값으로 canonical path를 만든다.
  */
 export function resolvePortalProjectContextSync(input: {
   routeProjectId?: string | null;
@@ -173,8 +184,8 @@ export function resolvePortalProjectContextSync(input: {
 }): PortalProjectContextSync {
   const routeProjectId = normalizedId(input.routeProjectId);
   const sessionProjectId = normalizedId(input.sessionProjectId);
+  if (routeProjectId) return { projectId: routeProjectId, action: 'idle', path: '' };
   if (!sessionProjectId) return { projectId: '', action: 'idle', path: '' };
-  if (routeProjectId === sessionProjectId) return { projectId: sessionProjectId, action: 'idle', path: '' };
   return {
     projectId: sessionProjectId,
     action: 'canonicalize-path',

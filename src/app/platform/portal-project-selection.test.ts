@@ -6,6 +6,7 @@ import {
   resolvePortalProjectContextSync,
   resolvePortalProjectResourceId,
   resolvePortalProjectResourcePath,
+  resolvePortalRouteProjectId,
   resolvePortalProjectSelectPath,
   resolvePortalProjectSwitchPath,
   runPortalProjectSwitch,
@@ -137,6 +138,13 @@ describe('portal project selection helpers', () => {
     );
   });
 
+  it('reads the project context from every project-scoped portal URL', () => {
+    expect(resolvePortalRouteProjectId('/portal/cashflow/p-axr')).toBe('p-axr');
+    expect(resolvePortalRouteProjectId('/portal/cashflow/p%2Fkimje/sheets-lab')).toBe('p/kimje');
+    expect(resolvePortalRouteProjectId('/portal/edit-project/p-sangscam')).toBe('p-sangscam');
+    expect(resolvePortalRouteProjectId('/portal/budget')).toBe('');
+  });
+
   it('canonicalizes a bare project resource path to the session project', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: '',
@@ -167,14 +175,14 @@ describe('portal project selection helpers', () => {
     })).toEqual({ projectId: '', action: 'idle', path: '' });
   });
 
-  it('waits for the session project instead of using a sticky route project', () => {
+  it('uses the route project before the session has caught up', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
       sessionProjectId: '',
       previousSessionProjectId: '',
       fallbackProjectId: 'p-recent',
       currentPath: '/portal/cashflow/p-assigned/sheets-lab',
-    })).toEqual({ projectId: '', action: 'idle', path: '' });
+    })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
 
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
@@ -185,7 +193,7 @@ describe('portal project selection helpers', () => {
     })).toEqual({ projectId: 'p-assigned', action: 'idle', path: '' });
   });
 
-  it('keeps the session project authoritative over a deep-linked route project', () => {
+  it('keeps a deep-linked route project authoritative over the previous session', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
       sessionProjectId: 'p-managed',
@@ -193,13 +201,13 @@ describe('portal project selection helpers', () => {
       fallbackProjectId: '',
       currentPath: '/portal/cashflow/p-assigned/sheets-lab',
     })).toEqual({
-      projectId: 'p-managed',
-      action: 'canonicalize-path',
-      path: '/portal/cashflow/p-managed/sheets-lab',
+      projectId: 'p-assigned',
+      action: 'idle',
+      path: '',
     });
   });
 
-  it('realigns the route when the top project selector switches the session project', () => {
+  it('does not rewrite an explicit project URL from stale session state', () => {
     expect(resolvePortalProjectContextSync({
       routeProjectId: 'p-assigned',
       sessionProjectId: 'p-managed',
@@ -207,9 +215,9 @@ describe('portal project selection helpers', () => {
       fallbackProjectId: 'p-assigned',
       currentPath: '/portal/cashflow/p-assigned/sheets-lab#review',
     })).toEqual({
-      projectId: 'p-managed',
-      action: 'canonicalize-path',
-      path: '/portal/cashflow/p-managed/sheets-lab#review',
+      projectId: 'p-assigned',
+      action: 'idle',
+      path: '',
     });
   });
 
