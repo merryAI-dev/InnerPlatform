@@ -92,6 +92,7 @@ interface AppActions {
   removeMember: (uid: string) => Promise<void>;
   addProject: (p: Project) => Promise<void>;
   updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+  patchProjectSnapshot: (project: Project) => void;
   trashProject: (id: string, reason?: string) => Promise<void>;
   restoreProject: (id: string) => Promise<void>;
   addLedger: (l: Ledger) => Promise<void>;
@@ -482,6 +483,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [runStoreMutation, writeStrategy, projects, orgId, bffActor, db, auditActor]);
 
+  const patchProjectSnapshot = useCallback((project: Project) => {
+    setProjects((prev) => prev.map((current) => (
+      current.id === project.id
+        ? normalizeProjectRevenueFields({ ...current, ...project } as Project, 'totalRevenueAmount')
+        : current
+    )));
+  }, []);
+
   const trashProject = useCallback(async (id: string, reason?: string) => {
     await runStoreMutation('trashProject', async () => {
       const existing = projects.find((project) => project.id === id);
@@ -813,6 +822,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeMember,
     addProject,
     updateProject,
+    patchProjectSnapshot,
     trashProject,
     restoreProject,
     addLedger,

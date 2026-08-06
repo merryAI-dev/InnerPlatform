@@ -7,7 +7,7 @@ import { useCashflowWeeks } from '../../data/cashflow-weeks-store';
 export function ProjectCashflowSheetPage() {
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
-  const { getProjectById } = useAppStore();
+  const { getProjectById, members, patchProjectSnapshot } = useAppStore();
   const { setYearMonth } = useCashflowWeeks();
 
   const ym = searchParams.get('ym') || '';
@@ -37,6 +37,9 @@ export function ProjectCashflowSheetPage() {
       key={projectId}
       projectId={projectId}
       projectName={project.name}
+      project={project}
+      members={members}
+      onExecutiveApproverSaved={(result) => patchProjectSnapshot({ ...project, ...result })}
       initialViewMode={initialViewMode}
     />
   );

@@ -190,8 +190,10 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).toContain("surface: 'border-border bg-accent'");
     expect(source).toContain('text-card-foreground">주간 정산');
     expect(source).toContain('text-card-foreground">월 결산');
-    expect(source).toContain('조직장 선택');
-    expect(source).toContain('조직장 확정');
+    expect(source).toContain('프로젝트 조직장');
+    expect(source).toContain('project-executive-approver');
+    expect(source).toContain("toast.error('먼저 프로젝트 조직장을 선택해 주세요.')");
+    expect(source).not.toContain('월 결산 승인 조직장을 선택하세요');
     expect(source).toContain('saveCashflowMonthCloseApproverViaBff');
     expect(source).toContain('text-secondary-foreground">{check.title}');
     expect(source).toContain('text-muted-foreground">프로젝트 전체 기간 · BFF/JVM 서버 판정');

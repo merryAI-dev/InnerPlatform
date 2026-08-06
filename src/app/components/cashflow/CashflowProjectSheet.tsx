@@ -392,6 +392,7 @@ export function CashflowProjectSheet({
   const [selectedExecutiveApproverId, setSelectedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [savedExecutiveApproverId, setSavedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [executiveApproverBusy, setExecutiveApproverBusy] = useState(false);
+  const [executiveApproverAttention, setExecutiveApproverAttention] = useState(false);
   const [weeklyCompletionBusy, setWeeklyCompletionBusy] = useState(false);
   const [weeklyCompletionOpen, setWeeklyCompletionOpen] = useState(false);
   const [weeklyUpdateResult, setWeeklyUpdateResult] = useState<'CHANGED' | 'NO_CHANGES' | ''>('');
@@ -801,6 +802,11 @@ export function CashflowProjectSheet({
 
   const handleCompleteWeeklyUpdate = useCallback(async (): Promise<void> => {
     if (!canCompleteWeekly || !weeklyUpdateResult) return;
+    if (!savedExecutiveApproverId) {
+      setExecutiveApproverAttention(true);
+      toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
+      return;
+    }
     setWeeklyCompletionBusy(true);
     const startedAt = Date.now();
     const currentDeadline = monthCloseResult?.dashboard?.deadlineSummary?.current;
@@ -869,7 +875,7 @@ export function CashflowProjectSheet({
     } finally {
       setWeeklyCompletionBusy(false);
     }
-  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
+  }, [canCompleteWeekly, loadCashflowMonthClose, monthCloseResult?.dashboard?.deadlineSummary?.current, orgId, projectId, resolveBffActor, savedExecutiveApproverId, weeklyProjectionWarning, weeklyUpdateResult, yearMonth]);
 
   const loadWeeklyComplianceHistory = useCallback(async (): Promise<void> => {
     setWeeklyComplianceHistoryLoading(true);
@@ -1105,8 +1111,9 @@ export function CashflowProjectSheet({
         idempotencyKey: `cashflow-month-close-approver:${projectId}:${yearMonth}:${approver.uid}:${project.version ?? 0}`,
       });
       setSavedExecutiveApproverId(result.executiveApproverId);
+      setExecutiveApproverAttention(false);
       onExecutiveApproverSaved?.(result);
-      toast.success(`${result.executiveApproverName || approver.name}님을 월 결산 조직장으로 지정했습니다.`);
+      toast.success(`${result.executiveApproverName || approver.name}님을 프로젝트 조직장으로 지정했습니다.`);
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, '조직장을 저장하지 못했습니다.'));
     } finally {
@@ -1136,7 +1143,8 @@ export function CashflowProjectSheet({
       return;
     }
     if (project && !savedExecutiveApproverId) {
-      toast.error('월 결산을 요청할 조직장을 먼저 선택하고 확정해 주세요.');
+      setExecutiveApproverAttention(true);
+      toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
       return;
     }
     setMonthCloseReviewOpen(true);
@@ -1157,6 +1165,7 @@ export function CashflowProjectSheet({
       return;
     }
     if (!yearMonth || !savedExecutiveApproverId || !monthCloseHumanReviewed) {
+      if (!savedExecutiveApproverId) setExecutiveApproverAttention(true);
       toast.error('결산 대상 월과 조직장을 선택하고 시트값 확인에 동의해 주세요.');
       return;
     }
@@ -2608,7 +2617,7 @@ export function CashflowProjectSheet({
       <Card className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <CardContent className="space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-end gap-2">
               <ClipboardList className="h-4 w-4 shrink-0 text-primary" />
               <div className="truncate text-[16px] font-bold tracking-[-0.01em] text-card-foreground">{dashboardTitle}</div>
               <Button
@@ -2657,6 +2666,35 @@ export function CashflowProjectSheet({
                   시트 값 불러오기
                 </Button>
               ) : null}
+              {project && members ? (
+                <div
+                  id="project-executive-approver"
+                  className={`flex min-w-[250px] items-end gap-2 border-l pl-2 ${executiveApproverAttention ? 'border-yellow-400 bg-yellow-50 ring-2 ring-yellow-300' : 'border-slate-200'}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <label className="mb-1 block text-[12px] font-semibold text-slate-800">프로젝트 조직장</label>
+                    <MemberPicker
+                      className="h-7 border-slate-300 bg-white text-[12px]"
+                      options={executiveApproverOptions}
+                      value={selectedExecutiveApproverId}
+                      onChange={setSelectedExecutiveApproverId}
+                      placeholder="조직장 선택"
+                      disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 border-slate-300 bg-white px-2.5 text-[12px] font-semibold text-[#17324D]"
+                    disabled={executiveApproverBusy || !selectedExecutiveApproverId || selectedExecutiveApproverId === savedExecutiveApproverId || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
+                    onClick={() => void handleSaveExecutiveApprover()}
+                  >
+                    {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                    저장
+                  </Button>
+                </div>
+              ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[12px] text-muted-foreground sm:inline">기준일 {todayIso}</span>
@@ -2702,6 +2740,11 @@ export function CashflowProjectSheet({
                       className="h-8 shrink-0 rounded-md border-slate-300 bg-white px-3 text-[12px] font-semibold text-[#17324D]"
                       disabled={weeklyCompletionBusy || monthCloseLoading || Boolean(monthCloseResult?.dashboard?.deadlineSummary?.current?.completedAt)}
                       onClick={() => {
+                        if (!savedExecutiveApproverId) {
+                          setExecutiveApproverAttention(true);
+                          toast.error('먼저 프로젝트 조직장을 선택해 주세요.');
+                          return;
+                        }
                         setWeeklyCompletionError('');
                         setWeeklyProjectionWarning(null);
                         setWeeklyUpdateResult('');
@@ -2744,7 +2787,7 @@ export function CashflowProjectSheet({
                         type="button"
                         size="sm"
                         className="h-8 rounded-md bg-[#17324D] px-3 text-[12px] font-semibold text-white shadow-none hover:bg-slate-800"
-                        disabled={monthCloseBusy || monthCloseLoading || Boolean(project && !savedExecutiveApproverId)}
+                        disabled={monthCloseBusy || monthCloseLoading}
                         onClick={handleOpenMonthCloseReview}
                       >
                         <CheckCircle2 className="mr-1 h-3 w-3" />
@@ -2764,42 +2807,6 @@ export function CashflowProjectSheet({
                     ) : null}
                   </div>
                 </div>
-                {project && members ? (
-                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                      <div className="min-w-0 flex-1">
-                        <label className="mb-1 block text-[12px] font-semibold text-slate-800">조직장 선택</label>
-                        <MemberPicker
-                          className="h-8 border-slate-300 bg-white text-[12px]"
-                          options={executiveApproverOptions}
-                          value={selectedExecutiveApproverId}
-                          onChange={setSelectedExecutiveApproverId}
-                          placeholder="월 결산 승인 조직장을 선택하세요"
-                          disabled={executiveApproverBusy || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')}
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-8 shrink-0 border-slate-300 bg-white px-3 text-[12px] font-semibold text-[#17324D]"
-                        disabled={
-                          executiveApproverBusy
-                          || !selectedExecutiveApproverId
-                          || selectedExecutiveApproverId === savedExecutiveApproverId
-                          || ['PENDING', 'APPROVING'].includes(monthCloseRequest?.status || '')
-                        }
-                        onClick={() => void handleSaveExecutiveApprover()}
-                      >
-                        {executiveApproverBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                        조직장 확정
-                      </Button>
-                    </div>
-                    <p className="mt-1.5 text-[12px] leading-4 text-slate-500">
-                      확정한 조직장에게 월 결산 요청이 배정되고, 조직장이 이 화면에서 승인·반려할 수 있습니다.
-                    </p>
-                  </div>
-                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
                   <span>{monthCloseResult?.dashboard?.summary?.closeDeadline && monthCloseResult.dashboard.summary.targetYearMonth ? `${monthCloseResult.dashboard.summary.closeDeadline}까지 ${monthCloseResult.dashboard.summary.targetYearMonth}월 결산` : '결산 가능일을 서버에서 확인합니다.'}</span>
                 </div>
