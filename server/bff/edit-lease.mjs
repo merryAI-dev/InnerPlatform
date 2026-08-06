@@ -6,7 +6,8 @@ import { buildRequestFingerprint, sha256 } from './utils.mjs';
 export const EDIT_LEASE_TTL_MS = 1_800_000;
 
 const RESOURCE_TYPES = new Set(['project-registration', 'project-info', 'cashflow']);
-const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
+// Every member works across all projects; see CROSS_PROJECT_ROLES in src/app/platform/rbac.ts.
+const CROSS_PROJECT_ROLES = new Set(['admin', 'finance', 'pm', 'viewer']);
 const FIRESTORE_DOCUMENT_ID_MAX_BYTES = 1_500;
 
 function editLeaseError(statusCode, message, code, publicDetails, auditContext) {

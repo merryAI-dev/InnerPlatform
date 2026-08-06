@@ -38,7 +38,8 @@ import {
 } from '../project-document-validation.mjs';
 
 const RESOURCE_TYPE = 'project-info';
-const CROSS_PROJECT_ROLES = new Set(['admin', 'finance']);
+// Every member works across all projects; see CROSS_PROJECT_ROLES in src/app/platform/rbac.ts.
+const CROSS_PROJECT_ROLES = new Set(['admin', 'finance', 'pm', 'viewer']);
 const DOCUMENT_KINDS = PROJECT_INFO_DOCUMENT_KINDS;
 const DOCUMENT_FIELD_BY_KIND = {
   contract: 'contractDocument',

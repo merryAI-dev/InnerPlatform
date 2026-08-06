@@ -355,13 +355,18 @@ describe('edit lease service', () => {
     });
     await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
 
+    // Assignment no longer gates access: every member works across all projects.
     db.__set(memberPath, {
       uid: 'actor-a', role: 'pm', status: 'ACTIVE', projectIds: ['project-b'],
     });
-    await expectHttpError(service.getStatus(base), 403, 'forbidden');
-
-    db.__set('orgs/tenant-a/projects/project-a', { id: 'project-a', managerId: 'actor-a' });
     await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
+
+    db.__set(memberPath, { uid: 'actor-a', role: 'viewer', status: 'ACTIVE', projectIds: [] });
+    await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
+
+    // An inactive member is still refused.
+    db.__set(memberPath, { uid: 'actor-a', role: 'pm', status: 'INACTIVE', projectIds: [] });
+    await expectHttpError(service.getStatus(base), 403, 'forbidden');
 
     db.__set(memberPath, { uid: 'actor-a', role: 'finance', status: 'ACTIVE' });
     await expect(service.getStatus(base)).resolves.toMatchObject({ state: 'AVAILABLE' });
