@@ -166,6 +166,12 @@ describe('CashflowProjectSheet monthly close shell', () => {
     expect(source).not.toContain('xl:max-h-[126px]');
   });
 
+  it('allows an active project manager to be selected as organization head by another requester', () => {
+    expect(source).toContain('.filter((member) => member.uid !== user?.uid)');
+    expect(source).not.toContain('member.uid !== project?.registeredById');
+    expect(source).not.toContain('member.uid !== project?.managerId');
+  });
+
   it('labels rate tiles by loading, over, under, and OK', () => {
     expect(source).toContain('function rateStatusLabel');
     expect(source).toContain("if (monthCloseLoading || !monthCloseResult?.dashboard) return '확인 중';");

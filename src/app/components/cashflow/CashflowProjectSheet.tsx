@@ -443,12 +443,8 @@ export function CashflowProjectSheet({
       && (!query || `${change.yearMonth} ${change.weekNo} ${change.mode} ${label} ${change.lineId}`.toLocaleLowerCase('ko-KR').includes(query));
   });
   const executiveApproverOptions = useMemo(() => buildOrgMemberPickerOptions(members || [])
-    .filter((member) => (
-      member.uid !== user?.uid
-      && member.uid !== project?.registeredById
-      && member.uid !== project?.managerId
-    )),
-  [members, project?.managerId, project?.registeredById, user?.uid]);
+    .filter((member) => member.uid !== user?.uid),
+  [members, user?.uid]);
 
   useEffect(() => {
     const approverId = project?.executiveApproverId || '';
