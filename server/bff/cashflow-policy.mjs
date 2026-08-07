@@ -1,4 +1,4 @@
-import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
+import cashflowPolicyData from '../../policies/cashflow-policy.json' with { type: 'json' };
 
 export const CASHFLOW_IN_LINES = cashflowPolicyData.lineEntries
   .filter((entry) => entry.direction === 'IN')

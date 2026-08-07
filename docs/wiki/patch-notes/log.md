@@ -1,5 +1,9 @@
 # Patch Notes Log
 
+## [2026-08-07] patch-note | cashflow-policy-shared-location | 캐시플로 정책 공유 위치 정리
+- pages: [shared-label-policy](./pages/shared-label-policy.md)
+- summary: 캐시플로 정책 JSON의 내용과 동작은 유지한 채 프론트 전용 경로에서 최상위 공유 정책 경로로 이동했다.
+
 ## [2026-08-03] patch-note | portal-budget | 예산 총계 가독성 정리
 - pages: [portal-budget](./pages/portal-budget.md)
 - summary: 포털 예산 화면의 중복 전체 소진율·집행·잔액 표시를 제거하고 예산·집행·잔액 총계의 글자 크기를 한 단계 키웠다.

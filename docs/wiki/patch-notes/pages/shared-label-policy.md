@@ -38,7 +38,7 @@
 
 ## Related Files
 
-- `src/app/policies/cashflow-policy.json`
+- `policies/cashflow-policy.json`
 - `src/app/platform/policies/cashflow-policy.ts`
 - `src/app/platform/bank-import-cashflow.ts`
 - `src/app/platform/settlement-csv.ts`

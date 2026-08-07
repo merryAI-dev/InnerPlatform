@@ -13,7 +13,7 @@
 ### Task 1: Cashflow line catalog 확장
 
 **Files:**
-- Modify: `src/app/policies/cashflow-policy.json`
+- Modify: `policies/cashflow-policy.json`
 - Modify: `src/app/data/types.ts`
 - Modify: `src/app/platform/cashflow-sheet.ts`
 - Modify: `src/app/platform/policies/cashflow-policy.ts`
@@ -65,7 +65,7 @@ Expected: PASS; 새 입금 7개·출금 9개가 한 번씩만 합산되고 기�
 - [ ] **Step 5: 커밋**
 
 ```bash
-git add src/app/policies/cashflow-policy.json src/app/data/types.ts src/app/platform/cashflow-sheet.ts src/app/platform/policies/cashflow-policy.ts src/app/platform/cashflow-sheet.test.ts src/app/platform/policies/cashflow-policy.test.ts
+git add policies/cashflow-policy.json src/app/data/types.ts src/app/platform/cashflow-sheet.ts src/app/platform/policies/cashflow-policy.ts src/app/platform/cashflow-sheet.test.ts src/app/platform/policies/cashflow-policy.test.ts
 git commit -m "feat(cashflow): add detailed MYSC prepayment lines"
 ```
 
