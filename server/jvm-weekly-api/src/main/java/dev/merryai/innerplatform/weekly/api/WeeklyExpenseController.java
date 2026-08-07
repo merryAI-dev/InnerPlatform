@@ -1196,7 +1196,7 @@ public class WeeklyExpenseController {
     public ResponseEntity<Map<String, String>> forbidden(WeeklyExpenseForbiddenException error) {
         return ResponseEntity.status(403).body(Map.of(
             "ok", "false",
-            "code", "weekly_expense_forbidden",
+            "code", error.code(),
             "message", error.getMessage()
         ));
     }
