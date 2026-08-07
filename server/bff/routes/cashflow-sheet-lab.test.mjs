@@ -4930,3 +4930,226 @@ describe('cashflow sheet lab route', () => {
       .expect(200);
   });
 });
+
+describe('cashflow sheet apply lock lease', () => {
+  const PUBLICATION_PATH = 'orgs/tenant-a/cashflow_sheet_publications/project-a';
+  const STAGE_RUN_PATH = 'orgs/tenant-a/cashflow_sheet_stage_runs/run-v1';
+
+  function minutesAgo(minutes) {
+    return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+  }
+
+  function applyingDb(applyStartedAt) {
+    return createDb({
+      initialDocuments: {
+        [PUBLICATION_PATH]: {
+          projectId: 'project-a',
+          status: 'APPLYING',
+          stagedRunId: 'run-v1',
+          sourceRevision: 'sha256:source',
+          targetRevisionAtFetch: 'sha256:target',
+          applyStartedAt,
+        },
+        [STAGE_RUN_PATH]: {
+          runId: 'run-v1',
+          projectId: 'project-a',
+          status: 'APPLYING',
+          applyStartedAt,
+          appliedIdempotencyKey: 'idem-v1',
+          applyRequestHash: 'sha256:req',
+        },
+      },
+    });
+  }
+
+  it('keeps reporting an apply in progress while the lease is held', async () => {
+    const db = applyingDb(minutesAgo(1));
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/apply-status')
+      .expect(200);
+
+    expect(response.body.status).toBe('APPLYING');
+    expect(db.__getDocument(PUBLICATION_PATH).status).toBe('APPLYING');
+  });
+
+  it('releases an abandoned apply lock once the lease expires', async () => {
+    const db = applyingDb(minutesAgo(11));
+
+    const response = await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/apply-status')
+      .expect(200);
+
+    expect(response.body.status).toBe('IDLE');
+    const publication = db.__getDocument(PUBLICATION_PATH);
+    expect(publication.status).toBe('READY');
+    expect(publication.applyFailure.code).toBe('cashflow_sheet_apply_lease_expired');
+    const stageRun = db.__getDocument(STAGE_RUN_PATH);
+    expect(stageRun.status).toBe('READY');
+    expect(stageRun.appliedIdempotencyKey).toBeNull();
+  });
+
+  // 2026-08-06 사고: 반영이 중단된 뒤 시트 값을 다시 불러오면 stagedRunId가 달라져
+  // 재반영도 409로 막혔다. 임대가 만료되면 그 고착이 풀려야 한다.
+  it('clears a stale lock that pins an older staged run so a new run can apply', async () => {
+    const db = applyingDb(minutesAgo(11));
+
+    await request(createApp({ db }))
+      .get('/api/v1/projects/project-a/cashflow-sheet-lab/apply-status')
+      .expect(200);
+
+    const publication = db.__getDocument(PUBLICATION_PATH);
+    // reserve 트랜잭션의 차단 조건(APPLYING && stagedRunId 불일치)이 더는 성립하지 않는다.
+    expect(publication.status).not.toBe('APPLYING');
+  });
+
+  it('does not release a held lease for a non-admin actor', async () => {
+    const db = applyingDb(minutesAgo(1));
+
+    await request(createApp({ db }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply-lock/release')
+      .send({ reason: '반영이 멈춰 있음' })
+      .expect(403);
+
+    expect(db.__getDocument(PUBLICATION_PATH).status).toBe('APPLYING');
+  });
+
+  it('requires a reason before an admin releases the lock', async () => {
+    const db = applyingDb(minutesAgo(1));
+
+    await request(createApp({ db, context: { actorRole: 'admin' } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply-lock/release')
+      .send({})
+      .expect(422)
+      .expect((response) => {
+        expect(response.body.code).toBe('cashflow_sheet_apply_lock_release_reason_required');
+      });
+
+    expect(db.__getDocument(PUBLICATION_PATH).status).toBe('APPLYING');
+  });
+
+  it('lets an admin release a lease that has not expired yet', async () => {
+    const db = applyingDb(minutesAgo(1));
+
+    const response = await request(createApp({ db, context: { actorRole: 'admin' } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply-lock/release')
+      .send({ reason: '반영 프로세스가 중단됨' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ released: true, status: 'READY', stagedRunId: 'run-v1' });
+    const publication = db.__getDocument(PUBLICATION_PATH);
+    expect(publication.status).toBe('READY');
+    expect(publication.applyFailure).toMatchObject({
+      code: 'cashflow_sheet_apply_lock_force_released',
+      reason: '반영 프로세스가 중단됨',
+      releasedById: 'actor-a',
+    });
+    expect(db.__getDocument(STAGE_RUN_PATH).status).toBe('READY');
+  });
+
+  it('treats a repeated admin release as a no-op instead of failing', async () => {
+    const db = createDb({
+      initialDocuments: {
+        [PUBLICATION_PATH]: { projectId: 'project-a', status: 'READY' },
+      },
+    });
+
+    const response = await request(createApp({ db, context: { actorRole: 'admin' } }))
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply-lock/release')
+      .send({ reason: '이미 해제됨' })
+      .expect(200);
+
+    expect(response.body.released).toBe(false);
+    expect(db.__getDocument(PUBLICATION_PATH).status).toBe('READY');
+  });
+});
+
+describe('cashflow sheet apply lock release on failure', () => {
+  function labDb() {
+    return createDb({
+      project: {
+        id: 'project-a',
+        cashflowSheetLab: {
+          value: 'saved-spreadsheet-a',
+          sheetName: 'cashflow(사용내역 연동)',
+          startWeek: '26-1-1',
+          endWeek: '26-1-5',
+        },
+      },
+    });
+  }
+
+  function previewStub() {
+    return vi.fn(async () => ({
+      spreadsheetId: 'spreadsheet-a',
+      selectedSheetName: 'cashflow(사용내역 연동)',
+      availableSheets: [{ sheetId: 1, title: 'cashflow(사용내역 연동)', index: 0 }],
+      matrix: buildMatrixWithWeekLabels(JANUARY_FINANCE_WEEKS),
+    }));
+  }
+
+  async function stageOne(app, keySuffix) {
+    const mirror = await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/mirror/refresh')
+      .send({ idempotencyKey: `refresh-${keySuffix}` })
+      .expect(200);
+    return request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/stage')
+      .send({
+        expectedMirrorRevision: mirror.body.sourceRevision,
+        yearMonth: '2026-01',
+        idempotencyKey: `stage-${keySuffix}`,
+      })
+      .expect(200);
+  }
+
+  // 예약 전에 실패하면 락 자체가 잡히지 않는다. 락 고착은 예약 이후에만 생긴다.
+  it('never takes an apply lock when validation fails before the reservation', async () => {
+    const db = labDb();
+    const javaWeeklyClient = {
+      validateCashflowSheetFormulas: vi.fn(async () => {
+        throw new TypeError('unexpected internal failure');
+      }),
+      applyCashflowSheetLab: vi.fn(),
+    };
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet: previewStub() }, routeOptions: { javaWeeklyClient } });
+    const stage = await stageOne(app, 'internal-error');
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-internal-error' })
+      .expect((response) => {
+        expect(response.status).toBeGreaterThanOrEqual(500);
+      });
+
+    expect(javaWeeklyClient.applyCashflowSheetLab).not.toHaveBeenCalled();
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a')).toBeUndefined();
+    expect(db.__getDocument(`orgs/tenant-a/cashflow_sheet_stage_runs/${stage.body.runId}`).status).toBe('READY');
+  });
+
+  // 반영 여부를 모르는 상태에서 락을 놓으면 이중 반영 위험이 있다. 임대 만료에 맡긴다.
+  it('keeps the apply lock when the mutation outcome is uncertain', async () => {
+    const db = labDb();
+    const javaWeeklyClient = {
+      applyCashflowSheetLab: vi.fn(async () => {
+        throw Object.assign(new Error('transport failure'), {
+          statusCode: 503,
+          code: 'jvm_weekly_api_unavailable',
+          transportFailure: true,
+          mutationOutcome: 'uncertain',
+        });
+      }),
+    };
+    const app = createApp({ db, googleSheetsService: { previewSpreadsheet: previewStub() }, routeOptions: { javaWeeklyClient } });
+    const stage = await stageOne(app, 'uncertain');
+
+    await request(app)
+      .post('/api/v1/projects/project-a/cashflow-sheet-lab/apply')
+      .send({ stageRunId: stage.body.runId, idempotencyKey: 'apply-uncertain' })
+      .expect((response) => {
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      });
+
+    expect(db.__getDocument('orgs/tenant-a/cashflow_sheet_publications/project-a').status).toBe('APPLYING');
+  });
+});
