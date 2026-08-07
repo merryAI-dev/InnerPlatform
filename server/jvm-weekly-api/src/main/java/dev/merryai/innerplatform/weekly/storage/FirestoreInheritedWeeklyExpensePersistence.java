@@ -33,6 +33,7 @@ import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmatio
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
+import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditExportEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseBankImportBatchEntity;
@@ -117,6 +118,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private final Firestore db;
     private final String firestoreProjectId;
     private final Clock clock;
+    private final long cashflowApplyLeaseMs;
     private final byte[] cashflowSettledWeekConfirmationKey;
     private final FirestoreWeeklyExpenseDocumentMapper sheetMapper = new FirestoreWeeklyExpenseDocumentMapper();
     private final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
@@ -131,29 +133,37 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     @Autowired
     public FirestoreInheritedWeeklyExpensePersistence(
         @Value("${weekly.firestore-project-id:}") String firestoreProjectId,
-        @Value("${weekly.cashflow-settled-week-confirmation-key:}") String cashflowSettledWeekConfirmationKey
+        @Value("${weekly.cashflow-settled-week-confirmation-key:}") String cashflowSettledWeekConfirmationKey,
+        @Value("${weekly.cashflow-apply-lease-ms:600000}") String cashflowApplyLeaseMs
     ) {
         this(
             createFirestore(firestoreProjectId),
             normalizeFirestoreProjectId(firestoreProjectId),
             Clock.systemUTC(),
-            cashflowSettledWeekConfirmationKey
+            cashflowSettledWeekConfirmationKey,
+            CashflowApplyLease.leaseMs(cashflowApplyLeaseMs)
         );
     }
 
     FirestoreInheritedWeeklyExpensePersistence(Firestore db, String firestoreProjectId, Clock clock) {
-        this(db, firestoreProjectId, clock, TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY);
+        this(db, firestoreProjectId, clock, TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY, CashflowApplyLease.DEFAULT_LEASE_MS);
+    }
+
+    FirestoreInheritedWeeklyExpensePersistence(Firestore db, String firestoreProjectId, Clock clock, long cashflowApplyLeaseMs) {
+        this(db, firestoreProjectId, clock, TEST_CASHFLOW_SETTLED_WEEK_CONFIRMATION_KEY, cashflowApplyLeaseMs);
     }
 
     private FirestoreInheritedWeeklyExpensePersistence(
         Firestore db,
         String firestoreProjectId,
         Clock clock,
-        String cashflowSettledWeekConfirmationKey
+        String cashflowSettledWeekConfirmationKey,
+        long cashflowApplyLeaseMs
     ) {
         this.db = db;
         this.firestoreProjectId = normalizeFirestoreProjectId(firestoreProjectId);
         this.clock = clock;
+        this.cashflowApplyLeaseMs = cashflowApplyLeaseMs;
         this.cashflowSettledWeekConfirmationKey = requireCashflowSettledWeekConfirmationKey(cashflowSettledWeekConfirmationKey);
     }
 
@@ -3796,8 +3806,8 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         if (!publicationSnapshot.exists()) {
             return;
         }
-        String status = text(data(publicationSnapshot).get("status"), "").toUpperCase(Locale.ROOT);
-        if ("APPLYING".equals(status)) {
+        Map<String, Object> publication = data(publicationSnapshot);
+        if (CashflowApplyLease.read(publication.get("status"), publication.get("stagedRunId"), publication.get("applyStartedAt"), clock.instant().toEpochMilli(), cashflowApplyLeaseMs).blocked()) {
             throw new WeeklyExpenseConflictException(
                 "Cashflow sheet values are being applied. Retry the month close after the apply finishes."
             );

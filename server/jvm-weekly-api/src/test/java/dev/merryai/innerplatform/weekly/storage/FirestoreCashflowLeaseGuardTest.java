@@ -1982,6 +1982,62 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthCloseContinuesWhenTheSheetPublicationLeaseHasExpired() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-publication-expired", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        String publicationPath = "orgs/tenant-a/cashflow_sheet_publications/project-a";
+        fixture.documents.put(
+            publicationPath,
+            new LinkedHashMap<>(Map.of(
+                "projectId", "project-a",
+                "status", "APPLYING",
+                "stagedRunId", "abandoned-stage-run",
+                "applyStartedAt", NOW.minusMillis(600_000).toString(),
+                "sourceRevision", SOURCE_REVISION
+            ))
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            pinnedMirror(request)
+        );
+
+        fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request));
+
+        assertThat(fixture.documents).containsKey(monthClosePath("project-a", request.yearMonth()));
+        assertThat(fixture.documents.get(publicationPath))
+            .containsEntry("status", "APPLYING")
+            .containsEntry("stagedRunId", "abandoned-stage-run");
+    }
+
+    @Test
+    void monthCloseRejectsAnApplyingSheetPublicationWhileItsLeaseIsValid() {
+        CloseCashflowMonthRequest request = monthCloseRequest("month-close-publication-valid-lease", 0, 3);
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_publications/project-a",
+            new LinkedHashMap<>(Map.of(
+                "projectId", "project-a",
+                "status", "APPLYING",
+                "applyStartedAt", NOW.minusMillis(599_999).toString()
+            ))
+        );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
+            pinnedMirror(request)
+        );
+
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> commandService(
+            fixture.persistence
+        ).closeCashflowMonth(ACTOR, "project-a", SESSION, request)))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessage("Cashflow sheet values are being applied. Retry the month close after the apply finishes.");
+
+        assertThat(fixture.documents).doesNotContainKey(monthClosePath("project-a", request.yearMonth()));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void monthCloseTransactionRetriesAndRejectsAnAnnualOnlyPublicationReservedAfterItsFirstRead() {
         CloseCashflowMonthRequest request = monthCloseRequest("month-close-publication-race", 0, 3);

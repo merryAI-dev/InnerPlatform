@@ -10,6 +10,7 @@ weekly:
   deploy-env: ${JVM_WEEKLY_DEPLOY_ENV:local}
   legacy-week-close-enabled: false
   cashflow-edit-leases-enabled: ${JVM_WEEKLY_EDIT_LEASES_ENABLED:false}
+  cashflow-apply-lease-ms: ${CASHFLOW_APPLY_LEASE_MS:600000}
   storage-backend: ${JVM_WEEKLY_STORAGE_BACKEND:firestore}
   internal-api-token-enabled: ${JVM_WEEKLY_INTERNAL_API_TOKEN_ENABLED:false}
   internal-api-token: ${JVM_WEEKLY_INTERNAL_API_TOKEN:}
