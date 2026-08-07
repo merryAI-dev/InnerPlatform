@@ -263,10 +263,14 @@ function PortalContent() {
   }, [activeProjectId, candidateProjects.priorityProjects, candidateProjects.searchProjects, myProject, routeProjectId]);
 
   useEffect(() => {
-    if (!routeProjectId || routeProjectId === activeProjectId) return;
-    if (!candidateProjects.searchProjects.some((project) => project.id === routeProjectId)) return;
+    if (!routeProjectId) return;
+    if (!candidateProjects.searchProjects.some((project) => project.id === routeProjectId)) {
+      if (!portalLoading) navigate('/portal/project-select', { replace: true });
+      return;
+    }
+    if (routeProjectId === activeProjectId) return;
     void setSessionActiveProject(routeProjectId);
-  }, [activeProjectId, candidateProjects.searchProjects, routeProjectId, setSessionActiveProject]);
+  }, [activeProjectId, candidateProjects.searchProjects, navigate, portalLoading, routeProjectId, setSessionActiveProject]);
 
   const selectedProjectOptionValue = useMemo(() => {
     if (!currentProject?.id) return '';
