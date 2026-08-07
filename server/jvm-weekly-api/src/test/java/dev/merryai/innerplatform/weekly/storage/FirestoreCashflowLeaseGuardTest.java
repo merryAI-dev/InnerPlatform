@@ -52,9 +52,12 @@ import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -64,12 +67,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
@@ -1873,6 +1879,55 @@ class FirestoreCashflowLeaseGuardTest {
             assertThat(line.getYearMonth()).isEqualTo("2026-07");
             assertThat(line.getAmount()).isEqualByComparingTo("10");
         });
+    }
+
+    @Test
+    void oneMonthLedgerReadDropsFromFiveHundredFortyDocumentsToFive() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        YearMonth start = YearMonth.of(2024, 1);
+        for (int monthOffset = 0; monthOffset < 108; monthOffset++) {
+            String yearMonth = start.plusMonths(monthOffset).toString();
+            for (int weekNo = 1; weekNo <= 5; weekNo++) {
+                fixture.documents.put(
+                    "orgs/tenant-a/cashflow_weeks/project-a-" + yearMonth + "-w" + weekNo,
+                    Map.of("projectId", "project-a", "yearMonth", yearMonth, "weekNo", weekNo)
+                );
+            }
+        }
+        assertThat(fixture.documents.keySet().stream().filter(path -> path.contains("/cashflow_weeks/")).count())
+            .as("unscoped baseline")
+            .isEqualTo(540);
+
+        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", "2026-07", "2026-07");
+
+        assertThat(fixture.queryReadSizes.getLast()).isEqualTo(5).isLessThanOrEqualTo(10);
+
+        fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a", "2026-07", "2026-09");
+
+        assertThat(fixture.queryReadSizes.getLast()).isEqualTo(15);
+    }
+
+    @Test
+    void unfilteredCashflowWeekScansStayPinnedToApprovedExceptions() throws Exception {
+        String source = Files.readString(Path.of(
+            "src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java"
+        ));
+        Set<String> approved = Set.of(
+            "completeCashflowWeeklyUpdate", "countCashflowActualReplacementWrites",
+            "replaceCashflowSheetMonthsInternal", "findCashflowLedgerSource", "replaceExpenseRows",
+            "replaceActualLines", "findWeeklyStatuses", "readProjectionLines", "readActualLines"
+        );
+
+        assertThat(approved).allSatisfy(method ->
+            assertThat(source).contains("SPEC-12 approved full scan: " + method)
+        );
+        assertThat(source.split(Pattern.quote("SPEC-12 approved full scan:"), -1).length - 1).isEqualTo(approved.size());
+        assertThat(source.split(Pattern.quote("cashflowWeeks(tenantId).whereEqualTo(\"projectId\", projectId)"), -1).length - 1)
+            .isEqualTo(8);
+        assertThat(source.split(Pattern.quote("cashflowWeeks(actor.tenantId()).whereEqualTo(\"projectId\", projectId)"), -1).length - 1)
+            .isEqualTo(1);
+        assertThat(source.split(Pattern.quote("cashflowWeeks(tenant(sheet)).whereEqualTo(\"projectId\", sheet.getProjectId())"), -1).length - 1)
+            .isEqualTo(1);
     }
 
     @Test
@@ -3793,6 +3848,24 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthCloseQueriesSelectOnlyTheSixFieldsUsedAcrossAllMonths() {
+        assertThat(FirestoreInheritedWeeklyExpensePersistence.CASHFLOW_MONTH_CLOSE_READ_FIELDS)
+            .containsExactly(
+                "contractVersion", "yearMonth", "revision", "reopenCount", "status",
+                "postDeadlineAmendmentWarningCount"
+            );
+
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-06"), Map.of(
+            "projectId", "project-a", "status", "OPEN", "reopenCount", 2L,
+            "postDeadlineAmendmentWarningCount", 3L, "snapshot", Map.of("large", "payload")
+        ));
+
+        assertThat(fixture.persistence.findCashflowMonthClose("tenant-a", "project-a", "2026-06")
+            .projectWarningCount()).isEqualTo(5L);
+    }
+
+    @Test
     void monthCloseWritesStillRejectAnotherLegacyMonth() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(monthClosePath("project-a", "2026-05"), new LinkedHashMap<>(Map.of(
@@ -4707,6 +4780,7 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, Map<String, Object>> docs = new HashMap<>();
         List<PendingWrite> pendingWrites = new ArrayList<>();
         List<Integer> getAllSizes = new ArrayList<>();
+        List<Integer> queryReadSizes = new ArrayList<>();
         docs.put("orgs/tenant-a/members/pm-1", member);
         docs.put(leasePath("project-a"), lease);
         for (String yearMonth : List.of("2026-06", "2026-07")) {
@@ -4753,6 +4827,7 @@ class FirestoreCashflowLeaseGuardTest {
             refs,
             queryScopes,
             docs,
+            queryReadSizes,
             invocation.getArgument(0)
         ));
         when(transaction.get(any(DocumentReference.class))).thenAnswer(invocation -> {
@@ -4787,12 +4862,13 @@ class FirestoreCashflowLeaseGuardTest {
         when(transaction.get(any(Query.class))).thenAnswer(invocation -> {
             QueryScope scope = queryScopes.get(invocation.getArgument(0));
             List<QueryDocumentSnapshot> snapshots = docs.entrySet().stream()
-                .filter(entry -> scope != null && entry.getKey().startsWith(scope.collectionPath() + "/"))
-                .filter(entry -> scope == null || java.util.Objects.equals(entry.getValue().get(scope.field()), scope.value()))
-                .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), entry.getValue()))
+                .filter(entry -> scope != null && entry.getKey().startsWith(scope.collectionPath + "/"))
+                .filter(entry -> scope != null && scope.matches(entry.getValue()))
+                .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), scope.project(entry.getValue())))
                 .toList();
             QuerySnapshot querySnapshot = mock(QuerySnapshot.class);
             when(querySnapshot.getDocuments()).thenReturn(snapshots);
+            queryReadSizes.add(snapshots.size());
             return ApiFutures.immediateFuture(querySnapshot);
         });
         when(transaction.set(any(DocumentReference.class), any(), any())).thenAnswer(invocation -> {
@@ -4847,7 +4923,7 @@ class FirestoreCashflowLeaseGuardTest {
             "stage-data-project",
             Clock.fixed(effectiveNow, ZoneOffset.UTC)
         );
-        return new Fixture(persistence, db, transaction, refs, collections, docs, pendingWrites, getAllSizes);
+        return new Fixture(persistence, db, transaction, refs, collections, docs, pendingWrites, getAllSizes, queryReadSizes);
     }
 
     private static DocumentReference ref(Map<String, DocumentReference> refs, String path) {
@@ -4864,6 +4940,7 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, DocumentReference> refs,
         Map<Query, QueryScope> queryScopes,
         Map<String, Map<String, Object>> docs,
+        List<Integer> queryReadSizes,
         String path
     ) {
         return collections.computeIfAbsent(path, key -> {
@@ -4874,17 +4951,32 @@ class FirestoreCashflowLeaseGuardTest {
                 Query query = mock(Query.class);
                 QueryScope scope = new QueryScope(key, invocation.getArgument(0), invocation.getArgument(1));
                 queryScopes.put(query, scope);
+                when(query.whereEqualTo(anyString(), any())).thenAnswer(filter -> {
+                    scope.equals.put(filter.getArgument(0), filter.getArgument(1));
+                    return query;
+                });
+                when(query.whereIn(anyString(), anyList())).thenAnswer(filter -> {
+                    scope.in.put(filter.getArgument(0), List.copyOf(filter.getArgument(1)));
+                    return query;
+                });
+                when(query.select(any(String[].class))).thenAnswer(selection -> {
+                    scope.selected = java.util.Arrays.stream(selection.getArguments())
+                        .map(String.class::cast)
+                        .toList();
+                    return query;
+                });
                 when(query.whereGreaterThanOrEqualTo(anyString(), any())).thenReturn(query);
                 when(query.whereLessThanOrEqualTo(anyString(), any())).thenReturn(query);
                 when(query.limit(org.mockito.ArgumentMatchers.anyInt())).thenReturn(query);
                 org.mockito.Mockito.doAnswer(ignored -> {
                     List<QueryDocumentSnapshot> snapshots = docs.entrySet().stream()
-                        .filter(entry -> entry.getKey().startsWith(scope.collectionPath() + "/"))
-                        .filter(entry -> java.util.Objects.equals(entry.getValue().get(scope.field()), scope.value()))
-                        .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), entry.getValue()))
+                        .filter(entry -> entry.getKey().startsWith(scope.collectionPath + "/"))
+                        .filter(entry -> scope.matches(entry.getValue()))
+                        .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), scope.project(entry.getValue())))
                         .toList();
                     QuerySnapshot querySnapshot = mock(QuerySnapshot.class);
                     when(querySnapshot.getDocuments()).thenReturn(snapshots);
+                    queryReadSizes.add(snapshots.size());
                     return ApiFutures.immediateFuture(querySnapshot);
                 }).when(query).get();
                 return query;
@@ -5228,13 +5320,37 @@ class FirestoreCashflowLeaseGuardTest {
         Map<String, CollectionReference> collections,
         Map<String, Map<String, Object>> documents,
         List<PendingWrite> pendingWrites,
-        List<Integer> getAllSizes
+        List<Integer> getAllSizes,
+        List<Integer> queryReadSizes
     ) {
     }
 
     private record PendingWrite(DocumentReference ref, Map<String, Object> data, boolean merge) {
     }
 
-    private record QueryScope(String collectionPath, String field, Object value) {
+    private static final class QueryScope {
+        private final String collectionPath;
+        private final Map<String, Object> equals = new LinkedHashMap<>();
+        private final Map<String, List<?>> in = new LinkedHashMap<>();
+        private List<String> selected;
+
+        private QueryScope(String collectionPath, String field, Object value) {
+            this.collectionPath = collectionPath;
+            equals.put(field, value);
+        }
+
+        private boolean matches(Map<String, Object> document) {
+            return equals.entrySet().stream().allMatch(filter -> Objects.equals(document.get(filter.getKey()), filter.getValue()))
+                && in.entrySet().stream().allMatch(filter -> filter.getValue().contains(document.get(filter.getKey())));
+        }
+
+        private Map<String, Object> project(Map<String, Object> document) {
+            if (selected == null) return document;
+            Map<String, Object> projection = new LinkedHashMap<>();
+            selected.forEach(name -> {
+                if (document.containsKey(name)) projection.put(name, document.get(name));
+            });
+            return projection;
+        }
     }
 }
