@@ -3744,6 +3744,24 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
+    void monthCloseQueriesSelectOnlyTheSixFieldsUsedAcrossAllMonths() {
+        assertThat(FirestoreInheritedWeeklyExpensePersistence.CASHFLOW_MONTH_CLOSE_READ_FIELDS)
+            .containsExactly(
+                "contractVersion", "yearMonth", "revision", "reopenCount", "status",
+                "postDeadlineAmendmentWarningCount"
+            );
+
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-06"), Map.of(
+            "projectId", "project-a", "status", "OPEN", "reopenCount", 2L,
+            "postDeadlineAmendmentWarningCount", 3L, "snapshot", Map.of("large", "payload")
+        ));
+
+        assertThat(fixture.persistence.findCashflowMonthClose("tenant-a", "project-a", "2026-06")
+            .projectWarningCount()).isEqualTo(5L);
+    }
+
+    @Test
     void monthCloseWritesStillRejectAnotherLegacyMonth() {
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(monthClosePath("project-a", "2026-05"), new LinkedHashMap<>(Map.of(
@@ -4738,9 +4756,9 @@ class FirestoreCashflowLeaseGuardTest {
         when(transaction.get(any(Query.class))).thenAnswer(invocation -> {
             QueryScope scope = queryScopes.get(invocation.getArgument(0));
             List<QueryDocumentSnapshot> snapshots = docs.entrySet().stream()
-                .filter(entry -> scope != null && entry.getKey().startsWith(scope.collectionPath() + "/"))
-                .filter(entry -> scope == null || java.util.Objects.equals(entry.getValue().get(scope.field()), scope.value()))
-                .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), entry.getValue()))
+                .filter(entry -> scope != null && entry.getKey().startsWith(scope.collectionPath + "/"))
+                .filter(entry -> scope != null && java.util.Objects.equals(entry.getValue().get(scope.field), scope.value))
+                .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), scope.project(entry.getValue())))
                 .toList();
             QuerySnapshot querySnapshot = mock(QuerySnapshot.class);
             when(querySnapshot.getDocuments()).thenReturn(snapshots);
@@ -4825,14 +4843,20 @@ class FirestoreCashflowLeaseGuardTest {
                 Query query = mock(Query.class);
                 QueryScope scope = new QueryScope(key, invocation.getArgument(0), invocation.getArgument(1));
                 queryScopes.put(query, scope);
+                when(query.select(any(String[].class))).thenAnswer(selection -> {
+                    scope.selected = java.util.Arrays.stream(selection.getArguments())
+                        .map(String.class::cast)
+                        .toList();
+                    return query;
+                });
                 when(query.whereGreaterThanOrEqualTo(anyString(), any())).thenReturn(query);
                 when(query.whereLessThanOrEqualTo(anyString(), any())).thenReturn(query);
                 when(query.limit(org.mockito.ArgumentMatchers.anyInt())).thenReturn(query);
                 org.mockito.Mockito.doAnswer(ignored -> {
                     List<QueryDocumentSnapshot> snapshots = docs.entrySet().stream()
-                        .filter(entry -> entry.getKey().startsWith(scope.collectionPath() + "/"))
-                        .filter(entry -> java.util.Objects.equals(entry.getValue().get(scope.field()), scope.value()))
-                        .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), entry.getValue()))
+                        .filter(entry -> entry.getKey().startsWith(scope.collectionPath + "/"))
+                        .filter(entry -> java.util.Objects.equals(entry.getValue().get(scope.field), scope.value))
+                        .map(entry -> queryDocumentSnapshot(refs, entry.getKey(), scope.project(entry.getValue())))
                         .toList();
                     QuerySnapshot querySnapshot = mock(QuerySnapshot.class);
                     when(querySnapshot.getDocuments()).thenReturn(snapshots);
@@ -5186,6 +5210,25 @@ class FirestoreCashflowLeaseGuardTest {
     private record PendingWrite(DocumentReference ref, Map<String, Object> data, boolean merge) {
     }
 
-    private record QueryScope(String collectionPath, String field, Object value) {
+    private static final class QueryScope {
+        private final String collectionPath;
+        private final String field;
+        private final Object value;
+        private List<String> selected;
+
+        private QueryScope(String collectionPath, String field, Object value) {
+            this.collectionPath = collectionPath;
+            this.field = field;
+            this.value = value;
+        }
+
+        private Map<String, Object> project(Map<String, Object> document) {
+            if (selected == null) return document;
+            Map<String, Object> projection = new LinkedHashMap<>();
+            selected.forEach(name -> {
+                if (document.containsKey(name)) projection.put(name, document.get(name));
+            });
+            return projection;
+        }
     }
 }

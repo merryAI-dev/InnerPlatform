@@ -87,6 +87,10 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     private static final Set<String> CASHFLOW_CROSS_PROJECT_ROLES = Set.of("admin", "finance", "tenant_admin");
     private static final String CASHFLOW_MONTH_CLOSE_CONTRACT_VERSION = "cashflow-month-close-v1";
     private static final String CASHFLOW_CUMULATIVE_CLOSE_CONTRACT_VERSION = "cashflow-cumulative-close-v2";
+    static final List<String> CASHFLOW_MONTH_CLOSE_READ_FIELDS = List.of(
+        "contractVersion", "yearMonth", "revision", "reopenCount", "status",
+        "postDeadlineAmendmentWarningCount"
+    );
     private static final YearMonth CASHFLOW_CUMULATIVE_BASELINE = YearMonth.of(2023, 1);
     private static final List<String> CASHFLOW_CUMULATIVE_LINES = List.of(
         "MYSC_PREPAY_IN", "MYSC_PREPAY_LABOR_IN", "MYSC_PREPAY_INPUT_VAT_IN", "SALES_IN",
@@ -3485,11 +3489,14 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private List<Map<String, Object>> readProjectMonthCloses(String tenantId, String projectId) {
         QuerySnapshot snapshot = query(db.collection("orgs/" + tenantId + "/monthly_closes")
-            .whereEqualTo("projectId", projectId));
+            .whereEqualTo("projectId", projectId)
+            .select(CASHFLOW_MONTH_CLOSE_READ_FIELDS.toArray(String[]::new)));
         List<Map<String, Object>> closes = new ArrayList<>();
         for (DocumentSnapshot document : snapshot.getDocuments()) {
-            Map<String, Object> close = data(document);
+            Map<String, Object> close = new LinkedHashMap<>(data(document));
             String yearMonth = text(close.get("yearMonth"), "");
+            close.put("tenantId", tenantId);
+            close.put("projectId", projectId);
             requireYearMonth(yearMonth);
             canonicalMonthStatus(close, tenantId, projectId, yearMonth);
             closes.add(close);
@@ -3499,15 +3506,18 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private List<Map<String, Object>> readProjectMonthClosesForRead(String tenantId, String projectId) {
         QuerySnapshot snapshot = query(db.collection("orgs/" + tenantId + "/monthly_closes")
-            .whereEqualTo("projectId", projectId));
+            .whereEqualTo("projectId", projectId)
+            .select(CASHFLOW_MONTH_CLOSE_READ_FIELDS.toArray(String[]::new)));
         List<Map<String, Object>> closes = new ArrayList<>();
         for (DocumentSnapshot document : snapshot.getDocuments()) {
-            Map<String, Object> close = data(document);
+            Map<String, Object> close = new LinkedHashMap<>(data(document));
             String yearMonth = text(close.get("yearMonth"), "");
             if (yearMonth.isBlank()) {
                 String prefix = projectId + "-";
                 yearMonth = document.getId().startsWith(prefix) ? document.getId().substring(prefix.length()) : "";
             }
+            close.put("tenantId", tenantId);
+            close.put("projectId", projectId);
             requireYearMonth(yearMonth);
             closes.add(readableMonthClose(close, tenantId, projectId, yearMonth));
         }
