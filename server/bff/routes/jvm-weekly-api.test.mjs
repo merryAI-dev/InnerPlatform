@@ -892,6 +892,7 @@ describe('JVM weekly API BFF proxy', () => {
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
       db: source.db,
+      now: () => new Date('2026-07-24T08:01:00.000Z'),
     });
 
     await request(app)
@@ -902,6 +903,33 @@ describe('JVM weekly API BFF proxy', () => {
       });
 
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('stops blocking the month dashboard once an abandoned sheet apply lease expires', async () => {
+    const source = fullMonthCloseSource();
+    source.documents.set('orgs/tenant-a/cashflow_sheet_publications/project-a', {
+      projectId: 'project-a',
+      status: 'APPLYING',
+      stagedRunId: 'run-abandoned',
+      sourceRevision: source.sourceRevision,
+      targetRevisionAtFetch: source.targetRevision,
+      applyStartedAt: '2026-07-24T08:00:00.000Z',
+    });
+    const fetchImpl = vi.fn();
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
+      env: runtimeEnv,
+      db: source.db,
+      now: () => new Date('2026-07-24T09:00:00.000Z'),
+    });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect((response) => {
+        expect(response.body.code).not.toBe('cashflow_sheet_apply_in_progress');
+      });
+
+    // 만료된 락이 더 이상 JVM 조회를 가로막지 않는다.
+    expect(fetchImpl).toHaveBeenCalled();
   });
 
   it('combines explicit sheet refresh and JVM month-close audit records for the activity timeline', async () => {

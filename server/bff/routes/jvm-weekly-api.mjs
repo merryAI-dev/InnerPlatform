@@ -18,6 +18,7 @@ import {
 } from '../cashflow-comparison.mjs';
 import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../cashflow-policy.mjs';
 import { stableStringify } from '../utils.mjs';
+import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import { createHash } from 'node:crypto';
 
@@ -1456,7 +1457,7 @@ function buildCumulativeCloseScope(yearMonth, evidence = null) {
   };
 }
 
-async function readCashflowSheetPublicationState({ db, tenantId, projectId }) {
+async function readCashflowSheetPublicationState({ db, tenantId, projectId, nowMs = Date.now() }) {
   if (!db?.doc) {
     return { blocked: false, fingerprint: '{}' };
   }
@@ -1472,19 +1473,26 @@ async function readCashflowSheetPublicationState({ db, tenantId, projectId }) {
     applyFailedAt: readOptionalText(data.applyFailedAt),
     appliedAt: readOptionalText(data.appliedAt),
   };
+  const lease = readCashflowApplyLeaseState(publication, {
+    nowMs,
+    leaseMs: cashflowApplyLeaseMs(),
+  });
   return {
-    blocked: publication.status === 'APPLYING',
+    blocked: lease.blocked,
+    leaseExpiresAt: lease.expiresAt,
     fingerprint: stableStringify(publication),
   };
 }
 
 function assertCashflowSheetPublicationReady(state) {
   if (!state.blocked) return;
-  throw createHttpError(
+  const error = createHttpError(
     409,
     '시트 값을 MYSCube 시트에 반영 중입니다. 반영이 끝난 뒤 다시 확인해 주세요.',
     'cashflow_sheet_apply_in_progress',
   );
+  if (state.leaseExpiresAt) error.details = { leaseExpiresAt: state.leaseExpiresAt };
+  throw error;
 }
 
 // 월 결산 기한은 대상월 다음 달 10일이다. 판정 주체는 JVM이며(WeeklyExpensePersistence.closeDeadline),
@@ -2519,6 +2527,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             db,
             tenantId: req.context.tenantId,
             projectId: rawProjectId,
+            nowMs: currentNow.getTime(),
           }),
           { attempt: traceAttempt },
         );
@@ -2607,6 +2616,7 @@ export function mountJvmWeeklyApiRoutes(app, {
             db,
             tenantId: req.context.tenantId,
             projectId: rawProjectId,
+            nowMs: currentNow.getTime(),
           }),
           { attempt: traceAttempt },
         );
@@ -2875,6 +2885,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         db,
         tenantId: req.context.tenantId,
         projectId: rawProjectId,
+        nowMs: currentNow.getTime(),
       });
       assertCashflowSheetPublicationReady(publicationBefore);
       const comparisonBoundary = {
@@ -2922,6 +2933,7 @@ export function mountJvmWeeklyApiRoutes(app, {
         db,
         tenantId: req.context.tenantId,
         projectId: rawProjectId,
+        nowMs: currentNow.getTime(),
       });
       assertCashflowSheetPublicationReady(publicationAfter);
       if (publicationBefore.fingerprint !== publicationAfter.fingerprint) {

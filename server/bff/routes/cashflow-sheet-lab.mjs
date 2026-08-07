@@ -22,6 +22,7 @@ import {
 import { assertCashflowMutationRuntime, createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
 import { stableStringify } from '../utils.mjs';
+import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
 import {
   cashflowSheetLabApplySchema,
@@ -311,6 +312,18 @@ function assertCashflowSheetLabAccess(req, workspaceEmailDomain = 'mysc.co.kr') 
   throw createHttpError(
     403,
     `Workspace email is required to preview cashflow sheets lab: ${actorRole || 'unknown'}`,
+    'forbidden',
+  );
+}
+
+// 강제 해제는 진행 중일 수 있는 반영을 끊는 조작이므로 워크스페이스 사용자 전체가 아니라
+// 관리 역할에게만 연다.
+function assertCashflowSheetApplyLockAdmin(req) {
+  const actorRole = normalizeRole(req.context?.actorRole);
+  if (['admin', 'finance_admin'].includes(actorRole)) return;
+  throw createHttpError(
+    403,
+    '시트 반영 대기 상태 해제는 관리자만 할 수 있습니다.',
     'forbidden',
   );
 }
@@ -2320,7 +2333,8 @@ async function reserveCashflowSheetApply({
   return { ...result, runRef, publicationRef };
 }
 
-async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
+async function readCashflowSheetApplyStatus({ db, tenantId, projectId, nowMs = Date.now() }) {
+  await releaseExpiredCashflowSheetApplyLease({ db, tenantId, projectId, nowMs });
   const publicationRef = db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`);
   const publicationSnap = await publicationRef.get();
   const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
@@ -2390,6 +2404,70 @@ async function readCashflowSheetApplyStatus({ db, tenantId, projectId }) {
       replaceAllActualSources: stageRunDocument.replaceAllActualSources === true,
     },
   };
+}
+
+// 락을 놓을 때 무엇이 반영됐는지는 여기서 판정하지 않는다. 반영 여부의 진실은 JVM
+// 멱등키와 revision 가드가 쥐고 있고, 다음 반영 요청이 그 가드를 정상적으로 통과하거나
+// 거절된다. force=true 는 임대가 아직 남아 있어도 관리자 판단으로 해제한다.
+async function releaseCashflowSheetApplyLock({
+  db,
+  tenantId,
+  projectId,
+  nowMs = Date.now(),
+  leaseMs = cashflowApplyLeaseMs(),
+  force = false,
+  reason = '',
+  actor = null,
+}) {
+  const publicationRef = db.doc(`orgs/${tenantId}/cashflow_sheet_publications/${projectId}`);
+  return db.runTransaction(async (transaction) => {
+    const publicationSnap = await transaction.get(publicationRef);
+    const publication = publicationSnap.exists ? (publicationSnap.data() || {}) : {};
+    const lease = readCashflowApplyLeaseState(publication, { nowMs, leaseMs });
+    if (!lease.applying) return { released: false, reasonCode: 'not_applying', lease };
+    if (!force && !lease.expired) return { released: false, reasonCode: 'lease_held', lease };
+    const releasedAt = new Date(nowMs).toISOString();
+    const failure = stripUndefinedDeep({
+      code: force ? 'cashflow_sheet_apply_lock_force_released' : 'cashflow_sheet_apply_lease_expired',
+      message: force
+        ? '관리자가 시트 반영 대기 상태를 해제했습니다.'
+        : '시트 반영이 끝나지 않아 대기 상태를 해제했습니다.',
+      reason: readOptionalText(reason) || undefined,
+      releasedById: readOptionalText(actor?.actorId) || undefined,
+      releasedByEmail: readOptionalText(actor?.actorEmail) || undefined,
+      previousApplyStartedAt: lease.applyStartedAt || undefined,
+      previousStagedRunId: lease.stagedRunId || undefined,
+    });
+    const stagedRunId = lease.stagedRunId;
+    if (stagedRunId) {
+      const runRef = db.doc(`orgs/${tenantId}/${CASHFLOW_SHEET_STAGE_RUNS_COLLECTION_ID}/${stagedRunId}`);
+      const runSnap = await transaction.get(runRef);
+      const stageRun = runSnap.exists ? (runSnap.data() || {}) : {};
+      if (
+        runSnap.exists
+        && readOptionalText(stageRun.projectId) === readOptionalText(projectId)
+        && readOptionalText(stageRun.status) === 'APPLYING'
+      ) {
+        transaction.set(runRef, stripUndefinedDeep({
+          status: 'READY',
+          appliedIdempotencyKey: null,
+          applyRequestHash: null,
+          applyFailedAt: releasedAt,
+          applyFailure: failure,
+        }), { merge: true });
+      }
+    }
+    transaction.set(publicationRef, stripUndefinedDeep({
+      status: 'READY',
+      applyFailedAt: releasedAt,
+      applyFailure: failure,
+    }), { merge: true });
+    return { released: true, reasonCode: failure.code, lease, releasedAt, stagedRunId };
+  });
+}
+
+function releaseExpiredCashflowSheetApplyLease(options) {
+  return releaseCashflowSheetApplyLock({ ...options, force: false });
 }
 
 async function restoreCashflowSheetApplyReady({
@@ -3077,6 +3155,15 @@ async function applyStagedCashflowSheetLab({
     }
   }
 
+  // 중단된 이전 반영이 남긴 락은 새 검토본으로 재시도해도 stagedRunId가 달라 계속 막힌다.
+  // 예약 전에 만료된 락을 먼저 놓아 그 고착을 끊는다.
+  await releaseExpiredCashflowSheetApplyLease({
+    db,
+    tenantId,
+    projectId,
+    nowMs: Date.parse(now),
+  });
+
   const reservation = await reserveCashflowSheetApply({
     db,
     tenantId,
@@ -3456,7 +3543,6 @@ async function applyStagedCashflowSheetLab({
       if (rejected) throw rejected.reason;
     }
   } catch (error) {
-    const statusCode = Number(error?.statusCode || error?.status);
     if (readOptionalText(error?.code) === 'cashflow_sheet_operation_uncertain' && error.operationKey) {
       await persistOperation(error.operationKey, {
         status: 'UNCERTAIN',
@@ -3475,7 +3561,12 @@ async function applyStagedCashflowSheetLab({
         closedMonthDifferences: summarizeCandidateMonthDifferences(selectedCandidates, requiredMonths),
       };
     }
-    if (completedOperationCount === 0 && statusCode >= 400 && statusCode < 500) {
+    // 반영된 작업이 하나도 없고 결과가 불확정도 아니면 락을 즉시 놓는다. 5xx·전송 실패는
+    // 이전에 해제 대상이 아니어서, 서버 오류 한 번이 프로젝트를 영구히 잠그는 원인이었다.
+    // 불확정(uncertain)은 JVM 반영 여부를 모르는 상태이므로 임대 만료에 맡긴다.
+    const uncertainOutcome = readOptionalText(error?.code) === 'cashflow_sheet_operation_uncertain'
+      || error?.mutationOutcome === 'uncertain';
+    if (completedOperationCount === 0 && !uncertainOutcome) {
       await restoreCashflowSheetApplyReady({
         db,
         runRef: reservation.runRef,
@@ -4070,6 +4161,36 @@ export function mountCashflowSheetLabRoutes(app, {
     const { projectId } = req.params;
     await readProjectDocument(db, tenantId, projectId);
     res.status(200).json(await readCashflowSheetApplyStatus({ db, tenantId, projectId }));
+  }));
+
+  app.post('/api/v1/projects/:projectId/cashflow-sheet-lab/apply-lock/release', asyncHandler(async (req, res) => {
+    assertCashflowSheetApplyLockAdmin(req);
+    const { tenantId } = req.context;
+    const { projectId } = req.params;
+    const reason = readOptionalText(req.body?.reason);
+    if (!reason) {
+      throw createHttpError(
+        422,
+        '해제 사유를 입력해 주세요.',
+        'cashflow_sheet_apply_lock_release_reason_required',
+      );
+    }
+    await readProjectDocument(db, tenantId, projectId);
+    const result = await releaseCashflowSheetApplyLock({
+      db,
+      tenantId,
+      projectId,
+      force: true,
+      reason,
+      actor: req.context,
+    });
+    res.status(200).json({
+      projectId,
+      released: result.released,
+      status: result.released ? 'READY' : result.lease.status || 'IDLE',
+      stagedRunId: result.stagedRunId || '',
+      releasedAt: result.releasedAt || '',
+    });
   }));
 
   app.get('/api/v1/projects/:projectId/cashflow-sheet-lab/years', asyncHandler(async (req, res) => {
