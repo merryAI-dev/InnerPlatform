@@ -35,6 +35,7 @@ import type { CashflowMutationLease } from '../lib/cashflow-edit-lease';
 import { addMonthsToYearMonth, getSeoulTodayIso } from '../platform/business-days';
 import { getMonthMondayWeeks } from '../platform/cashflow-weeks';
 import { recordDevtoolsLog, summarizeAmountMap, toDevtoolsError } from '../platform/devtools-transaction-log';
+import { resolveApiErrorPresentation } from '../platform/api-error-messages';
 
 interface CashflowWeekState {
   yearMonth: string; // selected month ("YYYY-MM")
@@ -235,7 +236,7 @@ export function CashflowWeekProvider({ children }: { children: ReactNode }) {
         setWeeks([]);
         setWeeklySettlementCompletedKeys([]);
         setIsLoading(false);
-        setLoadError('현금흐름 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        setLoadError(resolveApiErrorPresentation('', 500).guide);
       });
 
     return () => {

@@ -33,6 +33,8 @@ import { useAuth } from '../../data/auth-store';
 import { useFirebase } from '../../lib/firebase-context';
 import { getAuthInstance } from '../../lib/firebase';
 import { resolveApiErrorMessage } from '../../platform/api-error-message';
+import { PlatformApiError } from '../../platform/api-client';
+import { resolveApiErrorPresentation, type ApiErrorPresentation } from '../../platform/api-error-messages';
 import { recordDevtoolsLog, toDevtoolsError } from '../../platform/devtools-transaction-log';
 import {
   fetchCashflowActivityViaBff,
@@ -388,6 +390,10 @@ export function CashflowProjectSheet({
   const [monthCloseRequest, setMonthCloseRequest] = useState<CashflowMonthCloseRequest | null>(null);
   const [monthCloseLoading, setMonthCloseLoading] = useState(false);
   const [monthCloseError, setMonthCloseError] = useState<string | null>(null);
+  const [monthCloseErrorPresentation, setMonthCloseErrorPresentation] = useState<(ApiErrorPresentation & {
+    code: string;
+    requestId: string;
+  }) | null>(null);
   const [monthCloseBusy, setMonthCloseBusy] = useState(false);
   const [selectedExecutiveApproverId, setSelectedExecutiveApproverId] = useState(project?.executiveApproverId || '');
   const [savedExecutiveApproverId, setSavedExecutiveApproverId] = useState(project?.executiveApproverId || '');
@@ -682,12 +688,19 @@ export function CashflowProjectSheet({
     const isCurrentRequest = () => requestGeneration === monthCloseRequestGenerationRef.current;
     if (!projectId || !orgId || !user?.uid) {
       setMonthCloseResult(null);
-      setMonthCloseError('로그인 세션이 만료되었습니다.');
+      setMonthCloseError('로그인 세션이 만료됐어요. 다시 로그인해 주세요.');
+      setMonthCloseErrorPresentation({
+        guide: '로그인 세션이 만료됐어요. 다시 로그인해 주세요.',
+        resolution: 'contact',
+        code: '',
+        requestId: '',
+      });
       return;
     }
     setMonthCloseResult((current) => current?.yearMonth === yearMonth ? current : null);
     setMonthCloseLoading(true);
     setMonthCloseError(null);
+    setMonthCloseErrorPresentation(null);
     const startedAt = Date.now();
     logCashflowSettlement({
       phase: 'start',
@@ -739,7 +752,19 @@ export function CashflowProjectSheet({
       }
     } catch (error) {
       if (!isCurrentRequest()) return;
-      setMonthCloseError(resolveApiErrorMessage(error, '월 결산 상태를 불러오지 못했습니다.'));
+      if (error instanceof PlatformApiError) {
+        const presentation = resolveApiErrorPresentation(error.code, error.status);
+        setMonthCloseError(presentation.guide);
+        setMonthCloseErrorPresentation({
+          ...presentation,
+          code: error.code.slice(0, 64),
+          requestId: String(error.requestId || '').slice(0, 64),
+        });
+      } else {
+        const presentation = resolveApiErrorPresentation('', 500);
+        setMonthCloseError(presentation.guide);
+        setMonthCloseErrorPresentation({ ...presentation, code: '', requestId: '' });
+      }
       logCashflowSettlement({
         phase: 'error',
         operation: 'cashflow.month_close.status.load',
@@ -2405,8 +2430,20 @@ export function CashflowProjectSheet({
     }
     if (monthCloseError || !monthCloseResult?.dashboard?.canonical?.range) {
       return (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-6 text-center text-[12px] text-red-700">
-          {monthCloseError || '서버 확정 시트와 기간 합계를 불러오지 못했습니다.'}
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-6 text-center text-[12px] text-red-700">
+          <div>{monthCloseError || '서버 확정 시트와 기간 합계를 불러오지 못했습니다. 화면을 다시 확인해 주세요.'}</div>
+          {monthCloseErrorPresentation ? (
+            <>
+              <div className="mt-1 text-[12px] text-red-700">
+                {monthCloseErrorPresentation.resolution === 'retry' ? '상태: 다시 시도 가능' : monthCloseErrorPresentation.resolution === 'wait' ? '상태: 기다린 뒤 확인' : '상태: 담당자 확인 필요'}
+              </div>
+              {monthCloseErrorPresentation.code || monthCloseErrorPresentation.requestId ? (
+                <div className="mt-1 text-[12px] text-red-600">
+                  {[monthCloseErrorPresentation.code, monthCloseErrorPresentation.requestId].filter(Boolean).join(' · ')}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
       );
     }
@@ -2552,7 +2589,7 @@ export function CashflowProjectSheet({
             summary={dashboard?.projectionActualSummary}
             loading={monthCloseLoading}
             error={Boolean(monthCloseError)}
-            onRetry={() => void loadCashflowMonthClose()}
+            onRetry={monthCloseErrorPresentation?.resolution === 'contact' ? undefined : () => void loadCashflowMonthClose()}
           />
         </div>
       );
