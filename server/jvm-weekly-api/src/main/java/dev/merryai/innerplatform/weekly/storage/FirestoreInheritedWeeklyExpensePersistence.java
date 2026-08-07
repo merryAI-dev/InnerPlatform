@@ -1566,6 +1566,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             }
         }
 
+        // SPEC-12 approved full scan: completeCashflowWeeklyUpdate requires the global targetRevision.
         QuerySnapshot projectWeekSnapshot = query(cashflowWeeks(actor.tenantId()).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> projectWeeks = new LinkedHashMap<>();
         for (DocumentSnapshot weekSnapshot : projectWeekSnapshot.getDocuments()) {
@@ -2058,6 +2059,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         Set<String> writeDocumentIds = new java.util.LinkedHashSet<>(requestedWeekDocumentIds == null
             ? List.of()
             : requestedWeekDocumentIds);
+        // SPEC-12 approved full scan: countCashflowActualReplacementWrites budgets existing actual documents globally.
         QuerySnapshot existing = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         for (DocumentSnapshot doc : existing.getDocuments()) {
             if (data(doc).containsKey("weeklyExpenseActualBySheet")) {
@@ -2242,6 +2244,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             targetMonthDocs.put(snap.getId(), document);
         }
 
+        // SPEC-12 approved full scan: replaceCashflowSheetMonthsInternal hashes the complete project ledger.
         QuerySnapshot existingSnapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         Map<String, Map<String, Object>> allProjectWeeks = new LinkedHashMap<>();
         for (DocumentSnapshot doc : existingSnapshot.getDocuments()) {
@@ -2544,6 +2547,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
+        // SPEC-12 approved full scan: findCashflowLedgerSource serves the all-month dashboard and targetRevision.
         QuerySnapshot snapshot = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         return cashflowLedgerSource(tenantId, projectId, snapshot, null, null);
     }
@@ -2555,16 +2559,13 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String fromMonth,
         String throughMonth
     ) {
-        int maximumCanonicalWeeks = (2099 - 2023 + 1) * 12 * CashflowSheetLabApplyRequest.FINANCE_WEEK_COUNT;
-        QuerySnapshot snapshot = query(cashflowWeeks(tenantId)
-            .whereEqualTo("projectId", projectId)
-            .whereGreaterThanOrEqualTo("yearMonth", fromMonth)
-            .whereLessThanOrEqualTo("yearMonth", throughMonth)
-            .limit(maximumCanonicalWeeks + 1));
-        if (snapshot.size() > maximumCanonicalWeeks) {
-            throw new WeeklyExpenseConflictException("Canonical cashflow ledger exceeds the bounded read limit.");
-        }
-        return cashflowLedgerSource(tenantId, projectId, snapshot, fromMonth, throughMonth);
+        return cashflowLedgerSource(
+            tenantId,
+            projectId,
+            queryCashflowWeeks(tenantId, projectId, CashflowQueryScope.between(fromMonth, throughMonth)),
+            fromMonth,
+            throughMonth
+        );
     }
 
     private CashflowLedgerSource cashflowLedgerSource(
@@ -2574,11 +2575,21 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         String fromMonth,
         String throughMonth
     ) {
+        return cashflowLedgerSource(tenantId, projectId, snapshot.getDocuments(), fromMonth, throughMonth);
+    }
+
+    private CashflowLedgerSource cashflowLedgerSource(
+        String tenantId,
+        String projectId,
+        List<? extends DocumentSnapshot> snapshots,
+        String fromMonth,
+        String throughMonth
+    ) {
         List<WeeklyExpenseProjectionEntity> projection = new ArrayList<>();
         List<WeeklyExpenseActualEntity> actual = new ArrayList<>();
         Set<Integer> weeklyYears = new java.util.TreeSet<>();
         List<Map<String, Object>> documents = new ArrayList<>();
-        for (DocumentSnapshot doc : snapshot.getDocuments()) {
+        for (DocumentSnapshot doc : snapshots) {
             Map<String, Object> document = data(doc);
             documents.add(document);
             String yearMonth = text(document.get("yearMonth"), "");
@@ -4000,6 +4011,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
 
         Map<String, Map<String, Object>> docs = new LinkedHashMap<>();
+        // SPEC-12 approved full scan: replaceExpenseRows reconciles actuals across the whole source sheet.
         QuerySnapshot existing = query(cashflowWeeks(tenant(sheet)).whereEqualTo("projectId", sheet.getProjectId()));
         for (DocumentSnapshot doc : existing.getDocuments()) {
             docs.put(doc.getId(), data(doc));
@@ -4082,6 +4094,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
         }
 
         Map<String, Map<String, Object>> docs = new LinkedHashMap<>();
+        // SPEC-12 approved full scan: replaceActualLines reconciles every prior actual for the source sheet.
         QuerySnapshot existing = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         for (DocumentSnapshot doc : existing.getDocuments()) {
             docs.put(doc.getId(), data(doc));
@@ -4499,6 +4512,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     @Override
     public List<WeeklyExpenseWeeklyStatusEntity> findWeeklyStatuses(String tenantId, String projectId) {
+        // SPEC-12 approved full scan: findWeeklyStatuses returns the complete status history.
         QuerySnapshot snap = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         List<WeeklyExpenseWeeklyStatusEntity> statuses = new ArrayList<>();
         for (DocumentSnapshot doc : snap.getDocuments()) {
@@ -4584,6 +4598,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private List<WeeklyExpenseProjectionEntity> readProjectionLines(String tenantId, String projectId) {
+        // SPEC-12 approved full scan: readProjectionLines backs the all-month persistence contract.
         QuerySnapshot snap = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         List<WeeklyExpenseProjectionEntity> lines = new ArrayList<>();
         for (DocumentSnapshot doc : snap.getDocuments()) {
@@ -4600,6 +4615,7 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
     }
 
     private List<WeeklyExpenseActualEntity> readActualLines(String tenantId, String projectId, boolean auditOrder) {
+        // SPEC-12 approved full scan: readActualLines backs all-month reads and audit ordering.
         QuerySnapshot snap = query(cashflowWeeks(tenantId).whereEqualTo("projectId", projectId));
         List<WeeklyExpenseActualEntity> lines = new ArrayList<>();
         for (DocumentSnapshot doc : snap.getDocuments()) {
@@ -4664,6 +4680,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
 
     private CollectionReference cashflowWeeks(String tenantId) {
         return db.collection("orgs/" + tenantId + "/cashflow_weeks");
+    }
+
+    private List<DocumentSnapshot> queryCashflowWeeks(
+        String tenantId,
+        String projectId,
+        Collection<String> yearMonths
+    ) {
+        if (projectId == null || projectId.isBlank()) return List.of();
+        List<DocumentSnapshot> documents = new ArrayList<>();
+        for (List<String> chunk : CashflowQueryScope.chunks(yearMonths)) {
+            Query scoped = cashflowWeeks(tenantId).whereEqualTo("projectId", projectId);
+            scoped = chunk.size() == 1
+                ? scoped.whereEqualTo("yearMonth", chunk.getFirst())
+                : scoped.whereIn("yearMonth", chunk);
+            documents.addAll(query(scoped).getDocuments());
+        }
+        return List.copyOf(documents);
     }
 
     private DocumentReference cashflowWeekRef(String tenantId, String docId) {
