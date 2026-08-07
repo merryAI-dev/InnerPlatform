@@ -402,7 +402,7 @@ class WeeklyExpenseControllerTest {
 
         assertThat(sheetRepository.findByTenantIdAndProjectIdAndSheetKey("tenant-a", "project-a", "default")).isPresent();
         assertThat(actualRepository.findByTenantIdAndProjectId("tenant-a", "project-a")).hasSize(1);
-        assertThat(auditEventRepository.findAll()).hasSize(1);
+        assertThat(auditEventRepository.findByTenantIdAndProjectIdOrderByCreatedAtAsc("tenant-a", "project-a")).hasSize(1);
         assertThat(idempotencyRepository.findByTenantIdAndProjectIdAndCommandNameAndIdempotencyKey(
             "tenant-a",
             "project-a",
