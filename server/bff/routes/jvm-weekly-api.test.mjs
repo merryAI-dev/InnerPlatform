@@ -878,7 +878,7 @@ describe('JVM weekly API BFF proxy', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('does not publish a month dashboard while a sheet apply is in progress', async () => {
+  it('publishes a month dashboard with pending apply metadata while a sheet apply is in progress', async () => {
     const source = fullMonthCloseSource();
     source.documents.set('orgs/tenant-a/cashflow_sheet_publications/project-a', {
       projectId: 'project-a',
@@ -888,7 +888,14 @@ describe('JVM weekly API BFF proxy', () => {
       targetRevisionAtFetch: source.targetRevision,
       applyStartedAt: '2026-07-24T08:00:00.000Z',
     });
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
       db: source.db,
@@ -897,12 +904,51 @@ describe('JVM weekly API BFF proxy', () => {
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
-      .expect(409)
+      .expect(200)
       .expect((response) => {
-        expect(response.body.code).toBe('cashflow_sheet_apply_in_progress');
+        expect(response.body.pendingApply).toEqual({
+          startedAt: '2026-07-24T08:00:00.000Z',
+          expiresAt: '2026-07-24T08:10:00.000Z',
+        });
+        expect(response.body.publicationChangedDuringRead).toBe(false);
       });
 
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the latest month dashboard with metadata when publication changes twice', async () => {
+    const source = fullMonthCloseSource();
+    let publicationReadCount = 0;
+    const baseDoc = source.db.doc;
+    source.db.doc = (path) => {
+      if (path !== 'orgs/tenant-a/cashflow_sheet_publications/project-a') return baseDoc(path);
+      return {
+        get: async () => ({
+          exists: true,
+          data: () => ({ status: 'APPLIED', stagedRunId: `run-${publicationReadCount += 1}` }),
+        }),
+      };
+    };
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
+    const { app } = createApp(fetchImpl, createIdempotencyService(), {}, { env: runtimeEnv, db: source.db });
+
+    await request(app)
+      .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.publicationChangedDuringRead).toBe(true);
+        expect(response.body.pendingApply).toBeNull();
+      });
+
+    expect(publicationReadCount).toBe(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('stops blocking the month dashboard once an abandoned sheet apply lease expires', async () => {
@@ -915,7 +961,14 @@ describe('JVM weekly API BFF proxy', () => {
       targetRevisionAtFetch: source.targetRevision,
       applyStartedAt: '2026-07-24T08:00:00.000Z',
     });
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(monthDashboardSource({
+        ok: true, projectId: 'project-a', yearMonth: '2026-06', status: 'OPEN', revision: 0,
+        reopenCount: 0, projectWarningCount: 0, snapshot: {},
+      })),
+    }));
     const { app } = createApp(fetchImpl, createIdempotencyService(), {}, {
       env: runtimeEnv,
       db: source.db,
@@ -924,8 +977,9 @@ describe('JVM weekly API BFF proxy', () => {
 
     await request(app)
       .get('/api/v1/cashflow/project-a/month-close?yearMonth=2026-06')
+      .expect(200)
       .expect((response) => {
-        expect(response.body.code).not.toBe('cashflow_sheet_apply_in_progress');
+        expect(response.body.pendingApply).toBeNull();
       });
 
     // 만료된 락이 더 이상 JVM 조회를 가로막지 않는다.

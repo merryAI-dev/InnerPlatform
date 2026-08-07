@@ -1479,6 +1479,7 @@ async function readCashflowSheetPublicationState({ db, tenantId, projectId, nowM
   });
   return {
     blocked: lease.blocked,
+    applyStartedAt: publication.applyStartedAt || null,
     leaseExpiresAt: lease.expiresAt,
     fingerprint: stableStringify(publication),
   };
@@ -2531,7 +2532,6 @@ export function mountJvmWeeklyApiRoutes(app, {
           }),
           { attempt: traceAttempt },
         );
-        assertCashflowSheetPublicationReady(publicationBefore);
         const source = await trace.measure(
           'jvm_dashboard',
           () => proxyJavaWeeklyRequest({
@@ -2620,16 +2620,17 @@ export function mountJvmWeeklyApiRoutes(app, {
           }),
           { attempt: traceAttempt },
         );
-        assertCashflowSheetPublicationReady(publicationAfter);
+        const pendingApply = publicationAfter.blocked ? {
+          startedAt: publicationAfter.applyStartedAt,
+          expiresAt: publicationAfter.leaseExpiresAt,
+        } : null;
         if (publicationBefore.fingerprint === publicationAfter.fingerprint) {
-          return { ...cumulativeClose, dashboard };
+          return { ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: false };
+        }
+        if (attempt === 1) {
+          return { ...cumulativeClose, dashboard, pendingApply, publicationChangedDuringRead: true };
         }
       }
-      throw createHttpError(
-        409,
-        '시트 반영 상태가 조회 중 변경되었습니다. 잠시 후 다시 확인해 주세요.',
-        'cashflow_sheet_publication_changed',
-      );
     }, monthCloseRouteTimeoutMs);
     res.status(200).json(body);
   }));
