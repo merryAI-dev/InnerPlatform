@@ -1,5 +1,11 @@
 # Patch Notes Log
 
+## [2026-08-06] hotfix | portal-cashflow | 프로젝트 전환 시 시트 반영 상태 고정 복구
+- pages: [portal-cashflow](./pages/portal-cashflow.md)
+- prs: [#463](https://github.com/merryAI-dev/MYSCube/pull/463), [#464](https://github.com/merryAI-dev/MYSCube/pull/464)
+- commits: `a3809da`, `404a532`
+- summary: 프로젝트 선택을 바꾼 뒤에도 이전 사업의 시트 반영 복구 모달이 남는 문제를 고쳤다. 시트 연동 화면은 URL·세션 선택·BFF 요청을 같은 프로젝트 ID로 정렬하고, 전환 시 이전 프로젝트의 반영 복구와 임시 시트 상태를 비운다. 조직장 선택은 현재 요청자만 제외해 다른 사용자가 지정할 때 활성 프로젝트 담당자도 선택할 수 있다.
+
 ## [2026-08-03] patch-note | portal-budget | 예산 총계 가독성 정리
 - pages: [portal-budget](./pages/portal-budget.md)
 - summary: 포털 예산 화면의 중복 전체 소진율·집행·잔액 표시를 제거하고 예산·집행·잔액 총계의 글자 크기를 한 단계 키웠다.
