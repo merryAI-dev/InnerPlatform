@@ -28,12 +28,14 @@ import dev.merryai.innerplatform.weekly.api.RequestCashflowMonthReopenRequest;
 import dev.merryai.innerplatform.weekly.api.ReopenCashflowWeeklyUpdateRequest;
 import dev.merryai.innerplatform.weekly.api.TrustedActorContext;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseConflictException;
+import dev.merryai.innerplatform.weekly.api.WeeklyExpenseForbiddenException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmation;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationExpiredException;
 import dev.merryai.innerplatform.weekly.api.CashflowSettledWeekChangeConfirmationRequiredException;
 import dev.merryai.innerplatform.weekly.api.WeeklyExpenseEditLeaseException;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseActualEntity;
 import dev.merryai.innerplatform.weekly.domain.CashflowApplyLease;
+import dev.merryai.innerplatform.weekly.domain.CashflowMonthReopenApprovalPolicy;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditEventEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseAuditExportEntity;
 import dev.merryai.innerplatform.weekly.domain.WeeklyExpenseBankImportBatchEntity;
@@ -82,6 +84,7 @@ import javax.crypto.spec.SecretKeySpec;
 @Repository
 @ConditionalOnProperty(name = "weekly.storage-backend", havingValue = "firestore")
 public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpensePersistence {
+    private static final System.Logger LOGGER = System.getLogger(FirestoreInheritedWeeklyExpensePersistence.class.getName());
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> CASHFLOW_WRITE_ROLES = Set.of("admin", "finance", "pm", "viewer", "tenant_admin");
     private static final Set<String> CASHFLOW_CROSS_PROJECT_ROLES = Set.of("admin", "finance", "tenant_admin");
@@ -1921,6 +1924,23 @@ public class FirestoreInheritedWeeklyExpensePersistence implements WeeklyExpense
             throw new WeeklyExpenseConflictException("Cashflow month is not awaiting a reopen decision.");
         }
         requireExpectedMonthRevision(current, request.expectedRevision());
+        CashflowMonthReopenApprovalPolicy.Decision approvalDecision = CashflowMonthReopenApprovalPolicy.decide(
+            text(nestedMap(current.get("reopenRequest")).get("requestedByUid"), ""),
+            actor.id()
+        );
+        if (approvalDecision == CashflowMonthReopenApprovalPolicy.Decision.SELF_APPROVAL_FORBIDDEN) {
+            throw new WeeklyExpenseForbiddenException(
+                "cashflow_month_close_self_approval_forbidden",
+                "Cashflow month reopen requester cannot decide their own request."
+            );
+        }
+        if (approvalDecision == CashflowMonthReopenApprovalPolicy.Decision.LEGACY_REQUESTER_MISSING) {
+            LOGGER.log(
+                System.Logger.Level.WARNING,
+                "cashflow_month_reopen_legacy_requester_missing tenantId={0} projectId={1} yearMonth={2}",
+                actor.tenantId(), projectId, request.yearMonth()
+            );
+        }
         List<Map<String, Object>> projectCloses = readProjectMonthCloses(actor.tenantId(), projectId);
         boolean approved = "APPROVE".equals(request.decision());
         long reopenCount = addMonthCounters(

@@ -94,6 +94,12 @@ class FirestoreCashflowLeaseGuardTest {
         "pm@example.com",
         "viewer"
     );
+    private static final TrustedActorContext FINANCE_ACTOR = new TrustedActorContext(
+        "tenant-a",
+        "finance-1",
+        "finance@example.com",
+        "finance"
+    );
     private static final CashflowEditSession SESSION = new CashflowEditSession(
         "stage-data-project",
         "session-a",
@@ -3652,6 +3658,11 @@ class FirestoreCashflowLeaseGuardTest {
             "role", "finance",
             "projectIds", List.of()
         )));
+        fixture.documents.put("orgs/tenant-a/members/finance-1", member(Map.of(
+            "uid", "finance-1",
+            "role", "finance",
+            "projectIds", List.of()
+        )));
         DecideCashflowMonthReopenRequest decision = new DecideCashflowMonthReopenRequest(
             "reopen-decision-1",
             "2026-06",
@@ -3659,14 +3670,29 @@ class FirestoreCashflowLeaseGuardTest {
             "APPROVE",
             "증빙 확인 완료"
         );
-        CashflowMonthCloseResponse approved = fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
+        assertThatThrownBy(() -> fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
             ACTOR,
+            "project-a",
+            "stage-data-project",
+            decision
+        )))
+            .isInstanceOf(WeeklyExpenseForbiddenException.class)
+            .satisfies(error -> assertThat(((WeeklyExpenseForbiddenException) error).code())
+                .isEqualTo("cashflow_month_close_self_approval_forbidden"));
+        assertThat(fixture.documents.get(monthClosePath("project-a", "2026-06")))
+            .containsEntry("status", "REOPEN_REQUESTED")
+            .containsEntry("revision", 2L);
+        assertThat(fixture.documents.get(
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-06-w3"
+        )).containsEntry("status", "LOCKED");
+        CashflowMonthCloseResponse approved = fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
+            FINANCE_ACTOR,
             "project-a",
             "stage-data-project",
             decision
         ));
         CashflowMonthCloseResponse replay = fixture.persistence.runCommandTransaction(() -> service.decideCashflowMonthReopen(
-            ACTOR,
+            FINANCE_ACTOR,
             "project-a",
             "stage-data-project",
             decision
@@ -3704,6 +3730,29 @@ class FirestoreCashflowLeaseGuardTest {
                 )
             ))
         ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void legacyReopenRequestWithoutRequesterCanStillBeDecided() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put(monthClosePath("project-a", "2026-06"), closedMonth("2026-06", 1, 0));
+        fixture.persistence.runCommandTransaction(() -> fixture.persistence.requestCashflowMonthReopen(
+            ACTOR,
+            "project-a",
+            new RequestCashflowMonthReopenRequest("legacy-request", "2026-06", 1, "레거시 정정")
+        ));
+        Map<String, Object> close = fixture.documents.get(monthClosePath("project-a", "2026-06"));
+        ((Map<String, Object>) close.get("reopenRequest")).remove("requestedByUid");
+
+        WeeklyExpensePersistence.CashflowMonthCloseRecord decided = fixture.persistence.runCommandTransaction(() ->
+            fixture.persistence.decideCashflowMonthReopen(
+                ACTOR,
+                "project-a",
+                new DecideCashflowMonthReopenRequest("legacy-decision", "2026-06", 2, "APPROVE", "승인")
+            )
+        );
+
+        assertThat(decided.status()).isEqualTo("OPEN");
     }
 
     @Test
@@ -4202,7 +4251,7 @@ class FirestoreCashflowLeaseGuardTest {
             )
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            ACTOR, "project-a", new DecideCashflowMonthReopenRequest(
+            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest(
                 "legacy-reopen-decision", "2026-08", 2, "APPROVE", "정정 승인"
             )
         ));
@@ -4269,7 +4318,7 @@ class FirestoreCashflowLeaseGuardTest {
             ACTOR, "project-a", new RequestCashflowMonthReopenRequest("reopen-latest", "2026-08", 1, "정정")
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
@@ -4298,7 +4347,7 @@ class FirestoreCashflowLeaseGuardTest {
             ACTOR, "project-a", new RequestCashflowMonthReopenRequest("reopen-request", "2026-08", 1, "정정")
         ));
         fixture.persistence.runCommandTransaction(() -> fixture.persistence.decideCashflowMonthReopen(
-            ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
+            FINANCE_ACTOR, "project-a", new DecideCashflowMonthReopenRequest("reopen-decision", "2026-08", 2, "APPROVE", "승인")
         ));
 
         assertThat(fixture.documents.get("orgs/tenant-a/cashflow_cumulative_close_heads/project-a"))
