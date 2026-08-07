@@ -120,6 +120,8 @@ export class PlatformApiError extends Error {
   status: number;
   requestId?: string;
   body?: unknown;
+  code: string;
+  serverMessage: string;
 
   constructor(message: string, status: number, requestId?: string, body?: unknown) {
     super(message);
@@ -127,6 +129,9 @@ export class PlatformApiError extends Error {
     this.status = status;
     this.requestId = requestId;
     this.body = body;
+    const responseCode = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+    this.code = typeof responseCode === 'string' ? responseCode : '';
+    this.serverMessage = readErrorMessage(body) || '';
   }
 }
 

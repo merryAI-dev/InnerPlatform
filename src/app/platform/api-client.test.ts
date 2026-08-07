@@ -84,7 +84,7 @@ describe('PlatformApiClient', () => {
 
   it('throws PlatformApiError on non-2xx responses', async () => {
     const fetchImpl = vi.fn(async () => {
-      return new Response(JSON.stringify({ error: 'nope' }), {
+      return new Response(JSON.stringify({ code: 'forbidden', message: 'Access denied' }), {
         status: 403,
         headers: {
           'content-type': 'application/json',
@@ -105,8 +105,50 @@ describe('PlatformApiClient', () => {
         name: 'PlatformApiError',
         status: 403,
         requestId: 'req-denied',
+        code: 'forbidden',
+        serverMessage: 'Access denied',
+        message: '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        body: { code: 'forbidden', message: 'Access denied' },
       }),
     );
+  });
+
+  it('keeps empty gateway responses safe and preserves the default message', async () => {
+    const client = new PlatformApiClient({
+      fetchImpl: vi.fn(async () => new Response('<html>bad gateway</html>', {
+        status: 502,
+        headers: { 'content-type': 'text/html' },
+      })),
+    });
+
+    await expect(client.get('/api/v1/secure', {
+      tenantId: 'mysc',
+      actor: { id: 'u001' },
+    })).rejects.toMatchObject({
+      code: '',
+      serverMessage: '',
+      message: '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    });
+  });
+
+  it('does not preserve non-string server messages', async () => {
+    const client = new PlatformApiClient({
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ code: 500, message: { nested: true } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })),
+    });
+
+    await expect(client.get('/api/v1/secure', {
+      tenantId: 'mysc',
+      actor: { id: 'u001' },
+    })).rejects.toMatchObject({ code: '', serverMessage: '' });
+  });
+
+  it('preserves long server codes so the UI can limit them to 64 characters', () => {
+    const error = new PlatformApiError('failed', 400, 'request-id', { code: 'x'.repeat(100_000) });
+    expect(error.code).toHaveLength(100_000);
+    expect(error.code.slice(0, 64)).toHaveLength(64);
   });
 
   it('retries transient failures and eventually succeeds', async () => {
