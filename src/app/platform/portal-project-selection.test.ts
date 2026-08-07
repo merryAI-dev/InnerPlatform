@@ -91,18 +91,18 @@ describe('portal project selection helpers', () => {
     expect(financeResult.searchProjects.map((project) => project.id)).toEqual(['p-assigned', 'p-managed', 'p-other']);
   });
 
-  it('falls back from active project to primary and then the first candidate', () => {
+  it('keeps project selection empty when the active project is outside the current scope', () => {
     expect(resolveActivePortalProjectId({
       activeProjectId: 'missing-project',
       primaryProjectId: 'p-assigned',
       candidateProjectIds: ['p-assigned', 'p-managed'],
-    })).toBe('p-assigned');
+    })).toBe('');
 
     expect(resolveActivePortalProjectId({
       activeProjectId: '',
       primaryProjectId: '',
       candidateProjectIds: ['p-managed', 'p-assigned'],
-    })).toBe('p-managed');
+    })).toBe('');
   });
 
   it('keeps project selection and switch targets explicit without falling back to /portal', () => {

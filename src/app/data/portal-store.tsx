@@ -157,12 +157,6 @@ export interface CashflowMutationOptions {
   finalize?: boolean;
 }
 
-const ACTIVE_PORTAL_PROJECT_STORAGE_KEY = 'mysc-portal-active-project';
-
-function getActivePortalProjectStorageKey(uid: string | null | undefined): string {
-  return `${ACTIVE_PORTAL_PROJECT_STORAGE_KEY}:${String(uid || '').trim()}`;
-}
-
 function normalizePortalRole(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (!normalized) return 'pm';
@@ -824,34 +818,6 @@ export function PortalProvider({ children }: { children: ReactNode }) {
   }, [authUser?.uid, db, firestoreEnabled, isAuthenticated, orgId]);
 
   useEffect(() => {
-    const uid = authUser?.uid;
-    if (!uid || typeof sessionStorage === 'undefined') {
-      setActiveProjectIdState('');
-      return;
-    }
-    try {
-      setActiveProjectIdState(sessionStorage.getItem(getActivePortalProjectStorageKey(uid)) || '');
-    } catch {
-      setActiveProjectIdState('');
-    }
-  }, [authUser?.uid]);
-
-  useEffect(() => {
-    const uid = authUser?.uid;
-    if (!uid || typeof sessionStorage === 'undefined') return;
-    const storageKey = getActivePortalProjectStorageKey(uid);
-    try {
-      if (activeProjectId) {
-        sessionStorage.setItem(storageKey, activeProjectId);
-      } else if (scopedProjectIds.length > 0) {
-        sessionStorage.removeItem(storageKey);
-      }
-    } catch {
-      // ignore sessionStorage failures
-    }
-  }, [activeProjectId, authUser?.uid, scopedProjectIdsKey]);
-
-  useEffect(() => {
     if (!isDevHarnessUser || !activeProjectId || devHarnessHydratedProjectIdRef.current !== activeProjectId) return;
     writeDevHarnessPortalSnapshot(activeProjectId, {
       activeExpenseSheetId,
@@ -1154,6 +1120,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setExpenseSheetRows(null);
       setBankStatementRows(null);
       setBudgetPlanRows(null);
+      setBudgetTreeV2(null);
       setProjectScopeLoading(false);
       return () => {
         cancelled = true;
@@ -1236,6 +1203,7 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setExpenseSheetRows(null);
       setBankStatementRows(null);
       setBudgetPlanRows(null);
+      setBudgetTreeV2(null);
       setProjectScopeLoading(false);
       return () => {
         cancelled = true;
@@ -1257,12 +1225,28 @@ export function PortalProvider({ children }: { children: ReactNode }) {
       setExpenseSheetRows(null);
       setBankStatementRows(null);
       setBudgetPlanRows(null);
+      setBudgetTreeV2(null);
       setProjectScopeLoading(false);
       return () => {
         cancelled = true;
       };
     }
 
+    setLedgers([]);
+    setExpenseSets([]);
+    setChangeRequests([]);
+    setParticipationEntries([]);
+    setTransactions([]);
+    setComments([]);
+    setEvidenceRequiredMap({});
+    setSheetSources([]);
+    setExpenseIntakeItems([]);
+    setExpenseSheets([]);
+    setActiveExpenseSheetIdState('default');
+    setExpenseSheetRows(null);
+    setBankStatementRows(null);
+    setBudgetPlanRows(null);
+    setBudgetTreeV2(null);
     setProjectScopeLoading(true);
     let ledgerReady = false;
     let expenseReady = false;

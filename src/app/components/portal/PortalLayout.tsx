@@ -298,6 +298,9 @@ function PortalContent() {
   useEffect(() => {
     if (!authLoading && !portalLoading) setPortalBootstrapped(true);
   }, [authLoading, portalLoading]);
+  useEffect(() => {
+    setPortalBootstrapped(false);
+  }, [activeProjectId]);
   const shouldShowPortalLoading = !portalBootstrapped && (
     authLoading || (portalLoading && (!isCashflowWorkspace || !cashflowHasProjectContext))
   );

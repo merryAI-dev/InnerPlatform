@@ -15,10 +15,8 @@ describe('portal-store realtime safety', () => {
     expect(portalStoreSource).not.toContain('scopedProjectIds, isDevHarnessUser, portalUser?.projectIds, livePortalMode');
   });
 
-  it('does not clear the session active project before portal candidates are hydrated', () => {
-    expect(portalStoreSource).toContain("if (activeProjectId) {");
-    expect(portalStoreSource).toContain("} else if (scopedProjectIds.length > 0) {");
-    expect(portalStoreSource).toContain('sessionStorage.removeItem(storageKey);');
+  it('does not revive or persist the active project through sessionStorage', () => {
+    expect(portalStoreSource).not.toContain('sessionStorage');
   });
 
   it('keeps assigned project ids usable when the project catalog cannot be read', () => {

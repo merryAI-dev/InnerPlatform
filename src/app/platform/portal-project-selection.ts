@@ -85,11 +85,7 @@ export function resolveActivePortalProjectId(input: {
   const candidateProjectIds = normalizeProjectIds(input.candidateProjectIds || []);
   const activeProjectId = typeof input.activeProjectId === 'string' ? input.activeProjectId.trim() : '';
   if (activeProjectId && candidateProjectIds.includes(activeProjectId)) return activeProjectId;
-
-  const primaryProjectId = typeof input.primaryProjectId === 'string' ? input.primaryProjectId.trim() : '';
-  if (primaryProjectId && candidateProjectIds.includes(primaryProjectId)) return primaryProjectId;
-
-  return candidateProjectIds[0] || '';
+  return '';
 }
 
 export function resolvePortalProjectSelectPath(requestedPath?: string): string {
