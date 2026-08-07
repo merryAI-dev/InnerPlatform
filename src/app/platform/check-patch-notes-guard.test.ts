@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 import {
   evaluatePatchNotesGuard,
@@ -30,10 +33,24 @@ describe('resolveRequiredPatchNotePages', () => {
   it('maps shared policy files to the shared label policy page', () => {
     expect(
       resolveRequiredPatchNotePages([
-        'src/app/policies/cashflow-policy.json',
+        'policies/cashflow-policy.json',
         'src/app/platform/policies/cashflow-policy.ts',
       ]),
     ).toEqual(['docs/wiki/patch-notes/pages/shared-label-policy.md']);
+  });
+
+  it('keeps the cashflow policy only at the shared path', () => {
+    const repoRoot = resolve(import.meta.dirname, '../../..');
+    const oldPath = ['src/app/policies', 'cashflow-policy.json'].join('/');
+    const oldReferences = spawnSync('git', ['grep', '-l', oldPath], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+
+    expect(existsSync(resolve(repoRoot, oldPath))).toBe(false);
+    expect(oldReferences.status).toBe(1);
+    expect(oldReferences.stdout).toBe('');
+    expect(existsSync(resolve(repoRoot, 'policies/cashflow-policy.json'))).toBe(true);
   });
 
   it('maps portal bootstrap store changes to the shared portal architecture page', () => {

@@ -7,7 +7,7 @@
 
 ## 구현할 것
 
-- `src/app/policies/cashflow-policy.json`, `src/app/data/types.ts`, `src/app/platform/cashflow-sheet.ts` — 누락된 MYSC 선입금 4개 line ID와 mode별 표시 문구 추가
+- `policies/cashflow-policy.json`, `src/app/data/types.ts`, `src/app/platform/cashflow-sheet.ts` — 누락된 MYSC 선입금 4개 line ID와 mode별 표시 문구 추가
 - `server/bff/cashflow-sheet-template.mjs` — 동일 라벨을 입금/출금 문맥으로 구분하고 원본 Projection/ACTUAL 16개 행을 한 방향으로 읽기
 - `server/jvm-weekly-api/.../CashflowLineCatalog.java` — 새 line ID 검증과 canonical 합계 지원
 - `server/bff/cashflow-comparison.mjs`, `server/bff/routes/jvm-weekly-api.mjs` — JVM snapshot을 조회·조합해 `Projection - Actual` read model 계산

@@ -48,7 +48,7 @@ const SURFACE_TO_PATCH_NOTE_RULES = [
     page: 'docs/wiki/patch-notes/pages/portal-onboarding.md',
   },
   {
-    match: 'src/app/policies/cashflow-policy.json',
+    match: 'policies/cashflow-policy.json',
     page: 'docs/wiki/patch-notes/pages/shared-label-policy.md',
   },
   {

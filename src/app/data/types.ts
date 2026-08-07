@@ -3,7 +3,7 @@
 // Firestore 스키마와 1:1 매핑
 // ═══════════════════════════════════════════════════════════════
 
-import cashflowPolicyData from '../policies/cashflow-policy.json';
+import cashflowPolicyData from '../../../policies/cashflow-policy.json';
 
 // ── Enums ──
 

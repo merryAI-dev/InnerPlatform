@@ -1,5 +1,5 @@
 import type { CashflowCategory, CashflowSheetLineId, Direction } from '../../data/types';
-import cashflowPolicyData from '../../policies/cashflow-policy.json';
+import cashflowPolicyData from '../../../../policies/cashflow-policy.json';
 
 type CategoryEntry = {
   category: CashflowCategory;

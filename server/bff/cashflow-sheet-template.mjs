@@ -1,4 +1,4 @@
-import cashflowPolicyData from '../../src/app/policies/cashflow-policy.json' with { type: 'json' };
+import cashflowPolicyData from '../../policies/cashflow-policy.json' with { type: 'json' };
 
 const WEEK_LABEL_RE = /^(\d{2})-(\d{1,2})-(\d{1,2})$/;
 const ANNUAL_YEAR_LABEL_RE = /^(\d{4})년$/;
