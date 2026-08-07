@@ -1,27 +1,10 @@
 import type { CashflowCategory, CashflowSheetLineId, CashflowWeekSheet, Direction, Transaction } from '../data/types';
 import type { MonthMondayWeek } from './cashflow-weeks';
+import { CASHFLOW_IN_LINE_IDS, CASHFLOW_OUT_LINE_IDS } from './policies/cashflow-policy';
 
-export const CASHFLOW_IN_LINES: CashflowSheetLineId[] = [
-  'MYSC_PREPAY_IN',
-  'MYSC_PREPAY_LABOR_IN',
-  'MYSC_PREPAY_INPUT_VAT_IN',
-  'SALES_IN',
-  'SALES_VAT_IN',
-  'TEAM_SUPPORT_IN',
-  'BANK_INTEREST_IN',
-];
+export const CASHFLOW_IN_LINES: CashflowSheetLineId[] = CASHFLOW_IN_LINE_IDS;
 
-export const CASHFLOW_OUT_LINES: CashflowSheetLineId[] = [
-  'MYSC_PREPAY_DIRECT_OUT',
-  'MYSC_PREPAY_LABOR_OUT',
-  'DIRECT_COST_OUT',
-  'INPUT_VAT_OUT',
-  'MYSC_LABOR_OUT',
-  'MYSC_PROFIT_OUT',
-  'SALES_VAT_OUT',
-  'TEAM_SUPPORT_OUT',
-  'BANK_INTEREST_OUT',
-];
+export const CASHFLOW_OUT_LINES: CashflowSheetLineId[] = CASHFLOW_OUT_LINE_IDS;
 
 export const CASHFLOW_ALL_LINES: CashflowSheetLineId[] = [...CASHFLOW_IN_LINES, ...CASHFLOW_OUT_LINES];
 

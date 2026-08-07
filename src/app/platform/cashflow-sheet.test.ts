@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../data/types';
+import cashflowPolicyData from '../../../policies/cashflow-policy.json';
 import type { MonthMondayWeek } from './cashflow-weeks';
 import {
   aggregateTransactionsToActual,
@@ -52,6 +53,15 @@ function makeWeek(weekNo: number, start: string, end: string): MonthMondayWeek {
 }
 
 describe('cashflow line catalog', () => {
+  it('derives the line catalog from the policy', () => {
+    expect(CASHFLOW_IN_LINES).toEqual(
+      cashflowPolicyData.lineEntries.filter((entry) => entry.direction === 'IN').map((entry) => entry.lineId),
+    );
+    expect(CASHFLOW_OUT_LINES).toEqual(
+      cashflowPolicyData.lineEntries.filter((entry) => entry.direction === 'OUT').map((entry) => entry.lineId),
+    );
+  });
+
   it('keeps the approved IN and OUT line order', () => {
     expect(CASHFLOW_IN_LINES).toEqual([
       'MYSC_PREPAY_IN',
