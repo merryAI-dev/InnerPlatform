@@ -1,8 +1,12 @@
 import cashflowPolicyData from '../../policies/cashflow-policy.json' with { type: 'json' };
+import {
+  CashflowTemplateMismatchError,
+  annualYearsFor,
+  lineIndexOfRow,
+  lineRowFor,
+} from './cashflow-coordinates.mjs';
 
 const WEEK_LABEL_RE = /^(\d{2})-(\d{1,2})-(\d{1,2})$/;
-const ANNUAL_YEAR_LABEL_RE = /^(\d{4})년$/;
-const MODES = ['projection', 'actual'];
 const LINE_ENTRIES = Array.isArray(cashflowPolicyData.lineEntries) ? cashflowPolicyData.lineEntries : [];
 const WEEK_COLUMN_INDEXES = Array.from({ length: 60 }, (_, index) => index + 4); // E:BL
 const ANNUAL_COLUMN_INDEXES = [2, 3, 64, 65, 66, 67, 68, 69]; // C:D, BM:BR
@@ -12,7 +16,6 @@ const SECTION_LAYOUTS = [
     mode: 'projection',
     headerRowIndex: 11,
     weekRowIndex: 12,
-    lineRowIndexes: [14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30],
     derivedRows: [
       { rowIndex: 21, kind: 'deposit_total', label: '입금 합계' },
       { rowIndex: 31, kind: 'withdrawal_total', label: '출금 합계' },
@@ -23,7 +26,6 @@ const SECTION_LAYOUTS = [
     mode: 'actual',
     headerRowIndex: 34,
     weekRowIndex: 35,
-    lineRowIndexes: [37, 38, 39, 40, 41, 42, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53],
     derivedRows: [
       { rowIndex: 44, kind: 'deposit_total', label: '입금 합계' },
       { rowIndex: 54, kind: 'withdrawal_total', label: '출금 합계' },
@@ -39,41 +41,6 @@ function normalizeText(value) {
 function normalizeLabelKey(value) {
   return normalizeText(value).replace(/\s+/g, '');
 }
-
-export function buildCashflowLineLookup(lineEntries) {
-  const entriesByKey = new Map();
-  const ambiguousKeys = new Set();
-
-  for (const entry of lineEntries) {
-    for (const mode of MODES) {
-      const modeLabel = mode === 'projection' ? entry.projectionLabel : entry.actualLabel;
-      for (const label of [entry.lineId, entry.label, ...(entry.aliases || []), modeLabel]) {
-        for (const normalized of new Set([normalizeText(label), normalizeLabelKey(label)].filter(Boolean))) {
-          const key = `${mode}|${entry.direction}|${normalized}`;
-          const existing = entriesByKey.get(key);
-          if (existing && existing.lineId !== entry.lineId) {
-            entriesByKey.delete(key);
-            ambiguousKeys.add(key);
-          } else if (!ambiguousKeys.has(key)) {
-            entriesByKey.set(key, entry);
-          }
-        }
-      }
-    }
-  }
-
-  return (label, mode, direction) => {
-    for (const normalized of [normalizeText(label), normalizeLabelKey(label)].filter(Boolean)) {
-      const key = `${mode}|${direction}|${normalized}`;
-      if (ambiguousKeys.has(key)) return null;
-      const entry = entriesByKey.get(key);
-      if (entry) return entry;
-    }
-    return null;
-  };
-}
-
-const resolveLineEntry = buildCashflowLineLookup(LINE_ENTRIES);
 
 function columnName(columnIndex) {
   let number = columnIndex + 1;
@@ -110,28 +77,18 @@ export function parseCashflowWeekLabel(value) {
   };
 }
 
-function annualColumn(matrix, rowIndex, columnIndex) {
-  const match = ANNUAL_YEAR_LABEL_RE.exec(normalizeText(matrix?.[rowIndex]?.[columnIndex]));
-  if (!match) return null;
-  return {
-    year: Number.parseInt(match[1], 10),
-    periodKind: 'ANNUAL',
-    columnIndex,
-    a1: toA1(rowIndex, columnIndex),
-  };
-}
-
 function fixedSection(matrix, layout, reasons) {
-  const weekColumns = WEEK_COLUMN_INDEXES.map((columnIndex) => {
-    const parsed = parseCashflowWeekLabel(matrix?.[layout.weekRowIndex]?.[columnIndex]);
-    if (!parsed) {
-      reasons.push({
-        code: 'cashflow_week_header_invalid',
-        mode: layout.mode,
-        sourceCell: toA1(layout.weekRowIndex, columnIndex),
-        message: `${layout.mode} 주차 헤더가 공식 양식과 다릅니다.`,
-      });
-      return null;
+  const sourceYear = parseCashflowWeekLabel(matrix?.[layout.weekRowIndex]?.[WEEK_COLUMN_INDEXES[0]])?.year;
+  const weekColumns = WEEK_COLUMN_INDEXES.map((columnIndex, index) => {
+    const header = String(matrix?.[layout.weekRowIndex]?.[columnIndex] ?? '');
+    const parsed = parseCashflowWeekLabel(header);
+    const expectedLabel = Number.isSafeInteger(sourceYear)
+      ? `${String(sourceYear).slice(-2)}-${Math.floor(index / 5) + 1}-${index % 5 + 1}`
+      : '';
+    if (!parsed || header !== expectedLabel) {
+      throw new CashflowTemplateMismatchError(
+        `${toA1(layout.weekRowIndex, columnIndex)} 주차 헤더가 좌표 계약과 다릅니다.`,
+      );
     }
     return {
       ...parsed,
@@ -139,19 +96,32 @@ function fixedSection(matrix, layout, reasons) {
       columnIndex,
       a1: toA1(layout.weekRowIndex, columnIndex),
     };
-  }).filter(Boolean);
+  });
 
-  const annualColumns = ANNUAL_COLUMN_INDEXES
-    .map((columnIndex) => annualColumn(matrix, layout.headerRowIndex, columnIndex))
-    .filter(Boolean);
-  const sourceYear = weekColumns[0]?.year;
-  const sourceTotalHeader = normalizeText(matrix?.[layout.headerRowIndex]?.[SOURCE_YEAR_TOTAL_COLUMN_INDEX]);
-  const totalColumn = Number.isSafeInteger(sourceYear) && ['Total', `${sourceYear}년 합계`].includes(sourceTotalHeader)
-    ? {
-      columnIndex: SOURCE_YEAR_TOTAL_COLUMN_INDEX,
-      a1: toA1(layout.headerRowIndex, SOURCE_YEAR_TOTAL_COLUMN_INDEX),
+  const annualYears = annualYearsFor(sourceYear);
+  const annualColumns = ANNUAL_COLUMN_INDEXES.map((columnIndex, index) => {
+    const year = annualYears[index];
+    if (matrix?.[layout.headerRowIndex]?.[columnIndex] !== `${year}년`) {
+      throw new CashflowTemplateMismatchError(
+        `${toA1(layout.headerRowIndex, columnIndex)} 연간 헤더가 좌표 계약과 다릅니다.`,
+      );
     }
-    : null;
+    return {
+      year,
+      periodKind: 'ANNUAL',
+      columnIndex,
+      a1: toA1(layout.headerRowIndex, columnIndex),
+    };
+  });
+  if (matrix?.[layout.headerRowIndex]?.[SOURCE_YEAR_TOTAL_COLUMN_INDEX] !== 'Total') {
+    throw new CashflowTemplateMismatchError(
+      `${toA1(layout.headerRowIndex, SOURCE_YEAR_TOTAL_COLUMN_INDEX)} 합계 헤더가 좌표 계약과 다릅니다.`,
+    );
+  }
+  const totalColumn = {
+    columnIndex: SOURCE_YEAR_TOTAL_COLUMN_INDEX,
+    a1: toA1(layout.headerRowIndex, SOURCE_YEAR_TOTAL_COLUMN_INDEX),
+  };
   // The source-year Total is retained as an annual reconciliation input as well as
   // a display-only grand total. It must never replace the weekly source of truth.
   if (totalColumn) {
@@ -162,26 +132,17 @@ function fixedSection(matrix, layout, reasons) {
       a1: totalColumn.a1,
     });
   }
-  if (annualColumns.length !== ANNUAL_COLUMN_INDEXES.length + 1 || !totalColumn) {
-    reasons.push({
-      code: 'cashflow_annual_header_invalid',
-      mode: layout.mode,
-      message: `${layout.mode} 연간 합계 헤더가 공식 양식과 다릅니다.`,
-    });
-  }
-
-  const lineRows = layout.lineRowIndexes.map((rowIndex, index) => {
-    const expected = LINE_ENTRIES[index];
-    const label = normalizeText(matrix?.[rowIndex]?.[0]);
-    const resolved = expected ? resolveLineEntry(label, layout.mode, expected.direction) : null;
-    if (!expected || resolved?.lineId !== expected.lineId) {
-      reasons.push({
-        code: 'cashflow_line_invalid',
-        mode: layout.mode,
-        sourceCell: toA1(rowIndex, 0),
-        lineIds: expected ? [expected.lineId] : [],
-        message: `${layout.mode} 항목 행이 공식 양식과 다릅니다.`,
-      });
+  const lineRows = LINE_ENTRIES.map((_, index) => {
+    const rowIndex = lineRowFor(layout.mode, index);
+    const expected = LINE_ENTRIES[lineIndexOfRow(layout.mode, rowIndex)];
+    const label = String(matrix?.[rowIndex]?.[0] ?? '');
+    const expectedLabel = layout.mode === 'projection'
+      ? expected?.projectionLabel || expected?.label
+      : expected?.actualLabel || expected?.label;
+    if (!expected || label !== expectedLabel) {
+      throw new CashflowTemplateMismatchError(
+        `${toA1(rowIndex, 0)} 항목 라벨이 좌표 계약과 다릅니다.`,
+      );
     }
     return {
       rowIndex,
@@ -298,20 +259,14 @@ export function analyzeCashflowSheetTemplate(matrix) {
   const sections = SECTION_LAYOUTS.map((layout) => fixedSection(rows, layout, reasons));
   const projectionWeeks = sections[0].weekColumns.map((week) => week.raw);
   const actualWeeks = sections[1].weekColumns.map((week) => week.raw);
-  if (projectionWeeks.length !== 60 || JSON.stringify(projectionWeeks) !== JSON.stringify(actualWeeks)) {
-    reasons.push({
-      code: 'cashflow_week_headers_mismatch',
-      message: 'Projection과 Actual 주차 헤더가 일치하지 않습니다.',
-    });
+  if (JSON.stringify(projectionWeeks) !== JSON.stringify(actualWeeks)) {
+    throw new CashflowTemplateMismatchError('Projection과 Actual 주차 헤더가 일치하지 않습니다.');
   }
 
   const projectionYears = sections[0].annualColumns.map((column) => column.year);
   const actualYears = sections[1].annualColumns.map((column) => column.year);
   if (JSON.stringify(projectionYears) !== JSON.stringify(actualYears)) {
-    reasons.push({
-      code: 'cashflow_annual_headers_mismatch',
-      message: 'Projection과 Actual 연간 합계 헤더가 일치하지 않습니다.',
-    });
+    throw new CashflowTemplateMismatchError('Projection과 Actual 연간 합계 헤더가 일치하지 않습니다.');
   }
 
   const mappingCandidates = sections.flatMap((section) => section.mappings);
