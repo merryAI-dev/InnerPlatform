@@ -86,7 +86,8 @@ import {
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
-  summarizeCanonicalCashflowYear,
+  canonicalCashflowAnnualTotalFor,
+  type CanonicalCashflowAnnualTotal,
   type CashflowMonthCloseDepositReviewRow,
 } from './cashflow-month-close';
 import { CashflowSheetSyncOverlay } from './CashflowSheetSyncOverlay';
@@ -1764,30 +1765,12 @@ export function CashflowProjectSheet({
   const visibleComparisonAnnualYears = comparisonScope.annualYears;
   const previousComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year < selectedYear);
   const followingComparisonAnnualYears = visibleComparisonAnnualYears.filter((year) => year > selectedYear);
-  const canonicalAnnualTotalFor = (year: number, mode: 'projection' | 'actual') => summarizeCanonicalCashflowYear(
-    monthCloseResult?.dashboard?.canonical?.months || [],
-    year,
-    mode,
+  const canonicalAnnualTotals = (
+    monthCloseResult?.dashboard?.canonical as { annualTotals?: CanonicalCashflowAnnualTotal[] } | null | undefined
+  )?.annualTotals || [];
+  const annualTotalFor = (year: number, mode: 'projection' | 'actual') => (
+    canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)
   );
-  const annualTotalFor = (year: number, mode: 'projection' | 'actual') => {
-    const canonical = canonicalAnnualTotalFor(year, mode);
-    if (canonical) return canonical;
-    const jvmSource = monthCloseResult?.dashboard?.openingBalances?.selectedYear === selectedYear
-      ? monthCloseResult.dashboard.openingBalances[mode]?.sources?.find((source) => source.year === year)
-      : null;
-    if (jvmSource) {
-      const totalIn = CASHFLOW_IN_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-      const totalOut = CASHFLOW_OUT_LINES.reduce((sum, lineId) => sum + Number(jvmSource.lineAmounts?.[lineId] || 0), 0);
-      return {
-        lineAmounts: jvmSource.lineAmounts,
-        lineStates: jvmSource.lineStates,
-        totalIn,
-        totalOut,
-        net: totalIn - totalOut,
-      };
-    }
-    return null;
-  };
   const projectLineTotalFor = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId) => {
     const rangeTotals = monthCloseResult?.dashboard?.canonical?.range?.[mode] as {
       rowTotals?: Record<CashflowSheetLineId, number>;
@@ -1824,10 +1807,8 @@ export function CashflowProjectSheet({
       const comparisonAnnualYears = visibleComparisonAnnualYears.map((year) => {
         const projectionTotal = annualTotalFor(year, 'projection');
         const actualTotal = annualTotalFor(year, 'actual');
-        const projectionState = projectionTotal?.lineStates?.[lineId]
-          || (Object.prototype.hasOwnProperty.call(projectionTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
-        const actualState = actualTotal?.lineStates?.[lineId]
-          || (Object.prototype.hasOwnProperty.call(actualTotal?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
+        const projectionState = projectionTotal?.lineStates?.[lineId];
+        const actualState = actualTotal?.lineStates?.[lineId];
         const hasValue = ['VALUE', 'ZERO'].includes(projectionState) || ['VALUE', 'ZERO'].includes(actualState);
         const projection = Number(projectionTotal?.lineAmounts?.[lineId] || 0);
         const actual = Number(actualTotal?.lineAmounts?.[lineId] || 0);
@@ -2184,9 +2165,8 @@ export function CashflowProjectSheet({
     };
     const renderAnnualLineCell = (mode: 'projection' | 'actual', lineId: CashflowSheetLineId, year: number, isAltRow: boolean) => {
       const total = annualTotalFor(year, mode);
-      const state = total?.lineStates?.[lineId]
-        || (Object.prototype.hasOwnProperty.call(total?.lineAmounts || {}, lineId) ? 'VALUE' : 'EMPTY');
-      const value = Number(total?.lineAmounts?.[lineId] || 0);
+      const state = total?.lineStates?.[lineId];
+      const value = Number(total?.lineAmounts?.[lineId] ?? 0);
       return (
         <td key={`${mode}-${lineId}-${year}-annual`} data-cashflow-board-column="true" className={`min-w-[84px] border-l-[6px] border-l-white px-1 py-1 text-right align-middle text-[12px] tabular-nums text-slate-700 ${isAltRow ? 'bg-slate-50' : 'bg-white'}`}>
           {state === 'VALUE' || state === 'ZERO' ? fmt(value) : <span className="text-slate-400">미입력</span>}

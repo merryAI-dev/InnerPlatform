@@ -4,7 +4,7 @@ import type { CashflowSheetLabMirrorResult } from '../../lib/sheets-cashflow-rea
 import type { CashflowDeadlineSummary, CashflowManagementCheck } from '../../lib/platform-bff-client';
 import {
   buildCashflowMonthCloseDraftInput,
-  canonicalCashflowAnnualYears,
+  canonicalCashflowAnnualTotalFor,
   carryForwardCashflowRunningBalances,
   createEmptyCashflowMonthCloseDepositRows,
   isCashflowMonthCloseRequestLocked,
@@ -16,7 +16,6 @@ import {
   resolveCashflowEvidenceScope,
   shouldApplyCashflowMonthCloseRequestResult,
   shouldHideCashflowValuesAfterLoadError,
-  summarizeCanonicalCashflowYear,
 } from './cashflow-month-close';
 
 function mirror(): CashflowSheetLabMirrorResult {
@@ -56,22 +55,31 @@ const deadlineSummary: CashflowDeadlineSummary = {
 };
 
 describe('cashflow month close contract', () => {
-  it('deduplicates prior years and calculates exact canonical annual totals', () => {
-    const months = [
-      { yearMonth: '2024-01', projection: { weeks: [{ amounts: { SALES_IN: 100, DIRECT_COST_OUT: 30 } }] } },
-      { yearMonth: '2024-02', projection: { weeks: [{ amounts: { SALES_IN: 50, DIRECT_COST_OUT: 20 } }] } },
-      { yearMonth: '2025-01', projection: { weeks: [{ amounts: { SALES_IN: 900 } }] } },
-      { yearMonth: '2026-01', projection: { weeks: [{ amounts: { SALES_IN: 9999 } }] } },
-    ];
+  it('returns the server annual-column value and cell states unchanged', () => {
+    const actual = {
+      lineAmounts: { SALES_IN: 317_449_417, SALES_VAT_IN: 0, TEAM_SUPPORT_IN: 0 },
+      lineStates: { SALES_IN: 'VALUE', SALES_VAT_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' } as const,
+      totalIn: 317_449_417,
+      totalOut: 0,
+      net: 317_449_417,
+    };
+    const annualTotals = [{
+      year: 2025,
+      projection: { ...actual, lineAmounts: { SALES_IN: 7_582_243 } },
+      actual,
+    }];
 
-    expect(canonicalCashflowAnnualYears(months, 2026)).toEqual([2024, 2025]);
-    expect(summarizeCanonicalCashflowYear(months, 2024, 'projection')).toMatchObject({
-      lineAmounts: { SALES_IN: 150, DIRECT_COST_OUT: 50 },
-      lineStates: { SALES_IN: 'VALUE', DIRECT_COST_OUT: 'VALUE', SALES_VAT_IN: 'EMPTY' },
-      totalIn: 150,
-      totalOut: 50,
-      net: 100,
+    const result = canonicalCashflowAnnualTotalFor(annualTotals, 2025, 'actual');
+
+    expect(result).toBe(actual);
+    expect(result).toEqual({
+      lineAmounts: { SALES_IN: 317_449_417, SALES_VAT_IN: 0, TEAM_SUPPORT_IN: 0 },
+      lineStates: { SALES_IN: 'VALUE', SALES_VAT_IN: 'ZERO', TEAM_SUPPORT_IN: 'EMPTY' },
+      totalIn: 317_449_417,
+      totalOut: 0,
+      net: 317_449_417,
     });
+    expect(canonicalCashflowAnnualTotalFor(annualTotals, 2032, 'actual')).toBeNull();
   });
 
   it('hides values only when canonical loading failed without a retained model', () => {

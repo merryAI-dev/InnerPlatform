@@ -599,7 +599,9 @@ describe('CashflowProjectSheet monthly close shell', () => {
 
   it('renders annual carry-forward and future totals around the selected year weekly ledger', () => {
     expect(source).toContain('CASHFLOW_STANDARD_ANNUAL_YEARS = [2024, 2025, 2027, 2028, 2029, 2030, 2031, 2032]');
-    expect(source).toContain('canonicalAnnualTotalFor');
+    expect(source).toContain('canonicalCashflowAnnualTotalFor(canonicalAnnualTotals, year, mode)');
+    expect(source).toContain('dashboard?.canonical as { annualTotals?: CanonicalCashflowAnnualTotal[] }');
+    expect(source).not.toContain('summarizeCanonicalCashflowYear');
     expect(source).toContain('const previousAnnualYears = annualYears.filter((year) => year < selectedYear)');
     expect(source).toContain('const followingAnnualYears = annualYears.filter((year) => year > selectedYear)');
     expect(source).toContain('const renderAnnualSummaryCell');
