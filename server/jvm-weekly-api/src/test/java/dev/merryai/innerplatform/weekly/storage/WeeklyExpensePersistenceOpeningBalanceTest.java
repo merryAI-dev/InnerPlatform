@@ -13,7 +13,7 @@ import static org.mockito.Mockito.when;
 
 class WeeklyExpensePersistenceOpeningBalanceTest {
     @Test
-    void weeklyLedgerIsExcludedBecauseItsRunningNetAlreadyOwnsThatYear() {
+    void priorYearsAlwaysComeFromAnnualTotalsEvenWhenWeeklyDocumentsExist() {
         WeeklyExpensePersistence persistence = mock(WeeklyExpensePersistence.class, CALLS_REAL_METHODS);
         when(persistence.findCashflowWeeklyYears("tenant-a", "project-a")).thenReturn(List.of(2024, 2026));
         when(persistence.findCashflowSheetYearTotals("tenant-a", "project-a")).thenReturn(List.of(
@@ -28,16 +28,13 @@ class WeeklyExpensePersistenceOpeningBalanceTest {
             2026
         );
 
-        assertThat(result.projection().amount()).isEqualByComparingTo("500000");
-        assertThat(result.actual().amount()).isEqualByComparingTo("400000");
-        assertThat(result.projection().includedYears()).containsExactly(2025);
-        assertThat(result.projection().excludedWeeklyYears()).containsExactly(2024);
-        assertThat(result.projection().lineAmounts()).containsEntry("SALES_IN", new BigDecimal("500000"));
-        assertThat(result.projection().sources()).singleElement().satisfies(source -> {
-            assertThat(source.year()).isEqualTo(2025);
-            assertThat(source.lineAmounts()).containsEntry("SALES_IN", new BigDecimal("500000"));
-            assertThat(source.lineStates()).containsEntry("SALES_IN", "VALUE");
-        });
+        assertThat(result.projection().amount()).isEqualByComparingTo("9500000");
+        assertThat(result.actual().amount()).isEqualByComparingTo("9400000");
+        assertThat(result.projection().includedYears()).containsExactly(2024, 2025);
+        assertThat(result.projection().excludedWeeklyYears()).isEmpty();
+        assertThat(result.projection().lineAmounts()).containsEntry("SALES_IN", new BigDecimal("9500000"));
+        assertThat(result.projection().sources()).extracting(WeeklyExpensePersistence.CashflowOpeningBalance.YearSource::year)
+            .containsExactly(2024, 2025);
     }
 
     private WeeklyExpensePersistence.CashflowSheetAnnualTotal annual(int year, String projection, String actual) {

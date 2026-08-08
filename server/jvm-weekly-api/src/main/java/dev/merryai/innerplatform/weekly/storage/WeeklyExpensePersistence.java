@@ -159,11 +159,7 @@ public interface WeeklyExpensePersistence {
     ) {
     }
 
-    /**
-     * One authoritative read of the weekly cashflow ledger. Projection, Actual,
-     * and the years used to suppress annual fallbacks must come from the same
-     * storage snapshot so carry-forward cannot observe three different versions.
-     */
+    /** One authoritative read of the single weekly cashflow block. */
     record CashflowLedgerSource(
         List<WeeklyExpenseProjectionEntity> projection,
         List<WeeklyExpenseActualEntity> actual,
@@ -719,22 +715,13 @@ public interface WeeklyExpensePersistence {
     }
 
     default List<Integer> findCashflowWeeklyYears(String tenantId, String projectId) {
-        return findCashflowLedgerSource(tenantId, projectId).weeklyYears();
+        return List.of();
     }
 
     default CashflowLedgerSource findCashflowLedgerSource(String tenantId, String projectId) {
         List<WeeklyExpenseProjectionEntity> projection = findProjectionLines(tenantId, projectId);
         List<WeeklyExpenseActualEntity> actual = findActualLines(tenantId, projectId);
-        List<Integer> weeklyYears = java.util.stream.Stream.concat(
-                projection.stream().map(WeeklyExpenseProjectionEntity::getYearMonth),
-                actual.stream().map(WeeklyExpenseActualEntity::getYearMonth)
-            )
-            .filter(value -> value != null && value.matches("20\\d{2}-(0[1-9]|1[0-2])"))
-            .map(value -> Integer.parseInt(value.substring(0, 4)))
-            .distinct()
-            .sorted()
-            .toList();
-        return new CashflowLedgerSource(projection, actual, weeklyYears);
+        return new CashflowLedgerSource(projection, actual, findCashflowWeeklyYears(tenantId, projectId));
     }
 
     default CashflowLedgerSource findCashflowLedgerSource(
@@ -753,11 +740,7 @@ public interface WeeklyExpensePersistence {
         return new CashflowLedgerSource(projection, actual, source.weeklyYears(), source.targetRevision());
     }
 
-    /**
-     * Canonical carry-forward policy for cashflow reads and month-close snapshots.
-     * A prior year uses weekly ledger lines when that year exists in the weekly ledger;
-     * the annual-total document is only a fallback, so a year can never be counted twice.
-     */
+    /** Prior-year carry-forward comes only from the fixed annual columns. */
     default CashflowOpeningBalance findCashflowOpeningBalance(
         String tenantId,
         String projectId,
@@ -767,7 +750,7 @@ public interface WeeklyExpensePersistence {
             tenantId,
             projectId,
             selectedYear,
-            findCashflowWeeklyYears(tenantId, projectId)
+            List.of()
         );
     }
 
@@ -780,13 +763,8 @@ public interface WeeklyExpensePersistence {
         if (selectedYear < 2000 || selectedYear > 2099) {
             throw new IllegalArgumentException("Cashflow opening-balance year must be between 2000 and 2099.");
         }
-        List<Integer> weeklyYears = (sourceWeeklyYears == null ? List.<Integer>of() : sourceWeeklyYears).stream()
-            .filter(year -> year < selectedYear)
-            .distinct()
-            .sorted()
-            .toList();
         List<CashflowSheetAnnualTotal> annualTotals = findCashflowSheetYearTotals(tenantId, projectId).stream()
-            .filter(total -> total.year() < selectedYear && !weeklyYears.contains(total.year()))
+            .filter(total -> total.year() < selectedYear)
             .sorted(java.util.Comparator.comparingInt(CashflowSheetAnnualTotal::year))
             .toList();
         List<Integer> includedYears = annualTotals.stream().map(CashflowSheetAnnualTotal::year).toList();
@@ -814,14 +792,14 @@ public interface WeeklyExpensePersistence {
                 projectionLines,
                 projectionSources,
                 includedYears,
-                weeklyYears
+                List.of()
             ),
             new CashflowOpeningBalance.Mode(
                 cashflowMapNet(actualLines),
                 actualLines,
                 actualSources,
                 includedYears,
-                weeklyYears
+                List.of()
             )
         );
     }

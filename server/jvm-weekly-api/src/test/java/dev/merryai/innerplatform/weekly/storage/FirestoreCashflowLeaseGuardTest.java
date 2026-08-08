@@ -860,6 +860,7 @@ class FirestoreCashflowLeaseGuardTest {
         String mirrorPath = "orgs/tenant-a/cashflow_sheet_mirrors/project-a";
         fixture.documents.put(mirrorPath, new LinkedHashMap<>(Map.of(
             "projectId", "project-a",
+            "weeklyYear", 2026,
             "status", "FRESH",
             "sourceRevision", SOURCE_REVISION,
             "targetRevisionAtFetch", targetRevision
@@ -1825,8 +1826,11 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void dashboardLedgerSourceDerivesProjectionActualAndYearsFromOneFirestoreQuery() {
+    void dashboardLedgerSourceReadsOnlyTheDeclaredWeeklyYear() {
         Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
+            "projectId", "project-a", "weeklyYear", 2026
+        ));
         fixture.documents.put(
             "orgs/tenant-a/cashflow_weeks/project-a-2025-12-w5",
             new LinkedHashMap<>(Map.of(
@@ -1841,19 +1845,44 @@ class FirestoreCashflowLeaseGuardTest {
                 )
             ))
         );
+        fixture.documents.put(
+            "orgs/tenant-a/cashflow_weeks/project-a-2026-01-w1",
+            new LinkedHashMap<>(Map.of(
+                "tenantId", "tenant-a",
+                "projectId", "project-a",
+                "yearMonth", "2026-01",
+                "weekNo", 1,
+                "projection", Map.of("SALES_IN", 2_000_000L),
+                "weeklyExpenseActualBySheet", Map.of(
+                    "cashflow-sheet-lab",
+                    Map.of("SALES_IN", 1_800_000L)
+                )
+            ))
+        );
 
         WeeklyExpensePersistence.CashflowLedgerSource source = fixture.persistence
             .findCashflowLedgerSource("tenant-a", "project-a");
 
-        assertThat(source.weeklyYears()).containsExactly(2025);
+        assertThat(source.weeklyYears()).containsExactly(2026);
         assertThat(source.projection()).singleElement().satisfies(line ->
             assertThat(line.getAmount()).isEqualByComparingTo("2000000")
         );
         assertThat(source.actual()).singleElement().satisfies(line ->
             assertThat(line.getAmount()).isEqualByComparingTo("1800000")
         );
-        verify(fixture.collections.get("orgs/tenant-a/cashflow_weeks"), times(1))
-            .whereEqualTo("projectId", "project-a");
+        assertThat(fixture.queryReadSizes.getLast()).isEqualTo(1);
+    }
+
+    @Test
+    void dashboardLedgerSourceRejectsAnInvalidWeeklyYearDeclaration() {
+        Fixture fixture = fixture(activeMember(), activeLease());
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
+            "projectId", "project-a", "weeklyYear", "2026.0"
+        ));
+
+        assertThatThrownBy(() -> fixture.persistence.findCashflowLedgerSource("tenant-a", "project-a"))
+            .isInstanceOf(WeeklyExpenseConflictException.class)
+            .hasMessage("양식이 다릅니다.");
     }
 
     @Test
@@ -1908,25 +1937,13 @@ class FirestoreCashflowLeaseGuardTest {
     }
 
     @Test
-    void unfilteredCashflowWeekScansStayPinnedToApprovedExceptions() throws Exception {
+    void cashflowWeekQueriesHaveNoProjectOnlyScanExceptions() throws Exception {
         String source = Files.readString(Path.of(
             "src/main/java/dev/merryai/innerplatform/weekly/storage/FirestoreInheritedWeeklyExpensePersistence.java"
         ));
-        Set<String> approved = Set.of(
-            "completeCashflowWeeklyUpdate", "countCashflowActualReplacementWrites",
-            "replaceCashflowSheetMonthsInternal", "findCashflowLedgerSource", "replaceExpenseRows",
-            "replaceActualLines", "findWeeklyStatuses", "readProjectionLines", "readActualLines"
-        );
-
-        assertThat(approved).allSatisfy(method ->
-            assertThat(source).contains("SPEC-12 approved full scan: " + method)
-        );
-        assertThat(source.split(Pattern.quote("SPEC-12 approved full scan:"), -1).length - 1).isEqualTo(approved.size());
+        assertThat(source).doesNotContain("SPEC-12 approved full scan:");
         assertThat(source.split(Pattern.quote("cashflowWeeks(tenantId).whereEqualTo(\"projectId\", projectId)"), -1).length - 1)
-            .isEqualTo(8);
-        assertThat(source.split(Pattern.quote("cashflowWeeks(actor.tenantId()).whereEqualTo(\"projectId\", projectId)"), -1).length - 1)
-            .isEqualTo(1);
-        assertThat(source.split(Pattern.quote("cashflowWeeks(tenant(sheet)).whereEqualTo(\"projectId\", sheet.getProjectId())"), -1).length - 1)
+            .as("the bounded query helper adds yearMonth before execution")
             .isEqualTo(1);
     }
 
@@ -2173,7 +2190,7 @@ class FirestoreCashflowLeaseGuardTest {
         putCompleteProjectionWindow(fixture, "2026-07", 3);
         fixture.documents.put(
             "orgs/tenant-a/cashflow_sheet_mirrors/project-a",
-            Map.of("projectId", "project-a", "sourceRevision", SOURCE_REVISION)
+            Map.of("projectId", "project-a", "weeklyYear", 2026, "sourceRevision", SOURCE_REVISION)
         );
         WeeklyExpenseCommandService service = commandService(fixture.persistence);
         CompleteCashflowWeeklyUpdateRequest firstRequest = new CompleteCashflowWeeklyUpdateRequest(
@@ -2775,15 +2792,18 @@ class FirestoreCashflowLeaseGuardTest {
     @Test
     void weeklyCompletionValidatesCanonicalSixteenWeekWindowAndAllowsAuditedOverride() {
         Fixture fixture = fixture(activeMember(), Map.of());
-        putCompleteProjectionWindow(fixture, "2026-12", 4);
-        String missingPath = "orgs/tenant-a/cashflow_weeks/project-a-2027-01-w2";
+        fixture.documents.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
+            "projectId", "project-a", "weeklyYear", 2026
+        ));
+        putCompleteProjectionWindow(fixture, "2026-09", 4);
+        String missingPath = "orgs/tenant-a/cashflow_weeks/project-a-2026-10-w2";
         Map<String, Object> missingWeek = new LinkedHashMap<>(fixture.documents.get(missingPath));
         Map<String, Object> projection = new LinkedHashMap<>((Map<String, Object>) missingWeek.get("projection"));
         projection.remove("SALES_IN");
         missingWeek.put("projection", projection);
         fixture.documents.put(missingPath, missingWeek);
         CompleteCashflowWeeklyUpdateRequest initial = new CompleteCashflowWeeklyUpdateRequest(
-            "window-cross-year", "2026-12", 4, "2026-12-24T14:59:00Z", "NO_CHANGES"
+            "window-in-weekly-year", "2026-09", 4, "2026-09-24T14:59:00Z", "NO_CHANGES"
         );
 
         Throwable failure = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
@@ -2795,14 +2815,14 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(incomplete.details())
             .containsEntry("tenantId", "tenant-a")
             .containsEntry("projectId", "project-a")
-            .containsEntry("yearMonth", "2026-12")
+            .containsEntry("yearMonth", "2026-09")
             .containsEntry("weekNo", 4)
-            .containsEntry("windowStart", "2026-12-w4")
-            .containsEntry("windowEnd", "2027-03-w4")
+            .containsEntry("windowStart", "2026-09-w4")
+            .containsEntry("windowEnd", "2026-12-w4")
             .containsEntry("requiredWeekCount", 16)
             .containsEntry("requiredCellCount", 256);
         assertThat((List<Map<String, Object>>) incomplete.details().get("missingCells"))
-            .containsExactly(Map.of("yearMonth", "2027-01", "weekNo", 2, "lineId", "SALES_IN"));
+            .containsExactly(Map.of("yearMonth", "2026-10", "weekNo", 2, "lineId", "SALES_IN"));
         assertThat(fixture.documents.keySet()).noneMatch(path -> path.contains("/cashflow_weekly_update_completions/")
             || path.contains("/cashflow_weekly_update_completion_versions/")
             || path.contains("/weekly_api_audit_events/"));
@@ -2812,7 +2832,7 @@ class FirestoreCashflowLeaseGuardTest {
         Throwable staleOverride = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).completeCashflowWeeklyUpdate(ACTOR, "project-a", new CompleteCashflowWeeklyUpdateRequest(
-            "window-cross-year-stale", "2026-12", 4, "2026-12-24T14:59:00Z", "NO_CHANGES",
+            "window-in-weekly-year-stale", "2026-09", 4, "2026-09-24T14:59:00Z", "NO_CHANGES",
             true, "sha256:" + "f".repeat(64), 1
         ))));
         assertThat(staleOverride).isInstanceOf(WeeklyExpenseEditLeaseException.class);
@@ -2828,7 +2848,7 @@ class FirestoreCashflowLeaseGuardTest {
         Throwable resolvedOverride = catchThrowable(() -> fixture.persistence.runCommandTransaction(() -> commandService(
             fixture.persistence
         ).completeCashflowWeeklyUpdate(ACTOR, "project-a", new CompleteCashflowWeeklyUpdateRequest(
-            "window-cross-year-resolved", "2026-12", 4, "2026-12-24T14:59:00Z", "NO_CHANGES",
+            "window-in-weekly-year-resolved", "2026-09", 4, "2026-09-24T14:59:00Z", "NO_CHANGES",
             true, evidenceHash, 1
         ))));
         assertThat(resolvedOverride).isInstanceOf(WeeklyExpenseEditLeaseException.class);
@@ -2840,7 +2860,7 @@ class FirestoreCashflowLeaseGuardTest {
         fixture.documents.put(missingPath, missingWeek);
 
         CompleteCashflowWeeklyUpdateRequest override = new CompleteCashflowWeeklyUpdateRequest(
-            "window-cross-year-override", "2026-12", 4, "2026-12-24T14:59:00Z", "NO_CHANGES",
+            "window-in-weekly-year-override", "2026-09", 4, "2026-09-24T14:59:00Z", "NO_CHANGES",
             true, evidenceHash, 1
         );
         CashflowWeeklyUpdateCompletionResponse completed = fixture.persistence.runCommandTransaction(() -> commandService(
@@ -2850,7 +2870,7 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat(completed.updateResult()).isEqualTo("NO_CHANGES");
         assertThat(completed.complianceStatus()).isEqualTo("ON_TIME");
         assertThat(fixture.documents.get(
-            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-12-w4"
+            "orgs/tenant-a/cashflow_weekly_update_completions/project-a-2026-09-w4"
         ))
             .containsEntry("projectionValidationOverride", true)
             .containsEntry("projectionValidationIssueCount", 1)
@@ -2864,7 +2884,7 @@ class FirestoreCashflowLeaseGuardTest {
                 .contains("\"projectionValidationIssueCount\":1")
                 .contains(evidenceHash));
         Map<?, ?> periods = (Map<?, ?>) fixture.documents.get(
-            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-12"
+            "orgs/tenant-a/cashflow_settlement_statuses/project-a-2026-09"
         ).get("periods");
         assertThat(((Map<?, ?>) periods.get("WEEK_4")).get("status")).isEqualTo("PENDING_APPROVAL");
 
@@ -3076,11 +3096,10 @@ class FirestoreCashflowLeaseGuardTest {
             .containsEntry("capturedAt", NOW.minusSeconds(120).toString());
         assertThat(snapshot.get("sourceReadAt")).isEqualTo(NOW.minusSeconds(120).toString());
         assertThat((Map<String, Object>) snapshot.get("sheetFacts")).isEmpty();
-        assertThat(fixture.refs).doesNotContainKey("orgs/tenant-a/cashflow_sheet_mirrors/project-a");
     }
 
     @Test
-    void monthCloseClosesWithoutMirrorAndRetainsApprovedRequestEvidence() {
+    void monthCloseRetainsApprovedRequestEvidenceWhenTheRequestTimeMirrorWasMissing() {
         CloseCashflowMonthRequest request = monthCloseRequest("month-close-missing-mirror", 0, 3);
         Fixture fixture = fixture(activeMember(), activeLease());
         fixture.documents.put(draftPath("project-a", "pm-1"), activeDraft("project-a", 3, request));
@@ -3121,7 +3140,6 @@ class FirestoreCashflowLeaseGuardTest {
         assertThat((Map<String, Object>) snapshot.get("approvedMonthSnapshot"))
             .containsEntry("projectId", "project-a")
             .containsEntry("yearMonth", "2026-06");
-        assertThat(fixture.refs).doesNotContainKey("orgs/tenant-a/cashflow_sheet_mirrors/project-a");
     }
 
     @Test
@@ -4783,6 +4801,9 @@ class FirestoreCashflowLeaseGuardTest {
         List<Integer> queryReadSizes = new ArrayList<>();
         docs.put("orgs/tenant-a/members/pm-1", member);
         docs.put(leasePath("project-a"), lease);
+        docs.put("orgs/tenant-a/cashflow_sheet_mirrors/project-a", Map.of(
+            "projectId", "project-a", "weeklyYear", 2026
+        ));
         for (String yearMonth : List.of("2026-06", "2026-07")) {
             docs.put("orgs/tenant-a/cashflow_month_close_requests/project-a-" + yearMonth, Map.of(
                 "requestId", "project-a-" + yearMonth,
@@ -5195,6 +5216,7 @@ class FirestoreCashflowLeaseGuardTest {
         facts.put("issues", List.of());
         Map<String, Object> mirror = new LinkedHashMap<>();
         mirror.put("projectId", "project-a");
+        mirror.put("weeklyYear", Integer.parseInt(request.yearMonth().substring(0, 4)));
         mirror.put("status", "FRESH");
         mirror.put("sourceRevision", request.sourceRevision());
         mirror.put("appliedSourceRevision", request.sourceRevision());
