@@ -12,6 +12,7 @@ import {
 } from '../java-weekly-auth.mjs';
 import { assertCashflowMutationRuntime, createJavaWeeklyClient } from '../java-weekly-client.mjs';
 import { createCashflowPerformanceTrace } from '../cashflow-performance.mjs';
+import { cashflowAnnualTotalDocPath } from '../cashflow-annual-total.mjs';
 import {
   buildCashflowProjectionActualComparison,
   resolveCashflowComparisonAsOf,
@@ -20,6 +21,7 @@ import { CASHFLOW_ALL_LINES, CASHFLOW_IN_LINES, CASHFLOW_OUT_LINES } from '../ca
 import { stableStringify } from '../utils.mjs';
 import { cashflowApplyLeaseMs, readCashflowApplyLeaseState } from '../cashflow-apply-lease.mjs';
 import { getMonthFinanceWeeks } from '../../../src/app/platform/cashflow-week-core.mjs';
+import { WEEKS_PER_MONTH, annualYearsFor, weekOrdinal } from '../cashflow-coordinates.mjs';
 import { createHash } from 'node:crypto';
 
 const CASHFLOW_MANAGEMENT_CHECK_IDS = [
@@ -28,11 +30,17 @@ const CASHFLOW_MANAGEMENT_CHECK_IDS = [
   'negative-projection-balance',
   'future-prepay-over-million',
 ];
+const CASHFLOW_LINE_INDEX = new Map(CASHFLOW_ALL_LINES.map((lineId, index) => [lineId, index]));
 const CASHFLOW_MONTH_CLOSE_ROUTE_TIMEOUT_MS = 26_000;
 const CASHFLOW_MONTH_CLOSE_MUTATION_BUDGET_MS = 12_000;
 const CASHFLOW_MONTH_CLOSE_REQUEST_MAX_BYTES = 900_000;
 const CASHFLOW_CUMULATIVE_CLOSE_CONTRACT = 'cashflow-cumulative-close-v2';
 const CASHFLOW_CUMULATIVE_CLOSE_FROM_MONTH = '2023-01';
+
+function readWeeklyYear(value) {
+  const year = Number(value);
+  return Number.isSafeInteger(year) && year >= 2000 && year <= 2099 ? year : null;
+}
 
 function cashflowMonthCloseTimeoutError() {
   return createHttpError(
@@ -551,16 +559,30 @@ function sumSafe(values) {
   return total;
 }
 
-function buildMonthModeReadModel(cells, mode) {
+function indexMonthCells(cells) {
+  const indexed = Array(CASHFLOW_ALL_LINES.length * 2 * WEEKS_PER_MONTH);
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    const lineIndex = CASHFLOW_LINE_INDEX.get(cell?.cashflowLine);
+    const modeIndex = cell?.mode === 'projection' ? 0 : cell?.mode === 'actual' ? 1 : -1;
+    if (lineIndex === undefined || modeIndex === -1 || !Number.isInteger(cell?.weekNo)) continue;
+    indexed[(modeIndex * WEEKS_PER_MONTH + cell.weekNo - 1) * CASHFLOW_ALL_LINES.length + lineIndex] = cell;
+  }
+  return indexed;
+}
+
+function indexedMonthCell(indexed, mode, weekNo, lineId) {
+  const modeIndex = mode === 'projection' ? 0 : 1;
+  return indexed[(modeIndex * WEEKS_PER_MONTH + weekNo - 1) * CASHFLOW_ALL_LINES.length + CASHFLOW_LINE_INDEX.get(lineId)];
+}
+
+function buildMonthModeReadModel(cells, mode, indexed = indexMonthCells(cells)) {
   const rowTotals = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => [lineId, 0]));
   let runningIn = 0;
   let runningOut = 0;
-  const weeks = Array.from({ length: 5 }, (_, index) => {
+  const weeks = Array.from({ length: WEEKS_PER_MONTH }, (_, index) => {
     const weekNo = index + 1;
     const amounts = Object.fromEntries(CASHFLOW_ALL_LINES.map((lineId) => {
-      const cell = cells.find((candidate) => (
-        candidate.mode === mode && candidate.weekNo === weekNo && candidate.cashflowLine === lineId
-      ));
+      const cell = indexedMonthCell(indexed, mode, weekNo, lineId);
       return [lineId, ['VALUE', 'ZERO'].includes(cell?.cellState) ? safeAmount(cell.amount) : 0];
     }));
     for (const lineId of CASHFLOW_ALL_LINES) rowTotals[lineId] += amounts[lineId];
@@ -608,16 +630,17 @@ function monthWeeksFromCells(cells, yearMonth) {
     projection: buildMonthModeReadModel(cells, 'projection'),
     actual: buildMonthModeReadModel(cells, 'actual'),
   };
-  return Array.from({ length: 5 }, (_, index) => {
+  const financeWeeks = getMonthFinanceWeeks(yearMonth);
+  return Array.from({ length: WEEKS_PER_MONTH }, (_, index) => {
     const weekNo = index + 1;
-    const financeWeek = getMonthFinanceWeeks(yearMonth).find((week) => week.weekNo === weekNo) || {};
+    const financeWeek = financeWeeks[index];
     return {
       yearMonth,
       weekNo,
-      weekStart: financeWeek.weekStart || '',
-      weekEnd: financeWeek.weekEnd || '',
-      projection: modes.projection?.weeks?.find((week) => week.weekNo === weekNo)?.amounts || {},
-      actual: modes.actual?.weeks?.find((week) => week.weekNo === weekNo)?.amounts || {},
+      weekStart: financeWeek?.weekStart || '',
+      weekEnd: financeWeek?.weekEnd || '',
+      projection: modes.projection?.weeks?.[index]?.amounts || {},
+      actual: modes.actual?.weeks?.[index]?.amounts || {},
     };
   });
 }
@@ -640,41 +663,61 @@ function canonicalPinnedSheetWeeks(pinnedSheetCells) {
     .sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
 }
 
-function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells) {
-  const pinnedWeeks = canonicalPinnedSheetWeeks(pinnedSheetCells);
-  const byKey = new Map();
-  for (const month of Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : []) {
-    const monthKey = readOptionalText(month?.yearMonth);
-    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)) continue;
-    const financeWeeks = getMonthFinanceWeeks(monthKey);
-    for (let weekNo = 1; weekNo <= 5; weekNo += 1) {
-      const financeWeek = financeWeeks.find((week) => week.weekNo === weekNo) || {};
-      byKey.set(`${monthKey}:${weekNo}`, {
-        yearMonth: monthKey,
-        weekNo,
-        weekStart: financeWeek.weekStart || '',
-        weekEnd: financeWeek.weekEnd || '',
-        projection: month?.projection?.weeks?.find((week) => Number(week?.weekNo) === weekNo)?.amounts || {},
-        actual: month?.actual?.weeks?.find((week) => Number(week?.weekNo) === weekNo)?.amounts || {},
-      });
-    }
+function cashflowMonthsByCoordinate(months, weeklyYear) {
+  if (readWeeklyYear(weeklyYear) === null) return [];
+  const indexed = Array(12);
+  for (const month of Array.isArray(months) ? months : []) {
+    const ordinal = weekOrdinal(weeklyYear, readOptionalText(month?.yearMonth), 1);
+    if (ordinal !== -1) indexed[Math.trunc(ordinal / WEEKS_PER_MONTH)] = month;
   }
-  if (byKey.size > 0) {
-    for (const pinnedWeek of pinnedWeeks) {
-      const key = `${pinnedWeek.yearMonth}:${pinnedWeek.weekNo}`;
-      if (!byKey.has(key)) byKey.set(key, { ...pinnedWeek, projection: {}, actual: {} });
+  return indexed;
+}
+
+function cashflowWeeksByCoordinate(weeks, weeklyYear, yearMonth) {
+  if (readWeeklyYear(weeklyYear) === null) return [];
+  const indexed = Array(WEEKS_PER_MONTH);
+  for (const week of Array.isArray(weeks) ? weeks : []) {
+    const ordinal = weekOrdinal(weeklyYear, yearMonth, week?.weekNo);
+    if (ordinal !== -1) indexed[ordinal % WEEKS_PER_MONTH] = week;
+  }
+  return indexed;
+}
+
+function canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells, weeklyYear, monthState) {
+  if (readWeeklyYear(weeklyYear) === null) return [];
+  const byKey = new Map();
+  if (monthState === 'FROZEN_COMPLETE') {
+    for (const week of canonicalPinnedSheetWeeks(pinnedSheetCells)) {
+      if (weekOrdinal(weeklyYear, week.yearMonth, week.weekNo) !== -1) {
+        byKey.set(`${week.yearMonth}:${week.weekNo}`, week);
+      }
     }
     return [...byKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
   }
-  if (pinnedWeeks.length > 0) {
-    const pinnedByKey = new Map(pinnedWeeks.map((week) => [`${week.yearMonth}:${week.weekNo}`, week]));
-    if (completeMonthCloseCells(cells)) {
-      for (const week of monthWeeksFromCells(cells, yearMonth)) pinnedByKey.set(`${yearMonth}:${week.weekNo}`, week);
+  if (monthState === 'MONTH_CELLS') {
+    if (weekOrdinal(weeklyYear, yearMonth, 1) !== -1) {
+      for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
     }
-    return [...pinnedByKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
+    return [...byKey.values()].sort((left, right) => cashflowRangeSortKey(left) - cashflowRangeSortKey(right));
   }
-  if (completeMonthCloseCells(cells)) {
-    for (const week of monthWeeksFromCells(cells, yearMonth)) byKey.set(`${yearMonth}:${week.weekNo}`, week);
+  for (const month of Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : []) {
+    const monthKey = readOptionalText(month?.yearMonth);
+    if (weekOrdinal(weeklyYear, monthKey, 1) === -1) continue;
+    const financeWeeks = getMonthFinanceWeeks(monthKey);
+    const projectionWeeks = cashflowWeeksByCoordinate(month?.projection?.weeks, weeklyYear, monthKey);
+    const actualWeeks = cashflowWeeksByCoordinate(month?.actual?.weeks, weeklyYear, monthKey);
+    for (let weekIndex = 0; weekIndex < WEEKS_PER_MONTH; weekIndex += 1) {
+      const weekNo = weekIndex + 1;
+      const financeWeek = financeWeeks[weekIndex];
+      byKey.set(`${monthKey}:${weekNo}`, {
+        yearMonth: monthKey,
+        weekNo,
+        weekStart: financeWeek?.weekStart || '',
+        weekEnd: financeWeek?.weekEnd || '',
+        projection: projectionWeeks[weekIndex]?.amounts || {},
+        actual: actualWeeks[weekIndex]?.amounts || {},
+      });
+    }
   }
   return [...byKey.values()].sort((left, right) => (
     cashflowRangeSortKey(left) - cashflowRangeSortKey(right)
@@ -685,13 +728,14 @@ function cashflowCellKey(yearMonth, cell) {
   return `${yearMonth}:${cell.mode}:${cell.weekNo}:${cell.cashflowLine}`;
 }
 
-function canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells) {
+function canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells, weeklyYear, monthState) {
+  if (readWeeklyYear(weeklyYear) === null) return new Map();
   const canonicalMonths = Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : [];
-  if (canonicalMonths.length > 0) {
+  if (['LIVE_CURRENT', 'LIVE_AMENDED'].includes(monthState)) {
     const canonical = new Map();
     for (const month of canonicalMonths) {
       const monthKey = readOptionalText(month?.yearMonth);
-      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(monthKey)) continue;
+      if (weekOrdinal(weeklyYear, monthKey, 1) === -1) continue;
       for (const mode of ['projection', 'actual']) {
         for (const week of Array.isArray(month?.[mode]?.weeks) ? month[mode].weeks : []) {
           const weekNo = Number(week?.weekNo);
@@ -713,15 +757,13 @@ function canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCell
     return canonical;
   }
   const byKey = new Map();
-  for (const sourceCell of Array.isArray(pinnedSheetCells) ? pinnedSheetCells : []) {
+  const sourceCells = monthState === 'FROZEN_COMPLETE' ? pinnedSheetCells : cells;
+  for (const sourceCell of Array.isArray(sourceCells) ? sourceCells : []) {
     const source = objectValue(sourceCell);
-    const sourceYearMonth = readOptionalText(source?.yearMonth);
-    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(sourceYearMonth)) continue;
+    const sourceYearMonth = monthState === 'MONTH_CELLS' ? yearMonth : readOptionalText(source?.yearMonth);
+    if (weekOrdinal(weeklyYear, sourceYearMonth, source?.weekNo) === -1) continue;
     const cell = normalizeMonthCloseCell(source, sourceYearMonth);
     if (cell) byKey.set(cashflowCellKey(sourceYearMonth, cell), cell);
-  }
-  for (const cell of Array.isArray(cells) ? cells : []) {
-    if (cell) byKey.set(cashflowCellKey(yearMonth, cell), cell);
   }
   return byKey;
 }
@@ -836,9 +878,19 @@ function futurePrepayCheck(weeks, asOfKey) {
   );
 }
 
-export function buildCashflowManagementChecks({ cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells, projectionOpeningBalance = 0 }) {
-  const weeks = canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells);
-  const cellStates = canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells);
+export function buildCashflowManagementChecks({
+  cashflow, cells, yearMonth, depositScheduleRows, comparisonBoundary, pinnedSheetCells,
+  projectionOpeningBalance = 0, weeklyYear = null, monthState = null,
+}) {
+  const canonicalWeeklyYear = readWeeklyYear(weeklyYear);
+  const hasCanonicalSource = canonicalWeeklyYear !== null
+    && ['FROZEN_COMPLETE', 'MONTH_CELLS', 'LIVE_CURRENT', 'LIVE_AMENDED'].includes(monthState);
+  const weeks = hasCanonicalSource
+    ? canonicalCashflowWeeks(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState)
+    : [];
+  const cellStates = hasCanonicalSource
+    ? canonicalCashflowCellStates(cashflow, cells, yearMonth, pinnedSheetCells, canonicalWeeklyYear, monthState)
+    : new Map();
   const asOfKey = cashflowRangeSortKey(comparisonBoundary?.asOfWeek || { yearMonth, weekNo: 5 });
   const deposits = (Array.isArray(depositScheduleRows) ? depositScheduleRows : []).map((row) => ({
     ...row,
@@ -1051,19 +1103,21 @@ function buildCashflowRangeTotals(months, mode, range) {
   return { rowTotals, totalIn, totalOut, net };
 }
 
-function cashflowReadModelForYear(readModel, selectedYear) {
+function cashflowReadModelForYear(readModel, weeklyYear) {
   const canonical = objectValue(readModel);
-  if (!canonical || !Array.isArray(canonical.months)) return null;
+  if (!canonical || !Array.isArray(canonical.months) || readWeeklyYear(weeklyYear) === null) return null;
+  const months = cashflowMonthsByCoordinate(canonical.months, weeklyYear).filter(Boolean);
   const range = {
-    start: { yearMonth: `${selectedYear}-01`, weekNo: 1 },
-    end: { yearMonth: `${selectedYear}-12`, weekNo: 5 },
+    start: { yearMonth: `${weeklyYear}-01`, weekNo: 1 },
+    end: { yearMonth: `${weeklyYear}-12`, weekNo: WEEKS_PER_MONTH },
   };
   return {
     ...canonical,
+    months,
     range: {
       ...range,
-      projection: buildCashflowRangeTotals(canonical.months, 'projection', range),
-      actual: buildCashflowRangeTotals(canonical.months, 'actual', range),
+      projection: buildCashflowRangeTotals(months, 'projection', range),
+      actual: buildCashflowRangeTotals(months, 'actual', range),
     },
   };
 }
@@ -1190,18 +1244,15 @@ function dashboardTotals(mode) {
 function buildCashflowMonthCloseMonthSnapshot({
   projectId, yearMonth, cells, sourceRevision, targetRevision, capturedAt, spreadsheetId, spreadsheetTitle, selectedSheetName,
 }) {
+  const indexedCells = indexMonthCells(cells);
   const modeSnapshot = (mode) => {
-    const totals = dashboardTotals(buildMonthModeReadModel(cells, mode));
+    const totals = dashboardTotals(buildMonthModeReadModel(cells, mode, indexedCells));
     return {
       ...totals,
       weeks: totals.weeks.map((week) => ({
         ...week,
         cells: CASHFLOW_ALL_LINES.map((cashflowLine) => {
-          const cell = cells.find((candidate) => (
-            candidate.mode === mode
-            && candidate.weekNo === week.weekNo
-            && candidate.cashflowLine === cashflowLine
-          ));
+          const cell = indexedMonthCell(indexedCells, mode, week.weekNo, cashflowLine);
           return { cashflowLine, cellState: cell.cellState, amount: cell.amount };
         }),
       })),
@@ -1230,10 +1281,10 @@ function buildCashflowMonthCloseMonthSnapshot({
   };
 }
 
-function canonicalWeeklyProjection(cashflow, fallback) {
-  const months = Array.isArray(cashflow?.readModel?.months) ? cashflow.readModel.months : [];
+function canonicalWeeklyProjection(cashflow, fallback, weeklyYear) {
+  const months = cashflowMonthsByCoordinate(cashflow?.readModel?.months, weeklyYear).filter(Boolean);
   const boundaries = cashflowReadModelBoundaries(months);
-  if (boundaries.length === 0) return { ...fallback, weeklyYears: [] };
+  if (boundaries.length === 0) return fallback;
   const totals = buildCashflowRangeTotals(months, 'projection', {
     start: boundaries[0],
     end: boundaries.at(-1),
@@ -1241,9 +1292,6 @@ function canonicalWeeklyProjection(cashflow, fallback) {
   return {
     totalIn: totals.totalIn,
     salesAndVatTotal: safeAmount(totals.rowTotals?.SALES_IN) + safeAmount(totals.rowTotals?.SALES_VAT_IN),
-    weeklyYears: [...new Set(months
-      .map((month) => Number(readOptionalText(month?.yearMonth).slice(0, 4)))
-      .filter(Number.isSafeInteger))],
   };
 }
 
@@ -1260,19 +1308,17 @@ function projectFinancialYears(project = {}) {
     .filter(Number.isSafeInteger))].sort((left, right) => left - right);
 }
 
-function composeProjectionTotal({ project, cashflow, mirror, fallback, weeklyYearsHint = [] }) {
-  const weekly = canonicalWeeklyProjection(cashflow, fallback);
-  weekly.weeklyYears = [...new Set([...weekly.weeklyYears, ...weeklyYearsHint])].sort((left, right) => left - right);
-  const annualYears = projectFinancialYears(project).filter((year) => !weekly.weeklyYears.includes(year));
-  const annualTotals = new Map((Array.isArray(mirror?.sheetFacts?.annualCashflowTotals)
-    ? mirror.sheetFacts.annualCashflowTotals
-    : []).map((row) => [Number(row?.year), row]));
-  const appliedAnnualYears = new Set((Array.isArray(mirror?.appliedAnnualYears)
-    ? mirror.appliedAnnualYears
-    : []).map(Number));
-  const sourceIsApplied = readOptionalText(mirror?.appliedSourceRevision) === readOptionalText(mirror?.sourceRevision);
+function composeProjectionTotal({ project, cashflow, annualTotals, fallback, weeklyYear }) {
+  const canonicalWeeklyYear = readWeeklyYear(weeklyYear);
+  if (canonicalWeeklyYear === null) return { ...fallback, years: [] };
+  const weekly = canonicalWeeklyProjection(cashflow, fallback, canonicalWeeklyYear);
+  const projectYears = projectFinancialYears(project);
+  const annualYears = annualYearsFor(canonicalWeeklyYear).filter((year) => projectYears.includes(year));
+  const annualByYear = new Map((Array.isArray(annualTotals) ? annualTotals : [])
+    .filter((row) => Number.isSafeInteger(row?.projection?.totalIn))
+    .map((row) => [Number(row.year), row]));
   const annual = annualYears.map((year) => {
-    const total = sourceIsApplied && appliedAnnualYears.has(year) ? annualTotals.get(year) : null;
+    const total = annualByYear.get(year);
     return {
       year,
       source: total ? 'ANNUAL' : 'MISSING',
@@ -1286,7 +1332,7 @@ function composeProjectionTotal({ project, cashflow, mirror, fallback, weeklyYea
     totalIn: weekly.totalIn + annual.reduce((sum, row) => sum + row.totalIn, 0),
     salesAndVatTotal: weekly.salesAndVatTotal + annual.reduce((sum, row) => sum + row.salesAndVatTotal, 0),
     years: [
-      ...weekly.weeklyYears.map((year) => ({ year, source: 'WEEKLY' })),
+      { year: canonicalWeeklyYear, source: 'WEEKLY' },
       ...annual,
     ].sort((left, right) => left.year - right.year),
   };
@@ -1676,6 +1722,39 @@ async function readDocument(db, path) {
   return snapshot.exists ? snapshot.data() || {} : null;
 }
 
+function annualModeFromStoredDocument(document, mode) {
+  const lineAmounts = objectValue(document?.[mode]);
+  const lineStates = objectValue(document?.[`${mode}States`]);
+  if (!lineAmounts || !lineStates || !CASHFLOW_ALL_LINES.every((lineId) => (
+    (lineStates[lineId] === 'EMPTY' && !Object.hasOwn(lineAmounts, lineId))
+    || (lineStates[lineId] === 'ZERO' && lineAmounts[lineId] === 0)
+    || (lineStates[lineId] === 'VALUE' && Number.isSafeInteger(lineAmounts[lineId]))
+  ))) return null;
+  return {
+    lineAmounts,
+    lineStates,
+    totalIn: null,
+    totalOut: null,
+    net: null,
+  };
+}
+
+async function readAnnualTotals({ db, tenantId, projectId, weeklyYear }) {
+  if (readWeeklyYear(weeklyYear) === null) return null;
+  const years = annualYearsFor(weeklyYear);
+  const documents = await Promise.all(years.map((year) => (
+    readDocument(db, cashflowAnnualTotalDocPath(tenantId, projectId, year))
+      .catch(() => null)
+  )));
+  return years.flatMap((year, index) => {
+    const document = documents[index];
+    const identityMatches = document?.projectId === projectId && Number(document?.year) === year;
+    const projection = identityMatches ? annualModeFromStoredDocument(document, 'projection') : null;
+    const actual = identityMatches ? annualModeFromStoredDocument(document, 'actual') : null;
+    return projection && actual ? [{ year, projection, actual }] : [];
+  });
+}
+
 function validOpeningBalanceMode(mode, selectedYear) {
   if (
     !objectValue(mode)
@@ -1773,13 +1852,21 @@ function requireUnchangedReviewedOpeningBalances(reviewed, current) {
   }
 }
 
-function deadlineSummaryFromCompliance(compliance, comparisonBoundary) {
-  const items = Array.isArray(compliance?.items) ? compliance.items : [];
+function deadlineSummaryFromCompliance(compliance, comparisonBoundary, weeklyYear) {
+  const canonicalWeeklyYear = readWeeklyYear(weeklyYear);
+  const items = canonicalWeeklyYear === null ? [] : Array.isArray(compliance?.items) ? compliance.items : [];
   const completedLateCount = items.filter((item) => readOptionalText(item?.status) === 'COMPLETED_LATE').length;
-  const current = items.find((item) => (
-    item.yearMonth === comparisonBoundary?.asOfWeek?.yearMonth
-    && Number(item.weekNo) === Number(comparisonBoundary?.asOfWeek?.weekNo)
-  )) || null;
+  const indexed = Array(12 * WEEKS_PER_MONTH);
+  for (const item of items) {
+    const ordinal = weekOrdinal(canonicalWeeklyYear, item?.yearMonth, item?.weekNo);
+    if (ordinal !== -1) indexed[ordinal] = item;
+  }
+  const currentOrdinal = canonicalWeeklyYear === null ? -1 : weekOrdinal(
+    canonicalWeeklyYear,
+    comparisonBoundary?.asOfWeek?.yearMonth,
+    comparisonBoundary?.asOfWeek?.weekNo,
+  );
+  const current = currentOrdinal === -1 ? null : indexed[currentOrdinal] || null;
   return {
     trackingStartedAt: null,
     onTimeCount: Number(compliance?.onTimeCount) || 0,
@@ -1823,26 +1910,60 @@ async function composeCashflowMonthDashboard({
       readDocument(db, `orgs/${tenantId}/projects/${projectId}`),
       readDocument(db, `orgs/${tenantId}/cashflow_sheet_mirrors/${projectId}`),
     ]);
-  const project = closedSnapshot?.project || projectDocument || {};
-  const sheetFacts = closedSnapshot?.sheetFacts || mirror?.sheetFacts || null;
-  const mirrorCells = normalizeMonthCloseCells(mirror?.cells, yearMonth);
-  const frozenCells = closedSnapshot
-    ? closeSnapshotCells(closedSnapshot, yearMonth)
-    : mirrorCells;
   const selectedYear = Number(yearMonth.slice(0, 4));
-  const frozenCanonical = closedSnapshot
-    ? objectValue(closedSnapshot?.canonical) || frozenCashflowReadModel(closedSnapshot?.ledgerWeeks)
-    : null;
+  const weeklyYear = closedSnapshot
+    ? readWeeklyYear(closedSnapshot.weeklyYear) ?? readWeeklyYear(selectedYear)
+    : readWeeklyYear(mirror?.weeklyYear);
+  let project;
+  let sheetFacts;
+  let cells;
+  let canonicalSource;
+  let confirmations;
+  let managementConfirmations;
+  let depositScheduleRows;
+  let openingBalanceCandidate;
+  if (amendedCurrent) {
+    project = objectValue(closedSnapshot?.project) || {};
+    sheetFacts = objectValue(closedSnapshot?.sheetFacts);
+    canonicalSource = objectValue(cashflow?.readModel);
+    const monthOrdinal = weeklyYear === null ? -1 : weekOrdinal(weeklyYear, yearMonth, 1);
+    const currentMonth = monthOrdinal !== -1
+      ? cashflowMonthsByCoordinate(canonicalSource?.months, weeklyYear)[Math.trunc(monthOrdinal / WEEKS_PER_MONTH)]
+      : null;
+    cells = canonicalMonthCells(currentMonth, yearMonth);
+    confirmations = Array.isArray(closedSnapshot?.confirmations) ? closedSnapshot.confirmations : [];
+    managementConfirmations = Array.isArray(closedSnapshot?.managementConfirmations) ? closedSnapshot.managementConfirmations : [];
+    depositScheduleRows = Array.isArray(closedSnapshot?.depositScheduleRows) ? closedSnapshot.depositScheduleRows : [];
+    openingBalanceCandidate = openingBalances;
+  } else if (closedSnapshot) {
+    project = objectValue(closedSnapshot.project) || {};
+    sheetFacts = objectValue(closedSnapshot.sheetFacts);
+    canonicalSource = frozenCashflowReadModel(closedSnapshot.ledgerWeeks);
+    cells = closeSnapshotCells(closedSnapshot, yearMonth);
+    confirmations = Array.isArray(closedSnapshot.confirmations) ? closedSnapshot.confirmations : [];
+    managementConfirmations = Array.isArray(closedSnapshot.managementConfirmations) ? closedSnapshot.managementConfirmations : [];
+    depositScheduleRows = Array.isArray(closedSnapshot.depositScheduleRows) ? closedSnapshot.depositScheduleRows : [];
+    openingBalanceCandidate = objectValue(closedSnapshot.openingBalances);
+  } else {
+    project = objectValue(projectDocument) || {};
+    sheetFacts = objectValue(mirror?.sheetFacts);
+    canonicalSource = objectValue(cashflow?.readModel);
+    cells = normalizeMonthCloseCells(mirror?.cells, yearMonth);
+    confirmations = [];
+    managementConfirmations = [];
+    depositScheduleRows = sourceDepositRows(sheetFacts, yearMonth);
+    openingBalanceCandidate = openingBalances;
+  }
   const canonicalReadModel = cashflowReadModelForYear(
-    amendedCurrent ? objectValue(cashflow?.readModel) : frozenCanonical || objectValue(cashflow?.readModel),
-    selectedYear,
+    canonicalSource,
+    weeklyYear,
   );
-  const currentCanonicalMonth = amendedCurrent
-    ? canonicalReadModel?.months?.find((month) => month.yearMonth === yearMonth) || null
-    : null;
-  const cells = amendedCurrent
-    ? canonicalMonthCells(currentCanonicalMonth, yearMonth)
-    : frozenCells;
+  const annualTotals = await readAnnualTotals({
+    db,
+    tenantId,
+    projectId,
+    weeklyYear,
+  });
   const projectionMode = buildMonthModeReadModel(cells, 'projection');
   const actualMode = buildMonthModeReadModel(cells, 'actual');
   const projection = dashboardTotals(projectionMode);
@@ -1854,15 +1975,7 @@ async function composeCashflowMonthDashboard({
       readModel: { months: [{ yearMonth, projection: projectionMode, actual: actualMode }] },
     }, comparisonBoundary).months[0] || null
     : null;
-  const confirmations = closedSnapshot?.confirmations || [];
-  const managementConfirmations = closedSnapshot?.managementConfirmations || [];
   const sourceRows = sourceDepositRows(sheetFacts, yearMonth);
-  const depositScheduleRows = closedSnapshot?.depositScheduleRows
-    || sourceRows
-    || [];
-  const openingBalanceCandidate = amendedCurrent
-    ? openingBalances
-    : objectValue(closedSnapshot?.openingBalances) || openingBalances;
   const authoritativeOpeningBalances = openingBalanceCandidate
     ? requireJvmOpeningBalances({ openingBalances: openingBalanceCandidate }, yearMonth)
     : null;
@@ -1871,40 +1984,47 @@ async function composeCashflowMonthDashboard({
     : null;
   const canonicalWithComparison = canonicalReadModel ? {
     ...canonicalReadModel,
-    months: canonicalReadModel.months.map((month) => ({
+    weeklyYear,
+    annualTotals,
+    months: canonicalReadModel.months.map((month, monthIndex) => ({
       ...month,
-      comparison: canonicalComparison?.months?.find((candidate) => candidate.yearMonth === month.yearMonth) || null,
+      comparison: canonicalComparison?.months?.[monthIndex] || null,
     })),
   } : null;
-  const managementChecks = amendedCurrent
-    ? buildCashflowManagementChecks({
+  let managementChecks;
+  if (amendedCurrent) {
+    managementChecks = buildCashflowManagementChecks({
       project,
       cashflow,
       cells,
       yearMonth,
-      depositScheduleRows: sheetFacts?.depositScheduleRows || depositScheduleRows,
+      depositScheduleRows,
       comparisonBoundary,
       pinnedSheetCells: null,
       projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
-    })
-    : Array.isArray(closedSnapshot?.managementChecks)
-      ? closedSnapshot.managementChecks
-      : legacyEvidenceOnly
-      ? []
-      : buildCashflowManagementChecks({
-        project,
-        cashflow,
-        cells,
-        yearMonth,
-        depositScheduleRows: sheetFacts?.depositScheduleRows || depositScheduleRows,
-        comparisonBoundary,
-        pinnedSheetCells: mirror?.cells,
-        projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
-      });
-  const liveDeadlineSummary = deadlineSummaryFromCompliance(weeklyCompliance, weeklyComplianceBoundary);
+      weeklyYear,
+      monthState: 'LIVE_AMENDED',
+    });
+  } else if (closedSnapshot) {
+    managementChecks = Array.isArray(closedSnapshot.managementChecks) ? closedSnapshot.managementChecks : [];
+  } else {
+    managementChecks = buildCashflowManagementChecks({
+      project,
+      cashflow,
+      cells,
+      yearMonth,
+      depositScheduleRows,
+      comparisonBoundary,
+      pinnedSheetCells: mirror?.cells,
+      projectionOpeningBalance: safeAmount(authoritativeOpeningBalances?.projection?.amount),
+      weeklyYear,
+      monthState: 'LIVE_CURRENT',
+    });
+  }
+  const liveDeadlineSummary = deadlineSummaryFromCompliance(weeklyCompliance, weeklyComplianceBoundary, weeklyYear);
   const deadlineSummary = closedSnapshot
     ? {
-      ...(closedSnapshot?.deadlineSummary || liveDeadlineSummary),
+      ...(objectValue(closedSnapshot.deadlineSummary) || {}),
       completedWeeks: liveDeadlineSummary.completedWeeks,
       weeklyStatuses: liveDeadlineSummary.weeklyStatuses,
     }
@@ -1918,6 +2038,10 @@ async function composeCashflowMonthDashboard({
     }
     if (!projectDocument) blockers.push({ code: 'PROJECT_NOT_FOUND', message: '프로젝트 등록 정보를 찾을 수 없습니다.' });
     if (!mirror) blockers.push({ code: 'SHEET_SOURCE_REQUIRED', message: '먼저 시트값을 불러와 주세요.' });
+    else if (weeklyYear === null) blockers.push({
+      code: 'SHEET_SOURCE_REQUIRED',
+      message: '시트에서 주별 관리 연도를 확인하지 못했습니다. 표준 양식으로 다시 불러와 주세요.',
+    });
     else if (mirror.status !== 'FRESH') blockers.push({ code: 'SHEET_SOURCE_STALE', message: '시트값을 다시 불러와 주세요.' });
     else if ((mirror.projectId && mirror.projectId !== projectId) || !mirror.yearMonths?.includes(yearMonth)) {
       blockers.push({ code: 'SHEET_SOURCE_SCOPE_MISMATCH', message: '고정한 시트값의 프로젝트 또는 월이 다릅니다.' });
@@ -1929,26 +2053,36 @@ async function composeCashflowMonthDashboard({
     if (!completeMonthCloseCells(cells)) blockers.push({ code: 'SHEET_MONTH_INCOMPLETE', message: '선택한 월의 160개 캐시플로우 값을 다시 불러와 주세요.' });
     if (!projectionMode || !actualMode) blockers.push({ code: 'AMOUNT_OUT_OF_RANGE', message: '지원 범위를 넘는 금액이 있습니다.' });
   }
+  if (weeklyYear !== null && annualTotals.length !== annualYearsFor(weeklyYear).length) {
+    blockers.push({ code: 'SHEET_SOURCE_REQUIRED', message: '먼저 시트값을 불러와 주세요.' });
+  }
   const contractAmount = safeAmount(project?.contractAmount);
-  const projectionComposition = closedSnapshot
-    ? {
-      totalIn: safeAmount(canonicalWithComparison?.range?.projection?.totalIn ?? projection.totalIn),
-      salesAndVatTotal: safeAmount(canonicalWithComparison?.range?.projection?.rowTotals?.SALES_IN ?? projection.rowTotals?.SALES_IN)
-        + safeAmount(canonicalWithComparison?.range?.projection?.rowTotals?.SALES_VAT_IN ?? projection.rowTotals?.SALES_VAT_IN),
-      years: Array.isArray(closedSnapshot?.projectionYears) ? closedSnapshot.projectionYears : [],
-    }
-    : composeProjectionTotal({
+  let projectionComposition;
+  if (closedSnapshot && !legacyEvidenceOnly) {
+    projectionComposition = {
+      totalIn: safeAmount(canonicalWithComparison?.range?.projection?.totalIn),
+      salesAndVatTotal: safeAmount(canonicalWithComparison?.range?.projection?.rowTotals?.SALES_IN)
+        + safeAmount(canonicalWithComparison?.range?.projection?.rowTotals?.SALES_VAT_IN),
+      years: Array.isArray(closedSnapshot.projectionYears) ? closedSnapshot.projectionYears : [],
+    };
+  } else if (legacyEvidenceOnly) {
+    projectionComposition = {
+      totalIn: projection.totalIn,
+      salesAndVatTotal: safeAmount(projection.rowTotals?.SALES_IN) + safeAmount(projection.rowTotals?.SALES_VAT_IN),
+      years: [],
+    };
+  } else {
+    projectionComposition = composeProjectionTotal({
       project,
       cashflow,
-      mirror,
+      annualTotals,
       fallback: {
         totalIn: projection.totalIn,
         salesAndVatTotal: safeAmount(projection.rowTotals?.SALES_IN) + safeAmount(projection.rowTotals?.SALES_VAT_IN),
       },
-      weeklyYearsHint: (Array.isArray(mirror?.appliedWeeklyYears) ? mirror.appliedWeeklyYears : mirror?.cells?.map((cell) => (
-        Number(readOptionalText(cell?.yearMonth).slice(0, 4))
-      )) || []).map(Number).filter(Number.isSafeInteger),
+      weeklyYear,
     });
+  }
   const projectionTotalIn = projectionComposition.totalIn;
   const projectionSalesAndVatTotal = projectionComposition.salesAndVatTotal;
   const contractDifference = contractAmount - projectionSalesAndVatTotal;
@@ -2152,6 +2286,8 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
     comparisonBoundary,
     pinnedSheetCells: mirror?.cells,
     projectionOpeningBalance: safeAmount(openingBalances?.projection?.amount),
+    weeklyYear: readWeeklyYear(mirror?.weeklyYear),
+    monthState: 'LIVE_CURRENT',
   });
   const managementWarnings = matchingManagementChecks(managementChecks, closeInput.managementChecks) ? [] : [{
     code: 'MANAGEMENT_CHECKS_STALE',
@@ -2161,7 +2297,11 @@ async function composeCashflowMonthCloseBody({ db, req, projectId, cashflow, ope
   if (!completeMonthCloseConfirmations(closeInput.confirmations)) {
     throw createHttpError(409, '월 결산 대상 160개 항목을 모두 확인해 주세요.', 'cashflow_month_close_confirmations_incomplete');
   }
-  const deadlineSummary = deadlineSummaryFromCompliance(weeklyCompliance, comparisonBoundary);
+  const deadlineSummary = deadlineSummaryFromCompliance(
+    weeklyCompliance,
+    comparisonBoundary,
+    readWeeklyYear(mirror?.weeklyYear),
+  );
 
   const reviewWarnings = [
     ...sourceWarnings,
